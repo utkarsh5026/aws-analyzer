@@ -1,0 +1,9 @@
+# Runtime (preinstalled on SageMaker)
+boto3
+pandas
+pyarrow
+ipython
+
+# Tests
+moto[s3,cloudwatch]>=5
+pytest
