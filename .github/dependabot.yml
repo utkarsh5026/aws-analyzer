@@ -1,0 +1,36 @@
+# Dependabot opens pull requests that bump the pins in requirements-dev.txt and the
+# actions used in .github/workflows. CI runs on each one before it is merged.
+# Options: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    # Only propose releases that have been out for a week, so a broken or compromised
+    # release is usually yanked before it gets here. Security updates skip the wait.
+    cooldown:
+      default-days: 7
+    ignore:
+      # boto3 ships a release almost every weekday (new AWS API models). Take its minor
+      # releases and skip the daily patch ones.
+      - dependency-name: boto3
+        update-types: ["version-update:semver-patch"]
+    groups:
+      # Minor and patch updates share one pull request. Major updates each get their own,
+      # so one breaking upgrade doesn't hold back the rest.
+      python-packages:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
