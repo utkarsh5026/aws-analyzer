@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request cancels its older run. Pushes to main each get their
+  # own group, so every commit on main is tested.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  PY_COLORS: "1" # color pytest's output; FORCE_COLOR would also turn on pip's progress bars
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install ruff (version pinned in requirements-dev.txt)
+        run: python -m pip install "$(grep -E '^ruff==' requirements-dev.txt)"
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every CPython release still supported upstream. On 3.10, requirements-dev.txt
+        # installs pandas 2 and IPython 8, so both major versions stay tested.
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      # Each analyzers/<service>.py must work when copied into a notebook by itself, with
+      # boto3 as its only hard dependency (pandas, pyarrow and IPython are optional).
+      - name: Import each analyzer on its own with only boto3 installed
+        run: |
+          python -m pip install "$(grep -E '^boto3==' requirements-dev.txt)"
+          for file in analyzers/*.py; do
+            dir="$(mktemp -d)"
+            cp "$file" "$dir/"
+            (cd "$dir" && python -c "import $(basename "$file" .py)")
+            echo "ok: $file"
+          done
+      - name: Install dev requirements
+        run: python -m pip install -r requirements-dev.txt
+      - name: Pytest
+        run: python -m pytest
+
+  # One stable status to require in branch protection, so the rule doesn't need editing
+  # when the Python matrix changes.
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check that lint and every test job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || exit 1
+          done

@@ -1,9 +1,20 @@
-# Runtime (preinstalled on SageMaker)
-boto3
-pandas
-pyarrow
-ipython
+# Pinned so every CI run and local setup gets the same versions. Dependabot
+# (.github/dependabot.yml) proposes upgrades as pull requests, and CI tests them on
+# every supported Python before they land.
+
+# Runtime (preinstalled on SageMaker). pandas 3 and IPython 9 need Python 3.11+, so
+# Python 3.10 stays on the last pandas 2 / IPython 8 releases, which older SageMaker
+# images still ship. Dependabot leaves the python_version < "3.11" lines alone.
+boto3==1.43.97
+pandas==3.0.6; python_version >= "3.11"
+pandas==2.3.3; python_version < "3.11"
+pyarrow==25.0.1
+ipython==9.17.1; python_version >= "3.11"
+ipython==8.39.0; python_version < "3.11"
 
 # Tests
-moto[s3,cloudwatch]>=5
-pytest
+moto[s3,cloudwatch]==5.2.3
+pytest==9.1.1
+
+# Lint
+ruff==0.16.8

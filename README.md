@@ -1,5 +1,7 @@
 # aws-analyzer
 
+[![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
+
 Copy-paste utilities for analyzing AWS services from a SageMaker (or any Jupyter) notebook.
 
 **One file per service, no dependencies on each other.** Drop `analyzers/<service>.py` into a
@@ -101,6 +103,12 @@ for bucket sizes. Anything you can't read shows up as a note instead of an error
 ```bash
 pip install -r requirements-dev.txt
 pytest
+ruff check .
 ```
 
 Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed.
+
+[CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
+to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
+`requirements-dev.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly pull requests to update
+them and the GitHub Actions the workflow uses.
