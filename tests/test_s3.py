@@ -316,7 +316,9 @@ def test_summary_cost_and_small_files_in_ia():
     assert s.monthly_cost == pytest.approx(0.23 + ia_cost)
     assert (s.below_minimum["STANDARD_IA"].count, s.below_minimum["STANDARD_IA"].size) == (1000, 1000 * KB)
     level, message = next(f for f in summary_findings(s) if "128 KB" in f[1])
-    assert level == "warn" and "In STANDARD they would cost" in message
+    assert level == "info" and "In STANDARD they would cost" in message  # a fraction of a cent: just a note
+    pricey = {"STANDARD": 0.023, "STANDARD_IA": 50.0}
+    assert next(f for f in summary_findings(s, pricey) if "128 KB" in f[1])[0] == "warn"
 
 
 # --------------------------------------------------------------------------- avro

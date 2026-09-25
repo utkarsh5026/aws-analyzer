@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S3 Analyzer Guide</title>
+<meta name="description" content="How to explore, search, preview and cut the cost of Amazon S3 data from a SageMaker notebook with aws-analyzer's s3.py, with examples.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfa; --surface: #ffffff; --surface-2: #f3f4f2; --text: #1c1f1e; --muted: #5d6562;
+  --border: #e2e5e3; --accent: #0f766e; --accent-soft: #e3f2ef; --code-bg: #f3f5f4; --code-text: #1f2a28;
+  --tok-comment: #6b7a76; --tok-string: #9a4d0d; --tok-keyword: #6d28d9; --tok-number: #0f6ea8;
+  --warn-bg: #fff7e6; --warn-border: #e6a23c; --shadow: 0 1px 2px rgba(20, 30, 28, .06), 0 4px 16px rgba(20, 30, 28, .05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+    --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+    --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+    --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+  --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+  --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+  --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+:not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; font-size: .88em; overflow-wrap: anywhere; }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; padding: 28px 16px 40px 24px; border-right: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; margin-bottom: 22px; }
+.brand svg { flex: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li a { display: block; padding: 5px 10px; margin: 1px 0; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.4; }
+nav.toc li a:hover { color: var(--text); background: var(--surface-2); }
+nav.toc li a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+nav.toc .repo { margin-top: 22px; font-size: 13px; padding: 0 10px; }
+details.mobile-toc { display: none; }
+
+main { padding: 40px 48px 96px; min-width: 0; }
+.content { max-width: 860px; }
+header.hero { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.eyebrow { color: var(--accent); font-weight: 650; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 6px; }
+h1 { font-size: 40px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 14px; }
+.lede { font-size: 19px; color: var(--muted); margin: 0 0 20px; max-width: 720px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pills li { font-size: 13px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+h2 { font-size: 27px; letter-spacing: -.01em; margin: 64px 0 10px; padding-top: 8px; }
+h3 { font-size: 19px; margin: 34px 0 8px; }
+h2 + p, h3 + p { margin-top: 4px; }
+p, ul, ol { margin: 12px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.code { position: relative; margin: 14px 0 18px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13.6px; line-height: 1.6; }
+.code .label { position: absolute; top: 0; left: 14px; transform: translateY(-50%); background: var(--bg); color: var(--muted); font-size: 11px; padding: 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+.copy { position: absolute; top: 8px; right: 8px; font: 12px/1 inherit; font-family: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.code:hover .copy, .copy:focus-visible { opacity: 1; }
+.copy.done { color: var(--accent); }
+@media (hover: none) { .copy { opacity: 1; } }
+.t-c { color: var(--tok-comment); font-style: italic; }
+.t-s { color: var(--tok-string); }
+.t-k { color: var(--tok-keyword); }
+.t-n { color: var(--tok-number); }
+
+figure { margin: 18px 0 26px; }
+figure .shot { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td code { white-space: nowrap; }
+
+.callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+.callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout p { margin: 4px 0; }
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps > li { counter-increment: step; position: relative; padding-left: 40px; margin: 18px 0; }
+.steps > li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+.card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+.card h4 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+details.faq { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 10px 0; }
+details.faq summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details.faq > div { padding: 0 16px 8px; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+
+@media (max-width: 960px) {
+  .layout { display: block; }
+  nav.toc { display: none; }
+  details.mobile-toc { display: block; margin: 0 0 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  details.mobile-toc summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+  details.mobile-toc ol { margin: 0; padding: 0 14px 12px 34px; }
+  main { padding: 24px 16px 72px; }
+  h1 { font-size: 31px; }
+  .lede { font-size: 17px; }
+  h2 { font-size: 23px; margin-top: 52px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <a class="brand" href="#top">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor" style="color:var(--accent)"/><path d="M9 11h14M9 16h10M9 21h14" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      S3 Analyzer guide
+    </a>
+    <ol id="toc-list">
+      <li><a href="#setup">Set up in SageMaker</a></li>
+      <li><a href="#tour">Five-minute tour</a></li>
+      <li><a href="#buckets">Your buckets</a></li>
+      <li><a href="#browse">Browse and search</a></li>
+      <li><a href="#summary">What's in a folder</a></li>
+      <li><a href="#files">Look inside files</a></li>
+      <li><a href="#costs">Cut storage costs</a></li>
+      <li><a href="#deleted">Recover deleted files</a></li>
+      <li><a href="#compare">Check a copy or sync</a></li>
+      <li><a href="#python">Use the data in Python</a></li>
+      <li><a href="#big">Very large buckets</a></li>
+      <li><a href="#permissions">Permissions</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li><a href="#reference">Command reference</a></li>
+    </ol>
+    <p class="repo"><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
+  </nav>
+
+  <main id="top">
+    <div class="content">
+      <details class="mobile-toc">
+        <summary>Contents</summary>
+        <ol>
+          <li><a href="#setup">Set up in SageMaker</a></li>
+          <li><a href="#tour">Five-minute tour</a></li>
+          <li><a href="#buckets">Your buckets</a></li>
+          <li><a href="#browse">Browse and search</a></li>
+          <li><a href="#summary">What's in a folder</a></li>
+          <li><a href="#files">Look inside files</a></li>
+          <li><a href="#costs">Cut storage costs</a></li>
+          <li><a href="#deleted">Recover deleted files</a></li>
+          <li><a href="#compare">Check a copy or sync</a></li>
+          <li><a href="#python">Use the data in Python</a></li>
+          <li><a href="#big">Very large buckets</a></li>
+          <li><a href="#permissions">Permissions</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#reference">Command reference</a></li>
+        </ol>
+      </details>
+
+      <header class="hero">
+        <p class="eyebrow">aws-analyzer · s3.py</p>
+        <h1>Explore your S3 data from a SageMaker notebook</h1>
+        <p class="lede">One Python file. Drop it next to your notebook and get readable reports on your buckets: what's in them, what they cost, who can read them, and what's inside the files, without leaving Jupyter.</p>
+        <ul class="pills">
+          <li>One file, boto3 only</li>
+          <li>Read-only: never changes your data</li>
+          <li>Works on billion-object buckets</li>
+          <li>Plain text outside Jupyter</li>
+        </ul>
+      </header>
+
+      <p class="muted">Every example uses a bucket called <code>acme-ml-data</code>; use your own bucket names. The screenshots are real output from the tool, run against a demo bucket with synthetic data.</p>
+
+      <!-- ============================================================ setup -->
+      <h2 id="setup">Set up in SageMaker</h2>
+      <ol class="steps">
+        <li>
+          <strong>Get <code>s3.py</code> next to your notebook.</strong> Pick whichever works in your environment:
+          <ul>
+            <li><strong>Upload it.</strong> Download <a href="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3.py" download>s3.py</a>, then drag it into JupyterLab's file browser, in the same folder as your notebook.</li>
+            <li><strong>Fetch it from a cell</strong>, if the notebook can reach the internet:
+              <div class="code"><pre><code class="lang-sh">!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3.py</code></pre></div>
+            </li>
+            <li><strong>Copy it from S3</strong>, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
+              <div class="code"><pre><code class="lang-sh">!aws s3 cp s3://acme-ml-data/tools/s3.py .</code></pre></div>
+            </li>
+            <li>Or paste the whole file into a notebook cell and run it.</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Import it and create the view.</strong> It uses the notebook's IAM execution role, so there's nothing to configure.
+          <div class="code"><pre><code class="lang-py">from s3 import S3View
+
+ui = S3View()     # uses the notebook's IAM role
+ui.help()         # every command with a one-line description</code></pre></div>
+        </li>
+        <li>
+          <strong>Optional:</strong> another AWS profile or region, plain-text output, or longer tables:
+          <div class="code"><pre><code class="lang-py">from s3 import S3Analyzer, S3View
+
+ui = S3View(S3Analyzer(profile="dev", region="eu-west-1"))
+ui = S3View(mode="text")          # plain text, e.g. in a terminal or a script
+ui = S3View(max_rows=0)           # show every row of long tables (default: 50)</code></pre></div>
+        </li>
+      </ol>
+      <div class="callout">
+        <p><strong>Only boto3 is required.</strong> pandas, pyarrow and numpy (all preinstalled on SageMaker) are used for tables. A few file types need an extra package; the preview tells you which one when it's missing:</p>
+        <div class="code"><pre><code class="lang-sh">%pip install openpyxl pypdf zstandard python-snappy   # Excel, PDF text, .zst before Python 3.14, snappy Avro</code></pre></div>
+      </div>
+
+      <!-- ============================================================ tour -->
+      <h2 id="tour">Five-minute tour</h2>
+      <p>The commands you'll use most. Each one prints a report under the cell; none of them change anything.</p>
+      <div class="code"><pre><code class="lang-py">ui.overview()                                        # every bucket: size, monthly cost, warnings
+ui.bucket_info("acme-ml-data")                       # settings, policy, risks, size by storage class
+ui.summary("s3://acme-ml-data/curated/")             # what's in a folder, and what it costs
+ui.find("s3://acme-ml-data/", extensions="parquet", min_size="100MB")
+ui.preview("s3://acme-ml-data/curated/features/churn/train.parquet")
+df = ui.core.read_df("s3://acme-ml-data/curated/features/churn/train.parquet")   # a pandas DataFrame</code></pre></div>
+      <p>Anywhere a location is expected you can write <code>s3://bucket/prefix</code> or just <code>bucket/prefix</code>. Sizes accept <code>1024</code>, <code>"10MB"</code> or <code>"1.5GB"</code>. Times accept a <code>datetime</code>, <code>"2025-05-01"</code>, or an age such as <code>"7d"</code>, <code>"12h"</code> or <code>"2w"</code> (meaning that long ago).</p>
+
+      <!-- ============================================================ buckets -->
+      <h2 id="buckets">Your buckets</h2>
+
+      <h3>Every bucket at a glance</h3>
+      <p><code>overview()</code> checks every bucket in parallel: size and object count (from CloudWatch, so it's instant even for huge buckets), estimated monthly cost, versioning, encryption, public access, lifecycle rules, and a list of warnings.</p>
+      <div class="code"><pre><code class="lang-py">ui.buckets()                      # just names, regions and creation dates (fast)
+ui.overview()                     # every bucket in one table
+ui.overview("sagemaker-*")        # only buckets whose name matches
+ui.overview(metrics=False)        # skip CloudWatch: faster, but no sizes or costs</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/overview-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/overview-light.webp" alt="overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, and a list of warnings" width="984" height="550" loading="lazy"></picture></div>
+        <figcaption><code>ui.overview()</code>: sizes and costs cover all versions, from CloudWatch's daily storage metrics.</figcaption>
+      </figure>
+
+      <h3>One bucket in detail</h3>
+      <p><code>bucket_info()</code> shows the bucket's settings and flags anything risky or wasteful: Block Public Access off, no default encryption, versioning without a rule that cleans up old versions, and so on. It also explains the lifecycle rules and the bucket policy in plain English, and prices each storage type.</p>
+      <div class="code"><pre><code class="lang-py">ui.bucket_info("acme-ml-data")
+ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/bucket-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bucket-info-light.webp" alt="bucket_info(): cards for objects, size, cost, region, versioning, encryption and public access, warnings, size by storage type with cost, the bucket policy and lifecycle rules" width="984" height="1014" loading="lazy"></picture></div>
+        <figcaption><code>ui.bucket_info("acme-ml-data")</code></figcaption>
+      </figure>
+
+      <h3>Who can access a bucket</h3>
+      <p><code>policy()</code> turns the bucket policy into a table of who can do what, on which files, and under which conditions. It flags statements open to the whole internet, access from other AWS accounts, and whether plain HTTP is allowed. The raw JSON is shown underneath.</p>
+      <div class="code"><pre><code class="lang-py">ui.policy("acme-ml-data")</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/policy-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/policy-light.webp" alt="policy(): statement counts, findings about public and cross-account access, and a table of statements in plain English" width="984" height="534" loading="lazy"></picture></div>
+        <figcaption><code>ui.policy("acme-ml-data")</code></figcaption>
+      </figure>
+
+      <!-- ============================================================ browse -->
+      <h2 id="browse">Browse and search</h2>
+
+      <h3>Folders</h3>
+      <div class="code"><pre><code class="lang-py">ui.ls("s3://acme-ml-data/")                        # one level, like `aws s3 ls` (fast anywhere)
+ui.ls("s3://acme-ml-data/training")                # 'training' is read as the folder 'training/'
+ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at every level</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total" width="984" height="422" loading="lazy"></picture></div>
+        <figcaption><code>ui.tree("s3://acme-ml-data/curated/", depth=3)</code></figcaption>
+      </figure>
+
+      <h3>Find files</h3>
+      <p>Combine any filters; a file has to match all of them.</p>
+      <div class="code"><pre><code class="lang-py">ui.find("s3://acme-ml-data/training/", pattern="*.tar.gz", min_size="4GB", modified_after="90d")
+ui.find("s3://acme-ml-data/raw/", regex=r"dt=2025-0[1-3]-\d\d/", extensions=["json", "csv"])
+ui.find("s3://acme-ml-data/archive/", storage_classes="GLACIER", limit=None)   # no cap on matches</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/find-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/find-light.webp" alt="find(): the number of matches, their total size and a table of matching model.tar.gz files" width="984" height="221" loading="lazy"></picture></div>
+        <figcaption>Model artifacts over 4 GB from the last 90 days.</figcaption>
+      </figure>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Filter</th><th>Matches</th><th>Example</th></tr></thead>
+        <tbody>
+          <tr><td><code>pattern</code></td><td>Glob on the file name, or on the whole key if the pattern contains <code>/</code></td><td><code>"*.csv"</code>, <code>"raw/*/2025-*"</code></td></tr>
+          <tr><td><code>regex</code></td><td>Regular expression searched in the whole key</td><td><code>r"/dt=2025-09-\d\d/"</code></td></tr>
+          <tr><td><code>extensions</code></td><td>File types; <code>"csv"</code> also matches <code>.csv.gz</code></td><td><code>["parquet", "csv"]</code></td></tr>
+          <tr><td><code>min_size</code>, <code>max_size</code></td><td>Size limits</td><td><code>"100MB"</code>, <code>5 * 1024**3</code></td></tr>
+          <tr><td><code>modified_after</code>, <code>modified_before</code></td><td>Last-modified time</td><td><code>"7d"</code>, <code>"2025-01-01"</code></td></tr>
+          <tr><td><code>storage_classes</code></td><td>Storage class</td><td><code>"GLACIER"</code>, <code>["STANDARD_IA", "ONEZONE_IA"]</code></td></tr>
+          <tr><td><code>limit</code></td><td>Stop after this many matches (default 1000; <code>None</code> for all)</td><td><code>50</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Biggest, newest, oldest, and one object's details</h3>
+      <div class="code"><pre><code class="lang-py">ui.largest("s3://acme-ml-data/", 10)
+ui.newest("s3://acme-ml-data/raw/", 5)
+ui.oldest("s3://acme-ml-data/")
+ui.head("s3://acme-ml-data/curated/features/churn/train.parquet")   # every metadata field and tag
+ui.link("s3://acme-ml-data/curated/features/churn/train.parquet", expires=900)   # download link, valid 15 min</code></pre></div>
+
+      <!-- ============================================================ summary -->
+      <h2 id="summary">What's in a folder</h2>
+      <p><code>summary()</code> reads the listing once and gives you a dashboard: totals, estimated monthly cost, a breakdown by folder, file type and storage class, how old and how big the files are, and the largest files. At the top are plain-language findings, such as too many small files, data waiting to be restored from Glacier, cold data you could store more cheaply, and tiny files billed at a minimum size.</p>
+      <div class="code"><pre><code class="lang-py">ui.summary("s3://acme-ml-data/")
+ui.summary("s3://acme-ml-data/raw/", folder_depth=2, top_n=20)   # break down two folder levels, top 20 largest
+ui.summary("s3://acme-ml-data/", limit=100_000)                  # stop after 100,000 keys (a quick sample)</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/summary-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/summary-light.webp" alt="summary(): cards with object count, size and estimated cost, findings about small files, archived data and cold data, then tables by folder, file type and storage class" width="984" height="1064" loading="lazy"></picture></div>
+        <figcaption>The top of <code>ui.summary("s3://acme-ml-data/")</code>. Further down: size and age histograms and the largest objects.</figcaption>
+      </figure>
+
+      <!-- ============================================================ files -->
+      <h2 id="files">Look inside files</h2>
+      <p><code>preview()</code> shows what's in a file without downloading all of it: the first rows of a table and its schema, the files inside an archive, a model's tensors, a notebook's cells, and more. It picks the reader from the file name, or from the file's first bytes when there's no extension (Spark's <code>part-00000</code>, Firehose output) or the wrong one.</p>
+      <div class="code"><pre><code class="lang-py">ui.preview("s3://acme-ml-data/curated/features/churn/train.parquet", n=8)   # first 8 rows
+ui.preview("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz")
+ui.preview("s3://acme-ml-data/models/tiny-llm/model.safetensors")
+ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-parquet-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-parquet-light.webp" alt="preview() of a Parquet file: row, column and row-group counts, the first rows, and the schema" width="984" height="547" loading="lazy"></picture></div>
+        <figcaption>A Parquet file: only the footer and the first row group are downloaded.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-model-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-model-light.webp" alt="preview() of a SageMaker model.tar.gz: the number of files, unpacked size, and each file's name, size and date" width="984" height="265" loading="lazy"></picture></div>
+        <figcaption>A SageMaker <code>model.tar.gz</code>, listed without extracting it.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-safetensors-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-safetensors-light.webp" alt="preview() of a safetensors file: tensor count, total parameters, dtypes, and a table of tensors with shapes" width="984" height="399" loading="lazy"></picture></div>
+        <figcaption>A <code>.safetensors</code> model: only its header is read, so this is instant even for a multi-GB file.</figcaption>
+      </figure>
+
+      <h3 id="file-types">Supported file types</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Kind</th><th>Extensions</th><th><code>preview()</code> shows</th><th><code>read_df()</code></th></tr></thead>
+        <tbody>
+          <tr><td>Delimited text</td><td><code>.csv</code> <code>.tsv</code> <code>.psv</code></td><td>First rows</td><td>✓</td></tr>
+          <tr><td>JSON</td><td><code>.json</code> <code>.jsonl</code> <code>.ndjson</code></td><td>A table of records, or pretty JSON</td><td>✓</td></tr>
+          <tr><td>Columnar</td><td><code>.parquet</code> <code>.orc</code> <code>.feather</code> <code>.arrow</code></td><td>First rows, schema and row count; reads only what it needs</td><td>✓</td></tr>
+          <tr><td>Avro</td><td><code>.avro</code></td><td>First rows, schema and codec (built-in reader; snappy needs <code>python-snappy</code>)</td><td>✓</td></tr>
+          <tr><td>Excel</td><td><code>.xlsx</code> <code>.xlsm</code> <code>.xls</code></td><td>Sheet names and first rows (needs <code>openpyxl</code>; <code>.xls</code> needs <code>xlrd</code>)</td><td>✓ <code>sheet_name=</code></td></tr>
+          <tr><td>NumPy</td><td><code>.npy</code> <code>.npz</code></td><td>Shape, dtype and first rows, or the arrays inside</td><td>✓ <code>.npy</code>, up to 2-D</td></tr>
+          <tr><td>Archives</td><td><code>.zip</code> <code>.tar</code> <code>.tar.gz</code> <code>.tgz</code></td><td>The files inside</td><td></td></tr>
+          <tr><td>Models</td><td><code>.safetensors</code> <code>.pt</code> <code>.pth</code> <code>.ckpt</code> <code>.pkl</code> <code>.joblib</code></td><td>Tensors and parameter count, or the files in a checkpoint. Pickles are never loaded, because unpickling can run code</td><td></td></tr>
+          <tr><td>Notebooks</td><td><code>.ipynb</code></td><td>Kernel and a list of cells</td><td></td></tr>
+          <tr><td>Images, audio, video</td><td><code>.png</code> <code>.jpg</code> <code>.gif</code> <code>.webp</code>, <code>.wav</code> <code>.mp3</code> <code>.flac</code>, <code>.mp4</code> <code>.webm</code> <code>.mov</code></td><td>The image, or a player</td><td></td></tr>
+          <tr><td>PDF</td><td><code>.pdf</code></td><td>A link; with <code>pypdf</code> installed, the page count and first page's text</td><td></td></tr>
+          <tr><td>Text</td><td><code>.txt</code> <code>.log</code> <code>.md</code> <code>.yaml</code> <code>.xml</code> <code>.sql</code> <code>.py</code> and more</td><td>First lines</td><td></td></tr>
+        </tbody>
+      </table></div>
+      <p>Any of them can also be compressed: <code>.gz</code>, <code>.bz2</code>, <code>.xz</code>, or <code>.zst</code> (Python 3.14+, or <code>pip install zstandard</code>). Anything else is shown as text or a hex dump.</p>
+
+      <h3>Load files into Python</h3>
+      <p><code>ui.core</code> is the analyzer behind the view. Its readers return data instead of printing it.</p>
+      <div class="code"><pre><code class="lang-py">s3 = ui.core
+
+df = s3.read_df("s3://acme-ml-data/curated/features/churn/train.parquet")
+df = s3.read_df("s3://acme-ml-data/curated/features/churn/train.parquet", nrows=1000, columns=["age", "plan"])
+df = s3.read_df("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", nrows=500)
+df = s3.read_df("s3://acme-ml-data/reports/q3.xlsx", sheet_name="Summary")       # Excel: needs openpyxl
+df = s3.read_df("s3://acme-ml-data/spark-output/part-00000", fmt="parquet")     # no extension: say what it is
+df = s3.read_df("s3://acme-ml-data/exports/data.txt", fmt="csv", sep=";")        # extra options go to pandas</code></pre></div>
+      <div class="code"><pre><code class="lang-py">s3.read_lines("s3://acme-ml-data/logs/app/2025/09/01/app-00001.log", 50)   # first 50 lines
+s3.read_json("s3://acme-ml-data/config/settings.json")
+s3.read_jsonl("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", n=100)
+s3.read_avro("s3://acme-ml-data/kafka/events.avro", n=100)          # a list of dicts
+s3.read_npy("s3://acme-ml-data/embeddings/vectors.npy", nrows=10)    # a NumPy array
+s3.parquet_info("s3://acme-ml-data/curated/features/churn/train.parquet")   # rows, row groups, schema
+s3.list_archive("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz").entries
+s3.safetensors_info("s3://acme-ml-data/models/tiny-llm/model.safetensors")["tensors"]
+
+with s3.open("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz") as f:   # a stream, decompressed
+    first_line = f.readline()
+
+s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")</code></pre></div>
+
+      <!-- ============================================================ costs -->
+      <h2 id="costs">Cut storage costs</h2>
+      <p>Costs appear throughout: <code>summary()</code> prices the files in a folder, <code>bucket_info()</code> and <code>overview()</code> price whole buckets (old versions included), and <code>versions()</code> and <code>uploads()</code> price the storage you can't see in a normal listing. They're estimates of <strong>storage</strong> only, at us-east-1 list prices, and follow S3's billing rules: STANDARD_IA, ONEZONE_IA and GLACIER_IR bill at least 128 KB per file, and GLACIER and DEEP_ARCHIVE add 40 KB of index data per file.</p>
+
+      <h3>Preview a lifecycle rule before you add it</h3>
+      <p><code>what_if()</code> shows what a lifecycle rule would do if it ran today: how many files it would move or delete, the monthly cost before and after, the one-time cost (transition requests, and early-deletion charges for files that haven't reached their storage class's minimum duration), and how soon it pays for itself. It follows S3's own rules, for example that files under 128 KB aren't moved. It also prints the rule, ready to add.</p>
+      <div class="code"><pre><code class="lang-py">ui.what_if("s3://acme-ml-data/training/", move_after={30: "STANDARD_IA", 180: "GLACIER"})
+ui.what_if("s3://acme-ml-data/logs/", move_after=30, to="STANDARD_IA")
+ui.what_if("s3://acme-ml-data/tmp/", delete_after=7)
+ui.what_if("s3://acme-ml-data/raw/", move_after=0, to="INTELLIGENT_TIERING")</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/what-if-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/what-if-light.webp" alt="what_if(): files checked, files that would move, monthly cost now and after, saving, one-time cost and payback time, a table of what happens to the files, and the rule as JSON" width="984" height="772" loading="lazy"></picture></div>
+        <figcaption>Moving training outputs to STANDARD_IA after 30 days and to GLACIER after 180.</figcaption>
+      </figure>
+      <p>To add the rule yourself (the tool never changes your buckets):</p>
+      <div class="code"><pre><code class="lang-py">import boto3
+
+impact = ui.core.simulate_lifecycle("s3://acme-ml-data/training/", move_after={30: "STANDARD_IA", 180: "GLACIER"})
+print(f"saves ${impact.monthly_savings:,.2f} a month")
+client = boto3.client("s3")
+current = client.get_bucket_lifecycle_configuration(Bucket="acme-ml-data")["Rules"]
+# put_bucket_lifecycle_configuration replaces every rule, so send the existing ones too
+client.put_bucket_lifecycle_configuration(Bucket="acme-ml-data",
+                                          LifecycleConfiguration={"Rules": current + [impact.rule()]})</code></pre></div>
+      <div class="callout warn"><p>If the bucket has no lifecycle rules yet, <code>get_bucket_lifecycle_configuration</code> raises an error; use an empty list for <code>current</code> instead.</p></div>
+
+      <h3>Hidden storage: old versions, unfinished uploads, duplicates</h3>
+      <div class="code"><pre><code class="lang-py">ui.versions("s3://acme-ml-data/")                    # noncurrent versions and what they cost
+ui.uploads("s3://acme-ml-data/")                     # unfinished multipart uploads: billed but invisible
+ui.duplicates("s3://acme-ml-data/public-samples/")   # identical files and the space you'd get back</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/duplicates-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/duplicates-light.webp" alt="duplicates(): duplicate groups, redundant copies, reclaimable space and a table of identical files" width="984" height="340" loading="lazy"></picture></div>
+        <figcaption><code>ui.duplicates(...)</code> matches files by size and ETag.</figcaption>
+      </figure>
+
+      <h3>Use your region's prices</h3>
+      <p>The default prices are us-east-1 list prices for the first 50 TB, in USD per GB-month. Pass your own from the <a href="https://aws.amazon.com/s3/pricing/">S3 pricing page</a>; any class you leave out keeps its default.</p>
+      <div class="code"><pre><code class="lang-py">from s3 import S3Analyzer, S3View
+
+ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))</code></pre></div>
+
+      <!-- ============================================================ deleted -->
+      <h2 id="deleted">Recover deleted files</h2>
+      <p>In a versioned bucket, deleting a file only adds a <em>delete marker</em>; the data is still there. <code>deleted()</code> lists those files, most recent first, with the size you'd get back and the code that restores one.</p>
+      <div class="code"><pre><code class="lang-py">ui.deleted("s3://acme-ml-data/")
+ui.deleted("s3://acme-ml-data/curated/", deleted_after="7d")    # only files deleted in the last week</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/deleted-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/deleted-light.webp" alt="deleted(): counts of deleted and restorable files, a table with each file's deletion time, size and delete-marker version id, and example restore code" width="984" height="411" loading="lazy"></picture></div>
+        <figcaption><code>ui.deleted("s3://acme-ml-data/")</code></figcaption>
+      </figure>
+      <p>Restoring means deleting the delete marker, which needs <code>s3:DeleteObjectVersion</code>. To bring back everything deleted under a folder in the last day:</p>
+      <div class="code"><pre><code class="lang-py">import boto3
+
+client = boto3.client("s3")
+for f in ui.core.deleted_files("s3://acme-ml-data/curated/exports/", deleted_after="1d").files:
+    if f.restorable:
+        client.delete_object(Bucket="acme-ml-data", Key=f.key, VersionId=f.marker_version_id)</code></pre></div>
+      <p>For one file's full history, use <code>ui.history("s3://acme-ml-data/curated/exports/q3-report.csv")</code>. If versioning is off, <code>deleted()</code> says so: deleted files are gone for good in that case.</p>
+
+      <!-- ============================================================ compare -->
+      <h2 id="compare">Check a copy or sync</h2>
+      <p><code>compare()</code> matches two prefixes by relative key, size and ETag, so you can check that a copy, sync or migration is complete.</p>
+      <div class="code"><pre><code class="lang-py">ui.compare("s3://acme-ml-data/curated/", "s3://acme-eu-exports/curated/")
+
+result = ui.core.compare("s3://acme-ml-data/curated/", "s3://acme-eu-exports/curated/")
+result.in_sync, len(result.only_in_a), len(result.different)</code></pre></div>
+      <p class="muted">Files encrypted with SSE-KMS, or uploaded with different multipart settings, have different ETags even when their content is identical. Pairs with the same size but multipart ETags are counted separately, as “ETag not comparable”.</p>
+
+      <!-- ============================================================ python -->
+      <h2 id="python">Use the data in Python</h2>
+      <p>Every report has a data version on <code>ui.core</code> (an <code>S3Analyzer</code>) that returns dataclasses, lists and DataFrames instead of printing. Use it to build your own checks, charts or scheduled jobs.</p>
+      <div class="code"><pre><code class="lang-py">from s3 import explain_policy, objects_to_df
+
+s3 = ui.core
+
+summary = s3.summarize("s3://acme-ml-data/")          # PrefixSummary
+summary.total_size, summary.monthly_cost               # bytes, USD per month
+summary.by_extension["parquet"].size                   # bytes of parquet
+{cls: stat.size for cls, stat in summary.by_storage_class.items()}
+
+old_checkpoints = s3.find("s3://acme-ml-data/training/", extensions="pt", modified_before="180d")
+df = objects_to_df(old_checkpoints)                    # key, size, last_modified, storage_class, extension, etag, uri
+df.groupby("storage_class")["size"].sum()
+
+for obj in s3.iter_objects("s3://acme-ml-data/raw/", limit=5000):   # stream a listing
+    pass
+
+cfg = s3.bucket_config("acme-ml-data")                 # BucketConfig
+cfg.versioning, cfg.encryption, cfg.lifecycle_rules
+reports = s3.bucket_reports(match="acme-*")            # config + CloudWatch size for many buckets
+for st in explain_policy(s3.bucket_policy("acme-ml-data"), s3.account_id()):
+    print(st.effect, st.who, st.actions, st.resources, st.conditions)</code></pre></div>
+      <p>The analysis functions don't call AWS, so they also work on your own lists of files, for example rows from an <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory.html">S3 Inventory</a> report:</p>
+      <div class="code"><pre><code class="lang-py">from datetime import datetime, timezone
+from s3 import ObjectInfo, simulate_lifecycle_objects, summarize_objects
+
+rows = [ObjectInfo("acme-ml-data", "raw/a.json", 1_200_000, datetime(2025, 1, 5, tzinfo=timezone.utc)),
+        ObjectInfo("acme-ml-data", "raw/b.json", 800_000, datetime(2025, 6, 1, tzinfo=timezone.utc), "STANDARD_IA")]
+summarize_objects(rows, "s3://acme-ml-data/raw/").monthly_cost
+simulate_lifecycle_objects(rows, "s3://acme-ml-data/raw/", move_after=30, to="GLACIER_IR").monthly_savings</code></pre></div>
+      <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
+
+      <!-- ============================================================ big -->
+      <h2 id="big">Very large buckets</h2>
+      <div class="grid2">
+        <div class="card"><h4>Start with CloudWatch</h4><p><code>bucket_info()</code> and <code>overview()</code> read sizes from CloudWatch without listing anything, so they take seconds on any bucket.</p></div>
+        <div class="card"><h4>Scans list every key</h4><p><code>summary</code>, <code>tree</code>, <code>find</code>, <code>duplicates</code>, <code>compare</code> and <code>what_if</code> list 1,000 keys per request: about 1 to 3 minutes per million objects. Progress is shown while they run.</p></div>
+        <div class="card"><h4>Sample with <code>limit=</code></h4><p>Pass <code>limit=100_000</code> to stop early, or point the scan at a smaller prefix.</p></div>
+        <div class="card"><h4><code>ls</code> is always fast</h4><p>It lists a single level, however big the bucket is.</p></div>
+      </div>
+
+      <!-- ============================================================ permissions -->
+      <h2 id="permissions">Permissions</h2>
+      <p>Everything is read-only. Anything the notebook's role can't read shows up as a note (or a <code>?</code> on a card) instead of an error, so you can start with less and add what you need. This policy covers every command:</p>
+      <div class="code"><span class="label">IAM policy</span><pre><code class="lang-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadS3",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListAllMyBuckets", "s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketVersions",
+        "s3:ListBucketMultipartUploads", "s3:ListMultipartUploadParts", "s3:GetObject", "s3:GetObjectTagging",
+        "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration", "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy", "s3:GetBucketPolicyStatus", "s3:GetBucketOwnershipControls",
+        "s3:GetBucketObjectLockConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration",
+        "s3:GetBucketLogging", "s3:GetBucketTagging", "s3:GetInventoryConfiguration",
+        "s3:GetAccountPublicAccessBlock"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadBucketSizes",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:ListMetrics", "cloudwatch:GetMetricData"],
+      "Resource": "*"
+    }
+  ]
+}</code></pre></div>
+      <p>Files encrypted with SSE-KMS also need <code>kms:Decrypt</code> on their key to be previewed or read. To scope the policy down, replace <code>"Resource": "*"</code> in the first statement with your buckets' ARNs, for example <code>arn:aws:s3:::acme-ml-data</code> and <code>arn:aws:s3:::acme-ml-data/*</code>.</p>
+
+      <!-- ============================================================ troubleshooting -->
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <details class="faq"><summary>A card shows “?” or a note says “Couldn't read … (AccessDenied)”</summary><div>
+        <p>The notebook's role is missing that permission. The rest of the report still works. Compare the role with the <a href="#permissions">policy above</a>.</p>
+      </div></details>
+      <details class="faq"><summary>“No CloudWatch storage metrics yet”</summary><div>
+        <p>S3 publishes storage metrics once a day, so a new or empty bucket has none yet. <code>summary()</code> lists the files instead and always works.</p>
+      </div></details>
+      <details class="faq"><summary>Commands are slow or hang in a notebook with no internet access (VPC-only mode)</summary><div>
+        <p>S3 usually works through a gateway endpoint, but CloudWatch (for sizes) and STS (for your account id) need their own VPC interface endpoints. Without them, the tool gives up on the account id after about 5 seconds and marks it unknown. Use <code>ui.overview(metrics=False)</code> or <code>ui.bucket_info(name, metrics=False)</code> to skip CloudWatch.</p>
+      </div></details>
+      <details class="faq"><summary>The report lost its formatting after I reopened the notebook</summary><div>
+        <p>JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.</p>
+      </div></details>
+      <details class="faq"><summary>A preview says a package is missing</summary><div>
+        <p>Install it in the notebook's kernel, for example <code>%pip install openpyxl</code> for Excel, then run the cell again.</p>
+      </div></details>
+      <details class="faq"><summary>The costs don't match my bill</summary><div>
+        <p>They're estimates of storage only, at us-east-1 list prices for the first 50 TB. They leave out requests, retrievals, data transfer, volume discounts and Intelligent-Tiering's monitoring fee. For other regions, pass <a href="#costs">your own prices</a>. <code>summary()</code> prices current versions only; <code>bucket_info()</code> includes every version.</p>
+      </div></details>
+
+      <!-- ============================================================ reference -->
+      <h2 id="reference">Command reference</h2>
+      <p>Every <code>S3View</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td><code>buckets()</code></td><td>All buckets with region, creation date and age</td></tr>
+          <tr><td><code>overview(match=None, metrics=True)</code></td><td>Every bucket: objects, size, estimated cost, versioning, encryption, public access, lifecycle rules, warnings</td></tr>
+          <tr><td><code>bucket_info(bucket, metrics=True)</code></td><td>One bucket's settings, policy, lifecycle rules, risks, and size and cost by storage type</td></tr>
+          <tr><td><code>policy(bucket)</code></td><td>The bucket policy in plain English, its risks and the JSON</td></tr>
+          <tr><td><code>ls(uri, limit=500)</code></td><td>One level of folders and files</td></tr>
+          <tr><td><code>tree(uri, depth=2)</code></td><td>Folder tree with count, size and share at every level</td></tr>
+          <tr><td><code>summary(uri, top_n=10, folder_depth=1, limit=None)</code></td><td>Dashboard for a prefix, with cost and findings</td></tr>
+          <tr><td><code>find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=, limit=1000)</code></td><td>Search</td></tr>
+          <tr><td><code>largest(uri, n=20)</code> · <code>newest</code> · <code>oldest</code></td><td>Top-N objects</td></tr>
+          <tr><td><code>duplicates(uri, min_size=1)</code></td><td>Identical files and reclaimable space</td></tr>
+          <tr><td><code>compare(uri_a, uri_b)</code></td><td>Identical, different, only in A, only in B</td></tr>
+          <tr><td><code>versions(uri)</code></td><td>Current vs old versions, delete markers, what old versions cost</td></tr>
+          <tr><td><code>deleted(uri, deleted_after=None)</code></td><td>Deleted files you can still restore</td></tr>
+          <tr><td><code>history(uri)</code></td><td>Every version of one file</td></tr>
+          <tr><td><code>uploads(uri)</code></td><td>Unfinished multipart uploads and their cost</td></tr>
+          <tr><td><code>what_if(uri, move_after=, to=, delete_after=)</code></td><td>What a lifecycle rule would move, delete and save</td></tr>
+          <tr><td><code>head(uri)</code></td><td>All of one object's metadata and tags</td></tr>
+          <tr><td><code>preview(uri, n=20)</code></td><td>What's inside a file (see <a href="#file-types">file types</a>)</td></tr>
+          <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
+          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+        </tbody>
+      </table></div>
+
+      <footer>
+        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+// Syntax colouring for the examples: comments, strings, numbers and keywords.
+(function () {
+  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+  var rules = {
+    py: /(#[^\n]*)|([rbf]?"(?:[^"\\\n]|\\.)*"|[rbf]?'(?:[^'\\\n]|\\.)*')|\b(\d[\d_]*(?:\.\d+)?)\b|\b(from|import|as|for|in|with|if|not|and|or|print|True|False|None)\b/g,
+    sh: /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'[^'\n]*')|()()/g,
+    json: /()("(?:[^"\\\n]|\\.)*")|\b(\d+)\b|\b(true|false|null)\b/g
+  };
+  document.querySelectorAll("pre code").forEach(function (el) {
+    var lang = (el.className.match(/lang-(\w+)/) || [])[1], re = rules[lang];
+    if (!re) return;
+    var src = el.textContent, out = "", last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(src))) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out += esc(src.slice(last, m.index));
+      var cls = m[1] ? "t-c" : m[2] ? "t-s" : m[3] ? "t-n" : "t-k";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy buttons.
+  document.querySelectorAll(".code").forEach(function (box) {
+    var button = document.createElement("button");
+    button.className = "copy"; button.type = "button"; button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("click", function () {
+      var text = box.querySelector("code").textContent;
+      var done = function () {
+        button.textContent = "Copied"; button.classList.add("done");
+        setTimeout(function () { button.textContent = "Copy"; button.classList.remove("done"); }, 1500);
+      };
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done, function () {}); }
+      else {
+        var area = document.createElement("textarea"); area.value = text; document.body.appendChild(area);
+        area.select(); try { document.execCommand("copy"); done(); } catch (e) {} area.remove();
+      }
+    });
+    box.appendChild(button);
+  });
+
+  // Highlight the section being read in the sidebar.
+  var links = {};
+  document.querySelectorAll("#toc-list a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var visible = {};
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting ? e.boundingClientRect.top : undefined; });
+    var ids = Object.keys(links).filter(function (id) { return visible[id] !== undefined; });
+    if (!ids.length) return;
+    Object.keys(links).forEach(function (id) { links[id].classList.remove("active"); });
+    links[ids[0]].classList.add("active");
+  }, { rootMargin: "0px 0px -60% 0px" });
+  Object.keys(links).forEach(function (id) {
+    var section = document.getElementById(id);
+    if (section) observer.observe(section);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1156,7 +1156,7 @@ def summary_findings(summary: PrefixSummary, prices: dict[str, float] | None = N
         cheaper = (f" In STANDARD they would cost {human_money(in_standard)}/month."
                    if "STANDARD" in prices and in_standard < billed else "")
         classes = " / ".join(summary.below_minimum)
-        found.append(("warn" if count >= 1000 else "info",
+        found.append(("warn" if billed - in_standard >= 1 else "info",
                       f"{_plural(count, 'object')} in {classes} are under 128 KB, but S3 bills each one as 128 KB: "
                       f"{human_size(count * 128 * KB)} billed for {human_size(stored)} stored, "
                       f"costing {human_money(billed)}/month.{cheaper}"))
