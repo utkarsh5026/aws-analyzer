@@ -128,7 +128,9 @@ were used. A model missing from `MODEL_PRICES` shows its cost as unknown rather 
   `BedrockKBAnalyzer(client=agent, clients={"bedrock-agent-runtime": ..., "bedrock-runtime": ..., "bedrock": ...})`.
   Stubber answers in the order calls are queued and checks each request against the service model; set
   `core.max_workers = 1` when a test lists several knowledge bases. moto is only used for the S3 bucket behind
-  `unsynced()`. There is no Bedrock seeder in `.claude/skills/demo/demo.py`.
+  `unsynced()`. For the same reason the Bedrock seeder in `.claude/skills/demo/demo.py` returns fake clients
+  (`_FakeAWS`, which validates requests and responses against the service model) that `demo.py` passes to the
+  analyzer; only the bucket is moto.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper.
 
@@ -141,8 +143,8 @@ were used. A model missing from `MODEL_PRICES` shows its cost as unknown rather 
   guide (`s3.html`, `dynamodb.html`, `bedrock_kb.html`) that links back to it. A new analyzer gets its own
   `docs/<service>.html`, a card on `index.html` and a link in README. `index.html` also forwards old `/#section`
   links (from when it was the S3 guide) to `s3.html`, so keep its own ids in the `own` list there. The screenshots
-  (`docs/images/*-{light,dark}.webp`) are the tool's own output from a demo bucket and demo tables; the Bedrock
-  guide has none yet (they need a real demo knowledge base).
+  (`docs/images/*-{light,dark}.webp`) are the tool's own output from a demo bucket, demo tables and demo knowledge
+  bases (`/demo --html`, then 1476 px wide WebP; `bedrock-*` for the Bedrock guide).
 - Versions in `requirements-dev.txt` are pinned and updated by Dependabot; the `python_version < "3.11"` lines are
   intentionally held back. `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
   explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.

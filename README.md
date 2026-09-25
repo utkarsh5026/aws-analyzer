@@ -360,7 +360,7 @@ say how to pick. Nothing in the file changes a knowledge base: where a sync is n
 | `kbs()` | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings |
 | `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy), recent syncs, tags, and what to try next |
 | `syncs(kb=None, data_source=None, n=10)` | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again |
-| `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the failed ones first with their reason, and the sync command. `status="FAILED"` shows only those |
+| `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the ones that aren't indexed with Bedrock's reason, and the sync command. `status="INDEXED"` or `"FAILED"` lists only those |
 | `unsynced(kb=None, data_source=None)` | S3 files added or changed since each data source's last successful sync, and the command to sync them |
 | `search(question, n=5, kb=, where=, search_type=, rerank=)` | Ranked passages: a score bar relative to the top result, file and page, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
 | `chunk(rank)` | The full text, metadata and IDs of result #rank from the last `search` or `ask`, and the `S3View().preview("s3://...")` call that opens its file |
@@ -498,8 +498,9 @@ every request against the service model.
 The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
 whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
 its own guide (`docs/s3.html`, `docs/dynamodb.html`, `docs/bedrock_kb.html`); a new analyzer gets a new guide and a
-card on the home page. The screenshots are the tool's own output from a demo bucket and demo tables with synthetic
-data; the Bedrock guide has none yet, since they need a real demo knowledge base.
+card on the home page. The screenshots are the tool's own output from a demo bucket, demo tables and demo
+knowledge bases with synthetic data (`.claude/skills/demo/demo.py`; Bedrock's are served by a simulated Bedrock,
+since moto has none).
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
