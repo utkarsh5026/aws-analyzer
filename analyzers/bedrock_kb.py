@@ -33,6 +33,9 @@ Quick start
     ui.follow_up("And for digital goods?")            # same session
     ui.ask("...", engine="converse", model="sonnet")  # exact tokens and cost, your own prompt=
     ui.models()                                       # models you can use here, and their price
+    ui.unsynced()                                     # S3 files changed since the last sync
+    ui.compare("refund window for EU orders")         # SEMANTIC vs HYBRID, n=5 vs n=10
+    ui.evaluate([("refund window?", "refund-policy.pdf"), ("reset password", "account-faq")])  # hit rate, MRR
 
     kb = ui.core                                      # same analyzer, raw data
     info = kb.describe("support-docs")                # KnowledgeBaseInfo
@@ -694,6 +697,103 @@ class ModelInfo:
     price_in: float | None = None  # USD per 1M input tokens (None = not in the price table)
     price_out: float | None = None
     status: str = "ACTIVE"  # ACTIVE | LEGACY
+
+
+@dataclass
+class FileChange:
+    """A file in a data source's bucket, added or changed after the last successful sync."""
+
+    key: str
+    modified: datetime | None = None
+    size: int = 0
+    bucket: str = ""
+
+    @property
+    def uri(self) -> str:
+        return f"s3://{self.bucket}/{self.key}"
+
+
+@dataclass
+class SyncFreshness:
+    """An S3 data source's files compared with its last successful sync."""
+
+    data_source: DataSourceInfo
+    last_sync: IngestionJob | None = None  # the last COMPLETE sync (None = never)
+    files: int = 0  # files listed, metadata files aside
+    changed: list[FileChange] = field(default_factory=list)  # added or changed since last_sync started, newest first
+    metadata_changed: int = 0  # <file>.metadata.json files changed since then (their filters change too)
+    truncated: bool = False  # stopped listing at `limit`
+    note: str = ""  # why it wasn't checked, when it wasn't (not S3, no access to the bucket, ...)
+
+    def to_df(self):
+        """One row per changed file: key, when it changed, size."""
+        pd = _require("pandas", "SyncFreshness.to_df")
+        return pd.DataFrame([{"key": c.key, "modified": c.modified, "size": c.size, "uri": c.uri}
+                             for c in self.changed], columns=["key", "modified", "size", "uri"])
+
+
+@dataclass
+class SearchComparison:
+    """The same question searched with different settings, and how much the results agree."""
+
+    question: str = ""
+    kb_id: str = ""
+    kb_name: str = ""
+    runs: dict[str, Retrieval] = field(default_factory=dict)  # label ('HYBRID n=10') -> result
+    overlap: dict[tuple[str, str], float] = field(default_factory=dict)  # (label, label) -> shared / all passages
+    unique: dict[str, list[Passage]] = field(default_factory=dict)  # label -> passages no other setting found
+    errors: dict[str, str] = field(default_factory=dict)  # label -> why that setting couldn't run
+
+    def ranks(self) -> list[tuple[Passage, dict[str, int | None]]]:
+        """Every passage any setting found, with its rank under each setting (None = not found), best first."""
+        found: dict[str, tuple[Passage, dict[str, int | None]]] = {}
+        for label, r in self.runs.items():
+            for p in r.passages:
+                entry = found.setdefault(p.key, (p, dict.fromkeys(self.runs)))
+                entry[1][label] = p.rank
+        return sorted(found.values(), key=lambda e: (min(r for r in e[1].values() if r is not None),
+                                                     -sum(r is not None for r in e[1].values())))
+
+    def to_df(self):
+        """One row per passage, one column per setting holding its rank there."""
+        pd = _require("pandas", "SearchComparison.to_df")
+        return pd.DataFrame([{"source": p.source, "text": p.text, **ranks} for p, ranks in self.ranks()])
+
+
+@dataclass
+class EvalCase:
+    """One test question, and where its expected source came up."""
+
+    question: str
+    expected: Any  # a piece of the source's URI, file name or text (or a list of them)
+    rank: int | None = None  # where the expected source first came up; None = not in the top k
+    top_sources: list[str] = field(default_factory=list)  # what came up first
+    seconds: float = 0.0
+
+
+@dataclass
+class EvalReport:
+    """How well retrieval finds the expected sources for a set of test questions."""
+
+    kb_id: str = ""
+    kb_name: str = ""
+    cases: list[EvalCase] = field(default_factory=list)
+    k: int = 5  # passages retrieved per question
+    hit_rate: float = 0.0  # share of questions whose expected source was in the top k
+    mrr: float = 0.0  # mean reciprocal rank: 1.0 = always first, 0.5 = second on average, 0 = never found
+    seconds: float = 0.0
+    search_type: str | None = None
+    where: Any = None
+
+    @property
+    def missed(self) -> list[EvalCase]:
+        return [c for c in self.cases if c.rank is None]
+
+    def to_df(self):
+        """One row per question: expected source, its rank (None = missed) and what came up first."""
+        pd = _require("pandas", "EvalReport.to_df")
+        return pd.DataFrame([{"question": c.question, "expected": c.expected, "rank": c.rank, "hit": c.rank is not None,
+                              "top_sources": c.top_sources, "seconds": c.seconds} for c in self.cases])
 
 
 # =============================================================================
@@ -1367,6 +1467,148 @@ def parse_models(summaries: list[dict[str, Any]], profiles: list[dict[str, Any]]
     return sorted(found, key=lambda m: (m.provider.lower(), m.name.lower(), m.id))
 
 
+def changed_since(objects: Iterable[dict[str, Any] | FileChange], when: datetime | str | None) -> list[FileChange]:
+    """Files modified after `when` (all of them when None: never synced), newest first. Takes ListObjectsV2
+    'Contents' entries or FileChanges. Metadata files (<file>.metadata.json) and folder markers are left out."""
+    since = parse_time(when)
+    changed = []
+    for obj in objects:
+        change = obj if isinstance(obj, FileChange) else FileChange(obj["Key"], obj.get("LastModified"),
+                                                                     int(obj.get("Size") or 0))
+        if change.key.endswith((".metadata.json", "/")):
+            continue
+        if since is None or (change.modified is not None and change.modified > since):
+            changed.append(change)
+    return sorted(changed, key=lambda c: c.modified or _EPOCH, reverse=True)
+
+
+def freshness_findings(freshness: list[SyncFreshness], kb_id: str, region: str = "") -> list[tuple[str, str]]:
+    """What unsynced() found, with the command that syncs each stale data source -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    for fresh in freshness:
+        ds = fresh.data_source
+        label = _source_label(ds)
+        command = sync_command(kb_id, ds.id, region)
+        more = "+" if fresh.truncated else ""
+        if fresh.note:
+            found.append(("info", f"The {label} wasn't checked: {fresh.note}."))
+        elif fresh.last_sync is None:
+            found.append(("warn", f"The {label} has never finished a sync, so none of its {fresh.files:,}{more} files "
+                                  f"are searchable yet: {command}"))
+        elif fresh.changed:
+            found.append(("warn", f"{_plural(len(fresh.changed), 'file')}{more} in {ds.location} changed since the last "
+                                  f"sync on {_fmt_day(fresh.last_sync.started)}: searches and answers don't see those "
+                                  f"changes until you sync: {command}"))
+        elif fresh.metadata_changed:
+            found.append(("warn", f"{_plural(fresh.metadata_changed, 'metadata file')} in {ds.location} changed since "
+                                  "the last sync, so where= filters still use the old values until you sync: "
+                                  f"{command}"))
+    return found
+
+
+def _pairs(labels: list[str]) -> list[tuple[str, str]]:
+    return [(a, b) for i, a in enumerate(labels) for b in labels[i + 1:]]
+
+
+def compare_retrievals(runs: dict[str, Retrieval]) -> SearchComparison:
+    """How much searches agree: for each pair of runs the share of their passages both found (shared / all, by chunk
+    ID, or by source and text), and for each run the passages no other run found."""
+    keys = {label: {p.key for p in r.passages} for label, r in runs.items()}
+    overlap = {}
+    for a, b in _pairs(list(runs)):
+        either = keys[a] | keys[b]
+        overlap[(a, b)] = len(keys[a] & keys[b]) / len(either) if either else 1.0
+    unique = {label: [p for p in r.passages if not any(p.key in keys[other] for other in runs if other != label)]
+              for label, r in runs.items()}
+    first = next(iter(runs.values()), None)
+    return SearchComparison(question=first.question if first else "", kb_id=first.kb_id if first else "",
+                            kb_name=first.kb_name if first else "", runs=dict(runs), overlap=overlap, unique=unique)
+
+
+def _setting(label: str) -> tuple[str, str]:
+    """'HYBRID n=10' -> ('HYBRID', '10')."""
+    kind, _, n = label.rpartition(" n=")
+    return kind, n
+
+
+def comparison_findings(c: SearchComparison) -> list[tuple[str, str]]:
+    """What the differences between search settings mean for this question -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    for label, error in c.errors.items():
+        kind, _ = _setting(label)
+        why = ("this vector store only supports SEMANTIC search" if kind == "HYBRID" and "hybrid" in error.lower()
+               else error)
+        found.append(("info", f"{label} couldn't run: {why}."))
+    labels = list(c.runs)
+    for a, b in _pairs(labels):
+        (kind_a, n_a), (kind_b, n_b) = _setting(a), _setting(b)
+        new = [p for p in c.runs[b].passages if p.key not in {q.key for q in c.runs[a].passages}]
+        if n_a == n_b and kind_a != kind_b:
+            if not new and len(c.runs[a].passages) == len(c.runs[b].passages):
+                found.append(("info", f"{kind_a} and {kind_b} return the same passages at n={n_a}: the search type "
+                                      "doesn't change this question's results."))
+                continue
+            top = c.runs[b].passages[0] if c.runs[b].passages else None
+            with_top = ", including its top result" if top is not None and top in new else ""
+            if new:
+                found.append(("warn" if with_top else "info",
+                              f"{kind_b} found {_plural(len(new), 'passage')} {kind_a} missed at n={n_a}{with_top} "
+                              f"({', '.join(dict.fromkeys(p.source for p in new[:3]))}). If those are the right ones, "
+                              f"use search_type={kind_b!r} in search() and ask()."))
+        elif kind_a == kind_b and n_a != n_b and new:
+            files = {source_name(p.uri) for p in c.runs[a].passages}
+            new_files = sorted({source_name(p.uri) for p in new} - files)
+            what = (f", {_plural(len(new_files), 'new file')} among them ({', '.join(new_files[:3])})" if new_files
+                    else ", all from files the first " + n_a + " already had")
+            found.append(("info", f"{kind_a or 'The default search'} with n={n_b} adds {_plural(len(new), 'passage')}"
+                                  f"{what}. More passages give ask() more to work with, at more input tokens."))
+    return found
+
+
+def match_expected(passage: Passage, expected: Any) -> bool:
+    """Whether a passage is the one a test question expects: `expected` is a case-insensitive piece of its URI, its file
+    name or its text (a list means any of them)."""
+    wanted = [expected] if isinstance(expected, str) else list(expected or [])
+    haystack = f"{passage.uri}\n{source_name(passage.uri)}\n{passage.text}".lower()
+    return any(str(w).strip().lower() in haystack for w in wanted if str(w).strip())
+
+
+def retrieval_metrics(cases: Iterable[EvalCase], k: int) -> tuple[float, float]:
+    """(hit rate, mean reciprocal rank) at k: the share of questions whose expected source was in the top k, and the
+    average of 1/rank, counting a miss (or a rank past k) as 0."""
+    ranks = [c.rank if c.rank is not None and c.rank <= k else None for c in cases]
+    if not ranks:
+        return 0.0, 0.0
+    return (sum(r is not None for r in ranks) / len(ranks), sum(1 / r for r in ranks if r) / len(ranks))
+
+
+def eval_findings(report: EvalReport) -> list[tuple[str, str]]:
+    """What a retrieval check says to change -> [(level, message)]: the questions that missed, what came up instead,
+    and the usual fixes."""
+    found: list[tuple[str, str]] = []
+    cases, missed = report.cases, report.missed
+    if not cases:
+        return found
+    if missed:
+        examples = "; ".join(f"{c.question!r} expected {c.expected!r}, got "
+                             f"{', '.join(c.top_sources[:2]) or 'nothing'}" for c in missed[:3])
+        found.append(("warn", f"{len(missed)} of {len(cases)} questions missed: the expected source wasn't in the top "
+                              f"{report.k} ({examples}). Usual fixes: search_type='HYBRID' when questions hold codes "
+                              "or names, a larger n=, smaller chunks (a new data source), or where= filters."))
+        firsts = Counter(c.top_sources[0].split(" p.")[0] for c in missed if c.top_sources)
+        crowd = [(name, count) for name, count in firsts.most_common(1) if count >= 2]
+        if crowd:
+            found.append(("info", f"{crowd[0][0]} came up first for {crowd[0][1]} of the missed questions: it may be "
+                                  "too broad, or duplicate the files you expected. where= can leave it out while you "
+                                  "check."))
+    late = [c for c in cases if c.rank is not None and c.rank > 1]
+    if late:
+        found.append(("info", f"{_plural(len(late), 'question')} found the expected source below the top result "
+                              f"(MRR {report.mrr:.2f}; 1.00 means always first). A reranker (search(..., rerank=True)) "
+                              "or HYBRID search can move it up."))
+    return found
+
+
 # describe() section -> (what it is, the permission that reads it)
 _SECTIONS = {
     "describe": ("the knowledge base", "bedrock:GetKnowledgeBase"),
@@ -1394,9 +1636,10 @@ _METADATA_EXAMPLE = '{"metadataAttributes": {"team": "billing", "year": 2024}}'
 
 
 def kb_findings(info: KnowledgeBaseInfo, docs: DocumentSummary | None = None,
+                freshness: list[SyncFreshness] | None = None,
                 prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
     """What's wrong with a knowledge base and what to do about it -> [(level, message)]. `docs` (from documents())
-    adds its findings when given."""
+    and `freshness` (from unsynced()) add their findings when given."""
     prices = BEDROCK_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     region = info.region
@@ -1454,6 +1697,7 @@ def kb_findings(info: KnowledgeBaseInfo, docs: DocumentSummary | None = None,
             found.append(("info", f"The {label} keeps its data when deleted (deletion policy RETAIN): if you delete "
                                   "this data source its chunks stay in the vector store and keep appearing in "
                                   "answers. Set it to DELETE before deleting the data source."))
+    found += freshness_findings(freshness or [], info.id, region)
     if docs is not None and docs.counts.get("FAILED") and not failed_docs_named:
         top = f" The most common reason: {docs.reasons[0][0]}." if docs.reasons else ""
         found.append(("warn", f"{_plural(docs.counts['FAILED'], 'document')} failed to index and "
@@ -1534,6 +1778,28 @@ def _question_text(question: Any) -> str:
     if not text:
         raise ValueError("Pass a question, like search('how long do refunds take?')")
     return text
+
+
+def _eval_pairs(cases: Any) -> list[tuple[str, Any]]:
+    """evaluate()'s cases -> [(question, expected)]."""
+    rows = cases.to_dict("records") if hasattr(cases, "to_dict") and hasattr(cases, "columns") else list(cases or [])
+    pairs = []
+    for row in rows:
+        if isinstance(row, dict):
+            question, expected = row.get("question"), row.get("expected", row.get("source"))
+        elif isinstance(row, (list, tuple)) and len(row) == 2:
+            question, expected = row
+        else:
+            raise ValueError("cases holds (question, expected source) pairs, dicts with 'question' and 'expected', or a "
+                             f"DataFrame with those columns; got {row!r}")
+        if not str(question or "").strip() or expected is None or expected == "":
+            raise ValueError(f"Each case needs a question and an expected source (part of its file name, URI or text); "
+                             f"got {row!r}")
+        pairs.append((str(question), expected))
+    if not pairs:
+        raise ValueError("No test questions: pass [(question, expected source), ...], e.g. "
+                         "[('refund window?', 'refund-policy.pdf')]")
+    return pairs
 
 
 def _with_errors(ds: DataSourceInfo, errors: dict[str, str]) -> DataSourceInfo:
@@ -1991,6 +2257,112 @@ class BedrockKBAnalyzer:
                                temperature=temperature, max_tokens=16_000 if max_tokens is None else max_tokens)
         answer.kb_id, answer.kb_name, answer.seconds = r.kb_id, r.kb_name, answer.seconds + r.seconds
         return answer
+
+    # ------------------------------------------------------------------ deciding
+
+    def _s3_client(self) -> Any:
+        """s3: listing a data source's bucket for unsynced()."""
+        return self._cached_client("s3", lambda: self.session.client("s3", region_name=self.region, config=self._config))
+
+    def unsynced(self, kb: str, data_source: str | None = None, limit: int | None = 100_000,
+                 progress: Callable[[int], None] | None = None) -> list[SyncFreshness]:
+        """For each S3 data source (or one, by ID or name): the files added or changed since its last successful sync
+        started. Lists the bucket (and inclusion prefixes) up to `limit` objects in all, marking results truncated;
+        metadata files are counted apart. Other data source types are returned with a note."""
+        kb_id = self.resolve(kb)
+        limit = _as_count(limit, "limit")
+        listed = 0
+        results = []
+        for summary in self._pick_sources(kb_id, data_source):
+            fresh = SyncFreshness(summary)
+            results.append(fresh)
+            try:
+                ds = _with_errors(parse_data_source(self.client.get_data_source(
+                    knowledgeBaseId=kb_id, dataSourceId=summary.id)["dataSource"]), {})
+            except (ClientError, BotoCoreError) as exc:
+                fresh.note = f"couldn't read its settings ({_why(_error_name(exc), 'bedrock:GetDataSource')})"
+                continue
+            fresh.data_source = ds
+            if ds.source_type != "S3" or not ds.bucket:
+                fresh.note = f"it's a {ds.source_type or 'non-S3'} data source, and only S3 files can be listed"
+                continue
+            done = self._recent_jobs(kb_id, ds.id, 1, status="COMPLETE")
+            fresh.last_sync = done[0] if done else None
+            objects: dict[str, dict[str, Any]] = {}
+            try:
+                for prefix in ds.prefixes or [""]:
+                    for page in self._s3_client().get_paginator("list_objects_v2").paginate(Bucket=ds.bucket,
+                                                                                           Prefix=prefix):
+                        for obj in page.get("Contents", []):
+                            if limit is not None and listed >= limit:
+                                fresh.truncated = True
+                                break
+                            if obj["Key"] not in objects:
+                                objects[obj["Key"]] = obj
+                                listed += 1
+                        if progress:
+                            progress(listed)
+                        if fresh.truncated:
+                            break
+                    if fresh.truncated:
+                        break
+            except (ClientError, BotoCoreError) as exc:
+                fresh.note = f"couldn't list {ds.location} ({_why(_error_name(exc), 's3:ListBucket')})"
+                continue
+            since = fresh.last_sync.started if fresh.last_sync else None
+            fresh.files = sum(1 for key in objects if not key.endswith((".metadata.json", "/")))
+            fresh.changed = changed_since(objects.values(), since)
+            for change in fresh.changed:
+                change.bucket = ds.bucket
+            fresh.metadata_changed = sum(1 for key, obj in objects.items() if key.endswith(".metadata.json") and (
+                since is None or (obj.get("LastModified") is not None and obj["LastModified"] > since)))
+        return results
+
+    def compare(self, kb: str, question: str, *, n: int | Iterable[int] = (5, 10),
+                search_types: str | Iterable[str | None] = ("SEMANTIC", "HYBRID"), where: Any = None,
+                progress: Callable[[int], None] | None = None) -> SearchComparison:
+        """The same question searched with each search type and each n (one Retrieve per combination), and how much
+        the results overlap. A setting the vector store rejects (e.g. HYBRID) is recorded in `errors`."""
+        kb_id = self.resolve(kb)
+        sizes = [n] if isinstance(n, (int, str)) else list(n)
+        kinds = [search_types] if isinstance(search_types, str) or search_types is None else list(search_types)
+        runs: dict[str, Retrieval] = {}
+        errors: dict[str, str] = {}
+        for kind in kinds:
+            for size in sizes:
+                label = f"{str(kind).upper() if kind else 'DEFAULT'} n={_as_int(size, 'n')}"
+                try:
+                    runs[label] = self.retrieve(kb_id, question, size, where=where, search_type=kind)
+                except ClientError as exc:
+                    if _error_code(exc) != "ValidationException":
+                        raise
+                    errors[label] = exc.response.get("Error", {}).get("Message", "ValidationException")
+                if progress:
+                    progress(len(runs) + len(errors))
+        comparison = compare_retrievals(runs)
+        comparison.question, comparison.kb_id, comparison.kb_name = _question_text(question), kb_id, self.kb_name(kb_id)
+        comparison.errors = errors
+        return comparison
+
+    def evaluate(self, kb: str, cases: Any, *, n: int = 5, search_type: str | None = None, where: Any = None,
+                 progress: Callable[[int], None] | None = None) -> EvalReport:
+        """Retrieval hit rate and MRR on test questions: where each question's expected source came up in the top n.
+        Retrieval only, no answers generated, so it stays cheap. cases: (question, expected) pairs, dicts with
+        'question' and 'expected', or a DataFrame with those columns; expected is a piece of the source's URI, file
+        name or text."""
+        kb_id = self.resolve(kb)
+        n = _as_int(n, "n")
+        report = EvalReport(kb_id=kb_id, kb_name=self.kb_name(kb_id), k=n, search_type=search_type, where=where)
+        started = time.monotonic()
+        for i, (question, expected) in enumerate(_eval_pairs(cases), 1):
+            r = self.retrieve(kb_id, question, n, where=where, search_type=search_type)
+            rank = next((p.rank for p in r.passages if match_expected(p, expected)), None)
+            report.cases.append(EvalCase(r.question, expected, rank, [p.source for p in r.passages[:3]], r.seconds))
+            if progress:
+                progress(i)
+        report.hit_rate, report.mrr = retrieval_metrics(report.cases, n)
+        report.seconds = time.monotonic() - started
+        return report
 
 
 
@@ -2885,4 +3257,103 @@ class BedrockKBView:
                   "model you haven't enabled fails with AccessDeniedException: enable it in the Bedrock console under "
                   "Model access. '-' means no price in the table: pass BedrockKBAnalyzer(model_prices={...})."),
         ]
+        self._show(blocks)
+
+    # ------------------------------------------------------------------ deciding
+
+    @_friendly_errors
+    def unsynced(self, kb: str | None = None, *, data_source: str | None = None) -> None:
+        """Files added or changed in S3 since the last successful sync, and the command to sync them."""
+        kb_id = self._kb(kb)
+        with self._progress("Listing files", unit="files") as tick:
+            results = self.core.unsynced(kb_id, data_source, progress=tick)
+        region = self.core.region
+        checked = [f for f in results if not f.note]
+        changed = sum(len(f.changed) for f in checked)
+        syncs = [f.last_sync.started for f in checked if f.last_sync and f.last_sync.started]
+        blocks: list[Any] = [
+            _Title(f"Changes since the last sync: {self.core.kb_name(kb_id)}",
+                   "S3 files compared with the start of each data source's last successful sync"),
+            _Cards([("Data sources checked", f"{len(checked):,} of {len(results):,}"),
+                    ("Files", f"{sum(f.files for f in checked):,}"), ("Changed since sync", f"{changed:,}"),
+                    ("Oldest last sync", human_age(min(syncs)) if syncs else "-")]),
+        ]
+        blocks += [_Note(message, level) for level, message in freshness_findings(results, kb_id, region)]
+        for fresh in checked:
+            ds = fresh.data_source
+            if fresh.truncated:
+                blocks.append(_Note(f"Stopped listing {ds.location} at the limit, so there may be more changes: "
+                                    ".core.unsynced(..., limit=None) lists everything."))
+            if fresh.changed:
+                rows = [[c.key, _fmt_dt(c.modified), human_age(c.modified), human_size(c.size)] for c in fresh.changed]
+                blocks.append(_Table(["File", "Modified", "Age", "Size"], rows, title=f"{ds.name}: changed files"))
+            elif fresh.last_sync is not None and not fresh.metadata_changed:
+                blocks.append(_Note(f"{ds.name} is up to date: none of its {fresh.files:,} files changed since the sync "
+                                    f"of {_fmt_dt(fresh.last_sync.started)}.", "ok"))
+        stale = [f.data_source for f in checked if f.changed or f.metadata_changed or f.last_sync is None]
+        if stale:
+            lines = [f"{sync_command(kb_id, ds.id, region)}   # {ds.name}" for ds in stale]
+            lines.append(f"# or from Python: {sync_call(kb_id, stale[0].id, region)}")
+            blocks.append(_Text("\n".join(lines), title="To sync (this tool never starts a sync: it changes the index)"))
+        self._show(blocks)
+
+    @_friendly_errors
+    def compare(self, question: str, *, kb: str | None = None, n: int | Iterable[int] = (5, 10),
+                search_types: str | Iterable[str | None] = ("SEMANTIC", "HYBRID"), where: Any = None) -> None:
+        """One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings."""
+        kb_id = self._kb(kb)
+        with self._progress("Searching", unit="searches") as tick:
+            c = self.core.compare(kb_id, question, n=n, search_types=search_types, where=where, progress=tick)
+        labels = list(c.runs)
+        seconds = sum(r.seconds for r in c.runs.values())
+        pairs = [(a, b) for (a, b) in c.overlap if _setting(a)[1] == _setting(b)[1] or _setting(a)[0] == _setting(b)[0]]
+        cards = [("Settings tried", f"{len(labels) + len(c.errors):,}")]
+        cards += [(f"{a} vs {b}", f"{c.overlap[(a, b)]:.0%} overlap") for a, b in pairs[:4]]
+        cards += [("Time", f"{seconds:.1f}s"), ("Est. cost", human_money(query_cost(len(labels), prices=self.core.prices)))]
+        sub = "overlap = passages both settings found, out of all they found" + (
+            f" · where {describe_filter(where)}" if where is not None else "")
+        blocks: list[Any] = [_Title(f"Compare searches in {c.kb_name}: {_clip(c.question, 80)}", sub), _Cards(cards)]
+        found = comparison_findings(c)
+        blocks += [_Note(message, level) for level, message in sorted(found, key=lambda f: f[0] != "warn")]
+        terms = question_terms(c.question)
+        rows = [[p.source, best_snippet(p.text, terms, 70)] + ["-" if ranks[label] is None else str(ranks[label])
+                                                                for label in labels] for p, ranks in c.ranks()]
+        blocks.append(_Table(["Source", "Passage"] + labels, rows, title="Rank of each passage under each setting",
+                             max_rows=0))
+        if labels:
+            kind, size = _setting(labels[-1])
+            setting = f", search_type={kind!r}" if kind != "DEFAULT" else ""
+            blocks.append(_Note(f"search({_clip(c.question, 60)!r}{setting}, n={size}) shows one setting's passages in "
+                                "full."))
+        self._show(blocks)
+
+    @_friendly_errors
+    def evaluate(self, cases: Any, *, kb: str | None = None, n: int = 5, search_type: str | None = None,
+                 where: Any = None) -> None:
+        """Retrieval hit rate @n and MRR on test questions: where each expected source ranked (or missed), and what
+        came up first instead. cases: [(question, expected file or text), ...]."""
+        kb_id = self._kb(kb)
+        with self._progress("Checking questions", unit="questions") as tick:
+            report = self.core.evaluate(kb_id, cases, n=n, search_type=search_type, where=where, progress=tick)
+        sub = [f"top {report.k}", _search_label(report.search_type), "retrieval only (no answers generated)"]
+        if where is not None:
+            sub.append(f"where {describe_filter(where)}")
+        blocks: list[Any] = [
+            _Title(f"Retrieval check on {report.kb_name}: {_plural(len(report.cases), 'question')}", " · ".join(sub)),
+            _Cards([(f"Hit rate @{report.k}", f"{report.hit_rate:.0%}"), ("MRR", f"{report.mrr:.2f}"),
+                    ("Questions", f"{len(report.cases):,}"), ("Missed", f"{len(report.missed):,}"),
+                    ("Time", f"{report.seconds:.1f}s"),
+                    ("Est. cost", human_money(query_cost(len(report.cases), prices=self.core.prices)))]),
+        ]
+        found = eval_findings(report)
+        blocks += [_Note(message, level) for level, message in found]
+        if not found:
+            blocks.append(_Note("Every expected source came up first.", "ok"))
+        rows = [[c.question, c.expected if isinstance(c.expected, str) else ", ".join(map(str, c.expected)),
+                 "missed" if c.rank is None else f"#{c.rank}", ", ".join(c.top_sources[:2]) or "-"]
+                for c in report.cases]
+        blocks.append(_Table(["Question", "Expected", "Rank", "Came up first"], rows, max_rows=0))
+        blocks.append(_Note("MRR (mean reciprocal rank) averages 1/rank: 1.00 means the expected source always came "
+                            "first, 0.50 second on average. compare(question) shows how search settings change one "
+                            "question's results."))
         self._show(blocks)

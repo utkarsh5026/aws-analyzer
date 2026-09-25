@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import boto3
 import pytest
 from botocore.stub import Stubber
+from moto import mock_aws
 
 import bedrock_kb as kbmod
 from bedrock_kb import (
@@ -13,6 +14,9 @@ from bedrock_kb import (
     BedrockKBView,
     Citation,
     DataSourceInfo,
+    EvalCase,
+    EvalReport,
+    FileChange,
     IngestionJob,
     KBDocument,
     Passage,
@@ -21,15 +25,20 @@ from bedrock_kb import (
     best_snippet,
     build_filter,
     build_prompt,
+    changed_since,
+    compare_retrievals,
+    comparison_findings,
     describe_chunking,
     describe_filter,
     describe_parsing,
     describe_vector_store,
     estimate_tokens,
+    eval_findings,
     generation_cost,
     human_duration,
     human_tokens,
     kb_findings,
+    match_expected,
     model_price,
     parse_citation_markers,
     parse_converse,
@@ -43,6 +52,7 @@ from bedrock_kb import (
     query_cost,
     question_terms,
     retrieval_findings,
+    retrieval_metrics,
     short_model,
     source_name,
     split_metadata,
@@ -97,8 +107,9 @@ def kb_desc(kb_id=KB_ID, name="support-docs", *, status="ACTIVE", store="OPENSEA
 def ds_desc(ds_id=DS_ID, name="docs-s3", *, chunking=None, parsing=None, policy="DELETE", prefixes=("policies/",),
             kind="S3"):
     if kind == "S3":
-        config = {"type": "S3", "s3Configuration": {"bucketArn": "arn:aws:s3:::support-docs-bucket",
-                                                     "inclusionPrefixes": list(prefixes)}}
+        config = {"type": "S3", "s3Configuration": {"bucketArn": "arn:aws:s3:::support-docs-bucket"}}
+        if prefixes:
+            config["s3Configuration"]["inclusionPrefixes"] = list(prefixes)
     else:
         config = {"type": "WEB", "webConfiguration": {"sourceConfiguration": {"urlConfiguration": {
             "seedUrls": [{"url": "https://help.example.com/"}]}}}}
@@ -607,6 +618,84 @@ def test_parse_models():
     assert parse_models([model("x.y", "Y")], [])[0].via == "provisioned only"
 
 
+def test_changed_since():
+    objects = [{"Key": "p/old.pdf", "LastModified": ago(days=9), "Size": 10},
+               {"Key": "p/new.pdf", "LastModified": ago(hours=1), "Size": 2048},
+               {"Key": "p/newer.md", "LastModified": ago(minutes=5), "Size": 1},
+               {"Key": "p/new.pdf.metadata.json", "LastModified": ago(hours=1), "Size": 1},
+               {"Key": "p/", "LastModified": ago(hours=1), "Size": 0}]
+    assert [c.key for c in changed_since(objects, ago(days=3))] == ["p/newer.md", "p/new.pdf"]
+    assert [c.key for c in changed_since(objects, "3d")] == ["p/newer.md", "p/new.pdf"]  # forgiving time input
+    assert len(changed_since(objects, None)) == 3  # never synced: every file
+    assert changed_since([FileChange("a.txt", ago(days=1))], ago(days=2))[0].key == "a.txt"
+
+
+def test_freshness_in_kb_findings():
+    info = healthy_kb()
+    ds = info.data_sources[0]
+    stale = kbmod.SyncFreshness(ds, parse_ingestion_job(job(started=ago(days=3))), files=40,
+                                changed=[FileChange("policies/new.pdf", ago(hours=1))])
+    text = messages(kb_findings(info, freshness=[stale]), "warn")
+    assert "1 file in s3://support-docs-bucket/policies/ changed since the last sync on" in text
+    assert "don't see those changes until you sync: aws bedrock-agent start-ingestion-job" in text
+    never = kbmod.SyncFreshness(ds, None, files=40)
+    assert "never finished a sync, so none of its 40 files are searchable" in messages(kb_findings(info, freshness=[never]))
+    metadata = kbmod.SyncFreshness(ds, stale.last_sync, files=40, metadata_changed=2)
+    assert "2 metadata files" in messages(kb_findings(info, freshness=[metadata]))
+    fine = kbmod.SyncFreshness(ds, stale.last_sync, files=40)
+    assert kb_findings(info, freshness=[fine]) == []
+
+
+def run_of(label, *keys, question="q"):
+    kind, _, n = label.rpartition(" n=")
+    return Retrieval(KB_ID, question, [Passage(i, f"text {k}", uri=f"s3://b/{k}.pdf", chunk_id=k)
+                                       for i, k in enumerate(keys, 1)], n=int(n), search_type=kind)
+
+
+def test_compare_retrievals_and_findings():
+    c = compare_retrievals({"SEMANTIC n=2": run_of("SEMANTIC n=2", "a", "b"),
+                            "SEMANTIC n=3": run_of("SEMANTIC n=3", "a", "b", "c"),
+                            "HYBRID n=2": run_of("HYBRID n=2", "d", "a")})
+    assert c.overlap[("SEMANTIC n=2", "HYBRID n=2")] == pytest.approx(1 / 3)
+    assert c.overlap[("SEMANTIC n=2", "SEMANTIC n=3")] == pytest.approx(2 / 3)
+    assert [p.chunk_id for p in c.unique["HYBRID n=2"]] == ["d"] and c.unique["SEMANTIC n=2"] == []
+    assert [(p.chunk_id, ranks) for p, ranks in c.ranks()][:2] == [
+        ("a", {"SEMANTIC n=2": 1, "SEMANTIC n=3": 1, "HYBRID n=2": 2}),
+        ("d", {"SEMANTIC n=2": None, "SEMANTIC n=3": None, "HYBRID n=2": 1})]
+    c.errors["HYBRID n=3"] = "HYBRID search type is not supported"
+    found = comparison_findings(c)
+    text = messages(found)
+    assert "HYBRID found 1 passage SEMANTIC missed at n=2, including its top result (d.pdf)" in messages(found, "warn")
+    assert "SEMANTIC with n=3 adds 1 passage, 1 new file among them (c.pdf)" in text
+    assert "HYBRID n=3 couldn't run: this vector store only supports SEMANTIC search" in text
+    same = compare_retrievals({"SEMANTIC n=2": run_of("SEMANTIC n=2", "a"), "HYBRID n=2": run_of("HYBRID n=2", "a")})
+    assert "return the same passages at n=2" in messages(comparison_findings(same))
+
+
+def test_retrieval_metrics_and_matching():
+    cases = [EvalCase("q1", "a", 1), EvalCase("q2", "b", 2), EvalCase("q3", "c", None), EvalCase("q4", "d", 4)]
+    assert retrieval_metrics(cases, 5) == (pytest.approx(0.75), pytest.approx((1 + 0.5 + 0.25) / 4))
+    assert retrieval_metrics(cases, 2) == (pytest.approx(0.5), pytest.approx(1.5 / 4))  # rank 4 is past k
+    assert retrieval_metrics([], 5) == (0.0, 0.0)
+    p = Passage(1, "Reset your password from the login page.", uri="s3://b/help/Account-FAQ.md")
+    assert match_expected(p, "account-faq") and match_expected(p, "s3://b/help/") and match_expected(p, "LOGIN PAGE")
+    assert match_expected(p, ["nope", "account"]) and not match_expected(p, "refund") and not match_expected(p, " ")
+
+
+def test_eval_findings():
+    good = EvalReport(cases=[EvalCase("q", "a", 1)], k=5, hit_rate=1.0, mrr=1.0)
+    assert eval_findings(good) == []
+    bad = EvalReport(cases=[EvalCase("refund window?", "refund-policy.pdf", None, ["faq.md p.1", "x.pdf"]),
+                            EvalCase("reset?", "account", None, ["faq.md p.2"]), EvalCase("ok", "a", 3)],
+                     k=5, hit_rate=1 / 3, mrr=1 / 9)
+    text = messages(eval_findings(bad))
+    assert "2 of 3 questions missed: the expected source wasn't in the top 5" in text
+    assert "'refund window?' expected 'refund-policy.pdf', got faq.md p.1, x.pdf" in text
+    assert "search_type='HYBRID'" in text and "a larger n=" in text
+    assert "faq.md came up first for 2 of the missed questions" in text
+    assert "1 question found the expected source below the top result (MRR 0.11" in text
+
+
 # ----------------------------------------------------------------------------- AWS (Stubber / moto)
 
 
@@ -861,6 +950,94 @@ def test_generate_reads_exact_usage_and_skips_reasoning(aws, core):
     assert core.generate("q?", ["one", "two"], model="sonnet", history=history, temperature=0, max_tokens=100).cited == [2]
 
 
+def backdate(bucket, key, when):
+    """moto stamps objects with the current time; unsynced() needs some from before the last sync."""
+    from moto.core.models import DEFAULT_ACCOUNT_ID
+    from moto.s3.models import s3_backends
+
+    for version in s3_backends[DEFAULT_ACCOUNT_ID]["aws"].buckets[bucket].keys.getlist(key):
+        version.last_modified = when.replace(tzinfo=None)  # moto keeps naive UTC
+
+
+@pytest.fixture
+def bucket(aws):
+    """A moto bucket behind the S3 data source: an old file, new ones, and metadata files."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="support-docs-bucket")
+        for key in ("policies/old.pdf", "policies/old.pdf.metadata.json", "policies/new.pdf", "faq/q.md",
+                    "faq/q.md.metadata.json", "other/not-in-the-data-source.pdf"):
+            s3.put_object(Bucket="support-docs-bucket", Key=key, Body=b"x" * 2048)
+        backdate("support-docs-bucket", "policies/old.pdf", ago(days=10))
+        backdate("support-docs-bucket", "policies/old.pdf.metadata.json", ago(days=10))
+        aws.clients["s3"] = s3
+        yield s3
+
+
+def stub_freshness(aws, *, prefixes=("policies/", "faq/"), last=None, web=True):
+    aws.list_kbs()
+    aws.data_sources(ds_desc(), *([ds_desc(DS2_ID, "help-site", kind="WEB")] if web else []))
+    aws.agent.add_response("get_data_source", {"dataSource": ds_desc(prefixes=prefixes)})
+    aws.agent.add_response("list_ingestion_jobs", {"ingestionJobSummaries": [last or job(started=ago(days=3))]}, {
+        "knowledgeBaseId": KB_ID, "dataSourceId": DS_ID, "maxResults": 1,
+        "sortBy": {"attribute": "STARTED_AT", "order": "DESCENDING"},
+        "filters": [{"attribute": "STATUS", "operator": "EQ", "values": ["COMPLETE"]}]})
+    if web:
+        aws.agent.add_response("get_data_source", {"dataSource": ds_desc(DS2_ID, "help-site", kind="WEB")})
+
+
+def test_unsynced_lists_files_changed_since_the_last_sync(aws, bucket):
+    stub_freshness(aws)
+    [s3, web] = aws.analyzer().unsynced("support-docs")
+    assert sorted(c.key for c in s3.changed) == ["faq/q.md", "policies/new.pdf"]
+    assert s3.files == 3 and s3.metadata_changed == 1 and not s3.truncated and s3.last_sync.id == "JOB0000001"
+    assert s3.changed[0].uri.startswith("s3://support-docs-bucket/") and s3.changed[0].size == 2048
+    assert "only S3 files can be listed" in web.note and web.changed == []
+    assert list(s3.to_df().columns) == ["key", "modified", "size", "uri"]
+
+
+def test_unsynced_stops_at_the_limit(aws, bucket):
+    stub_freshness(aws, prefixes=(), web=False)
+    [s3] = aws.analyzer().unsynced(KB_ID, limit=2)
+    assert s3.truncated and s3.files <= 2
+
+
+def test_compare_runs_each_setting_and_records_unsupported_ones(aws, core):
+    aws.list_kbs()
+    semantic = [passage(chunk="a"), passage(EU_TEXT, "eu.pdf", chunk="b")]
+    code = passage("E1234 means the card was declined.", "errors.pdf", chunk="c")
+    aws.runtime.add_response("retrieve", retrieve_resp(*semantic), search_params("q", 2, overrideSearchType="SEMANTIC"))
+    aws.runtime.add_response("retrieve", retrieve_resp(*semantic, code),
+                             search_params("q", 3, overrideSearchType="SEMANTIC"))
+    aws.runtime.add_response("retrieve", retrieve_resp(code, semantic[0]),
+                             search_params("q", 2, overrideSearchType="HYBRID"))
+    aws.runtime.add_client_error("retrieve", service_error_code="ValidationException",
+                                 service_message="HYBRID search type is not supported for this knowledge base")
+    c = core.compare("support-docs", "q", n=(2, 3))
+    assert list(c.runs) == ["SEMANTIC n=2", "SEMANTIC n=3", "HYBRID n=2"] and list(c.errors) == ["HYBRID n=3"]
+    assert c.overlap[("SEMANTIC n=2", "HYBRID n=2")] == pytest.approx(1 / 3) and c.kb_name == "support-docs"
+
+
+def test_evaluate_makes_one_retrieve_per_case(aws, core):
+    pd = pytest.importorskip("pandas")
+    aws.list_kbs()
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(EU_TEXT, "eu.pdf", chunk="x"), passage()),
+                             search_params("refund window?"))
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(EU_TEXT, "eu.pdf", chunk="x")),
+                             search_params("reset password"))
+    report = core.evaluate("support-docs", [("refund window?", "refund-policy.pdf"),
+                                            {"question": "reset password", "expected": "account-faq"}])
+    assert [c.rank for c in report.cases] == [2, None] and report.hit_rate == 0.5 and report.mrr == 0.25
+    assert report.cases[1].top_sources == ["eu.pdf p.3"] and list(report.to_df()["hit"]) == [True, False]
+    aws.runtime.add_response("retrieve", retrieve_resp(passage()), search_params("refund window?", 3))
+    frame = pd.DataFrame({"question": ["refund window?"], "expected": ["refund-policy"]})
+    assert core.evaluate(KB_ID, frame, n=3).hit_rate == 1.0
+    with pytest.raises(ValueError, match="needs a question and an expected source"):
+        core.evaluate(KB_ID, [("q", "")])
+    with pytest.raises(ValueError, match="No test questions"):
+        core.evaluate(KB_ID, [])
+
+
 def test_missing_region_is_a_readable_error(monkeypatch):
     for name in ("AWS_DEFAULT_REGION", "AWS_REGION"):
         monkeypatch.delenv(name, raising=False)
@@ -1085,6 +1262,54 @@ def test_ui_model_error_notes(aws, ui, capsys):
                                  service_message="Too many requests", http_status_code=429)
     assert "Bedrock throttled the call: wait a few seconds and retry" in run(capsys, ui.ask, "q?")
     assert "engine is 'kb'" in run(capsys, ui.ask, "q?", engine="magic")
+
+
+def test_ui_unsynced(aws, bucket, ui, capsys):
+    stub_freshness(aws)
+    out = run(capsys, ui.unsynced)
+    for expected in ("Changes since the last sync: support-docs", "Data sources checked: 1 of 2", "Files: 3",
+                     "Changed since sync: 2", "Oldest last sync: 3d ago",
+                     "2 files in s3://support-docs-bucket/policies/, s3://support-docs-bucket/faq/ changed since",
+                     "The data source 'help-site' wasn't checked: it's a WEB data source", "docs-s3: changed files",
+                     "policies/new.pdf", "2.0 KB", "faq/q.md",
+                     f"aws bedrock-agent start-ingestion-job --knowledge-base-id {KB_ID} --data-source-id {DS_ID}",
+                     "this tool never starts a sync"):
+        assert expected in out
+    assert "old.pdf" not in out
+
+
+def test_ui_unsynced_up_to_date(aws, bucket, ui, capsys):
+    stub_freshness(aws, prefixes=("policies/old.pdf",), web=False)
+    out = run(capsys, ui.unsynced)
+    assert "[ok] docs-s3 is up to date: none of its 1 files changed" in out and "To sync" not in out
+
+
+def test_ui_compare(aws, ui, capsys):
+    aws.list_kbs()
+    semantic = [passage(chunk="a"), passage(EU_TEXT, "eu.pdf", chunk="b")]
+    code = passage("E1234 means the card was declined.", "errors.pdf", chunk="c")
+    for resp in (retrieve_resp(*semantic), retrieve_resp(*semantic, code), retrieve_resp(code, semantic[0]),
+                 retrieve_resp(code, *semantic)):
+        aws.runtime.add_response("retrieve", resp)
+    out = run(capsys, ui.compare, "what is error E1234?", n=(2, 3))
+    for expected in ("Compare searches in support-docs: what is error E1234?", "Settings tried: 4",
+                     "SEMANTIC n=2 vs HYBRID n=2: 33% overlap", "HYBRID found 1 passage SEMANTIC missed at n=2, "
+                     "including its top result", "Rank of each passage under each setting", "SEMANTIC n=2  SEMANTIC n=3",
+                     "errors.pdf p.3", "search('what is error E1234?', search_type='HYBRID', n=3)"):
+        assert expected in out
+
+
+def test_ui_evaluate(aws, ui, capsys):
+    aws.list_kbs()
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(EU_TEXT, "eu.pdf", chunk="x"), passage()))
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(EU_TEXT, "eu.pdf", chunk="x")))
+    out = run(capsys, ui.evaluate, [("refund window?", "refund-policy.pdf"), ("reset password", "account-faq")])
+    for expected in ("Retrieval check on support-docs: 2 questions", "top 5", "retrieval only", "Hit rate @5: 50%",
+                     "MRR: 0.25", "Missed: 1", "1 of 2 questions missed", "#2", "missed", "eu.pdf p.3",
+                     "MRR (mean reciprocal rank)"):
+        assert expected in out
+    aws.runtime.add_response("retrieve", retrieve_resp(passage()))
+    assert "[ok] Every expected source came up first." in run(capsys, ui.evaluate, [("refund?", "refund-policy")])
 
 
 def test_ui_turns_errors_into_notes(aws, ui, capsys):
