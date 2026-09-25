@@ -138,6 +138,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
       <li><a href="#deleted">Recover deleted files</a></li>
       <li><a href="#compare">Check a copy or sync</a></li>
       <li><a href="#python">Use the data in Python</a></li>
+      <li><a href="#build">Build your own analysis</a></li>
       <li><a href="#big">Very large buckets</a></li>
       <li><a href="#permissions">Permissions</a></li>
       <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -162,6 +163,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <li><a href="#deleted">Recover deleted files</a></li>
           <li><a href="#compare">Check a copy or sync</a></li>
           <li><a href="#python">Use the data in Python</a></li>
+          <li><a href="#build">Build your own analysis</a></li>
           <li><a href="#big">Very large buckets</a></li>
           <li><a href="#permissions">Permissions</a></li>
           <li><a href="#troubleshooting">Troubleshooting</a></li>
@@ -363,7 +365,7 @@ ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></
 
 df = s3.read_df("s3://acme-ml-data/curated/features/churn/train.parquet")
 df = s3.read_df("s3://acme-ml-data/curated/features/churn/train.parquet", nrows=1000, columns=["age", "plan"])
-df = s3.read_df("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", nrows=500)
+df = s3.read_df("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", fmt="jsonl", nrows=500)   # one record per line
 df = s3.read_df("s3://acme-ml-data/reports/q3.xlsx", sheet_name="Summary")       # Excel: needs openpyxl
 df = s3.read_df("s3://acme-ml-data/spark-output/part-00000", fmt="parquet")     # no extension: say what it is
 df = s3.read_df("s3://acme-ml-data/exports/data.txt", fmt="csv", sep=";")        # extra options go to pandas</code></pre></div>
@@ -380,6 +382,7 @@ with s3.open("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz") as
     first_line = f.readline()
 
 s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")</code></pre></div>
+      <p>For worked examples that load a JSON export, a CSV, an Excel workbook or a whole folder and build on it, see <a href="#build">Build your own analysis</a>.</p>
 
       <!-- ============================================================ documents -->
       <h2 id="documents">Read PDFs, Word and PowerPoint files</h2>
@@ -521,6 +524,151 @@ rows = [ObjectInfo("acme-ml-data", "raw/a.json", 1_200_000, datetime(2025, 1, 5,
 summarize_objects(rows, "s3://acme-ml-data/raw/").monthly_cost
 simulate_lifecycle_objects(rows, "s3://acme-ml-data/raw/", move_after=30, to="GLACIER_IR").monthly_savings</code></pre></div>
       <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
+
+      <!-- ============================================================ build -->
+      <h2 id="build">Build your own analysis</h2>
+      <p>The commands above answer common questions. For your own, the pattern is always the same: take a file's S3 path, load it into Python with <code>ui.core</code>, and from there it's ordinary Python and pandas. The loaders deal with the S3 side: compression, file formats, reading only the rows you ask for, and streaming files too big for memory.</p>
+      <div class="grid2">
+        <div class="card"><h4>1. Find the file</h4><p>A path you already know, or one from <code>find()</code> or <code>ls()</code>. Look at it first with <code>ui.preview(path)</code>.</p></div>
+        <div class="card"><h4>2. Load it</h4><p><code>read_df()</code> for tables, <code>read_json()</code> for JSON documents, <code>open()</code> to stream.</p></div>
+        <div class="card"><h4>3. Build on it</h4><p>Clean, join, aggregate, check, chart. Put it in a function to run it again on tomorrow's file.</p></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>You have</th><th>Load it with</th><th>You get</th></tr></thead>
+        <tbody>
+          <tr><td>A JSON document: a config, an API response, an export</td><td><code>s3.read_json(path)</code></td><td>Dicts and lists, as <code>json.load</code> returns them</td></tr>
+          <tr><td>JSON records, one per line (<code>.jsonl</code>, Firehose, Spark)</td><td><code>s3.read_df(path)</code>, plus <code>fmt="jsonl"</code> if the name ends in <code>.json</code></td><td>A DataFrame; nested fields become <code>a.b</code> columns</td></tr>
+          <tr><td>CSV, TSV or other delimited text</td><td><code>s3.read_df(path)</code></td><td>A DataFrame; extra options go to <code>pandas.read_csv</code></td></tr>
+          <tr><td>An Excel workbook</td><td><code>s3.read_df(path, sheet_name=...)</code></td><td>A DataFrame, or every sheet with <code>sheet_name=None</code></td></tr>
+          <tr><td>A folder of files</td><td><code>s3.find(...)</code>, then <code>read_df</code> each</td><td>One DataFrame, with <code>pd.concat</code></td></tr>
+          <tr><td>A file too big for memory</td><td><code>s3.open(path)</code></td><td>A stream, already decompressed, to read in chunks</td></tr>
+          <tr><td>A library that needs a file on disk</td><td><code>s3.download(path, "/tmp/")</code></td><td>The local path</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Start from a path</h3>
+      <div class="code"><pre><code class="lang-py">import pandas as pd
+from s3 import S3View
+
+ui = S3View()
+s3 = ui.core                       # the analyzer behind the view: returns data instead of printing
+
+path = "s3://acme-ml-data/raw/api/orders/2025-09-01.json"   # "acme-ml-data/raw/..." works too
+s3.exists(path)                    # True or False
+ui.preview(path)                   # look before you load: first records, columns, size</code></pre></div>
+      <p>In a script or a scheduled job there's no view: create the analyzer directly with <code>s3 = S3Analyzer()</code>, or <code>S3Analyzer(profile="dev", region="eu-west-1")</code>. Everything below works the same. The loaders read from S3; for a file that's already on the notebook's disk, load it with pandas (<code>pd.read_csv("sales.csv")</code>) and the rest of your code doesn't change.</p>
+
+      <h3>A JSON file</h3>
+      <p><code>read_json()</code> parses a whole JSON document into dicts and lists. Exports usually wrap the records you want in an outer object, like this <code>orders/2025-09-01.json</code>:</p>
+      <div class="code"><span class="label">JSON</span><pre><code class="lang-json">{
+  "exported_at": "2025-09-02T01:00:00Z",
+  "orders": [
+    {"id": "o-1001", "placed_at": "2025-09-01T08:14:00Z", "customer": {"id": "c-17", "country": "DE"},
+     "items": [{"sku": "A-1", "qty": 2, "price": 9.5}, {"sku": "B-7", "qty": 1, "price": 30.0}]},
+    {"id": "o-1002", "placed_at": "2025-09-01T08:20:00Z", "customer": {"id": "c-42", "country": "FR"},
+     "items": [{"sku": "A-1", "qty": 5, "price": 9.5}]}
+  ]
+}</code></pre></div>
+      <p>Take the records out and flatten them into a table with <code>pd.json_normalize</code>:</p>
+      <div class="code"><pre><code class="lang-py">data = s3.read_json("s3://acme-ml-data/raw/api/orders/2025-09-01.json")
+data["exported_at"], len(data["orders"])
+
+orders = pd.json_normalize(data["orders"])     # one row per order: id, placed_at, customer.id, customer.country, items
+items = pd.json_normalize(data["orders"], record_path="items",      # one row per line item,
+                          meta=["id", ["customer", "country"]])     # with its order's id and country
+
+items["revenue"] = items["qty"] * items["price"]
+items.groupby("customer.country")["revenue"].sum().sort_values(ascending=False)</code></pre></div>
+      <p>A file with one JSON record per line loads straight into a DataFrame. Firehose and Spark often name those files <code>.json</code>; add <code>fmt="jsonl"</code> so they're read line by line:</p>
+      <div class="code"><pre><code class="lang-py">events = s3.read_df("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", fmt="jsonl")
+events = s3.read_df("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz", fmt="jsonl", nrows=1000)   # first 1,000
+events["user.plan"].value_counts()             # nested fields are flattened: {"user": {"plan": ...}} is "user.plan"</code></pre></div>
+
+      <h3>A CSV file</h3>
+      <p><code>read_df()</code> picks the reader from the file name, and passes any extra options on to <code>pandas.read_csv</code>. Peek at the first rows, load the file with the types you want, then work on it as usual:</p>
+      <div class="code"><pre><code class="lang-py">path = "s3://acme-ml-data/raw/sales/dt=2025-09-01/sales.csv"
+
+s3.read_df(path, nrows=5)                      # a peek: reads only the start of the file
+sales = s3.read_df(path, parse_dates=["placed_at"], dtype={"sku": "string"})
+sales["revenue"] = sales["qty"] * sales["unit_price"]
+
+sales.groupby("store")["revenue"].agg(["count", "sum", "mean"])   # orders and revenue per store
+sales.set_index("placed_at").resample("h")["revenue"].sum()       # revenue per hour
+sales[(sales["qty"] &lt;= 0) | sales["unit_price"].isna()]          # rows that need a look</code></pre></div>
+      <p>Files from other systems often need a few options: a different separator or decimal mark, an older encoding, or a title above the header. <code>fmt="csv"</code> tells it how to read a file whose name doesn't say.</p>
+      <div class="code"><pre><code class="lang-py">stock = s3.read_df("s3://acme-ml-data/raw/partners/stock.txt", fmt="csv",
+                   sep=";", decimal=",", encoding="latin-1", skiprows=2)</code></pre></div>
+      <p><code>read_df()</code> loads the whole file into memory; <code>columns=["store", "qty"]</code> loads fewer columns. For a file that won't fit at all, stream it with <code>open()</code>, which decompresses as it goes, and let pandas read it in chunks:</p>
+      <div class="code"><pre><code class="lang-py">parts = []
+with s3.open("s3://acme-ml-data/archive/sales-2024.csv.gz") as f:
+    for chunk in pd.read_csv(f, chunksize=500_000, usecols=["store", "qty"]):
+        parts.append(chunk.groupby("store")["qty"].sum())
+totals = pd.concat(parts).groupby(level=0).sum()          # add up the per-chunk totals</code></pre></div>
+
+      <h3>An Excel workbook</h3>
+      <p>Excel needs <code>openpyxl</code> (<code>%pip install openpyxl</code>). Options such as <code>sheet_name</code>, <code>header</code> and <code>skiprows</code> go to <code>pandas.read_excel</code>.</p>
+      <div class="code"><pre><code class="lang-py">path = "s3://acme-ml-data/reports/q3.xlsx"
+
+ui.preview(path)                                           # sheet names and the first rows
+summary = s3.read_df(path, sheet_name="Summary", header=2)    # the header is on row 3, under a title
+sheets = s3.read_df(path, sheet_name=None)                 # every sheet: {"Summary": df, "Jul": df, "Aug": df, "Sep": df}
+
+months = pd.concat([df.assign(month=name) for name, df in sheets.items() if name != "Summary"],
+                   ignore_index=True)                      # sheets with the same columns, stacked into one table
+months.pivot_table(index="region", columns="month", values="revenue", aggfunc="sum", sort=False)</code></pre></div>
+      <p>pandas reads cell values. For formulas, comments, merged cells or formatting, download the file and open it with openpyxl:</p>
+      <div class="code"><pre><code class="lang-py">import openpyxl
+
+wb = openpyxl.load_workbook(s3.download(path, "/tmp/"))
+wb.sheetnames, wb["Summary"].merged_cells.ranges</code></pre></div>
+
+      <h3>Many files: a folder or a date range</h3>
+      <p>Use <code>find()</code> to pick the files (every <a href="#browse">filter</a> works), then load each one and stack them. Each match has <code>.uri</code>, <code>.key</code>, <code>.size</code> and <code>.last_modified</code>.</p>
+      <div class="code"><pre><code class="lang-py">files = s3.find("s3://acme-ml-data/raw/sales/", extensions="csv", modified_after="30d", limit=None)
+# or by name: s3.find("s3://acme-ml-data/raw/sales/", regex=r"dt=2025-09-\d\d/")
+sales = pd.concat([s3.read_df(f.uri).assign(source=f.key) for f in files], ignore_index=True)
+sales["dt"] = sales["source"].str.extract(r"dt=([\d-]+)/", expand=False)   # the date from the folder name</code></pre></div>
+      <p>With hundreds of small files, most of the time is spent waiting for S3. Load several at once:</p>
+      <div class="code"><pre><code class="lang-py">from concurrent.futures import ThreadPoolExecutor
+
+with ThreadPoolExecutor(max_workers=16) as pool:
+    frames = list(pool.map(lambda f: s3.read_df(f.uri).assign(source=f.key), files))
+sales = pd.concat(frames, ignore_index=True)</code></pre></div>
+
+      <h3>Turn it into your own tool</h3>
+      <p>Once an analysis works, put it in functions that take the analyzer and a path. The same code then runs on any day's file, in any notebook, and in a script or scheduled job with <code>S3Analyzer()</code> in place of <code>ui.core</code>.</p>
+      <div class="code"><pre><code class="lang-py">import pandas as pd
+from s3 import S3Analyzer
+
+def load_sales(s3: S3Analyzer, path: str) -> pd.DataFrame:
+    """A sales export, with a revenue column."""
+    sales = s3.read_df(path, parse_dates=["placed_at"])
+    return sales.assign(revenue=sales["qty"] * sales["unit_price"])
+
+def check_sales(sales: pd.DataFrame) -> list[str]:
+    """Problems to fix before the data is used; an empty list means it looks fine."""
+    problems = []
+    if sales["order_id"].duplicated().any():
+        problems.append(f"{sales['order_id'].duplicated().sum()} duplicate order ids")
+    if (sales["qty"] &lt;= 0).any():
+        problems.append(f"{(sales['qty'] &lt;= 0).sum()} rows with a quantity of 0 or less")
+    empty = [c for c in sales.columns if sales[c].isna().any()]
+    if empty:
+        problems.append("missing values in " + ", ".join(empty))
+    return problems
+
+s3 = ui.core                                       # in a script or a job: s3 = S3Analyzer()
+for f in s3.find("s3://acme-ml-data/raw/sales/", extensions="csv", modified_after="7d"):
+    print(f.key, check_sales(load_sales(s3, f.uri)) or "OK")
+
+report = load_sales(s3, "s3://acme-ml-data/raw/sales/dt=2025-09-01/sales.csv").groupby("store")["revenue"].sum()
+report.plot.bar()                                  # a chart in the notebook
+report.to_csv("revenue-by-store-2025-09-01.csv")   # a file next to the notebook</code></pre></div>
+      <p>The analyzer only reads. To save a result to S3, upload it with boto3, which needs <code>s3:PutObject</code> on the destination:</p>
+      <div class="code"><pre><code class="lang-py">import boto3
+
+boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data",
+                               "reports/daily/revenue-by-store-2025-09-01.csv")</code></pre></div>
 
       <!-- ============================================================ big -->
       <h2 id="big">Very large buckets</h2>
