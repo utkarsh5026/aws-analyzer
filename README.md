@@ -9,6 +9,7 @@ command, and ready-made IAM permissions.
 
 - **[S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)** (source: [`docs/s3.html`](docs/s3.html))
 - **[DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)** (source: [`docs/dynamodb.html`](docs/dynamodb.html))
+- **[Bedrock Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)** (source: [`docs/bedrock_kb.html`](docs/bedrock_kb.html))
 
 **One file per service, no dependencies on each other.** Drop `analyzers/<service>.py` into a
 notebook cell (or upload it next to the notebook and `import` it) and start analyzing.
@@ -17,13 +18,13 @@ Every file has the same two layers:
 
 | Layer | Class | What it does |
 |---|---|---|
-| Logic | `S3Analyzer`, `DynamoDBAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
-| UI | `S3View`, `DynamoDBView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| Logic | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
+| UI | `S3View`, `DynamoDBView`, `BedrockKBView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 | Service | File | Status |
 |---|---|---|
 | S3 | [`analyzers/s3.py`](analyzers/s3.py) | ✅ |
-| Bedrock Knowledge Bases | `analyzers/bedrock_kb.py` | planned |
+| Bedrock Knowledge Bases | [`analyzers/bedrock_kb.py`](analyzers/bedrock_kb.py) | ✅ |
 | DynamoDB | [`analyzers/dynamodb.py`](analyzers/dynamodb.py) | ✅ |
 
 ## S3 quick start
@@ -319,6 +320,169 @@ Reading an index needs the permission on its ARN too (`arn:aws:dynamodb:<region>
 and a table encrypted with a customer managed KMS key needs `kms:Decrypt`. Anything you can't read shows up as a
 note instead of an error.
 
+## Bedrock Knowledge Bases quick start
+
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker both are already
+installed.
+
+```python
+%pip install boto3               # every command (required)
+%pip install pandas              # optional: only for DataFrames (r.to_df(), a.to_df(), report.to_df())
+```
+
+Every `BedrockKBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
+Answers are generated through Bedrock itself (RetrieveAndGenerate or Converse), so no model SDK is needed and any
+Bedrock model you have access to works.
+
+```python
+ui = BedrockKBView()               # uses the notebook's execution role and region
+ui.help()                          # every command with a one-line description
+
+ui.kbs()                           # every knowledge base: status, store, embedding model, last sync, warnings
+ui.use("support-docs")             # later commands use this knowledge base (a name, ID or ARN)
+ui.kb_info()                       # settings in plain English, data sources, recent syncs, findings, idle cost
+ui.search("how do refunds work?")  # ranked passages with source, page and the question's words highlighted
+ui.chunk(2)                        # the full text and metadata of result #2
+ui.ask("How long do refunds take?")          # an answer with [1][2] citations and the sources behind them
+ui.follow_up("And for digital goods?")       # same conversation
+```
+
+Knowledge bases are regional: `BedrockKBView(BedrockKBAnalyzer(region="us-west-2"))` looks at another region.
+Commands take `kb=` (a name in any case, the 10-character ID, or the ARN); without it they use the one set by
+`use()` or `BedrockKBView(kb=...)`, else the only knowledge base in the region, else they list the ones there and
+say how to pick. Nothing in the file changes a knowledge base: where a sync is needed, it shows the
+`aws bedrock-agent start-ingestion-job ...` command and the boto3 call instead of running them.
+
+### What you can look at (`BedrockKBView`)
+
+| Command | Shows |
+|---|---|
+| `kbs()` | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings |
+| `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy), recent syncs, tags, and what to try next |
+| `syncs(kb=None, data_source=None, n=10)` | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again |
+| `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the failed ones first with their reason, and the sync command. `status="FAILED"` shows only those |
+| `unsynced(kb=None, data_source=None)` | S3 files added or changed since each data source's last successful sync, and the command to sync them |
+| `search(question, n=5, kb=, where=, search_type=, rerank=)` | Ranked passages: a score bar relative to the top result, file and page, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
+| `chunk(rank)` | The full text, metadata and IDs of result #rank from the last `search` or `ask`, and the `S3View().preview("s3://...")` call that opens its file |
+| `ask(question, kb=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens) |
+| `follow_up(question)` | The next question in the same RetrieveAndGenerate session (or Converse conversation). If the session has expired, starts a new one and says so |
+| `compare(question, kb=, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=)` | One row per passage and one column per setting with its rank there, how much each pair of settings overlaps, and what each found that the others missed |
+| `evaluate(cases, kb=, n=5, search_type=)` | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes |
+| `models(match=None)` | The text models you can use for `ask()` here: the ID to pass as `model=`, provider, on demand or through an inference profile, and $ per 1M tokens in and out |
+
+### Two ways to generate answers
+
+- **`engine="kb"` (default)** calls Bedrock's managed RetrieveAndGenerate: Bedrock retrieves, prompts the model and
+  returns the citations, and `follow_up()` keeps its session. It doesn't report token counts, so tokens and cost are
+  estimated from characters (and labelled as estimates). A custom `prompt=` must contain `$search_results$`.
+- **`engine="converse"`** retrieves, then calls the model through Bedrock Converse with the passages numbered as
+  sources: exact token counts and cost, any Bedrock model, and your own `prompt=` template with `{sources}` and
+  `{question}` (see `bedrock_kb.DEFAULT_PROMPT`). The sources are sent as data, never as instructions, and the model
+  is told to cite them as `[n]` and to say when they don't hold the answer.
+
+`model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`,
+`"claude-opus-5"`, `"nova-pro"`. The default is Claude Opus 5 (`bedrock_kb.DEFAULT_MODEL`), through the region's
+inference profile when it needs one; `BedrockKBAnalyzer(default_model="sonnet")` changes it.
+
+### Filters (`where=`)
+
+`where=` filters on the documents' own metadata, which comes from a `<file>.metadata.json` next to each file (for
+example `refund-policy.pdf.metadata.json` holding `{"metadataAttributes": {"team": "billing", "year": 2024}}`). It
+works on `search`, `ask`, `compare` and `evaluate`, uses the same vocabulary as the DynamoDB analyzer, and every
+condition must match:
+
+| `where=` | Means |
+|---|---|
+| `{"team": "billing"}` | `team = 'billing'` |
+| `{"team": ["billing", "support"]}` | one of these values |
+| `{"year": (">=", 2024)}` | also `"="`, `"!="`, `">"`, `"<"`, `"<="` |
+| `{"year": ("between", 2020, 2024)}` | both ends included |
+| `{"region": ("in", ["eu", "uk"])}` | also `("not_in", [...])` |
+| `{"doc_id": ("begins_with", "POL-")}` | text starting with this |
+| `{"title": ("contains", "refund")}` | text containing this, or a list with an element containing it |
+| `{"tags": ("list_contains", "gdpr")}` | a list attribute holding exactly this element |
+
+Values are typed: `2024` and `"2024"` differ. For OR, pass a Bedrock `RetrievalFilter` instead, e.g.
+`where={"orAll": [{"equals": {"key": "team", "value": "a"}}, {"equals": {"key": "team", "value": "b"}}]}`; it is
+sent unchanged.
+
+### Getting the data (`BedrockKBAnalyzer`)
+
+`ui.core` is the `BedrockKBAnalyzer`. Every UI command has a data method on it, and its methods take the knowledge
+base first:
+
+```python
+kb = ui.core                                        # or BedrockKBAnalyzer(region="us-west-2", profile="dev")
+
+info = kb.describe("support-docs")                  # KnowledgeBaseInfo: settings, data sources, last syncs, tags
+info.data_sources[0].chunking                       # the chunkingConfiguration AWS returned
+kb.list_knowledge_bases()                           # [KnowledgeBaseInfo], described in parallel
+kb.ingestion_jobs("support-docs", n=20)             # [IngestionJob], newest first, with failure reasons
+docs, summary = kb.documents("support-docs", status="FAILED")   # [KBDocument], DocumentSummary
+kb.unsynced("support-docs")                         # [SyncFreshness]: changed S3 files per data source
+
+r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
+r.passages[0].text, r.passages[0].source, r.passages[0].metadata
+df = r.to_df()                                      # one row per passage
+
+a = kb.ask("support-docs", "How long do refunds take?")          # Answer (RetrieveAndGenerate)
+a.text, a.citations, a.sources, a.grounded_share
+a = kb.generate("refund window?", r.passages, model="opus", prompt=MY_TEMPLATE)   # Converse on your passages
+a = kb.generate("refund window?", ["my own chunk", "another chunk"])             # ...or on plain strings
+a.input_tokens, a.output_tokens                     # exact, from Converse
+
+kb.compare("support-docs", "refund window for EU orders").overlap   # SearchComparison
+report = kb.evaluate("support-docs", [("refund window?", "refund-policy.pdf")])
+report.hit_rate, report.mrr, report.to_df()         # EvalReport
+kb.models("claude")                                 # [ModelInfo]: what to pass as model=, and its price
+```
+
+The analysis functions are pure (no AWS calls), so they also work on responses and passages you already have:
+`parse_knowledge_base`, `parse_data_source`, `parse_ingestion_job`, `parse_retrieve`, `parse_rag`, `parse_converse`,
+`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`, `build_prompt`
+(and `DEFAULT_PROMPT`), `parse_citation_markers`, `question_terms`, `best_snippet`, `retrieval_metrics`,
+`match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
+`vector_store_monthly_cost`, `query_cost`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
+`answer_findings`, `eval_findings`.
+
+### Cost and limits
+
+- Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25,
+  and every report says whether it used list prices or yours. `BEDROCK_PRICES` holds the OpenSearch Serverless
+  OCU-hour, its idle minimum, reranking per 1,000 queries and question embedding; `MODEL_PRICES` holds $ per 1M
+  input and output tokens by model family. Pass your own:
+  `BedrockKBAnalyzer(prices={"opensearch_min_ocus": 1}, model_prices={"my-model": (1.0, 5.0)})`.
+- The idle cost is only estimated for OpenSearch Serverless: a classic vector collection bills 2 OCUs
+  (about $350/month) even with no traffic. Collections that share a KMS key share those OCUs, dev-test collections
+  bill half, and NextGen collections scale to zero, so check your collection type. Other vector stores are billed by
+  their own service and show "not estimated".
+- `ask()` with the default engine estimates tokens from characters, since RetrieveAndGenerate doesn't return
+  them; `engine="converse"` shows exact counts. A model that isn't in `MODEL_PRICES` shows its cost as unknown.
+- `evaluate()` and `compare()` only retrieve, so they cost a question embedding per search (well under a cent),
+  plus reranking when you ask for it.
+- `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects by default; both say
+  when they stopped early (`.core.documents(..., limit=None)` reads everything).
+
+### IAM permissions (Bedrock Knowledge Bases)
+
+Read-only, per command:
+
+| Permission | Used by |
+|---|---|
+| `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase` | `kbs`, `kb_info`, and finding a knowledge base by name |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced` |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced` |
+| `bedrock:ListKnowledgeBaseDocuments` | `documents` |
+| `bedrock:ListTagsForResource` | `kb_info` |
+| `bedrock:Retrieve` | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")` |
+| `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up` |
+| `bedrock:InvokeModel` | `ask(engine="converse")`, `core.generate` |
+| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | `models`, and turning `model="sonnet"` into an ID |
+| `s3:ListBucket` on the data source's bucket | `unsynced` |
+
+A model also has to be enabled for the account under **Model access** in the Bedrock console. Anything you can't
+read shows up as a note instead of an error.
+
 ## Development
 
 ```bash
@@ -327,12 +491,15 @@ pytest
 ruff check .
 ```
 
-Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed.
+Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
+Bedrock, so the Bedrock Knowledge Bases tests use botocore's `Stubber` on real clients instead, which also checks
+every request against the service model.
 
 The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
 whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
-its own guide (`docs/s3.html`, `docs/dynamodb.html`); a new analyzer gets a new guide and a card on the home page.
-The screenshots are the tool's own output from a demo bucket and demo tables with synthetic data.
+its own guide (`docs/s3.html`, `docs/dynamodb.html`, `docs/bedrock_kb.html`); a new analyzer gets a new guide and a
+card on the home page. The screenshots are the tool's own output from a demo bucket and demo tables with synthetic
+data; the Bedrock guide has none yet, since they need a real demo knowledge base.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in

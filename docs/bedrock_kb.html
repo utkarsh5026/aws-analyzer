@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bedrock Knowledge Bases Analyzer Guide</title>
+<meta name="description" content="How to check, search and ask Amazon Bedrock Knowledge Bases from a SageMaker notebook with aws-analyzer's bedrock_kb.py, with examples.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfa; --surface: #ffffff; --surface-2: #f3f4f2; --text: #1c1f1e; --muted: #5d6562;
+  --border: #e2e5e3; --accent: #0f766e; --accent-soft: #e3f2ef; --code-bg: #f3f5f4; --code-text: #1f2a28;
+  --tok-comment: #6b7a76; --tok-string: #9a4d0d; --tok-keyword: #6d28d9; --tok-number: #0f6ea8;
+  --warn-bg: #fff7e6; --warn-border: #e6a23c; --shadow: 0 1px 2px rgba(20, 30, 28, .06), 0 4px 16px rgba(20, 30, 28, .05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+    --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+    --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+    --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+  --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+  --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+  --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+:not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; font-size: .88em; overflow-wrap: anywhere; }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; padding: 28px 16px 40px 24px; border-right: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; margin-bottom: 22px; }
+.brand svg { flex: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li a { display: block; padding: 5px 10px; margin: 1px 0; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.4; }
+nav.toc li a:hover { color: var(--text); background: var(--surface-2); }
+nav.toc li a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+nav.toc .repo { margin-top: 22px; font-size: 13px; padding: 0 10px; }
+details.mobile-toc { display: none; }
+
+main { padding: 40px 48px 96px; min-width: 0; }
+.content { max-width: 860px; }
+header.hero { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.eyebrow { color: var(--accent); font-weight: 650; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 6px; }
+h1 { font-size: 40px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 14px; }
+.lede { font-size: 19px; color: var(--muted); margin: 0 0 20px; max-width: 720px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pills li { font-size: 13px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+h2 { font-size: 27px; letter-spacing: -.01em; margin: 64px 0 10px; padding-top: 8px; }
+h3 { font-size: 19px; margin: 34px 0 8px; }
+h2 + p, h3 + p { margin-top: 4px; }
+p, ul, ol { margin: 12px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.code { position: relative; margin: 14px 0 18px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13.6px; line-height: 1.6; }
+.code .label { position: absolute; top: 0; left: 14px; transform: translateY(-50%); background: var(--bg); color: var(--muted); font-size: 11px; padding: 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+.copy { position: absolute; top: 8px; right: 8px; font: 12px/1 inherit; font-family: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.code:hover .copy, .copy:focus-visible { opacity: 1; }
+.copy.done { color: var(--accent); }
+@media (hover: none) { .copy { opacity: 1; } }
+.t-c { color: var(--tok-comment); font-style: italic; }
+.t-s { color: var(--tok-string); }
+.t-k { color: var(--tok-keyword); }
+.t-n { color: var(--tok-number); }
+
+figure { margin: 18px 0 26px; }
+figure .shot { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td code { white-space: nowrap; }
+/* Command reference: long signatures wrap between arguments, continuation lines indented under the name. */
+.table-wrap.ref td:first-child { width: 55%; padding-left: calc(13px + 1.5em); text-indent: -1.5em; }
+.table-wrap.ref td code { white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+
+.callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+.callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout p { margin: 4px 0; }
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps > li { counter-increment: step; position: relative; padding-left: 40px; margin: 18px 0; }
+.steps > li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+.card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+.card h4 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+details.faq { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 10px 0; }
+details.faq summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details.faq > div { padding: 0 16px 8px; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+
+@media (max-width: 960px) {
+  .layout { display: block; }
+  nav.toc { display: none; }
+  details.mobile-toc { display: block; margin: 0 0 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  details.mobile-toc summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+  details.mobile-toc ol { margin: 0; padding: 0 14px 12px 34px; }
+  main { padding: 24px 16px 72px; }
+  h1 { font-size: 31px; }
+  .lede { font-size: 17px; }
+  h2 { font-size: 23px; margin-top: 52px; }
+}
+@media (max-width: 600px) {
+  .table-wrap.ref thead { display: none; }
+  .table-wrap.ref tr, .table-wrap.ref td { display: block; }
+  .table-wrap.ref td:first-child { width: auto; border-bottom: none; padding-bottom: 0; }
+  .table-wrap.ref td + td { padding-top: 2px; color: var(--muted); }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <a class="brand" href="#top">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor" style="color:var(--accent)"/><path d="M9 11h14M9 16h10M9 21h14" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      Knowledge Bases guide
+    </a>
+    <ol id="toc-list">
+      <li><a href="#setup">Set up in SageMaker</a></li>
+      <li><a href="#tour">Five-minute tour</a></li>
+      <li><a href="#kbs">Your knowledge bases</a></li>
+      <li><a href="#syncs">Syncs and documents</a></li>
+      <li><a href="#search">Search</a></li>
+      <li><a href="#ask">Ask</a></li>
+      <li><a href="#filters">Filter by metadata</a></li>
+      <li><a href="#decide">Compare and evaluate</a></li>
+      <li><a href="#python">Use the data in Python</a></li>
+      <li><a href="#cost">Cost</a></li>
+      <li><a href="#permissions">Permissions</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li><a href="#reference">Command reference</a></li>
+    </ol>
+    <p class="repo"><a href="index.html">← All guides</a><br><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
+  </nav>
+
+  <main id="top">
+    <div class="content">
+      <details class="mobile-toc">
+        <summary>Contents</summary>
+        <ol>
+          <li><a href="#setup">Set up in SageMaker</a></li>
+          <li><a href="#tour">Five-minute tour</a></li>
+          <li><a href="#kbs">Your knowledge bases</a></li>
+          <li><a href="#syncs">Syncs and documents</a></li>
+          <li><a href="#search">Search</a></li>
+          <li><a href="#ask">Ask</a></li>
+          <li><a href="#filters">Filter by metadata</a></li>
+          <li><a href="#decide">Compare and evaluate</a></li>
+          <li><a href="#python">Use the data in Python</a></li>
+          <li><a href="#cost">Cost</a></li>
+          <li><a href="#permissions">Permissions</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#reference">Command reference</a></li>
+        </ol>
+      </details>
+
+      <header class="hero">
+        <p class="eyebrow">aws-analyzer · bedrock_kb.py</p>
+        <h1>Check, search and ask your Bedrock knowledge bases from a SageMaker notebook</h1>
+        <p class="lede">One Python file. Drop it next to your notebook to see whether your knowledge bases are healthy, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it.</p>
+        <ul class="pills">
+          <li>One file, boto3 only</li>
+          <li>Read-only: never starts a sync</li>
+          <li>Any Bedrock model</li>
+          <li>Plain text outside Jupyter</li>
+        </ul>
+      </header>
+
+      <p class="muted">Every example uses a knowledge base called <code>support-docs</code>: support policies (PDFs and Markdown files) in the S3 bucket <code>support-docs-bucket</code>, some with a <code>.metadata.json</code> file that tags them with a <code>team</code> and a <code>year</code>. Use your own names. The Bedrock guide has no screenshots yet; the sample output below is the tool's text mode.</p>
+
+      <!-- ============================================================ setup -->
+      <h2 id="setup">Set up in SageMaker</h2>
+      <ol class="steps">
+        <li>
+          <strong>Get <code>bedrock_kb.py</code> next to your notebook.</strong> Pick whichever works in your environment:
+          <ul>
+            <li><strong>Upload it.</strong> Download <a href="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_kb.py" download>bedrock_kb.py</a>, then drag it into JupyterLab's file browser, in the same folder as your notebook.</li>
+            <li><strong>Fetch it from a cell</strong>, if the notebook can reach the internet:
+              <div class="code"><pre><code class="lang-sh">!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_kb.py</code></pre></div>
+            </li>
+            <li><strong>Copy it from S3</strong>, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
+              <div class="code"><pre><code class="lang-sh">!aws s3 cp s3://acme-ml-data/tools/bedrock_kb.py .</code></pre></div>
+            </li>
+            <li>Or paste the whole file into a notebook cell and run it.</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Import it and create the view.</strong> It uses the notebook's IAM execution role and region, so there's nothing to configure.
+          <div class="code"><pre><code class="lang-py">from bedrock_kb import BedrockKBView
+
+ui = BedrockKBView()   # uses the notebook's IAM role and region
+ui.help()              # every command with a one-line description</code></pre></div>
+        </li>
+        <li>
+          <strong>Optional:</strong> another region or AWS profile, a default knowledge base, or plain-text output. Knowledge bases are regional, so if <code>kbs()</code> comes back empty, check the region first.
+          <div class="code"><pre><code class="lang-py">from bedrock_kb import BedrockKBAnalyzer, BedrockKBView
+
+ui = BedrockKBView(BedrockKBAnalyzer(region="us-west-2", profile="dev"))
+ui = BedrockKBView(kb="support-docs")    # commands use this knowledge base unless given another
+ui = BedrockKBView(mode="text")          # plain text, e.g. in a terminal or a script</code></pre></div>
+        </li>
+      </ol>
+      <div class="callout">
+        <p><strong>Only boto3 is required.</strong> Answers are generated through Bedrock itself, so no model SDK is needed and any model enabled in your account works. pandas (preinstalled on SageMaker) is used only when you ask for a DataFrame.</p>
+      </div>
+
+      <!-- ============================================================ tour -->
+      <h2 id="tour">Five-minute tour</h2>
+      <p>The commands you'll use most. Each one prints a report under the cell; none of them change anything.</p>
+      <div class="code"><pre><code class="lang-py">ui.kbs()                                     # every knowledge base: store, model, last sync, warnings
+ui.use("support-docs")                       # later commands use this one (a name, ID or ARN)
+ui.kb_info()                                 # its settings in plain English, data sources, syncs, findings
+ui.search("How long do refunds take?")       # the passages a question retrieves, best first
+ui.chunk(1)                                  # the full text and metadata of result #1
+ui.ask("How long do refunds take?")          # an answer with [1][2] citations
+ui.follow_up("And for digital goods?")       # the next question in the same conversation
+ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find the right file?</code></pre></div>
+      <p>Commands take <code>kb=</code>: a name in any case, the 10-character ID, or the ARN. Without it they use the one set by <code>use()</code>, else the only knowledge base in the region, else they list the ones there and say how to pick.</p>
+
+      <!-- ============================================================ kbs -->
+      <h2 id="kbs">Your knowledge bases</h2>
+
+      <h3>Every knowledge base at a glance</h3>
+      <p><code>kbs()</code> describes every knowledge base in the region, in parallel: status, type, vector store, embedding model, how many data sources it has, how many documents the last successful sync read, when the last sync ran and how it went, and the vector store's estimated idle cost. Below the table, the warnings for each one, such as a data source that has never been synced or a sync that failed.</p>
+      <div class="code"><pre><code class="lang-py">ui.kbs()</code></pre></div>
+
+      <h3>One knowledge base in detail</h3>
+      <p><code>kb_info()</code> puts the numbers that matter in cards (status, vector store, embedding model and its dimensions, data sources, last sync, idle cost), then the findings, each with what to do about it. The settings follow in plain English:</p>
+      <ul>
+        <li><strong>Vector store:</strong> for example “OpenSearch Serverless collection abc123, index kb-index”.</li>
+        <li><strong>Chunking:</strong> “Fixed size: 300 tokens per chunk, 20% overlap”, “Hierarchical: 1,500-token parents, 300-token children, 60-token overlap”, “Semantic: up to 300 tokens, split where the topic changes” or “None: each file is one chunk”.</li>
+        <li><strong>Parsing:</strong> the default parser reads the text only; a foundation model or Bedrock Data Automation also reads tables, charts and images.</li>
+        <li><strong>When deleted:</strong> whether a data source's chunks are removed with it (<code>DELETE</code>) or stay in the vector store and keep turning up in answers (<code>RETAIN</code>).</li>
+      </ul>
+      <div class="code"><pre><code class="lang-py">ui.kb_info("support-docs")
+ui.kb_info()                                 # the default knowledge base</code></pre></div>
+      <p>Findings cover a failed knowledge base, data sources that were never synced, the last sync failing or leaving documents unindexed, no metadata files (so <code>where=</code> filters match nothing), chunking that is off or has no overlap, the <code>RETAIN</code> deletion policy, and what an OpenSearch Serverless store costs while idle. A section the notebook's role can't read shows as <code>? (AccessDeniedException)</code> and a note; the rest of the report still renders.</p>
+
+      <!-- ============================================================ syncs -->
+      <h2 id="syncs">Syncs and documents</h2>
+      <p>A knowledge base only knows what its last sync indexed. Three commands show how far that is from the files you have. None of them starts a sync: where one is needed, they show the command to run and the boto3 call to copy.</p>
+      <div class="code"><pre><code class="lang-py">ui.syncs()                                   # sync history: counts, how long, why it failed
+ui.syncs(data_source="docs-s3", n=30)        # one data source, further back
+ui.documents(status="FAILED")                # documents that failed to index, with the reason
+ui.unsynced()                                # S3 files added or changed since the last sync</code></pre></div>
+      <ul>
+        <li><code>syncs()</code> lists each sync with when it started, how long it took, its status, and how many documents it scanned, added, re-indexed, removed and failed on, with the reason a sync failed. Findings group repeated failures and their reasons: when the last three syncs failed the same way, syncing again won't help until the cause is fixed.</li>
+        <li><code>documents()</code> counts documents by status (indexed, failed, pending ...) and lists the failed ones first with Bedrock's reason, such as an encrypted PDF or a file that's too large. Bedrock keeps document status for S3 and custom data sources only; for the others, <code>syncs()</code> has the failed counts.</li>
+        <li><code>unsynced()</code> lists the S3 bucket (and the data source's inclusion prefixes) and compares each file's modification time with the start of the last successful sync. Metadata files are counted apart: a changed <code>.metadata.json</code> needs a sync too, before filters see the new values.</li>
+      </ul>
+      <div class="code"><span class="label">What a sync looks like</span><pre><code class="lang-sh">aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456 --region us-east-1</code></pre></div>
+
+      <!-- ============================================================ search -->
+      <h2 id="search">Search</h2>
+      <p><code>search()</code> runs Bedrock's Retrieve for a question and shows the passages it returns, best first: a score bar relative to the top result, the file and page, the part of the passage with the most of the question's words (highlighted in Jupyter), and the passage's own metadata.</p>
+      <div class="code"><pre><code class="lang-py">ui.search("How long do refunds take?")
+ui.search("How long do refunds take?", n=10)              # up to 100 passages
+ui.search("error E1234", search_type="HYBRID")            # meaning and keywords, where the store supports it
+ui.search("refund window", rerank=True)                   # re-order with a reranking model (Cohere Rerank 3.5)
+ui.chunk(2)                                               # result #2 in full, with its metadata and IDs</code></pre></div>
+      <div class="code"><span class="label">Output (text mode)</span><pre><code>Search support-docs: How long do refunds take?
+==============================================
+3 of up to 5 passages · Bedrock&#x27;s default search · cost at us-east-1 list prices
+Passages: 3   Top score: 0.71   Files: 3   Time: 0.0s   Est. cost: &lt;$0.01 (question embedding)
+[i] Scores are relative: compare them with each other, not against a fixed cutoff. They depend on the vector store and the embedding model.
+
+[1] refund-policy.pdf p.3 (score 0.71)
+    team=billing · year=2024
+    Refunds are issued within 5-7 business days of receiving the returned item. The refund goes back
+    to the original payment method.
+
+[2] eu-returns.pdf (score 0.52)
+    Customers in the EU can return any order within 14 days of delivery, no reason needed.
+
+[3] digital-goods.pdf p.2 (score 0.44)
+    Digital goods, such as e-books and software licences, can&#x27;t be refunded once they have been
+    downloaded. Contact support if a download failed.
+[i] chunk(1) shows the full text and metadata of result #1; ask(question) answers the question from passages like these, with citations.</code></pre></div>
+      <p class="muted">From canned responses in the test suite, so the time shows 0.0s; a real search takes about a second.</p>
+      <p>Scores are relative: compare them with each other, not against a fixed cutoff, since they depend on the vector store and the embedding model. The findings say what to try next:</p>
+      <ul>
+        <li><strong>Nothing came back:</strong> check the filter, whether the data sources are synced, or try a larger <code>n=</code>.</li>
+        <li><strong>A code in the question is in no passage</strong> (an error code, a SKU): semantic search matches meaning, not exact strings; try <code>search_type="HYBRID"</code>.</li>
+        <li><strong>Every passage comes from one file</strong>, <strong>passages repeat each other word for word</strong> (duplicate files), or <strong>most passages are very short</strong> (chunking too small).</li>
+      </ul>
+      <p><code>chunk(n)</code> shows result <em>n</em> of the last search (or source <em>n</em> of the last answer) in full, with its metadata, chunk ID and data source, and the <code>S3View().preview("s3://…")</code> call that opens the whole file with <a href="s3.html">s3.py</a>.</p>
+
+      <!-- ============================================================ ask -->
+      <h2 id="ask">Ask</h2>
+      <p><code>ask()</code> answers a question from the knowledge base and shows the answer with <code>[1][2]</code> markers after each claim, linked to the sources below it. The cards say how much of the answer the citations cover (“grounded”), how many sources it used, the model, tokens, cost and time.</p>
+      <div class="code"><pre><code class="lang-py">ui.ask("How long do refunds take?")
+ui.follow_up("And for digital goods?")                     # same session
+ui.ask("How long do refunds take?", model="sonnet", n=10)
+ui.ask("How long do refunds take?", engine="converse")     # exact tokens and cost
+ui.chunk(1)                                                # source [1] in full</code></pre></div>
+      <div class="code"><span class="label">Output (text mode)</span><pre><code>Ask support-docs: How long do refunds take?
+===========================================
+Bedrock RetrieveAndGenerate · 3 sources · cost at us-east-1 list prices
+Grounded: 100%   Sources used: 3   Model: claude-opus-5 (KB engine)   Tokens: ~132 (estimate)
+Cost: &lt;$0.01   Time: 0.0s
+Refunds are issued within 5-7 business days of receiving the returned item [1]. EU orders can be
+returned within 14 days of delivery [2]. Digital goods can&#x27;t be refunded once downloaded [3].
+
+-- Sources --
+#  File               Page  Passage
+-  -----------------  ----  ------------------------------------------------------------------------------------------
+1  refund-policy.pdf     3  &quot;Refunds are issued within 5-7 business days of receiving the returned item. The refund…&quot;
+2  eu-returns.pdf     -     &quot;Customers in the EU can return any order within 14 days of delivery, no reason needed.&quot;
+3  digital-goods.pdf     2  &quot;…such as e-books and software licences, can&#x27;t be refunded once they have been downloaded…
+[i] Estimated from characters: RetrieveAndGenerate doesn&#x27;t return token counts. engine=&quot;converse&quot; gives exact ones.
+[i] chunk(n) shows source #n in full; follow_up(&#x27;...&#x27;) asks a follow-up question.</code></pre></div>
+      <p class="muted">From canned responses in the test suite; in Jupyter the cited spans are shaded and the markers are superscripts.</p>
+
+      <h3>Two ways to generate</h3>
+      <div class="grid2">
+        <div class="card"><h4><code>engine="kb"</code> (default)</h4><p>Bedrock's managed RetrieveAndGenerate: it retrieves, prompts the model and returns the citations, and <code>follow_up()</code> keeps its session. It doesn't report tokens, so tokens and cost are estimated from characters. A custom <code>prompt=</code> must contain <code>$search_results$</code>.</p></div>
+        <div class="card"><h4><code>engine="converse"</code></h4><p>Retrieve, then the model through Bedrock Converse: exact token counts and cost, any model, and your own <code>prompt=</code> with <code>{sources}</code> and <code>{question}</code>. The passages go in as numbered sources the model must cite as <code>[n]</code>.</p></div>
+      </div>
+      <p>With <code>engine="converse"</code>, the sources are sent as data, never as instructions (a document that says “ignore your instructions” is just text), and the model is told to say plainly when they don't hold the answer. <code>bedrock_kb.DEFAULT_PROMPT</code> is the template it uses; copy it to write your own.</p>
+      <div class="code"><pre><code class="lang-py">import bedrock_kb
+print(bedrock_kb.DEFAULT_PROMPT)
+
+MY_PROMPT = """Sources:
+{sources}
+
+Answer in two sentences for a customer, citing sources as [n]: {question}"""
+ui.ask("How long do refunds take?", engine="converse", prompt=MY_PROMPT)</code></pre></div>
+
+      <h3>Choosing a model</h3>
+      <p><code>model=</code> takes a model ID or ARN, an inference profile ID, or a short name: <code>"opus"</code>, <code>"sonnet"</code>, <code>"haiku"</code>, <code>"claude-opus-5"</code>, <code>"nova-pro"</code>. The default is Claude Opus 5, called through the region's inference profile when it can't be called on demand. <code>models()</code> lists the text models you can use in the region, the ID to pass, how each is called and its price per million tokens.</p>
+      <div class="code"><pre><code class="lang-py">ui.models()
+ui.models("claude")
+ui = BedrockKBView(BedrockKBAnalyzer(default_model="sonnet"))   # a different default</code></pre></div>
+      <p>The answer's findings flag an answer that cites nothing (it may be the model's own knowledge), one where less than half is backed by a citation, Bedrock's default “unable to assist” reply (the passages didn't hold the answer: run <code>search()</code> on the question), a guardrail stepping in, and an answer cut off at <code>max_tokens</code>.</p>
+
+      <!-- ============================================================ filters -->
+      <h2 id="filters">Filter by metadata</h2>
+      <p><code>where=</code> filters on the documents' own metadata, which comes from a <code>&lt;file&gt;.metadata.json</code> next to each file in S3, then a sync. It works on <code>search</code>, <code>ask</code>, <code>compare</code> and <code>evaluate</code>, and every condition must match:</p>
+      <div class="code"><span class="label">refund-policy.pdf.metadata.json</span><pre><code class="lang-json">{"metadataAttributes": {"team": "billing", "year": 2024}}</code></pre></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th><code>where=</code></th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td><code>{"team": "billing"}</code></td><td><code>team</code> equals <code>"billing"</code></td></tr>
+          <tr><td><code>{"team": ["billing", "support"]}</code></td><td>Any of these values</td></tr>
+          <tr><td><code>{"year": ("&gt;=", 2024)}</code></td><td>Also <code>"="</code>, <code>"!="</code>, <code>"&gt;"</code>, <code>"&lt;"</code> and <code>"&lt;="</code></td></tr>
+          <tr><td><code>{"year": ("between", 2020, 2024)}</code></td><td>Both ends included</td></tr>
+          <tr><td><code>{"region": ("in", ["eu", "uk"])}</code></td><td>Also <code>("not_in", [...])</code></td></tr>
+          <tr><td><code>{"doc_id": ("begins_with", "POL-")}</code></td><td>Text starting with this</td></tr>
+          <tr><td><code>{"title": ("contains", "refund")}</code></td><td>Text containing this, or a list with an element containing it</td></tr>
+          <tr><td><code>{"tags": ("list_contains", "gdpr")}</code></td><td>A list attribute holding exactly this element</td></tr>
+        </tbody>
+      </table></div>
+      <p>Values are typed: <code>2024</code> and <code>"2024"</code> are different. It's the same vocabulary as the DynamoDB analyzer's filters. For <code>OR</code>, pass a Bedrock <code>RetrievalFilter</code> instead, and it's sent unchanged:</p>
+      <div class="code"><pre><code class="lang-py">ui.search("error E1234", where={"team": "billing", "year": ("&gt;=", 2024)})
+ui.search("refund window", where={"orAll": [{"equals": {"key": "team", "value": "billing"}},
+                                            {"equals": {"key": "team", "value": "support"}}]})</code></pre></div>
+
+      <!-- ============================================================ decide -->
+      <h2 id="decide">Compare and evaluate</h2>
+      <h3>Which search settings suit a question</h3>
+      <p><code>compare()</code> runs the same question with each search type and each <code>n</code> (one Retrieve each), and shows one row per passage with its rank under every setting, or “-” where a setting missed it. The cards say how much each pair of settings overlaps, and the findings say what changed, for example “HYBRID found 2 passages SEMANTIC missed at n=5, including its top result”. A setting the vector store doesn't support becomes a note.</p>
+      <div class="code"><pre><code class="lang-py">ui.compare("refund window for EU orders")                       # SEMANTIC and HYBRID, n=5 and n=10
+ui.compare("error E1234", n=10, search_types=("SEMANTIC", "HYBRID"))</code></pre></div>
+
+      <h3>How often retrieval finds the right file</h3>
+      <p><code>evaluate()</code> takes test questions with the source each one should find (part of its file name, URI or text) and reports the hit rate (the share of questions whose source came up in the top <code>n</code>) and the MRR (mean reciprocal rank: 1.00 means always first, 0.50 second on average). Each question shows where its source ranked, or “missed”, and what came up first instead. It only retrieves, so it costs a question embedding per question.</p>
+      <div class="code"><pre><code class="lang-py">cases = [
+    ("How long do refunds take?", "refund-policy.pdf"),
+    ("How do I reset my password?", "account-faq"),
+    ("Can EU customers return an order?", "eu-returns.pdf"),
+]
+ui.evaluate(cases)
+ui.evaluate(cases, n=10, search_type="HYBRID")          # did that help?
+ui.evaluate(df)                                        # or a DataFrame with question and expected columns</code></pre></div>
+      <p>Findings list the questions that missed, a file that keeps coming up first instead, and the usual fixes: <code>search_type="HYBRID"</code> for codes and names, a larger <code>n=</code>, smaller chunks (a new data source), or <code>where=</code> filters.</p>
+
+      <!-- ============================================================ python -->
+      <h2 id="python">Use the data in Python</h2>
+      <p>Every report has a data version on <code>ui.core</code> (a <code>BedrockKBAnalyzer</code>) that returns dataclasses and DataFrames instead of printing. Its methods take the knowledge base first.</p>
+      <div class="code"><pre><code class="lang-py">kb = ui.core
+
+info = kb.describe("support-docs")                # KnowledgeBaseInfo: settings, data sources, last syncs, tags
+info.data_sources[0].chunking                     # chunkingConfiguration, as AWS returns it
+kb.ingestion_jobs("support-docs", n=20)           # [IngestionJob], newest first, with failure reasons
+docs, summary = kb.documents("support-docs", status="FAILED")
+
+r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
+r.passages[0].text, r.passages[0].source, r.passages[0].metadata
+df = r.to_df()                                    # one row per passage
+
+a = kb.ask("support-docs", "How long do refunds take?")   # Answer
+a.text, a.citations, a.sources, a.grounded_share
+
+# Generate from your own passages, with your own prompt, on any model (Converse, exact tokens)
+a = kb.generate("refund window?", r.passages, model="opus", prompt=MY_PROMPT)
+a = kb.generate("refund window?", ["a chunk of text", "another chunk"])
+a.input_tokens, a.output_tokens
+
+report = kb.evaluate("support-docs", cases)       # EvalReport
+report.hit_rate, report.mrr, report.to_df()</code></pre></div>
+      <p>The analysis functions don't call AWS, so they work on responses and passages you already have: <code>parse_retrieve</code>, <code>parse_rag</code>, <code>parse_converse</code>, <code>parse_knowledge_base</code>, <code>parse_data_source</code>, <code>describe_chunking</code>, <code>describe_parsing</code>, <code>describe_vector_store</code>, <code>build_filter</code>, <code>build_prompt</code>, <code>parse_citation_markers</code>, <code>best_snippet</code>, <code>question_terms</code>, <code>retrieval_metrics</code>, <code>match_expected</code>, <code>compare_retrievals</code>, <code>changed_since</code>, <code>generation_cost</code>, <code>vector_store_monthly_cost</code>, <code>query_cost</code>, and the findings (<code>kb_findings</code>, <code>sync_findings</code>, <code>retrieval_findings</code>, <code>answer_findings</code>, <code>eval_findings</code>).</p>
+
+      <!-- ============================================================ cost -->
+      <h2 id="cost">Cost</h2>
+      <div class="grid2">
+        <div class="card"><h4>The idle vector store</h4><p>A classic OpenSearch Serverless vector collection bills at least 2 OCUs around the clock, about $350/month at us-east-1 list prices, even with no searches. Collections sharing a KMS key share those OCUs; dev-test collections bill half, and NextGen collections scale to zero.</p></div>
+        <div class="card"><h4>Answers</h4><p>Priced per million input and output tokens by model (<code>MODEL_PRICES</code>). With the default engine the tokens are an estimate; <code>engine="converse"</code> reports exact counts. A model not in the table shows its cost as unknown.</p></div>
+        <div class="card"><h4>Searches</h4><p>A search embeds the question (a fraction of a cent) and, with <code>rerank=</code>, pays for reranking (about $2 per 1,000 searches for Cohere Rerank 3.5). <code>compare</code> and <code>evaluate</code> only search.</p></div>
+        <div class="card"><h4>Listing stops early</h4><p><code>documents()</code> reads at most 10,000 documents and <code>unsynced()</code> lists at most 100,000 objects, and they say when they stopped.</p></div>
+      </div>
+      <p>Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25 (<code>BEDROCK_PRICES</code> and <code>MODEL_PRICES</code>), and every report says whether it used list prices or yours. For another region or a negotiated price, pass your own:</p>
+      <div class="code"><pre><code class="lang-py">ui = BedrockKBView(BedrockKBAnalyzer(
+    prices={"opensearch_ocu_hour": 0.26, "opensearch_min_ocus": 1},
+    model_prices={"claude-sonnet-5": (2.00, 10.00)},    # $ per 1M input and output tokens
+))</code></pre></div>
+
+      <!-- ============================================================ permissions -->
+      <h2 id="permissions">Permissions</h2>
+      <p>Everything is read-only. Anything the notebook's role can't read shows up as a note (or a <code>?</code> on a card) instead of an error, so you can start with less and add what you need. This policy covers every command:</p>
+      <div class="code"><span class="label">IAM policy</span><pre><code class="lang-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadKnowledgeBases",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListKnowledgeBases", "bedrock:GetKnowledgeBase", "bedrock:ListDataSources",
+        "bedrock:GetDataSource", "bedrock:ListIngestionJobs", "bedrock:GetIngestionJob",
+        "bedrock:ListKnowledgeBaseDocuments", "bedrock:ListTagsForResource",
+        "bedrock:Retrieve", "bedrock:RetrieveAndGenerate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:ListFoundationModels", "bedrock:ListInferenceProfiles"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GenerateAnswers",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": ["arn:aws:bedrock:*::foundation-model/*", "arn:aws:bedrock:*:*:inference-profile/*"]
+    },
+    {
+      "Sid": "ListSourceBuckets",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::support-docs-bucket"
+    }
+  ]
+}</code></pre></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Permission</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>bedrock:ListKnowledgeBases</code>, <code>bedrock:GetKnowledgeBase</code></td><td><code>kbs</code>, <code>kb_info</code>, and finding a knowledge base by name</td></tr>
+          <tr><td><code>bedrock:ListDataSources</code>, <code>bedrock:GetDataSource</code></td><td><code>kb_info</code>, <code>syncs</code>, <code>documents</code>, <code>unsynced</code></td></tr>
+          <tr><td><code>bedrock:ListIngestionJobs</code>, <code>bedrock:GetIngestionJob</code></td><td><code>kbs</code>, <code>kb_info</code>, <code>syncs</code>, <code>unsynced</code></td></tr>
+          <tr><td><code>bedrock:ListKnowledgeBaseDocuments</code></td><td><code>documents</code></td></tr>
+          <tr><td><code>bedrock:ListTagsForResource</code></td><td><code>kb_info</code></td></tr>
+          <tr><td><code>bedrock:Retrieve</code></td><td><code>search</code>, <code>compare</code>, <code>evaluate</code>, <code>ask(engine="converse")</code></td></tr>
+          <tr><td><code>bedrock:RetrieveAndGenerate</code> and <code>bedrock:InvokeModel</code></td><td><code>ask</code>, <code>follow_up</code></td></tr>
+          <tr><td><code>bedrock:InvokeModel</code></td><td><code>ask(engine="converse")</code>, <code>core.generate</code></td></tr>
+          <tr><td><code>bedrock:ListFoundationModels</code>, <code>bedrock:ListInferenceProfiles</code></td><td><code>models</code>, and turning <code>model="sonnet"</code> into an ID</td></tr>
+          <tr><td><code>s3:ListBucket</code> on the data source's bucket</td><td><code>unsynced</code></td></tr>
+        </tbody>
+      </table></div>
+      <p>A model also has to be enabled for the account under <strong>Model access</strong> in the Bedrock console. To scope the policy down, replace <code>*</code> in the first statement with your knowledge bases' ARNs (<code>ListKnowledgeBases</code> itself needs <code>*</code>).</p>
+
+      <!-- ============================================================ troubleshooting -->
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <details class="faq"><summary>“No knowledge base 'x' in us-east-1”, or “knowledge base not found”</summary><div>
+        <p>Knowledge bases are regional: the notebook's region may not be the knowledge base's. Use <code>BedrockKBView(BedrockKBAnalyzer(region="us-west-2"))</code>. The note lists the names it did find; names match in any case.</p>
+      </div></details>
+      <details class="faq"><summary>“Which knowledge base? There are 3 in us-east-1 …”</summary><div>
+        <p>There's more than one and no default. Pass <code>kb="support-docs"</code> to the command, or set it once with <code>ui.use("support-docs")</code>.</p>
+      </div></details>
+      <details class="faq"><summary>“AccessDeniedException: You don't have access to the model …”</summary><div>
+        <p>The model isn't enabled for the account. Enable it in the Bedrock console under Model access, or pick another from <code>ui.models()</code>. If the message says “not authorized to perform: bedrock:InvokeModel”, the notebook's role needs that permission instead (see <a href="#permissions">Permissions</a>).</p>
+      </div></details>
+      <details class="faq"><summary>“This model needs an inference profile”</summary><div>
+        <p>Some models can only be called through a cross-region inference profile. The note names the one to pass, such as <code>model="us.anthropic.claude-opus-5"</code>; <code>ui.models()</code> shows it for every model.</p>
+      </div></details>
+      <details class="faq"><summary>“This vector store only supports SEMANTIC search”</summary><div>
+        <p>Hybrid search (meaning and keywords) needs a store that keeps the text searchable, such as OpenSearch, Aurora PostgreSQL or MongoDB Atlas. Drop <code>search_type="HYBRID"</code>.</p>
+      </div></details>
+      <details class="faq"><summary>A search returns nothing</summary><div>
+        <p>Check <code>ui.syncs()</code> (was the data source ever synced?) and <code>ui.documents()</code> (did the files index?). With <code>where=</code>, remember that metadata values are typed and that filtering needs a <code>.metadata.json</code> file next to each file, followed by a sync.</p>
+      </div></details>
+      <details class="faq"><summary>The answer is “Sorry, I am unable to assist you with this request.”</summary><div>
+        <p>That's RetrieveAndGenerate's reply when the passages it retrieved don't answer the question. Run <code>ui.search()</code> on the same question to see what came back, then try a larger <code>n=</code>, <code>search_type="HYBRID"</code>, or a different wording.</p>
+      </div></details>
+      <details class="faq"><summary>Tokens and cost say “estimate”</summary><div>
+        <p>RetrieveAndGenerate doesn't report token counts, so they're estimated from characters. <code>engine="converse"</code> reports exact counts.</p>
+      </div></details>
+      <details class="faq"><summary>A follow-up says the session expired</summary><div>
+        <p>Bedrock ends RetrieveAndGenerate sessions after a while. The tool starts a new one and says so; that answer doesn't know the earlier questions, so ask the full question again if it needs them.</p>
+      </div></details>
+      <details class="faq"><summary>The report lost its formatting after I reopened the notebook</summary><div>
+        <p>JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.</p>
+      </div></details>
+
+      <!-- ============================================================ reference -->
+      <h2 id="reference">Command reference</h2>
+      <p>Every <code>BedrockKBView</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <div class="table-wrap ref"><table>
+        <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td><code>use(kb)</code></td><td>Sets the knowledge base later commands use</td></tr>
+          <tr><td><code>kbs()</code></td><td>Every knowledge base in the region: status, type, vector store, embedding model, sources, documents, last sync, idle cost, warnings</td></tr>
+          <tr><td><code>kb_info(kb=None)</code></td><td>Settings in plain English, data sources, recent syncs, findings, cost and tags</td></tr>
+          <tr><td><code>syncs(kb=None, data_source=None, n=10)</code></td><td>Sync history with counts and why syncs failed, and the command to sync again</td></tr>
+          <tr><td><code>documents(kb=None, data_source=None, status=None, n=50)</code></td><td>Documents by status, failed ones first with the reason</td></tr>
+          <tr><td><code>unsynced(kb=None, data_source=None)</code></td><td>S3 files added or changed since the last successful sync</td></tr>
+          <tr><td><code>search(question, n=5, kb=None, where=None, search_type=None, rerank=None)</code></td><td>Ranked passages with scores, source and page, highlighted words, metadata and findings</td></tr>
+          <tr><td><code>chunk(rank=1)</code></td><td>The full text and metadata of a result from the last search or ask</td></tr>
+          <tr><td><code>ask(question, kb=None, n=5, where=None, search_type=None, model=None, engine="kb", prompt=None, temperature=None, max_tokens=None)</code></td><td>The answer with [1][2] citations, grounded share, sources, model, tokens, cost and findings</td></tr>
+          <tr><td><code>follow_up(question)</code></td><td>The next question in the same session or conversation</td></tr>
+          <tr><td><code>compare(question, kb=None, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=None)</code></td><td>Each passage's rank under each search setting, overlap and findings</td></tr>
+          <tr><td><code>evaluate(cases, kb=None, n=5, search_type=None, where=None)</code></td><td>Retrieval hit rate and MRR on test questions</td></tr>
+          <tr><td><code>models(match=None)</code></td><td>Models for <code>ask()</code>: the ID to pass, how it's called, and its price</td></tr>
+          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+        </tbody>
+      </table></div>
+
+      <footer>
+        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. Guides for other AWS services are on the <a href="index.html">home page</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+// Syntax colouring for the examples: comments, strings, numbers and keywords.
+(function () {
+  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+  var rules = {
+    py: /(#[^\n]*)|([rbf]?"(?:[^"\\\n]|\\.)*"|[rbf]?'(?:[^'\\\n]|\\.)*')|\b(\d[\d_]*(?:\.\d+)?)\b|\b(from|import|as|for|in|with|if|not|and|or|print|True|False|None)\b/g,
+    sh: /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'[^'\n]*')|()()/g,
+    json: /()("(?:[^"\\\n]|\\.)*")|\b(\d+)\b|\b(true|false|null)\b/g
+  };
+  document.querySelectorAll("pre code").forEach(function (el) {
+    var lang = (el.className.match(/lang-(\w+)/) || [])[1], re = rules[lang];
+    if (!re) return;
+    var src = el.textContent, out = "", last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(src))) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out += esc(src.slice(last, m.index));
+      var cls = m[1] ? "t-c" : m[2] ? "t-s" : m[3] ? "t-n" : "t-k";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy buttons.
+  document.querySelectorAll(".code").forEach(function (box) {
+    var button = document.createElement("button");
+    button.className = "copy"; button.type = "button"; button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("click", function () {
+      var text = box.querySelector("code").textContent;
+      var done = function () {
+        button.textContent = "Copied"; button.classList.add("done");
+        setTimeout(function () { button.textContent = "Copy"; button.classList.remove("done"); }, 1500);
+      };
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done, function () {}); }
+      else {
+        var area = document.createElement("textarea"); area.value = text; document.body.appendChild(area);
+        area.select(); try { document.execCommand("copy"); done(); } catch (e) {} area.remove();
+      }
+    });
+    box.appendChild(button);
+  });
+
+  // Highlight the section being read in the sidebar.
+  var links = {};
+  document.querySelectorAll("#toc-list a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var visible = {};
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting ? e.boundingClientRect.top : undefined; });
+    var ids = Object.keys(links).filter(function (id) { return visible[id] !== undefined; });
+    if (!ids.length) return;
+    Object.keys(links).forEach(function (id) { links[id].classList.remove("active"); });
+    links[ids[0]].classList.add("active");
+  }, { rootMargin: "0px 0px -60% 0px" });
+  Object.keys(links).forEach(function (id) {
+    var section = document.getElementById(id);
+    if (section) observer.observe(section);
+  });
+})();
+</script>
+</body>
+</html>
