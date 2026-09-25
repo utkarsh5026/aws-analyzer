@@ -215,7 +215,8 @@ ui.help()             # every command with a one-line description</code></pre></
 
 ui = DynamoDBView(DynamoDBAnalyzer(region="eu-west-1", profile="dev"))
 ui = DynamoDBView(mode="text")          # plain text, e.g. in a terminal or a script
-ui = DynamoDBView(max_columns=0)        # show every attribute side by side (default: 30)</code></pre></div>
+ui = DynamoDBView(max_columns=0)        # show every attribute side by side (default: 30)
+ui = DynamoDBView(progress="plain")     # a plain progress line on long scans instead of tqdm bars ("off": none)</code></pre></div>
         </li>
       </ol>
       <div class="callout">

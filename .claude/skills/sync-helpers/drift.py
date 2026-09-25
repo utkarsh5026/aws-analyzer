@@ -30,7 +30,8 @@ ANALYZERS = ROOT / "analyzers"
 
 # The helpers CLAUDE.md lists as deliberately duplicated. Every analyzer should have all of them.
 EXPECTED = ["human_size", "human_money", "_require", "_in_notebook", "_esc", "_Title", "_Cards", "_Table", "_Note",
-            "_Text", "_render_html", "_render_text", "_friendly_errors", "View._progress", "View.help", "View._show"]
+            "_Text", "_render_html", "_render_text", "_friendly_errors", "View._progress", "_progress_bar_class",
+            "_progress_bar", "_progress_text", "_duration", "View.help", "View._show"]
 
 
 def _definitions(path: Path) -> tuple[dict[str, tuple[int, str]], dict[str, str]]:

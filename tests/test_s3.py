@@ -1,9 +1,12 @@
 import gzip
+import hashlib
 import importlib
 import io
+import itertools
 import json
 import pickle
 import tarfile
+import types
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 
@@ -17,6 +20,7 @@ import pyarrow.orc as orc
 import pyarrow.parquet as pq
 import pypdf
 import pytest
+from botocore.exceptions import ClientError
 from moto import mock_aws
 
 import s3 as s3mod
@@ -29,15 +33,21 @@ from s3 import (
     ObjectInfo,
     S3Analyzer,
     S3View,
+    Stat,
+    ZipPlan,
     build_folder_tree,
     bucket_findings,
     cloudwatch_cost,
     compare_objects,
     detect_format,
+    duplicate_findings,
+    duplicate_folders,
     explain_policy,
     file_extension,
+    files_to_hash,
     find_duplicate_groups,
     folder_of,
+    group_duplicates,
     human_money,
     human_size,
     make_filter,
@@ -56,6 +66,8 @@ from s3 import (
     storage_type_class,
     summarize_objects,
     summary_findings,
+    zip_checks,
+    zip_findings,
 )
 
 NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -238,6 +250,141 @@ def test_find_duplicate_groups():
     groups = find_duplicate_groups(objects)
     assert [[o.key for o in g] for g in groups] == [["d", "e", "f"], ["a", "b"]]  # zero-byte skipped
     assert find_duplicate_groups(objects, min_size="100") == [groups[0]]
+
+
+def test_files_to_hash():
+    objects = [obj("a/1", 10, etag="x"), obj("a/2", 10, etag="x"), obj("b/1", 10, etag="y"),  # 2 ETags: read one each
+               obj("c/1", 99, etag="z"), obj("c/2", 99, etag="z"),  # one ETag: already known to match
+               obj("d/1", 7, etag="p"), obj("g/1", 7, storage_class="GLACIER", etag="q"), obj("g/2", 7, etag="q"),
+               obj("u", 5, etag="u")]  # no other file of this size
+    plan = files_to_hash(objects)
+    assert [[o.key for o in files] for files in plan] == [["a/1", "b/1"], ["d/1", "g/2"]]  # the readable one
+    assert sorted(len(files) for files in files_to_hash(objects, method="strict")) == [2, 3, 3]
+    assert files_to_hash(objects, method="etag") == []
+    assert files_to_hash(objects, min_size="8B") == plan[:1]
+    with pytest.raises(ValueError, match="method must be"):
+        files_to_hash(objects, method="md5")
+
+
+def test_group_duplicates_merges_etags_by_content_hash():
+    objects = [obj("raw/a.csv", 100, days_old=5, etag="e1"), obj("raw/b.csv", 100, days_old=1, etag="e1"),
+               obj("copy/a.csv", 100, days_old=9, etag="e2-2"),  # uploaded in parts: another ETag
+               obj("raw/c.csv", 100, etag="e3"), obj("raw/d.csv", 100, etag="e4"),
+               obj("old/a.csv", 100, days_old=400, storage_class="GLACIER", etag="e1"),
+               obj("raw/unique.csv", 7, etag="e5"), obj("raw/", 0, etag="m")]
+    hashes = {"s3://b/raw/a.csv": "h1", "s3://b/copy/a.csv": "h1", "s3://b/raw/c.csv": "h2"}
+    report = group_duplicates(objects, "s3://b/", hashes=hashes)
+    [group] = report.groups
+    # Keep: readable (not GLACIER), in the folder with the smallest share of copies (raw/), then the oldest.
+    assert [o.key for o in group.objects] == ["raw/a.csv", "raw/b.csv", "copy/a.csv", "old/a.csv"]
+    assert group.matched_by == "SHA-256 + ETag" and group.sha256 == "h1" and group.reclaimable == 300
+    assert group.monthly_cost == pytest.approx(object_monthly_cost(100, "STANDARD") * 2
+                                               + object_monthly_cost(100, "GLACIER"))
+    assert (report.scanned.count, report.candidates.count, report.candidates.size) == (7, 6, 600)
+    assert report.not_compared.count == 1  # raw/d.csv: same size, another ETag, not read
+    assert report.files_by_folder == {"raw/": 5, "copy/": 1, "old/": 1}
+    assert group_duplicates(objects, hashes=hashes, distinct=["s3://b/raw/d.csv"]).not_compared.count == 0
+
+    by_etag = group_duplicates(objects, "s3://b/")
+    assert [(g.matched_by, len(g.objects)) for g in by_etag.groups] == [("ETag", 3)]
+    assert by_etag.not_compared.count == 6
+    strict = {f"s3://b/{key}": "h1" for key in ("raw/a.csv", "raw/b.csv", "copy/a.csv")}
+    assert group_duplicates(objects[:3], hashes=strict).groups[0].matched_by == "SHA-256"
+    assert group_duplicates(objects, hashes=strict).groups[0].matched_by == "SHA-256 + ETag"  # + the GLACIER one
+    df = report.to_df()
+    assert list(df.role) == ["keep", "copy", "copy", "copy"] and set(df.group) == {1} and df.sha256[0] == "h1"
+    assert group_duplicates([]).groups == []
+
+
+def test_duplicate_folders_and_findings():
+    objects = [obj("backfill/1.gz", 10, etag="a"), obj("backfill/2.gz", 20, etag="b"),
+               obj("events/d1/1.gz", 10, etag="a"), obj("events/d1/x.gz", 30, etag="x"),
+               obj("events/d2/2.gz", 20, etag="b"), obj("events/d2/y.gz", 40, etag="y"),
+               obj("same/a.csv", 5, etag="s"), obj("same/a (1).csv", 5, etag="s")]
+    report = group_duplicates(objects, "s3://b/")
+    folders = {f.folder: f for f in duplicate_folders(report)}
+    backfill, same = folders["backfill/"], folders["same/"]
+    assert backfill.all_copies and (backfill.files, backfill.duplicated.size) == (2, 30)
+    assert backfill.elsewhere == {"events/d1/": 1, "events/d2/": 1}
+    assert not folders["events/d1/"].all_copies and folders["events/d1/"].duplicated.count == 1
+    assert (same.outside, same.elsewhere, same.all_copies) == (0, {"same/": 2}, False)  # copies within one folder
+    assert all(g.keep.key.startswith(("events/", "same/")) for g in report.groups)  # the folder of copies empties
+    text = "\n".join(f"{level}: {message}" for level, message in duplicate_findings(report))
+    assert "info: 3 redundant copies take 35 B" in text and "Keep suggests" in text
+    assert ("backfill/ holds only copies: all 2 of its files (30 B) are identical to files in events/d1/ and "
+            "events/d2/") in text
+    assert "same/ holds only copies" not in text and "method='strict'" in text
+
+    mirror = group_duplicates([obj("a/1", 2 * GB, etag="1"), obj("b/1", 2 * GB, etag="1"), obj("c/1", 5, etag="p"),
+                               obj("c/2", 5, etag="q")], "s3://b/")
+    mirror.versioning, mirror.truncated = "Enabled", True
+    text = "\n".join(f"{level}: {message}" for level, message in duplicate_findings(mirror))
+    assert "warn: Listing stopped at the limit" in text and "Pass limit=None" in text
+    assert "warn: 1 redundant copy takes 2.0 GB, costing $0.05/month" in text
+    assert "warn: a/ and b/ hold the same 1 file (2.0 GB). Keeping one of the two folders" in text
+    assert "b/ holds only copies" not in text and "warn: Versioning is on" in text
+    assert "info: 2 files (10 B) share their size with a file whose ETag differs" in text and "method='hash'" in text
+    mirror.method, mirror.read_capped, mirror.max_read = "hash", True, GB
+    mirror.unreadable = {"c/1": "GLACIER", "c/2": "AccessDenied"}
+    text = "\n".join(f"{level}: {message}" for level, message in duplicate_findings(mirror))
+    assert "warn: Stopped reading at max_read=1.0 GB: 2 files (10 B)" in text and "max_read='1GB'" in text
+    assert ("2 files could only be compared by ETag, because they couldn't be read: 1 in GLACIER, which needs a "
+            "restore first, 1 AccessDenied (needs s3:GetObject)") in text
+
+
+def zip_plan(**changes):
+    plan = ZipPlan(uri="s3://b/data/", path="/tmp/out/data.zip", max_size=100 * MB, max_files=10_000,
+                   files=[(obj("data/a.csv", 10 * MB), "a.csv"), (obj("data/b/c.csv", 5 * MB), "b/c.csv")],
+                   disk_free=50 * GB, memory_free=8 * GB, probed="data/a.csv")
+    for name, value in changes.items():
+        setattr(plan, name, value)
+    return plan
+
+
+def findings_text(plan):
+    return "\n".join(f"{level}: {message}" for level, message in zip_findings(plan))
+
+
+def test_zip_checks_and_findings():
+    ok = zip_plan()
+    assert ok.can_download and ok.size == 15 * MB and 15 * MB < ok.space_needed < 16 * MB
+    assert [(name, passed) for name, passed, _ in zip_checks(ok)] == [
+        ("Files", True), ("Size", True), ("Disk space", True), ("Memory", True), ("Read access", True)]
+    assert zip_findings(ok) == []
+
+    big = zip_plan(max_size=10 * MB)
+    assert not big.can_download and ("Size", False) in [(n, p) for n, p, _ in zip_checks(big)]
+    assert ("warn: The files take 15.0 MB, over the 10.0 MB limit. Pass max_size='15MB' to zip them anyway (the "
+            "disk has 50.0 GB free)") in findings_text(big)
+    disk = zip_plan(disk_free=MB)
+    assert not disk.can_download and "The disk doesn't have room" in findings_text(disk)
+    assert "pass path= on a disk with more room" in findings_text(disk)
+    denied = zip_plan(read_error="AccessDenied")
+    assert not denied.can_download and "AccessDenied on data/a.csv" in findings_text(denied)
+    assert "s3:GetObject" in findings_text(denied) and "kms:Decrypt" in findings_text(denied)
+    more = zip_plan(more=True)
+    assert not more.can_download and "more than 10,000 files" in findings_text(more)
+
+    cold = zip_plan(files=[], archived=Stat(2, 3 * MB), left_out={"data/x": "GLACIER", "data/y": "GLACIER"})
+    assert zip_checks(cold) == [("Files", False, "all 2 files are in GLACIER / DEEP_ARCHIVE")]
+    assert "warn: 2 files (3.0 MB) in GLACIER / DEEP_ARCHIVE can't go in the zip" in findings_text(cold)
+    some_cold = zip_plan(archived=Stat(1, MB), left_out={"data/x": "GLACIER", "data/../y": "outside"})
+    assert some_cold.can_download and ("Archived files", None) in [(n, p) for n, p, _ in zip_checks(some_cold)]
+    assert "info: 1 file (1.0 MB) in GLACIER" in findings_text(some_cold)
+    assert "info: 1 file left out because their names would unzip outside the folder" in findings_text(some_cold)
+    assert "Nothing to zip" in findings_text(zip_plan(files=[]))
+    unknown = zip_plan(disk_free=None, memory_free=None, probed=None)
+    assert unknown.can_download and [p for _, p, _ in zip_checks(unknown)] == [True, True, None, True, None]
+    assert [s3mod._nice_size(n) for n in (3 * MB + 1, 340 * MB, 3 * GB + 1)] == ["4MB", "400MB", "4GB"]
+
+
+def test_progress_text():
+    assert s3mod._progress_text("Listing", "files", 12345, None, 0.4) == "Listing... 12,345 files · 0.4s"
+    assert (s3mod._progress_text("Reading", "B", 400 * MB, GB, 4.0)
+            == "Reading... 400.0 MB of 1.0 GB (39%) · 4.0s · 100.0 MB/s · about 6.2s left")
+    assert s3mod._progress_text("Checking", "buckets", 3, 12, 2.0).startswith("Checking... 3 of 12 buckets (25%)")
+    assert [s3mod._duration(t) for t in (0.42, 42.4, 125, 7500)] == ["0.4s", "42s", "2m 05s", "2h 05m"]
+    assert s3mod._progress_text("Checking", "buckets", 2, None, 4.0).endswith("· 0.5/s")
 
 
 def test_compare_objects():
@@ -642,9 +789,146 @@ def test_largest_newest_oldest(core):
 
 
 def test_find_duplicates(core):
-    groups = core.find_duplicates(f"s3://{BUCKET}/")
-    assert sorted(o.key for o in groups[0]) == ["archive/old.csv", "raw/2024/01/events-copy.csv",
-                                                "raw/2024/01/events.csv"]
+    report = core.find_duplicates(f"s3://{BUCKET}/")
+    [group] = report.groups
+    assert sorted(o.key for o in group.objects) == ["archive/old.csv", "raw/2024/01/events-copy.csv",
+                                                    "raw/2024/01/events.csv"]
+    assert group.keep.storage_class == "STANDARD" and group.matched_by == "ETag" and report.copies == 2
+    assert report.versioning == "Disabled" and report.scan_seconds > 0
+    assert core.find_duplicates(f"s3://{BUCKET}/", limit=3).truncated
+
+
+def put_multipart(aws, key, body, bucket=BUCKET):
+    upload = aws.create_multipart_upload(Bucket=bucket, Key=key)
+    part = aws.upload_part(Bucket=bucket, Key=key, UploadId=upload["UploadId"], PartNumber=1, Body=body)
+    aws.complete_multipart_upload(Bucket=bucket, Key=key, UploadId=upload["UploadId"],
+                                  MultipartUpload={"Parts": [{"PartNumber": 1, "ETag": part["ETag"]}]})
+
+
+BODY = bytes(range(256)) * 400  # 100 KB: more than the first 64 KB that find_duplicates compares first
+
+
+@pytest.fixture
+def dupes(aws, bucket):
+    aws.put_object(Bucket=BUCKET, Key="dupes/original.bin", Body=BODY)
+    put_multipart(aws, "dupes/copy.bin", BODY)  # same content, another ETag
+    aws.put_object(Bucket=BUCKET, Key="dupes/same-start.bin", Body=BODY[:-1] + b"!")  # only the end differs
+    aws.put_object(Bucket=BUCKET, Key="dupes/other.bin", Body=b"?" + BODY[1:])  # the start differs
+    return f"s3://{BUCKET}/dupes/"
+
+
+def test_find_duplicates_hashes_what_etags_miss(core, dupes):
+    seen = []
+    report = core.find_duplicates(dupes, read_progress=lambda done, total: seen.append((done, total)))
+    [group] = report.groups
+    assert sorted(o.key for o in group.objects) == ["dupes/copy.bin", "dupes/original.bin"]
+    assert group.matched_by == "SHA-256" and group.sha256 == hashlib.sha256(BODY).hexdigest()
+    # All four start alike in size; three share their first 64 KB, and only those are read to the end.
+    assert (report.files_read, report.requests) == (4, 7)
+    assert report.bytes_read == 4 * HEAD + 3 * (len(BODY) - HEAD)
+    assert report.not_compared.count == 0 and report.unreadable == {}
+    assert (4 * HEAD, 4 * HEAD) in seen and seen[-1] == (3 * (len(BODY) - HEAD),) * 2  # two passes, from 0 each
+
+    etag = core.find_duplicates(dupes, method="etag")
+    assert etag.groups == [] and etag.not_compared.count == 4 and etag.bytes_read == 0
+    capped = core.find_duplicates(dupes, max_read="100KB")  # the first pass alone needs 256 KB
+    assert capped.groups == [] and capped.read_capped and capped.bytes_read == 0 and capped.not_compared.count == 4
+    assert core.find_duplicates(dupes, method="strict").groups[0].matched_by == "SHA-256"
+
+
+HEAD = s3mod.HASH_HEAD_BYTES
+
+
+def test_find_duplicates_notes_what_it_cant_read(core, aws, dupes, monkeypatch):
+    aws.put_object(Bucket=BUCKET, Key="cold/a.bin", Body=b"a" * 50, StorageClass="GLACIER")
+    aws.put_object(Bucket=BUCKET, Key="cold/b.bin", Body=b"b" * 50, StorageClass="GLACIER")
+    assert core.find_duplicates(f"s3://{BUCKET}/cold/").unreadable == {"cold/a.bin": "GLACIER", "cold/b.bin": "GLACIER"}
+
+    def denied(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+
+    monkeypatch.setattr(core.client, "get_object", denied)
+    report = core.find_duplicates(dupes)
+    assert set(report.unreadable.values()) == {"AccessDenied"} and len(report.unreadable) == 4
+    assert report.groups == [] and report.not_compared.count == 4
+
+
+def test_find_duplicates_in_a_versioned_bucket(core, aws):
+    aws.create_bucket(Bucket="versioned-dupes")
+    aws.put_bucket_versioning(Bucket="versioned-dupes", VersioningConfiguration={"Status": "Enabled"})
+    for key in ("a/x.csv", "b/x.csv"):
+        aws.put_object(Bucket="versioned-dupes", Key=key, Body=CSV)
+    report = core.find_duplicates("s3://versioned-dupes/")
+    assert report.versioning == "Enabled"
+    assert any("Versioning is on" in message for _, message in duplicate_findings(report))
+
+
+def test_download_zip(core, aws, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    z = core.download_zip(f"s3://{BUCKET}/raw", progress=lambda *done: seen.append(done))  # the folder raw/
+    assert z.written and z.plan.uri == f"s3://{BUCKET}/raw/" and z.plan.path == str(tmp_path / "raw.zip")
+    with zipfile.ZipFile(tmp_path / "raw.zip") as archive:
+        assert sorted(archive.namelist()) == ["2024/01/events-copy.csv", "2024/01/events.csv", "2024/02/empty.txt",
+                                              "2024/02/events.csv.gz"]
+        assert archive.read("2024/01/events.csv") == CSV and archive.testzip() is None
+        assert archive.getinfo("2024/02/events.csv.gz").compress_type == zipfile.ZIP_STORED  # already compressed
+        assert archive.getinfo("2024/01/events.csv").compress_type == zipfile.ZIP_DEFLATED
+    assert (z.files.count, seen[-1]) == (4, (z.plan.size, z.plan.size)) and z.zip_size > 0
+    assert not (tmp_path / "raw.zip.part").exists()
+
+    one = core.download_zip(f"s3://{BUCKET}/docs/readme.md", "readme")  # '.zip' is added
+    assert one.plan.path == str(tmp_path / "readme.zip") and zipfile.ZipFile(one.plan.path).namelist() == ["readme.md"]
+    monkeypatch.setattr(s3mod, "_ZIP_SMALL_FILE", 1024)  # big files stream into the zip instead of being read whole
+    big = core.download_zip(f"s3://{BUCKET}/big/", str(tmp_path))  # a folder: big.zip goes in it
+    assert zipfile.ZipFile(big.plan.path).read("file.bin") == b"x" * (2 * MB)
+
+    dry = core.download_zip(f"s3://{BUCKET}/", "dry.zip", dry_run=True)
+    assert dry.plan.can_download and not dry.written and not (tmp_path / "dry.zip").exists()
+    assert dry.plan.left_out == {"archive/old.csv": "GLACIER"} and dry.plan.probed and dry.plan.read_error is None
+    over = core.download_zip(f"s3://{BUCKET}/", "over.zip", max_size="1KB")
+    assert not over.plan.can_download and not over.written and not (tmp_path / "over.zip").exists()
+    few = core.plan_zip(f"s3://{BUCKET}/", max_files=3)
+    assert few.more and len(few.files) + len(few.left_out) == 3 and not few.can_download
+    aws.put_object(Bucket=BUCKET, Key="raw//etc/escape.txt", Body=b"x")
+    assert "raw//etc/escape.txt" in core.plan_zip(f"s3://{BUCKET}/raw/").left_out
+    monkeypatch.setattr(s3mod, "_free_space", lambda path: 10)
+    assert not core.download_zip(f"s3://{BUCKET}/raw/", "full-disk.zip").written
+    with pytest.raises(ValueError, match="max_size"):
+        core.plan_zip(f"s3://{BUCKET}/raw/", max_size=None)
+
+
+def test_download_zip_when_reads_fail(core, tmp_path, monkeypatch):
+    real = core.client.get_object
+
+    def denied(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+
+    def one_denied(**kwargs):  # the 1-byte check passes; zipping this file fails
+        return denied() if kwargs["Key"].endswith("events-copy.csv") and "Range" not in kwargs else real(**kwargs)
+
+    monkeypatch.setattr(core.client, "get_object", one_denied)
+    z = core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "part.zip"))
+    assert z.written and z.failed == {"raw/2024/01/events-copy.csv": "AccessDenied"} and z.files.count == 3
+    assert "2024/01/events-copy.csv" not in zipfile.ZipFile(z.plan.path).namelist()
+
+    def stop(done, total):
+        if done:
+            raise KeyboardInterrupt  # the notebook's stop button, halfway
+    monkeypatch.setattr(core.client, "get_object", real)
+    with pytest.raises(KeyboardInterrupt):
+        core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "stopped.zip"), progress=stop)
+    assert not any(p.name.startswith("stopped") for p in tmp_path.iterdir())  # no half-written zip left behind
+
+    monkeypatch.setattr(core.client, "get_object", denied)
+    blocked = core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "denied.zip"))
+    assert blocked.plan.read_error == "AccessDenied" and not blocked.written
+
+
+def test_compare_progress_keeps_counting(core):
+    seen = []
+    core.compare(f"s3://{BUCKET}/raw/", f"s3://{BUCKET}/curated/", progress=seen.append)
+    assert seen == sorted(seen) and seen[-1] == 5 + 5
 
 
 def test_compare(core, aws):
@@ -835,8 +1119,34 @@ def test_simulate_lifecycle(core):
 def test_presigned_url_and_download(core, tmp_path):
     url = core.presigned_url(f"s3://{BUCKET}/docs/readme.md", expires=60)
     assert BUCKET in url and "readme.md" in url
-    path = core.download(f"s3://{BUCKET}/docs/readme.md", str(tmp_path))
+    seen = []
+    path = core.download(f"s3://{BUCKET}/docs/readme.md", str(tmp_path), progress=lambda *done: seen.append(done))
     assert path.endswith("readme.md") and open(path).read().startswith("# Title")
+    assert seen[-1] == (len(("# Title\n" + "line\n" * 50).encode()),) * 2
+
+
+def test_download_folder(core, aws, tmp_path, monkeypatch):
+    target = tmp_path / "raw-copy"
+    seen = []
+    result = core.download_folder(f"s3://{BUCKET}/raw", str(target), progress=lambda *done: seen.append(done))
+    files = sorted(p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file())
+    assert files == ["2024/01/events-copy.csv", "2024/01/events.csv", "2024/02/empty.txt", "2024/02/events.csv.gz"]
+    assert result.uri == f"s3://{BUCKET}/raw/" and result.downloaded.count == 4 and result.skipped == {}
+    assert (target / "2024/01/events.csv").read_bytes() == CSV and seen[-1] == (result.downloaded.size,) * 2
+    again = core.download_folder(f"s3://{BUCKET}/raw/", str(target))  # same size and time: skipped
+    assert (again.downloaded.count, again.already_there.count) == (0, 4)
+
+    aws.put_object(Bucket=BUCKET, Key="raw//etc/escape.txt", Body=b"x")  # '/etc/escape.txt' under raw/
+    escape = core.download_folder(f"s3://{BUCKET}/raw/", str(target))
+    assert escape.skipped == {"raw//etc/escape.txt": "its name leads outside the folder"}
+    monkeypatch.chdir(tmp_path)
+    loose = core.download_folder(f"s3://{BUCKET}/", limit=100)
+    assert loose.path == str(tmp_path / BUCKET) and loose.skipped == {"archive/old.csv": "GLACIER"}
+    assert core.download_folder(f"s3://{BUCKET}/", "partial", limit=2).truncated
+
+    monkeypatch.setattr(s3mod.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10))
+    with pytest.raises(ValueError, match="Not enough disk space"):
+        core.download_folder(f"s3://{BUCKET}/big/", "big")
 
 
 # ------------------------------------------------------------------------ formats
@@ -1291,6 +1601,126 @@ def test_ui_previews_new_formats(ui, capsys, formats):
     assert "-- Text --" in run(capsys, ui.document, uri_of("docs/study.docx"))
     assert "Stopped after 5 characters" in run(capsys, ui.document, uri_of("docs/report.pdf"), max_chars=5)
     assert "old binary format" in run(capsys, ui.document, uri_of("docs/old.doc"))
+
+
+def test_ui_duplicates(ui, capsys, aws, dupes):
+    root = f"s3://{BUCKET}/"
+    put_multipart(aws, "exports/original.bin", BODY)  # a copy of dupes/original.bin in a folder of its own
+    out = run(capsys, ui.duplicates, root)
+    for expected in ("Duplicate files in s3://data-lake/", "Duplicate groups: 2", "Redundant copies: 4",
+                     "read to compare contents", "exports/ holds only copies: its only file (100.0 KB)",
+                     "-- Folders with duplicated files --", "SHA-256", "Keep", "report.to_df()",
+                     "ui.core.find_duplicates('s3://data-lake/')"):
+        assert expected in out
+    etag = run(capsys, ui.duplicates, root, method="etag", min_size="1KB")
+    assert "Read to compare: nothing" in etag and "method='hash' reads them" in etag
+    assert "find_duplicates('s3://data-lake/', method='etag', min_size='1KB')" in etag
+    assert "files of at least 1.0 KB" in etag
+    assert "No two files have the same size" in run(capsys, ui.duplicates, f"{root}docs/")
+    aws.put_object(Bucket=BUCKET, Key="unique/a.txt", Body=b"a" * 10)
+    aws.put_object(Bucket=BUCKET, Key="unique/b.txt", Body=b"b" * 10)
+    assert "all have different contents" in run(capsys, ui.duplicates, f"{root}unique/", max_read=None)
+    assert "No files under this prefix" in run(capsys, ui.duplicates, f"{root}nothing-here/")
+    assert "method must be" in run(capsys, ui.duplicates, root, method="md5")
+
+
+def test_ui_duplicates_without_read_permission(ui, capsys, dupes, monkeypatch):
+    def denied(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+
+    monkeypatch.setattr(ui.core.client, "get_object", denied)
+    out = run(capsys, ui.duplicates, dupes)
+    assert "Traceback" not in out and "AccessDenied (needs s3:GetObject)" in out and "Duplicate groups: 0" in out
+
+
+def test_ui_download_and_ls_of_a_file(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    one = run(capsys, ui.download, f"s3://{BUCKET}/raw/2024/01/events.csv")
+    assert "Downloaded s3://data-lake/raw/2024/01/events.csv" in one and "pd.read_csv('" in one
+    assert (tmp_path / "events.csv").read_bytes() == CSV
+    folder = run(capsys, ui.download, f"s3://{BUCKET}/raw/")
+    assert "Files downloaded: 4" in folder and str(tmp_path / "raw") in folder
+    assert "Already there: 4" in run(capsys, ui.download, f"s3://{BUCKET}/raw")
+    archived = run(capsys, ui.download, f"s3://{BUCKET}/archive/")
+    assert "Download of s3://data-lake/archive/" in archived and "need a restore first" in archived
+    assert "No files under this folder" in run(capsys, ui.download, f"s3://{BUCKET}/nothing-here/")
+    monkeypatch.setattr(s3mod.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10))
+    assert "Not enough disk space" in run(capsys, ui.download, f"s3://{BUCKET}/big/file.bin", "big.bin")
+    assert "That's a file, not a folder" in run(capsys, ui.ls, f"s3://{BUCKET}/raw/2024/01/events.csv")
+
+
+def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = run(capsys, ui.download_zip, f"s3://{BUCKET}/raw/")
+    for expected in ("Zip of s3://data-lake/raw/", "Can download: yes", "Zip size:", "right-click it",
+                     "-- Can this notebook make the zip? --", "✓ ok", "Read access"):
+        assert expected in out
+    assert (tmp_path / "raw.zip").exists()
+    dry = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1GB", dry_run=True)
+    assert "It can be downloaded" in dry and "download_zip('s3://data-lake/', max_size='1GB')" in dry
+    assert "-- Left out --" in dry and "GLACIER" in dry and not (tmp_path / "data-lake.zip").exists()
+    over = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1KB")
+    assert "Can download: no" in over and "over the size limit" in over and "✗ no" in over and "max_size='3MB'" in over
+    assert "nothing to zip" in run(capsys, ui.download_zip, f"s3://{BUCKET}/nothing-here/")
+    assert "ValueError" in run(capsys, ui.download_zip, f"s3://{BUCKET}/raw/", max_size="lots")
+
+
+class FakeBar:
+    """Records what _progress does with a tqdm bar."""
+
+    made: list = []
+
+    def __init__(self, **options):
+        self.options, self.total, self.n, self.closed = options, options["total"], 0, False
+        FakeBar.made.append(self)
+
+    def update(self, count):
+        self.n += count
+
+    def close(self):
+        self.closed = True
+
+
+def test_progress_shows_one_tqdm_bar_at_a_time(ui, monkeypatch):
+    FakeBar.made = []
+    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: FakeBar)
+    with ui._progress("Listing", unit="files") as tick, ui._progress("Reading", unit="B") as read:
+        tick(1000)
+        tick(2500)
+        [listing] = FakeBar.made
+        assert listing.n == 2500 and listing.total is None and "{n:,} files" in listing.options["bar_format"]
+        read(10, 100)
+        assert listing.closed  # the reading bar took its place
+        read(100, 100)
+        read(5, 50)  # a new total starts a new bar
+        _, first, second = FakeBar.made
+        assert first.closed and first.n == 100 and first.options["unit"] == "B" and (second.n, second.total) == (5, 50)
+    assert all(bar.closed for bar in FakeBar.made)
+    assert second.total == 5  # finished short of its total (files it couldn't read): not shown as a failure
+    with pytest.raises(KeyboardInterrupt), ui._progress("Reading", unit="B") as read:
+        read(5, 50)
+        raise KeyboardInterrupt  # the notebook's stop button
+    assert FakeBar.made[-1].closed and FakeBar.made[-1].total == 50  # left where it stopped
+    FakeBar.made = FakeBar.made[:3]
+    ui.progress = "off"
+    with ui._progress() as tick:
+        tick(5)
+    assert len(FakeBar.made) == 3
+
+
+def test_progress_without_tqdm(core, capsys, monkeypatch):
+    clock = itertools.count(0, 1.0)
+    monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: None)  # tqdm not installed
+    for progress in ("auto", "plain"):
+        ui = S3View(core, mode="text", progress=progress)
+        with ui._progress("Reading", unit="B") as tick:
+            tick(MB, 4 * MB)
+            tick(2 * MB, 4 * MB)
+        err = capsys.readouterr().err
+        assert "Reading... 2.0 MB of 4.0 MB (50%)" in err and "left" in err and err.endswith("\r")
+    with pytest.raises(ValueError, match="progress must be"):
+        S3View(core, progress="fancy")
 
 
 def test_ui_turns_errors_into_notes(ui, capsys):

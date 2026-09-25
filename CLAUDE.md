@@ -39,7 +39,7 @@ report against these rules (the existing code follows them, so match it):
 ## Commands
 
 ```bash
-pip install -r requirements-dev.txt            # pinned versions; moto, pytest, ruff, fastavro, openpyxl, pypdf
+pip install -r requirements-dev.txt            # pinned versions; moto, pytest, ruff, fastavro, openpyxl, pypdf, tqdm
 python -m pytest                               # all tests (moto, no AWS account needed)
 python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
@@ -58,11 +58,14 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
 
 - **No imports between analyzers and no shared module.** Each file must work alone in a notebook. Helpers that
   every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, the render blocks and
-  `_render_html` / `_render_text`, `_friendly_errors`, `View._progress`, `View.help`) are deliberately
-  duplicated in all three analyzers. When you fix or change one of them, check the copies in the other two.
+  `_render_html` / `_render_text`, `_friendly_errors`, `View._progress` with `_progress_bar_class` /
+  `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are deliberately duplicated in all three
+  analyzers. When you fix or change one of them, check the copies in the other two.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, openpyxl, etc. are optional and are
   imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an ImportError
-  that says what to `pip install`) or a local `from IPython.display import ...`.
+  that says what to `pip install`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
+  notebook widget) is the exception that fails quietly: `_progress_bar_class` loads it with `importlib`, and without
+  it the progress line is plain text.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
@@ -104,7 +107,12 @@ How the View layer works:
   data-decoding errors into a warning note instead of a traceback.
 - `help()` lists public View methods by introspection, using the **first line of each docstring** as the
   description.
-- Long operations wrap the analyzer call in `with self._progress(...) as tick:` and pass `progress=tick`.
+- Long operations wrap the analyzer call in `with self._progress(label, unit) as tick:` and pass `progress=tick`.
+  The analyzer calls `progress(count)` with a running count, or `progress(done, total)` when it knows the total
+  (a new total starts a new bar; `unit="B"` counts bytes). `_progress` shows a tqdm bar when tqdm is installed and a
+  plain line with the rate and time left otherwise, only one at a time (a nested `_progress` replaces the outer
+  bar), and nothing with `View(progress="off")`. Work spread over threads reports progress from the calling thread
+  only (S3's `_run_in_threads`), never from a worker, so notebook widgets aren't touched from other threads.
 - `DynamoDBView` keeps `self._pager` so `more()` continues the last `scan` / `query` / `sql`. `BedrockKBView` keeps
   `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`), and
   `self.kb`, the default knowledge base that `use()` sets.

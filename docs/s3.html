@@ -223,12 +223,14 @@ ui.help()         # every command with a one-line description</code></pre></div>
 
 ui = S3View(S3Analyzer(profile="dev", region="eu-west-1"))
 ui = S3View(mode="text")          # plain text, e.g. in a terminal or a script
-ui = S3View(max_rows=0)           # show every row of long tables (default: 50)</code></pre></div>
+ui = S3View(max_rows=0)           # show every row of long tables (default: 50)
+ui = S3View(progress="plain")     # a plain progress line instead of tqdm bars ("off" for none)</code></pre></div>
         </li>
       </ol>
       <div class="callout">
         <p><strong>Only boto3 is required.</strong> pandas, pyarrow and numpy (all preinstalled on SageMaker) are used for tables. A few file types need an extra package; the preview tells you which one when it's missing:</p>
         <div class="code"><pre><code class="lang-sh">%pip install openpyxl pypdf zstandard python-snappy   # Excel, PDF text, .zst before Python 3.14, snappy Avro</code></pre></div>
+        <p>Commands that take a while show a <a href="https://github.com/tqdm/tqdm">tqdm</a> progress bar with the time left, when tqdm is installed (it usually is on SageMaker; <code>ipywidgets</code> makes it a notebook widget). Without it you get a plain line with the same numbers.</p>
       </div>
 
       <!-- ============================================================ tour -->
@@ -314,6 +316,22 @@ ui.oldest("s3://acme-ml-data/")
 ui.head("s3://acme-ml-data/curated/features/churn/train.parquet")   # every metadata field and tag
 ui.link("s3://acme-ml-data/curated/features/churn/train.parquet", expires=900)   # download link, valid 15 min</code></pre></div>
 
+      <h3>Download a file or a folder</h3>
+      <p><code>download()</code> copies a file, or a whole folder with its sub-folders, to the notebook's disk with a progress bar, and says where it went. For a table file it also shows the pandas call that opens it. A file already downloaded (same size and time) is skipped, so if a big download stops, run it again to pick up where it left off. Files in GLACIER or DEEP_ARCHIVE are listed as needing a restore, and nothing starts if the disk doesn't have room.</p>
+      <div class="code"><pre><code class="lang-py">ui.download("s3://acme-ml-data/curated/features/churn/train.parquet")        # into the current folder
+ui.download("s3://acme-ml-data/curated/features/churn/", "/tmp/churn")     # a folder, keeping its sub-folders</code></pre></div>
+      <p>To get a folder onto your own computer, <code>download_zip()</code> packs it into one <code>.zip</code>. It first checks that this notebook can make it, and downloads nothing if a check fails:</p>
+      <ul>
+        <li><strong>Size and file count</strong>: at most <code>max_size</code> of files (100 MB by default) and <code>max_files</code> files (10,000). It stops counting at <code>max_files</code>, so the answer comes quickly even on a huge folder.</li>
+        <li><strong>Disk space</strong>: the zip has to fit where it's written.</li>
+        <li><strong>Memory</strong>: files stream into the zip, so only a few MB are held at a time; it shows what's free.</li>
+        <li><strong>Read access</strong>: it reads one byte of one file, which fails if the role lacks <code>s3:GetObject</code> (or <code>kms:Decrypt</code> for SSE-KMS files).</li>
+      </ul>
+      <p>When a check fails, the report says what to change, such as the <code>max_size=</code> that would fit. Files in GLACIER or DEEP_ARCHIVE are left out and listed. Parquet, gzip and image files go in as they are, since compressing them again gains nothing; the rest are compressed. Once it's written, right-click the zip in JupyterLab's file browser and choose Download.</p>
+      <div class="code"><pre><code class="lang-py">ui.download_zip("s3://acme-ml-data/curated/features/churn/", dry_run=True)   # only the checks
+ui.download_zip("s3://acme-ml-data/curated/features/churn/")                 # churn.zip, if it's under 100 MB
+ui.download_zip("s3://acme-ml-data/reports/", "/tmp/reports.zip", max_size="1GB")</code></pre></div>
+
       <!-- ============================================================ summary -->
       <h2 id="summary">What's in a folder</h2>
       <p><code>summary()</code> reads the listing once and gives you a dashboard: totals, estimated monthly cost, a breakdown by folder, file type and storage class, how old and how big the files are, and the largest files. At the top are plain-language findings, such as too many small files, data waiting to be restored from Glacier, cold data you could store more cheaply, and tiny files billed at a minimum size.</p>
@@ -390,7 +408,9 @@ s3.safetensors_info("s3://acme-ml-data/models/tiny-llm/model.safetensors")["tens
 with s3.open("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz") as f:   # a stream, decompressed
     first_line = f.readline()
 
-s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")</code></pre></div>
+s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")
+s3.download_folder("s3://acme-ml-data/curated/features/churn/", "/tmp/churn")   # every file, sub-folders kept
+s3.plan_zip("s3://acme-ml-data/curated/").can_download   # would download_zip() work here? (downloads nothing)</code></pre></div>
       <p>For worked examples that load a JSON export, a CSV, an Excel workbook or a whole folder and build on it, see <a href="#build">Build your own analysis</a>.</p>
 
       <!-- ============================================================ documents -->
@@ -458,13 +478,29 @@ client.put_bucket_lifecycle_configuration(Bucket="acme-ml-data",
                                           LifecycleConfiguration={"Rules": current + [impact.rule()]})</code></pre></div>
       <div class="callout warn"><p>If the bucket has no lifecycle rules yet, <code>get_bucket_lifecycle_configuration</code> raises an error; use an empty list for <code>current</code> instead.</p></div>
 
-      <h3>Hidden storage: old versions, unfinished uploads, duplicates</h3>
+      <h3>Hidden storage: old versions, unfinished uploads</h3>
       <div class="code"><pre><code class="lang-py">ui.versions("s3://acme-ml-data/")                    # noncurrent versions and what they cost
-ui.uploads("s3://acme-ml-data/")                     # unfinished multipart uploads: billed but invisible
-ui.duplicates("s3://acme-ml-data/public-samples/")   # identical files and the space you'd get back</code></pre></div>
+ui.uploads("s3://acme-ml-data/")                     # unfinished multipart uploads: billed but invisible</code></pre></div>
+
+      <h3 id="duplicates">Duplicate files</h3>
+      <p><code>duplicates()</code> finds files with identical content and tells you what their copies take and cost per month, which copy to keep, and which folders hold nothing but copies, such as a backfill of files that also exist elsewhere. It's read-only: it shows how to get the list, and deleting is up to you.</p>
+      <div class="code"><pre><code class="lang-py">ui.duplicates("s3://acme-ml-data/public-samples/")                    # the usual call
+ui.duplicates("s3://acme-ml-data/", min_size="1MB", max_read="50GB")  # skip small files, read more if needed
+ui.duplicates("s3://acme-ml-data/", method="etag")                    # the listing only: reads no file
+ui.duplicates("s3://acme-ml-data/models/", method="strict")           # hash every candidate with SHA-256</code></pre></div>
+      <p>It does the cheap checks first and only reads what it has to:</p>
+      <ol>
+        <li><strong>Size.</strong> A file no other file matches in size can't be a copy. This comes from the listing, so it's free.</li>
+        <li><strong>ETag.</strong> Files with the same size and ETag are copies: the ETag is S3's checksum of the content (the MD5, for a file uploaded in one part). Also free.</li>
+        <li><strong>SHA-256 of the content.</strong> A copy uploaded in parts of another size, or encrypted with SSE-KMS, gets a different ETag. So where files share a size but not an ETag, it reads one file per ETag: the first 64 KB, then the whole file only where those match. It reads at most <code>max_read</code> (10 GB by default), starting where the saving could be biggest, and says how much it read and what it had to leave out.</li>
+      </ol>
+      <p>For each group, <em>Keep</em> suggests a file you can read without a restore, in the folder with the fewest copies, then the oldest, so a folder of copies empties out. In a versioned bucket a deleted copy stays as a noncurrent version until a lifecycle rule removes it; the report says so. To act on the result in pandas:</p>
+      <div class="code"><pre><code class="lang-py">report = ui.core.find_duplicates("s3://acme-ml-data/public-samples/")
+df = report.to_df()              # one row per file: group, role ('keep' / 'copy'), key, size, sha256, ...
+copies = df[df.role == "copy"]   # everything but the file to keep in each group</code></pre></div>
       <figure>
         <div class="shot"><picture><source srcset="images/duplicates-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/duplicates-light.webp" alt="duplicates(): duplicate groups, redundant copies, reclaimable space and a table of identical files" width="984" height="340" loading="lazy"></picture></div>
-        <figcaption><code>ui.duplicates(...)</code> matches files by size and ETag.</figcaption>
+        <figcaption><code>ui.duplicates(...)</code>: groups of identical files and the space their copies take.</figcaption>
       </figure>
 
       <h3>Use your region's prices</h3>
@@ -532,7 +568,7 @@ rows = [ObjectInfo("acme-ml-data", "raw/a.json", 1_200_000, datetime(2025, 1, 5,
         ObjectInfo("acme-ml-data", "raw/b.json", 800_000, datetime(2025, 6, 1, tzinfo=timezone.utc), "STANDARD_IA")]
 summarize_objects(rows, "s3://acme-ml-data/raw/").monthly_cost
 simulate_lifecycle_objects(rows, "s3://acme-ml-data/raw/", move_after=30, to="GLACIER_IR").monthly_savings</code></pre></div>
-      <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
+      <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, the duplicate finder's steps (<code>files_to_hash</code>, <code>group_duplicates</code>, <code>duplicate_folders</code>, <code>duplicate_findings</code>), <code>zip_checks</code>, <code>zip_findings</code>, <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
 
       <!-- ============================================================ build -->
       <h2 id="build">Build your own analysis</h2>
@@ -683,7 +719,8 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
       <h2 id="big">Very large buckets</h2>
       <div class="grid2">
         <div class="card"><h4>Start with CloudWatch</h4><p><code>bucket_info()</code> and <code>overview()</code> read sizes from CloudWatch without listing anything, so they take seconds on any bucket.</p></div>
-        <div class="card"><h4>Scans list every key</h4><p><code>summary</code>, <code>tree</code>, <code>find</code>, <code>duplicates</code>, <code>compare</code> and <code>what_if</code> list 1,000 keys per request: about 1 to 3 minutes per million objects. Progress is shown while they run.</p></div>
+        <div class="card"><h4>Scans list every key</h4><p><code>summary</code>, <code>tree</code>, <code>find</code>, <code>duplicates</code>, <code>compare</code> and <code>what_if</code> list 1,000 keys per request: about 1 to 3 minutes per million objects. A progress bar shows while they run.</p></div>
+        <div class="card"><h4><code>duplicates</code> reads only what it must</h4><p>It downloads files only where same-size files have different ETags, 64 KB of each first, and stops at <code>max_read</code> (10 GB by default). That's free inside the bucket's region; <code>method="etag"</code> reads nothing.</p></div>
         <div class="card"><h4>Sample with <code>limit=</code></h4><p>Pass <code>limit=100_000</code> to stop early, or point the scan at a smaller prefix.</p></div>
         <div class="card"><h4><code>ls</code> is always fast</h4><p>It lists a single level, however big the bucket is.</p></div>
       </div>
@@ -716,7 +753,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
     }
   ]
 }</code></pre></div>
-      <p>Files encrypted with SSE-KMS also need <code>kms:Decrypt</code> on their key to be previewed or read. To scope the policy down, replace <code>"Resource": "*"</code> in the first statement with your buckets' ARNs, for example <code>arn:aws:s3:::acme-ml-data</code> and <code>arn:aws:s3:::acme-ml-data/*</code>.</p>
+      <p>Files encrypted with SSE-KMS also need <code>kms:Decrypt</code> on their key to be previewed, read, downloaded or compared by <code>duplicates</code>. To scope the policy down, replace <code>"Resource": "*"</code> in the first statement with your buckets' ARNs, for example <code>arn:aws:s3:::acme-ml-data</code> and <code>arn:aws:s3:::acme-ml-data/*</code>.</p>
 
       <!-- ============================================================ troubleshooting -->
       <h2 id="troubleshooting">Troubleshooting</h2>
@@ -754,7 +791,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>summary(uri, top_n=10, folder_depth=1, limit=None)</code></td><td>Dashboard for a prefix, with cost and findings</td></tr>
           <tr><td><code>find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=, limit=1000)</code></td><td>Search</td></tr>
           <tr><td><code>largest(uri, n=20)</code> · <code>newest</code> · <code>oldest</code></td><td>Top-N objects</td></tr>
-          <tr><td><code>duplicates(uri, min_size=1)</code></td><td>Identical files and reclaimable space</td></tr>
+          <tr><td><code>duplicates(uri, method="hash", min_size=1, max_read="10GB")</code></td><td>Identical files (by size, ETag and SHA-256), what their copies cost, which to keep, folders of copies</td></tr>
           <tr><td><code>compare(uri_a, uri_b)</code></td><td>Identical, different, only in A, only in B</td></tr>
           <tr><td><code>versions(uri)</code></td><td>Current vs old versions, delete markers, what old versions cost</td></tr>
           <tr><td><code>deleted(uri, deleted_after=None)</code></td><td>Deleted files you can still restore</td></tr>
@@ -764,6 +801,8 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>head(uri)</code></td><td>All of one object's metadata and tags</td></tr>
           <tr><td><code>preview(uri, n=20)</code></td><td>What's inside a file (see <a href="#file-types">file types</a>)</td></tr>
           <tr><td><code>document(uri, pages=None)</code></td><td>Full text of a PDF, Word or PowerPoint file, page by page or slide by slide</td></tr>
+          <tr><td><code>download(uri, path=None)</code></td><td>Download a file or a folder, with a progress bar; running it again resumes</td></tr>
+          <tr><td><code>download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)</code></td><td>A file or folder as one .zip, after checking size, file count, disk space, memory and read access</td></tr>
           <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
           <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
         </tbody>

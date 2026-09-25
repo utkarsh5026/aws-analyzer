@@ -21,6 +21,11 @@ Every file has the same two layers:
 | Logic | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
 | UI | `S3View`, `DynamoDBView`, `BedrockKBView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
+Commands that take a while show a progress bar as they run: a [tqdm](https://github.com/tqdm/tqdm) bar (a widget in
+Jupyter when `ipywidgets` is installed) with the rate and the time left, when tqdm is installed, as it usually is on
+SageMaker. Without it you get a plain line with the same numbers. Every View takes `progress="plain"` to always use
+that line, or `progress="off"` for none.
+
 | Service | File | Status |
 |---|---|---|
 | S3 | [`analyzers/s3.py`](analyzers/s3.py) | ✅ |
@@ -34,7 +39,7 @@ installed, so you only need the second one, and only for the file types it lists
 
 ```python
 %pip install boto3 pandas pyarrow                                  # the commands below
-%pip install openpyxl xlrd pypdf zstandard python-snappy           # optional: Excel, PDF, .zst, snappy Avro
+%pip install openpyxl xlrd pypdf zstandard python-snappy tqdm      # optional: Excel, PDF, .zst, snappy Avro, progress bars
 ```
 
 | Package | Needed for |
@@ -46,6 +51,7 @@ installed, so you only need the second one, and only for the file types it lists
 | `pypdf` | PDF text in `preview`, `document`, `read_pdf` |
 | `zstandard` | `.zst` files before Python 3.14 |
 | `python-snappy` | Avro files compressed with snappy |
+| `tqdm` | Progress bars with the time left while long commands run (`ipywidgets` makes them notebook widgets). Without it, a plain progress line |
 
 IPython, used for the HTML output, comes with Jupyter. If a package is missing, the command tells you which one to
 install instead of failing; install it and run the cell again.
@@ -77,7 +83,7 @@ Sizes accept `1024`, `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-0
 | `tree(uri, depth=2)` | Folder tree with count, size and share at every level |
 | `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search |
 | `largest(uri)` / `newest(uri)` / `oldest(uri)` | Top-N objects |
-| `duplicates(uri)` | Identical objects (same size + ETag) and reclaimable space |
+| `duplicates(uri, method="hash", min_size=1, max_read="10GB")` | Identical files, the space and monthly cost of their copies, which copy to keep, and folders that hold nothing but copies (e.g. a backfill of files that exist elsewhere), plus the call that gets the list as a DataFrame. Files are matched by size and ETag, and where same-size files have different ETags (copies uploaded in parts of another size, or encrypted with SSE-KMS), by the SHA-256 of their content: the first 64 KB first, the whole file only where those match, reading at most `max_read`. `method="etag"` reads nothing; `method="strict"` hashes every file that shares its size |
 | `compare(uri_a, uri_b)` | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync) |
 | `versions(uri)` | Current vs noncurrent versions, delete markers, what the old versions cost per month, keys holding the most old-version data |
 | `deleted(uri, deleted_after=None)` | Deleted files you can still bring back in a versioned bucket (most recent first), their size, the old versions kept, and the call that restores one. Read-only: it never restores anything itself |
@@ -87,6 +93,8 @@ Sizes accept `1024`, `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-0
 | `head(uri)` | All object metadata, user metadata and tags |
 | `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, or a hex dump. Only downloads what it needs. |
 | `document(uri, pages=None)` | Full text of a PDF, Word `.docx` or PowerPoint `.pptx`, page by page or slide by slide (PDFs need `pypdf`) |
+| `download(uri, path=None)` | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it |
+| `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
 | `link(uri)` | Clickable presigned download link |
 
 ### Getting the data (`S3Analyzer`)
@@ -122,6 +130,11 @@ explain_policy(s3.bucket_policy("my-bucket"), s3.account_id())   # [PolicyStatem
 impact = s3.simulate_lifecycle("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")
 impact.monthly_savings, impact.rule()               # USD per month, the rule as a dict
 s3.deleted_files("s3://my-bucket/data/", deleted_after="7d").files   # [DeletedObject]
+dupes = s3.find_duplicates("s3://my-bucket/data/")  # DuplicateReport: groups, copies, reclaimable, monthly_cost
+dupes.to_df()                                       # one row per file: group, role ('keep' / 'copy'), key, sha256, ...
+s3.download_folder("s3://my-bucket/data/", "data")  # FolderDownload; s3.download(uri, path) for one file
+plan = s3.plan_zip("s3://my-bucket/data/")          # ZipPlan: files, size, disk / memory free, can_download
+s3.download_zip("s3://my-bucket/data/", max_size="1GB").plan.path   # ZipDownload; nothing written if a check fails
 ```
 
 ### File types
@@ -153,8 +166,10 @@ Packages in the table are optional; without them `preview` says what to install.
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
 `make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
-`bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`, and the file parsers
-`parse_docx`, `parse_pptx`, `parse_pdf`, `parse_avro`.
+`bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`, the duplicate
+finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
+have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
+file parsers `parse_docx`, `parse_pptx`, `parse_pdf`, `parse_avro`.
 
 ### Cost estimates
 
@@ -171,7 +186,13 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
 ### Large buckets
 
 - `summary`, `tree`, `find`, `duplicates` and `compare` list every key under the prefix (1,000 per request),
-  so expect about 1 to 3 minutes per million objects. Progress is shown while they run. Pass `limit=` to sample.
+  so expect about 1 to 3 minutes per million objects. A progress bar shows while they run. Pass `limit=` to sample.
+- `duplicates` also downloads files that share a size but not an ETag: 64 KB of each, then whole files only where
+  those match, 16 at a time, biggest possible saving first, and it stops at `max_read` (10 GB by default). It
+  says how much it read. That download is free inside the bucket's region; from outside AWS it's billed as data
+  transfer. `method="etag"` reads nothing.
+- `download_zip` counts at most `max_files` keys (10,000 by default) before it decides, so it answers quickly even
+  on a huge folder, and it only downloads once every check passes.
 - `what_if` lists every key too; `deleted` and `versions` list every version.
 - `bucket_info` reads the bucket's size from CloudWatch without listing anything. Use it first on huge buckets.
 - `overview` makes about 15 read calls per bucket, 8 buckets at a time, and lists no keys.
@@ -181,7 +202,8 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
 
 Read-only. Grant what you need:
 `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:ListBucketVersions`,
-`s3:ListBucketMultipartUploads`, `s3:GetObject`, `s3:GetObjectTagging`, the `s3:GetBucket*` /
+`s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts`, `s3:GetObject` (also for `duplicates` to read
+files and for `download` / `download_zip`), `s3:GetObjectTagging`, the `s3:GetBucket*` /
 `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` /
 `s3:GetInventoryConfiguration` family for `bucket_info` (including `s3:GetBucketPolicy` for `policy`),
 `s3:GetAccountPublicAccessBlock` for the account-level setting, and `cloudwatch:ListMetrics` +
