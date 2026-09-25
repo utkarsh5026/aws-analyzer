@@ -1,0 +1,1588 @@
+"""
+bedrock_kb.py - self-contained Amazon Bedrock Knowledge Bases toolkit for SageMaker / Jupyter notebooks.
+
+Copy this one file into a notebook cell (or upload it next to your notebook and
+``import bedrock_kb``). Nothing else from this repo is needed.
+
+Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich
+HTML output. All are preinstalled on SageMaker.
+
+The file has two layers:
+
+    BedrockKBAnalyzer  Pure logic. Talks to AWS and returns plain Python data
+                       (dataclasses, dicts, lists, DataFrames). Never prints.
+    BedrockKBView      Notebook UI. Calls BedrockKBAnalyzer and renders readable
+                       cards and tables (HTML in Jupyter, plain text in a terminal).
+
+Nothing in this file changes a knowledge base: it never starts a sync (it shows the
+command to run instead) and never adds or removes documents.
+
+Quick start
+-----------
+    ui = BedrockKBView()                              # or BedrockKBView(kb="support-docs")
+    ui.help()                                         # list every command
+    ui.kbs()                                          # every knowledge base: status, store, model, last sync, warnings
+    ui.kb_info("support-docs")                        # settings in plain English, data sources, syncs, findings
+    ui.use("support-docs")                            # later commands use this knowledge base
+    ui.syncs()                                        # sync history, with why syncs failed
+    ui.documents(status="FAILED")                     # documents that failed to index, and why
+
+    kb = ui.core                                      # same analyzer, raw data
+    info = kb.describe("support-docs")                # KnowledgeBaseInfo
+"""
+
+from __future__ import annotations
+
+import difflib
+import functools
+import html
+import importlib
+import inspect
+import re
+import sys
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable, Iterable, Iterator
+from urllib.parse import unquote
+
+import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
+
+# =============================================================================
+# 1. Helpers: parsing and formatting
+# =============================================================================
+
+HOURS_PER_MONTH = 730
+
+# USD, us-east-1 list prices, read from aws.amazon.com/bedrock/pricing and
+# aws.amazon.com/opensearch-service/pricing on 2026-09-25. Other regions differ; pass
+# BedrockKBAnalyzer(prices={...}) to use your own.
+BEDROCK_PRICES: dict[str, float] = {
+    "opensearch_ocu_hour": 0.24,  # per OpenSearch Compute Unit hour; indexing and search OCUs cost the same
+    "opensearch_min_ocus": 2,  # a classic vector collection bills 1 indexing + 1 search OCU even when idle
+    "rerank_per_1k_queries": 2.00,  # Cohere Rerank 3.5 (Amazon Rerank 1.0 is $1.00 where it's offered)
+    "embedding_per_million_tokens": 0.02,  # Amazon Titan Text Embeddings V2, to embed each question
+}
+
+
+def human_size(num_bytes: float | None) -> str:
+    """1536 -> '1.5 KB' (binary units, like the AWS console)."""
+    if num_bytes is None:
+        return "-"
+    value = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(value) < 1024:
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PB"
+
+
+_RELATIVE_TIME_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$", re.IGNORECASE)
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_time(value: datetime | date | timedelta | str | None, now: datetime | None = None) -> datetime | None:
+    """datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), or a relative
+    age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are UTC."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return (now or _utcnow()) - value
+    if isinstance(value, datetime):
+        moment = value
+    elif isinstance(value, date):
+        moment = datetime(value.year, value.month, value.day)
+    else:
+        relative = _RELATIVE_TIME_RE.match(str(value))
+        if relative:
+            seconds = float(relative.group(1)) * _UNIT_SECONDS[relative.group(2).lower()]
+            return (now or _utcnow()) - timedelta(seconds=seconds)
+        moment = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def human_age(when: datetime | None, now: datetime | None = None) -> str:
+    """datetime -> '3d ago' / '5mo ago' / 'just now'."""
+    if when is None:
+        return "-"
+    seconds = ((now or _utcnow()) - when).total_seconds()
+    for unit, size in (("y", 365 * 86400), ("mo", 30 * 86400), ("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size:
+            return f"{int(seconds // size)}{unit} ago"
+    return "just now"
+
+
+def human_money(usd: float | None) -> str:
+    """12.345 -> '$12.35', 0.004 -> '<$0.01', 12345.6 -> '$12,346', -3 -> '-$3.00'."""
+    if usd is None:
+        return "-"
+    sign, usd = ("-" if usd < 0 else ""), abs(usd)
+    if 0 < usd < 0.01:
+        return f"{sign}<$0.01"
+    return f"{sign}${usd:,.0f}" if usd >= 1000 else f"{sign}${usd:,.2f}"
+
+
+def human_duration(delta: timedelta | float | None) -> str:
+    """timedelta or seconds -> '45s', '3m 20s', '2h 05m'."""
+    if delta is None:
+        return "-"
+    seconds = int(delta.total_seconds() if isinstance(delta, timedelta) else delta)
+    if seconds < 60:
+        return f"{max(seconds, 0)}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60:02d}s"
+    return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count:,} {word}{'' if count == 1 else 's'}"
+
+
+def _isnt(count: int) -> str:
+    return "isn't" if count == 1 else "aren't"
+
+
+def _require(module: str, purpose: str) -> Any:
+    try:
+        return importlib.import_module(module)
+    except ImportError as exc:
+        raise ImportError(f"{purpose} needs `{module.split('.')[0]}` (pip install {module.split('.')[0]})") from exc
+
+
+def _error_code(exc: ClientError) -> str:
+    return exc.response.get("Error", {}).get("Code", "Unknown")
+
+
+def _error_name(exc: ClientError | BotoCoreError) -> str:
+    return _error_code(exc) if isinstance(exc, ClientError) else type(exc).__name__
+
+
+def _why(code: str, permission: str) -> str:
+    """'AccessDeniedException' -> 'AccessDeniedException; needs bedrock:GetDataSource'. Other codes stay as they are."""
+    return f"{code}; needs {permission}" if "denied" in code.lower() or code == "UnauthorizedOperation" else code
+
+
+_COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE)
+
+
+def _as_int(value: Any, name: str, *, hint: str = "") -> int:
+    """A number-of-items argument: 1000, '10,000', '10k' or '2m' -> int."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer():
+        return int(value)
+    match = _COUNT_RE.match(value) if isinstance(value, str) else None
+    if match:
+        number = float(match.group(1).replace(",", "").replace("_", "")) * {"": 1, "k": 1000, "m": 10**6}[
+            match.group(2).lower()]
+        if number.is_integer():
+            return int(number)
+    raise ValueError(f"{name} takes a number of items, like 1000 or '10k'{hint}; got {value!r}")
+
+
+def _as_count(value: Any, name: str) -> int | None:
+    """Like _as_int, for limits where None means no limit."""
+    return None if value is None else _as_int(value, name, hint=", or None for no limit")
+
+
+def _clip(text: str, width: int = 90) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+_KB_ID_RE = re.compile(r"^[0-9A-Z]{10}$")
+_KB_ARN_RE = re.compile(r"^arn:aws[\w-]*:bedrock:[\w-]+:\d{12}:knowledge-base/([0-9A-Za-z]{10})$")
+
+
+def parse_kb_ref(ref: str) -> tuple[str, str]:
+    """How a knowledge base was named: 'ABCDE12345' -> ('id', 'ABCDE12345'), 'support-docs' -> ('name',
+    'support-docs'), and an ARN (arn:aws:bedrock:<region>:<account>:knowledge-base/ABCDE12345) -> ('arn', 'ABCDE12345'),
+    the ID inside it."""
+    text = str(ref or "").strip()
+    if not text:
+        raise ValueError("Pass a knowledge base: its name, its 10-character ID or its ARN (kbs() lists them)")
+    match = _KB_ARN_RE.match(text)
+    if match:
+        return "arn", match.group(1)
+    if text.lower().startswith("arn:"):
+        raise ValueError(f"{text!r} isn't a knowledge base ARN; those look like "
+                         "arn:aws:bedrock:<region>:<account>:knowledge-base/<ID>")
+    return ("id", text) if _KB_ID_RE.match(text) else ("name", text)
+
+
+def _arn_region(arn: str) -> str:
+    """'arn:aws:bedrock:eu-west-1:123456789012:knowledge-base/X' -> 'eu-west-1' ('' for anything else)."""
+    parts = (arn or "").split(":")
+    return parts[3] if len(parts) > 5 and parts[0] == "arn" else ""
+
+
+def _model_id(arn: str | None) -> str:
+    """'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0' -> 'amazon.titan-embed-text-v2:0'."""
+    return (arn or "").rsplit("/", 1)[-1]
+
+
+def source_name(uri: str | None) -> str:
+    """The file name in a source location: 's3://docs/policies/refund-policy.pdf' -> 'refund-policy.pdf',
+    'https://example.com/help/refunds?x=1' -> 'refunds', 'https://example.com/' -> 'example.com'."""
+    if not uri:
+        return ""
+    text = str(uri).split("?", 1)[0].split("#", 1)[0]
+    scheme, _, rest = text.partition("://")
+    if not rest:
+        rest, scheme = scheme, ""
+    parts = [p for p in rest.split("/") if p]
+    if not parts:
+        return str(uri)
+    if len(parts) == 1 and scheme not in ("s3", ""):
+        return parts[0]  # just a host
+    return unquote(parts[-1])
+
+
+def sync_command(kb_id: str, data_source_id: str, region: str = "") -> str:
+    """The AWS CLI command that syncs one data source. This module never runs it: syncing changes the index."""
+    where = f" --region {region}" if region else ""
+    return f"aws bedrock-agent start-ingestion-job --knowledge-base-id {kb_id} --data-source-id {data_source_id}{where}"
+
+
+def sync_call(kb_id: str, data_source_id: str, region: str = "") -> str:
+    """The same sync as a boto3 call to copy into a cell."""
+    where = f", region_name={region!r}" if region else ""
+    return (f"boto3.client('bedrock-agent'{where}).start_ingestion_job(knowledgeBaseId={kb_id!r}, "
+            f"dataSourceId={data_source_id!r})")
+
+
+# =============================================================================
+# 2. Data models (what BedrockKBAnalyzer returns)
+# =============================================================================
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_RUNNING = ("STARTING", "IN_PROGRESS", "STOPPING")
+
+
+@dataclass
+class IngestionJob:
+    """One sync (ingestion job) of a data source. Counts are documents: files, web pages or records."""
+
+    id: str
+    data_source_id: str = ""
+    status: str = ""  # STARTING | IN_PROGRESS | COMPLETE | FAILED | STOPPING | STOPPED
+    started: datetime | None = None
+    updated: datetime | None = None
+    scanned: int = 0  # documents the sync looked at
+    metadata_scanned: int = 0  # <file>.metadata.json files it found
+    new: int = 0  # indexed for the first time
+    modified: int = 0  # indexed again because they changed
+    metadata_modified: int = 0
+    deleted: int = 0  # removed from the index because they're gone from the source
+    failed: int = 0  # couldn't be indexed (documents(status='FAILED') says why)
+    skipped: int = 0
+    failure_reasons: list[str] = field(default_factory=list)  # why the job itself failed (GetIngestionJob only)
+
+    @property
+    def running(self) -> bool:
+        return self.status in _RUNNING
+
+    @property
+    def duration(self) -> timedelta | None:
+        """How long it ran (so far, while it's running)."""
+        if self.started is None:
+            return None
+        end = _utcnow() if self.running else self.updated
+        return None if end is None else end - self.started
+
+    @property
+    def ok(self) -> bool:
+        """Finished, and every document it read was indexed."""
+        return self.status == "COMPLETE" and not self.failed
+
+
+@dataclass
+class DataSourceInfo:
+    """Where a knowledge base's documents come from and how they're cut into chunks. Parts that couldn't be read
+    are listed in `errors` (section -> error code)."""
+
+    id: str
+    name: str = ""
+    status: str = ""  # AVAILABLE | CREATING | UPDATING | DELETING | FAILED | DELETE_UNSUCCESSFUL
+    kb_id: str = ""
+    description: str = ""
+    source_type: str = ""  # S3 | WEB | CONFLUENCE | SHAREPOINT | SALESFORCE | CUSTOM | ...
+    location: str = ""  # e.g. 's3://bucket/prefix/', or the web site's seed URLs
+    bucket: str | None = None  # S3 data sources only
+    prefixes: list[str] = field(default_factory=list)  # S3 inclusion prefixes ([] = the whole bucket)
+    chunking: dict[str, Any] = field(default_factory=dict)  # chunkingConfiguration ({} = Bedrock's default)
+    parsing: dict[str, Any] = field(default_factory=dict)  # parsingConfiguration ({} = Bedrock's default)
+    transformation: str | None = None  # custom Lambda / context enrichment, described
+    deletion_policy: str | None = None  # DELETE | RETAIN: what happens to the chunks when the data source is deleted
+    created: datetime | None = None
+    updated: datetime | None = None
+    failure_reasons: list[str] = field(default_factory=list)
+    jobs: list[IngestionJob] = field(default_factory=list)  # recent syncs, newest first
+    last_sync: IngestionJob | None = None  # the newest sync, whatever its outcome
+    last_success: IngestionJob | None = None  # the newest COMPLETE sync among `jobs`
+    errors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class KnowledgeBaseInfo:
+    """A knowledge base's settings, data sources and their latest syncs. Parts that couldn't be read are listed in
+    `errors` (section -> error code)."""
+
+    id: str
+    name: str = ""
+    arn: str = ""
+    status: str = ""  # ACTIVE | CREATING | UPDATING | DELETING | FAILED | ...
+    kb_type: str = ""  # VECTOR | KENDRA | SQL | MANAGED
+    description: str = ""
+    embedding_model: str = ""  # model ID, e.g. 'amazon.titan-embed-text-v2:0'
+    embedding_dims: int | None = None
+    vector_store: str = ""  # OPENSEARCH_SERVERLESS | PINECONE | RDS | S3_VECTORS | ... (KENDRA / REDSHIFT for those)
+    vector_store_detail: dict[str, Any] = field(default_factory=dict)  # storageConfiguration, as AWS returns it
+    role_arn: str = ""
+    created: datetime | None = None
+    updated: datetime | None = None
+    failure_reasons: list[str] = field(default_factory=list)
+    data_sources: list[DataSourceInfo] = field(default_factory=list)
+    tags: dict[str, str] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def region(self) -> str:
+        return _arn_region(self.arn)
+
+    @property
+    def last_sync(self) -> IngestionJob | None:
+        """The newest sync of any of its data sources."""
+        jobs = [ds.last_sync for ds in self.data_sources if ds.last_sync]
+        return max(jobs, key=lambda j: j.started or _EPOCH, default=None)
+
+
+@dataclass
+class KBDocument:
+    """One document (file or record) of a data source, and whether it's searchable."""
+
+    data_source_id: str
+    uri: str  # s3://... for S3 data sources, the document ID for custom ones
+    status: str  # INDEXED | FAILED | PENDING | IN_PROGRESS | IGNORED | PARTIALLY_INDEXED | ...
+    reason: str = ""  # why it failed or was ignored
+    updated: datetime | None = None
+
+    @property
+    def name(self) -> str:
+        return source_name(self.uri)
+
+
+@dataclass
+class DocumentSummary:
+    """Counts of documents by status, and the most common reasons documents failed."""
+
+    total: int = 0
+    counts: dict[str, int] = field(default_factory=dict)  # status -> documents, most common first
+    reasons: list[tuple[str, int]] = field(default_factory=list)  # (reason, documents), most common first
+    truncated: bool = False  # stopped at `limit`: counts cover only the documents read
+    errors: dict[str, str] = field(default_factory=dict)  # data source ID -> error code (e.g. unsupported type)
+
+
+# =============================================================================
+# 3. Pure analysis (no AWS calls - works on the dicts AWS returns)
+# =============================================================================
+
+
+def parse_knowledge_base(desc: dict[str, Any]) -> KnowledgeBaseInfo:
+    """A GetKnowledgeBase 'knowledgeBase' dict (or a ListKnowledgeBases summary) -> KnowledgeBaseInfo.
+    Data sources, syncs and tags need their own calls: see BedrockKBAnalyzer.describe."""
+    cfg = desc.get("knowledgeBaseConfiguration") or {}
+    kind = cfg.get("type", "")
+    info = KnowledgeBaseInfo(
+        id=desc["knowledgeBaseId"], name=desc.get("name", ""), arn=desc.get("knowledgeBaseArn", ""),
+        status=desc.get("status", ""), kb_type=kind, description=desc.get("description", ""),
+        role_arn=desc.get("roleArn", ""), created=desc.get("createdAt"), updated=desc.get("updatedAt"),
+        failure_reasons=list(desc.get("failureReasons") or []))
+    embedding = cfg.get("vectorKnowledgeBaseConfiguration") or cfg.get("managedKnowledgeBaseConfiguration") or {}
+    info.embedding_model = _model_id(embedding.get("embeddingModelArn")) or ("managed by Bedrock" if kind == "MANAGED"
+                                                                           else "")
+    model_cfg = (embedding.get("embeddingModelConfiguration") or {}).get("bedrockEmbeddingModelConfiguration") or {}
+    info.embedding_dims = model_cfg.get("dimensions")
+    storage = desc.get("storageConfiguration") or {}
+    if storage:
+        info.vector_store, info.vector_store_detail = storage.get("type", ""), storage
+    elif kind == "KENDRA":
+        info.vector_store = "KENDRA"
+        info.vector_store_detail = {"type": "KENDRA", **(cfg.get("kendraKnowledgeBaseConfiguration") or {})}
+    elif kind == "SQL":
+        info.vector_store = "REDSHIFT"
+        info.vector_store_detail = {"type": "REDSHIFT", **(cfg.get("sqlKnowledgeBaseConfiguration") or {})}
+    elif kind == "MANAGED":
+        info.vector_store, info.vector_store_detail = "MANAGED", {"type": "MANAGED"}
+    return info
+
+
+def _web_urls(cfg: dict[str, Any]) -> list[str]:
+    source = cfg.get("sourceConfiguration") or {}
+    return [seed.get("url", "") for seed in (source.get("urlConfiguration") or {}).get("seedUrls", [])]
+
+
+def parse_data_source(desc: dict[str, Any]) -> DataSourceInfo:
+    """A GetDataSource 'dataSource' dict -> DataSourceInfo (its syncs need their own call)."""
+    cfg = desc.get("dataSourceConfiguration") or {}
+    kind = cfg.get("type", "")
+    ds = DataSourceInfo(
+        id=desc["dataSourceId"], name=desc.get("name", ""), status=desc.get("status", ""),
+        kb_id=desc.get("knowledgeBaseId", ""), description=desc.get("description", ""), source_type=kind,
+        deletion_policy=desc.get("dataDeletionPolicy"), created=desc.get("createdAt"), updated=desc.get("updatedAt"),
+        failure_reasons=list(desc.get("failureReasons") or []))
+    if kind == "S3":
+        s3cfg = cfg.get("s3Configuration") or {}
+        bucket = (s3cfg.get("bucketArn") or "").rsplit(":", 1)[-1]  # arn:aws:s3:::bucket
+        ds.bucket, ds.prefixes = bucket or None, list(s3cfg.get("inclusionPrefixes") or [])
+        ds.location = ", ".join(f"s3://{bucket}/{p}" for p in ds.prefixes) or f"s3://{bucket}/"
+    elif kind == "WEB":
+        ds.location = ", ".join(_web_urls(cfg.get("webConfiguration") or {}))
+    elif kind in ("CONFLUENCE", "SALESFORCE"):
+        source = (cfg.get(f"{kind.lower()}Configuration") or {}).get("sourceConfiguration") or {}
+        ds.location = source.get("hostUrl", "")
+    elif kind == "SHAREPOINT":
+        source = (cfg.get("sharePointConfiguration") or {}).get("sourceConfiguration") or {}
+        ds.location = ", ".join(source.get("siteUrls") or []) or source.get("domain", "")
+    elif kind == "CUSTOM":
+        ds.location = "documents sent through the API"
+    elif kind == "REDSHIFT_METADATA":
+        ds.location = "Redshift table descriptions"
+    ingestion = desc.get("vectorIngestionConfiguration") or {}
+    ds.chunking = ingestion.get("chunkingConfiguration") or {}
+    ds.parsing = ingestion.get("parsingConfiguration") or {}
+    steps = [f"Lambda {t['transformationFunction']['transformationLambdaConfiguration']['lambdaArn'].rsplit(':', 1)[-1]}"
+             " after chunking" for t in (ingestion.get("customTransformationConfiguration") or {}).get(
+                 "transformations", [])]
+    enrichment = (ingestion.get("contextEnrichmentConfiguration") or {}).get("bedrockFoundationModelConfiguration")
+    if enrichment:
+        steps.append(f"entity extraction with {_model_id(enrichment.get('modelArn'))}")
+    ds.transformation = "; ".join(steps) or None
+    return ds
+
+
+_JOB_STATISTICS = {
+    "numberOfDocumentsScanned": "scanned", "numberOfMetadataDocumentsScanned": "metadata_scanned",
+    "numberOfNewDocumentsIndexed": "new", "numberOfModifiedDocumentsIndexed": "modified",
+    "numberOfMetadataDocumentsModified": "metadata_modified", "numberOfDocumentsDeleted": "deleted",
+    "numberOfDocumentsFailed": "failed", "numberOfDocumentsSkipped": "skipped",
+}
+
+
+def parse_ingestion_job(desc: dict[str, Any]) -> IngestionJob:
+    """A GetIngestionJob 'ingestionJob' dict or a ListIngestionJobs summary -> IngestionJob. Only GetIngestionJob
+    returns failure_reasons."""
+    job = IngestionJob(id=desc.get("ingestionJobId", ""), data_source_id=desc.get("dataSourceId", ""),
+                       status=desc.get("status", ""), started=desc.get("startedAt"), updated=desc.get("updatedAt"),
+                       failure_reasons=list(desc.get("failureReasons") or []))
+    stats = desc.get("statistics") or {}
+    for key, attribute in _JOB_STATISTICS.items():
+        setattr(job, attribute, int(stats.get(key) or 0))
+    return job
+
+
+def parse_document(desc: dict[str, Any]) -> KBDocument:
+    """One ListKnowledgeBaseDocuments 'documentDetails' entry -> KBDocument."""
+    ident = desc.get("identifier") or {}
+    uri = (ident.get("s3") or {}).get("uri") or (ident.get("custom") or {}).get("id") or ""
+    return KBDocument(data_source_id=desc.get("dataSourceId", ""), uri=uri, status=desc.get("status", ""),
+                      reason=desc.get("statusReason") or "", updated=desc.get("updatedAt"))
+
+
+def describe_chunking(cfg: dict[str, Any] | None) -> str:
+    """chunkingConfiguration -> plain English: 'Fixed size: 300 tokens per chunk, 20% overlap'."""
+    cfg = cfg or {}
+    strategy = cfg.get("chunkingStrategy")
+    if not strategy:
+        return "Default: up to about 300 tokens per chunk, split at sentence ends"
+    if strategy == "FIXED_SIZE":
+        fixed = cfg.get("fixedSizeChunkingConfiguration") or {}
+        return (f"Fixed size: {fixed.get('maxTokens', 0):,} tokens per chunk, "
+                f"{fixed.get('overlapPercentage', 0)}% overlap")
+    if strategy == "HIERARCHICAL":
+        levels = [level.get("maxTokens", 0) for level in (cfg.get("hierarchicalChunkingConfiguration") or {}).get(
+            "levelConfigurations", [])] + [0, 0]
+        overlap = (cfg.get("hierarchicalChunkingConfiguration") or {}).get("overlapTokens", 0)
+        return (f"Hierarchical: {levels[0]:,}-token parents, {levels[1]:,}-token children, {overlap:,}-token overlap "
+                "(search matches children, answers get the parent)")
+    if strategy == "SEMANTIC":
+        semantic = cfg.get("semanticChunkingConfiguration") or {}
+        return f"Semantic: up to {semantic.get('maxTokens', 0):,} tokens, split where the topic changes"
+    if strategy == "NONE":
+        return "None: each file is one chunk"
+    return strategy
+
+
+_PARSERS = {
+    "BEDROCK_FOUNDATION_MODEL": "a foundation model reads text, tables, charts and images",
+    "BEDROCK_DATA_AUTOMATION": "Bedrock Data Automation reads text, tables, figures and images (billed per page)",
+    "SMART_PARSING": "smart parsing picks a parser for each file",
+    "MULTI_MODAL_EMBEDDINGS": "images are embedded as images",
+}
+
+
+def describe_parsing(cfg: dict[str, Any] | None) -> str:
+    """parsingConfiguration -> plain English: 'Default: the text only (...)'."""
+    cfg = cfg or {}
+    strategy = cfg.get("parsingStrategy")
+    if not strategy:
+        return "Default: the text only (images and charts inside files are skipped)"
+    text = _PARSERS.get(strategy, strategy)
+    text = text[0].upper() + text[1:]
+    model = _model_id((cfg.get("bedrockFoundationModelConfiguration") or {}).get("modelArn"))
+    if strategy == "BEDROCK_FOUNDATION_MODEL" and model:
+        text = text.replace("A foundation model", model)
+    if (cfg.get("bedrockFoundationModelConfiguration") or {}).get("parsingPrompt"):
+        text += ", with a custom parsing prompt"
+    return text
+
+
+_STORE_NAMES = {
+    "OPENSEARCH_SERVERLESS": "OpenSearch Serverless", "OPENSEARCH_MANAGED_CLUSTER": "OpenSearch Service",
+    "PINECONE": "Pinecone", "REDIS_ENTERPRISE_CLOUD": "Redis Enterprise Cloud", "RDS": "Aurora PostgreSQL",
+    "MONGO_DB_ATLAS": "MongoDB Atlas", "NEPTUNE_ANALYTICS": "Neptune Analytics", "S3_VECTORS": "S3 Vectors",
+    "KENDRA": "Kendra", "REDSHIFT": "Redshift (SQL)", "MANAGED": "managed by Bedrock",
+}
+_STORE_BILLED_BY = {"PINECONE": "Pinecone", "REDIS_ENTERPRISE_CLOUD": "Redis", "MONGO_DB_ATLAS": "MongoDB Atlas",
+                    "RDS": "Aurora", "OPENSEARCH_MANAGED_CLUSTER": "OpenSearch Service", "S3_VECTORS": "S3 Vectors",
+                    "NEPTUNE_ANALYTICS": "Neptune Analytics", "KENDRA": "Kendra", "REDSHIFT": "Redshift",
+                    "MANAGED": "Bedrock"}
+
+
+def store_name(kind: str) -> str:
+    """'OPENSEARCH_SERVERLESS' -> 'OpenSearch Serverless'."""
+    return _STORE_NAMES.get(kind, kind.replace("_", " ").title() if kind else "-")
+
+
+def describe_vector_store(cfg: dict[str, Any] | None) -> str:
+    """storageConfiguration -> plain English: 'OpenSearch Serverless collection abc123, index kb-index'."""
+    cfg = cfg or {}
+    kind = cfg.get("type", "")
+    name = store_name(kind)
+    if kind == "OPENSEARCH_SERVERLESS":
+        c = cfg.get("opensearchServerlessConfiguration") or {}
+        return f"{name} collection {c.get('collectionArn', '').rsplit('/', 1)[-1]}, index {c.get('vectorIndexName')}"
+    if kind == "OPENSEARCH_MANAGED_CLUSTER":
+        c = cfg.get("opensearchManagedClusterConfiguration") or {}
+        return f"{name} domain {c.get('domainArn', '').rsplit('/', 1)[-1]}, index {c.get('vectorIndexName')}"
+    if kind == "PINECONE":
+        c = cfg.get("pineconeConfiguration") or {}
+        namespace = f", namespace {c['namespace']}" if c.get("namespace") else ""
+        return f"{name} index {c.get('connectionString', '').split('//')[-1].split('.')[0]}{namespace}"
+    if kind == "REDIS_ENTERPRISE_CLOUD":
+        c = cfg.get("redisEnterpriseCloudConfiguration") or {}
+        return f"{name} at {c.get('endpoint')}, index {c.get('vectorIndexName')}"
+    if kind == "RDS":
+        c = cfg.get("rdsConfiguration") or {}
+        return (f"{name} cluster {c.get('resourceArn', '').rsplit(':', 1)[-1]}, table "
+                f"{c.get('databaseName')}.{c.get('tableName')} (pgvector)")
+    if kind == "MONGO_DB_ATLAS":
+        c = cfg.get("mongoDbAtlasConfiguration") or {}
+        return f"{name} collection {c.get('databaseName')}.{c.get('collectionName')}, index {c.get('vectorIndexName')}"
+    if kind == "NEPTUNE_ANALYTICS":
+        c = cfg.get("neptuneAnalyticsConfiguration") or {}
+        return f"{name} graph {c.get('graphArn', '').rsplit('/', 1)[-1]} (GraphRAG)"
+    if kind == "S3_VECTORS":
+        c = cfg.get("s3VectorsConfiguration") or {}
+        index = c.get("indexName") or (c.get("indexArn") or "").rsplit("/", 1)[-1]
+        return f"{name} index {index} in bucket {(c.get('vectorBucketArn') or '').rsplit('/', 1)[-1] or '?'}"
+    if kind == "KENDRA":
+        return f"{name} index {(cfg.get('kendraIndexArn') or '').rsplit('/', 1)[-1]}"
+    if kind == "REDSHIFT":
+        engine = ((cfg.get("redshiftConfiguration") or {}).get("queryEngineConfiguration") or {}).get("type", "")
+        return f"{name}: questions become SQL queries" + (f" on {engine.lower()} Redshift" if engine else "")
+    return name
+
+
+def summarize_documents(docs: Iterable[KBDocument], *, truncated: bool = False) -> DocumentSummary:
+    """Counts by status and the most common failure reasons."""
+    docs = list(docs)
+    counts = Counter(d.status for d in docs)
+    reasons = Counter(_clip(d.reason.strip(), 200) for d in docs if d.reason and d.status not in ("INDEXED",))
+    return DocumentSummary(total=len(docs), counts=dict(counts.most_common()), reasons=reasons.most_common(10),
+                           truncated=truncated)
+
+
+def vector_store_monthly_cost(kb: KnowledgeBaseInfo, prices: dict[str, float] | None = None) -> float | None:
+    """Estimated USD per month the vector store costs even with no traffic. Only OpenSearch Serverless is estimated
+    (its minimum OCUs, around the clock); other stores are billed by their own service, and this returns None."""
+    prices = BEDROCK_PRICES if prices is None else prices
+    if kb.vector_store != "OPENSEARCH_SERVERLESS":
+        return None
+    return prices["opensearch_ocu_hour"] * prices["opensearch_min_ocus"] * HOURS_PER_MONTH
+
+
+def idle_cost_label(kb: KnowledgeBaseInfo, prices: dict[str, float] | None = None) -> str:
+    """'$350.40' for OpenSearch Serverless, 'billed by Pinecone, not estimated' for the others."""
+    cost = vector_store_monthly_cost(kb, prices)
+    if cost is not None:
+        return human_money(cost)
+    return f"billed by {_STORE_BILLED_BY[kb.vector_store]}, not estimated" if kb.vector_store in _STORE_BILLED_BY else "-"
+
+
+# describe() section -> (what it is, the permission that reads it)
+_SECTIONS = {
+    "describe": ("the knowledge base", "bedrock:GetKnowledgeBase"),
+    "data_sources": ("its data sources", "bedrock:ListDataSources"),
+    "data_source": ("a data source's settings", "bedrock:GetDataSource"),
+    "ingestion": ("sync history", "bedrock:ListIngestionJobs"),
+    "documents": ("document status", "bedrock:ListKnowledgeBaseDocuments"),
+    "tags": ("tags", "bedrock:ListTagsForResource"),
+}
+
+
+def _fmt_day(moment: datetime | None) -> str:
+    return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _source_label(ds: DataSourceInfo) -> str:
+    return f"data source {ds.name!r}" if ds.name else f"data source {ds.id}"
+
+
+def _reasons_text(reasons: list[str], limit: int = 2) -> str:
+    return "; ".join(_clip(" ".join(r.split()), 200) for r in reasons[:limit]) or "no reason given"
+
+
+_METADATA_EXAMPLE = '{"metadataAttributes": {"team": "billing", "year": 2024}}'
+
+
+def kb_findings(info: KnowledgeBaseInfo, docs: DocumentSummary | None = None,
+                prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
+    """What's wrong with a knowledge base and what to do about it -> [(level, message)]. `docs` (from documents())
+    adds its findings when given."""
+    prices = BEDROCK_PRICES if prices is None else prices
+    found: list[tuple[str, str]] = []
+    region = info.region
+    if info.status == "FAILED" or info.status.endswith("_UNSUCCESSFUL"):
+        found.append(("warn", f"The knowledge base is {info.status}: {_reasons_text(info.failure_reasons)}. Searches "
+                              "and answers can fail until it's fixed. Check that its service role "
+                              f"({info.role_arn.rsplit('/', 1)[-1] or '?'}) can read the data sources and the vector "
+                              "store, then fix the settings in the Bedrock console."))
+    elif info.status and info.status != "ACTIVE":
+        found.append(("info", f"The knowledge base is {info.status}; wait until it's ACTIVE before searching it."))
+    failed_docs_named = False
+    for ds in info.data_sources:
+        label = _source_label(ds)
+        command = sync_command(info.id, ds.id, region)
+        if ds.status == "FAILED" or ds.status.endswith("_UNSUCCESSFUL"):
+            found.append(("warn", f"The {label} is {ds.status}: {_reasons_text(ds.failure_reasons)}. Fix its settings "
+                                  "in the Bedrock console, then sync it again."))
+        job = ds.last_sync
+        if "ingestion" in ds.errors:
+            pass
+        elif job is None:
+            found.append(("warn", f"The {label} has never been synced, so nothing from it is searchable until you "
+                                  f"sync: {command}"))
+        elif job.status == "FAILED":
+            found.append(("warn", f"The last sync of the {label} failed {human_age(job.started)} "
+                                  f"({_reasons_text(job.failure_reasons)}). Searches use what earlier syncs indexed; "
+                                  f"syncs() shows the history. Once the cause is fixed, sync again: {command}"))
+        elif job.running:
+            found.append(("info", f"The {label} is syncing now (started {human_age(job.started)}): results can "
+                                  "change until it finishes. syncs() shows its progress."))
+        elif job.failed:
+            failed_docs_named = True
+            found.append(("warn", f"The last sync of the {label} finished with "
+                                  f"{_plural(job.failed, 'document')} that failed to index, so "
+                                  f"{'it is' if job.failed == 1 else 'they are'} not searchable: "
+                                  "documents(status='FAILED') shows which and why."))
+        if (ds.source_type == "S3" and job is not None and job.status == "COMPLETE" and job.scanned
+                and not job.metadata_scanned):
+            found.append(("info", f"The last sync of the {label} found no metadata files, so where= filters match "
+                                  "nothing from it. Filtering needs a `<file>.metadata.json` next to each file, e.g. "
+                                  f"refund-policy.pdf.metadata.json holding {_METADATA_EXAMPLE}; sync after adding "
+                                  "them."))
+        strategy = ds.chunking.get("chunkingStrategy")
+        if strategy == "NONE":
+            found.append(("warn", f"The {label} doesn't chunk: each file is one chunk, so a long file becomes one "
+                                  "vector and text past the embedding model's input limit may not be searchable. "
+                                  "Unless your files are already short passages, create a data source with fixed-size, "
+                                  "semantic or hierarchical chunking (chunking can't be changed later) and sync it."))
+        elif strategy == "FIXED_SIZE" and not (ds.chunking.get("fixedSizeChunkingConfiguration") or {}).get(
+                "overlapPercentage"):
+            found.append(("info", f"The {label} cuts fixed-size chunks with 0% overlap, so a sentence cut at a chunk "
+                                  "boundary is split in two and may match neither half well. 10-20% overlap is "
+                                  "usual; chunking is set when a data source is created."))
+        if ds.deletion_policy == "RETAIN":
+            found.append(("info", f"The {label} keeps its data when deleted (deletion policy RETAIN): if you delete "
+                                  "this data source its chunks stay in the vector store and keep appearing in "
+                                  "answers. Set it to DELETE before deleting the data source."))
+    if docs is not None and docs.counts.get("FAILED") and not failed_docs_named:
+        top = f" The most common reason: {docs.reasons[0][0]}." if docs.reasons else ""
+        found.append(("warn", f"{_plural(docs.counts['FAILED'], 'document')} failed to index and "
+                              f"{_isnt(docs.counts['FAILED'])} searchable.{top} documents(status='FAILED') lists them."))
+    cost = vector_store_monthly_cost(info, prices)
+    if cost is not None:
+        found.append(("info", f"The vector store is OpenSearch Serverless, which costs about {human_money(cost)}/month "
+                              f"even when idle ({prices['opensearch_min_ocus']:g} OCUs minimum at "
+                              f"${prices['opensearch_ocu_hour']:g}/hour). Knowledge bases whose collections share a "
+                              "KMS key share those OCUs, and deleting a knowledge base doesn't delete its collection: "
+                              "remove unused collections in the OpenSearch Service console."))
+    if info.errors:
+        parts = [f"{_SECTIONS.get(k, (k, ''))[0]} ({_why(v, _SECTIONS[k][1]) if k in _SECTIONS else v})"
+                 for k, v in info.errors.items()]
+        found.append(("info", "Couldn't read " + ", ".join(parts) + "."))
+    return found
+
+
+
+def sync_findings(jobs: list[IngestionJob], names: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    """Patterns in a sync history (newest first, one or more data sources) -> [(level, message)]: syncs that keep
+    failing (with their reasons grouped), documents that keep failing, and syncs that seem stuck."""
+    names = names or {}
+    found: list[tuple[str, str]] = []
+    by_source: dict[str, list[IngestionJob]] = {}
+    for job in sorted(jobs, key=lambda j: j.started or _EPOCH, reverse=True):
+        by_source.setdefault(job.data_source_id, []).append(job)
+    for ds_id, history in by_source.items():
+        label = f"data source {names[ds_id]!r}" if names.get(ds_id) else f"data source {ds_id}"
+        latest = history[0]
+        failures = 0
+        for job in history:
+            if job.status != "FAILED":
+                break
+            failures += 1
+        if failures:
+            reasons = Counter(_clip(" ".join(r.split()), 160) for job in history[:failures] for r in job.failure_reasons)
+            grouped = "; ".join(f"{reason} ({count}x)" if count > 1 else reason for reason, count in reasons.most_common(3))
+            what = "The last sync" if failures == 1 else f"The last {failures} syncs"
+            found.append(("warn", f"{what} of the {label} failed ({grouped or 'no reason given'}). "
+                                  + ("Syncing again won't help until the cause is fixed: usually the knowledge base's "
+                                     "role can't read the source or write to the vector store." if failures > 1 else
+                                     "Fix the cause, then sync again.")))
+        finished = [job for job in history if job.status == "COMPLETE"]
+        if finished and finished[0].failed:
+            streak = 0
+            for job in finished:
+                if not job.failed:
+                    break
+                streak += 1
+            again = f" Each of the last {streak} syncs had failed documents, so this isn't a one-off." if streak > 1 else ""
+            found.append(("warn", f"The last finished sync of the {label} couldn't index "
+                                  f"{_plural(finished[0].failed, 'document')}: documents(status='FAILED') shows which "
+                                  f"and why.{again}"))
+        if latest.running and latest.duration and latest.duration > timedelta(hours=12):
+            found.append(("info", f"A sync of the {label} has been running for {human_duration(latest.duration)}. "
+                                  "Large sources can take hours; if it doesn't move, check it in the Bedrock console."))
+    return found
+
+
+# =============================================================================
+# 4. BedrockKBAnalyzer - pure logic layer (talks to AWS, returns data)
+# =============================================================================
+
+
+def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
+    """The ID in {ID: name} that `value` names (an ID, or a name in any case); None if nothing matches."""
+    if kind == "id" and value in names:
+        return value
+    hits = [kb_id for kb_id, name in names.items() if name.lower() == value.lower()]
+    if len(hits) > 1:
+        raise ValueError(f"{len(hits)} knowledge bases are named {value!r}; pass one of their IDs: {', '.join(hits)}")
+    return hits[0] if hits else None
+
+
+def _with_errors(ds: DataSourceInfo, errors: dict[str, str]) -> DataSourceInfo:
+    ds.errors.update(errors)
+    return ds
+
+
+class BedrockKBAnalyzer:
+    """Pure-logic Bedrock Knowledge Bases analysis: every method returns data; nothing is printed or written.
+
+    Methods take the knowledge base first, as an ID, a name (any case) or an ARN. Nothing here starts a sync or
+    changes a document; where one is needed, sync_command() gives the command to run.
+    `prices` overrides BEDROCK_PRICES for cost estimates. `clients` pre-fills the boto3 clients by service name
+    ('bedrock-agent', 'bedrock-agent-runtime', 'bedrock-runtime', 'bedrock', 's3'), e.g. to use stubbed ones.
+    """
+
+    def __init__(self, session: Any = None, *, region: str | None = None, profile: str | None = None,
+                 client: Any = None, clients: dict[str, Any] | None = None,
+                 prices: dict[str, float] | None = None):
+        self.session = session or boto3.Session(profile_name=profile, region_name=region)
+        self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
+        self._clients: dict[str, Any] = dict(clients or {})
+        if client is not None:
+            self._clients["bedrock-agent"] = client
+        self.prices = {**BEDROCK_PRICES, **(prices or {})}
+        self.max_workers = 8  # knowledge bases described in parallel by list_knowledge_bases
+        self._names: dict[str, str] | None = None  # knowledge base ID -> name
+
+    @property
+    def client(self) -> Any:
+        """The bedrock-agent client (settings, syncs, documents), made on first use so a missing region shows up as
+        a readable error."""
+        if "bedrock-agent" not in self._clients:
+            try:
+                self._clients["bedrock-agent"] = self.session.client("bedrock-agent", config=self._config)
+            except NoRegionError:
+                raise ValueError("No AWS region is set, and knowledge bases are regional. Pass one: "
+                                 "BedrockKBView(BedrockKBAnalyzer(region='us-east-1')), or set AWS_DEFAULT_REGION.") from None
+        return self._clients["bedrock-agent"]
+
+    @property
+    def region(self) -> str:
+        return self.client.meta.region_name
+
+    def _pages(self, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
+        return [item for page in self.client.get_paginator(operation).paginate(**params) for item in page.get(key, [])]
+
+    # ---------------------------------------------------------- knowledge bases
+
+    def _kb_summaries(self) -> list[dict[str, Any]]:
+        summaries = self._pages("list_knowledge_bases", "knowledgeBaseSummaries")
+        self._names = {s["knowledgeBaseId"]: s.get("name", "") for s in summaries}
+        return summaries
+
+    def knowledge_base_names(self, *, refresh: bool = False) -> dict[str, str]:
+        """{ID: name} of every knowledge base in the region (one ListKnowledgeBases, cached)."""
+        if refresh or self._names is None:
+            self._kb_summaries()
+        return dict(self._names or {})
+
+    def kb_name(self, kb_id: str) -> str:
+        """The name of a knowledge base already seen (its ID otherwise). Makes no AWS call."""
+        return (self._names or {}).get(kb_id) or kb_id
+
+    def resolve(self, kb: str) -> str:
+        """The ID of a knowledge base, given its ID, name (any case) or ARN. An unknown name raises a ValueError
+        that lists the knowledge bases in the region."""
+        kind, value = parse_kb_ref(kb)
+        if kind == "arn":
+            return value
+        listed_now = self._names is None
+        try:
+            names = self.knowledge_base_names()
+        except (ClientError, BotoCoreError):
+            if kind == "id":
+                return value  # can't list knowledge bases, but may still read this one
+            raise
+        found = _match_kb(names, kind, value)
+        if found is None and not listed_now:  # maybe created since the names were cached
+            names = self.knowledge_base_names(refresh=True)
+            found = _match_kb(names, kind, value)
+        if found is not None:
+            return found
+        close = difflib.get_close_matches(value.lower(), {n.lower(): n for n in names.values()}, n=3, cutoff=0.6)
+        close_names = [n for n in names.values() if n.lower() in close]
+        text = f"No knowledge base {value!r} in {self.region}."
+        if close_names:
+            text += f" Did you mean {' or '.join(map(repr, close_names))}?"
+        if names:
+            listed = sorted(names.values(), key=str.lower)
+            text += f" The ones here: {', '.join(listed[:15])}{', …' if len(listed) > 15 else ''}."
+        else:
+            text += " There are none in this region, and knowledge bases are regional."
+        raise ValueError(text + " kbs() lists them.")
+
+    def list_knowledge_bases(self, *, details: bool = True,
+                             progress: Callable[[int], None] | None = None) -> list[KnowledgeBaseInfo]:
+        """Every knowledge base in the region. details=True describes each one (in parallel): settings, data
+        sources and their latest syncs. One that can't be described keeps its error in `errors`."""
+        found = [parse_knowledge_base(summary) for summary in self._kb_summaries()]
+        if not details:
+            return found
+        done: list[KnowledgeBaseInfo] = []
+        with ThreadPoolExecutor(max_workers=max(1, self.max_workers)) as pool:
+            for info in pool.map(self._safe_describe, found):
+                done.append(info)
+                if progress:
+                    progress(len(done))
+        return done
+
+    def _safe_describe(self, basic: KnowledgeBaseInfo) -> KnowledgeBaseInfo:
+        try:
+            return self.describe(basic.id)
+        except (ClientError, BotoCoreError) as exc:
+            basic.errors["describe"] = _error_name(exc)
+            return basic
+
+    def describe(self, kb: str, *, jobs: int = 5) -> KnowledgeBaseInfo:
+        """Everything about a knowledge base: its settings, each data source's settings and last `jobs` syncs, and its
+        tags. A section that can't be read (e.g. a missing permission) is recorded in `errors` instead of raising."""
+        kb_id = self.resolve(kb)
+        info = parse_knowledge_base(self.client.get_knowledge_base(knowledgeBaseId=kb_id)["knowledgeBase"])
+
+        def get(errors: dict[str, str], section: str, call: Callable[[], Any]) -> Any:
+            try:
+                return call()
+            except (ClientError, BotoCoreError) as exc:
+                errors[section] = _error_name(exc)
+            return None
+
+        summaries = get(info.errors, "data_sources", lambda: self._pages(
+            "list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)) or []
+        for summary in summaries:
+            ds = DataSourceInfo(id=summary["dataSourceId"], name=summary.get("name", ""),
+                                status=summary.get("status", ""), kb_id=kb_id, description=summary.get("description", ""),
+                                updated=summary.get("updatedAt"))
+            desc = get(ds.errors, "data_source", lambda: self.client.get_data_source(
+                knowledgeBaseId=kb_id, dataSourceId=ds.id)["dataSource"])
+            if desc:
+                ds = _with_errors(parse_data_source(desc), ds.errors)
+            recent = get(ds.errors, "ingestion", lambda: self._recent_jobs(kb_id, ds.id, jobs))
+            if recent is not None:
+                self._set_jobs(ds, recent)
+                if ds.last_sync and ds.last_sync.status == "FAILED":
+                    self._add_reasons(kb_id, ds.last_sync)
+            for section in ("data_source", "ingestion"):
+                if section in ds.errors:
+                    info.errors.setdefault(section, ds.errors[section])
+            info.data_sources.append(ds)
+        if info.arn:
+            tags = get(info.errors, "tags", lambda: self.client.list_tags_for_resource(resourceArn=info.arn))
+            if tags is not None:
+                info.tags = dict(tags.get("tags") or {})
+        return info
+
+    # ------------------------------------------------------------- data sources
+
+    def data_sources(self, kb: str) -> list[DataSourceInfo]:
+        """The data sources of a knowledge base: ID, name and status (describe() adds their settings and syncs)."""
+        kb_id = self.resolve(kb)
+        return [DataSourceInfo(id=s["dataSourceId"], name=s.get("name", ""), status=s.get("status", ""), kb_id=kb_id,
+                               description=s.get("description", ""), updated=s.get("updatedAt"))
+                for s in self._pages("list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)]
+
+    def _pick_sources(self, kb_id: str, data_source: str | None) -> list[DataSourceInfo]:
+        """Every data source, or the one named by `data_source` (its ID or name, any case)."""
+        sources = self.data_sources(kb_id)
+        if data_source is None:
+            return sources
+        wanted = str(data_source).strip()
+        picked = [ds for ds in sources if ds.id == wanted] or [ds for ds in sources if ds.name.lower() == wanted.lower()]
+        if not picked:
+            names = ", ".join(f"{ds.name} ({ds.id})" for ds in sources) or "none"
+            raise ValueError(f"{self.kb_name(kb_id)} has no data source {wanted!r}; its data sources: {names}")
+        return picked[:1]
+
+    def _recent_jobs(self, kb_id: str, ds_id: str, n: int, status: str | None = None) -> list[IngestionJob]:
+        params: dict[str, Any] = {"knowledgeBaseId": kb_id, "dataSourceId": ds_id, "maxResults": max(1, min(n, 1000)),
+                                  "sortBy": {"attribute": "STARTED_AT", "order": "DESCENDING"}}
+        if status:
+            params["filters"] = [{"attribute": "STATUS", "operator": "EQ", "values": [status]}]
+        resp = self.client.list_ingestion_jobs(**params)
+        return [parse_ingestion_job(job) for job in resp.get("ingestionJobSummaries", [])][:n]
+
+    @staticmethod
+    def _set_jobs(ds: DataSourceInfo, jobs: list[IngestionJob]) -> None:
+        ds.jobs = jobs
+        ds.last_sync = jobs[0] if jobs else None
+        ds.last_success = next((job for job in jobs if job.status == "COMPLETE"), None)
+
+    def _add_reasons(self, kb_id: str, job: IngestionJob) -> None:
+        """Fill in why a job failed (only GetIngestionJob returns the reasons). Leaves it alone if that call fails."""
+        try:
+            desc = self.client.get_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=job.data_source_id,
+                                                 ingestionJobId=job.id)["ingestionJob"]
+        except (ClientError, BotoCoreError):
+            return
+        job.failure_reasons = list(desc.get("failureReasons") or [])
+
+    def ingestion_jobs(self, kb: str, data_source: str | None = None, n: int = 10) -> list[IngestionJob]:
+        """The last n syncs of every data source (or of one, by ID or name), newest first, with the reasons for
+        failed ones."""
+        kb_id = self.resolve(kb)
+        n = _as_int(n, "n")
+        jobs: list[IngestionJob] = []
+        for ds in self._pick_sources(kb_id, data_source):
+            jobs += self._recent_jobs(kb_id, ds.id, n)
+        jobs = sorted(jobs, key=lambda j: j.started or _EPOCH, reverse=True)[:n]
+        for job in [j for j in jobs if j.status == "FAILED" or j.failed][:10]:
+            self._add_reasons(kb_id, job)
+        return jobs
+
+    def documents(self, kb: str, data_source: str | None = None, status: str | Iterable[str] | None = None,
+                  limit: int | None = 10_000,
+                  progress: Callable[[int], None] | None = None) -> tuple[list[KBDocument], DocumentSummary]:
+        """Documents and whether each is searchable: (documents with `status`, or all of them; a summary of every
+        document read). Reads at most `limit` documents (None = all). Data sources whose type has no document list
+        (only S3 and custom ones do) are recorded in the summary's `errors`."""
+        kb_id = self.resolve(kb)
+        limit = _as_count(limit, "limit")
+        wanted = {s.upper() for s in ([status] if isinstance(status, str) else (status or []))}
+        docs: list[KBDocument] = []
+        errors: dict[str, str] = {}
+        truncated = False
+        for ds in self._pick_sources(kb_id, data_source):
+            try:
+                for page in self.client.get_paginator("list_knowledge_base_documents").paginate(
+                        knowledgeBaseId=kb_id, dataSourceId=ds.id):
+                    for desc in page.get("documentDetails", []):
+                        if limit is not None and len(docs) >= limit:
+                            truncated = True
+                            break
+                        docs.append(parse_document(desc))
+                    if progress:
+                        progress(len(docs))
+                    if truncated:
+                        break
+            except (ClientError, BotoCoreError) as exc:
+                errors[ds.id] = _error_name(exc)
+            if truncated:
+                break
+        summary = summarize_documents(docs, truncated=truncated)
+        summary.errors = errors
+        return [d for d in docs if not wanted or d.status in wanted], summary
+
+
+
+# =============================================================================
+# 5. BedrockKBView - notebook UI layer (renders what BedrockKBAnalyzer returns)
+# =============================================================================
+
+
+@dataclass
+class _Title:
+    text: str
+    sub: str = ""
+
+
+@dataclass
+class _Cards:
+    items: list[tuple[str, str]]
+
+
+@dataclass
+class _Table:
+    headers: list[str]
+    rows: list[list[Any]]
+    title: str = ""
+    bars: list[float] | None = None  # 0..1 per row, drawn as an extra column
+    bar_label: str = "Share"
+    tree: bool = False  # first column holds indented tree labels
+    max_rows: int | None = None  # None = view default, 0 = no cap
+
+
+@dataclass
+class _Note:
+    text: str
+    level: str = "info"  # 'info' | 'warn' | 'ok'
+
+
+@dataclass
+class _Text:
+    text: str
+    title: str = ""
+
+
+_CSS = """<style>
+.kba{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
+.kba h3{margin:10px 0 2px;font-size:16px}
+.kba h4{margin:14px 0 4px;font-size:13px}
+.kba .sub{opacity:.65;font-size:12px;margin-bottom:6px}
+.kba .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.kba .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
+.kba .card .l{font-size:11px;opacity:.65}
+.kba .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.kba .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
+.kba table.t{border-collapse:collapse;width:auto;font-size:inherit}
+.kba table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
+.kba table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
+.kba table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
+.kba table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kba table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.kba table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
+.kba .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
+.kba .track{vertical-align:middle;margin-right:6px}
+.kba .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
+.kba .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
+.kba .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
+.kba .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
+.kba .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
+.kba pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
+</style>"""
+
+_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
+
+
+def _esc(value: Any) -> str:
+    return html.escape("" if value is None else str(value))
+
+
+def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
+    cap = default_max if table.max_rows is None else table.max_rows
+    rows = table.rows if not cap else table.rows[:cap]
+    return rows, len(table.rows) - len(rows)
+
+
+def _render_html(blocks: list[Any], max_rows: int) -> str:
+    out = [_CSS, '<div class="kba">']
+    for block in blocks:
+        if isinstance(block, _Title):
+            out.append(f"<h3>{_esc(block.text)}</h3>")
+            if block.sub:
+                out.append(f'<div class="sub">{_esc(block.sub)}</div>')
+        elif isinstance(block, _Cards):
+            cards = "".join(f'<div class="card"><div class="l">{_esc(label)}</div><div class="v">{_esc(value)}</div></div>'
+                            for label, value in block.items)
+            out.append(f'<div class="cards">{cards}</div>')
+        elif isinstance(block, _Note):
+            out.append(f'<div class="note {block.level}">{_esc(block.text)}</div>')
+        elif isinstance(block, _Table):
+            if block.title:
+                out.append(f"<h4>{_esc(block.title)}</h4>")
+            if not block.rows:
+                out.append('<div class="more">(none)</div>')
+                continue
+            rows, hidden = _visible_rows(block, max_rows)
+            head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
+            head += f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
+            body = []
+            for i, row in enumerate(rows):
+                cells = []
+                for j, cell in enumerate(row):
+                    text = "" if cell is None else str(cell)
+                    css = "tree" if block.tree and j == 0 else ("n" if _NUMERIC_RE.match(text) else "")
+                    cells.append(f'<td class="{css}">{_esc(text)}</td>' if css else f"<td>{_esc(text)}</td>")
+                if block.bars is not None:
+                    pct = max(0.0, min(1.0, block.bars[i])) * 100
+                    cells.append(f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
+                                 f"</span></span>{pct:.1f}%</td>")
+                body.append(f"<tr>{''.join(cells)}</tr>")
+            out.append(f'<div class="tw"><table class="t"><thead><tr>{head}</tr></thead>'
+                       f'<tbody>{"".join(body)}</tbody></table></div>')
+            if hidden:
+                out.append(f'<div class="more">... {hidden:,} more rows not shown</div>')
+        elif isinstance(block, _Text):
+            if block.title:
+                out.append(f"<h4>{_esc(block.title)}</h4>")
+            out.append(f"<pre>{_esc(block.text)}</pre>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def _text_bar(fraction: float, width: int = 20) -> str:
+    fraction = max(0.0, min(1.0, fraction))
+    filled = round(fraction * width)
+    return "█" * filled + "░" * (width - filled) + f" {fraction * 100:5.1f}%"
+
+
+def _render_text(blocks: list[Any], max_rows: int) -> str:
+    out: list[str] = []
+    for block in blocks:
+        if isinstance(block, _Title):
+            out += ["", block.text, "=" * min(len(block.text), 100)] + ([block.sub] if block.sub else [])
+        elif isinstance(block, _Cards):
+            line = ""
+            for label, value in block.items:
+                item = f"{label}: {value}"
+                if line and len(line) + len(item) > 100:
+                    out.append(line)
+                    line = ""
+                line += ("   " if line else "") + item
+            out.append(line)
+        elif isinstance(block, _Note):
+            out.append({"warn": "[!] ", "ok": "[ok] "}.get(block.level, "[i] ") + block.text)
+        elif isinstance(block, _Table):
+            out.append("")
+            if block.title:
+                out.append(f"-- {block.title} --")
+            if not block.rows:
+                out.append("(none)")
+                continue
+            rows, hidden = _visible_rows(block, max_rows)
+            headers = list(block.headers) + ([block.bar_label] if block.bars is not None else [])
+            cells = [[_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
+                     + ([_text_bar(block.bars[i])] if block.bars is not None else []) for i, row in enumerate(rows)]
+            widths = [max([len(h)] + [len(r[j]) for r in cells]) for j, h in enumerate(headers)]
+
+            def line_of(values: list[str], widths: list[int] = widths) -> str:
+                return "  ".join(v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                                 for v, w in zip(values, widths)).rstrip()
+
+            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [line_of(r) for r in cells]
+            if hidden:
+                out.append(f"... {hidden:,} more rows not shown")
+        elif isinstance(block, _Text):
+            if block.title:
+                out += ["", f"-- {block.title} --"]
+            out.append(block.text)
+    return "\n".join(out)
+
+
+def _in_notebook() -> bool:
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return False
+    shell = get_ipython()
+    return shell is not None and type(shell).__name__ != "TerminalInteractiveShell"
+
+
+def _fmt_dt(moment: datetime | None) -> str:
+    return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _share(part: float, whole: float) -> float:
+    return part / whole if whole else 0.0
+
+
+def _count(value: int | None) -> str:
+    return "-" if value is None else f"{value:,}"
+
+
+_JOB_STATES = {"COMPLETE": "done", "FAILED": "FAILED", "IN_PROGRESS": "running", "STARTING": "starting",
+               "STOPPED": "stopped", "STOPPING": "stopping"}
+_DOC_STATES = {"INDEXED": "Indexed", "FAILED": "Failed", "PARTIALLY_INDEXED": "Partly indexed", "PENDING": "Pending",
+               "STARTING": "Starting", "IN_PROGRESS": "Indexing", "IGNORED": "Ignored", "NOT_FOUND": "Not found",
+               "METADATA_PARTIALLY_INDEXED": "Metadata partly indexed", "METADATA_UPDATE_FAILED": "Metadata failed",
+               "DELETING": "Deleting", "DELETE_IN_PROGRESS": "Deleting"}
+_DOC_ORDER = ["FAILED", "METADATA_UPDATE_FAILED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "IGNORED",
+              "NOT_FOUND", "PENDING", "STARTING", "IN_PROGRESS", "DELETING", "DELETE_IN_PROGRESS", "INDEXED"]
+_KB_TYPES = {"VECTOR": "vector search", "KENDRA": "Kendra index", "SQL": "SQL on Redshift", "MANAGED": "managed"}
+_DELETION = {"DELETE": "chunks deleted too", "RETAIN": "chunks kept (RETAIN)"}
+
+
+def _sync_label(job: IngestionJob | None) -> str:
+    """'done 3d ago', 'FAILED 2h ago', 'done 1d ago, 2 docs failed', 'never'."""
+    if job is None:
+        return "never"
+    text = f"{_JOB_STATES.get(job.status, job.status.lower())} {human_age(job.started)}"
+    return text + (f", {_plural(job.failed, 'doc')} failed" if job.failed else "")
+
+
+def _job_row(job: IngestionJob, names: dict[str, str]) -> list[str]:
+    return [names.get(job.data_source_id) or job.data_source_id, _fmt_dt(job.started), human_duration(job.duration),
+            _JOB_STATES.get(job.status, job.status.lower()), f"{job.scanned:,}", f"{job.new:,}", f"{job.modified:,}",
+            f"{job.deleted:,}", f"{job.failed:,}", _reasons_text(job.failure_reasons, 1) if job.failure_reasons else ""]
+
+
+def _model_label(model: str) -> str:
+    """'amazon.titan-embed-text-v2:0' stays as is; '' -> '-'."""
+    return model or "-"
+
+
+def _section(info: KnowledgeBaseInfo | DataSourceInfo, section: str, text: str) -> str:
+    return f"? ({info.errors[section]})" if section in info.errors else text
+
+
+class _Hint(ValueError):
+    """A question back to the user (e.g. which knowledge base), shown as a plain note rather than an error."""
+
+
+def _friendly_errors(method: Callable) -> Callable:
+    """Show AWS / input errors as a readable note instead of a traceback."""
+
+    @functools.wraps(method)
+    def wrapper(self: BedrockKBView, *args: Any, **kwargs: Any) -> None:
+        try:
+            return method(self, *args, **kwargs)
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
+            self._show([_Note(f"{code}: {self._explain(code, message)}  [{method.__name__}]", "warn")])
+        except _Hint as exc:
+            self._show([_Note(str(exc))])
+        except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
+            self._show([_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")])
+
+    return wrapper
+
+
+class BedrockKBView:
+    """Notebook UI over BedrockKBAnalyzer. Each method renders a report and returns nothing; for the underlying
+    data call the matching method on `view.core` (a BedrockKBAnalyzer).
+
+    kb: the knowledge base to use when a command isn't given one (a name, ID or ARN); use() changes it. Without
+    it, commands use the only knowledge base in the region, or say how to pick one.
+    mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
+    max_rows: default cap for long tables (set to 0 for no cap).
+    """
+
+    def __init__(self, core: BedrockKBAnalyzer | None = None, *, kb: str | None = None, mode: str = "auto",
+                 max_rows: int = 50):
+        if mode not in ("auto", "html", "text"):
+            raise ValueError("mode must be 'auto', 'html' or 'text'")
+        self.core = core or BedrockKBAnalyzer()
+        self.kb = kb
+        self.use_html = _in_notebook() if mode == "auto" else mode == "html"
+        self.max_rows = max_rows
+
+    # ------------------------------------------------------------------ plumbing
+
+    def _show(self, blocks: list[Any]) -> None:
+        if self.use_html:
+            from IPython.display import HTML, display
+
+            display(HTML(_render_html(blocks, self.max_rows)))
+        else:
+            print(_render_text(blocks, self.max_rows))
+
+    @contextmanager
+    def _progress(self, label: str = "Reading", unit: str = "items read") -> Iterator[Callable[[int], None]]:
+        last_update = [0.0]
+        handle = None
+        if self.use_html:
+            from IPython.display import HTML, display
+
+            handle = display(HTML(""), display_id=True)
+
+        def tick(count: int) -> None:
+            now = time.monotonic()
+            if now - last_update[0] < 0.5:
+                return
+            last_update[0] = now
+            if handle is not None:
+                handle.update(HTML(f'<div style="opacity:.6">{_esc(label)}... {count:,} {_esc(unit)}</div>'))
+            else:
+                print(f"\r{label}... {count:,} {unit}", end="", file=sys.stderr, flush=True)
+
+        try:
+            yield tick
+        finally:
+            if handle is not None:
+                handle.update(HTML(""))
+            elif last_update[0]:
+                print("\r" + " " * 50 + "\r", end="", file=sys.stderr, flush=True)
+
+    def help(self) -> None:
+        """This list."""
+        rows = []
+        for name, member in vars(type(self)).items():
+            if name.startswith("_") or not callable(member):
+                continue
+            target = inspect.unwrap(member)
+            params = str(inspect.signature(target)).replace("(self, ", "(").replace("(self)", "()")
+            rows.append([f"{name}{params}", (inspect.getdoc(target) or "").split("\n")[0]])
+        self._show([_Title("BedrockKBView commands", "Data versions of each live on .core (BedrockKBAnalyzer)"),
+                    _Table(["Command", "What it shows"], rows, max_rows=0)])
+
+    def _explain(self, code: str, message: str) -> str:
+        """The AWS error message plus what to do about it."""
+        lowered = message.lower()
+        if code == "ResourceNotFoundException" and "model" not in lowered:
+            return f"knowledge base (or data source) not found in {self.core.region}; kbs() lists them"
+        if code == "AccessDeniedException" and "model" in lowered:
+            return (f"{message} Enable the model in the Bedrock console (Model access), or pick one from models().")
+        if code == "AccessDeniedException":
+            return f"{message} README lists the read-only IAM permissions each command needs."
+        if code == "ValidationException" and "on-demand throughput" in lowered:
+            return ("this model needs an inference profile: pass model='<profile id>' (models() shows it, e.g. "
+                    "'us.<model id>').")
+        if code == "ValidationException" and "hybrid" in lowered:
+            return "this vector store only supports SEMANTIC search: drop search_type='HYBRID'."
+        if code in ("ThrottlingException", "TooManyRequestsException", "ServiceQuotaExceededException"):
+            return f"{message} Bedrock throttled the call: wait a few seconds and retry."
+        return message
+
+    def _price_basis(self) -> str:
+        return "us-east-1 list prices" if self.core.prices == BEDROCK_PRICES else "your prices"
+
+    def _kb(self, kb: str | None) -> str:
+        """The knowledge base a command works on: `kb`, else the view's default, else the only one in the region."""
+        if kb is not None:
+            return self.core.resolve(kb)
+        if self.kb is not None:
+            return self.core.resolve(self.kb)
+        names = self.core.knowledge_base_names()
+        if len(names) == 1:
+            return next(iter(names))
+        if not names:
+            raise _Hint(f"There are no knowledge bases in {self.core.region}. They're regional: try "
+                        "BedrockKBView(BedrockKBAnalyzer(region='us-west-2')).")
+        listed = sorted(names.values(), key=str.lower)
+        raise _Hint(f"Which knowledge base? There are {len(names)} in {self.core.region}: "
+                    f"{', '.join(listed[:15])}{', …' if len(listed) > 15 else ''}. Pass kb='{listed[0]}', or pick one for "
+                    f"every command with use('{listed[0]}').")
+
+    # ---------------------------------------------------------- knowledge bases
+
+    @_friendly_errors
+    def use(self, kb: str) -> None:
+        """Set the knowledge base that later commands use when you don't pass kb=."""
+        kb_id = self.core.resolve(kb)
+        self.kb = kb_id
+        name = self.core.kb_name(kb_id)
+        self._show([_Note(f"Using knowledge base {name} ({kb_id}) from now on. kb_info() describes it.", "ok")])
+
+    @_friendly_errors
+    def kbs(self) -> None:
+        """Every knowledge base in the region: status, type, vector store, embedding model, sources, documents,
+        last sync, estimated idle cost and warnings."""
+        with self._progress("Checking knowledge bases", unit="knowledge bases") as tick:
+            infos = sorted(self.core.list_knowledge_bases(progress=tick), key=lambda i: i.name.lower())
+        rows: list[list[str]] = []
+        warnings: list[list[str]] = []
+        unreadable: list[str] = []
+        idle: dict[str, float] = {}  # collection -> $/month, so knowledge bases sharing one count it once
+        never = 0
+        for info in infos:
+            if "describe" in info.errors:
+                unreadable.append(f"{info.name} ({_why(info.errors['describe'], 'bedrock:GetKnowledgeBase')})")
+                rows.append([info.name, info.id, info.status or "?", "?", "-", "-", "-", "-", "-", "-", "-"])
+                continue
+            found = [message for level, message in kb_findings(info, prices=self.core.prices) if level == "warn"]
+            warnings += [[info.name, message] for message in found]
+            cost = vector_store_monthly_cost(info, self.core.prices)
+            if cost is not None:
+                collection = (info.vector_store_detail.get("opensearchServerlessConfiguration") or {}).get(
+                    "collectionArn", info.id)
+                idle[collection] = cost
+            never += sum(1 for ds in info.data_sources if ds.last_sync is None and "ingestion" not in ds.errors)
+            scanned = [ds.last_success.scanned for ds in info.data_sources if ds.last_success]
+            rows.append([info.name, info.id, info.status, _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "-"),
+                         store_name(info.vector_store), _model_label(info.embedding_model),
+                         _section(info, "data_sources", f"{len(info.data_sources):,}"),
+                         f"{sum(scanned):,}" if scanned else "-", _section(info, "ingestion", _sync_label(info.last_sync)),
+                         idle_cost_label(info, self.core.prices) if cost is not None else "-", str(len(found))])
+        blocks: list[Any] = [
+            _Title(f"Knowledge bases in {self.core.region} ({len(infos)})",
+                   "documents = files the last successful sync read · idle cost is the OpenSearch Serverless minimum "
+                   f"at {self._price_basis()}, before any searches"),
+            _Cards([("Knowledge bases", f"{len(infos):,}"),
+                    ("Data sources", f"{sum(len(i.data_sources) for i in infos):,}"),
+                    ("Never synced", f"{never:,} data source{'' if never == 1 else 's'}"),
+                    ("Est. idle cost / month", human_money(sum(idle.values())) if idle else "-"),
+                    ("With warnings", f"{len({name for name, _ in warnings}):,}")]),
+        ]
+        if not infos:
+            blocks.append(_Note(f"No knowledge bases in {self.core.region}. They're regional: try "
+                                "BedrockKBView(BedrockKBAnalyzer(region='us-west-2'))."))
+            self._show(blocks)
+            return
+        if unreadable:
+            blocks.append(_Note(f"Couldn't describe {', '.join(unreadable)}.", "warn"))
+        blocks.append(_Table(["Name", "ID", "Status", "Type", "Vector store", "Embedding model", "Sources", "Documents",
+                              "Last sync", "Est. idle $/month", "Warnings"], rows, max_rows=0))
+        if warnings:
+            blocks.append(_Table(["Knowledge base", "Warning"], warnings, max_rows=0,
+                                 title="Warnings (kb_info(name) shows every finding for one knowledge base)"))
+        else:
+            blocks.append(_Note("kb_info(name) shows one knowledge base's settings in plain English, its data sources "
+                                "and syncs, and every finding."))
+        self._show(blocks)
+
+    @_friendly_errors
+    def kb_info(self, kb: str | None = None) -> None:
+        """Settings in plain English, data sources (chunking, parsing, last sync), recent syncs, findings and cost.
+        Also tags, and how to try the knowledge base."""
+        info = self.core.describe(self._kb(kb))
+        cost = vector_store_monthly_cost(info, self.core.prices)
+        embedding = _model_label(info.embedding_model) + (f" ({info.embedding_dims:,} dims)" if info.embedding_dims
+                                                          else "")
+        blocks: list[Any] = [
+            _Title(f"Knowledge base {info.name}", " · ".join(filter(None, [info.id, _clip(info.description, 120)]))),
+            _Cards([("Status", info.status or "?"), ("Type", _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "?")),
+                    ("Vector store", store_name(info.vector_store)), ("Embedding model", embedding),
+                    ("Data sources", _section(info, "data_sources", f"{len(info.data_sources):,}")),
+                    ("Last sync", _section(info, "ingestion", _sync_label(info.last_sync))),
+                    ("Est. idle cost / month", human_money(cost) if cost is not None else "not estimated"),
+                    ("Created", _fmt_dt(info.created))]),
+        ]
+        blocks += [_Note(message, level) for level, message in kb_findings(info, prices=self.core.prices)]
+        settings = [["Vector store", describe_vector_store(info.vector_store_detail)],
+                    ["Embedding model", embedding],
+                    ["Idle cost", f"about {human_money(cost)}/month ({self._price_basis()})" if cost is not None
+                     else idle_cost_label(info, self.core.prices)],
+                    ["Service role", info.role_arn or "-"], ["ARN", info.arn or "-"],
+                    ["Last changed", _fmt_dt(info.updated)]]
+        blocks.append(_Table(["Setting", "Value"], settings, title="Settings", max_rows=0))
+        rows = [[f"{ds.name} ({ds.id})", ds.source_type or "?", _section(ds, "data_source", ds.location or "-"),
+                 _section(ds, "data_source", describe_chunking(ds.chunking)),
+                 _section(ds, "data_source", describe_parsing(ds.parsing))
+                 + (f"; then {ds.transformation}" if ds.transformation else ""),
+                 _DELETION.get(ds.deletion_policy or "", ds.deletion_policy or "-"),
+                 _section(ds, "ingestion", _sync_label(ds.last_sync))] for ds in info.data_sources]
+        blocks.append(_Table(["Data source", "Type", "Location", "Chunking", "Parsing", "When deleted", "Last sync"],
+                             rows, title="Data sources", max_rows=0))
+        jobs = sorted((job for ds in info.data_sources for job in ds.jobs), key=lambda j: j.started or _EPOCH,
+                      reverse=True)[:5]
+        if jobs:
+            names = {ds.id: ds.name for ds in info.data_sources}
+            blocks.append(_Table(["Data source", "Started", "Took", "Status", "Scanned", "New", "Modified", "Deleted",
+                                  "Failed"], [_job_row(job, names)[:9] for job in jobs],
+                                 title="Recent syncs (syncs() shows more, with reasons)", max_rows=0))
+        if info.tags:
+            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(info.tags.items())], title="Tags"))
+        hint = "" if self.kb in (info.id, info.name) else f"kb={info.name!r}"
+        blocks.append(_Note(f"Next: syncs({hint}) shows the sync history with reasons; documents({hint}) shows "
+                            "which files are searchable."))
+        self._show(blocks)
+
+    @_friendly_errors
+    def syncs(self, kb: str | None = None, *, data_source: str | None = None, n: int = 10) -> None:
+        """Sync history: when, how long, status, and scanned / new / modified / deleted / failed counts, with
+        why syncs failed."""
+        kb_id = self._kb(kb)
+        jobs = self.core.ingestion_jobs(kb_id, data_source, n=n)
+        sources = self.core.data_sources(kb_id)
+        names = {ds.id: ds.name for ds in sources}
+        name = self.core.kb_name(kb_id)
+        last_ok = next((job for job in jobs if job.status == "COMPLETE"), None)
+        latest = jobs[0] if jobs else None
+        sub = f"newest first · {_plural(len(jobs), 'sync')}" + (f" of data source {data_source}" if data_source else "")
+        blocks: list[Any] = [
+            _Title(f"Syncs of {name}", sub),
+            _Cards([("Syncs shown", f"{len(jobs):,}"), ("Failed", f"{sum(j.status == 'FAILED' for j in jobs):,}"),
+                    ("Last successful", human_age(last_ok.started) if last_ok else "none shown"),
+                    ("Docs failed (latest)", f"{latest.failed:,}" if latest else "-"),
+                    ("Latest took", human_duration(latest.duration) if latest else "-")]),
+        ]
+        if not jobs:
+            blocks.append(_Note("No syncs yet, so nothing is searchable. Sync each data source: "
+                                + "; ".join(sync_command(kb_id, ds.id, self.core.region) for ds in sources[:3]), "warn"))
+            self._show(blocks)
+            return
+        blocks += [_Note(message, level) for level, message in sync_findings(jobs, names)]
+        blocks.append(_Table(["Data source", "Started", "Took", "Status", "Scanned", "New", "Modified", "Deleted",
+                              "Failed", "Why it failed"], [_job_row(job, names) for job in jobs], max_rows=0))
+        picked = [ds for ds in sources if not data_source or data_source in (ds.id, ds.name)] or sources
+        commands = [f"{sync_command(kb_id, ds.id, self.core.region)}   # {ds.name}" for ds in picked[:5]]
+        commands.append(f"# or from Python: {sync_call(kb_id, picked[0].id, self.core.region)}" if picked else "")
+        blocks.append(_Text("\n".join(filter(None, commands)),
+                            title="To sync again (this tool never starts a sync: it changes the index)"))
+        self._show(blocks)
+
+    @_friendly_errors
+    def documents(self, kb: str | None = None, *, data_source: str | None = None, status: str | None = None,
+                  n: int = 50) -> None:
+        """Documents by status (indexed / failed / pending ...), failed ones first with the reason, and the command to
+        sync again."""
+        kb_id = self._kb(kb)
+        n = _as_int(n, "n")
+        with self._progress("Listing documents", unit="documents") as tick:
+            docs, summary = self.core.documents(kb_id, data_source, status=status, progress=tick)
+        sources = {ds.id: ds for ds in self.core.data_sources(kb_id)}
+        sub = f"{summary.total:,} documents read" + (" (stopped at the limit, so counts are partial: use .core.documents"
+                                                      "(..., limit=None) for all)" if summary.truncated else "")
+        if status:
+            sub += f" · showing status {status.upper()}"
+        cards = [("Documents", f"{summary.total:,}")]
+        cards += [(_DOC_STATES.get(state, state.title()), f"{count:,}") for state, count in
+                  sorted(summary.counts.items(), key=lambda kv: _DOC_ORDER.index(kv[0]) if kv[0] in _DOC_ORDER else 99)]
+        blocks: list[Any] = [_Title(f"Documents in {self.core.kb_name(kb_id)}", sub), _Cards(cards)]
+        for ds_id, code in summary.errors.items():
+            ds = sources.get(ds_id)
+            kind = f"{ds.name} ({ds.id})" if ds else ds_id
+            blocks.append(_Note(f"Couldn't list the documents of data source {kind}: "
+                                f"{_why(code, 'bedrock:ListKnowledgeBaseDocuments')}. Document status is only kept for "
+                                "S3 and custom data sources; syncs() shows the others' failed counts."))
+        failed = summary.counts.get("FAILED", 0)
+        if failed:
+            top = f" Most common reason: {summary.reasons[0][0]}." if summary.reasons else ""
+            commands = "; ".join(sync_command(kb_id, ds_id, self.core.region) for ds_id in
+                                 sorted({d.data_source_id for d in docs if d.status == "FAILED"} or set(sources))[:3])
+            blocks.append(_Note(f"{_plural(failed, 'document')} failed to index and {_isnt(failed)} searchable.{top} Fix or "
+                                f"replace the files (see the reasons below), then sync again: {commands}", "warn"))
+        if not summary.total and not summary.errors:
+            blocks.append(_Note("No documents yet: the data sources haven't been synced, or they're empty. syncs() "
+                                "shows the sync history."))
+        ordered = sorted(docs, key=lambda d: (_DOC_ORDER.index(d.status) if d.status in _DOC_ORDER else 99, d.uri))
+        rows = [[_DOC_STATES.get(d.status, d.status), d.name or d.uri, sources[d.data_source_id].name
+                 if d.data_source_id in sources else d.data_source_id, d.reason or "", human_age(d.updated)]
+                for d in ordered[:n]]
+        if docs or status:
+            blocks.append(_Table(["Status", "Document", "Data source", "Reason", "Updated"], rows, max_rows=0,
+                                 title=f"Documents ({'failed first' if not status else status.upper()})"))
+        if len(ordered) > n:
+            blocks.append(_Note(f"{len(ordered) - n:,} more not shown: pass n= for more, or use .core.documents(...) "
+                                "for all of them."))
+        self._show(blocks)
+
