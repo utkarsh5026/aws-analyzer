@@ -21,6 +21,8 @@ fastavro==1.12.2
 openpyxl==3.1.5
 # Optional for users (PDF text); installed here so the PDF tests run.
 pypdf==6.19.0
+# Optional for users (progress bars); installed here so the tqdm path is tested.
+tqdm==4.70.1
 
 # Lint
 ruff==0.16.8

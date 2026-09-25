@@ -14,7 +14,7 @@ of every report to a standalone page.
 Demo data (moto, us-east-1, everything synthetic):
   s3        demo-lake (versioned): raw/events/YYYY/MM/DD/ ~1,000 small gzipped JSON-lines files over 90 days,
             raw/backfill/ duplicates of a week of them, curated/orders/ parquet + curated/customers.csv (metadata,
-            tags), logs/app/ backdated 1-3 years, archive/ in GLACIER, reports/monthly/ small STANDARD_IA files,
+            tags), exports/ a multipart re-upload of one parquet file (same content, different ETag), logs/app/ backdated 1-3 years, archive/ in GLACIER, reports/monthly/ small STANDARD_IA files,
             reports/daily.csv overwritten 4 times, 3 deleted files under reports/, tmp/ with an empty file and an
             unfinished multipart upload, a policy sharing curated/ with another account and not requiring HTTPS,
             a lifecycle rule for tmp/, tags, CloudWatch size metrics. demo-models: a SageMaker-style
@@ -110,6 +110,15 @@ def seed_s3() -> None:
             buffer = io.BytesIO()
             pq.write_table(table, buffer, row_group_size=1000)
             put(f"curated/orders/part-{part:05d}.parquet", buffer.getvalue(), age_days=20 + part)
+        # exports/: the same parquet file uploaded again in parts, so its ETag differs (only a SHA-256 of the
+        # content shows it's a copy).
+        export = s3.create_multipart_upload(Bucket=lake, Key="exports/orders-part-0.parquet")
+        body = s3.get_object(Bucket=lake, Key="curated/orders/part-00000.parquet")["Body"].read()
+        part = s3.upload_part(Bucket=lake, Key="exports/orders-part-0.parquet", UploadId=export["UploadId"],
+                              PartNumber=1, Body=body)
+        s3.complete_multipart_upload(Bucket=lake, Key="exports/orders-part-0.parquet", UploadId=export["UploadId"],
+                                     MultipartUpload={"Parts": [{"PartNumber": 1, "ETag": part["ETag"]}]})
+        _backdate(lake, "exports/orders-part-0.parquet", NOW - timedelta(days=5))
     except ImportError:
         print("(pyarrow isn't installed: no parquet files in the demo bucket)", file=sys.stderr)
     csv = "user_id,name,city,signup\n" + "".join(

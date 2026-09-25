@@ -1379,6 +1379,19 @@ def test_ui_without_a_region(monkeypatch, capsys):
     assert "No AWS region is set" in run(capsys, ui.kbs)  # ...and a note that says what to pass
 
 
+def test_ui_progress_options(capsys, monkeypatch):
+    with pytest.raises(ValueError, match="progress must be"):
+        BedrockKBView(mode="text", progress="fancy")
+    monkeypatch.setattr(kbmod, "_progress_bar_class", lambda notebook: None)  # no tqdm: a plain line
+    clock = iter(range(100))
+    monkeypatch.setattr(kbmod.time, "monotonic", lambda: next(clock))
+    for progress, shown in (("auto", True), ("plain", True), ("off", False)):
+        with BedrockKBView(mode="text", progress=progress)._progress("Reading", unit="items") as tick:
+            tick(1500)
+            tick(3000)
+        assert ("Reading... 3,000 items" in capsys.readouterr().err) is shown
+
+
 def test_ui_help(ui, capsys):
     out = run(capsys, ui.help)
     assert "BedrockKBView commands" in out and "kb_info(kb: 'str | None' = None)" in out

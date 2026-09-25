@@ -2717,6 +2717,60 @@ def _in_notebook() -> bool:
     return shell is not None and type(shell).__name__ != "TerminalInteractiveShell"
 
 
+def _progress_bar_class(notebook: bool) -> Any:
+    """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
+    try:
+        if notebook:
+            importlib.import_module("ipywidgets")
+            return importlib.import_module("tqdm.notebook").tqdm
+        return importlib.import_module("tqdm").tqdm
+    except Exception:  # not installed, or too old to import cleanly: the plain progress line takes over
+        return None
+
+
+def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
+    """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
+    options: dict[str, Any] = {"desc": label, "total": total, "leave": False, "delay": 0.5, "mininterval": 0.25,
+                               "dynamic_ncols": True, "disable": False, "unit_scale": True}
+    if unit == "B":
+        options.update(unit="B", unit_divisor=1024)
+    else:
+        known = total is not None
+        counts = "{percentage:3.0f}%|{bar}| {n:,}/{total:,}" if known else "{n:,}"
+        timing = "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
+        options.update(unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]")
+    return bar_class(**options)
+
+
+def _duration(seconds: float) -> str:
+    """0.42 -> '0.4s', 42.4 -> '42s', 125 -> '2m 05s', 7500 -> '2h 05m'."""
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
+    return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60):02d}m"
+
+
+def _progress_text(label: str, unit: str, count: int, total: int | None, elapsed: float) -> str:
+    """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
+    amount = human_size if unit == "B" else (lambda n: f"{n:,}")
+    text = f"{label}... {amount(count)}"
+    if total:
+        text += f" of {amount(total)}"
+    text += "" if unit == "B" else f" {unit}"
+    if total:
+        text += f" ({min(count / total, 1):.0%})"
+    text += f" · {_duration(elapsed)}"
+    if elapsed >= 1 and count:
+        rate = count / elapsed
+        text += f" · {human_size(rate)}/s" if unit == "B" else f" · {rate:,.0f}/s" if rate >= 10 else f" · {rate:.1f}/s"
+        if total and total > count:
+            text += f" · about {_duration((total - count) / rate)} left"
+    return text
+
+
 def _fmt_dt(moment: datetime | None) -> str:
     return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
@@ -2830,16 +2884,21 @@ class BedrockKBView:
     it, commands use the only knowledge base in the region, or say how to pick one.
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
     max_rows: default cap for long tables (set to 0 for no cap).
+    progress: 'auto' (a tqdm bar while long commands run, when tqdm is installed; else a line with the count,
+    rate and time left), 'plain' (always that line) or 'off'.
     """
 
     def __init__(self, core: BedrockKBAnalyzer | None = None, *, kb: str | None = None, mode: str = "auto",
-                 max_rows: int = 50):
+                 max_rows: int = 50, progress: str = "auto"):
         if mode not in ("auto", "html", "text"):
             raise ValueError("mode must be 'auto', 'html' or 'text'")
+        if progress not in ("auto", "plain", "off"):
+            raise ValueError("progress must be 'auto', 'plain' or 'off'")
         self.core = core or BedrockKBAnalyzer()
         self.kb = kb
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
+        self.progress = progress
         self._last: Retrieval | Answer | None = None  # what chunk() reads
         self._conversation: dict[str, Any] | None = None  # what follow_up() continues
 
@@ -2854,31 +2913,82 @@ class BedrockKBView:
             print(_render_text(blocks, self.max_rows))
 
     @contextmanager
-    def _progress(self, label: str = "Reading", unit: str = "items read") -> Iterator[Callable[[int], None]]:
-        last_update = [0.0]
-        handle = None
-        if self.use_html:
-            from IPython.display import HTML, display
+    def _progress(self, label: str = "Reading", unit: str = "items read") -> Iterator[Callable[..., None]]:
+        """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
+        and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
+        Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
+        at a time: when a nested _progress starts showing, the outer one's bar goes away."""
+        bar_class = [_progress_bar_class(self.use_html and _in_notebook()) if self.progress == "auto" else None]
+        bar: list[Any] = [None]
+        handle: list[Any] = [None]
+        started: list[Any] = [time.monotonic(), None]  # when the current total started, and that total
+        shown, width, stopped = [0.0], [0], [False]
 
-            handle = display(HTML(""), display_id=True)
+        def close_bar() -> None:
+            if bar[0] is not None:
+                if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
+                    bar[0].total = bar[0].n  # done early (a file it couldn't read): no red "failed" widget
+                bar[0].close()
+                bar[0] = None
 
-        def tick(count: int) -> None:
-            now = time.monotonic()
-            if now - last_update[0] < 0.5:
+        def clear() -> None:
+            close_bar()
+            if handle[0] is not None:
+                from IPython.display import HTML
+
+                handle[0].update(HTML(""))
+            elif width[0]:
+                print("\r" + " " * width[0] + "\r", end="", file=sys.stderr, flush=True)
+                width[0] = 0
+
+        def take_over() -> None:
+            owner = getattr(self, "_progress_owner", None)
+            if owner is not clear:
+                if owner is not None:
+                    owner()
+                self._progress_owner = clear
+
+        def tick(count: int, total: int | None = None) -> None:
+            if self.progress == "off":
                 return
-            last_update[0] = now
-            if handle is not None:
-                handle.update(HTML(f'<div style="opacity:.6">{_esc(label)}... {count:,} {_esc(unit)}</div>'))
+            if bar_class[0] is not None:
+                try:
+                    if bar[0] is not None and total != bar[0].total:
+                        close_bar()
+                    if bar[0] is None:
+                        take_over()
+                        bar[0] = _progress_bar(bar_class[0], label, unit, total)
+                    bar[0].update(count - bar[0].n)
+                    return
+                except Exception:  # an old tqdm or a broken widget front end: use the plain line instead
+                    bar_class[0] = None
+            now = time.monotonic()
+            if total != started[1]:
+                started[:] = [now, total]
+            if now - started[0] < 0.5 or now - shown[0] < 0.5:
+                return
+            shown[0] = now
+            take_over()
+            text = _progress_text(label, unit, count, total, now - started[0])
+            if self.use_html:
+                from IPython.display import HTML, display
+
+                if handle[0] is None:
+                    handle[0] = display(HTML(""), display_id=True)
+                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
-                print(f"\r{label}... {count:,} {unit}", end="", file=sys.stderr, flush=True)
+                width[0] = max(width[0], len(text))
+                print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
 
         try:
             yield tick
+        except BaseException:
+            stopped[0] = True  # interrupted: a tqdm widget stays, red, where it stopped
+            raise
         finally:
-            if handle is not None:
-                handle.update(HTML(""))
-            elif last_update[0]:
-                print("\r" + " " * 50 + "\r", end="", file=sys.stderr, flush=True)
+            clear()
+            if getattr(self, "_progress_owner", None) is clear:
+                self._progress_owner = None
 
     def help(self) -> None:
         """This list."""

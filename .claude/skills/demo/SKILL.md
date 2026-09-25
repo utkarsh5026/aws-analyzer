@@ -33,6 +33,7 @@ service is given, run a short tour:
 - **S3**, bucket `demo-lake` (versioned):
   - `raw/events/` has about 1,000 small files, and `raw/backfill/` duplicates a week of them.
   - `curated/` has parquet files and `customers.csv` with metadata and tags.
+  - `exports/` holds one of those parquet files uploaded again in parts: same content, different ETag.
   - `logs/app/` is 1–3 years old, `archive/` is in GLACIER, and `reports/monthly/` holds small STANDARD_IA files.
   - `reports/` also holds an overwritten file and 3 deleted ones.
   - `tmp/` has an unfinished multipart upload.

@@ -42,6 +42,7 @@ import bz2
 import fnmatch
 import functools
 import gzip
+import hashlib
 import heapq
 import html
 import importlib
@@ -55,15 +56,17 @@ import mimetypes
 import os
 import posixpath
 import re
+import shutil
 import struct
 import sys
 import tarfile
+import threading
 import time
 import zipfile
 import zlib
 from xml.etree import ElementTree
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -882,6 +885,90 @@ class CompareResult:
 
 
 @dataclass
+class DuplicateGroup:
+    """Files with identical content. The first is the one to keep (see group_duplicates); the rest are copies."""
+
+    size: int
+    objects: list[ObjectInfo]
+    sha256: str | None = None  # hex SHA-256 of the content, when it was read
+    # How the files are known to match: 'ETag' (from the listing), 'SHA-256' (every file's content hashed) or
+    # 'SHA-256 + ETag' (some by each, e.g. one file per ETag hashed)
+    matched_by: str = "ETag"
+    monthly_cost: float = 0.0  # estimated USD per month to store the copies
+
+    @property
+    def keep(self) -> ObjectInfo:
+        return self.objects[0]
+
+    @property
+    def copies(self) -> list[ObjectInfo]:
+        return self.objects[1:]
+
+    @property
+    def reclaimable(self) -> int:
+        return self.size * (len(self.objects) - 1)
+
+
+@dataclass
+class DuplicateReport:
+    """Identical files under a prefix (see S3Analyzer.find_duplicates and group_duplicates)."""
+
+    uri: str
+    method: str = "etag"  # 'etag' (listing only), 'hash' or 'strict' (see S3Analyzer.find_duplicates)
+    groups: list[DuplicateGroup] = field(default_factory=list)  # biggest reclaimable size first
+    scanned: Stat = field(default_factory=Stat)  # files listed, folder markers excluded
+    candidates: Stat = field(default_factory=Stat)  # files of at least min_size sharing their size with another
+    not_compared: Stat = field(default_factory=Stat)  # candidates whose ETag differs and whose content wasn't read
+    files_by_folder: dict[str, int] = field(default_factory=dict)  # folder -> files of at least min_size in it
+    unreadable: dict[str, str] = field(default_factory=dict)  # key -> why it couldn't be read
+    files_read: int = 0  # files read to hash (the first 64 KB or all of it)
+    bytes_read: int = 0
+    requests: int = 0  # GET requests made to read them
+    max_read: int | None = None  # the read budget, in bytes (None = no cap)
+    read_capped: bool = False  # some files weren't read because of max_read
+    truncated: bool = False  # the listing stopped at `limit`
+    versioning: str | None = None  # the bucket's versioning status, when it could be read
+    scan_seconds: float = 0.0
+
+    @property
+    def copies(self) -> int:
+        return sum(len(g.objects) - 1 for g in self.groups)
+
+    @property
+    def reclaimable(self) -> int:
+        return sum(g.reclaimable for g in self.groups)
+
+    @property
+    def monthly_cost(self) -> float:
+        return sum(g.monthly_cost for g in self.groups)
+
+    def to_df(self):
+        """One row per file in a duplicate group: group number, 'keep' or 'copy', key, size, sha256, ..."""
+        pd = _require("pandas", "DuplicateReport.to_df")
+        columns = ["group", "role", "key", "size", "last_modified", "storage_class", "matched_by", "sha256", "etag",
+                   "uri"]
+        return pd.DataFrame([[n, "keep" if i == 0 else "copy", o.key, o.size, o.last_modified, o.storage_class,
+                              g.matched_by, g.sha256, o.etag, o.uri]
+                             for n, g in enumerate(self.groups, 1) for i, o in enumerate(g.objects)], columns=columns)
+
+
+@dataclass
+class DuplicateFolder:
+    """A folder holding files that have an identical file somewhere (see duplicate_folders)."""
+
+    folder: str  # full prefix of the folder, '' = the bucket's top level
+    files: int  # files of at least min_size in the folder
+    duplicated: Stat = field(default_factory=Stat)  # its files that have an identical file anywhere
+    outside: int = 0  # its files that have an identical file in another folder
+    elsewhere: dict[str, int] = field(default_factory=dict)  # folder holding copies -> files; itself = same folder
+
+    @property
+    def all_copies(self) -> bool:
+        """Every file here also exists in another folder, so the folder could go without losing data."""
+        return 0 < self.files == self.outside
+
+
+@dataclass
 class VersionStats:
     uri: str
     current: Stat = field(default_factory=Stat)
@@ -1005,6 +1092,19 @@ class BucketReport:
     config: BucketConfig
     metrics: BucketMetrics | None = None
     metrics_error: str | None = None
+
+
+@dataclass
+class FolderDownload:
+    """What S3Analyzer.download_folder fetched."""
+
+    uri: str
+    path: str  # the local folder
+    downloaded: Stat = field(default_factory=Stat)
+    already_there: Stat = field(default_factory=Stat)  # same size and time as the local file: not fetched again
+    skipped: dict[str, str] = field(default_factory=dict)  # key -> why it wasn't downloaded
+    truncated: bool = False  # the listing stopped at `limit`
+    seconds: float = 0.0
 
 
 @dataclass
@@ -1360,6 +1460,235 @@ def find_duplicate_groups(objects: Iterable[ObjectInfo], *, min_size: int | str 
     dupes = [group for group in groups.values() if len(group) > 1]
     dupes.sort(key=lambda group: group[0].size * (len(group) - 1), reverse=True)
     return dupes
+
+
+DUPLICATE_METHODS = ("etag", "hash", "strict")
+HASH_HEAD_BYTES = 64 * KB  # find_duplicates hashes this much of a file first; the rest only if the starts match
+
+
+def _etag_clusters(same_size: list[ObjectInfo]) -> list[list[ObjectInfo]]:
+    """Files of one size -> lists of files sharing an ETag (a file without one is on its own)."""
+    clusters: dict[str, list[ObjectInfo]] = {}
+    for obj in same_size:
+        clusters.setdefault(obj.etag or obj.uri, []).append(obj)
+    return list(clusters.values())
+
+
+def files_to_hash(objects: Iterable[ObjectInfo], *, min_size: int | str = 1, method: str = "hash"
+                  ) -> list[list[ObjectInfo]]:
+    """The files find_duplicates reads, one list per size, biggest possible saving first.
+
+    A file whose size no other file has can't be a copy, and files with the same size and ETag already match,
+    so method='hash' reads one file per ETag, only for sizes where the ETags differ, picking one outside GLACIER /
+    DEEP_ARCHIVE when it can (those can't be read without a restore). 'strict' reads every file that shares its
+    size with another; 'etag' reads nothing.
+    """
+    if method not in DUPLICATE_METHODS:
+        raise ValueError(f"method must be one of {', '.join(map(repr, DUPLICATE_METHODS))}")
+    threshold = parse_size(min_size) or 0
+    by_size: dict[int, list[ObjectInfo]] = defaultdict(list)
+    for obj in objects:
+        if obj.size >= threshold and not obj.is_folder_marker:
+            by_size[obj.size].append(obj)
+    plan: list[list[ObjectInfo]] = []
+    for same in by_size.values():
+        if len(same) < 2 or method == "etag":
+            continue
+        if method == "strict":
+            plan.append(same)
+            continue
+        clusters = _etag_clusters(same)
+        if len(clusters) > 1:
+            plan.append([next((o for o in c if o.storage_class not in ARCHIVE_CLASSES), c[0]) for c in clusters])
+    plan.sort(key=lambda files: files[0].size * (len(files) - 1), reverse=True)
+    return plan
+
+
+def _root(parent: list[int], i: int) -> int:
+    while parent[i] != i:
+        i = parent[i]
+    return i
+
+
+def group_duplicates(
+    objects: Iterable[ObjectInfo],
+    uri: str = "",
+    *,
+    hashes: dict[str, str] | None = None,
+    distinct: Iterable[str] = (),
+    min_size: int | str = 1,
+    prices: dict[str, float] | None = None,
+) -> DuplicateReport:
+    """Group identical files -> DuplicateReport. Files match when they have the same size and either the same
+    ETag or the same SHA-256 in `hashes` (uri -> hex digest). `distinct` lists uris already known to differ from
+    every other file of their size (their first bytes differ). Works on any list of ObjectInfo, e.g. S3 Inventory
+    rows. The groups are sorted by the space their copies take. In each, the file to keep comes first: one that can
+    be read without a restore (not GLACIER / DEEP_ARCHIVE), in the folder with the smallest share of duplicated
+    files so that a folder of copies empties out, then the oldest."""
+    hashes = hashes or {}
+    distinct = set(distinct)
+    threshold = parse_size(min_size) or 0
+    bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
+    report = DuplicateReport(uri=s3_uri(bucket, prefix) if bucket else uri)
+    by_size: dict[int, list[ObjectInfo]] = defaultdict(list)
+    folders: Counter[str] = Counter()
+    for obj in objects:
+        if obj.is_folder_marker:
+            continue
+        report.scanned.add(obj.size)
+        if obj.size >= threshold:
+            by_size[obj.size].append(obj)
+            folders[base_prefix(obj.key)] += 1
+    report.files_by_folder = dict(folders)
+
+    found: list[tuple[int, list[list[ObjectInfo]]]] = []  # (size, the ETag clusters making up one group)
+    for size, same in by_size.items():
+        if len(same) < 2:
+            continue
+        report.candidates.count += len(same)
+        report.candidates.size += size * len(same)
+        clusters = _etag_clusters(same)
+        parent = list(range(len(clusters)))  # union-find: clusters with a SHA-256 in common are one group
+        first_with: dict[str, int] = {}
+        for i, cluster in enumerate(clusters):
+            for digest in {hashes[o.uri] for o in cluster if o.uri in hashes}:
+                if digest in first_with:
+                    parent[_root(parent, i)] = _root(parent, first_with[digest])
+                else:
+                    first_with[digest] = i
+        if len(clusters) > 1:
+            for cluster in clusters:
+                if not any(o.uri in hashes or o.uri in distinct for o in cluster):
+                    report.not_compared.count += len(cluster)
+                    report.not_compared.size += size * len(cluster)
+        merged: dict[int, list[list[ObjectInfo]]] = defaultdict(list)
+        for i, cluster in enumerate(clusters):
+            merged[_root(parent, i)].append(cluster)
+        found += [(size, parts) for parts in merged.values() if sum(map(len, parts)) > 1]
+
+    duplicated = Counter(base_prefix(o.key) for _, parts in found for cluster in parts for o in cluster)
+
+    def keep_first(obj: ObjectInfo) -> tuple[bool, float, datetime, str]:
+        folder = base_prefix(obj.key)
+        archived = obj.storage_class in ARCHIVE_CLASSES
+        return archived, duplicated[folder] / max(folders[folder], 1), obj.last_modified, obj.key
+
+    for size, parts in found:
+        members = sorted((o for cluster in parts for o in cluster), key=keep_first)
+        hashed = [o for o in members if o.uri in hashes]
+        by_hash = len(parts) > 1 or len(hashed) > 1  # some files are known to match by their SHA-256
+        matched_by = "SHA-256" if len(hashed) == len(members) else "SHA-256 + ETag" if by_hash else "ETag"
+        cost = sum(object_monthly_cost(o.size, o.storage_class, prices) or 0.0 for o in members[1:])
+        report.groups.append(DuplicateGroup(size, members, hashes[hashed[0].uri] if hashed else None, matched_by, cost))
+    report.groups.sort(key=lambda g: (-g.reclaimable, g.keep.key))
+    return report
+
+
+def duplicate_folders(report: DuplicateReport) -> list[DuplicateFolder]:
+    """Folders holding duplicated files, most duplicated bytes first. A folder whose files all exist in other
+    folders too (all_copies) can go without losing data, as long as those other copies stay."""
+    folders: dict[str, DuplicateFolder] = {}
+    for group in report.groups:
+        where = Counter(base_prefix(o.key) for o in group.objects)
+        for obj in group.objects:
+            here = base_prefix(obj.key)
+            entry = folders.setdefault(here, DuplicateFolder(here, report.files_by_folder.get(here, 0)))
+            entry.duplicated.add(obj.size)
+            entry.outside += len(where) > 1
+            for folder, count in where.items():
+                if folder != here or count > 1:
+                    entry.elsewhere[folder] = entry.elsewhere.get(folder, 0) + 1
+    for entry in folders.values():
+        entry.elsewhere = dict(sorted(entry.elsewhere.items(), key=lambda kv: (-kv[1], kv[0])))
+    return sorted(folders.values(), key=lambda f: (-f.duplicated.size, -f.duplicated.count, f.folder))
+
+
+def _folders_text(folders: list[str], base: str = "", most: int = 2) -> str:
+    """['logs/a/', 'logs/b/', 'logs/c/'] -> '3 folders under logs/'; ['a/', 'b/'] -> 'a/ and b/'."""
+    names = [relative_key(f, base) or "(top level)" for f in folders]
+    if len(names) <= most:
+        return " and ".join(names)
+    common = posixpath.commonprefix(folders)
+    common = common[: common.rfind("/") + 1]
+    if len(common) > len(base):
+        return f"{len(names):,} folders under {relative_key(common, base)}"
+    return ", ".join(names[:most]) + f" and {len(names) - most:,} more folders"
+
+
+_UNREADABLE_REASONS = {
+    "GLACIER": "in GLACIER, which needs a restore first", "DEEP_ARCHIVE": "in DEEP_ARCHIVE, which needs a restore first",
+    "InvalidObjectState": "archived, which needs a restore first", "AccessDenied": "AccessDenied (needs s3:GetObject)",
+    "PreconditionFailed": "changed while being read", "NoSuchKey": "deleted while being read",
+}
+
+
+def duplicate_findings(report: DuplicateReport) -> list[tuple[str, str]]:
+    """Plain-language observations about duplicate files -> [(level, message)], level 'warn' or 'info'."""
+    found: list[tuple[str, str]] = []
+    base = base_prefix(parse_s3_uri(report.uri)[1]) if report.uri else ""
+
+    def name(folder: str) -> str:
+        return relative_key(folder, base) or "(top level)"
+
+    if report.truncated:
+        found.append(("warn", f"Listing stopped at the limit: only the first {report.scanned.count:,} files (in key "
+                              "order) were compared, so copies of later files are missing. Pass limit=None to "
+                              "check them all."))
+    if report.groups:
+        copies = report.copies
+        big = report.monthly_cost >= 1 or report.reclaimable >= GB
+        found.append(("warn" if big else "info",
+                      f"{copies:,} redundant {'copy takes' if copies == 1 else 'copies take'} "
+                      f"{human_size(report.reclaimable)}, costing {human_money(report.monthly_cost)}/month. Keep "
+                      "one file per group and delete the others, after checking that no job or notebook reads "
+                      "their paths. Keep suggests a readable file in the folder with the fewest copies, then the "
+                      "oldest."))
+    whole = {f.folder: f for f in duplicate_folders(report) if f.all_copies}
+    reported: set[str] = set()
+    for folder in list(whole.values())[:3]:
+        others = [f for f in folder.elsewhere if f != folder.folder]
+        size = human_size(folder.duplicated.size)
+        level = "warn" if folder.duplicated.size >= GB else "info"
+        mirror = others[0] if len(others) == 1 and others[0] in whole else None
+        if mirror and [f for f in whole[mirror].elsewhere if f != mirror] == [folder.folder]:
+            if mirror in reported:
+                continue
+            found.append((level, f"{name(folder.folder)} and {name(mirror)} hold the same "
+                                 f"{_plural(folder.files, 'file')} ({size}). Keeping one of the two folders "
+                                 "loses no data."))
+        else:
+            what = (f"its only file ({size}) is identical to a file" if folder.files == 1 else
+                    f"all {folder.files:,} of its files ({size}) are identical to files")
+            found.append((level, f"{name(folder.folder)} holds only copies: {what} in {_folders_text(others, base)}. "
+                                 "Removing it, or no longer writing it, loses no data while those stay."))
+        reported.add(folder.folder)
+    if report.groups and report.versioning == "Enabled":
+        found.append(("warn", "Versioning is on for this bucket: a deleted copy stays as a noncurrent version, still "
+                              "billed, until a lifecycle rule with NoncurrentVersionExpiration removes it "
+                              "(bucket_info shows the rules)."))
+    missed = report.not_compared
+    if missed.count and report.method == "etag":
+        found.append(("info", f"{_plural(missed.count, 'file')} ({human_size(missed.size)}) share their size with a "
+                              "file whose ETag differs, so their contents weren't compared. Copies uploaded in parts "
+                              "of another size, or encrypted with SSE-KMS, look like this; method='hash' reads them "
+                              "to check."))
+    elif missed.count and report.read_capped:
+        suggest = max(1, math.ceil((report.bytes_read + missed.size) / GB))
+        found.append(("warn", f"Stopped reading at max_read={human_size(report.max_read)}: "
+                              f"{_plural(missed.count, 'file')} ({human_size(missed.size)}) sharing a size with "
+                              "another file weren't compared, so some copies may be missing. Pass "
+                              f"max_read='{suggest}GB' to check them all."))
+    if report.unreadable:
+        reasons = Counter(report.unreadable.values())
+        text = ", ".join(f"{n:,} {_UNREADABLE_REASONS.get(code, code)}" for code, n in reasons.most_common())
+        found.append(("info", f"{_plural(len(report.unreadable), 'file')} could only be compared by ETag, because "
+                              f"they couldn't be read: {text}."))
+    by_etag = sum(g.matched_by == "ETag" for g in report.groups)
+    if by_etag and report.method != "strict":
+        found.append(("info", f"{_plural(by_etag, 'group')} matched on size + ETag without reading the files: the "
+                              "ETag is S3's checksum of the content (the MD5, for a file uploaded in one part). "
+                              "method='strict' reads every file to confirm with SHA-256."))
+    return found
 
 
 def compare_objects(
@@ -1792,6 +2121,149 @@ class _RangeReader(io.RawIOBase):
         return len(data)
 
 
+def _run_in_threads(work: Callable[[Any], Any], items: list[Any], workers: int, tick: Callable[[], None],
+                    stop: threading.Event) -> list[tuple[Any, Any, Exception | None]]:
+    """Run work(item) for every item on `workers` threads -> [(item, result, error)], in the order they finish.
+    tick() runs about four times a second on the calling thread, so progress bars are only touched from it.
+    An interrupt (the notebook's stop button) sets `stop` for the workers to see and cancels what hasn't started."""
+    results: list[tuple[Any, Any, Exception | None]] = []
+    if not items:
+        return results
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(work, item): item for item in items}
+        pending = set(futures)
+        try:
+            while pending:
+                finished, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    try:
+                        results.append((futures[future], future.result(), None))
+                    except Exception as exc:
+                        results.append((futures[future], None, exc))
+                tick()
+        except BaseException:
+            stop.set()
+            for future in pending:
+                future.cancel()
+            raise
+    return results
+
+
+def _pool_size(client: Any) -> int:
+    """How many connections the client keeps open: more threads than that just wait for one."""
+    return getattr(getattr(getattr(client, "meta", None), "config", None), "max_pool_connections", None) or 10
+
+
+def _check_disk_space(path: str, needed: int) -> None:
+    folder = os.path.abspath(path)
+    while not os.path.isdir(folder):
+        folder = os.path.dirname(folder)
+    free = shutil.disk_usage(folder).free
+    if needed > free:
+        raise ValueError(f"Not enough disk space: {human_size(needed)} to download, {human_size(free)} free in "
+                         f"{folder}. Pass limit=, or a path on a bigger disk.")
+
+
+class _ContentHasher:
+    """Reads files for find_duplicates, in parallel: the SHA-256 of each file's first HASH_HEAD_BYTES, then of
+    the rest where those match another file's. Stops planning reads at `budget` bytes. Progress is reported
+    from the calling thread only, so a notebook progress bar is never touched from a worker thread."""
+
+    def __init__(self, client: Any, budget: int | None, max_workers: int,
+                 progress: Callable[[int, int], None] | None):
+        self.client, self.budget, self.progress = client, budget, progress
+        self.workers = max(1, min(max_workers, _pool_size(client)))
+        self.hashes: dict[str, str] = {}  # uri -> SHA-256 of the whole file
+        self.distinct: set[str] = set()  # uris whose first bytes differ from every other file of their size
+        self.unreadable: dict[str, str] = {}  # key -> storage class or error code
+        self.files_read = self.bytes_read = self.requests = self.planned = 0
+        self._phase: tuple[int, int] = (0, 0)  # (bytes read before this phase, bytes this phase will read)
+        self.capped = False
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+
+    def _fits(self, size: int) -> bool:
+        if self.budget is not None and self.planned + size > self.budget:
+            self.capped = True
+            return False
+        self.planned += size
+        return True
+
+    def run(self, plan: list[list[ObjectInfo]]) -> None:
+        heads: list[list[ObjectInfo]] = []
+        for files in plan:
+            readable = [o for o in files if o.storage_class not in ARCHIVE_CLASSES]
+            self.unreadable.update((o.key, o.storage_class) for o in files if o.storage_class in ARCHIVE_CLASSES)
+            if len(readable) > 1 and self._fits(sum(min(o.size, HASH_HEAD_BYTES) for o in readable)):
+                heads.append(readable)
+        started = self._read_all([(o, 0, hashlib.sha256()) for files in heads for o in files],
+                                 sum(min(o.size, HASH_HEAD_BYTES) for files in heads for o in files))
+
+        rest: list[list[ObjectInfo]] = []
+        for files in heads:
+            by_start: dict[str, list[ObjectInfo]] = defaultdict(list)
+            for obj in files:
+                if obj.uri in started:
+                    by_start[started[obj.uri].hexdigest()].append(obj)
+            for digest, same in by_start.items():
+                if same[0].size <= HASH_HEAD_BYTES:  # the first bytes were the whole file
+                    self.hashes.update((o.uri, digest) for o in same)
+                elif len(same) == 1:
+                    self.distinct.add(same[0].uri)
+                else:
+                    rest.append(same)
+        rest.sort(key=lambda same: same[0].size * (len(same) - 1), reverse=True)
+        todo = [(o, HASH_HEAD_BYTES, started[o.uri]) for same in rest
+                if self._fits(sum(o.size - HASH_HEAD_BYTES for o in same)) for o in same]
+        whole = self._read_all(todo, sum(o.size - start for o, start, _ in todo))
+        self.hashes.update((uri, hasher.hexdigest()) for uri, hasher in whole.items())
+
+    def _read_all(self, todo: list[tuple[ObjectInfo, int, Any]], size: int) -> dict[str, Any]:
+        """Read every (object, from byte, hasher) in parallel -> {uri: hasher}; failures go to `unreadable`.
+        Progress counts this phase's `size` bytes from 0."""
+        done_hashers: dict[str, Any] = {}
+        if not todo:
+            return done_hashers
+        self._phase = (self.bytes_read, size)
+        self._report()
+        for (obj, _, _), hasher, error in _run_in_threads(self._read, todo, self.workers, self._report, self._stop):
+            if isinstance(error, ClientError):
+                self.unreadable[obj.key] = _error_code(error)
+            elif isinstance(error, BotoCoreError):
+                self.unreadable[obj.key] = type(error).__name__
+            elif error is not None:
+                raise error
+            else:
+                done_hashers[obj.uri] = hasher
+        return done_hashers
+
+    def _read(self, job: tuple[ObjectInfo, int, Any]) -> Any:
+        obj, start, hasher = job
+        if obj.size == 0:
+            return hasher
+        end = min(obj.size, HASH_HEAD_BYTES) - 1 if start == 0 else obj.size - 1
+        match = {"IfMatch": f'"{obj.etag}"'} if obj.etag else {}  # the file listed, not one written since
+        body = self.client.get_object(Bucket=obj.bucket, Key=obj.key, Range=f"bytes={start}-{end}", **match)["Body"]
+        with self._lock:
+            self.requests += 1
+            self.files_read += start == 0
+        try:
+            while not self._stop.is_set():
+                chunk = body.read(MB)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                with self._lock:
+                    self.bytes_read += len(chunk)
+        finally:
+            body.close()
+        return hasher
+
+    def _report(self) -> None:
+        if self.progress:
+            self.progress(self.bytes_read - self._phase[0], self._phase[1])
+
+
 # What a broken or mislabeled file can raise while being decoded (pyarrow's errors subclass ValueError / OSError).
 _DATA_ERRORS = (ValueError, ImportError, OSError, EOFError, zlib.error, lzma.LZMAError, zipfile.BadZipFile,
                 tarfile.TarError)
@@ -2177,16 +2649,58 @@ class S3Analyzer:
     def _files(self, uri: str, progress: Callable[[int], None] | None) -> Iterator[ObjectInfo]:
         return (o for o in self.iter_objects(uri, progress=progress) if not o.is_folder_marker)
 
-    def find_duplicates(self, uri: str, *, min_size: int | str = 1, limit: int | None = None,
-                        progress: Callable[[int], None] | None = None) -> list[list[ObjectInfo]]:
-        """Groups of objects with identical size + ETag (see find_duplicate_groups for caveats)."""
-        return find_duplicate_groups(self.iter_objects(uri, limit=limit, progress=progress), min_size=min_size)
+    def find_duplicates(self, uri: str, *, min_size: int | str = 1, method: str = "hash",
+                        max_read: int | str | None = "10GB", limit: int | None = None, max_workers: int = 16,
+                        progress: Callable[[int], None] | None = None,
+                        read_progress: Callable[[int, int], None] | None = None) -> DuplicateReport:
+        """Identical files under `uri`, with what their copies take and cost.
+
+        Files are grouped by size (a file no other file matches in size can't be a copy), then by ETag.
+        method='hash' (the default) also reads files that share a size but not an ETag, because copies uploaded
+        in parts of another size or encrypted with SSE-KMS get a different ETag: their first 64 KB first, and
+        the whole file only where those match, hashed with SHA-256. method='strict' reads every file that shares
+        its size, to prove each group byte for byte; 'etag' reads nothing. Reads stop at `max_read` bytes
+        (None = no cap), biggest possible saving first. read_progress gets (bytes read, bytes to read) for
+        each of the two passes, counting from 0 in each.
+        """
+        if method not in DUPLICATE_METHODS:
+            raise ValueError(f"method must be one of {', '.join(map(repr, DUPLICATE_METHODS))}")
+        budget = parse_size(max_read)
+        bucket, prefix = parse_s3_uri(uri)
+        started = time.monotonic()
+        objects = list(self.iter_objects(uri, limit=None if limit is None else limit + 1, progress=progress))
+        truncated = limit is not None and len(objects) > limit
+        if truncated:
+            del objects[limit:]
+        reader = _ContentHasher(self.client, budget, max_workers, read_progress)
+        reader.run(files_to_hash(objects, min_size=min_size, method=method))
+        report = group_duplicates(objects, s3_uri(bucket, prefix), hashes=reader.hashes, distinct=reader.distinct,
+                                  min_size=min_size, prices=self.prices)
+        report.method, report.max_read, report.truncated = method, budget, truncated
+        report.unreadable, report.read_capped = reader.unreadable, reader.capped
+        report.files_read, report.bytes_read, report.requests = reader.files_read, reader.bytes_read, reader.requests
+        if report.groups:
+            try:
+                report.versioning = self.versioning_status(bucket)
+            except (ClientError, BotoCoreError):
+                pass
+        report.scan_seconds = time.monotonic() - started
+        return report
 
     def compare(self, uri_a: str, uri_b: str, *, progress: Callable[[int], None] | None = None) -> CompareResult:
         """Diff two prefixes (e.g. a copy/sync source and target) by relative key, size and ETag."""
         bucket_a, prefix_a = parse_s3_uri(uri_a)
         bucket_b, prefix_b = parse_s3_uri(uri_b)
-        return compare_objects(self.iter_objects(uri_a, progress=progress), self.iter_objects(uri_b, progress=progress),
+        seen = [0, 0]  # keys listed on each side, so the progress count keeps going up across both listings
+
+        def side(i: int) -> Callable[[int], None] | None:
+            def tick(count: int) -> None:
+                seen[i] = count
+                progress(sum(seen))
+
+            return tick if progress else None
+
+        return compare_objects(self.iter_objects(uri_a, progress=side(0)), self.iter_objects(uri_b, progress=side(1)),
                                prefix_a=prefix_a, prefix_b=prefix_b,
                                uri_a=s3_uri(bucket_a, prefix_a), uri_b=s3_uri(bucket_b, prefix_b))
 
@@ -2301,7 +2815,8 @@ class S3Analyzer:
                         for m in page.get("DeleteMarkers", []) if m["Key"] == key]
         return sorted(history, key=lambda v: (v.last_modified, v.is_latest), reverse=True)
 
-    def incomplete_uploads(self, uri: str, *, with_sizes: bool = False) -> list[MultipartUpload]:
+    def incomplete_uploads(self, uri: str, *, with_sizes: bool = False,
+                           progress: Callable[[int], None] | None = None) -> list[MultipartUpload]:
         """Multipart uploads that were started but never completed/aborted - their parts are billed
         but invisible in normal listings. with_sizes=True adds one ListParts call per upload."""
         bucket, prefix = parse_s3_uri(uri)
@@ -2315,6 +2830,8 @@ class S3Analyzer:
                         Bucket=bucket, Key=item["Key"], UploadId=item["UploadId"]) for part in p.get("Parts", [])]
                     upload.parts, upload.size = len(parts), sum(part["Size"] for part in parts)
                 uploads.append(upload)
+                if progress and with_sizes:
+                    progress(len(uploads))
         return sorted(uploads, key=lambda u: u.initiated)
 
     # ------------------------------------------------------------------ objects
@@ -2960,14 +3477,94 @@ class S3Analyzer:
         return self._client_for(bucket).generate_presigned_url(
             "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires)
 
-    def download(self, uri: str, path: str | None = None) -> str:
-        """Download to `path` (a file or directory; default: current directory). Returns the local path."""
+    def download(self, uri: str, path: str | None = None, *,
+                 progress: Callable[[int, int], None] | None = None) -> str:
+        """Download one file to `path` (a file or directory; default: current directory). Returns the local path.
+        Refuses when the disk hasn't room. progress gets (bytes downloaded, file size)."""
         bucket, key = parse_s3_uri(uri)
         path = path or os.path.basename(key)
         if os.path.isdir(path):
             path = os.path.join(path, os.path.basename(key))
-        self.client.download_file(bucket, key, path)
+        head = self.client.head_object(Bucket=bucket, Key=key)
+        _check_disk_space(path, head["ContentLength"])
+        failed = self._fetch([(bucket, key, path, head["ContentLength"], head.get("LastModified"))], progress)
+        if failed:
+            raise failed[key]
         return os.path.abspath(path)
+
+    def download_folder(self, uri: str, path: str | None = None, *, limit: int | None = None, max_workers: int = 8,
+                        progress: Callable[[int, int], None] | None = None,
+                        list_progress: Callable[[int], None] | None = None) -> FolderDownload:
+        """Download every file under a folder into `path` (default: a folder of the same name in the current
+        directory), keeping the sub-folders. A file already there with the same size and time is skipped, so
+        running it again resumes. GLACIER / DEEP_ARCHIVE files are skipped (they need a restore first). Refuses
+        when the disk hasn't room. progress gets (bytes downloaded, bytes to download)."""
+        bucket, prefix = parse_s3_uri(uri)
+        if prefix and not prefix.endswith("/"):
+            prefix += "/"  # 's3://b/data' means the folder data/, not also data-old/
+        root = os.path.abspath(path or prefix.rstrip("/").rsplit("/", 1)[-1] or bucket)
+        result = FolderDownload(uri=s3_uri(bucket, prefix), path=root)
+        started = time.monotonic()
+        jobs = []
+        listing = self.iter_objects(result.uri, limit=None if limit is None else limit + 1, progress=list_progress)
+        for i, obj in enumerate(listing):
+            if limit is not None and i >= limit:
+                result.truncated = True
+                break
+            local = os.path.normpath(os.path.join(root, relative_key(obj.key, prefix)))
+            if obj.is_folder_marker or obj.key.endswith("/"):
+                continue
+            if not local.startswith(root + os.sep):
+                result.skipped[obj.key] = "its name leads outside the folder"
+            elif obj.storage_class in ARCHIVE_CLASSES:
+                result.skipped[obj.key] = obj.storage_class
+            elif (os.path.isfile(local) and os.path.getsize(local) == obj.size
+                  and int(os.path.getmtime(local)) == int(obj.last_modified.timestamp())):
+                result.already_there.add(obj.size)
+            else:
+                jobs.append((bucket, obj.key, local, obj.size, obj.last_modified))
+        _check_disk_space(root, sum(job[3] for job in jobs))
+        failed = self._fetch(jobs, progress, max_workers)
+        for _, key, _, size, _ in jobs:
+            if key in failed:
+                error = failed[key]
+                result.skipped[key] = _error_code(error) if isinstance(error, ClientError) else str(error)
+            else:
+                result.downloaded.add(size)
+        result.seconds = time.monotonic() - started
+        return result
+
+    def _fetch(self, jobs: list[tuple[str, str, str, int, datetime | None]],
+               progress: Callable[[int, int], None] | None, max_workers: int = 1) -> dict[str, Exception]:
+        """Download (bucket, key, local path, size, last modified) jobs in parallel, stamping each file with
+        the object's time. Returns {key: error} for the ones that failed (AWS errors, a full disk)."""
+        total, done, lock, stop = sum(job[3] for job in jobs), [0], threading.Lock(), threading.Event()
+
+        def add(count: int) -> None:  # boto3 calls this from its own threads as bytes arrive
+            if stop.is_set():
+                raise RuntimeError("Download stopped")
+            with lock:
+                done[0] += count
+
+        def one(job: tuple[str, str, str, int, datetime | None]) -> None:
+            bucket, key, local, _, modified = job
+            os.makedirs(os.path.dirname(local) or ".", exist_ok=True)
+            self.client.download_file(bucket, key, local, Callback=add)
+            if modified is not None:
+                os.utime(local, (modified.timestamp(), modified.timestamp()))
+
+        def report() -> None:
+            if progress:
+                progress(done[0], total)
+
+        report()
+        failed: dict[str, Exception] = {}
+        for job, _, error in _run_in_threads(one, jobs, min(max_workers, _pool_size(self.client)), report, stop):
+            if isinstance(error, (ClientError, BotoCoreError, OSError)):
+                failed[job[1]] = error
+            elif error is not None:
+                raise error
+        return failed
 
 
 # =============================================================================
@@ -3212,6 +3809,60 @@ def _in_notebook() -> bool:
     return shell is not None and type(shell).__name__ != "TerminalInteractiveShell"
 
 
+def _progress_bar_class(notebook: bool) -> Any:
+    """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
+    try:
+        if notebook:
+            importlib.import_module("ipywidgets")
+            return importlib.import_module("tqdm.notebook").tqdm
+        return importlib.import_module("tqdm").tqdm
+    except Exception:  # not installed, or too old to import cleanly: the plain progress line takes over
+        return None
+
+
+def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
+    """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
+    options: dict[str, Any] = {"desc": label, "total": total, "leave": False, "delay": 0.5, "mininterval": 0.25,
+                               "dynamic_ncols": True, "disable": False, "unit_scale": True}
+    if unit == "B":
+        options.update(unit="B", unit_divisor=1024)
+    else:
+        known = total is not None
+        counts = "{percentage:3.0f}%|{bar}| {n:,}/{total:,}" if known else "{n:,}"
+        timing = "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
+        options.update(unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]")
+    return bar_class(**options)
+
+
+def _duration(seconds: float) -> str:
+    """0.42 -> '0.4s', 42.4 -> '42s', 125 -> '2m 05s', 7500 -> '2h 05m'."""
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
+    return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60):02d}m"
+
+
+def _progress_text(label: str, unit: str, count: int, total: int | None, elapsed: float) -> str:
+    """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
+    amount = human_size if unit == "B" else (lambda n: f"{n:,}")
+    text = f"{label}... {amount(count)}"
+    if total:
+        text += f" of {amount(total)}"
+    text += "" if unit == "B" else f" {unit}"
+    if total:
+        text += f" ({min(count / total, 1):.0%})"
+    text += f" · {_duration(elapsed)}"
+    if elapsed >= 1 and count:
+        rate = count / elapsed
+        text += f" · {human_size(rate)}/s" if unit == "B" else f" · {rate:,.0f}/s" if rate >= 10 else f" · {rate:.1f}/s"
+        if total and total > count:
+            text += f" · about {_duration((total - count) / rate)} left"
+    return text
+
+
 def _fmt_dt(moment: datetime | None) -> str:
     return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
@@ -3278,6 +3929,13 @@ _INFO_CARDS = {  # Preview.info key -> card label, in display order
 }
 _LISTING_TITLES = {"zip": "Files", "tar": "Files", "torch": "Files in the checkpoint", "npz": "Arrays", "pptx": "Slides",
                    "safetensors": "Tensors", "notebook": "Cells"}
+
+
+_PANDAS_READERS = {  # format -> how pandas opens a downloaded file of it
+    "csv": "read_csv({path})", "tsv": "read_csv({path}, sep='\\t')", "psv": "read_csv({path}, sep='|')",
+    "parquet": "read_parquet({path})", "orc": "read_orc({path})", "arrow": "read_feather({path})",
+    "jsonl": "read_json({path}, lines=True)", "json": "read_json({path})", "excel": "read_excel({path})",
+}
 
 
 def _card_value(key: str, value: Any) -> str:
@@ -3411,14 +4069,20 @@ class S3View:
 
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
     max_rows: default cap for long tables (set to 0 for no cap).
+    progress: 'auto' (a tqdm bar while long commands run, when tqdm is installed; else a line with the count,
+    rate and time left), 'plain' (always that line) or 'off'.
     """
 
-    def __init__(self, core: S3Analyzer | None = None, *, mode: str = "auto", max_rows: int = 50):
+    def __init__(self, core: S3Analyzer | None = None, *, mode: str = "auto", max_rows: int = 50,
+                 progress: str = "auto"):
         if mode not in ("auto", "html", "text"):
             raise ValueError("mode must be 'auto', 'html' or 'text'")
+        if progress not in ("auto", "plain", "off"):
+            raise ValueError("progress must be 'auto', 'plain' or 'off'")
         self.core = core or S3Analyzer()
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
+        self.progress = progress
 
     # ------------------------------------------------------------------ plumbing
 
@@ -3431,31 +4095,82 @@ class S3View:
             print(_render_text(blocks, self.max_rows))
 
     @contextmanager
-    def _progress(self, label: str = "Scanning", unit: str = "objects") -> Iterator[Callable[[int], None]]:
-        last_update = [0.0]
-        handle = None
-        if self.use_html:
-            from IPython.display import HTML, display
+    def _progress(self, label: str = "Scanning", unit: str = "objects") -> Iterator[Callable[..., None]]:
+        """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
+        and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
+        Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
+        at a time: when a nested _progress starts showing, the outer one's bar goes away."""
+        bar_class = [_progress_bar_class(self.use_html and _in_notebook()) if self.progress == "auto" else None]
+        bar: list[Any] = [None]
+        handle: list[Any] = [None]
+        started: list[Any] = [time.monotonic(), None]  # when the current total started, and that total
+        shown, width, stopped = [0.0], [0], [False]
 
-            handle = display(HTML(""), display_id=True)
+        def close_bar() -> None:
+            if bar[0] is not None:
+                if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
+                    bar[0].total = bar[0].n  # done early (a file it couldn't read): no red "failed" widget
+                bar[0].close()
+                bar[0] = None
 
-        def tick(count: int) -> None:
-            now = time.monotonic()
-            if now - last_update[0] < 0.5:
+        def clear() -> None:
+            close_bar()
+            if handle[0] is not None:
+                from IPython.display import HTML
+
+                handle[0].update(HTML(""))
+            elif width[0]:
+                print("\r" + " " * width[0] + "\r", end="", file=sys.stderr, flush=True)
+                width[0] = 0
+
+        def take_over() -> None:
+            owner = getattr(self, "_progress_owner", None)
+            if owner is not clear:
+                if owner is not None:
+                    owner()
+                self._progress_owner = clear
+
+        def tick(count: int, total: int | None = None) -> None:
+            if self.progress == "off":
                 return
-            last_update[0] = now
-            if handle is not None:
-                handle.update(HTML(f'<div style="opacity:.6">{_esc(label)}... {count:,} {_esc(unit)}</div>'))
+            if bar_class[0] is not None:
+                try:
+                    if bar[0] is not None and total != bar[0].total:
+                        close_bar()
+                    if bar[0] is None:
+                        take_over()
+                        bar[0] = _progress_bar(bar_class[0], label, unit, total)
+                    bar[0].update(count - bar[0].n)
+                    return
+                except Exception:  # an old tqdm or a broken widget front end: use the plain line instead
+                    bar_class[0] = None
+            now = time.monotonic()
+            if total != started[1]:
+                started[:] = [now, total]
+            if now - started[0] < 0.5 or now - shown[0] < 0.5:
+                return
+            shown[0] = now
+            take_over()
+            text = _progress_text(label, unit, count, total, now - started[0])
+            if self.use_html:
+                from IPython.display import HTML, display
+
+                if handle[0] is None:
+                    handle[0] = display(HTML(""), display_id=True)
+                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
-                print(f"\r{label}... {count:,} {unit}", end="", file=sys.stderr, flush=True)
+                width[0] = max(width[0], len(text))
+                print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
 
         try:
             yield tick
+        except BaseException:
+            stopped[0] = True  # interrupted: a tqdm widget stays, red, where it stopped
+            raise
         finally:
-            if handle is not None:
-                handle.update(HTML(""))
-            elif last_update[0]:
-                print("\r" + " " * 50 + "\r", end="", file=sys.stderr, flush=True)
+            clear()
+            if getattr(self, "_progress_owner", None) is clear:
+                self._progress_owner = None
 
     def help(self) -> None:
         """This list."""
@@ -3653,7 +4368,9 @@ class S3View:
         ]
         if listing.truncated:
             blocks.append(_Note(f"Showing the first {limit:,} entries; pass limit= for more.", "warn"))
-        if not rows:
+        if not rows and not listing.uri.endswith("/") and self.core.exists(listing.uri):
+            blocks.append(_Note("That's a file, not a folder: head(uri) shows its details, preview(uri) what's in it."))
+        elif not rows:
             blocks.append(_Note("Nothing here. Check the prefix (keys are case-sensitive)."))
         else:
             blocks.append(_Table(["Name", "Size", "Last modified (UTC)", "Storage class"], rows, max_rows=0))
@@ -3763,24 +4480,79 @@ class S3View:
         self._show([_Title(f"{title} in {s3_uri(bucket, prefix)}"), _objects_table("", objects, base_prefix(prefix))])
 
     @_friendly_errors
-    def duplicates(self, uri: str, *, min_size: int | str = 1, limit: int | None = None) -> None:
-        """Identical objects (same size + ETag) and how much space removing the copies would save."""
-        with self._progress() as tick:
-            groups = self.core.find_duplicates(uri, min_size=min_size, limit=limit, progress=tick)
-        bucket, prefix = parse_s3_uri(uri)
-        base = base_prefix(prefix)
-        reclaimable = sum(g[0].size * (len(g) - 1) for g in groups)
-        blocks: list[Any] = [
-            _Title(f"Duplicates in {s3_uri(bucket, prefix)}", f"objects of at least {human_size(parse_size(min_size))}"),
-            _Cards([("Duplicate groups", f"{len(groups):,}"),
-                    ("Redundant copies", f"{sum(len(g) - 1 for g in groups):,}"),
-                    ("Reclaimable", human_size(reclaimable))]),
-            _Note("Matched on size + ETag. Copies uploaded with different multipart settings or SSE-KMS "
-                  "have different ETags and won't show up here."),
-            _Table(["Size", "Copies", "Reclaimable", "Keys"],
-                   [[human_size(g[0].size), str(len(g)), human_size(g[0].size * (len(g) - 1)),
-                     "\n".join(relative_key(o.key, base) for o in g)] for g in groups], title="Groups"),
-        ]
+    def duplicates(self, uri: str, *, method: str = "hash", min_size: int | str = 1,
+                   max_read: int | str | None = "10GB", limit: int | None = None) -> None:
+        """Identical files under a prefix: what the copies take and cost, and folders that hold only copies.
+        Matched by size + ETag, and by SHA-256 of the content where the ETags differ, reading at most max_read.
+        method='strict' reads every file that shares its size; method='etag' reads none."""
+        with self._progress("Listing", unit="files") as tick, \
+                self._progress("Reading to compare", unit="B") as read_tick:
+            report = self.core.find_duplicates(uri, min_size=min_size, method=method, max_read=max_read, limit=limit,
+                                               progress=tick, read_progress=read_tick)
+        base = base_prefix(parse_s3_uri(report.uri)[1])
+        smallest = parse_size(min_size) or 0
+        if report.method == "etag":
+            read = "matched on size + ETag from the listing, no file read"
+        else:
+            read = (f"{_plural(report.files_read, 'file')} read to compare contents ({human_size(report.bytes_read)} "
+                    f"in {_plural(report.requests, 'request')})")
+        sub = [f"{report.scanned.count:,} files listed ({human_size(report.scanned.size)})", read,
+               f"files of at least {human_size(smallest)}" if smallest > 1 else "",
+               f"took {_duration(report.scan_seconds)}"]
+        blocks: list[Any] = [_Title(f"Duplicate files in {report.uri}", " · ".join(filter(None, sub)))]
+        findings = [_Note(message, level) for level, message in duplicate_findings(report)]
+        if not report.scanned.count:
+            blocks.append(_Note("No files under this prefix. Check the prefix (keys are case-sensitive)."))
+            return self._show(blocks + findings)
+        blocks.append(_Cards([
+            ("Duplicate groups", f"{len(report.groups):,}"),
+            ("Redundant copies", f"{report.copies:,}"),
+            ("Reclaimable", human_size(report.reclaimable)),
+            ("Est. saving / month", human_money(report.monthly_cost)),
+            ("Files listed", f"{report.scanned.count:,}{'+' if report.truncated else ''}"),
+            ("Read to compare", "nothing" if report.method == "etag" else human_size(report.bytes_read)),
+        ]))
+        if not report.candidates.count:
+            blocks.append(_Note("No two files have the same size, so none can be a copy of another.", "ok"))
+        elif not report.groups and not report.not_compared.count:
+            blocks.append(_Note(f"No duplicates: the {_plural(report.candidates.count, 'file')} that share a size "
+                                "with another file all have different contents.", "ok"))
+        blocks += findings
+        if not report.groups:
+            return self._show(blocks)
+
+        def name(folder: str) -> str:
+            return _folder_label(relative_key(folder, base))
+
+        folders = duplicate_folders(report)
+        rows = []
+        for folder in folders:
+            others = [f for f in folder.elsewhere if f != folder.folder]
+            where = [_folders_text(others, base)] if others else []
+            where += ["this folder"] if folder.folder in folder.elsewhere else []
+            rows.append([name(folder.folder), f"{folder.duplicated.count:,} of {folder.files:,}",
+                         human_size(folder.duplicated.size), "\n".join(where)])
+        blocks.append(_Table(["Folder", "Files with a copy", "Their size", "The copies are in"], rows,
+                             title="Folders with duplicated files", bars=[_share(f.duplicated.count, f.files)
+                                                                           for f in folders],
+                             bar_label="% of the folder's files"))
+
+        def listed(objects: list[ObjectInfo], most: int = 5) -> str:
+            keys = [relative_key(o.key, base) for o in objects[:most]]
+            return "\n".join(keys + ([f"… and {len(objects) - most:,} more"] if len(objects) > most else []))
+
+        blocks.append(_Table(
+            ["Size", "Files", "Reclaimable", "Est. $/month", "Matched by", "Keep", "Copies"],
+            [[human_size(g.size), f"{len(g.objects):,}", human_size(g.reclaimable), human_money(g.monthly_cost),
+              g.matched_by, relative_key(g.keep.key, base), listed(g.copies)] for g in report.groups],
+            title=f"Duplicate groups, biggest saving first (cost {self._price_basis()})"))
+        options = {"method": (method, "hash"), "min_size": (min_size, 1), "max_read": (max_read, "10GB"),
+                   "limit": (limit, None)}
+        args = "".join(f", {key}={value!r}" for key, (value, default) in options.items() if value != default)
+        blocks.append(_Text(f"report = ui.core.find_duplicates({report.uri!r}{args})\n"
+                            "df = report.to_df()              # one row per file: group, role, key, size, sha256, ...\n"
+                            "copies = df[df.role == 'copy']   # every file but the one to keep in each group",
+                            title="Get the list in pandas (nothing is deleted here)"))
         self._show(blocks)
 
     @_friendly_errors
@@ -3898,7 +4670,8 @@ class S3View:
     @_friendly_errors
     def uploads(self, uri: str, *, with_sizes: bool = True) -> None:
         """Incomplete multipart uploads (billed, but invisible in normal listings)."""
-        uploads = self.core.incomplete_uploads(uri, with_sizes=with_sizes)
+        with self._progress("Measuring uploads", unit="uploads") as tick:
+            uploads = self.core.incomplete_uploads(uri, with_sizes=with_sizes, progress=tick)
         total = sum(u.size or 0 for u in uploads)
         cost = (object_monthly_cost(total, "STANDARD", self.core.prices) or 0.0) if with_sizes else None
         blocks: list[Any] = [
@@ -4088,6 +4861,56 @@ class S3View:
                 break
             blocks.append(_Text(text[: max_chars - shown] or "(no text)", title=heading, wrap=True))
             shown += len(text)
+        self._show(blocks)
+
+    @_friendly_errors
+    def download(self, uri: str, path: str | None = None, *, limit: int | None = None) -> None:
+        """Download a file, or a whole folder with its sub-folders, with a progress bar, and say where it went.
+        Files already downloaded are skipped, so running it again resumes, e.g. download('s3://b/data/', 'data')."""
+        bucket, key = parse_s3_uri(uri)
+        if key and not key.endswith("/") and self.core.exists(uri):
+            started = time.monotonic()
+            with self._progress("Downloading", unit="B") as tick:
+                local = self.core.download(uri, path, progress=tick)
+            seconds, size = time.monotonic() - started, os.path.getsize(local)
+            blocks: list[Any] = [
+                _Title(f"Downloaded {s3_uri(bucket, key)}", f"to {local}"),
+                _Cards([("Size", human_size(size)), ("Took", _duration(seconds)),
+                        ("Speed", f"{human_size(size / max(seconds, 1e-3))}/s")]),
+            ]
+            opener = _PANDAS_READERS.get(detect_format(key)[0] or "")
+            if opener:
+                blocks.append(_Text(f"import pandas as pd\n\ndf = pd.{opener.format(path=repr(local))}",
+                                    title="Open it"))
+            return self._show(blocks)
+        with self._progress("Listing", unit="files") as list_tick, self._progress("Downloading", unit="B") as tick:
+            d = self.core.download_folder(uri, path, limit=limit, progress=tick, list_progress=list_tick)
+        speed = f"{human_size(d.downloaded.size / max(d.seconds, 1e-3))}/s" if d.downloaded.size else "-"
+        blocks = [
+            _Title(f"{'Downloaded' if d.downloaded.count else 'Download of'} {d.uri}", f"to {d.path}"),
+            _Cards([("Files downloaded", f"{d.downloaded.count:,}"), ("Size", human_size(d.downloaded.size)),
+                    ("Already there", f"{d.already_there.count:,}"), ("Not downloaded", f"{len(d.skipped):,}"),
+                    ("Took", _duration(d.seconds)), ("Speed", speed)]),
+        ]
+        if d.truncated:
+            blocks.append(_Note(f"Stopped at limit={limit:,} files; pass a bigger limit= (or none) for the rest. "
+                                "Running it again skips what's already downloaded.", "warn"))
+        if not (d.downloaded.count or d.already_there.count or d.skipped):
+            blocks.append(_Note("No files under this folder. Check the path (keys are case-sensitive)."))
+        elif d.downloaded.count or d.already_there.count:
+            again = (f" {_plural(d.already_there.count, 'file')} ({human_size(d.already_there.size)}) were already "
+                     "there with the same size and time, so they weren't downloaded again.") if d.already_there.count else ""
+            blocks.append(_Note(f"Files are in {d.path}, in the same sub-folders as in S3.{again}", "ok"))
+        if d.skipped:
+            archived = sum(reason in ARCHIVE_CLASSES for reason in d.skipped.values())
+            if archived:
+                blocks.append(_Note(f"{_plural(archived, 'file')} in GLACIER / DEEP_ARCHIVE weren't downloaded: they "
+                                    "need a restore first (the S3 console, or restore_object).", "warn"))
+            if len(d.skipped) > archived:
+                blocks.append(_Note(f"{_plural(len(d.skipped) - archived, 'file')} couldn't be downloaded; the table "
+                                    "says why. Running download() again retries them.", "warn"))
+            blocks.append(_Table(["Key", "Why"], [[relative_key(k, parse_s3_uri(d.uri)[1]), why]
+                                                  for k, why in sorted(d.skipped.items())], title="Not downloaded"))
         self._show(blocks)
 
     @_friendly_errors
