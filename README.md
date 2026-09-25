@@ -28,6 +28,27 @@ Every file has the same two layers:
 
 ## S3 quick start
 
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker the first line is already
+installed, so you only need the second one, and only for the file types it lists.
+
+```python
+%pip install boto3 pandas pyarrow                                  # the commands below
+%pip install openpyxl xlrd pypdf zstandard python-snappy           # optional: Excel, PDF, .zst, snappy Avro
+```
+
+| Package | Needed for |
+|---|---|
+| `boto3` | Every command (required) |
+| `pandas` | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`. Installs `numpy` for `.npy` / `.npz` |
+| `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview` and `read_df`, and `parquet_info` |
+| `openpyxl` / `xlrd` | Excel `.xlsx` / `.xlsm` and old `.xls` |
+| `pypdf` | PDF text in `preview`, `document`, `read_pdf` |
+| `zstandard` | `.zst` files before Python 3.14 |
+| `python-snappy` | Avro files compressed with snappy |
+
+IPython, used for the HTML output, comes with Jupyter. If a package is missing, the command tells you which one to
+install instead of failing; install it and run the cell again.
+
 ```python
 ui = S3View()                      # uses the notebook's execution role
 ui.help()                          # every command with a one-line description
@@ -166,6 +187,16 @@ Read-only. Grant what you need:
 `cloudwatch:GetMetricData` for bucket sizes. Anything you can't read shows up as a note instead of an error.
 
 ## DynamoDB quick start
+
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker both are already
+installed.
+
+```python
+%pip install boto3               # every command (required)
+%pip install pandas              # optional: only for DataFrames (page.to_df(), profile.to_df(), items_to_df)
+```
+
+Every `DynamoDBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
 
 ```python
 ui = DynamoDBView()                # uses the notebook's execution role and region
