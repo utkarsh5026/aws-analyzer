@@ -133,6 +133,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
       <li><a href="#browse">Browse and search</a></li>
       <li><a href="#summary">What's in a folder</a></li>
       <li><a href="#files">Look inside files</a></li>
+      <li><a href="#documents">PDF, Word, PowerPoint</a></li>
       <li><a href="#costs">Cut storage costs</a></li>
       <li><a href="#deleted">Recover deleted files</a></li>
       <li><a href="#compare">Check a copy or sync</a></li>
@@ -156,6 +157,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <li><a href="#browse">Browse and search</a></li>
           <li><a href="#summary">What's in a folder</a></li>
           <li><a href="#files">Look inside files</a></li>
+          <li><a href="#documents">PDF, Word, PowerPoint</a></li>
           <li><a href="#costs">Cut storage costs</a></li>
           <li><a href="#deleted">Recover deleted files</a></li>
           <li><a href="#compare">Check a copy or sync</a></li>
@@ -346,7 +348,10 @@ ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></
           <tr><td>Models</td><td><code>.safetensors</code> <code>.pt</code> <code>.pth</code> <code>.ckpt</code> <code>.pkl</code> <code>.joblib</code></td><td>Tensors and parameter count, or the files in a checkpoint. Pickles are never loaded, because unpickling can run code</td><td></td></tr>
           <tr><td>Notebooks</td><td><code>.ipynb</code></td><td>Kernel and a list of cells</td><td></td></tr>
           <tr><td>Images, audio, video</td><td><code>.png</code> <code>.jpg</code> <code>.gif</code> <code>.webp</code>, <code>.wav</code> <code>.mp3</code> <code>.flac</code>, <code>.mp4</code> <code>.webm</code> <code>.mov</code></td><td>The image, or a player</td><td></td></tr>
-          <tr><td>PDF</td><td><code>.pdf</code></td><td>A link; with <code>pypdf</code> installed, the page count and first page's text</td><td></td></tr>
+          <tr><td>PDF</td><td><code>.pdf</code></td><td>Page count, title and the first page's text (needs <code>pypdf</code>; without it, a link). <a href="#documents">Full text</a> with <code>ui.document()</code></td><td></td></tr>
+          <tr><td>Word</td><td><code>.docx</code> <code>.docm</code> <code>.dotx</code></td><td>First paragraphs, outline of headings, first table, word count (no package needed)</td><td></td></tr>
+          <tr><td>PowerPoint</td><td><code>.pptx</code> <code>.pptm</code> <code>.ppsx</code></td><td>Every slide's title and text, and which have speaker notes (no package needed)</td><td></td></tr>
+          <tr><td>Old Office</td><td><code>.doc</code> <code>.ppt</code> <code>.msg</code></td><td>Recognised, with how to convert them to <code>.docx</code> / <code>.pptx</code> (their binary format can't be read here)</td><td></td></tr>
           <tr><td>Text</td><td><code>.txt</code> <code>.log</code> <code>.md</code> <code>.yaml</code> <code>.xml</code> <code>.sql</code> <code>.py</code> and more</td><td>First lines</td><td></td></tr>
         </tbody>
       </table></div>
@@ -375,6 +380,45 @@ with s3.open("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz") as
     first_line = f.readline()
 
 s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")</code></pre></div>
+
+      <!-- ============================================================ documents -->
+      <h2 id="documents">Read PDFs, Word and PowerPoint files</h2>
+      <p><code>preview()</code> gives a quick look; <code>ui.document()</code> shows the full text, page by page or slide by slide. Word and PowerPoint files are read with Python's standard library. PDFs need <code>pypdf</code> (<code>%pip install pypdf</code>).</p>
+      <div class="code"><pre><code class="lang-py">ui.preview("s3://acme-ml-data/docs/model-card-churn-xgb.docx")        # outline, first paragraphs, first table
+ui.preview("s3://acme-ml-data/docs/q3-ml-platform-review.pptx")       # every slide's title and text
+ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf")       # full text, page by page
+ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf", pages=[2])       # just page 2
+ui.document("s3://acme-ml-data/docs/q3-ml-platform-review.pptx", pages=[2, 3])   # slides 2-3, with speaker notes</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-docx-light.webp" alt="preview() of a Word document: word, paragraph, heading and table counts, title and author, the first paragraphs, the outline of headings and the first table" width="984" height="721" loading="lazy"></picture></div>
+        <figcaption>A Word model card: the outline and the first table come straight from the document.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-pptx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-pptx-light.webp" alt="preview() of a PowerPoint deck: slide and word counts, and a table of slides with title, text, word count and whether there are speaker notes" width="984" height="265" loading="lazy"></picture></div>
+        <figcaption>A PowerPoint deck, in the order it's presented.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><picture><source srcset="images/document-pdf-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/document-pdf-light.webp" alt="document() of a PDF: page count, word count, title and author, then the text of each page" width="984" height="421" loading="lazy"></picture></div>
+        <figcaption><code>ui.document(...)</code> on a two-page PDF.</figcaption>
+      </figure>
+      <p>To use the text in Python (for search, summaries, or checking what a knowledge base will ingest), <code>read_document()</code> returns a <code>Document</code>:</p>
+      <div class="code"><pre><code class="lang-py">doc = ui.core.read_document("s3://acme-ml-data/docs/data-retention-policy.pdf")
+doc.text                  # everything, pages separated by blank lines
+doc.parts                 # one string per page (PDF) or slide (PowerPoint); paragraphs and tables for Word
+doc.numbers               # the page / slide number of each part
+doc.page_count, doc.word_count, doc.title, doc.author
+
+deck = ui.core.read_pptx("s3://acme-ml-data/docs/q3-ml-platform-review.pptx")
+deck.slide_titles, deck.notes                     # per slide
+card = ui.core.read_docx("s3://acme-ml-data/docs/model-card-churn-xgb.docx")
+card.headings, card.tables                        # [(level, text)], tables as rows of cells
+ui.core.read_pdf("s3://acme-ml-data/docs/data-retention-policy.pdf", pages=range(1, 3))
+
+texts = {obj.key: ui.core.read_document(obj.uri).text                  # every PDF under a folder
+         for obj in ui.core.find("s3://acme-ml-data/docs/", extensions="pdf")}</code></pre></div>
+      <div class="callout">
+        <p><strong>Scanned PDFs</strong> are images with no text layer: their pages come back empty and the preview says so; reading them needs OCR (for example Amazon Textract). <strong>Password-protected PDFs</strong>: pass <code>password="..."</code>. <strong>Old <code>.doc</code> / <code>.ppt</code> files</strong> use a binary format this tool can't read; save them as <code>.docx</code> / <code>.pptx</code>, or convert them with LibreOffice: <code>soffice --headless --convert-to docx FILE.doc</code>.</p>
+      </div>
 
       <!-- ============================================================ costs -->
       <h2 id="costs">Cut storage costs</h2>
@@ -562,6 +606,7 @@ simulate_lifecycle_objects(rows, "s3://acme-ml-data/raw/", move_after=30, to="GL
           <tr><td><code>what_if(uri, move_after=, to=, delete_after=)</code></td><td>What a lifecycle rule would move, delete and save</td></tr>
           <tr><td><code>head(uri)</code></td><td>All of one object's metadata and tags</td></tr>
           <tr><td><code>preview(uri, n=20)</code></td><td>What's inside a file (see <a href="#file-types">file types</a>)</td></tr>
+          <tr><td><code>document(uri, pages=None)</code></td><td>Full text of a PDF, Word or PowerPoint file, page by page or slide by slide</td></tr>
           <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
           <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
         </tbody>

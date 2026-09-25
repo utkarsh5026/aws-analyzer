@@ -19,6 +19,8 @@ pytest==9.1.1
 # and Excel through pandas + openpyxl when they are installed.
 fastavro==1.12.2
 openpyxl==3.1.5
+# Optional for users (PDF text); installed here so the PDF tests run.
+pypdf==6.19.0
 
 # Lint
 ruff==0.16.8

@@ -61,6 +61,7 @@ Sizes accept `1024`, `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-0
 | `what_if(uri, move_after=, to=, delete_after=)` | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves |
 | `head(uri)` | All object metadata, user metadata and tags |
 | `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, or a hex dump. Only downloads what it needs. |
+| `document(uri, pages=None)` | Full text of a PDF, Word `.docx` or PowerPoint `.pptx`, page by page or slide by slide (PDFs need `pypdf`) |
 | `link(uri)` | Clickable presigned download link |
 
 ### Getting the data (`S3Analyzer`)
@@ -82,6 +83,8 @@ df = s3.read_df("s3://my-bucket/spark/part-00000", fmt="parquet")   # no extensi
 s3.parquet_info("s3://my-bucket/data/big.parquet")  # rows, row groups, schema (reads only the footer)
 s3.list_archive("s3://my-bucket/job/output/model.tar.gz").entries   # files inside, without extracting
 s3.read_avro("s3://my-bucket/events.avro", n=100), s3.read_npy(uri, nrows=10), s3.safetensors_info(uri)
+doc = s3.read_document("s3://my-bucket/docs/policy.pdf")   # also .docx / .pptx: doc.text, doc.parts, doc.title
+s3.read_pdf(uri, pages=[1, 2]), s3.read_docx(uri).headings, s3.read_pptx(uri).notes
 s3.read_lines("s3://my-bucket/logs/app.log.gz", 50)
 s3.read_json(...), s3.read_jsonl(..., n=100), s3.read_text(...), s3.read_bytes(uri, 0, 1023)
 with s3.open("s3://my-bucket/data/x.csv.gz") as f: ...   # streaming, decompressed
@@ -113,7 +116,10 @@ no extension or the wrong one (Spark's `part-00000`, a Firehose object, a `.gz` 
 | Models | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib` | tensors, shapes, parameter count / files inside; pickles are never loaded | |
 | Notebooks | `.ipynb` | kernel and cells | |
 | Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player | |
-| PDF | `.pdf` | link; page count and first page's text with `pypdf` installed | |
+| PDF | `.pdf` | page count, title and first page's text (needs `pypdf`; without it, a link) | |
+| Word | `.docx` `.docm` `.dotx` | first paragraphs, outline, first table, word count (no package needed) | |
+| PowerPoint | `.pptx` `.pptm` `.ppsx` | every slide's title and text, speaker notes (no package needed) | |
+| Old Office | `.doc` `.ppt` `.msg` | recognised, with how to convert them (the old binary format can't be read) | |
 | Text | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more | first lines | |
 
 Any of them can also be compressed: `.gz`, `.bz2`, `.xz`, or `.zst` (Python 3.14+, or `pip install zstandard`).
@@ -122,7 +128,8 @@ Packages in the table are optional; without them `preview` says what to install.
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
 `make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
-`bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`.
+`bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`, and the file parsers
+`parse_docx`, `parse_pptx`, `parse_pdf`, `parse_avro`.
 
 ### Cost estimates
 

@@ -45,6 +45,7 @@ import gzip
 import heapq
 import html
 import importlib
+import importlib.util
 import inspect
 import io
 import json
@@ -52,6 +53,7 @@ import lzma
 import math
 import mimetypes
 import os
+import posixpath
 import re
 import struct
 import sys
@@ -59,6 +61,7 @@ import tarfile
 import time
 import zipfile
 import zlib
+from xml.etree import ElementTree
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -210,6 +213,10 @@ _FORMAT_BY_EXT = {
     "png": "image", "jpg": "image", "jpeg": "image", "gif": "image", "webp": "image", "bmp": "image",
     "wav": "audio", "mp3": "audio", "flac": "audio", "ogg": "audio", "m4a": "audio", "aac": "audio",
     "mp4": "video", "webm": "video", "mov": "video", "m4v": "video", "pdf": "pdf",
+    "docx": "docx", "docm": "docx", "dotx": "docx", "dotm": "docx",
+    "pptx": "pptx", "pptm": "pptx", "potx": "pptx", "ppsx": "pptx", "ppsm": "pptx",
+    "doc": "oldoffice", "dot": "oldoffice", "ppt": "oldoffice", "pps": "oldoffice", "pot": "oldoffice",
+    "msg": "oldoffice",
     **{ext: "text" for ext in _TEXT_EXTS},
 }
 _CSV_SEPARATORS = {"csv": ",", "tsv": "\t", "psv": "|"}
@@ -250,6 +257,7 @@ _MAGIC_CODECS = [(b"\x1f\x8b", "gz"), (b"\xfd7zXZ\x00", "xz"), (b"\x28\xb5\x2f\x
 _MAGIC_FORMATS = [  # (offset, leading bytes, format)
     (0, b"PAR1", "parquet"), (0, b"ORC", "orc"), (0, b"ARROW1", "arrow"), (0, b"FEA1", "arrow"),
     (0, b"Obj\x01", "avro"), (0, b"\x93NUMPY", "npy"), (0, b"%PDF-", "pdf"),
+    (0, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "oldoffice"),  # OLE2: Office 97-2003 files
     (0, b"PK\x03\x04", "zip"), (0, b"PK\x05\x06", "zip"),
     (0, b"\x89PNG\r\n\x1a\n", "image"), (0, b"\xff\xd8\xff", "image"), (0, b"GIF8", "image"),
     (257, b"ustar", "tar"),
@@ -443,6 +451,240 @@ def _avro_type_name(schema: Any) -> str:
             return f"map<{_avro_type_name(schema['values'])}>"
         return f"{kind} {schema['name']}" if kind in ("record", "enum", "fixed") and "name" in schema else kind
     return str(schema)
+
+# ---- Documents: PDF (with pypdf), Word and PowerPoint (standard library only)
+
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+_OFFICE_PARTS = {"word/document.xml": "docx", "ppt/presentation.xml": "pptx", "xl/workbook.xml": "excel"}
+_OLD_OFFICE = {"doc": "Word 97-2003 document", "dot": "Word 97-2003 template", "ppt": "PowerPoint 97-2003 deck",
+               "pps": "PowerPoint 97-2003 show", "pot": "PowerPoint 97-2003 template", "msg": "Outlook message"}
+
+
+def _count_words(text: str) -> int:
+    """Words in text; list markers and table separators ('-', '|') don't count."""
+    return sum(any(ch.isalnum() for ch in word) for word in text.split())
+
+
+def _old_office_note(key: str) -> str:
+    ext = key.rsplit(".", 1)[-1].lower() if "." in key.rsplit("/", 1)[-1] else ""
+    what = _OLD_OFFICE.get(ext, "Office 97-2003 file")
+    modern = {"ppt": "pptx", "pps": "pptx", "pot": "pptx"}.get(ext, "docx")
+    return (f"{what} (the old binary format): its text can't be read here. Save it as .{modern} in Office, "
+            f"or convert it with LibreOffice (soffice --headless --convert-to {modern} FILE), then preview that.")
+
+
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _zip_xml(archive: zipfile.ZipFile, name: str, *, required: bool = True) -> Any:
+    """Parse one XML part of an Office file (None if it's missing and not required)."""
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        if required:
+            raise ValueError(f"Not a valid Office file: {name} is missing") from None
+        return None
+    if info.file_size > 256 * MB:
+        raise ValueError(f"{name} unpacks to {human_size(info.file_size)}; not read")
+    data = archive.read(info)
+    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:  # Office never writes these; refuse entity tricks
+        raise ValueError(f"{name} has a DTD, which Office files never contain; not parsed")
+    return ElementTree.fromstring(data)
+
+
+def _zip_rels(archive: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]:
+    """Relationships of an Office part -> {id: (type, path inside the zip)}."""
+    folder, name = posixpath.split(part)
+    root = _zip_xml(archive, posixpath.join(folder, "_rels", name + ".rels"), required=False)
+    rels: dict[str, tuple[str, str]] = {}
+    for rel in [] if root is None else root.iter(f"{_REL}Relationship"):
+        target = rel.get("Target", "")
+        if rel.get("TargetMode") == "External" or not target:
+            continue
+        path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(folder, target))
+        rels[rel.get("Id", "")] = (rel.get("Type", "").rsplit("/", 1)[-1], path)
+    return rels
+
+
+def _office_properties(archive: zipfile.ZipFile) -> dict[str, Any]:
+    """Title, author and the page / slide count the app saved (docProps/core.xml and app.xml)."""
+    props: dict[str, Any] = {}
+    for part in ("docProps/core.xml", "docProps/app.xml"):
+        root = _zip_xml(archive, part, required=False)
+        for elem in [] if root is None else root:
+            value = (elem.text or "").strip()
+            if value:
+                props[_local(elem.tag).lower()] = value
+    return {"title": props.get("title"), "author": props.get("creator"),
+            "pages": int(props["pages"]) if props.get("pages", "").isdigit() else None}
+
+
+def office_kind(source: Any) -> str | None:
+    """'docx', 'pptx' or 'excel' for an Office zip file (by the parts inside it), else None."""
+    with zipfile.ZipFile(source) as archive:
+        names = set(archive.namelist())
+    return next((kind for part, kind in _OFFICE_PARTS.items() if part in names), None)
+
+
+def _word_text(paragraph: Any) -> str:
+    out = []
+    for elem in paragraph.iter():
+        if elem.tag == f"{_W}t":  # deleted text (w:delText) and field codes (w:instrText) are skipped
+            out.append(elem.text or "")
+        elif elem.tag == f"{_W}tab":
+            out.append("\t")
+        elif elem.tag in (f"{_W}br", f"{_W}cr"):
+            out.append("\n")
+    return "".join(out).strip()
+
+
+def parse_docx(source: Any, uri: str = "") -> Document:
+    """A Word .docx (path or binary file object) -> Document: paragraphs and tables in order,
+    headings (by style), list items prefixed with '- ', title and author. No packages needed."""
+    with zipfile.ZipFile(source) as archive:
+        root = _zip_xml(archive, "word/document.xml")
+        styles = _zip_xml(archive, "word/styles.xml", required=False)
+        props = _office_properties(archive)
+    style_names, based_on, numbered = {}, {}, set()
+    for style in [] if styles is None else styles.iter(f"{_W}style"):
+        style_id, name, parent = style.get(f"{_W}styleId"), style.find(f"{_W}name"), style.find(f"{_W}basedOn")
+        style_names[style_id] = "" if name is None else name.get(f"{_W}val", "")
+        based_on[style_id] = None if parent is None else parent.get(f"{_W}val")
+        if style.find(f"{_W}pPr/{_W}numPr") is not None:
+            numbered.add(style_id)
+
+    def style_is_list(style_id: str | None) -> bool:  # bullets can come from the style or one it's based on
+        for _ in range(10):
+            if style_id is None:
+                return False
+            if style_id in numbered:
+                return True
+            style_id = based_on.get(style_id)
+        return False
+    doc = Document(uri=uri, kind="docx", title=props["title"], author=props["author"], page_count=props["pages"])
+
+    def heading_level(paragraph: Any) -> int | None:
+        properties = paragraph.find(f"{_W}pPr")
+        if properties is None:
+            return None
+        style = properties.find(f"{_W}pStyle")
+        style_id = "" if style is None else style.get(f"{_W}val", "")
+        name = (style_names.get(style_id) or style_id).lower().replace(" ", "")
+        if name == "title":
+            return 0
+        if match := re.fullmatch(r"heading(\d)", name):
+            return int(match.group(1))
+        outline = properties.find(f"{_W}outlineLvl")
+        return None if outline is None else int(outline.get(f"{_W}val", "0")) + 1
+
+    def walk(container: Any) -> None:
+        for child in container:
+            if child.tag == f"{_W}p":
+                text = _word_text(child)
+                if not text:
+                    continue
+                level = heading_level(child)
+                if level is not None:
+                    doc.headings.append((level, text))
+                style = child.find(f"{_W}pPr/{_W}pStyle")
+                listed = (child.find(f"{_W}pPr/{_W}numPr") is not None
+                          or style_is_list(None if style is None else style.get(f"{_W}val")))
+                doc.parts.append(f"- {text}" if listed else text)
+            elif child.tag == f"{_W}tbl":
+                rows = [["\n".join(filter(None, (_word_text(p) for p in cell.iter(f"{_W}p"))))
+                         for cell in row.findall(f"{_W}tc")] for row in child.findall(f"{_W}tr")]
+                if any(any(cells) for cells in rows):
+                    doc.tables.append(rows)
+                    doc.parts.append("\n".join(" | ".join(cells) for cells in rows))
+            elif child.tag in (f"{_W}sdt", f"{_W}sdtContent", f"{_W}customXml", f"{_W}ins"):
+                walk(child)  # content controls and tracked insertions wrap ordinary paragraphs
+
+    body = root.find(f"{_W}body")
+    walk(root if body is None else body)
+    return doc
+
+
+def _drawing_text(paragraph: Any) -> str:
+    parts = [(elem.text or "") if elem.tag == f"{_A}t" else "\n"
+             for elem in paragraph.iter() if elem.tag in (f"{_A}t", f"{_A}br")]
+    return "".join(parts).strip()
+
+
+def _slide_text(root: Any, skip_placeholders: tuple[str, ...] = ()) -> tuple[str | None, list[str], list[list[list[str]]]]:
+    """(title, paragraphs, tables) of a slide or notes page."""
+    title, paragraphs, tables = None, [], []
+    for shape in root.iter(f"{_P}sp"):
+        placeholder = shape.find(f"{_P}nvSpPr/{_P}nvPr/{_P}ph")
+        kind = None if placeholder is None else placeholder.get("type")
+        if kind in skip_placeholders:
+            continue
+        texts = [t for t in (_drawing_text(p) for p in shape.iter(f"{_A}p")) if t]
+        if kind in ("title", "ctrTitle") and texts and title is None:
+            title = " ".join(texts)
+        paragraphs += texts
+    for table in root.iter(f"{_A}tbl"):
+        rows = [["\n".join(t for t in (_drawing_text(p) for p in cell.iter(f"{_A}p")) if t)
+                 for cell in row.findall(f"{_A}tc")] for row in table.findall(f"{_A}tr")]
+        if any(any(cells) for cells in rows):
+            tables.append(rows)
+            paragraphs.append("\n".join(" | ".join(cells) for cells in rows))
+    return title, paragraphs, tables
+
+
+def parse_pptx(source: Any, uri: str = "", *, slides: Iterable[int] | None = None) -> Document:
+    """A PowerPoint .pptx -> Document: one part per slide in presentation order, slide titles,
+    tables and speaker notes. slides: 1-based slide numbers to read. No packages needed."""
+    with zipfile.ZipFile(source) as archive:
+        presentation = _zip_xml(archive, "ppt/presentation.xml")
+        rels = _zip_rels(archive, "ppt/presentation.xml")
+        props = _office_properties(archive)
+        paths = [rels[ref][1] for ref in (s.get(f"{_R}id") for s in presentation.iter(f"{_P}sldId")) if ref in rels]
+        wanted = range(1, len(paths) + 1) if slides is None else [int(n) for n in slides]
+        bad = [n for n in wanted if not 1 <= n <= len(paths)]
+        if bad:
+            raise ValueError(f"Slide {bad[0]} doesn't exist; the deck has {len(paths)} slides")
+        doc = Document(uri=uri, kind="pptx", title=props["title"], author=props["author"], page_count=len(paths))
+        for number in wanted:
+            path = paths[number - 1]
+            title, paragraphs, tables = _slide_text(_zip_xml(archive, path))
+            notes = ""
+            for kind, notes_path in _zip_rels(archive, path).values():
+                if kind == "notesSlide":
+                    _, note_paragraphs, _ = _slide_text(_zip_xml(archive, notes_path), ("sldNum", "sldImg", "hdr", "ftr", "dt"))
+                    notes = "\n".join(note_paragraphs)
+            doc.parts.append("\n".join(paragraphs))
+            doc.numbers.append(number)
+            doc.slide_titles.append(title)
+            doc.notes.append(notes)
+            doc.tables += tables
+    return doc
+
+
+def parse_pdf(source: Any, uri: str = "", *, pages: Iterable[int] | None = None, password: str | None = None) -> Document:
+    """A PDF (path or seekable binary file) -> Document with one part per page. Needs pypdf.
+    pages: 1-based page numbers to read. Scanned pages have no text layer and come back empty."""
+    pypdf = _require("pypdf", "Reading PDF text")
+    try:
+        reader = pypdf.PdfReader(source)
+        if reader.is_encrypted and not reader.decrypt(password or ""):
+            raise ValueError("The PDF is password-protected; pass password=")
+        count = len(reader.pages)
+        wanted = list(range(1, count + 1)) if pages is None else [int(n) for n in pages]
+        bad = [n for n in wanted if not 1 <= n <= count]
+        if bad:
+            raise ValueError(f"Page {bad[0]} doesn't exist; the PDF has {count} pages")
+        parts = [reader.pages[n - 1].extract_text() or "" for n in wanted]
+        meta = reader.metadata
+        title, author = (meta.title, meta.author) if meta else (None, None)
+    except pypdf.errors.PyPdfError as exc:
+        raise ValueError(f"pypdf couldn't read this PDF: {exc}") from exc
+    return Document(uri=uri, kind="pdf", parts=parts, numbers=wanted, title=title or None, author=author or None,
+                    page_count=count)
 
 
 def _plural(count: int, word: str) -> str:
@@ -783,6 +1025,31 @@ class ArchiveListing:
     total_files: int | None = None  # None when the listing stopped early
     complete: bool = True
     bytes_read: int | None = None  # compressed tar: how much of the archive was streamed
+
+
+@dataclass
+class Document:
+    """Text of a PDF, Word (.docx) or PowerPoint (.pptx) file (see S3Analyzer.read_document)."""
+
+    uri: str
+    kind: str  # 'pdf' | 'docx' | 'pptx'
+    parts: list[str] = field(default_factory=list)  # pages / slides / Word paragraphs and tables, in order
+    numbers: list[int] = field(default_factory=list)  # page or slide number of each part (PDF, PPTX)
+    title: str | None = None
+    author: str | None = None
+    page_count: int | None = None  # PDF pages, PPTX slides; for a DOCX, the count Word last saved (can be stale)
+    headings: list[tuple[int, str]] = field(default_factory=list)  # DOCX outline: (level, text), 0 = title
+    slide_titles: list[str | None] = field(default_factory=list)  # PPTX, one per part
+    notes: list[str] = field(default_factory=list)  # PPTX speaker notes, one per part
+    tables: list[list[list[str]]] = field(default_factory=list)  # DOCX / PPTX tables: rows of cell texts
+
+    @property
+    def text(self) -> str:
+        return "\n\n".join(part for part in self.parts if part)
+
+    @property
+    def word_count(self) -> int:
+        return _count_words(self.text)
 
 
 @dataclass
@@ -2338,6 +2605,65 @@ class S3Analyzer:
                     "parameters": math.prod(spec.get("shape", []))} for name, spec in header.items()]
         return {"tensors": tensors, "metadata": metadata}
 
+    def _open_document(self, bucket: str, key: str, codec: str | None, *, whole_under: int = 64 * MB) -> io.BufferedIOBase:
+        """Seekable handle for a document: the whole object in memory when it's small (or compressed),
+        ranged GETs for bigger ones."""
+        if codec:
+            return self._random_access(bucket, key, codec)
+        size = self.client.head_object(Bucket=bucket, Key=key)["ContentLength"]
+        if size <= whole_under:
+            return io.BytesIO(self.read_bytes(s3_uri(bucket, key)))
+        return io.BufferedReader(_RangeReader(self.client, bucket, key, size), buffer_size=MB)
+
+    def read_pdf(self, uri: str, *, pages: Iterable[int] | None = None, password: str | None = None,
+                 compression: str | None = None) -> Document:
+        """Text of a PDF, one part per page (needs pypdf). pages: 1-based page numbers, e.g. [1, 2] or
+        range(1, 11); only those are read. Scanned pages have no text layer and come back empty."""
+        bucket, key = parse_s3_uri(uri)
+        codec = detect_format(key)[1] if compression is None else compression
+        with self._open_document(bucket, key, codec, whole_under=256 * MB if pages is None else 16 * MB) as handle:
+            return parse_pdf(handle, s3_uri(bucket, key), pages=pages, password=password)
+
+    def read_docx(self, uri: str, *, compression: str | None = None) -> Document:
+        """Text of a Word .docx: paragraphs and tables in order, headings, title and author. No packages needed."""
+        bucket, key = parse_s3_uri(uri)
+        codec = detect_format(key)[1] if compression is None else compression
+        with self._open_document(bucket, key, codec) as handle:
+            return parse_docx(handle, s3_uri(bucket, key))
+
+    def read_pptx(self, uri: str, *, slides: Iterable[int] | None = None, compression: str | None = None) -> Document:
+        """Text of a PowerPoint .pptx, one part per slide, with slide titles, tables and speaker notes.
+        slides: 1-based slide numbers to read. No packages needed."""
+        bucket, key = parse_s3_uri(uri)
+        codec = detect_format(key)[1] if compression is None else compression
+        with self._open_document(bucket, key, codec) as handle:
+            return parse_pptx(handle, s3_uri(bucket, key), slides=slides)
+
+    def read_document(self, uri: str, *, pages: Iterable[int] | None = None, password: str | None = None,
+                      compression: str | None = None) -> Document:
+        """Text of a PDF, Word .docx or PowerPoint .pptx, told apart by name or content. pages: page numbers
+        (PDF) or slide numbers (PPTX). doc.text is everything; doc.parts has one entry per page / slide."""
+        bucket, key = parse_s3_uri(uri)
+        fmt, codec = detect_format(key)
+        codec = codec if compression is None else compression
+        if fmt not in ("pdf", "docx", "pptx", "oldoffice"):
+            head = self._read_head(uri, 512, codec or "")[0]
+            fmt = sniff_format(head)[0]
+            if fmt == "zip":
+                with self._open_document(bucket, key, codec) as handle:
+                    fmt = office_kind(handle) or "zip"
+        if fmt == "pdf":
+            return self.read_pdf(uri, pages=pages, password=password, compression=codec or "")
+        if fmt == "pptx":
+            return self.read_pptx(uri, slides=pages, compression=codec or "")
+        if fmt == "docx":
+            if pages is not None:
+                raise ValueError("A .docx has no fixed pages; read it whole and use doc.parts")
+            return self.read_docx(uri, compression=codec or "")
+        if fmt == "oldoffice":
+            raise ValueError(_old_office_note(key))
+        raise ValueError(f"{key!r} isn't a PDF, Word .docx or PowerPoint .pptx file")
+
     def preview(self, uri: str, n: int = 20, *, max_bytes: int = 512 * KB) -> Preview:
         """Best-effort look at an object: a DataFrame for tables (csv, tsv, psv, json, jsonl, parquet, orc,
         feather, avro, excel, npy), the files in an archive (zip, tar, tar.gz, model.tar.gz, npz, PyTorch
@@ -2450,6 +2776,11 @@ class S3Analyzer:
 
     def _preview_zip(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         listing = self.list_archive(uri, limit=max(n, 200), compression=codec)
+        names = {e.name for e in listing.entries}
+        kind = next((kind for part, kind in _OFFICE_PARTS.items() if part in names), None)
+        if kind and p.format in ("zip", None):  # a Word / PowerPoint / Excel file without its extension
+            p.format = kind
+            return getattr(self, f"_preview_{kind}")(p, uri, n, codec)
         p.kind = "listing"
         p.data = [{"name": e.name, "size": e.size, "modified": e.modified} for e in listing.entries if not e.is_dir]
         files = sum(not e.is_dir for e in listing.entries)
@@ -2534,25 +2865,59 @@ class S3Analyzer:
 
     def _preview_pdf(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         url = self.presigned_url(uri)
-        try:
-            pypdf = importlib.import_module("pypdf")
-        except ImportError:
+        if importlib.util.find_spec("pypdf") is None:
             p.kind, p.data, p.info = "media", url, {"media": "pdf"}
-            p.note = "Install pypdf (pip install pypdf) to see the page count and first page's text here."
+            p.note = "Install pypdf (pip install pypdf) to see the page count and text here."
             return True
         bucket, key = parse_s3_uri(uri)
         try:
-            with self._random_access(bucket, key, codec) as handle:
-                reader = pypdf.PdfReader(handle)
-                text = reader.pages[0].extract_text() if len(reader.pages) else ""
-                title = reader.metadata.title if reader.metadata else None
-                p.info = {k: v for k, v in {"pages": len(reader.pages), "title": title, "url": url}.items() if v}
-        except (pypdf.errors.PyPdfError, *_READ_ERRORS) as exc:
+            with self._open_document(bucket, key, codec, whole_under=16 * MB) as handle:
+                doc = parse_pdf(handle, p.uri, pages=[1])
+        except _READ_ERRORS as exc:
             p.kind, p.data, p.info = "media", url, {"media": "pdf"}
-            p.note = f"pypdf couldn't read this PDF ({exc}); the link may still open it."
+            p.note = f"Couldn't read the PDF's text ({exc}); the link may still open it."
             return True
-        lines = text.splitlines()
-        p.kind, p.data, p.truncated = "text", lines[:n], len(lines) > n
+        p.kind, p.data = "document", doc.parts[0]
+        p.info = {"pages": doc.page_count, "title": doc.title, "author": doc.author, "url": url,
+                  "excerpt": "Page 1" + (f" of {doc.page_count}" if doc.page_count > 1 else "")}
+        if not doc.parts[0].strip():
+            p.note = "Page 1 has no text layer (probably a scanned image); reading it needs OCR."
+        return True
+
+    def _preview_docx(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        with self._open_document(bucket, key, codec) as handle:
+            doc = parse_docx(handle, p.uri)
+        shown = doc.parts[:n]
+        p.kind, p.data, p.truncated = "document", "\n\n".join(shown), len(doc.parts) > n
+        p.info = {"words": doc.word_count, "paragraphs": len(doc.parts) - len(doc.tables),
+                  "headings": len(doc.headings) or None, "tables": len(doc.tables) or None,
+                  "title": doc.title, "author": doc.author,
+                  "excerpt": f"First {len(shown)} paragraphs" if p.truncated else "Text",
+                  "outline": [{"level": level, "heading": text} for level, text in doc.headings[:50]],
+                  "table": doc.tables[0] if doc.tables else None}
+        if not doc.parts:
+            p.note = "The document has no text."
+        return True
+
+    def _preview_pptx(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        with self._open_document(bucket, key, codec) as handle:
+            doc = parse_pptx(handle, p.uri)
+        rows = []
+        for number, title, text, notes in list(zip(doc.numbers, doc.slide_titles, doc.parts, doc.notes))[: max(n, 50)]:
+            body = text.split("\n", 1)[1] if title and text.startswith(title) and "\n" in text else text
+            body = " · ".join(" ".join(line.split()) for line in body.splitlines() if line.strip())
+            rows.append({"slide": number, "title": title or "", "text": body[:120] + ("…" if len(body) > 120 else ""),
+                         "words": _count_words(text), "notes": "yes" if notes else ""})
+        p.kind, p.data = "listing", rows
+        p.info = {"slides": doc.page_count, "words": doc.word_count, "tables": len(doc.tables) or None,
+                  "title": doc.title, "author": doc.author}
+        return True
+
+    def _preview_oldoffice(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        p.kind, p.data = "binary", self.read_bytes(uri, 0, 511)
+        p.note = _old_office_note(uri)
         return True
 
     def _preview_as_text(self, p: Preview, uri: str, n: int, codec: str, max_bytes: int, sniffed: bool) -> None:
@@ -2642,6 +3007,7 @@ class _Note:
 class _Text:
     text: str
     title: str = ""
+    wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
 
 
 @dataclass
@@ -2694,6 +3060,7 @@ _CSS = """<style>
 .s3a .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
 .s3a .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
 .s3a pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
+.s3a pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
 .s3a img{max-width:100%;max-height:480px;border:1px solid rgba(127,127,127,.3)}
 </style>"""
 
@@ -2751,7 +3118,7 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
         elif isinstance(block, _Text):
             if block.title:
                 out.append(f"<h4>{_esc(block.title)}</h4>")
-            out.append(f"<pre>{_esc(block.text)}</pre>")
+            out.append(f'<pre class="wrap">{_esc(block.text)}</pre>' if block.wrap else f"<pre>{_esc(block.text)}</pre>")
         elif isinstance(block, _Frame):
             if block.title:
                 out.append(f"<h4>{_esc(block.title)}</h4>")
@@ -2898,16 +3265,18 @@ def _folder_label(folder: str) -> str:
     return folder or "(files at this level)"
 
 
-_FORMAT_LABELS = {"arrow": "feather / arrow", "excel": "excel", "torch": "PyTorch checkpoint",
+_FORMAT_LABELS = {"arrow": "feather / arrow", "excel": "excel", "torch": "PyTorch checkpoint", "pdf": "PDF",
+                  "docx": "Word document", "pptx": "PowerPoint deck", "oldoffice": "Office 97-2003 file",
                   "notebook": "Jupyter notebook", "npy": "NumPy array", "npz": "NumPy arrays (npz)"}
 _INFO_CARDS = {  # Preview.info key -> card label, in display order
     "rows": "Rows", "records": "Records", "columns": "Columns", "row_groups": "Row groups", "stripes": "Stripes",
     "batches": "Record batches", "sheets": "Sheets", "codec": "Codec", "compression": "Compression",
     "files": "Files", "unpacked_size": "Unpacked size", "arrays": "Arrays", "shape": "Shape", "dtype": "Dtype",
     "tensors": "Tensors", "parameters": "Parameters", "dtypes": "Dtypes", "kernel": "Kernel",
-    "language": "Language", "cells": "Cells", "pages": "Pages", "title": "Title",
+    "language": "Language", "cells": "Cells", "pages": "Pages", "slides": "Slides", "words": "Words",
+    "paragraphs": "Paragraphs", "headings": "Headings", "tables": "Tables", "title": "Title", "author": "Author",
 }
-_LISTING_TITLES = {"zip": "Files", "tar": "Files", "torch": "Files in the checkpoint", "npz": "Arrays",
+_LISTING_TITLES = {"zip": "Files", "tar": "Files", "torch": "Files in the checkpoint", "npz": "Arrays", "pptx": "Slides",
                    "safetensors": "Tensors", "notebook": "Cells"}
 
 
@@ -2921,6 +3290,14 @@ def _card_value(key: str, value: Any) -> str:
     if isinstance(value, (list, tuple)) and key != "shape":
         return ", ".join(map(str, value))
     return str(value)
+
+
+def _document_table(rows: list[list[str]], title: str) -> _Table:
+    """A table from a Word / PowerPoint file: first row as the header, ragged rows padded."""
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+    headers = rows[0] if len(rows) > 1 else [""] * width
+    return _Table(headers, rows[1:] if len(rows) > 1 else rows, title=title)
 
 
 def _listing_table(rows: list[dict[str, Any]], title: str) -> _Table:
@@ -3645,6 +4022,8 @@ class S3View:
             blocks.append(_Frame(p.data, title=f"First {len(p.data):,} rows"))
         elif p.kind == "listing":
             blocks.append(_listing_table(p.data, _LISTING_TITLES.get(p.format or "", "Contents")))
+        elif p.kind == "document":
+            blocks.append(_Text(_clip(p.data, 20_000) or "(no text)", title=p.info.get("excerpt", "Text"), wrap=True))
         elif p.kind == "json":
             text = json.dumps(p.data, indent=2, default=str, ensure_ascii=False)
             blocks.append(_Text(_clip(text, 20_000)))
@@ -3663,11 +4042,52 @@ class S3View:
             blocks.append(_Link(p.info["url"], "Open the file (link valid 1 hour)"))
         if p.info.get("columns"):
             blocks.append(_Table(["Column", "Type"], [list(c) for c in p.info["columns"]], title="Schema"))
+        if p.info.get("outline"):
+            blocks.append(_listing_table(p.info["outline"], "Outline"))
+        if p.info.get("table"):
+            blocks.append(_document_table(p.info["table"], "First table"))
+        if p.truncated and p.kind == "document":
+            blocks.append(_Note(f"Showing the first {n} paragraphs; ui.document(uri) shows all of it."))
         if p.info.get("metadata"):
             blocks.append(_Table(["Key", "Value"], [[k, _clip(str(v), 200)] for k, v in p.info["metadata"].items()],
                                  title="Metadata"))
         if p.truncated and p.kind == "text":
             blocks.append(_Note(f"Showing the first {n} lines; pass n= for more."))
+        self._show(blocks)
+
+    @_friendly_errors
+    def document(self, uri: str, *, pages: Iterable[int] | None = None, password: str | None = None,
+                 max_chars: int = 200_000) -> None:
+        """Full text of a PDF, Word .docx or PowerPoint .pptx, page by page or slide by slide,
+        e.g. document(uri, pages=[1, 2]). PDFs need pypdf."""
+        doc = self.core.read_document(uri, pages=pages, password=password)
+        if doc.kind == "docx":  # Word's saved page count is often stale, so count paragraphs instead
+            cards = [("Paragraphs", f"{len(doc.parts) - len(doc.tables):,}"), ("Tables", f"{len(doc.tables):,}")]
+        else:
+            cards = [("Pages" if doc.kind == "pdf" else "Slides", f"{doc.page_count or 0:,}")]
+        cards.append(("Words", f"{doc.word_count:,}"))
+        cards += [(label, value) for label, value in (("Title", doc.title), ("Author", doc.author)) if value]
+        blocks: list[Any] = [_Title(f"{_FORMAT_LABELS[doc.kind]} {doc.uri}"), _Cards(cards)]
+        if doc.kind == "pdf" and doc.parts and not any(part.strip() for part in doc.parts):
+            blocks.append(_Note("No text layer (probably a scanned document); reading it needs OCR.", "warn"))
+        shown = 0
+        if doc.kind == "docx":
+            sections = [("Text", doc.text)]
+        else:
+            name = "Page" if doc.kind == "pdf" else "Slide"
+            sections = []
+            for i, (number, part) in enumerate(zip(doc.numbers, doc.parts)):
+                title = doc.slide_titles[i] if doc.kind == "pptx" else None
+                notes = doc.notes[i] if doc.kind == "pptx" and doc.notes[i] else ""
+                body = part + (f"\n\nSpeaker notes:\n{notes}" if notes else "")
+                sections.append((f"{name} {number}" + (f": {title}" if title else ""), body))
+        for heading, text in sections:
+            if shown >= max_chars:
+                blocks.append(_Note(f"Stopped after {max_chars:,} characters; pass max_chars= for more, "
+                                    "or use ui.core.read_document(uri).text."))
+                break
+            blocks.append(_Text(text[: max_chars - shown] or "(no text)", title=heading, wrap=True))
+            shown += len(text)
         self._show(blocks)
 
     @_friendly_errors

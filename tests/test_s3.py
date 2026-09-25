@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.feather as feather
 import pyarrow.orc as orc
 import pyarrow.parquet as pq
+import pypdf
 import pytest
 from moto import mock_aws
 
@@ -43,6 +44,9 @@ from s3 import (
     object_monthly_cost,
     objects_to_df,
     parse_avro,
+    parse_docx,
+    parse_pdf,
+    parse_pptx,
     parse_s3_uri,
     parse_size,
     parse_time,
@@ -134,6 +138,7 @@ def test_file_extension(key, expected):
     ("d.psv", ("psv", None)), ("a.npy", ("npy", None)), ("w.safetensors", ("safetensors", None)),
     ("nb.ipynb", ("notebook", None)), ("s.mp3", ("audio", None)), ("v.mp4", ("video", None)), ("d.pdf", ("pdf", None)),
     ("m.pth", ("torch", None)), ("m.pkl", ("pickle", None)),
+    ("r.docx", ("docx", None)), ("d.pptx", ("pptx", None)), ("old.DOC", ("oldoffice", None)), ("s.ppt", ("oldoffice", None)),
 ])
 def test_detect_format(key, expected):
     assert detect_format(key) == expected
@@ -145,7 +150,7 @@ def test_detect_format(key, expected):
     (b"PK\x03\x04", ("zip", None)), (b"\x89PNG\r\n\x1a\n", ("image", None)), (b"\xff\xd8\xff\xe0", ("image", None)),
     (b"\x1f\x8b\x08", (None, "gz")), (b"BZh91AY", (None, "bz2")), (b"\xfd7zXZ\x00", (None, "xz")),
     (b"\x28\xb5\x2f\xfd", (None, "zst")), (b"  {\"a\": 1}", ("json", None)), (b"[1, 2]", ("json", None)),
-    (bytes(257) + b"ustar", ("tar", None)), (b"id,name\n1,a", (None, None)), (b"BZhello", (None, None)), (b"", (None, None)),
+    (bytes(257) + b"ustar", ("tar", None)), (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00", ("oldoffice", None)), (b"id,name\n1,a", (None, None)), (b"BZhello", (None, None)), (b"", (None, None)),
 ])
 def test_sniff_format(head, expected):
     assert sniff_format(head) == expected
@@ -361,6 +366,62 @@ def test_parse_avro_matches_fastavro(codec):
 def test_parse_avro_rejects_other_files():
     with pytest.raises(ValueError):
         parse_avro(b"PAR1 not avro")
+
+
+# ---------------------------------------------------------------------- documents
+
+
+def test_parse_docx():
+    doc = parse_docx(io.BytesIO(docx_bytes()))
+    assert doc.parts == ["Churn study", "Data", "Rows: 2,000\tok", "- direct bullet", "- style bullet",
+                         "inside a content control", "plan | churn\npro | 11%", "Outline level 3"]
+    assert doc.headings == [(0, "Churn study"), (1, "Data"), (3, "Outline level 3")]
+    assert doc.tables == [[["plan", "churn"], ["pro", "11%"]]]
+    assert (doc.title, doc.author, doc.page_count, doc.kind) == ("Churn study", "Kirti", 3, "docx")
+    assert "removed" not in doc.text and doc.word_count == 21  # "-" and "|" aren't words
+
+
+def test_parse_docx_refuses_xml_entities():
+    evil = zip_bytes({"word/document.xml": '<!DOCTYPE x [<!ENTITY a "aaaa">]><w:document ' + W_NS + '>&a;</w:document>'})
+    with pytest.raises(ValueError, match="DTD"):
+        parse_docx(io.BytesIO(evil))
+    with pytest.raises(ValueError, match="missing"):
+        parse_docx(io.BytesIO(zip_bytes({"a.txt": "not word"})))
+
+
+def test_parse_pptx():
+    deck = pptx_bytes(DECK, order=[2, 3, 1])  # the deck shows slide files in this order
+    doc = parse_pptx(io.BytesIO(deck))
+    assert doc.slide_titles == ["Q3 review", "Highlights", "Numbers"] and doc.numbers == [1, 2, 3]
+    assert doc.parts == ["Q3 review\nML platform team", "Highlights\nChurn down 3 points\nStorage cost -40%",
+                         "Numbers\nmetric | value\nAUC | 0.91"]
+    assert doc.notes == ["", "Mention the lifecycle rule.", ""]  # the slide-number placeholder is left out
+    assert doc.tables == [[["metric", "value"], ["AUC", "0.91"]]] and (doc.title, doc.page_count) == ("Q3 review", 3)
+    assert parse_pptx(io.BytesIO(deck), slides=[3]).parts == ["Numbers\nmetric | value\nAUC | 0.91"]
+    with pytest.raises(ValueError, match="Slide 9"):
+        parse_pptx(io.BytesIO(deck), slides=[9])
+
+
+def test_parse_pdf():
+    data = pdf_bytes("First page", "", "Third page", title="Handbook")
+    doc = parse_pdf(io.BytesIO(data))
+    assert doc.parts == ["First page", "", "Third page"] and doc.numbers == [1, 2, 3]
+    assert (doc.page_count, doc.title, doc.author, doc.kind) == (3, "Handbook", "Kirti", "pdf")
+    assert parse_pdf(io.BytesIO(data), pages=[3]).parts == ["Third page"]
+    with pytest.raises(ValueError, match="Page 4"):
+        parse_pdf(io.BytesIO(data), pages=[4])
+    with pytest.raises(ValueError, match="pypdf couldn't read"):
+        parse_pdf(io.BytesIO(b"%PDF-1.4 not really"))
+
+
+def test_parse_pdf_with_a_password():
+    writer = pypdf.PdfWriter(clone_from=io.BytesIO(pdf_bytes("Secret page")))
+    writer.encrypt(user_password="letmein", owner_password="owner", algorithm="RC4-128")
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    with pytest.raises(ValueError, match="password"):
+        parse_pdf(io.BytesIO(buffer.getvalue()))
+    assert parse_pdf(io.BytesIO(buffer.getvalue()), password="letmein").parts == ["Secret page"]
 
 
 # ---------------------------------------------------------------------- lifecycle
@@ -848,19 +909,30 @@ def formats(aws):
     put("notebooks/explore.ipynb", json.dumps(notebook).encode())
     put("media/clip.mp3", b"ID3" + bytes(100))
     put("media/movie.mp4", bytes(64))
-    put("docs/report.pdf", pdf_bytes("Hello S3"))
+    put("docs/report.pdf", pdf_bytes("Hello S3", "Second page", title="Handbook"))
+    put("docs/scan.pdf", pdf_bytes(""))
     put("docs/broken.pdf", b"%PDF-1.4\nnot really a pdf")
+    put("docs/study.docx", docx_bytes())
+    put("docs/deck.pptx", pptx_bytes(DECK))
+    put("docs/old.doc", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(600))
+    put("docs/attachment-7", docx_bytes())  # no extension: recognised as Word from the parts inside
     return FORMATS
 
 
-def pdf_bytes(text):
-    """A one-page PDF with `text` on it, xref offsets and all."""
-    stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode()
-    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R "
-               b"/Resources << /Font << /F1 5 0 R >> >> >>",
-               b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+def pdf_bytes(*pages, title=None):
+    """A PDF with one page per text (an empty string = a page with no text layer), xref offsets and all."""
+    pages = pages or ("",)
+    count = len(pages)
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(count)), count),
                b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    for i, text in enumerate(pages):
+        stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode() if text else b""
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents %d 0 R "
+                       b"/Resources << /Font << /F1 3 0 R >> >> >>" % (5 + 2 * i))
+        objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+    if title:
+        objects.append(b"<< /Title (%s) /Author (Kirti) >>" % title.encode())
     out, offsets = bytearray(b"%PDF-1.4\n"), []
     for number, body in enumerate(objects, 1):
         offsets.append(len(out))
@@ -868,8 +940,96 @@ def pdf_bytes(text):
     xref = len(out)
     out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
     out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
-    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    info = b" /Info %d 0 R" % len(objects) if title else b""
+    out += b"trailer\n<< /Size %d /Root 1 0 R%s >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, info, xref)
     return bytes(out)
+
+
+W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+P_NS = ('xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')
+REL_NS = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"'
+CORE = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title><dc:creator>Kirti</dc:creator>'
+        '</cp:coreProperties>')
+APP = '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Pages>{pages}</Pages></Properties>'
+
+
+def run(text):
+    return f'<w:r><w:t xml:space="preserve">{text}</w:t></w:r>'
+
+
+def para(text, style=None, numbered=False, outline=None):
+    props = (f'<w:pStyle w:val="{style}"/>' if style else "") + \
+            ('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>' if numbered else "") + \
+            (f'<w:outlineLvl w:val="{outline}"/>' if outline is not None else "")
+    return f"<w:p>{f'<w:pPr>{props}</w:pPr>' if props else ''}{run(text) if text else ''}</w:p>"
+
+
+DOCX_BODY = "".join([
+    para("Churn study", style="Titre"),  # a localized style id; styles.xml names it "Title"
+    para("Data", style="Heading1"),  # not in styles.xml: recognised by its id
+    '<w:p>' + run("Rows: ") + '<w:r><w:t>2,000</w:t><w:tab/><w:t>ok</w:t></w:r>'
+    '<w:del><w:r><w:delText>removed</w:delText></w:r></w:del></w:p>',
+    para("direct bullet", numbered=True),
+    para("style bullet", style="MyList"),  # its style is based on a numbered style
+    '<w:sdt><w:sdtContent>' + para("inside a content control") + '</w:sdtContent></w:sdt>',
+    '<w:tbl>' + "".join('<w:tr>' + "".join(f'<w:tc>{para(cell)}</w:tc>' for cell in row) + '</w:tr>'
+                        for row in (["plan", "churn"], ["pro", "11%"])) + '</w:tbl>',
+    para("Outline level 3", outline=2),
+    para(""),
+])
+DOCX_STYLES = ('<w:style w:type="paragraph" w:styleId="Titre"><w:name w:val="Title"/></w:style>'
+               '<w:style w:type="paragraph" w:styleId="ListBase"><w:name w:val="List Base"/>'
+               '<w:pPr><w:numPr><w:numId w:val="2"/></w:numPr></w:pPr></w:style>'
+               '<w:style w:type="paragraph" w:styleId="MyList"><w:name w:val="My List"/><w:basedOn w:val="ListBase"/></w:style>')
+
+
+def docx_bytes(body=DOCX_BODY, styles=DOCX_STYLES, title="Churn study", pages=3):
+    return zip_bytes({"[Content_Types].xml": "<Types/>",
+                      "word/document.xml": f"<w:document {W_NS}><w:body>{body}</w:body></w:document>",
+                      "word/styles.xml": f"<w:styles {W_NS}>{styles}</w:styles>",
+                      "docProps/core.xml": CORE.format(title=title), "docProps/app.xml": APP.format(pages=pages)})
+
+
+def shape(text, placeholder=None):
+    nv = f'<p:nvPr><p:ph type="{placeholder}"/></p:nvPr>' if placeholder else "<p:nvPr/>"
+    paragraphs = "".join(f"<a:p><a:r><a:t>{line}</a:t></a:r></a:p>" for line in text.split("\n"))
+    return f'<p:sp><p:nvSpPr><p:cNvPr id="1" name="s"/><p:cNvSpPr/>{nv}</p:nvSpPr><p:txBody>{paragraphs}</p:txBody></p:sp>'
+
+
+def pptx_bytes(slides, order=None, title="Q3 review"):
+    """slides: (title, body, notes, table rows) per slide file; order: slide file numbers as the deck shows them."""
+    files = {"[Content_Types].xml": "<Types/>", "docProps/core.xml": CORE.format(title=title)}
+    for i, (slide_title, body, notes, table) in enumerate(slides, 1):
+        shapes = (shape(slide_title, "title") if slide_title else "") + (shape(body) if body else "")
+        if table:
+            cells = "".join("<a:tr>" + "".join(f"<a:tc><a:txBody><a:p><a:r><a:t>{c}</a:t></a:r></a:p></a:txBody></a:tc>"
+                                               for c in row) + "</a:tr>" for row in table)
+            shapes += f"<p:graphicFrame><a:graphic><a:graphicData><a:tbl>{cells}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"
+        files[f"ppt/slides/slide{i}.xml"] = f"<p:sld {P_NS}><p:cSld><p:spTree>{shapes}</p:spTree></p:cSld></p:sld>"
+        if notes:
+            files[f"ppt/notesSlides/notesSlide{i}.xml"] = (f"<p:notes {P_NS}><p:cSld><p:spTree>{shape('7', 'sldNum')}"
+                                                           f"{shape(notes, 'body')}</p:spTree></p:cSld></p:notes>")
+            files[f"ppt/slides/_rels/slide{i}.xml.rels"] = (
+                f'<Relationships {REL_NS}><Relationship Id="rId2" Target="../notesSlides/notesSlide{i}.xml" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide"/></Relationships>')
+    order = order or range(1, len(slides) + 1)
+    files["ppt/presentation.xml"] = (f"<p:presentation {P_NS}><p:sldIdLst>"
+                                     + "".join(f'<p:sldId id="{255 + i}" r:id="rId{i}"/>' for i in order)
+                                     + "</p:sldIdLst></p:presentation>")
+    files["ppt/_rels/presentation.xml.rels"] = (
+        f"<Relationships {REL_NS}>" + "".join(
+            f'<Relationship Id="rId{i}" Target="slides/slide{i}.xml" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/>'
+            for i in range(1, len(slides) + 1)) + "</Relationships>")
+    return zip_bytes(files)
+
+
+DECK = [("Numbers", "", "", [["metric", "value"], ["AUC", "0.91"]]),
+        ("Q3 review", "ML platform team", "", None),
+        ("Highlights", "Churn down 3 points\nStorage cost -40%", "Mention the lifecycle rule.", None)]
 
 
 def uri_of(key):
@@ -899,6 +1059,11 @@ def uri_of(key):
     ("notebooks/explore.ipynb", "listing", "notebook"),
     ("media/clip.mp3", "media", "audio"),
     ("media/movie.mp4", "media", "video"),
+    ("docs/report.pdf", "document", "pdf"),
+    ("docs/study.docx", "document", "docx"),
+    ("docs/deck.pptx", "listing", "pptx"),
+    ("docs/old.doc", "binary", "oldoffice"),
+    ("docs/attachment-7", "document", "docx"),
 ])
 def test_preview_formats(core, formats, key, kind, fmt):
     p = core.preview(uri_of(key), n=5)
@@ -942,15 +1107,45 @@ def test_preview_details_for_new_formats(core, formats):
     assert clip.data.startswith("https://") and clip.info == {"media": "audio", "mime": "audio/mpeg"}
 
 
-def test_preview_pdf(core, formats):
-    p = core.preview(uri_of("docs/report.pdf"))
-    if importlib.util.find_spec("pypdf") is None:  # pypdf is optional: without it, a link
-        assert p.kind == "media" and p.data.startswith("https://") and "pip install pypdf" in p.note
-    else:
-        assert p.kind == "text" and p.data == ["Hello S3"] and p.info["pages"] == 1
-        assert p.info["url"].startswith("https://")
+def test_preview_documents(core, formats):
+    pdf = core.preview(uri_of("docs/report.pdf"))
+    assert pdf.data == "Hello S3" and pdf.info["pages"] == 2 and pdf.info["title"] == "Handbook"
+    assert pdf.info["url"].startswith("https://") and pdf.info["excerpt"] == "Page 1 of 2"
+    assert "no text layer" in core.preview(uri_of("docs/scan.pdf")).note
     broken = core.preview(uri_of("docs/broken.pdf"))
     assert broken.kind == "media" and broken.data.startswith("https://")
+    word = core.preview(uri_of("docs/study.docx"), n=3)
+    assert word.data == "Churn study\n\nData\n\nRows: 2,000\tok" and word.truncated
+    assert word.info["words"] == 21 and word.info["headings"] == 3 and word.info["tables"] == 1
+    assert word.info["outline"][1] == {"level": 1, "heading": "Data"} and word.info["table"][0] == ["plan", "churn"]
+    deck = core.preview(uri_of("docs/deck.pptx"))
+    assert deck.data[2] == {"slide": 3, "title": "Highlights", "text": "Churn down 3 points · Storage cost -40%",
+                            "words": 8, "notes": "yes"}
+    assert deck.info["slides"] == 3 and deck.info["tables"] == 1
+    assert "convert-to docx" in core.preview(uri_of("docs/old.doc")).note
+
+
+def test_preview_pdf_without_pypdf(core, formats, monkeypatch):
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name == "pypdf" else real_find_spec(name, *a))
+    p = core.preview(uri_of("docs/report.pdf"))
+    assert p.kind == "media" and p.data.startswith("https://") and "pip install pypdf" in p.note
+
+
+def test_read_document(core, formats):
+    pdf = core.read_document(uri_of("docs/report.pdf"))
+    assert pdf.parts == ["Hello S3", "Second page"] and pdf.text == "Hello S3\n\nSecond page"
+    assert core.read_pdf(uri_of("docs/report.pdf"), pages=[2]).parts == ["Second page"]
+    assert core.read_document(uri_of("docs/deck.pptx"), pages=[1]).slide_titles == ["Numbers"]
+    assert core.read_docx(uri_of("docs/study.docx")).headings[0] == (0, "Churn study")
+    assert core.read_document(uri_of("docs/attachment-7")).kind == "docx"
+    assert core.read_pptx(uri_of("docs/deck.pptx")).notes[2] == "Mention the lifecycle rule."
+    with pytest.raises(ValueError, match="no fixed pages"):
+        core.read_document(uri_of("docs/study.docx"), pages=[1])
+    with pytest.raises(ValueError, match="old binary format"):
+        core.read_document(uri_of("docs/old.doc"))
+    with pytest.raises(ValueError, match="isn't a PDF"):
+        core.read_document(uri_of("tables/t.psv"))
 
 
 def test_read_df_new_formats(core, formats):
@@ -1085,6 +1280,17 @@ def test_ui_previews_new_formats(ui, capsys, formats):
     assert "Sheets: first, second" in run(capsys, ui.preview, uri_of("tables/book.xlsx"))
     assert "isn't gz-compressed" in run(capsys, ui.preview, uri_of("logs/app.log.gz"))
     assert "Codec: deflate" in run(capsys, ui.preview, uri_of("tables/t.avro"))
+    word = run(capsys, ui.preview, uri_of("docs/study.docx"))
+    assert "Words: 21" in word and "-- Outline --" in word and "-- First table --" in word and "11%" in word
+    assert "-- Slides --" in run(capsys, ui.preview, uri_of("docs/deck.pptx"))
+    assert "old binary format" in run(capsys, ui.preview, uri_of("docs/old.doc"))
+    pdf = run(capsys, ui.document, uri_of("docs/report.pdf"))
+    assert "-- Page 1 --" in pdf and "Second page" in pdf and "Title: Handbook" in pdf
+    deck = run(capsys, ui.document, uri_of("docs/deck.pptx"), pages=[3])
+    assert "-- Slide 3: Highlights --" in deck and "Speaker notes:" in deck
+    assert "-- Text --" in run(capsys, ui.document, uri_of("docs/study.docx"))
+    assert "Stopped after 5 characters" in run(capsys, ui.document, uri_of("docs/report.pdf"), max_chars=5)
+    assert "old binary format" in run(capsys, ui.document, uri_of("docs/old.doc"))
 
 
 def test_ui_turns_errors_into_notes(ui, capsys):
