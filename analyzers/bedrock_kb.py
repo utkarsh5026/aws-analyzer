@@ -417,8 +417,10 @@ def best_snippet(text: str, terms: Iterable[str], width: int = 320) -> str:
 
 def _family_match(family: str, model_id: str) -> bool:
     """Whether `model_id` belongs to a model family: 'claude-opus-5' matches 'anthropic.claude-opus-5-v1:0' and
-    'us.anthropic.claude-opus-5-20260301-v1:0', but not 'anthropic.claude-opus-5-5' (a different model)."""
-    return re.search(re.escape(family.lower()) + r"(?!\d)(?!-\d{1,2}(?:\D|$))", (model_id or "").lower()) is not None
+    'us.anthropic.claude-opus-5-20260301-v1:0', but not 'anthropic.claude-opus-5-5' (a newer version, another model);
+    'llama4-maverick' matches 'meta.llama4-maverick-17b-instruct-v1:0' (17b is its size, not a version)."""
+    version = r"(?!\d)(?!-\d{1,2}(?:[-:.]|$))"  # right after the family, '-5' then '-', ':', '.' or the end
+    return re.search(re.escape(family.lower()) + version, (model_id or "").lower()) is not None
 
 
 def model_price(model: str, model_prices: dict[str, tuple[float, float]] | None = None) -> tuple[float, float] | None:
@@ -1397,6 +1399,10 @@ def compare_retrievals(runs: dict[str, Retrieval]) -> SearchComparison:
                             kb_name=first.kb_name if first else "", runs=dict(runs), overlap=overlap, unique=unique)
 
 
+def _snippet_of(passage: Passage, width: int = 60) -> str:
+    return '"' + best_snippet(passage.text, [], width) + '"'
+
+
 def _setting(label: str) -> tuple[str, str]:
     """'HYBRID n=10' -> ('HYBRID', '10')."""
     kind, _, n = label.rpartition(" n=")
@@ -1481,7 +1487,7 @@ def _source_label(ds: DataSourceInfo) -> str:
 
 
 def _reasons_text(reasons: list[str], limit: int = 2) -> str:
-    return "; ".join(_clip(" ".join(r.split()), 200) for r in reasons[:limit]) or "no reason given"
+    return "; ".join(_clip(" ".join(r.split()).rstrip("."), 200) for r in reasons[:limit]) or "no reason given"
 
 
 _METADATA_EXAMPLE = '{"metadataAttributes": {"team": "billing", "year": 2024}}'
@@ -1552,7 +1558,7 @@ def kb_findings(info: KnowledgeBaseInfo, docs: DocumentSummary | None = None,
                                   "source's settings) before deleting it."))
     found += freshness_findings(freshness or [], info.id, region)
     if docs is not None and docs.counts.get("FAILED") and not failed_docs_named:
-        top = f" The most common reason: {docs.reasons[0][0]}." if docs.reasons else ""
+        top = f" The most common reason: {docs.reasons[0][0].rstrip('.')}." if docs.reasons else ""
         found.append(("warn", f"{_plural(docs.counts['FAILED'], 'document')} failed to index and "
                               f"{_isnt(docs.counts['FAILED'])} searchable.{top} documents(status='FAILED') lists them."))
     cost = vector_store_monthly_cost(info, prices)
@@ -1610,7 +1616,8 @@ def sync_findings(jobs: list[IngestionJob], names: dict[str, str] | None = None)
                 break
             failures += 1
         if failures:
-            reasons = Counter(_clip(" ".join(r.split()), 160) for job in history[:failures] for r in job.failure_reasons)
+            reasons = Counter(_clip(" ".join(r.split()).rstrip("."), 160)
+                              for job in history[:failures] for r in job.failure_reasons)
             grouped = "; ".join(f"{reason} ({count}x)" if count > 1 else reason for reason, count in reasons.most_common(3))
             what = "The last sync" if failures == 1 else f"The last {failures} syncs"
             found.append(("warn", f"{what} of the {label} failed ({grouped or 'no reason given'}). "
@@ -1729,13 +1736,26 @@ def comparison_findings(c: SearchComparison) -> list[tuple[str, str]]:
                else error)
         found.append(("info", f"{label} couldn't run: {why}."))
     labels = list(c.runs)
+    reordered: set[tuple[str, str]] = set()  # (search types) whose different first passage was already reported
     for a, b in _pairs(labels):
         (kind_a, n_a), (kind_b, n_b) = _setting(a), _setting(b)
         new = [p for p in c.runs[b].passages if p.key not in {q.key for q in c.runs[a].passages}]
         if n_a == n_b and kind_a != kind_b:
             if not new and len(c.runs[a].passages) == len(c.runs[b].passages):
-                found.append(("info", f"{kind_a} and {kind_b} return the same passages at n={n_a}: the search type "
-                                      "doesn't change this question's results."))
+                first_a, first_b = c.runs[a].passages[:1], c.runs[b].passages[:1]
+                if first_a and first_b and first_a[0].key != first_b[0].key:
+                    if (kind_a, kind_b) in reordered:
+                        continue
+                    reordered.add((kind_a, kind_b))
+                    rank = next(p.rank for p in c.runs[a].passages if p.key == first_b[0].key)
+                    found.append(("info", f"{kind_a} and {kind_b} return the same passages at n={n_a}, but {kind_b} "
+                                          f"puts a different one first: {first_b[0].source} ({_snippet_of(first_b[0])}), "
+                                          f"#{rank} under {kind_a}. The first passages weigh most in an answer: "
+                                          f"chunk() shows each in full; if {kind_b}'s is the better one, use "
+                                          f"search_type={kind_b!r}."))
+                else:
+                    found.append(("info", f"{kind_a} and {kind_b} return the same passages in the same order at "
+                                          f"n={n_a}: the search type doesn't change this question's results."))
                 continue
             top = c.runs[b].passages[0] if c.runs[b].passages else None
             with_top = ", including its top result" if top is not None and top in new else ""
@@ -1765,8 +1785,10 @@ def eval_findings(report: EvalReport) -> list[tuple[str, str]]:
         examples = "; ".join(f"{c.question!r} expected {c.expected!r}, got "
                              f"{', '.join(c.top_sources[:2]) or 'nothing'}" for c in missed[:3])
         found.append(("warn", f"{len(missed)} of {len(cases)} questions missed: the expected source wasn't in the top "
-                              f"{report.k} ({examples}). Usual fixes: search_type='HYBRID' when questions hold codes "
-                              "or names, a larger n=, smaller chunks (a new data source), or where= filters."))
+                              f"{report.k} ({examples}). First check the expected files are indexed "
+                              "(documents(), unsynced()); then the usual fixes: search_type='HYBRID' when questions "
+                              "hold codes or names, a larger n=, smaller chunks (a new data source), or where= "
+                              "filters."))
         firsts = Counter(c.top_sources[0].split(" p.")[0] for c in missed if c.top_sources)
         crowd = [(name, count) for name, count in firsts.most_common(1) if count >= 2]
         if crowd:
@@ -3070,8 +3092,8 @@ class BedrockKBView:
     @_friendly_errors
     def documents(self, kb: str | None = None, *, data_source: str | None = None, status: str | None = None,
                   n: int = 50) -> None:
-        """Documents by status (indexed / failed / pending ...), failed ones first with the reason, and the command to
-        sync again."""
+        """Documents by status (indexed / failed / pending ...), the ones that aren't indexed with Bedrock's reason,
+        and the command to sync again."""
         kb_id = self._kb(kb)
         n = _as_int(n, "n")
         with self._progress("Listing documents", unit="documents") as tick:
@@ -3093,7 +3115,7 @@ class BedrockKBView:
                                 "S3 and custom data sources; syncs() shows the others' failed counts."))
         failed = summary.counts.get("FAILED", 0)
         if failed:
-            top = f" Most common reason: {summary.reasons[0][0]}." if summary.reasons else ""
+            top = f" Most common reason: {summary.reasons[0][0].rstrip('.')}." if summary.reasons else ""
             commands = "; ".join(sync_command(kb_id, ds_id, self.core.region) for ds_id in
                                  sorted({d.data_source_id for d in docs if d.status == "FAILED"} or set(sources))[:3])
             blocks.append(_Note(f"{_plural(failed, 'document')} failed to index and {_isnt(failed)} searchable.{top} Fix or "
@@ -3102,12 +3124,22 @@ class BedrockKBView:
             blocks.append(_Note("No documents yet: the data sources haven't been synced, or they're empty. syncs() "
                                 "shows the sync history."))
         ordered = sorted(docs, key=lambda d: (_DOC_ORDER.index(d.status) if d.status in _DOC_ORDER else 99, d.uri))
+        title = f"Documents with status {status.upper()}" if status else "Documents, failed first"
+        attention = [d for d in ordered if d.status != "INDEXED"]
+        if not status and attention:  # the indexed ones are fine: list what needs a look
+            hidden = len(ordered) - len(attention)
+            ordered, title = attention, "Documents that aren't fully indexed"
+            if hidden:
+                blocks.append(_Note(f"{_plural(hidden, 'indexed document')} {_isnt(hidden)} listed: "
+                                    "documents(status='INDEXED') lists them."))
+        elif not status and ordered:
+            blocks.append(_Note(f"All {len(ordered):,} documents read are indexed and searchable.", "ok"))
         rows = [[_DOC_STATES.get(d.status, d.status), d.name or d.uri, sources[d.data_source_id].name
                  if d.data_source_id in sources else d.data_source_id, d.reason or "", human_age(d.updated)]
                 for d in ordered[:n]]
         if docs or status:
             blocks.append(_Table(["Status", "Document", "Data source", "Reason", "Updated"], rows, max_rows=0,
-                                 title=f"Documents ({'failed first' if not status else status.upper()})"))
+                                 title=title))
         if len(ordered) > n:
             blocks.append(_Note(f"{len(ordered) - n:,} more not shown: pass n= for more, or use .core.documents(...) "
                                 "for all of them."))
@@ -3393,7 +3425,8 @@ class BedrockKBView:
         if not found:
             blocks.append(_Note("Every expected source came up first.", "ok"))
         rows = [[c.question, c.expected if isinstance(c.expected, str) else ", ".join(map(str, c.expected)),
-                 "missed" if c.rank is None else f"#{c.rank}", ", ".join(c.top_sources[:2]) or "-"]
+                 "missed" if c.rank is None else f"#{c.rank}",
+                 ", ".join(list(dict.fromkeys(c.top_sources))[:2]) or "-"]
                 for c in report.cases]
         blocks.append(_Table(["Question", "Expected", "Rank", "Came up first"], rows, max_rows=0))
         blocks.append(_Note("MRR (mean reciprocal rank) averages 1/rank: 1.00 means the expected source always came "

@@ -351,8 +351,9 @@ def test_kb_findings_silent_when_healthy():
 
 def test_kb_findings_fire_on_their_triggers():
     failed = healthy_kb()
-    failed.status, failed.failure_reasons = "FAILED", ["Role can't read the collection"]
-    assert "The knowledge base is FAILED: Role can't read the collection" in messages(kb_findings(failed), "warn")
+    failed.status, failed.failure_reasons = "FAILED", ["Role can't read the collection."]
+    assert "The knowledge base is FAILED: Role can't read the collection. Searches" in messages(kb_findings(failed),
+                                                                                               "warn")
 
     never = healthy_kb(last_sync=None, last_success=None)
     text = messages(kb_findings(never), "warn")
@@ -393,7 +394,7 @@ def test_kb_findings_fire_on_their_triggers():
 def test_sync_findings():
     assert sync_findings([parse_ingestion_job(job())]) == []
     failing = [parse_ingestion_job({**job(f"J{i}", status="FAILED", started=ago(days=i)),
-                                    "failureReasons": ["Role can't write to the collection"]}) for i in range(1, 4)]
+                                    "failureReasons": ["Role can't write to the collection."]}) for i in range(1, 4)]
     failing.append(parse_ingestion_job(job("J9", started=ago(days=9))))
     text = messages(sync_findings(failing, {DS_ID: "docs-s3"}), "warn")
     assert "The last 3 syncs of the data source 'docs-s3' failed" in text
@@ -592,6 +593,8 @@ def test_model_prices():
     assert model_price("us.anthropic.claude-opus-5-5-v1:0") == (4.40, 22.00)  # not priced as Opus 5
     assert model_price("anthropic.claude-opus-4-20250514-v1:0") == (15.0, 75.0)
     assert model_price("anthropic.claude-opus-4-9") is None  # a newer 4.x isn't guessed from 'claude-opus-4'
+    assert model_price("us.meta.llama4-maverick-17b-instruct-v1:0") == (0.24, 0.97)  # '17b' is a size, not a version
+    assert model_price("mistral.mistral-large-3-675b-instruct") == (0.50, 1.50)
     assert model_price("arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0") == (0.80, 3.20)
     assert model_price("acme.unknown") is None and model_price("x", {"x": (1.0, 2.0)}) == (1.0, 2.0)
     assert generation_cost(1_000_000, 100_000, "anthropic.claude-sonnet-5") == pytest.approx(2.20 + 1.10)
@@ -671,7 +674,12 @@ def test_compare_retrievals_and_findings():
     assert "SEMANTIC with n=3 adds 1 passage, 1 new file among them (c.pdf)" in text
     assert "HYBRID n=3 couldn't run: this vector store only supports SEMANTIC search" in text
     same = compare_retrievals({"SEMANTIC n=2": run_of("SEMANTIC n=2", "a"), "HYBRID n=2": run_of("HYBRID n=2", "a")})
-    assert "return the same passages at n=2" in messages(comparison_findings(same))
+    assert "return the same passages in the same order at n=2" in messages(comparison_findings(same))
+    swapped = compare_retrievals({"SEMANTIC n=2": run_of("SEMANTIC n=2", "a", "b"),
+                                  "HYBRID n=2": run_of("HYBRID n=2", "b", "a")})
+    text = messages(comparison_findings(swapped))
+    assert "same passages at n=2, but HYBRID puts a different one first: b.pdf (\"text b\"), #2 under SEMANTIC" in text
+    assert "search_type='HYBRID'" in text and "same order" not in text
 
 
 def test_retrieval_metrics_and_matching():
@@ -1137,13 +1145,25 @@ def test_ui_documents(aws, ui, capsys):
     aws.list_kbs()
     aws.data_sources()
     aws.agent.add_response("list_knowledge_base_documents", {"documentDetails": [
-        doc("a.pdf"), doc("scan.pdf", "FAILED", "The file is encrypted"), doc("b.pdf")]})
+        doc("a.pdf"), doc("scan.pdf", "FAILED", "The file is encrypted."), doc("b.pdf")]})
     aws.data_sources()
     out = run(capsys, ui.documents)
     for expected in ("Documents in support-docs", "Documents: 3", "Failed: 1", "Indexed: 2",
-                     "1 document failed to index", "The file is encrypted", "start-ingestion-job"):
+                     "1 document failed to index", "Most common reason: The file is encrypted. Fix",
+                     "start-ingestion-job", "Documents that aren't fully indexed",
+                     "2 indexed documents aren't listed: documents(status='INDEXED') lists them"):
         assert expected in out
-    assert out.index("scan.pdf") < out.index("a.pdf")  # failed first
+    assert "scan.pdf" in out and "a.pdf" not in out  # only what needs a look
+    aws.data_sources()
+    aws.agent.add_response("list_knowledge_base_documents", {"documentDetails": [doc("a.pdf"), doc("b.pdf")]})
+    aws.data_sources()
+    out = run(capsys, ui.documents)
+    assert "[ok] All 2 documents read are indexed and searchable." in out and "a.pdf" in out
+    aws.data_sources()
+    aws.agent.add_response("list_knowledge_base_documents", {"documentDetails": [doc("scan.pdf", "FAILED", "x.")]})
+    aws.data_sources()
+    out = run(capsys, ui.documents)
+    assert "scan.pdf" in out and "indexed document" not in out  # no "0 indexed documents aren't listed"
 
 
 def test_ui_search_and_chunk(aws, ui, capsys):
