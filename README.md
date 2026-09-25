@@ -4,8 +4,11 @@
 
 Copy-paste utilities for analyzing AWS services from a SageMaker (or any Jupyter) notebook.
 
-📖 **[S3 guide with examples and screenshots](https://utkarsh5026.github.io/aws-analyzer/)**: setting up in SageMaker,
-every command, and ready-made IAM permissions. Its source is [`docs/index.html`](docs/index.html).
+📖 [Guides](https://utkarsh5026.github.io/aws-analyzer/) with examples and screenshots: setting up in SageMaker, every
+command, and ready-made IAM permissions.
+
+- **[S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)** (source: [`docs/s3.html`](docs/s3.html))
+- **[DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)** (source: [`docs/dynamodb.html`](docs/dynamodb.html))
 
 **One file per service, no dependencies on each other.** Drop `analyzers/<service>.py` into a
 notebook cell (or upload it next to the notebook and `import` it) and start analyzing.
@@ -14,16 +17,37 @@ Every file has the same two layers:
 
 | Layer | Class | What it does |
 |---|---|---|
-| Logic | `S3Analyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
-| UI | `S3View` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| Logic | `S3Analyzer`, `DynamoDBAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
+| UI | `S3View`, `DynamoDBView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 | Service | File | Status |
 |---|---|---|
 | S3 | [`analyzers/s3.py`](analyzers/s3.py) | ✅ |
 | Bedrock Knowledge Bases | `analyzers/bedrock_kb.py` | planned |
-| DynamoDB | `analyzers/dynamodb.py` | planned |
+| DynamoDB | [`analyzers/dynamodb.py`](analyzers/dynamodb.py) | ✅ |
 
 ## S3 quick start
+
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker the first line is already
+installed, so you only need the second one, and only for the file types it lists.
+
+```python
+%pip install boto3 pandas pyarrow                                  # the commands below
+%pip install openpyxl xlrd pypdf zstandard python-snappy           # optional: Excel, PDF, .zst, snappy Avro
+```
+
+| Package | Needed for |
+|---|---|
+| `boto3` | Every command (required) |
+| `pandas` | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`. Installs `numpy` for `.npy` / `.npz` |
+| `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview` and `read_df`, and `parquet_info` |
+| `openpyxl` / `xlrd` | Excel `.xlsx` / `.xlsm` and old `.xls` |
+| `pypdf` | PDF text in `preview`, `document`, `read_pdf` |
+| `zstandard` | `.zst` files before Python 3.14 |
+| `python-snappy` | Avro files compressed with snappy |
+
+IPython, used for the HTML output, comes with Jupyter. If a package is missing, the command tells you which one to
+install instead of failing; install it and run the cell again.
 
 ```python
 ui = S3View()                      # uses the notebook's execution role
@@ -162,6 +186,139 @@ Read-only. Grant what you need:
 `s3:GetAccountPublicAccessBlock` for the account-level setting, and `cloudwatch:ListMetrics` +
 `cloudwatch:GetMetricData` for bucket sizes. Anything you can't read shows up as a note instead of an error.
 
+## DynamoDB quick start
+
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker both are already
+installed.
+
+```python
+%pip install boto3               # every command (required)
+%pip install pandas              # optional: only for DataFrames (page.to_df(), profile.to_df(), items_to_df)
+```
+
+Every `DynamoDBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
+
+```python
+ui = DynamoDBView()                # uses the notebook's execution role and region
+ui.help()                          # every command with a one-line description
+
+ui.tables()                        # every table in the region: key, items, size, est. cost, warnings
+ui.table_info("orders")            # indexes and how to query each, capacity, usage, backups, risks
+ui.scan("orders")                  # the first 20 items as a table...
+ui.more()                          # ...and the next 20
+ui.schema("orders")                # what the items look like
+ui.get("orders", "USER#42", "ORDER#0017")
+ui.query("orders", "USER#42", sort=("begins_with", "ORDER#"))
+```
+
+Tables are regional: `DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))` looks at another region.
+Items are shown and returned as plain Python, not DynamoDB JSON: numbers are `int` / `float`, sets are sets,
+binary is `bytes`. Nothing in the file writes to a table.
+
+### What you can look at (`DynamoDBView`)
+
+| Command | Shows |
+|---|---|
+| `tables(match=None)` | Every table in the region in one table: key, item count, size, billing mode, indexes, estimated monthly cost (including on-demand requests at the last 24 hours' rate) and a list of warnings. `match="prod-*"` checks only matching names |
+| `table_info(table)` | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks, each with what to do about it: no point-in-time recovery (with its cost and the command that turns it on), throttling, capacity near its limit, or capacity far above what's used (with what less capacity or on-demand would cost) |
+| `scan(table, n=20, where=, index=, attributes=)` | Items from the start of the table (or an index) as a table: key attributes first, then the others by how many items have them, nested maps as `address.city` columns. Shows how many items were read to find them and the read units used |
+| `query(table, partition, sort=None, index=, where=, descending=)` | Items sharing one partition key, in sort-key order, on the table or an index |
+| `sample(table, n=20)` | About n items spread across the whole key space. `scan` shows the start of the table, which can all be one partition key; this reads a few items from many slices of it |
+| `more()` | The next page of the last `scan`, `query` or `sql` |
+| `get(table, *key)` | One item with every nested map and list expanded, the type of each attribute, its size and read / write cost. `as_json=True` adds a JSON copy |
+| `sql(statement, *params)` | A PartiQL statement, e.g. `sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42")` |
+| `schema(table, n=1000)` | Every attribute and map field: type (or mix of types), share of items that have it, distinct values, examples, range. Key patterns such as `USER#<number>` and `ORDER#<date>`, which show the entity types of a single-table design. Item sizes, the largest items, and findings: mixed types, empty strings, items near the 400 KB limit, attribute names built from data |
+| `value_counts(table, attribute)` | How often each value occurs, with the size of those items. On the partition key this is each item collection's size, so hot partitions stand out |
+| `largest(table, n=10)` | The biggest items by DynamoDB's sizing rules, and what reading each costs |
+| `count(table, where=None)` | Exact count (a full scan), next to DynamoDB's own estimate |
+
+### Filters
+
+`where=` works on `scan`, `query`, `sample`, `schema`, `value_counts`, `largest` and `count`. It takes a dict, and
+every condition must match:
+
+| `where=` | Means |
+|---|---|
+| `{"status": "failed"}` | `status = 'failed'` |
+| `{"total": (">", 100)}` | also `"="`, `"!="`, `"<"`, `"<="`, `">="` |
+| `{"total": ("between", 10, 100)}` | both ends included |
+| `{"sk": ("begins_with", "ORDER#")}` | |
+| `{"tags": ("contains", "promo")}` | a substring, or a member of a set or list |
+| `{"status": ("in", ["paid", "shipped"])}` | |
+| `{"deleted_at": ("not_exists",)}` | also `("exists",)`, and `("type", "N")` to check the stored type |
+| `{"address.city": "Pune"}` | dots reach into maps |
+
+For OR and NOT, pass a boto3 condition instead: `where=Attr("a").eq(1) | Attr("b").exists()`. The `sort=` argument
+of `query` takes a value or one of the same tuples (`=`, `<`, `<=`, `>`, `>=`, `between`, `begins_with`). Key values
+are converted to the key's type, so `"42"` works for a number key.
+
+### Getting the data (`DynamoDBAnalyzer`)
+
+`ui.core` is the `DynamoDBAnalyzer`. Every UI command has a data method on it:
+
+```python
+ddb = ui.core                                       # or DynamoDBAnalyzer(region="eu-west-1", profile="dev")
+
+page = ddb.scan("orders", n=5000, where={"status": "failed"})   # ItemPage
+page.items                                          # list of plain dicts
+df = page.to_df()                                   # DataFrame: keys first, nested maps as 'address.city'
+page.stats                                          # items read, items returned, read units, seconds
+more = ddb.scan("orders", n=5000, where={"status": "failed"}, start_key=page.last_key)
+
+ddb.query("orders", "USER#42", sort=("between", "ORDER#2024-01", "ORDER#2024-12"), descending=True)
+ddb.query("orders", "failed", index="by-status").to_df()
+ddb.sample("orders", 500).items                     # spread over the key space
+ddb.get("orders", "USER#42", "ORDER#0017")          # dict, or None
+ddb.sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42").items
+
+profile = ddb.profile("orders", 2000)               # TableProfile (what schema() shows)
+profile.attributes["total"].types                   # Counter({'N': 1990, 'S': 10})
+profile.to_df()                                     # one row per attribute
+
+ddb.value_counts("orders", "status").counts         # {'paid': Stat(count=..., size=...), ...}
+ddb.count("orders", where={"status": "failed"}).matched
+ddb.describe("orders")                              # TableInfo: keys, indexes, capacity, TTL, backups, tags
+ddb.table_metrics("orders", hours=24)               # consumed units, busiest period, throttle events
+ddb.table_reports(match="prod-*")                   # [TableReport]: describe() + usage for every table
+
+for item in ddb.iter_items("orders", limit=None):   # stream a full scan without holding it in memory
+    ...
+```
+
+The analysis functions are pure (no AWS calls), so they also work on items you already have, for example a
+DynamoDB export to S3: `from_dynamo_item`, `to_dynamo`, `items_to_df`, `flatten_item`, `profile_items`,
+`count_values`, `item_size`, `key_pattern`, `build_filter`, `table_findings`, `profile_findings`,
+`table_monthly_cost`, `capacity_cost`, `request_cost`.
+
+```python
+rows = S3Analyzer().read_jsonl("s3://my-bucket/AWSDynamoDB/01234-abcd/data/part.json.gz")   # from s3.py
+profile_items([from_dynamo_item(row["Item"]) for row in rows], keys=["pk", "sk"])
+```
+
+### Large tables and cost
+
+- DynamoDB bills every item a scan reads, and a scan competes with your application for the table's
+  capacity. So the commands that scan stop early by default: `value_counts` and `largest` read the first
+  10,000 items (`limit=None` reads everything), `schema` profiles about 1,000, and `ui.scan` with a filter
+  reads at most 100,000 items per page (`scan_limit=`).
+- `count` always reads the whole table: `Select=COUNT` returns no items but still reads, and bills, every one.
+  For an instant estimate, `tables()` and `table_info()` show DynamoDB's own item count and size, which it
+  refreshes about every 6 hours.
+- Every report shows the read units it used and, where it matters, what they cost on-demand.
+- Costs are estimates at us-east-1 list prices for the standard table class, before the free tier
+  (`DYNAMODB_PRICES`): storage, provisioned capacity and point-in-time recovery per month, and on-demand
+  reads and writes per million. For another region, pass your prices:
+  `DynamoDBAnalyzer(prices={"storage": 0.285, "read_request": 0.1425})`.
+
+### IAM permissions (DynamoDB)
+
+Read-only: `dynamodb:ListTables`, `dynamodb:DescribeTable`, `dynamodb:Scan`, `dynamodb:Query`,
+`dynamodb:GetItem`, `dynamodb:PartiQLSelect` for `sql`, `dynamodb:DescribeTimeToLive`,
+`dynamodb:DescribeContinuousBackups`, `dynamodb:ListTagsOfResource`, and `cloudwatch:GetMetricData` for usage.
+Reading an index needs the permission on its ARN too (`arn:aws:dynamodb:<region>:<account>:table/orders/index/*`),
+and a table encrypted with a customer managed KMS key needs `kms:Decrypt`. Anything you can't read shows up as a
+note instead of an error.
+
 ## Development
 
 ```bash
@@ -172,8 +329,10 @@ ruff check .
 
 Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed.
 
-The guide in `docs/` is plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
-whenever `docs/` changes on `main`. Its screenshots are the tool's own output from a demo bucket.
+The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
+whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
+its own guide (`docs/s3.html`, `docs/dynamodb.html`); a new analyzer gets a new guide and a card on the home page.
+The screenshots are the tool's own output from a demo bucket and demo tables with synthetic data.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in

@@ -1,0 +1,96 @@
+{
+  // Python: a local virtualenv with requirements-dev.txt installed
+  //   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+
+  // Tests import each analyzer the way a notebook does (`import s3`, `import dynamodb`),
+  // with tests/conftest.py putting analyzers/ on sys.path. Pylance needs the same path
+  // to resolve those imports.
+  "python.analysis.extraPaths": ["analyzers"],
+  "python.analysis.typeCheckingMode": "basic",
+
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+
+  // Lint with the ruff pinned in requirements-dev.txt, so the editor reports what CI
+  // reports (rules in ruff.toml). Falls back to the extension's bundled ruff.
+  "ruff.importStrategy": "fromEnvironment",
+
+  // The code isn't ruff-formatted or isort-sorted, and CI doesn't ask for either, so
+  // saving a file only checks it. Formatting or sorting on save would rewrite most lines.
+  "[python]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.formatOnSave": false,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "never",
+      "source.organizeImports": "never"
+    }
+  },
+
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    ".pytest_cache": true,
+    ".ruff_cache": true,
+    ".mypy_cache": true
+  },
+  "search.exclude": {
+    "docs/images": true
+  },
+
+  // Look and feel. The theme and icons come from the Catppuccin extensions
+  // (catppuccin.catppuccin-vsc, catppuccin.catppuccin-vsc-icons); without them VS Code
+  // falls back to its defaults, and to the next font in each list.
+  "workbench.colorTheme": "Visual Studio Dark - C++",
+  "workbench.iconTheme": "catppuccin-mocha",
+  "editor.fontFamily": "'Source Code Pro', 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace",
+  "editor.fontLigatures": true,
+  "terminal.integrated.fontFamily": "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono', monospace",
+  "editor.semanticHighlighting.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.stickyScroll.enabled": true,
+  "editor.padding.top": 8,
+  "editor.cursorBlinking": "smooth",
+  "editor.cursorSmoothCaretAnimation": "on",
+  "editor.smoothScrolling": true,
+  "workbench.list.smoothScrolling": true,
+  "terminal.integrated.smoothScrolling": true,
+  "workbench.tree.indent": 16,
+  "workbench.tree.renderIndentGuides": "always",
+  "workbench.editor.highlightModifiedTabs": true,
+
+  // Each analyzer is a few thousand lines split into numbered banners ("# 1. Helpers: ...")
+  // and "# ------ tables" dividers inside the classes; the tests use the same dividers.
+  // Label them in the minimap so it works as a table of contents.
+  "editor.minimap.renderCharacters": false,
+  "editor.minimap.maxColumn": 100,
+  "editor.minimap.showMarkSectionHeaders": true,
+  "editor.minimap.markSectionHeaderRegex": "^[ \\t]*# (?:-{10,} )?(?<label>(?:\\d+\\. |(?<=- ))\\S.*)$",
+
+  // Branch in the title bar, for when the status bar is hidden.
+  "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeRepositoryBranchName}",
+
+  // Title bar in the guide's accent colour (docs/*.html), so this window is easy to
+  // pick out from other projects.
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#0f766e",
+    "titleBar.activeForeground": "#f0fdfa",
+    "titleBar.inactiveBackground": "#134e4a",
+    "titleBar.inactiveForeground": "#a7c7c2",
+    "titleBar.border": "#0f766e",
+    "commandCenter.background": "#ffffff14",
+    "commandCenter.activeBackground": "#ffffff26",
+    "commandCenter.border": "#ffffff33",
+    "commandCenter.foreground": "#f0fdfa",
+    "commandCenter.activeForeground": "#f0fdfa",
+    "activityBar.activeBorder": "#4fd1c1",
+    "tab.activeBorderTop": "#4fd1c1"
+  }
+}

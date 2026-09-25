@@ -13,7 +13,7 @@ ipython==9.17.1; python_version >= "3.11"
 ipython==8.39.0; python_version < "3.11"
 
 # Tests
-moto[s3,cloudwatch]==5.2.3
+moto[s3,dynamodb,cloudwatch]==5.2.3
 pytest==9.1.1
 # Write the Avro and Excel test files. The analyzer doesn't need them: it reads Avro itself,
 # and Excel through pandas + openpyxl when they are installed.
