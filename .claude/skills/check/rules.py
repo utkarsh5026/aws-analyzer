@@ -194,6 +194,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)}
     ops = _operations(services)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    # Strings that are keyword values or compared with something (engine="converse", kind == "scan") are labels,
+    # not operation names handed to a client.
+    labels = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.keyword)}
+    labels |= {id(c) for n in ast.walk(tree) if isinstance(n, ast.Compare) for c in (n.left, *n.comparators)}
     found: dict[str, int] = {}
     for node in ast.walk(tree):
         name = None
@@ -201,7 +205,8 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             target = ast.get_source_segment(source, node.func.value) or ""
             if "client" in target.lower() or node.func.attr not in defined:
                 name = node.func.attr
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops:
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops
+              and id(node) not in labels):
             name = node.value  # getattr(client, "get_bucket_policy"), get_paginator("list_objects_v2"), ...
         if name and name not in found:
             found[name] = getattr(node, "lineno", 0)

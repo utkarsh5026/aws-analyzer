@@ -218,8 +218,9 @@ OPUS_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.anthro
 
 
 def denied(stub, operation, code="AccessDeniedException"):
-    stub.add_client_error(operation, service_error_code=code, service_message="User is not authorized",
-                          http_status_code=403 if "Denied" in code else 400)
+    action = "bedrock:" + "".join(word.title() for word in operation.split("_"))
+    stub.add_client_error(operation, service_error_code=code, http_status_code=403 if "Denied" in code else 400,
+                          service_message=f"User: arn:aws:iam::{ACCOUNT}:user/ds is not authorized to perform: {action}")
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -950,6 +951,17 @@ def test_generate_reads_exact_usage_and_skips_reasoning(aws, core):
     assert core.generate("q?", ["one", "two"], model="sonnet", history=history, temperature=0, max_tokens=100).cited == [2]
 
 
+def test_generate_works_with_models_that_take_no_system_prompt(aws, core):
+    aws.models()
+    system, user = build_prompt("q?", ["one"])
+    aws.llm.add_client_error("converse", service_error_code="ValidationException",
+                             service_message="This model doesn't support system messages.")
+    aws.llm.add_response("converse", converse_resp("One [1]."), {
+        "modelId": "amazon.nova-pro-v1:0", "inferenceConfig": {"maxTokens": 16_000},
+        "messages": [{"role": "user", "content": [{"text": f"{system}\n\n{user}"}]}]})
+    assert core.generate("q?", ["one"], model="nova-pro").cited == [1]
+
+
 def backdate(bucket, key, when):
     """moto stamps objects with the current time; unsynced() needs some from before the last sync."""
     from moto.core.models import DEFAULT_ACCOUNT_ID
@@ -1324,6 +1336,9 @@ def test_ui_turns_errors_into_notes(aws, ui, capsys):
                                http_status_code=403)
     out = run(capsys, ui.kb_info, KB_ARN)
     assert "AccessDeniedException: User is not authorized" in out and "README lists the read-only IAM" in out
+    denied(aws.bedrock, "list_foundation_models")
+    out = run(capsys, ui.models)  # "...not authorized to perform bedrock:ListFoundationModels" is about IAM, not model access
+    assert "README lists the read-only IAM" in out and "Model access" not in out
 
 
 def test_ui_without_a_region(monkeypatch, capsys):
