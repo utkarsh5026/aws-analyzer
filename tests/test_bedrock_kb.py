@@ -617,6 +617,7 @@ def test_parse_models():
     assert parse_models(MODEL_LIST, PROFILES, "eu-west-1")[3].invoke_id == "eu.anthropic.claude-opus-5"
     assert models["amazon.nova-pro-v1:0"].via == "on-demand" and models["acme.unpriced-v1:0"].price_in is None
     assert parse_models([model("x.y", "Y")], [])[0].via == "provisioned only"
+    assert parse_models([model("x.y", "Y")], None)[0].via == "inference profile (unknown)"  # profiles unreadable
 
 
 def test_changed_since():
@@ -1192,7 +1193,7 @@ def test_ui_ask(aws, ui, capsys):
     aws.runtime.add_response("retrieve_and_generate", RAG, rag_params("How long do refunds take?"))
     out = run(capsys, ui.ask, "How long do refunds take?")
     for expected in ("Ask support-docs: How long do refunds take?", "Grounded: 75%", "Sources used: 3",
-                     "Model: claude-opus-5 (KB engine)", "Tokens: ~", " (estimate)", "Cost: <$0.01",
+                     "Model: claude-opus-5 (KB engine)", "Tokens: ~", " (estimate)", "Est. cost: <$0.01",
                      "Refunds are issued within 5-7 business days of receiving the item [1]. EU orders can be returned",
                      "within 14 days [2][3]. Contact support", "-- Sources --", "#  File               Page  Passage",
                      '1  refund-policy.pdf     3  "Refunds are issued within 5-7 business days',
@@ -1229,7 +1230,7 @@ def test_ui_ask_converse_and_follow_up(aws, ui, capsys):
         "Refunds take 5-7 business days [1]. EU customers get 14 days [2][7].", (1234, 56), reasoning=True))
     out = run(capsys, ui.ask, "How long do refunds take?", engine="converse", model="haiku")
     for expected in ("Retrieve, then Converse", "Grounded: 100%", "Sources used: 2", "Model: claude-haiku-4-5 (Converse)",
-                     "Tokens: 1,234 in + 56 out", "Cost: <$0.01", "Refunds take 5-7 business days [1].",
+                     "Tokens: 1,234 in + 56 out", "Est. cost: <$0.01", "Refunds take 5-7 business days [1].",
                      "#  File               Page  Cited  Passage"):
         assert expected in out
     assert "Estimated from characters" not in out
@@ -1255,6 +1256,14 @@ def test_ui_models(aws, ui, capsys):
                      "inference profile", "$5.50", "$27.50", "$0.80", "Model access", "model_prices"):
         assert expected in out
     assert "rerank" not in out and "Models for ask() in us-east-1 (1)" in run(capsys, ui.models, "nova")
+
+
+def test_ui_models_without_inference_profiles(aws, ui, capsys):
+    aws.bedrock.add_response("list_foundation_models", {"modelSummaries": MODEL_LIST}, {"byOutputModality": "TEXT"})
+    denied(aws.bedrock, "list_inference_profiles")
+    out = run(capsys, ui.models)
+    assert "Couldn't list inference profiles (AccessDeniedException; needs bedrock:ListInferenceProfiles)" in out
+    assert "inference profile (unknown)" in out and "provisioned only" not in out
 
 
 def test_ui_model_error_notes(aws, ui, capsys):

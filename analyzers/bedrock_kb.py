@@ -1008,11 +1008,13 @@ def parse_converse(resp: dict[str, Any], sources: Iterable[Passage | str]) -> An
                   seconds=((resp.get("metrics") or {}).get("latencyMs") or 0) / 1000)
 
 
-def parse_models(summaries: list[dict[str, Any]], profiles: list[dict[str, Any]], region: str = "",
+def parse_models(summaries: list[dict[str, Any]], profiles: list[dict[str, Any]] | None, region: str = "",
                  model_prices: dict[str, tuple[float, float]] | None = None) -> list[ModelInfo]:
     """ListFoundationModels summaries + ListInferenceProfiles summaries -> the text models ask() can use. A model
     that can't be called on demand gets the inference profile for this region's geography (e.g. 'us.' in us-east-1),
-    else a global one."""
+    else a global one. profiles=None means they couldn't be listed, so such a model's profile is unknown."""
+    known = profiles is not None
+    profiles = profiles or []
     served: dict[str, list[dict[str, Any]]] = {}
     for profile in profiles:
         for model_id in dict.fromkeys(_model_id(m.get("modelArn")) for m in profile.get("models") or []):
@@ -1039,7 +1041,7 @@ def parse_models(summaries: list[dict[str, Any]], profiles: list[dict[str, Any]]
                 info.via, info.invoke_id, info.arn = ("inference profile", options[0]["inferenceProfileId"],
                                                       options[0]["inferenceProfileArn"])
             else:
-                info.via = "provisioned only"
+                info.via = "provisioned only" if known else "inference profile (unknown)"
         found.append(info)
     for profile in profiles:
         if profile.get("type") == "APPLICATION":
@@ -1546,7 +1548,8 @@ def kb_findings(info: KnowledgeBaseInfo, docs: DocumentSummary | None = None,
         if ds.deletion_policy == "RETAIN":
             found.append(("info", f"The {label} keeps its data when deleted (deletion policy RETAIN): if you delete "
                                   "this data source its chunks stay in the vector store and keep appearing in "
-                                  "answers. Set it to DELETE before deleting the data source."))
+                                  "answers. Set its data deletion policy to Delete (Bedrock console, the data "
+                                  "source's settings) before deleting it."))
     found += freshness_findings(freshness or [], info.id, region)
     if docs is not None and docs.counts.get("FAILED") and not failed_docs_named:
         top = f" The most common reason: {docs.reasons[0][0]}." if docs.reasons else ""
@@ -1851,6 +1854,7 @@ class BedrockKBAnalyzer:
         self.default_model = default_model  # what model=None means (None: DEFAULT_MODEL, Claude Opus 5)
         self._models: list[ModelInfo] | None = None
         self._profiles: list[dict[str, Any]] = []
+        self.model_errors: dict[str, str] = {}  # 'profiles' -> error code, when inference profiles can't be listed
         self.max_workers = 8  # knowledge bases described in parallel by list_knowledge_bases
         self._names: dict[str, str] | None = None  # knowledge base ID -> name
 
@@ -1870,13 +1874,13 @@ class BedrockKBAnalyzer:
     def region(self) -> str:
         return self.client.meta.region_name
 
-    def _pages(self, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
+    def _paginate(self, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
         return [item for page in self.client.get_paginator(operation).paginate(**params) for item in page.get(key, [])]
 
     # ---------------------------------------------------------- knowledge bases
 
     def _kb_summaries(self) -> list[dict[str, Any]]:
-        summaries = self._pages("list_knowledge_bases", "knowledgeBaseSummaries")
+        summaries = self._paginate("list_knowledge_bases", "knowledgeBaseSummaries")
         self._names = {s["knowledgeBaseId"]: s.get("name", "") for s in summaries}
         return summaries
 
@@ -1956,7 +1960,7 @@ class BedrockKBAnalyzer:
                 errors[section] = _error_name(exc)
             return None
 
-        summaries = get(info.errors, "data_sources", lambda: self._pages(
+        summaries = get(info.errors, "data_sources", lambda: self._paginate(
             "list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)) or []
         for summary in summaries:
             ds = DataSourceInfo(id=summary["dataSourceId"], name=summary.get("name", ""),
@@ -1988,7 +1992,7 @@ class BedrockKBAnalyzer:
         kb_id = self.resolve(kb)
         return [DataSourceInfo(id=s["dataSourceId"], name=s.get("name", ""), status=s.get("status", ""), kb_id=kb_id,
                                description=s.get("description", ""), updated=s.get("updatedAt"))
-                for s in self._pages("list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)]
+                for s in self._paginate("list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)]
 
     def _pick_sources(self, kb_id: str, data_source: str | None) -> list[DataSourceInfo]:
         """Every data source, or the one named by `data_source` (its ID or name, any case)."""
@@ -2148,12 +2152,16 @@ class BedrockKBAnalyzer:
         if self._models is None or refresh:
             bedrock = self._bedrock_client()
             summaries = bedrock.list_foundation_models(byOutputModality="TEXT").get("modelSummaries", [])
+            profiles: list[dict[str, Any]] | None
             try:
-                self._profiles = [profile for page in bedrock.get_paginator("list_inference_profiles").paginate()
-                                  for profile in page.get("inferenceProfileSummaries", [])]
-            except (ClientError, BotoCoreError):
-                self._profiles = []  # models that need a profile will say so when called
-            self._models = parse_models(summaries, self._profiles, self.region, self.model_prices)
+                profiles = [profile for page in bedrock.get_paginator("list_inference_profiles").paginate()
+                            for profile in page.get("inferenceProfileSummaries", [])]
+                self.model_errors.pop("profiles", None)
+            except (ClientError, BotoCoreError) as exc:
+                profiles = None  # models that need a profile say which one when called
+                self.model_errors["profiles"] = _error_name(exc)
+            self._profiles = profiles or []
+            self._models = parse_models(summaries, profiles, self.region, self.model_prices)
         if not match:
             return list(self._models)
         wanted = str(match).lower()
@@ -2915,7 +2923,7 @@ class BedrockKBView:
 
     @_friendly_errors
     def use(self, kb: str) -> None:
-        """Set the knowledge base that later commands use when you don't pass kb=."""
+        """Sets the knowledge base that later commands use when you don't pass kb=."""
         kb_id = self.core.resolve(kb)
         self.kb, self._conversation = kb_id, None
         name = self.core.kb_name(kb_id)
@@ -3105,6 +3113,42 @@ class BedrockKBView:
                                 "for all of them."))
         self._show(blocks)
 
+    @_friendly_errors
+    def unsynced(self, kb: str | None = None, *, data_source: str | None = None) -> None:
+        """Files added or changed in S3 since the last successful sync, and the command to sync them."""
+        kb_id = self._kb(kb)
+        with self._progress("Listing files", unit="files") as tick:
+            results = self.core.unsynced(kb_id, data_source, progress=tick)
+        region = self.core.region
+        checked = [f for f in results if not f.note]
+        changed = sum(len(f.changed) for f in checked)
+        syncs = [f.last_sync.started for f in checked if f.last_sync and f.last_sync.started]
+        blocks: list[Any] = [
+            _Title(f"Changes since the last sync: {self.core.kb_name(kb_id)}",
+                   "S3 files compared with the start of each data source's last successful sync"),
+            _Cards([("Data sources checked", f"{len(checked):,} of {len(results):,}"),
+                    ("Files", f"{sum(f.files for f in checked):,}"), ("Changed since sync", f"{changed:,}"),
+                    ("Oldest last sync", human_age(min(syncs)) if syncs else "-")]),
+        ]
+        blocks += [_Note(message, level) for level, message in freshness_findings(results, kb_id, region)]
+        for fresh in checked:
+            ds = fresh.data_source
+            if fresh.truncated:
+                blocks.append(_Note(f"Stopped listing {ds.location} at the limit, so there may be more changes: "
+                                    ".core.unsynced(..., limit=None) lists everything."))
+            if fresh.changed:
+                rows = [[c.key, _fmt_dt(c.modified), human_age(c.modified), human_size(c.size)] for c in fresh.changed]
+                blocks.append(_Table(["File", "Modified", "Age", "Size"], rows, title=f"{ds.name}: changed files"))
+            elif fresh.last_sync is not None and not fresh.metadata_changed:
+                blocks.append(_Note(f"{ds.name} is up to date: none of its {fresh.files:,} files changed since the sync "
+                                    f"of {_fmt_dt(fresh.last_sync.started)}.", "ok"))
+        stale = [f.data_source for f in checked if f.changed or f.metadata_changed or f.last_sync is None]
+        if stale:
+            lines = [f"{sync_command(kb_id, ds.id, region)}   # {ds.name}" for ds in stale]
+            lines.append(f"# or from Python: {sync_call(kb_id, stale[0].id, region)}")
+            blocks.append(_Text("\n".join(lines), title="To sync (this tool never starts a sync: it changes the index)"))
+        self._show(blocks)
+
     # ---------------------------------------------------------------- retrieval
 
     @_friendly_errors
@@ -3193,7 +3237,7 @@ class BedrockKBView:
         blocks: list[Any] = [
             _Title(f"{title} {a.kb_name or a.kb_id}: {_clip(a.question, 80)}", sub),
             _Cards([("Grounded", f"{a.grounded_share:.0%}"), ("Sources used", f"{used:,}"),
-                    ("Model", f"{short_model(a.model)} ({engine})"), ("Tokens", tokens), ("Cost", self._cost_label(a)),
+                    ("Model", f"{short_model(a.model)} ({engine})"), ("Tokens", tokens), ("Est. cost", self._cost_label(a)),
                     ("Time", f"{a.seconds:.1f}s")]),
             _Answer(a.text, a.citations, inline=a.engine == "converse"),
         ]
@@ -3234,7 +3278,7 @@ class BedrockKBView:
 
     @_friendly_errors
     def follow_up(self, question: str) -> None:
-        """Continue the last ask() with another question, in the same session (engine='kb') or conversation."""
+        """The answer to a follow-up question, in the same session (engine='kb') or conversation as the last ask()."""
         conv = self._conversation
         if conv is None:
             raise _Hint("Nothing to follow up yet: ask('...') first, then follow_up('...').")
@@ -3287,45 +3331,14 @@ class BedrockKBView:
                   "model you haven't enabled fails with AccessDeniedException: enable it in the Bedrock console under "
                   "Model access. '-' means no price in the table: pass BedrockKBAnalyzer(model_prices={...})."),
         ]
+        if "profiles" in self.core.model_errors:
+            blocks.insert(2, _Note("Couldn't list inference profiles ("
+                                   f"{_why(self.core.model_errors['profiles'], 'bedrock:ListInferenceProfiles')}), so "
+                                   "models that need one show 'inference profile (unknown)'. Calling one names the "
+                                   "profile to use.", "warn"))
         self._show(blocks)
 
     # ------------------------------------------------------------------ deciding
-
-    @_friendly_errors
-    def unsynced(self, kb: str | None = None, *, data_source: str | None = None) -> None:
-        """Files added or changed in S3 since the last successful sync, and the command to sync them."""
-        kb_id = self._kb(kb)
-        with self._progress("Listing files", unit="files") as tick:
-            results = self.core.unsynced(kb_id, data_source, progress=tick)
-        region = self.core.region
-        checked = [f for f in results if not f.note]
-        changed = sum(len(f.changed) for f in checked)
-        syncs = [f.last_sync.started for f in checked if f.last_sync and f.last_sync.started]
-        blocks: list[Any] = [
-            _Title(f"Changes since the last sync: {self.core.kb_name(kb_id)}",
-                   "S3 files compared with the start of each data source's last successful sync"),
-            _Cards([("Data sources checked", f"{len(checked):,} of {len(results):,}"),
-                    ("Files", f"{sum(f.files for f in checked):,}"), ("Changed since sync", f"{changed:,}"),
-                    ("Oldest last sync", human_age(min(syncs)) if syncs else "-")]),
-        ]
-        blocks += [_Note(message, level) for level, message in freshness_findings(results, kb_id, region)]
-        for fresh in checked:
-            ds = fresh.data_source
-            if fresh.truncated:
-                blocks.append(_Note(f"Stopped listing {ds.location} at the limit, so there may be more changes: "
-                                    ".core.unsynced(..., limit=None) lists everything."))
-            if fresh.changed:
-                rows = [[c.key, _fmt_dt(c.modified), human_age(c.modified), human_size(c.size)] for c in fresh.changed]
-                blocks.append(_Table(["File", "Modified", "Age", "Size"], rows, title=f"{ds.name}: changed files"))
-            elif fresh.last_sync is not None and not fresh.metadata_changed:
-                blocks.append(_Note(f"{ds.name} is up to date: none of its {fresh.files:,} files changed since the sync "
-                                    f"of {_fmt_dt(fresh.last_sync.started)}.", "ok"))
-        stale = [f.data_source for f in checked if f.changed or f.metadata_changed or f.last_sync is None]
-        if stale:
-            lines = [f"{sync_command(kb_id, ds.id, region)}   # {ds.name}" for ds in stale]
-            lines.append(f"# or from Python: {sync_call(kb_id, stale[0].id, region)}")
-            blocks.append(_Text("\n".join(lines), title="To sync (this tool never starts a sync: it changes the index)"))
-        self._show(blocks)
 
     @_friendly_errors
     def compare(self, question: str, *, kb: str | None = None, n: int | Iterable[int] = (5, 10),
