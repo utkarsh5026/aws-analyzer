@@ -48,7 +48,7 @@
   // Look and feel. The theme and icons come from the Catppuccin extensions
   // (catppuccin.catppuccin-vsc, catppuccin.catppuccin-vsc-icons); without them VS Code
   // falls back to its defaults, and to the next font in each list.
-  "workbench.colorTheme": "Dark+",
+  "workbench.colorTheme": "Visual Studio Dark - C++",
   "workbench.iconTheme": "catppuccin-mocha",
   "editor.fontFamily": "'Source Code Pro', 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace",
   "editor.fontLigatures": true,
