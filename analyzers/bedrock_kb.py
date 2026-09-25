@@ -26,9 +26,13 @@ Quick start
     ui.use("support-docs")                            # later commands use this knowledge base
     ui.syncs()                                        # sync history, with why syncs failed
     ui.documents(status="FAILED")                     # documents that failed to index, and why
+    ui.search("how do refunds work?")                 # ranked passages, highlighted, with source and page
+    ui.chunk(2)                                       # full text and metadata of result #2
+    ui.search("error E1234", where={"team": "billing", "year": (">=", 2024)}, search_type="HYBRID")
 
     kb = ui.core                                      # same analyzer, raw data
     info = kb.describe("support-docs")                # KnowledgeBaseInfo
+    r = kb.retrieve("support-docs", "refund window", n=10)    # Retrieval: r.passages, r.to_df()
 """
 
 from __future__ import annotations
@@ -38,8 +42,10 @@ import functools
 import html
 import importlib
 import inspect
+import math
 import re
 import sys
+import textwrap
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -257,6 +263,113 @@ def sync_call(kb_id: str, data_source_id: str, region: str = "") -> str:
             f"dataSourceId={data_source_id!r})")
 
 
+def human_tokens(count: int | None, *, estimate: bool = False) -> str:
+    """1234 -> '1,234 tokens' ('~1,234 tokens' when it's an estimate)."""
+    if count is None:
+        return "-"
+    return f"{'~' if estimate else ''}{count:,} token{'' if count == 1 else 's'}"
+
+
+def estimate_tokens(text: str | None) -> int:
+    """Roughly how many tokens `text` is: one per 4 characters. An estimate: label it as one wherever it's shown."""
+    return math.ceil(len(text or "") / 4)
+
+
+_BEDROCK_META_PREFIX = "x-amz-bedrock-kb-"
+
+
+def split_metadata(md: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A retrieved passage's metadata -> (system, user). System keys lose their prefix: 'source-uri', 'chunk-id',
+    'data-source-id', 'document-page-number'. User keys are the knowledge base author's own metadata (from
+    <file>.metadata.json), which is what where= filters on."""
+    system: dict[str, Any] = {}
+    user: dict[str, Any] = {}
+    for key, value in (md or {}).items():
+        if key.startswith(_BEDROCK_META_PREFIX):
+            system[key[len(_BEDROCK_META_PREFIX):]] = value
+        elif key.startswith("AMAZON_BEDROCK_"):
+            system[key] = value
+        else:
+            user[key] = value
+    return system, user
+
+
+_STOPWORDS = frozenset("""
+a about after all also am an and any are as at be been but by can could did do does doing for from had has have how
+i if in into is it its me my no not of on or our she should so than that the their them then there these they this
+those to too us was we were what when where which who whom why will with would you your
+""".split())
+_TERM_RE = re.compile(r"[^\W_](?:[\w'’.\-/#]*[^\W_])?")
+
+
+def question_terms(question: str) -> list[str]:
+    """The words of a question worth highlighting, lower case, each once: no stopwords, 3+ characters or holding a
+    digit. 'How long do refunds take for order E1234?' -> ['long', 'refunds', 'take', 'order', 'e1234']."""
+    terms: list[str] = []
+    for match in _TERM_RE.finditer(question or ""):
+        word = match.group(0).lower()
+        if word in _STOPWORDS or (len(word) < 3 and not any(c.isdigit() for c in word)) or word in terms:
+            continue
+        terms.append(word)
+    return terms
+
+
+def _code_terms(question: str) -> list[str]:
+    """IDs and codes in a question ('E1234', 'SKU-42', 'GDPR', '4412'): exact strings that semantic search, which
+    matches meaning, tends to miss."""
+    codes = []
+    for match in _TERM_RE.finditer(question or ""):
+        word = match.group(0)
+        digits, letters = any(c.isdigit() for c in word), any(c.isalpha() for c in word)
+        if (digits and (letters or len(word) >= 4)) or (word.isalpha() and word.isupper() and len(word) >= 3):
+            codes.append(word)
+    return list(dict.fromkeys(codes))
+
+
+def _terms_regex(terms: Iterable[str]) -> re.Pattern[str] | None:
+    """One regex (with a single group) matching any of `terms` as whole words, plus simple plural / verb endings:
+    'refunds' also matches 'refund' and 'refunded'."""
+    stems = set()
+    for term in terms:
+        term = term.lower()
+        if len(term) > 3 and term.endswith("s") and not term.endswith("ss"):
+            term = term[:-1]
+        if term:
+            stems.add(term)
+    if not stems:
+        return None
+    words = "|".join(re.escape(t) for t in sorted(stems, key=len, reverse=True))
+    return re.compile(rf"(?<!\w)((?:{words})(?:s|es|ed|ing|'s)?)(?!\w)", re.IGNORECASE)
+
+
+def best_snippet(text: str, terms: Iterable[str], width: int = 320) -> str:
+    """The `width`-character window of `text` holding the most question words, cut at spaces, with … where the text
+    was cut. Whitespace is collapsed. Text without any of the words gives its start."""
+    flat = " ".join((text or "").split())
+    if len(flat) <= width:
+        return flat
+    regex = _terms_regex(terms)
+    hits = [m.start() for m in regex.finditer(flat)] if regex else []
+    start, best = 0, -1
+    for pos in hits:
+        begin = max(0, min(pos - width // 5, len(flat) - width))
+        count = sum(1 for h in hits if begin <= h < begin + width - 10)
+        if count > best:
+            start, best = begin, count
+    end = min(len(flat), start + width)
+    if start > 0:
+        space = flat.find(" ", start, start + 30)
+        start = space + 1 if space != -1 else start
+    if end < len(flat):
+        space = flat.rfind(" ", start + width // 2, end)
+        end = space if space != -1 else end
+    return ("…" if start > 0 else "") + flat[start:end] + ("…" if end < len(flat) else "")
+
+
+DEFAULT_RERANK_MODEL = "cohere.rerank-v3-5:0"  # rerank=True uses this; Amazon's is 'amazon.rerank-v1:0'
+_RERANK_ALIASES = {"cohere": DEFAULT_RERANK_MODEL, "amazon": "amazon.rerank-v1:0"}
+
+
 # =============================================================================
 # 2. Data models (what BedrockKBAnalyzer returns)
 # =============================================================================
@@ -387,6 +500,58 @@ class DocumentSummary:
     reasons: list[tuple[str, int]] = field(default_factory=list)  # (reason, documents), most common first
     truncated: bool = False  # stopped at `limit`: counts cover only the documents read
     errors: dict[str, str] = field(default_factory=dict)  # data source ID -> error code (e.g. unsupported type)
+
+
+@dataclass
+class Passage:
+    """One retrieved chunk of a document, with where it came from."""
+
+    rank: int  # 1 = best match
+    text: str
+    score: float | None = None  # relevance; only comparable with other scores of the same search
+    uri: str = ""  # s3://bucket/key, a web page URL, ... (see location_type)
+    location_type: str = ""  # S3 | WEB | CONFLUENCE | SALESFORCE | SHAREPOINT | CUSTOM | KENDRA | SQL | ...
+    page: int | None = None  # page number in a PDF, when the parser recorded one
+    chunk_id: str = ""
+    data_source_id: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)  # the author's metadata only (what where= filters on)
+    content_type: str = "TEXT"  # TEXT | IMAGE | ROW | AUDIO | VIDEO
+    row: dict[str, Any] | None = None  # ROW results (SQL knowledge bases): column -> value
+
+    @property
+    def source(self) -> str:
+        """'refund-policy.pdf p.3'."""
+        name = source_name(self.uri) or self.uri or "(unknown source)"
+        return f"{name} p.{self.page}" if self.page is not None else name
+
+    @property
+    def key(self) -> str:
+        """What identifies this chunk when comparing searches: its chunk ID, or its source and text."""
+        return self.chunk_id or f"{self.uri}|{self.page}|{self.text[:500]}"
+
+
+@dataclass
+class Retrieval:
+    """What one Retrieve call returned for a question, best passage first."""
+
+    kb_id: str
+    question: str
+    passages: list[Passage] = field(default_factory=list)
+    kb_name: str = ""
+    n: int = 5  # passages asked for
+    search_type: str | None = None  # SEMANTIC | HYBRID; None = Bedrock's choice
+    where: Any = None
+    reranked: str | None = None  # the reranking model, when one re-ordered the results
+    seconds: float = 0.0
+    guardrail_action: str | None = None  # INTERVENED when a guardrail stepped in
+
+    def to_df(self):
+        """One row per passage: rank, score, source, page, text, IDs and metadata."""
+        pd = _require("pandas", "Retrieval.to_df")
+        return pd.DataFrame([{
+            "rank": p.rank, "score": p.score, "source": source_name(p.uri), "page": p.page, "text": p.text,
+            "uri": p.uri, "chunk_id": p.chunk_id, "data_source_id": p.data_source_id, "content_type": p.content_type,
+            "metadata": p.metadata} for p in self.passages])
 
 
 # =============================================================================
@@ -626,6 +791,221 @@ def idle_cost_label(kb: KnowledgeBaseInfo, prices: dict[str, float] | None = Non
     return f"billed by {_STORE_BILLED_BY[kb.vector_store]}, not estimated" if kb.vector_store in _STORE_BILLED_BY else "-"
 
 
+_FILTER_OPERATORS = {
+    "=": "equals", "==": "equals", "!=": "notEquals", "<>": "notEquals", ">": "greaterThan",
+    ">=": "greaterThanOrEquals", "<": "lessThan", "<=": "lessThanOrEquals", "in": "in", "not_in": "notIn",
+    "begins_with": "startsWith", "contains": "stringContains", "list_contains": "listContains", "between": "between",
+}
+_FILTER_KEYS = {"equals", "notEquals", "greaterThan", "greaterThanOrEquals", "lessThan", "lessThanOrEquals", "in",
+                "notIn", "startsWith", "listContains", "stringContains", "andAll", "orAll"}
+
+
+def _filter_value(value: Any) -> Any:
+    """A metadata value Bedrock accepts: tuples and sets become lists, dates ISO text."""
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_filter_value(v) for v in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
+def _is_bedrock_filter(where: Any) -> bool:
+    return isinstance(where, dict) and len(where) == 1 and next(iter(where)) in _FILTER_KEYS
+
+
+def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
+    """One where= entry -> Bedrock filter conditions (two for 'between')."""
+    if not isinstance(key, str) or not key:
+        raise ValueError(f"where= keys are metadata attribute names, got {key!r}")
+    if not isinstance(spec, tuple):
+        if isinstance(spec, (list, set, frozenset)):  # a list of allowed values
+            return [{"in": {"key": key, "value": _filter_value(spec)}}]
+        return [{"equals": {"key": key, "value": _filter_value(spec)}}]
+    op = spec[0].lower() if spec and isinstance(spec[0], str) else None
+    if op not in _FILTER_OPERATORS:
+        raise ValueError(f"Can't read the condition {spec!r} on {key!r}: use a value, or (operator, value) with one of "
+                         + ", ".join(_FILTER_OPERATORS))
+    args = list(spec[1:])
+    if op == "between":
+        if len(args) != 2:
+            raise ValueError(f"'between' takes two values, like ('between', 2020, 2024); got {spec!r}")
+        return [{"greaterThanOrEquals": {"key": key, "value": _filter_value(args[0])}},
+                {"lessThanOrEquals": {"key": key, "value": _filter_value(args[1])}}]
+    if op in ("in", "not_in") and len(args) > 1:
+        args = [args]  # ('in', 'a', 'b') means ('in', ['a', 'b'])
+    if len(args) != 1:
+        raise ValueError(f"{op!r} takes one value, like ({op!r}, {'[...]' if 'in' in op else 'x'}); got {spec!r}")
+    value = _filter_value(args[0])
+    if op in ("in", "not_in") and not isinstance(value, list):
+        value = [value]
+    name = _FILTER_OPERATORS[op]
+    if op == "contains" and not isinstance(value, str):
+        name = "listContains"  # a number or boolean can only be an element of a list attribute
+    return [{name: {"key": key, "value": value}}]
+
+
+def build_filter(where: Any) -> dict[str, Any] | None:
+    """`where` -> a Bedrock RetrievalFilter on the documents' metadata. Takes None, a filter Bedrock already
+    understands ({'andAll': [...]}, {'equals': {...}}, ...), or a dict of attribute -> value or (operator, *values),
+    which must all match:
+
+        {'team': 'billing'}                     team = 'billing'
+        {'team': ['billing', 'support']}        team is one of these
+        {'year': ('>=', 2024)}                  also '=', '!=', '>', '<', '<=', ('between', 2020, 2024)
+        {'region': ('in', ['eu', 'uk'])}        also ('not_in', [...])
+        {'doc_id': ('begins_with', 'POL-')}     text starting with this
+        {'title': ('contains', 'refund')}       text containing this, or a list with an element containing it
+        {'tags': ('list_contains', 'gdpr')}     a list attribute holding exactly this element
+
+    Metadata comes from a <file>.metadata.json next to each file; values are typed, so 2024 and '2024' differ."""
+    if where is None:
+        return None
+    if _is_bedrock_filter(where):
+        return where
+    if not isinstance(where, dict):
+        raise ValueError("where= takes a dict like {'team': 'billing', 'year': ('>=', 2024)}, or a Bedrock "
+                         "RetrievalFilter like {'equals': {'key': 'team', 'value': 'billing'}}")
+    conditions = [condition for key, spec in where.items() for condition in _conditions(key, spec)]
+    if not conditions:
+        return None
+    return conditions[0] if len(conditions) == 1 else {"andAll": conditions}
+
+
+def describe_filter(where: Any) -> str:
+    """`where` as text: {'team': 'billing', 'year': ('>=', 2024)} -> "team = 'billing', year >= 2024"."""
+    if where is None:
+        return ""
+    if _is_bedrock_filter(where) or not isinstance(where, dict):
+        return "a Bedrock filter"
+    parts = []
+    for name, spec in where.items():
+        if not isinstance(spec, tuple):
+            parts.append(f"{name} in {list(spec)!r}" if isinstance(spec, (list, set, frozenset)) else f"{name} = {spec!r}")
+        elif spec and spec[0] == "between" and len(spec) == 3:
+            parts.append(f"{name} between {spec[1]!r} and {spec[2]!r}")
+        else:
+            op, *args = spec
+            parts.append(f"{name} {op} " + ", ".join(map(repr, args)))
+    return ", ".join(parts)
+
+
+_LOCATIONS = {
+    "S3": ("s3Location", "uri"), "WEB": ("webLocation", "url"), "CONFLUENCE": ("confluenceLocation", "url"),
+    "SALESFORCE": ("salesforceLocation", "url"), "SHAREPOINT": ("sharePointLocation", "url"),
+    "CUSTOM": ("customDocumentLocation", "id"), "KENDRA": ("kendraDocumentLocation", "uri"),
+    "SQL": ("sqlLocation", "query"), "ONEDRIVE": ("oneDriveLocation", "url"),
+    "GOOGLEDRIVE": ("googleDriveLocation", "url"),
+}
+
+
+def _page_number(value: Any) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
+    """One Retrieve result (or one RetrieveAndGenerate retrievedReference) -> Passage."""
+    content = ref.get("content") or {}
+    location = ref.get("location") or {}
+    kind = location.get("type", "")
+    section, key = _LOCATIONS.get(kind, ("", ""))
+    uri = (location.get(section) or {}).get(key, "") if section else ""
+    system, user = split_metadata(ref.get("metadata"))
+    content_type = content.get("type") or "TEXT"
+    text = content.get("text") or ""
+    row = None
+    if content.get("row"):
+        row = {column.get("columnName", ""): column.get("columnValue") for column in content["row"]}
+        text = text or ", ".join(f"{name}: {value}" for name, value in row.items())
+    elif content.get("audio"):
+        text = text or content["audio"].get("transcription") or "(audio)"
+    elif content.get("video"):
+        text = text or content["video"].get("summary") or "(video)"
+    elif content_type == "IMAGE":
+        text = text or "(an image)"
+    return Passage(rank=rank, text=text, score=ref.get("score"), uri=uri or str(system.get("source-uri") or ""),
+                   location_type=kind, page=_page_number(system.get("document-page-number")),
+                   chunk_id=str(system.get("chunk-id") or ""), data_source_id=str(system.get("data-source-id") or ""),
+                   metadata=user, content_type=content_type, row=row)
+
+
+def parse_retrieve(resp: dict[str, Any]) -> list[Passage]:
+    """A Retrieve response -> Passages, best first."""
+    return [parse_passage(ref, i) for i, ref in enumerate(resp.get("retrievalResults") or [], 1)]
+
+
+def query_cost(n_queries: int, rerank: bool = False, prices: dict[str, float] | None = None, *,
+               question_tokens: int = 20) -> float:
+    """Estimated USD for n searches: embedding each question (about question_tokens tokens) and, with rerank=True,
+    the reranking model. The vector store's own charges aren't included."""
+    prices = BEDROCK_PRICES if prices is None else prices
+    per_query = question_tokens * prices["embedding_per_million_tokens"] / 1e6
+    if rerank:
+        per_query += prices["rerank_per_1k_queries"] / 1000
+    return n_queries * per_query
+
+
+def _search_label(search_type: str | None) -> str:
+    return {"SEMANTIC": "semantic search", "HYBRID": "hybrid search (meaning and keywords)"}.get(
+        (search_type or "").upper(), "Bedrock's default search")
+
+
+def retrieval_findings(r: Retrieval) -> list[tuple[str, str]]:
+    """What a search result says about the knowledge base, with what to try next -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    passages = r.passages
+    if r.guardrail_action == "INTERVENED":
+        found.append(("warn", "A guardrail intervened in this search, so passages may be missing or masked. The "
+                              "guardrail's settings in the Bedrock console say what it blocks."))
+    if not passages:
+        if r.where is not None:
+            found.append(("warn", f"Nothing came back. The filter ({describe_filter(r.where)}) may match no documents: "
+                                  "metadata values are exact and typed (2024 and '2024' differ), and filtering needs a "
+                                  "<file>.metadata.json next to each file. Try without where=, then check kb_info()."))
+        else:
+            found.append(("warn", "Nothing came back. Check that the data sources are synced (syncs()) and hold "
+                                  "searchable documents (documents()), or try a larger n=."))
+        return found
+    files = {p.uri or p.source for p in passages}
+    if len(passages) >= 3 and len(files) == 1:
+        found.append(("info", f"All {len(passages)} passages come from one file ({source_name(next(iter(files)))}). If "
+                              "the answer could be in other files, try search_type='HYBRID', a larger n=, or where= "
+                              "to leave that file out."))
+    seen: dict[str, Passage] = {}
+    repeats: list[tuple[Passage, Passage]] = []
+    for p in passages:
+        text = " ".join(p.text.lower().split())
+        if len(text) >= 40 and text in seen:
+            repeats.append((seen[text], p))
+        seen.setdefault(text, p)
+    if repeats:
+        first, again = repeats[0]
+        where = (f"{source_name(first.uri)} and {source_name(again.uri)}" if first.uri != again.uri
+                 else source_name(first.uri))
+        found.append(("info", f"{_plural(len(repeats), 'passage')} repeat{'s' if len(repeats) == 1 else ''} another "
+                              f"one word for word (e.g. #{first.rank} and #{again.rank}, from {where}): the same "
+                              "content is probably in several files. Removing the copies, then syncing, frees those "
+                              "slots for other passages."))
+    short = [p for p in passages if p.content_type == "TEXT" and len(p.text.split()) < 20]
+    if len(short) >= 2 and len(short) * 2 >= len(passages):
+        found.append(("info", f"{len(short)} of {len(passages)} passages are under 20 words, which gives an answer "
+                              "little to work with. kb_info() shows the chunking; bigger chunks, or hierarchical "
+                              "chunking, usually help (set on a new data source)."))
+    missing = [code for code in _code_terms(r.question)
+               if not any(code.lower() in p.text.lower() for p in passages)]
+    if missing and (r.search_type or "").upper() != "HYBRID":
+        listed = " and ".join(repr(code) for code in missing[:3])
+        found.append(("warn", f"{listed} from the question appear{'s' if len(missing) == 1 else ''} in no passage. "
+                              "Semantic search matches meaning, not exact codes or names: try search_type='HYBRID', "
+                              "which also matches keywords (OpenSearch, Aurora and MongoDB stores support it)."))
+    if any(p.score is not None for p in passages):
+        found.append(("info", "Scores are relative: compare them with each other, not against a fixed cutoff. They "
+                              "depend on the vector store and the embedding model."))
+    return found
+
+
 # describe() section -> (what it is, the permission that reads it)
 _SECTIONS = {
     "describe": ("the knowledge base", "bedrock:GetKnowledgeBase"),
@@ -786,6 +1166,13 @@ def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
     if len(hits) > 1:
         raise ValueError(f"{len(hits)} knowledge bases are named {value!r}; pass one of their IDs: {', '.join(hits)}")
     return hits[0] if hits else None
+
+
+def _question_text(question: Any) -> str:
+    text = " ".join(str(question or "").split())
+    if not text:
+        raise ValueError("Pass a question, like search('how long do refunds take?')")
+    return text
 
 
 def _with_errors(ds: DataSourceInfo, errors: dict[str, str]) -> DataSourceInfo:
@@ -1031,6 +1418,65 @@ class BedrockKBAnalyzer:
         summary.errors = errors
         return [d for d in docs if not wanted or d.status in wanted], summary
 
+    # ---------------------------------------------------------------- retrieval
+
+    def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
+        if service not in self._clients:
+            self._clients[service] = make()
+        return self._clients[service]
+
+    def _runtime_client(self) -> Any:
+        """bedrock-agent-runtime: Retrieve and RetrieveAndGenerate."""
+        return self._cached_client("bedrock-agent-runtime", lambda: self.session.client(
+            "bedrock-agent-runtime", region_name=self.region, config=self._config))
+
+    def _rerank_arn(self, model: str | bool) -> str:
+        """True, 'cohere', 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants."""
+        model_id = DEFAULT_RERANK_MODEL if model is True else _RERANK_ALIASES.get(str(model).lower(), str(model))
+        return model_id if model_id.startswith("arn:") else f"arn:aws:bedrock:{self.region}::foundation-model/{model_id}"
+
+    def _search_config(self, n: int, where: Any, search_type: str | None,
+                       rerank_model: str | bool | None = None) -> dict[str, Any]:
+        """The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate."""
+        n = _as_int(n, "n")
+        if not 1 <= n <= 100:
+            raise ValueError(f"n can be 1 to 100 (a search returns at most 100 passages); got {n}")
+        config: dict[str, Any] = {"numberOfResults": n}
+        condition = build_filter(where)
+        if condition:
+            config["filter"] = condition
+        if search_type:
+            kind = str(search_type).upper()
+            if kind not in ("SEMANTIC", "HYBRID"):
+                raise ValueError("search_type is 'SEMANTIC' (matches meaning) or 'HYBRID' (meaning and keywords), or "
+                                 "None to let Bedrock choose")
+            config["overrideSearchType"] = kind
+        if rerank_model:
+            config["numberOfResults"] = min(100, max(4 * n, 20))  # the reranker picks the best n of these
+            config["rerankingConfiguration"] = {"type": "BEDROCK_RERANKING_MODEL", "bedrockRerankingConfiguration": {
+                "modelConfiguration": {"modelArn": self._rerank_arn(rerank_model)}, "numberOfRerankedResults": n}}
+        return config
+
+    def retrieve(self, kb: str, question: str, n: int = 5, *, where: Any = None, search_type: str | None = None,
+                 rerank_model: str | bool | None = None) -> Retrieval:
+        """The n passages (up to 100) that best match `question`, best first. where= filters on the documents'
+        metadata (see build_filter); search_type='HYBRID' adds keyword matching, where the vector store supports it;
+        rerank_model re-orders a wider set of results with a reranking model (True = Cohere Rerank 3.5)."""
+        kb_id = self.resolve(kb)
+        question = _question_text(question)
+        config = self._search_config(n, where, search_type, rerank_model)
+        started = time.monotonic()
+        resp = self._runtime_client().retrieve(knowledgeBaseId=kb_id, retrievalQuery={"text": question},
+                                               retrievalConfiguration={"vectorSearchConfiguration": config})
+        n = _as_int(n, "n")
+        reranker = None
+        if rerank_model:
+            reranker = _model_id(config["rerankingConfiguration"]["bedrockRerankingConfiguration"][
+                "modelConfiguration"]["modelArn"])
+        return Retrieval(kb_id=kb_id, question=question, passages=parse_retrieve(resp)[:n], kb_name=self.kb_name(kb_id),
+                         n=n, search_type=config.get("overrideSearchType"), where=where, reranked=reranker,
+                         seconds=time.monotonic() - started, guardrail_action=resp.get("guardrailAction"))
+
 
 
 # =============================================================================
@@ -1070,6 +1516,19 @@ class _Note:
 class _Text:
     text: str
     title: str = ""
+    wrap: bool = False
+
+
+@dataclass
+class _Passage:
+    rank: int
+    score_share: float | None  # 0..1: the score against the top result's, drawn as a bar
+    source: str  # 'refund-policy.pdf'
+    detail: str  # 'p.3'
+    text: str  # the snippet shown
+    terms: list[str] = field(default_factory=list)  # words to highlight
+    score: float | None = None
+    meta: str = ""  # the passage's metadata, e.g. 'team=billing · year=2024'
 
 
 _CSS = """<style>
@@ -1097,6 +1556,12 @@ _CSS = """<style>
 .kba .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
 .kba .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
 .kba pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
+.kba pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
+.kba .psg{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 10px;margin:6px 0;max-width:900px}
+.kba .psg .ph{font-weight:600;font-size:12px}
+.kba .psg .pm{opacity:.65;font-size:12px}
+.kba .psg .pt{margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere}
+.kba mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px;padding:0 1px}
 </style>"""
 
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
@@ -1153,9 +1618,28 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
         elif isinstance(block, _Text):
             if block.title:
                 out.append(f"<h4>{_esc(block.title)}</h4>")
-            out.append(f"<pre>{_esc(block.text)}</pre>")
+            out.append(f'<pre class="wrap">{_esc(block.text)}</pre>' if block.wrap else f"<pre>{_esc(block.text)}</pre>")
+        elif isinstance(block, _Passage):
+            head = " · ".join(filter(None, [f"#{block.rank}", block.source, block.detail,
+                                            "" if block.score is None else f"score {block.score:.2f}"]))
+            bar = ""
+            if block.score_share is not None:
+                pct = max(0.0, min(1.0, block.score_share)) * 100
+                bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
+            meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
+            out.append(f'<div class="psg"><div class="ph">{bar}{_esc(head)}</div>{meta}'
+                       f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>')
     out.append("</div>")
     return "".join(out)
+
+
+def _highlight(text: str, terms: Iterable[str]) -> str:
+    """HTML for `text` with the question's words in <mark>. The text is split on the words and each piece escaped
+    before it's wrapped, so markup inside a passage (knowledge base content is untrusted) stays text."""
+    regex = _terms_regex(terms)
+    if regex is None:
+        return _esc(text)
+    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
 
 
 def _text_bar(fraction: float, width: int = 20) -> str:
@@ -1204,6 +1688,12 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out += ["", f"-- {block.title} --"]
             out.append(block.text)
+        elif isinstance(block, _Passage):
+            score = "" if block.score is None else f" (score {block.score:.2f})"
+            out += ["", f"[{block.rank}] {block.source}" + (f" {block.detail}" if block.detail else "") + score]
+            if block.meta:
+                out.append("    " + block.meta)
+            out += textwrap.wrap(block.text, 100, initial_indent="    ", subsequent_indent="    ") or ["    (no text)"]
     return "\n".join(out)
 
 
@@ -1252,6 +1742,17 @@ def _job_row(job: IngestionJob, names: dict[str, str]) -> list[str]:
     return [names.get(job.data_source_id) or job.data_source_id, _fmt_dt(job.started), human_duration(job.duration),
             _JOB_STATES.get(job.status, job.status.lower()), f"{job.scanned:,}", f"{job.new:,}", f"{job.modified:,}",
             f"{job.deleted:,}", f"{job.failed:,}", _reasons_text(job.failure_reasons, 1) if job.failure_reasons else ""]
+
+
+def _meta_label(metadata: dict[str, Any]) -> str:
+    return " · ".join(f"{k}={v}" for k, v in sorted(metadata.items()))
+
+
+def _passage_blocks(passages: list[Passage], terms: list[str], width: int = 320) -> list[_Passage]:
+    top = max((p.score for p in passages if p.score is not None), default=None)
+    return [_Passage(p.rank, None if p.score is None or not top else p.score / top, source_name(p.uri) or p.uri or "?",
+                     f"p.{p.page}" if p.page is not None else "", best_snippet(p.text, terms, width), terms, p.score,
+                     _meta_label(p.metadata)) for p in passages]
 
 
 def _model_label(model: str) -> str:
@@ -1304,6 +1805,7 @@ class BedrockKBView:
         self.kb = kb
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
+        self._last: Retrieval | None = None  # what chunk() reads
 
     # ------------------------------------------------------------------ plumbing
 
@@ -1501,9 +2003,9 @@ class BedrockKBView:
                                  title="Recent syncs (syncs() shows more, with reasons)", max_rows=0))
         if info.tags:
             blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(info.tags.items())], title="Tags"))
-        hint = "" if self.kb in (info.id, info.name) else f"kb={info.name!r}"
-        blocks.append(_Note(f"Next: syncs({hint}) shows the sync history with reasons; documents({hint}) shows "
-                            "which files are searchable."))
+        hint = "" if self.kb in (info.id, info.name) else f", kb={info.name!r}"
+        blocks.append(_Note(f"Try it: search('a question your documents answer'{hint}) shows the passages it "
+                            "retrieves, with scores and sources. syncs() and documents() show what's indexed."))
         self._show(blocks)
 
     @_friendly_errors
@@ -1586,3 +2088,68 @@ class BedrockKBView:
                                 "for all of them."))
         self._show(blocks)
 
+    # ---------------------------------------------------------------- retrieval
+
+    @_friendly_errors
+    def search(self, question: str, n: int = 5, *, kb: str | None = None, where: Any = None,
+               search_type: str | None = None, rerank: str | bool | None = None) -> None:
+        """Ranked passages for a question, with score bars, source and page, highlighted words and metadata.
+        Also findings, time and cost. where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}."""
+        kb_id = self._kb(kb)
+        with self._progress("Searching", unit="passages"):
+            r = self.core.retrieve(kb_id, question, n, where=where, search_type=search_type, rerank_model=rerank)
+        self._last = r
+        terms = question_terms(r.question)
+        top = max((p.score for p in r.passages if p.score is not None), default=None)
+        sub = [f"{len(r.passages)} of up to {r.n} passages", _search_label(r.search_type)]
+        if where is not None:
+            sub.append(f"where {describe_filter(where)}")
+        if r.reranked:
+            sub.append(f"reranked by {r.reranked}")
+        sub.append(f"cost at {self._price_basis()}")
+        blocks: list[Any] = [
+            _Title(f"Search {r.kb_name}: {_clip(r.question, 80)}", " · ".join(sub)),
+            _Cards([("Passages", f"{len(r.passages):,}"), ("Top score", "-" if top is None else f"{top:.2f}"),
+                    ("Files", f"{len({p.uri for p in r.passages}):,}"), ("Time", f"{r.seconds:.1f}s"),
+                    ("Est. cost", human_money(query_cost(1, bool(r.reranked), self.core.prices))
+                     + (" (question embedding and reranking)" if r.reranked else " (question embedding)"))]),
+        ]
+        blocks += [_Note(message, level) for level, message in retrieval_findings(r)]
+        blocks += _passage_blocks(r.passages, terms)
+        if r.passages:
+            blocks.append(_Note("chunk(1) shows the full text and metadata of result #1."))
+        self._show(blocks)
+
+    @_friendly_errors
+    def chunk(self, rank: int = 1) -> None:
+        """The full text and metadata of result #rank from the last search, and the call that opens its file."""
+        if self._last is None:
+            raise _Hint("Nothing to show yet: run search('...') first, then chunk(1).")
+        passages = self._last.passages
+        rank = _as_int(rank, "rank")
+        if not 1 <= rank <= len(passages):
+            raise ValueError(f"rank goes from 1 to {len(passages)}: the last search returned "
+                             f"{_plural(len(passages), 'passage')}")
+        p = passages[rank - 1]
+        blocks: list[Any] = [
+            _Title(f"Result #{rank}: {p.source}", p.uri),
+            _Cards([("Score", "-" if p.score is None else f"{p.score:.3f}"), ("Page", _count(p.page)),
+                    ("Words", f"{len(p.text.split()):,}"), ("Tokens (estimate)", f"~{estimate_tokens(p.text):,}"),
+                    ("Kind", p.content_type.lower()), ("Data source", p.data_source_id or "-")]),
+            _Text(p.text, title="Full text", wrap=True),
+        ]
+        if p.row:
+            blocks.append(_Table(["Column", "Value"], [[k, v] for k, v in p.row.items()], title="Row"))
+        rows = [[k, v] for k, v in sorted(p.metadata.items())]
+        blocks.append(_Table(["Attribute", "Value"], rows, title="Metadata (what where= filters on)"))
+        if not rows:
+            blocks.append(_Note("No metadata on this passage: where= filters need a <file>.metadata.json next to each "
+                                "file, then a sync."))
+        blocks.append(_Table(["Field", "Value"], [["Chunk ID", p.chunk_id or "-"], ["Data source", p.data_source_id or "-"],
+                                                   ["Location type", p.location_type or "-"]], title="Where it's stored"))
+        if p.uri.startswith("s3://"):
+            blocks.append(_Note(f"To open the whole file: S3View().preview({p.uri!r}), from s3.py in this repo "
+                                "(import s3 first)."))
+        elif p.uri.startswith("http"):
+            blocks.append(_Note(f"The page it came from: {p.uri}"))
+        self._show(blocks)
