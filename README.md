@@ -4,8 +4,10 @@
 
 Copy-paste utilities for analyzing AWS services from a SageMaker (or any Jupyter) notebook.
 
-📖 **[S3 guide with examples and screenshots](https://utkarsh5026.github.io/aws-analyzer/)**: setting up in SageMaker,
-every command, and ready-made IAM permissions. Its source is [`docs/index.html`](docs/index.html).
+📖 Guides with examples and screenshots: setting up in SageMaker, every command, and ready-made IAM permissions.
+
+- **[S3 guide](https://utkarsh5026.github.io/aws-analyzer/)** (source: [`docs/index.html`](docs/index.html))
+- **[DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)** (source: [`docs/dynamodb.html`](docs/dynamodb.html))
 
 **One file per service, no dependencies on each other.** Drop `analyzers/<service>.py` into a
 notebook cell (or upload it next to the notebook and `import` it) and start analyzing.
@@ -294,8 +296,9 @@ ruff check .
 
 Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed.
 
-The guide in `docs/` is plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
-whenever `docs/` changes on `main`. Its screenshots are the tool's own output from a demo bucket.
+The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
+whenever `docs/` changes on `main`. Their screenshots are the tool's own output from a demo bucket and demo
+tables with synthetic data.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in

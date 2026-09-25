@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DynamoDB Analyzer Guide</title>
+<meta name="description" content="How to browse, query and understand Amazon DynamoDB tables from a SageMaker notebook with aws-analyzer's dynamodb.py, with examples.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfa; --surface: #ffffff; --surface-2: #f3f4f2; --text: #1c1f1e; --muted: #5d6562;
+  --border: #e2e5e3; --accent: #0f766e; --accent-soft: #e3f2ef; --code-bg: #f3f5f4; --code-text: #1f2a28;
+  --tok-comment: #6b7a76; --tok-string: #9a4d0d; --tok-keyword: #6d28d9; --tok-number: #0f6ea8;
+  --warn-bg: #fff7e6; --warn-border: #e6a23c; --shadow: 0 1px 2px rgba(20, 30, 28, .06), 0 4px 16px rgba(20, 30, 28, .05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+    --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+    --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+    --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+  --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+  --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+  --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+:not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; font-size: .88em; overflow-wrap: anywhere; }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; padding: 28px 16px 40px 24px; border-right: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; margin-bottom: 22px; }
+.brand svg { flex: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li a { display: block; padding: 5px 10px; margin: 1px 0; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.4; }
+nav.toc li a:hover { color: var(--text); background: var(--surface-2); }
+nav.toc li a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+nav.toc .repo { margin-top: 22px; font-size: 13px; padding: 0 10px; }
+details.mobile-toc { display: none; }
+
+main { padding: 40px 48px 96px; min-width: 0; }
+.content { max-width: 860px; }
+header.hero { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.eyebrow { color: var(--accent); font-weight: 650; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 6px; }
+h1 { font-size: 40px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 14px; }
+.lede { font-size: 19px; color: var(--muted); margin: 0 0 20px; max-width: 720px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pills li { font-size: 13px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+h2 { font-size: 27px; letter-spacing: -.01em; margin: 64px 0 10px; padding-top: 8px; }
+h3 { font-size: 19px; margin: 34px 0 8px; }
+h2 + p, h3 + p { margin-top: 4px; }
+p, ul, ol { margin: 12px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.code { position: relative; margin: 14px 0 18px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13.6px; line-height: 1.6; }
+.code .label { position: absolute; top: 0; left: 14px; transform: translateY(-50%); background: var(--bg); color: var(--muted); font-size: 11px; padding: 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+.copy { position: absolute; top: 8px; right: 8px; font: 12px/1 inherit; font-family: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.code:hover .copy, .copy:focus-visible { opacity: 1; }
+.copy.done { color: var(--accent); }
+@media (hover: none) { .copy { opacity: 1; } }
+.t-c { color: var(--tok-comment); font-style: italic; }
+.t-s { color: var(--tok-string); }
+.t-k { color: var(--tok-keyword); }
+.t-n { color: var(--tok-number); }
+
+figure { margin: 18px 0 26px; }
+figure .shot { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td code { white-space: nowrap; }
+
+.callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+.callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout p { margin: 4px 0; }
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps > li { counter-increment: step; position: relative; padding-left: 40px; margin: 18px 0; }
+.steps > li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+.card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+.card h4 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+details.faq { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 10px 0; }
+details.faq summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details.faq > div { padding: 0 16px 8px; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+
+@media (max-width: 960px) {
+  .layout { display: block; }
+  nav.toc { display: none; }
+  details.mobile-toc { display: block; margin: 0 0 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  details.mobile-toc summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+  details.mobile-toc ol { margin: 0; padding: 0 14px 12px 34px; }
+  main { padding: 24px 16px 72px; }
+  h1 { font-size: 31px; }
+  .lede { font-size: 17px; }
+  h2 { font-size: 23px; margin-top: 52px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <a class="brand" href="#top">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor" style="color:var(--accent)"/><path d="M9 11h14M9 16h10M9 21h14" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      DynamoDB Analyzer guide
+    </a>
+    <ol id="toc-list">
+      <li><a href="#setup">Set up in SageMaker</a></li>
+      <li><a href="#tour">Five-minute tour</a></li>
+      <li><a href="#tables">Your tables</a></li>
+      <li><a href="#items">Look at items</a></li>
+      <li><a href="#filters">Filter items</a></li>
+      <li><a href="#schema">What the items look like</a></li>
+      <li><a href="#values">Values and sizes</a></li>
+      <li><a href="#python">Use the data in Python</a></li>
+      <li><a href="#big">Large tables and cost</a></li>
+      <li><a href="#permissions">Permissions</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li><a href="#reference">Command reference</a></li>
+    </ol>
+    <p class="repo"><a href="index.html">S3 guide →</a><br><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
+  </nav>
+
+  <main id="top">
+    <div class="content">
+      <details class="mobile-toc">
+        <summary>Contents</summary>
+        <ol>
+          <li><a href="#setup">Set up in SageMaker</a></li>
+          <li><a href="#tour">Five-minute tour</a></li>
+          <li><a href="#tables">Your tables</a></li>
+          <li><a href="#items">Look at items</a></li>
+          <li><a href="#filters">Filter items</a></li>
+          <li><a href="#schema">What the items look like</a></li>
+          <li><a href="#values">Values and sizes</a></li>
+          <li><a href="#python">Use the data in Python</a></li>
+          <li><a href="#big">Large tables and cost</a></li>
+          <li><a href="#permissions">Permissions</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#reference">Command reference</a></li>
+        </ol>
+      </details>
+
+      <header class="hero">
+        <p class="eyebrow">aws-analyzer · dynamodb.py</p>
+        <h1>Explore your DynamoDB tables from a SageMaker notebook</h1>
+        <p class="lede">One Python file. Drop it next to your notebook and read your tables the easy way: items as plain tables, one item with every nested field laid out, what attributes the items actually hold, and what each read costs, without leaving Jupyter.</p>
+        <ul class="pills">
+          <li>One file, boto3 only</li>
+          <li>Read-only: never writes to a table</li>
+          <li>Scans stop early by default</li>
+          <li>Plain text outside Jupyter</li>
+        </ul>
+      </header>
+
+      <p class="muted">Every example uses a table called <code>acme-app</code>, a single-table design that keeps customers (<code>sk = "PROFILE"</code>), their orders (<code>sk = "ORDER#&lt;date&gt;#&lt;id&gt;"</code>) and support tickets under one partition key, <code>CUSTOMER#&lt;id&gt;</code>. Use your own table names. The screenshots are real output from the tool, run against demo tables with synthetic data.</p>
+
+      <!-- ============================================================ setup -->
+      <h2 id="setup">Set up in SageMaker</h2>
+      <ol class="steps">
+        <li>
+          <strong>Get <code>dynamodb.py</code> next to your notebook.</strong> Pick whichever works in your environment:
+          <ul>
+            <li><strong>Upload it.</strong> Download <a href="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/dynamodb.py" download>dynamodb.py</a>, then drag it into JupyterLab's file browser, in the same folder as your notebook.</li>
+            <li><strong>Fetch it from a cell</strong>, if the notebook can reach the internet:
+              <div class="code"><pre><code class="lang-sh">!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/dynamodb.py</code></pre></div>
+            </li>
+            <li><strong>Copy it from S3</strong>, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
+              <div class="code"><pre><code class="lang-sh">!aws s3 cp s3://acme-ml-data/tools/dynamodb.py .</code></pre></div>
+            </li>
+            <li>Or paste the whole file into a notebook cell and run it.</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Import it and create the view.</strong> It uses the notebook's IAM execution role and region, so there's nothing to configure.
+          <div class="code"><pre><code class="lang-py">from dynamodb import DynamoDBView
+
+ui = DynamoDBView()   # uses the notebook's IAM role and region
+ui.help()             # every command with a one-line description</code></pre></div>
+        </li>
+        <li>
+          <strong>Optional:</strong> another region or AWS profile, plain-text output, or longer tables. Tables are regional, so if <code>tables()</code> comes back empty, check the region first.
+          <div class="code"><pre><code class="lang-py">from dynamodb import DynamoDBAnalyzer, DynamoDBView
+
+ui = DynamoDBView(DynamoDBAnalyzer(region="eu-west-1", profile="dev"))
+ui = DynamoDBView(mode="text")          # plain text, e.g. in a terminal or a script
+ui = DynamoDBView(max_columns=0)        # show every attribute side by side (default: 30)</code></pre></div>
+        </li>
+      </ol>
+      <div class="callout">
+        <p><strong>Only boto3 is required.</strong> pandas (preinstalled on SageMaker) is used only when you ask for a DataFrame.</p>
+      </div>
+
+      <!-- ============================================================ tour -->
+      <h2 id="tour">Five-minute tour</h2>
+      <p>The commands you'll use most. Each one prints a report under the cell; none of them change anything.</p>
+      <div class="code"><pre><code class="lang-py">ui.tables()                                   # every table: key, items, size, billing, cost
+ui.table_info("acme-app")                     # indexes and how to query each, usage, backups, risks
+ui.scan("acme-app")                           # the first 20 items as a table...
+ui.more()                                     # ...and the next 20
+ui.query("acme-app", "CUSTOMER#1042")         # everything stored under one partition key
+ui.get("acme-app", "CUSTOMER#1042", "PROFILE")   # one item, nested fields laid out
+ui.schema("acme-app")                         # which attributes the items hold, and their types
+df = ui.core.scan("acme-app", n=5000).to_df() # a pandas DataFrame</code></pre></div>
+      <p>Items come back as plain Python, not DynamoDB JSON: numbers are <code>int</code> or <code>float</code> (not <code>Decimal</code>), sets are sets, binary is <code>bytes</code>, and maps and lists are dicts and lists. A key value is converted to the key's type, so <code>"42"</code> works for a number key.</p>
+
+      <!-- ============================================================ tables -->
+      <h2 id="tables">Your tables</h2>
+
+      <h3>Every table at a glance</h3>
+      <p><code>tables()</code> describes every table in the region in parallel: status, item count, size, key, billing mode, number of indexes, and estimated monthly cost for storage and provisioned capacity. It reads no items, so it's instant however big the tables are.</p>
+      <div class="code"><pre><code class="lang-py">ui.tables()</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-tables-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-tables-light.webp" alt="tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age" width="984" height="209" loading="lazy"></picture></div>
+        <figcaption><code>ui.tables()</code>: item counts and sizes are DynamoDB's own estimates, which it refreshes about every 6 hours.</figcaption>
+      </figure>
+
+      <h3>One table in detail</h3>
+      <p><code>table_info()</code> shows the keys and their types, and every index with its key, what it projects, and the <code>query(...)</code> call that reads it. It adds the last 24 hours of usage from CloudWatch (read and write units, the busiest 5 minutes, throttling), TTL, the stream, point-in-time recovery, deletion protection, encryption and tags. Then it flags what's risky or wasteful: no point-in-time recovery, throttled requests, provisioned capacity far above or close to what's used.</p>
+      <div class="code"><pre><code class="lang-py">ui.table_info("acme-app")
+ui.table_info("acme-app", hours=24 * 7)       # a week of usage
+ui.table_info("acme-app", metrics=False)      # skip CloudWatch</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-table-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-table-info-light.webp" alt="table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage" width="984" height="853" loading="lazy"></picture></div>
+        <figcaption><code>ui.table_info("acme-app")</code>: for an on-demand table the monthly cost includes reads and writes at the last 24 hours' rate.</figcaption>
+      </figure>
+
+      <!-- ============================================================ items -->
+      <h2 id="items">Look at items</h2>
+
+      <h3>Scan and page through</h3>
+      <p><code>scan()</code> shows items from the start of the table as a table: key attributes first, then the other attributes by how many items have them, and nested maps as <code>address.city</code> columns. A missing attribute is a blank cell, and an empty string shows as <code>""</code>, so you can tell them apart. <code>more()</code> continues exactly where the last page stopped.</p>
+      <div class="code"><pre><code class="lang-py">ui.scan("acme-app")                                   # first 20 items
+ui.more()                                             # next 20; works after scan, query and sql
+ui.scan("acme-app", n=50, attributes=["status", "total"])   # only some attributes (keys are always included)
+ui.scan("acme-app", index="by-status")                # read an index instead of the table
+ui.sample("acme-app", 20)                             # 20 items spread across the whole table</code></pre></div>
+      <p>The start of a table can all belong to a handful of partition keys, so for a first look at what a table holds, <code>sample()</code> is better: it reads a few items from each of many slices of the key space, in parallel.</p>
+
+      <h3>Everything under one partition key</h3>
+      <p><code>query()</code> reads the items that share a partition key, in sort-key order. <code>sort=</code> narrows the sort key with a value or a condition, <code>index=</code> queries a secondary index, and <code>descending=True</code> starts from the highest sort key (the newest, for date-based keys).</p>
+      <div class="code"><pre><code class="lang-py">ui.query("acme-app", "CUSTOMER#1042")                                 # profile, orders and tickets
+ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"))  # just the orders
+ui.query("acme-app", "CUSTOMER#1042", sort=("between", "ORDER#2026-06", "ORDER#2026-09"))
+ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), descending=True, n=5)   # latest 5
+ui.query("acme-app", "failed", index="by-status")                     # on a global index</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-query-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-query-light.webp" alt="query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings" width="984" height="375" loading="lazy"></picture></div>
+        <figcaption><code>ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), n=8, attributes=["status", "created_at", "total", "currency", "coupon"])</code></figcaption>
+      </figure>
+
+      <h3>One item, every field</h3>
+      <p><code>get()</code> reads one item by its key and lays it out as a tree: every attribute with its DynamoDB type, maps and lists of maps expanded underneath, long text on several lines. It also shows the item's size and what it costs to read and write. Pass the key values in order, or a dict.</p>
+      <div class="code"><pre><code class="lang-py">ui.get("acme-app", "CUSTOMER#1042", "ORDER#2026-08-14#7731")
+ui.get("acme-app", {"pk": "CUSTOMER#1042", "sk": "PROFILE"})
+ui.get("acme-app", "CUSTOMER#1042", "PROFILE", as_json=True)   # add a JSON copy</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-get-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-get-light.webp" alt="get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price" width="984" height="703" loading="lazy"></picture></div>
+        <figcaption><code>ui.get("acme-app", "CUSTOMER#1042", "ORDER#2026-08-14#7731")</code></figcaption>
+      </figure>
+
+      <h3>PartiQL</h3>
+      <p>If you'd rather write SQL, <code>sql()</code> runs a PartiQL statement. <code>?</code> placeholders are filled from the extra arguments, in order.</p>
+      <div class="code"><pre><code class="lang-py">ui.sql('SELECT * FROM "acme-app" WHERE pk = ?', "CUSTOMER#1042")
+ui.sql('SELECT pk, sk, total FROM "acme-app"."by-status" WHERE status = ?', "failed")</code></pre></div>
+      <div class="callout warn">
+        <p>A <code>SELECT</code> without the partition key in its <code>WHERE</code> clause scans the whole table, and you pay for every item it reads.</p>
+      </div>
+
+      <!-- ============================================================ filters -->
+      <h2 id="filters">Filter items</h2>
+      <p><code>where=</code> works on <code>scan</code>, <code>query</code>, <code>sample</code>, <code>schema</code>, <code>value_counts</code>, <code>largest</code> and <code>count</code>. It takes a dict, and every condition must match:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th><code>where=</code></th><th>Means</th></tr></thead>
+        <tbody>
+          <tr><td><code>{"status": "failed"}</code></td><td><code>status</code> equals <code>"failed"</code></td></tr>
+          <tr><td><code>{"total": ("&gt;", 100)}</code></td><td>Also <code>"="</code>, <code>"!="</code>, <code>"&lt;"</code>, <code>"&lt;="</code> and <code>"&gt;="</code></td></tr>
+          <tr><td><code>{"total": ("between", 10, 100)}</code></td><td>Both ends included</td></tr>
+          <tr><td><code>{"sk": ("begins_with", "ORDER#")}</code></td><td>Starts with</td></tr>
+          <tr><td><code>{"tags": ("contains", "vip")}</code></td><td>A substring, or a member of a set or list</td></tr>
+          <tr><td><code>{"status": ("in", ["pending", "failed"])}</code></td><td>Any of these values</td></tr>
+          <tr><td><code>{"shipped_at": ("not_exists",)}</code></td><td>The attribute is missing. Also <code>("exists",)</code>, and <code>("type", "N")</code> to check the stored type</td></tr>
+          <tr><td><code>{"address.city": "Pune"}</code></td><td>Dots reach into maps</td></tr>
+        </tbody>
+      </table></div>
+      <p>For <code>OR</code> and <code>NOT</code>, pass a boto3 condition instead: <code>where=Attr("status").eq("failed") | Attr("total").gt(500)</code>, with <code>from boto3.dynamodb.conditions import Attr</code>.</p>
+      <div class="code"><pre><code class="lang-py">ui.scan("acme-app", 10, where={"status": "failed", "total": (">", 300)},
+        attributes=["status", "created_at", "total", "failure_reason"])</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-scan-filter-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-scan-filter-light.webp" alt="scan() with a filter: 10 items returned after reading 1,098, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300" width="984" height="489" loading="lazy"></picture></div>
+        <figcaption>A filter runs after DynamoDB reads the items, so you pay for everything read, not just what matches.</figcaption>
+      </figure>
+      <p>If you search by an attribute often, a <code>query</code> on a key or a global index is far cheaper than a filtered scan. A filtered <code>ui.scan</code> reads at most 100,000 items per page (<code>scan_limit=</code>); <code>more()</code> continues from there.</p>
+
+      <!-- ============================================================ schema -->
+      <h2 id="schema">What the items look like</h2>
+      <p>DynamoDB doesn't store a schema, so <code>schema()</code> works one out from about 1,000 items spread across the table. For every attribute, and every field inside a map, it shows:</p>
+      <ul>
+        <li>its type, or the mix of types when items disagree;</li>
+        <li>how many items have it;</li>
+        <li>how many distinct values it takes, a few examples, and the range of numbers or lengths.</li>
+      </ul>
+      <p>The key patterns turn key values into shapes, such as <code>ORDER#&lt;date&gt;#&lt;number&gt;</code>, so the entity types of a single-table design stand out. Findings point at data problems: one attribute stored with different types, empty strings, items close to the 400 KB limit, and attribute names built from data.</p>
+      <div class="code"><pre><code class="lang-py">ui.schema("acme-app")
+ui.schema("acme-app", where={"sk": ("begins_with", "ORDER#")})   # just the orders
+ui.schema("acme-app", n=5000, max_depth=3)                        # more items, deeper maps</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-schema-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-schema-light.webp" alt="schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items" width="984" height="1724" loading="lazy"></picture></div>
+        <figcaption><code>ui.schema("acme-app")</code>: an old import stored some US zip codes as numbers, so a filter on <code>address.zip</code> silently misses them.</figcaption>
+      </figure>
+
+      <!-- ============================================================ values -->
+      <h2 id="values">Values and sizes</h2>
+      <p><code>value_counts()</code> counts each value of an attribute, with the size of the items that hold it. On the partition key, each count is the size of one item collection, so hot or oversized partitions stand out. It reads the first 10,000 items unless you pass <code>limit=None</code>.</p>
+      <div class="code"><pre><code class="lang-py">ui.value_counts("acme-app", "status")
+ui.value_counts("acme-app", "address.country")          # dots reach into maps
+ui.value_counts("acme-app", "pk", limit=None)           # items per partition key, whole table</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/dynamodb-value-counts-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-value-counts-light.webp" alt="value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes" width="984" height="337" loading="lazy"></picture></div>
+        <figcaption><code>ui.value_counts("acme-app", "status")</code>: “(not set)” is customers and tickets, which have no status.</figcaption>
+      </figure>
+      <div class="code"><pre><code class="lang-py">ui.largest("acme-app")                                  # the 10 biggest items, by DynamoDB's sizing rules
+ui.count("acme-app", where={"status": "pending"})       # exact count: a full scan
+ui.count("acme-app")                                    # next to DynamoDB's own estimate</code></pre></div>
+
+      <!-- ============================================================ python -->
+      <h2 id="python">Use the data in Python</h2>
+      <p>Every report has a data version on <code>ui.core</code> (a <code>DynamoDBAnalyzer</code>) that returns dataclasses, dicts and DataFrames instead of printing.</p>
+      <div class="code"><pre><code class="lang-py">ddb = ui.core
+
+page = ddb.scan("acme-app", n=5000, where={"status": "failed"})   # ItemPage
+page.items                                   # list of plain dicts
+df = page.to_df()                            # DataFrame: keys first, nested maps as address.city
+page.stats.scanned, page.stats.read_units    # what the read cost
+next_page = ddb.scan("acme-app", n=5000, where={"status": "failed"}, start_key=page.last_key)
+
+orders = ddb.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), n=None).to_df()
+ddb.get("acme-app", "CUSTOMER#1042", "PROFILE")              # dict, or None
+ddb.sample("acme-app", 500).items                           # spread across the table
+
+profile = ddb.profile("acme-app", 2000)                     # TableProfile, what schema() shows
+profile.attributes["address.zip"].types                     # Counter({'S': 145, 'N': 17})
+profile.to_df()                                             # one row per attribute
+
+ddb.value_counts("acme-app", "status").counts               # {'delivered': Stat(count=..., size=...), ...}
+ddb.count("acme-app", where={"status": "failed"}).matched
+ddb.describe("acme-app")                                    # TableInfo: keys, indexes, capacity, TTL, backups, tags
+ddb.table_metrics("acme-app", hours=24)                     # consumed units, busiest period, throttles
+
+for item in ddb.iter_items("acme-app", limit=None):         # stream a full scan without holding it in memory
+    pass</code></pre></div>
+      <p>The analysis functions don't call AWS, so they also work on items you already have, for example a <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport.HowItWorks.html">DynamoDB export to S3</a>. Read the export with <code>s3.py</code> and profile it without touching the table:</p>
+      <div class="code"><pre><code class="lang-py">from dynamodb import from_dynamo_item, items_to_df, profile_items
+from s3 import S3Analyzer
+
+rows = S3Analyzer().read_jsonl("s3://acme-ml-data/exports/AWSDynamoDB/01234-abcd/data/part.json.gz")
+items = [from_dynamo_item(row["Item"]) for row in rows]
+profile_items(items, keys=["pk", "sk"]).to_df()
+items_to_df(items, keys=["pk", "sk"])</code></pre></div>
+      <p>Also pure: <code>to_dynamo</code>, <code>flatten_item</code>, <code>count_values</code>, <code>item_size</code>, <code>key_pattern</code>, <code>build_filter</code>, <code>table_findings</code>, <code>profile_findings</code>, <code>table_monthly_cost</code> and <code>request_cost</code>.</p>
+
+      <!-- ============================================================ big -->
+      <h2 id="big">Large tables and cost</h2>
+      <div class="grid2">
+        <div class="card"><h4>Start without reading items</h4><p><code>tables()</code> and <code>table_info()</code> use DynamoDB's own counts and sizes and CloudWatch's usage, so they take seconds on any table.</p></div>
+        <div class="card"><h4>Scans stop early</h4><p>Every item a scan reads is billed and uses the table's capacity. <code>value_counts</code> and <code>largest</code> read 10,000 items and <code>schema</code> about 1,000; pass <code>limit=None</code> to read everything.</p></div>
+        <div class="card"><h4>Queries are cheap</h4><p>A <code>query</code> reads only one partition key's items. Prefer it, or a global index, to a filtered scan.</p></div>
+        <div class="card"><h4><code>count</code> reads everything</h4><p>It returns no items, but still reads and pays for all of them. The estimate in <code>tables()</code> is free.</p></div>
+      </div>
+      <p>Every report shows the read units it used. Costs are estimates at us-east-1 list prices for the standard table class, before the free tier (<code>DYNAMODB_PRICES</code>): storage, provisioned capacity and point-in-time recovery per month, and on-demand reads and writes per million. For another region, pass your prices:</p>
+      <div class="code"><pre><code class="lang-py">ui = DynamoDBView(DynamoDBAnalyzer(prices={"storage": 0.285, "read_request": 0.1425, "write_request": 0.7125}))</code></pre></div>
+
+      <!-- ============================================================ permissions -->
+      <h2 id="permissions">Permissions</h2>
+      <p>Everything is read-only. Anything the notebook's role can't read shows up as a note (or a <code>?</code> on a card) instead of an error, so you can start with less and add what you need. This policy covers every command:</p>
+      <div class="code"><span class="label">IAM policy</span><pre><code class="lang-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListTables",
+      "Effect": "Allow",
+      "Action": "dynamodb:ListTables",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadTables",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable", "dynamodb:Scan", "dynamodb:Query", "dynamodb:GetItem",
+        "dynamodb:PartiQLSelect", "dynamodb:DescribeTimeToLive", "dynamodb:DescribeContinuousBackups",
+        "dynamodb:ListTagsOfResource"
+      ],
+      "Resource": ["arn:aws:dynamodb:*:*:table/*", "arn:aws:dynamodb:*:*:table/*/index/*"]
+    },
+    {
+      "Sid": "ReadUsage",
+      "Effect": "Allow",
+      "Action": "cloudwatch:GetMetricData",
+      "Resource": "*"
+    }
+  ]
+}</code></pre></div>
+      <p>To scope it down, replace <code>table/*</code> with your tables, for example <code>arn:aws:dynamodb:us-east-1:123456789012:table/acme-app</code> and <code>…:table/acme-app/index/*</code>. A table encrypted with a customer managed KMS key also needs <code>kms:Decrypt</code> on that key.</p>
+
+      <!-- ============================================================ troubleshooting -->
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <details class="faq"><summary>“ResourceNotFoundException: table not found”</summary><div>
+        <p>Table names are case-sensitive, and tables are regional: the notebook's region may not be the table's. Use <code>DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))</code>.</p>
+      </div></details>
+      <details class="faq"><summary>A query returns nothing, but the item exists</summary><div>
+        <p>Keys are typed. <code>"42"</code> (a string) and <code>42</code> (a number) are different keys. The tool converts what you pass to the key's declared type, but a filter on an ordinary attribute can't know what type you meant. <code>schema()</code> shows which types each attribute really holds.</p>
+      </div></details>
+      <details class="faq"><summary>A card shows “?” or a note says “Couldn't read … (AccessDeniedException)”</summary><div>
+        <p>The notebook's role is missing that permission. The rest of the report still works. Compare the role with the <a href="#permissions">policy above</a>.</p>
+      </div></details>
+      <details class="faq"><summary>“No reads or writes recorded in CloudWatch”</summary><div>
+        <p>The table had no traffic in that window, or the role can't call <code>cloudwatch:GetMetricData</code>. Try <code>ui.table_info(name, hours=24 * 7)</code>, or <code>metrics=False</code> to skip CloudWatch.</p>
+      </div></details>
+      <details class="faq"><summary>The item count in <code>tables()</code> doesn't match <code>count()</code></summary><div>
+        <p>DynamoDB refreshes the item count and size it reports about every 6 hours. <code>count()</code> is exact because it reads every item.</p>
+      </div></details>
+      <details class="faq"><summary>The report lost its formatting after I reopened the notebook</summary><div>
+        <p>JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.</p>
+      </div></details>
+
+      <!-- ============================================================ reference -->
+      <h2 id="reference">Command reference</h2>
+      <p>Every <code>DynamoDBView</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td><code>tables()</code></td><td>Every table in the region: key, items, size, billing, indexes, estimated cost</td></tr>
+          <tr><td><code>table_info(table, metrics=True, hours=24)</code></td><td>Keys, indexes and how to query each, capacity, usage, TTL, backups, encryption, tags, cost, risks</td></tr>
+          <tr><td><code>scan(table, n=20, where=, index=, attributes=, scan_limit=100_000)</code></td><td>Items from the start of the table or an index</td></tr>
+          <tr><td><code>query(table, partition, sort=None, n=20, where=, index=, attributes=, descending=False)</code></td><td>Items sharing one partition key, in sort-key order</td></tr>
+          <tr><td><code>sample(table, n=20, where=, index=, attributes=)</code></td><td>Items spread across the whole table</td></tr>
+          <tr><td><code>more()</code></td><td>The next page of the last scan, query or sql</td></tr>
+          <tr><td><code>get(table, *key, as_json=False)</code></td><td>One item as a tree, with its size and read and write cost</td></tr>
+          <tr><td><code>sql(statement, *parameters, n=50)</code></td><td>A PartiQL statement</td></tr>
+          <tr><td><code>schema(table, n=1000, where=, index=, spread=True, max_depth=2)</code></td><td>Attributes, types, fill rate, examples, ranges, key patterns, item sizes, findings</td></tr>
+          <tr><td><code>value_counts(table, attribute, limit=10_000, where=, index=, top=30)</code></td><td>How often each value occurs, and the size of those items</td></tr>
+          <tr><td><code>largest(table, n=10, limit=10_000, where=, index=)</code></td><td>The biggest items</td></tr>
+          <tr><td><code>count(table, where=, index=)</code></td><td>Exact item count, next to DynamoDB's estimate</td></tr>
+          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+        </tbody>
+      </table></div>
+
+      <footer>
+        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. See also the <a href="index.html">S3 guide</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+// Syntax colouring for the examples: comments, strings, numbers and keywords.
+(function () {
+  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+  var rules = {
+    py: /(#[^\n]*)|([rbf]?"(?:[^"\\\n]|\\.)*"|[rbf]?'(?:[^'\\\n]|\\.)*')|\b(\d[\d_]*(?:\.\d+)?)\b|\b(from|import|as|for|in|with|if|not|and|or|print|True|False|None)\b/g,
+    sh: /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'[^'\n]*')|()()/g,
+    json: /()("(?:[^"\\\n]|\\.)*")|\b(\d+)\b|\b(true|false|null)\b/g
+  };
+  document.querySelectorAll("pre code").forEach(function (el) {
+    var lang = (el.className.match(/lang-(\w+)/) || [])[1], re = rules[lang];
+    if (!re) return;
+    var src = el.textContent, out = "", last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(src))) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out += esc(src.slice(last, m.index));
+      var cls = m[1] ? "t-c" : m[2] ? "t-s" : m[3] ? "t-n" : "t-k";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy buttons.
+  document.querySelectorAll(".code").forEach(function (box) {
+    var button = document.createElement("button");
+    button.className = "copy"; button.type = "button"; button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("click", function () {
+      var text = box.querySelector("code").textContent;
+      var done = function () {
+        button.textContent = "Copied"; button.classList.add("done");
+        setTimeout(function () { button.textContent = "Copy"; button.classList.remove("done"); }, 1500);
+      };
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done, function () {}); }
+      else {
+        var area = document.createElement("textarea"); area.value = text; document.body.appendChild(area);
+        area.select(); try { document.execCommand("copy"); done(); } catch (e) {} area.remove();
+      }
+    });
+    box.appendChild(button);
+  });
+
+  // Highlight the section being read in the sidebar.
+  var links = {};
+  document.querySelectorAll("#toc-list a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var visible = {};
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting ? e.boundingClientRect.top : undefined; });
+    var ids = Object.keys(links).filter(function (id) { return visible[id] !== undefined; });
+    if (!ids.length) return;
+    Object.keys(links).forEach(function (id) { links[id].classList.remove("active"); });
+    links[ids[0]].classList.add("active");
+  }, { rootMargin: "0px 0px -60% 0px" });
+  Object.keys(links).forEach(function (id) {
+    var section = document.getElementById(id);
+    if (section) observer.observe(section);
+  });
+})();
+</script>
+</body>
+</html>
