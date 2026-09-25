@@ -120,9 +120,12 @@ callers override with `prices={...}`; the View shows whether list prices or the 
 
 - `README.md` is the user documentation: per service, a quick start, a command table, the pure functions, cost
   notes and IAM permissions. Update it together with the analyzer.
-- `docs/index.html` is the S3 guide: plain static HTML published to GitHub Pages by `.github/workflows/pages.yml`
-  on pushes to `main` that touch `docs/`. Its screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own
-  output from a demo bucket.
+- `docs/` is the guide site: plain static HTML published to GitHub Pages by `.github/workflows/pages.yml` on pushes
+  to `main` that touch `docs/`. `index.html` is the home page with one card per service; each service has its own
+  guide (`s3.html`, `dynamodb.html`) that links back to it. A new analyzer gets its own `docs/<service>.html`, a card
+  on `index.html` and a link in README. `index.html` also forwards old `/#section` links (from when it was the S3
+  guide) to `s3.html`, so keep its own ids in the `own` list there. The screenshots
+  (`docs/images/*-{light,dark}.webp`) are the tool's own output from a demo bucket and demo tables.
 - Versions in `requirements-dev.txt` are pinned and updated by Dependabot; the `python_version < "3.11"` lines are
   intentionally held back. `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
   explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.

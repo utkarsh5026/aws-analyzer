@@ -4,9 +4,10 @@
 
 Copy-paste utilities for analyzing AWS services from a SageMaker (or any Jupyter) notebook.
 
-📖 Guides with examples and screenshots: setting up in SageMaker, every command, and ready-made IAM permissions.
+📖 [Guides](https://utkarsh5026.github.io/aws-analyzer/) with examples and screenshots: setting up in SageMaker, every
+command, and ready-made IAM permissions.
 
-- **[S3 guide](https://utkarsh5026.github.io/aws-analyzer/)** (source: [`docs/index.html`](docs/index.html))
+- **[S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)** (source: [`docs/s3.html`](docs/s3.html))
 - **[DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)** (source: [`docs/dynamodb.html`](docs/dynamodb.html))
 
 **One file per service, no dependencies on each other.** Drop `analyzers/<service>.py` into a
@@ -297,8 +298,9 @@ ruff check .
 Tests run against [moto](https://github.com/getmoto/moto), so no AWS account is needed.
 
 The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
-whenever `docs/` changes on `main`. Their screenshots are the tool's own output from a demo bucket and demo
-tables with synthetic data.
+whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
+its own guide (`docs/s3.html`, `docs/dynamodb.html`); a new analyzer gets a new guide and a card on the home page.
+The screenshots are the tool's own output from a demo bucket and demo tables with synthetic data.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in

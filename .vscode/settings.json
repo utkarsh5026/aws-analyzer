@@ -77,7 +77,7 @@
   // Branch in the title bar, for when the status bar is hidden.
   "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeRepositoryBranchName}",
 
-  // Title bar in the guide's accent colour (docs/index.html), so this window is easy to
+  // Title bar in the guide's accent colour (docs/*.html), so this window is easy to
   // pick out from other projects.
   "workbench.colorCustomizations": {
     "titleBar.activeBackground": "#0f766e",

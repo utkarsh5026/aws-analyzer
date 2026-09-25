@@ -90,6 +90,9 @@ th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--bor
 th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
 tr:last-child td { border-bottom: none; }
 td code { white-space: nowrap; }
+/* Command reference: long signatures wrap between arguments, continuation lines indented under the name. */
+.table-wrap.ref td:first-child { width: 55%; padding-left: calc(13px + 1.5em); text-indent: -1.5em; }
+.table-wrap.ref td code { white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
 .callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
 .callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
@@ -117,6 +120,12 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
   .lede { font-size: 17px; }
   h2 { font-size: 23px; margin-top: 52px; }
 }
+@media (max-width: 600px) {
+  .table-wrap.ref thead { display: none; }
+  .table-wrap.ref tr, .table-wrap.ref td { display: block; }
+  .table-wrap.ref td:first-child { width: auto; border-bottom: none; padding-bottom: 0; }
+  .table-wrap.ref td + td { padding-top: 2px; color: var(--muted); }
+}
 </style>
 </head>
 <body>
@@ -140,7 +149,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
       <li><a href="#troubleshooting">Troubleshooting</a></li>
       <li><a href="#reference">Command reference</a></li>
     </ol>
-    <p class="repo"><a href="index.html">S3 guide →</a><br><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
+    <p class="repo"><a href="index.html">← All guides</a><br><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
   </nav>
 
   <main id="top">
@@ -448,7 +457,7 @@ items_to_df(items, keys=["pk", "sk"])</code></pre></div>
       <!-- ============================================================ reference -->
       <h2 id="reference">Command reference</h2>
       <p>Every <code>DynamoDBView</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
-      <div class="table-wrap"><table>
+      <div class="table-wrap ref"><table>
         <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
         <tbody>
           <tr><td><code>tables()</code></td><td>Every table in the region: key, items, size, billing, indexes, estimated cost</td></tr>
@@ -468,7 +477,7 @@ items_to_df(items, keys=["pk", "sk"])</code></pre></div>
       </table></div>
 
       <footer>
-        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. See also the <a href="index.html">S3 guide</a>.</p>
+        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. Guides for other AWS services are on the <a href="index.html">home page</a>.</p>
       </footer>
     </div>
   </main>
