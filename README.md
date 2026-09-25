@@ -26,10 +26,11 @@ Every file has the same two layers:
 ui = S3View()                      # uses the notebook's execution role
 ui.help()                          # every command with a one-line description
 
-ui.buckets()
+ui.overview()                      # every bucket: size, monthly cost, security warnings
 ui.bucket_info("my-bucket")
 ui.summary("s3://my-bucket/data/")
 ui.preview("s3://my-bucket/data/part-0.parquet")
+ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
 ```
 
 Anywhere a location is expected you can pass `s3://bucket/prefix` or `bucket/prefix`.
@@ -40,17 +41,21 @@ Sizes accept `1024`, `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-0
 | Command | Shows |
 |---|---|
 | `buckets()` | All buckets with region, creation date, age |
-| `bucket_info(bucket)` | Versioning, encryption, public access, policy, ownership, object lock, lifecycle rules (in plain English), replication, logging, inventory, tags, **plus CloudWatch object count and size per storage class** (instant, even for billion-object buckets), and flagged risks |
+| `overview(match=None)` | Every bucket in one table: objects, size, estimated monthly cost, versioning, encryption, public access, lifecycle rules, and a list of warnings. `match="sagemaker-*"` checks only matching names |
+| `bucket_info(bucket)` | Versioning, encryption, public access (bucket and account level), bucket policy and lifecycle rules in plain English, ownership, object lock, replication, logging, inventory, tags, **plus CloudWatch object count, size and estimated monthly cost per storage type** (instant, even for billion-object buckets), and flagged risks |
+| `policy(bucket)` | The bucket policy in plain English (who can do what, on which files, under which conditions), its risks (public access, other accounts, no HTTPS requirement) and the raw JSON |
 | `ls(uri)` | One level of folders and files, like `aws s3 ls` |
-| `summary(uri)` | Dashboard: totals, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD, empty files) |
+| `summary(uri)` | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files) |
 | `tree(uri, depth=2)` | Folder tree with count, size and share at every level |
 | `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search |
 | `largest(uri)` / `newest(uri)` / `oldest(uri)` | Top-N objects |
 | `duplicates(uri)` | Identical objects (same size + ETag) and reclaimable space |
 | `compare(uri_a, uri_b)` | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync) |
-| `versions(uri)` | Current vs noncurrent versions, delete markers, keys holding the most old-version data |
+| `versions(uri)` | Current vs noncurrent versions, delete markers, what the old versions cost per month, keys holding the most old-version data |
+| `deleted(uri, deleted_after=None)` | Deleted files you can still bring back in a versioned bucket (most recent first), their size, the old versions kept, and the call that restores one. Read-only: it never restores anything itself |
 | `history(uri)` | Version history of one object |
-| `uploads(uri)` | Incomplete multipart uploads (billed but invisible in normal listings) |
+| `uploads(uri)` | Incomplete multipart uploads (billed but invisible in normal listings) and what they cost |
+| `what_if(uri, move_after=, to=, delete_after=)` | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves |
 | `head(uri)` | All object metadata, user metadata and tags |
 | `preview(uri, n=20)` | CSV/TSV/JSON/JSONL/Parquet as a DataFrame (+ parquet schema and row count), pretty JSON, text lines, images, hex dump. `.gz`/`.bz2`/`.xz` are decompressed on the fly. Only downloads what it needs. |
 | `link(uri)` | Clickable presigned download link |
@@ -76,17 +81,38 @@ with s3.open("s3://my-bucket/data/x.csv.gz") as f: ...   # streaming, decompress
 
 for obj in s3.iter_objects("s3://my-bucket/"):      # stream a listing without holding it in memory
     ...
+
+reports = s3.bucket_reports(match="sagemaker-*")    # BucketConfig + CloudWatch size per bucket
+explain_policy(s3.bucket_policy("my-bucket"), s3.account_id())   # [PolicyStatement], plain English
+impact = s3.simulate_lifecycle("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")
+impact.monthly_savings, impact.rule()               # USD per month, the rule as a dict
+s3.deleted_files("s3://my-bucket/data/", deleted_after="7d").files   # [DeletedObject]
 ```
 
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,
-`make_filter`, `find_duplicate_groups`, `compare_objects`, `summary_findings`, `bucket_findings`.
+`make_filter`, `find_duplicate_groups`, `compare_objects`, `simulate_lifecycle_objects`, `summary_findings`,
+`bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`.
+
+### Cost estimates
+
+Costs are storage only (no requests, retrievals or data transfer), at us-east-1 list prices for the first
+50 TB (`S3_PRICES`). They follow S3's billing rules: STANDARD_IA, ONEZONE_IA and GLACIER_IR bill at least
+128 KB per object, and GLACIER / DEEP_ARCHIVE add 40 KB of index data per object. Listings don't say which
+Intelligent-Tiering tier an object is in, so it's priced at the frequent-access rate; CloudWatch does, so
+`bucket_info` and `overview` price each tier. For another region, pass your prices:
+
+```python
+ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
+```
 
 ### Large buckets
 
 - `summary`, `tree`, `find`, `duplicates` and `compare` list every key under the prefix (1,000 per request),
   so expect about 1 to 3 minutes per million objects. Progress is shown while they run. Pass `limit=` to sample.
+- `what_if` lists every key too; `deleted` and `versions` list every version.
 - `bucket_info` reads the bucket's size from CloudWatch without listing anything. Use it first on huge buckets.
+- `overview` makes about 15 read calls per bucket, 8 buckets at a time, and lists no keys.
 - `ls` only lists one level, so it's fast anywhere.
 
 ### IAM permissions
@@ -95,8 +121,9 @@ Read-only. Grant what you need:
 `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:ListBucketVersions`,
 `s3:ListBucketMultipartUploads`, `s3:GetObject`, `s3:GetObjectTagging`, the `s3:GetBucket*` /
 `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` /
-`s3:GetInventoryConfiguration` family for `bucket_info`, and `cloudwatch:ListMetrics` + `cloudwatch:GetMetricData`
-for bucket sizes. Anything you can't read shows up as a note instead of an error.
+`s3:GetInventoryConfiguration` family for `bucket_info` (including `s3:GetBucketPolicy` for `policy`),
+`s3:GetAccountPublicAccessBlock` for the account-level setting, and `cloudwatch:ListMetrics` +
+`cloudwatch:GetMetricData` for bucket sizes. Anything you can't read shows up as a note instead of an error.
 
 ## Development
 

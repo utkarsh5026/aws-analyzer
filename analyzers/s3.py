@@ -25,6 +25,10 @@ Quick start
     ui.tree("s3://my-bucket/data/", depth=2)        # folder sizes as a tree
     ui.find("s3://my-bucket/data/", pattern="*.parquet", min_size="100MB")
     ui.preview("s3://my-bucket/data/part-0.csv.gz")
+    ui.overview()                                   # every bucket: size, cost, security warnings
+    ui.policy("my-bucket")                          # bucket policy in plain English
+    ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
+    ui.deleted("s3://my-bucket/data/")              # deleted files you can still restore
 
     s3 = ui.core                                    # same analyzer, raw data
     summary = s3.summarize("s3://my-bucket/data/")
@@ -156,6 +160,16 @@ def human_age(when: datetime | None, now: datetime | None = None) -> str:
         if seconds >= size:
             return f"{int(seconds // size)}{unit} ago"
     return "just now"
+
+
+def human_money(usd: float | None) -> str:
+    """12.345 -> '$12.35', 0.004 -> '<$0.01', 12345.6 -> '$12,346', -3 -> '-$3.00'."""
+    if usd is None:
+        return "-"
+    sign, usd = ("-" if usd < 0 else ""), abs(usd)
+    if 0 < usd < 0.01:
+        return f"{sign}<$0.01"
+    return f"{sign}${usd:,.0f}" if usd >= 1000 else f"{sign}${usd:,.2f}"
 
 
 _COMPRESSION_EXTS = {"gz", "gzip", "bz2", "xz", "zst", "zstd", "snappy", "lz4", "zip", "z"}
@@ -306,6 +320,7 @@ class BucketConfig:
     public_access_block: dict[str, bool] | None = None  # None = not configured on the bucket
     has_policy: bool | None = None
     policy_is_public: bool | None = None
+    policy: dict | None = None  # the bucket policy document (see explain_policy)
     object_ownership: str | None = None
     object_lock: bool | None = None
     lifecycle_rules: list[dict] = field(default_factory=list)
@@ -349,6 +364,9 @@ class PrefixSummary:
     size_histogram: dict[str, Stat] = field(default_factory=dict)
     age_histogram: dict[str, Stat] = field(default_factory=dict)
     cold_standard: Stat = field(default_factory=Stat)  # STANDARD objects unchanged for 90+ days
+    # Estimated USD per month per storage class (see object_monthly_cost); None = no price for that class
+    cost_by_storage_class: dict[str, float | None] = field(default_factory=dict)
+    below_minimum: dict[str, Stat] = field(default_factory=dict)  # objects billed as 128 KB, per class
     largest: list[ObjectInfo] = field(default_factory=list)
     truncated: bool = False
     scan_seconds: float = 0.0
@@ -356,6 +374,10 @@ class PrefixSummary:
     @property
     def avg_size(self) -> float:
         return self.total_size / self.object_count if self.object_count else 0.0
+
+    @property
+    def monthly_cost(self) -> float:
+        return sum(cost for cost in self.cost_by_storage_class.values() if cost)
 
 
 @dataclass
@@ -393,6 +415,7 @@ class VersionStats:
     noncurrent: Stat = field(default_factory=Stat)
     delete_markers: int = 0
     deleted_keys: int = 0  # keys whose latest version is a delete marker (old versions still billed)
+    noncurrent_cost: float = 0.0  # estimated USD per month for the noncurrent versions
     top_noncurrent: list[tuple[str, Stat]] = field(default_factory=list)
     truncated: bool = False
 
@@ -417,6 +440,98 @@ class MultipartUpload:
     storage_class: str = "STANDARD"
     parts: int | None = None  # filled when with_sizes=True
     size: int | None = None
+
+
+@dataclass
+class DeletedObject:
+    """A key whose latest version is a delete marker. Deleting that marker brings `last_version` back."""
+
+    key: str
+    deleted: datetime
+    marker_version_id: str
+    last_version: ObjectVersion | None = None  # newest real version; None = nothing left to restore
+    old_versions: Stat = field(default_factory=Stat)  # every version still stored for this key
+    monthly_cost: float = 0.0  # estimated USD per month for those versions
+
+    @property
+    def restorable(self) -> bool:
+        return self.last_version is not None
+
+
+@dataclass
+class DeletedFiles:
+    uri: str
+    files: list[DeletedObject] = field(default_factory=list)  # most recently deleted first
+    truncated: bool = False
+
+
+@dataclass
+class LifecycleImpact:
+    """What a lifecycle rule would do to a prefix if it ran today (see simulate_lifecycle_objects)."""
+
+    uri: str
+    transitions: list[tuple[int, str]] = field(default_factory=list)  # (days, storage class), ascending
+    expire_days: int | None = None
+    scanned: Stat = field(default_factory=Stat)
+    moves: dict[str, Stat] = field(default_factory=dict)  # target storage class -> objects moved there
+    expired: Stat = field(default_factory=Stat)
+    too_small: Stat = field(default_factory=Stat)  # old enough to move, but under S3's 128 KB transition minimum
+    early_removals: Stat = field(default_factory=Stat)  # deleted or moved before their class's minimum storage duration
+    cost_before: float = 0.0  # USD per month for the scanned objects today
+    cost_after: float = 0.0
+    one_time_cost: float = 0.0  # transition requests + early-deletion charges
+    truncated: bool = False
+
+    @property
+    def monthly_savings(self) -> float:
+        return self.cost_before - self.cost_after
+
+    def describe(self) -> str:
+        steps = [f"move to {cls} after {days} days" for days, cls in self.transitions]
+        if self.expire_days is not None:
+            steps.append(f"delete after {self.expire_days} days")
+        return ", then ".join(steps)
+
+    def rule(self, rule_id: str | None = None) -> dict:
+        """The rule in the format put_bucket_lifecycle_configuration takes."""
+        prefix = parse_s3_uri(self.uri)[1] if self.uri else ""
+        rule: dict[str, Any] = {"ID": rule_id or f"{prefix.strip('/') or 'whole-bucket'}-lifecycle"[:255],
+                                "Status": "Enabled", "Filter": {"Prefix": prefix}}
+        if self.transitions:
+            rule["Transitions"] = [{"Days": days, "StorageClass": cls} for days, cls in self.transitions]
+        if self.expire_days is not None:
+            rule["Expiration"] = {"Days": self.expire_days}
+        return rule
+
+
+@dataclass
+class PolicyStatement:
+    """One bucket-policy statement in plain English (see explain_policy)."""
+
+    sid: str
+    effect: str  # 'Allow' | 'Deny'
+    who: list[str]
+    actions: list[str]
+    resources: list[str]
+    conditions: list[str]
+    anyone: bool = False  # the principal is '*' (or NotPrincipal): everyone, including anonymous users
+    restricted: bool = False  # a condition limits callers to a VPC, IP range, organization, account or ARN
+    writes: bool = False  # can change or delete data or settings (not just read / list)
+    other_accounts: list[str] = field(default_factory=list)  # account ids other than yours
+
+    @property
+    def public(self) -> bool:
+        return self.effect == "Allow" and self.anyone and not self.restricted
+
+
+@dataclass
+class BucketReport:
+    """One bucket in the all-buckets overview."""
+
+    bucket: BucketInfo
+    config: BucketConfig
+    metrics: BucketMetrics | None = None
+    metrics_error: str | None = None
 
 
 @dataclass
@@ -471,6 +586,86 @@ AGE_BANDS: list[tuple[str, int | None]] = [  # (label, exclusive upper bound in 
 ]
 ARCHIVE_CLASSES = {"GLACIER", "DEEP_ARCHIVE"}  # need a restore before GetObject works
 
+# Storage price in USD per GB-month (GB = 2**30 bytes): us-east-1 list prices for the first 50 TB.
+# Other regions and volume tiers differ; pass S3Analyzer(prices={...}) to use your own.
+S3_PRICES: dict[str, float] = {
+    "STANDARD": 0.023,
+    "INTELLIGENT_TIERING": 0.023,  # frequent-access tier; listings don't say which tier an object is in
+    "STANDARD_IA": 0.0125,
+    "ONEZONE_IA": 0.01,
+    "GLACIER_IR": 0.004,
+    "GLACIER": 0.0036,
+    "DEEP_ARCHIVE": 0.00099,
+    "REDUCED_REDUNDANCY": 0.024,
+    "EXPRESS_ONEZONE": 0.11,
+}
+# USD per 1,000 lifecycle transition requests into each class (us-east-1).
+S3_TRANSITION_PRICES: dict[str, float] = {
+    "INTELLIGENT_TIERING": 0.01, "STANDARD_IA": 0.01, "ONEZONE_IA": 0.01,
+    "GLACIER_IR": 0.02, "GLACIER": 0.03, "DEEP_ARCHIVE": 0.05,
+}
+MIN_BILLABLE_SIZE = {"STANDARD_IA": 128 * KB, "ONEZONE_IA": 128 * KB, "GLACIER_IR": 128 * KB}
+MIN_STORAGE_DAYS = {"STANDARD_IA": 30, "ONEZONE_IA": 30, "GLACIER_IR": 90, "GLACIER": 90, "DEEP_ARCHIVE": 180}
+ARCHIVE_INDEX_BYTES = (32 * KB, 8 * KB)  # per GLACIER / DEEP_ARCHIVE object: billed at its class's rate, at STANDARD's
+MIN_TRANSITION_SIZE = 128 * KB  # lifecycle rules don't move smaller objects (S3 default since September 2024)
+# Lifecycle transitions only go "down" this list (S3's waterfall; STANDARD_IA can move to
+# INTELLIGENT_TIERING but not the other way round).
+TRANSITION_ORDER = {"STANDARD": 0, "REDUCED_REDUNDANCY": 0, "STANDARD_IA": 1, "INTELLIGENT_TIERING": 2,
+                    "ONEZONE_IA": 3, "GLACIER_IR": 4, "GLACIER": 5, "DEEP_ARCHIVE": 6}
+
+
+def object_monthly_cost(size: int, storage_class: str, prices: dict[str, float] | None = None) -> float | None:
+    """Estimated USD per month to store one object, with S3's billing minimums: STANDARD_IA,
+    ONEZONE_IA and GLACIER_IR bill at least 128 KB per object; GLACIER and DEEP_ARCHIVE add 40 KB
+    of index data per object (32 KB at the archive rate, 8 KB at the STANDARD rate).
+    None when `prices` has no price for the class. Storage only: no requests or data transfer."""
+    prices = S3_PRICES if prices is None else prices
+    price = prices.get(storage_class)
+    if price is None:
+        return None
+    billed = max(size, MIN_BILLABLE_SIZE.get(storage_class, 0))
+    if storage_class in ARCHIVE_CLASSES:
+        at_class, at_standard = ARCHIVE_INDEX_BYTES
+        return ((billed + at_class) * price + at_standard * prices.get("STANDARD", 0.0)) / GB
+    return billed * price / GB
+
+
+_STORAGE_TYPE_PREFIXES = [  # CloudWatch StorageType prefix -> class whose price applies; longest match first
+    ("IntelligentTieringFA", "INTELLIGENT_TIERING"),
+    ("IntelligentTieringIA", "STANDARD_IA"),  # each Intelligent-Tiering tier costs the same as this class
+    ("IntelligentTieringAIA", "GLACIER_IR"),
+    ("IntelligentTieringAA", "GLACIER"),
+    ("IntelligentTieringDAA", "DEEP_ARCHIVE"),
+    ("StandardIA", "STANDARD_IA"),
+    ("Standard", "STANDARD"),
+    ("OneZoneIA", "ONEZONE_IA"),
+    ("ReducedRedundancy", "REDUCED_REDUNDANCY"),
+    ("GlacierInstantRetrieval", "GLACIER_IR"),
+    ("Glacier", "GLACIER"),
+    ("DeepArchive", "DEEP_ARCHIVE"),
+    ("ExpressOneZone", "EXPRESS_ONEZONE"),
+]
+
+
+def storage_type_class(storage_type: str) -> str | None:
+    """CloudWatch StorageType ('StandardIAStorage', 'GlacierObjectOverhead', ...) -> the storage
+    class whose price applies to it, or None if unknown."""
+    if "S3ObjectOverhead" in storage_type or "Staging" in storage_type:
+        return "STANDARD"  # archive index data and archive uploads in progress are billed as STANDARD
+    return next((cls for prefix, cls in _STORAGE_TYPE_PREFIXES if storage_type.startswith(prefix)), None)
+
+
+def cloudwatch_cost(size_by_storage_type: dict[str, int], prices: dict[str, float] | None = None
+                    ) -> dict[str, float | None]:
+    """BucketMetrics.size_by_storage_type -> estimated USD per month per storage type (None = no price).
+    CloudWatch already reports minimum-size and archive overheads as their own storage types."""
+    prices = S3_PRICES if prices is None else prices
+    costs: dict[str, float | None] = {}
+    for storage_type, size in size_by_storage_type.items():
+        price = prices.get(storage_type_class(storage_type) or "")
+        costs[storage_type] = None if price is None else size * price / GB
+    return costs
+
 
 def _band(value: float, bands: list[tuple[str, int | None]]) -> str:
     for label, upper in bands:
@@ -498,8 +693,9 @@ def summarize_objects(
     folder_depth: int = 1,
     limit: int | None = None,
     now: datetime | None = None,
+    prices: dict[str, float] | None = None,
 ) -> PrefixSummary:
-    """One streaming pass over `objects` -> PrefixSummary (counts, sizes, histograms, top-N)."""
+    """One streaming pass over `objects` -> PrefixSummary (counts, sizes, histograms, top-N, cost)."""
     now = now or _utcnow()
     bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
     base = base_prefix(prefix)
@@ -509,6 +705,8 @@ def summarize_objects(
     by_ext: dict[str, Stat] = defaultdict(Stat)
     by_class: dict[str, Stat] = defaultdict(Stat)
     by_folder: dict[str, Stat] = defaultdict(Stat)
+    cost_by_class: dict[str, float] = defaultdict(float)
+    below_minimum: dict[str, Stat] = defaultdict(Stat)
     largest: list[tuple[int, int, ObjectInfo]] = []  # min-heap of the top_n biggest
     started = time.monotonic()
 
@@ -537,6 +735,11 @@ def summarize_objects(
         by_folder[folder_of(obj.key, base, folder_depth)].add(size)
         if obj.storage_class == "STANDARD" and age_days > 90:
             summary.cold_standard.add(size)
+        cost = object_monthly_cost(size, obj.storage_class, prices)
+        if cost is not None:
+            cost_by_class[obj.storage_class] += cost
+        if size < MIN_BILLABLE_SIZE.get(obj.storage_class, 0):
+            below_minimum[obj.storage_class].add(size)
         if top_n > 0:
             if len(largest) < top_n:
                 heapq.heappush(largest, (size, i, obj))
@@ -547,6 +750,8 @@ def summarize_objects(
     summary.size_histogram, summary.age_histogram = size_hist, age_hist
     summary.by_extension, summary.by_storage_class = _by_size(by_ext), _by_size(by_class)
     summary.by_folder = _by_size(by_folder)
+    summary.cost_by_storage_class = {cls: cost_by_class.get(cls) for cls in summary.by_storage_class}
+    summary.below_minimum = dict(below_minimum)
     summary.largest = [obj for _, _, obj in sorted(largest, reverse=True)]
     return summary
 
@@ -663,8 +868,9 @@ def compare_objects(
     return result
 
 
-def summary_findings(summary: PrefixSummary) -> list[tuple[str, str]]:
+def summary_findings(summary: PrefixSummary, prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
     """Plain-language observations about a prefix -> [(level, message)], level 'warn' or 'info'."""
+    prices = S3_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     n = summary.object_count
     if summary.truncated:
@@ -682,20 +888,41 @@ def summary_findings(summary: PrefixSummary) -> list[tuple[str, str]]:
         found.append(("warn", f"{_plural(archived, 'object')} in GLACIER / DEEP_ARCHIVE must be restored before reading."))
     if summary.cold_standard.size >= GB:
         cold = summary.cold_standard
+        saving = ""
+        if "STANDARD" in prices and "STANDARD_IA" in prices:
+            monthly = cold.size * (prices["STANDARD"] - prices["STANDARD_IA"]) / GB
+            saving = f" In STANDARD_IA it would cost about {human_money(monthly)}/month less (see what_if)."
         found.append(("info", f"{human_size(cold.size)} in {_plural(cold.count, 'STANDARD object')} hasn't changed in 90+ days. "
-                              "If it's rarely read, Intelligent-Tiering or a lifecycle transition could cut storage cost."))
+                              "If it's rarely read, Intelligent-Tiering or a lifecycle transition could cut storage cost."
+                              + saving))
+    if summary.below_minimum:
+        count = sum(st.count for st in summary.below_minimum.values())
+        stored = sum(st.size for st in summary.below_minimum.values())
+        billed = sum(st.count * MIN_BILLABLE_SIZE[cls] * prices.get(cls, 0.0) / GB
+                     for cls, st in summary.below_minimum.items())
+        in_standard = stored * prices.get("STANDARD", 0.0) / GB
+        cheaper = (f" In STANDARD they would cost {human_money(in_standard)}/month."
+                   if "STANDARD" in prices and in_standard < billed else "")
+        classes = " / ".join(summary.below_minimum)
+        found.append(("warn" if count >= 1000 else "info",
+                      f"{_plural(count, 'object')} in {classes} are under 128 KB, but S3 bills each one as 128 KB: "
+                      f"{human_size(count * 128 * KB)} billed for {human_size(stored)} stored, "
+                      f"costing {human_money(billed)}/month.{cheaper}"))
     if summary.folder_markers:
         found.append(("info", f"{_plural(summary.folder_markers, 'zero-byte folder-marker key')} (ending in '/') not counted."))
     return found
 
 
-def bucket_findings(cfg: BucketConfig) -> list[tuple[str, str]]:
-    """Plain-language risks / cost notes for a bucket config -> [(level, message)]."""
+def bucket_findings(cfg: BucketConfig, account_block: dict[str, bool] | None = None) -> list[tuple[str, str]]:
+    """Plain-language risks / cost notes for a bucket config -> [(level, message)].
+    account_block: the account-level Block Public Access settings ({} = not set, None = unknown)."""
     found: list[tuple[str, str]] = []
     pab = cfg.public_access_block
-    if "public_access_block" not in cfg.errors and not (pab and all(pab.values())):
-        found.append(("warn", "Block Public Access is not fully on for this bucket "
-                              "(account-level Block Public Access may still apply)."))
+    account_on = bool(account_block) and all(account_block.values())
+    if not account_on and "public_access_block" not in cfg.errors and not (pab and all(pab.values())):
+        where = ("this bucket or the account" if account_block is not None
+                 else "this bucket (account-level Block Public Access may still apply)")
+        found.append(("warn", f"Block Public Access is not fully on for {where}."))
     if cfg.policy_is_public:
         found.append(("warn", "The bucket policy grants public access."))
     if "encryption" not in cfg.errors and not cfg.encryption:
@@ -710,6 +937,281 @@ def bucket_findings(cfg: BucketConfig) -> list[tuple[str, str]]:
                                   "until aborted (see incomplete uploads)."))
     if cfg.errors:
         found.append(("info", "Couldn't read: " + ", ".join(f"{k} ({v})" for k, v in cfg.errors.items())))
+    return found
+
+
+def _lifecycle_steps(move_after: int | dict[int, str] | None, to: str | None) -> list[tuple[int, str]]:
+    """Normalize move_after / to into [(days, class)] and apply the checks S3 does on a rule."""
+    if move_after is None:
+        if to is not None:
+            raise ValueError("to= needs move_after= (days)")
+        return []
+    if isinstance(move_after, dict):
+        if to is not None:
+            raise ValueError("Pass either move_after=days with to=class, or move_after={days: class}")
+        steps = sorted((int(days), str(cls).upper()) for days, cls in move_after.items())
+    elif to is None:
+        raise ValueError("move_after= needs to=, e.g. to='STANDARD_IA'")
+    else:
+        steps = [(int(move_after), to.upper())]
+    targets = ", ".join(cls for cls, rank in TRANSITION_ORDER.items() if rank)
+    last_days, last_rank, last_cls = 0, 0, ""
+    for days, cls in steps:
+        rank = TRANSITION_ORDER.get(cls)
+        if not rank:
+            raise ValueError(f"Lifecycle rules can't move objects to {cls!r}; use one of {targets}")
+        if days < 0:
+            raise ValueError("Days can't be negative")
+        if cls in ("STANDARD_IA", "ONEZONE_IA") and days < 30:
+            raise ValueError(f"S3 only moves objects to {cls} once they are at least 30 days old")
+        if rank <= last_rank:
+            raise ValueError(f"Each move must go to a colder class: {cls} comes after {last_cls}")
+        if last_cls in ("STANDARD_IA", "ONEZONE_IA") and days < last_days + 30:
+            raise ValueError(f"S3 keeps objects in {last_cls} for at least 30 days before moving them again")
+        last_days, last_rank, last_cls = days, rank, cls
+    return steps
+
+
+def simulate_lifecycle_objects(
+    objects: Iterable[ObjectInfo],
+    uri: str = "",
+    *,
+    move_after: int | dict[int, str] | None = None,
+    to: str | None = None,
+    delete_after: int | None = None,
+    prices: dict[str, float] | None = None,
+    transition_prices: dict[str, float] | None = None,
+    now: datetime | None = None,
+    limit: int | None = None,
+) -> LifecycleImpact:
+    """What a lifecycle rule would do to `objects` if it ran today, and what it would save.
+
+    move_after    days since last modified, with to='STANDARD_IA' / 'GLACIER_IR' / 'GLACIER' / ...,
+                  or several moves at once: {30: 'STANDARD_IA', 180: 'GLACIER'}
+    delete_after  days since last modified before the object is deleted (expired)
+
+    Follows S3's rules: objects under 128 KB are not moved, objects only move to colder classes,
+    and removing an object before its class's minimum storage duration is billed for the rest of it.
+    """
+    steps = _lifecycle_steps(move_after, to)
+    if delete_after is None and not steps:
+        raise ValueError("Nothing to simulate: pass move_after= with to=, and/or delete_after=")
+    if delete_after is not None and (delete_after < 1 or (steps and delete_after <= steps[-1][0])):
+        raise ValueError("delete_after must be at least 1 day and later than the last move")
+    prices = S3_PRICES if prices is None else prices
+    transition_prices = S3_TRANSITION_PRICES if transition_prices is None else transition_prices
+    now = now or _utcnow()
+    bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
+    impact = LifecycleImpact(uri=s3_uri(bucket, prefix) if bucket else uri, transitions=steps,
+                             expire_days=delete_after)
+    moves: dict[str, Stat] = defaultdict(Stat)
+
+    for i, obj in enumerate(objects):
+        if limit is not None and i >= limit:
+            impact.truncated = True
+            break
+        if obj.is_folder_marker:
+            continue
+        size, cls = obj.size, obj.storage_class
+        age_days = (now - obj.last_modified).total_seconds() / 86400
+        before = after = object_monthly_cost(size, cls, prices) or 0.0
+        target = next((step_cls for days, step_cls in reversed(steps) if age_days >= days), None)
+        removed = False
+        impact.scanned.add(size)
+        if delete_after is not None and age_days >= delete_after:
+            impact.expired.add(size)
+            after, removed = 0.0, True
+        elif target and TRANSITION_ORDER.get(cls, 99) < TRANSITION_ORDER[target]:  # unknown classes never move
+            if size < MIN_TRANSITION_SIZE:
+                impact.too_small.add(size)
+            else:
+                moves[target].add(size)
+                after, removed = object_monthly_cost(size, target, prices) or 0.0, True
+                impact.one_time_cost += transition_prices.get(target, 0.0) / 1000
+        min_days = MIN_STORAGE_DAYS.get(cls, 0)
+        if removed and age_days < min_days:
+            impact.early_removals.add(size)
+            impact.one_time_cost += before * (min_days - age_days) / 30
+        impact.cost_before += before
+        impact.cost_after += after
+
+    impact.moves = dict(moves)
+    return impact
+
+
+# ---- bucket policies in plain English
+
+_POLICY_ACTIONS = {name.lower(): text for name, text in {
+    "*": "everything", "s3:*": "everything in S3",
+    "s3:Get*": "all read actions", "s3:List*": "all list actions", "s3:Put*": "all write actions",
+    "s3:Delete*": "all delete actions",
+    "s3:GetObject": "read files", "s3:GetObjectVersion": "read old versions",
+    "s3:PutObject": "upload / overwrite files", "s3:DeleteObject": "delete files",
+    "s3:DeleteObjectVersion": "permanently delete versions", "s3:ListBucket": "list files",
+    "s3:ListBucketVersions": "list versions", "s3:GetBucketLocation": "look up the region",
+    "s3:GetObjectAcl": "read file ACLs", "s3:PutObjectAcl": "change file ACLs",
+    "s3:GetObjectTagging": "read file tags", "s3:PutObjectTagging": "change file tags",
+    "s3:AbortMultipartUpload": "cancel uploads", "s3:ListMultipartUploadParts": "list upload parts",
+    "s3:ListBucketMultipartUploads": "list unfinished uploads", "s3:RestoreObject": "restore archived files",
+    "s3:PutBucketPolicy": "change the bucket policy", "s3:DeleteBucketPolicy": "delete the bucket policy",
+    "s3:PutBucketAcl": "change the bucket ACL", "s3:DeleteBucket": "delete the bucket",
+    "s3:PutLifecycleConfiguration": "change lifecycle rules", "s3:PutBucketVersioning": "change versioning",
+    "s3:ReplicateObject": "replicate files in", "s3:ReplicateDelete": "replicate deletes in",
+}.items()}
+_WRITE_VERBS = ("put", "delete", "replicate", "restore", "abort", "create", "bypass", "update")
+_CONDITION_KEYS = {
+    "aws:securetransport": "HTTPS", "aws:sourcevpce": "VPC endpoint", "aws:sourcevpc": "VPC",
+    "aws:sourceip": "source IP", "aws:vpcsourceip": "VPC source IP", "aws:principalorgid": "caller's organization",
+    "aws:principalorgpaths": "caller's organization path", "aws:principalaccount": "caller's account",
+    "aws:sourceaccount": "source account", "aws:sourcearn": "source ARN", "aws:principalarn": "caller ARN",
+    "aws:userid": "caller user id", "aws:username": "caller user name", "s3:tlsversion": "TLS version",
+    "s3:x-amz-server-side-encryption": "upload encryption", "s3:x-amz-acl": "upload ACL",
+}
+# Condition keys that narrow who can use an Allow (when compared positively, not with a Not... operator).
+_RESTRICTING_KEYS = {"aws:sourcevpce", "aws:sourcevpc", "aws:sourceip", "aws:vpcsourceip", "aws:principalorgid",
+                     "aws:principalorgpaths", "aws:principalaccount", "aws:sourceaccount", "aws:sourcearn",
+                     "aws:principalarn", "aws:userid", "aws:username", "aws:sourceowner"}
+_CONDITION_OPERATORS = {
+    "stringequals": "=", "stringequalsignorecase": "=", "stringnotequals": "≠", "stringnotequalsignorecase": "≠",
+    "stringlike": "matches", "stringnotlike": "doesn't match", "arnequals": "=", "arnlike": "matches",
+    "arnnotequals": "≠", "arnnotlike": "doesn't match", "ipaddress": "in", "notipaddress": "not in",
+    "numericequals": "=", "numericnotequals": "≠", "numericlessthan": "<", "numericlessthanequals": "≤",
+    "numericgreaterthan": ">", "numericgreaterthanequals": "≥", "bool": "=", "dateequals": "=",
+    "datelessthan": "before", "dategreaterthan": "after",
+}
+_PRINCIPAL_ARN_RE = re.compile(r"^arn:aws[\w-]*:(?:iam|sts)::([^:]*):(.+)$")
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _describe_principal(kind: str, value: str) -> tuple[str, str | None]:
+    """One principal -> (plain text, its account id or None)."""
+    if kind == "AWS":
+        if value == "*":
+            return "anyone (public)", None
+        if value.isdigit():
+            return f"account {value}", value
+        match = _PRINCIPAL_ARN_RE.match(value)
+        if match:
+            account, resource = match.groups()
+            if account == "cloudfront":
+                return f"CloudFront origin access identity {resource.rsplit(' ', 1)[-1]}", None
+            if resource == "root":
+                return f"account {account}", account
+            kind_, _, name = resource.partition("/")
+            name = name.split("/")[0] if kind_ == "assumed-role" else name.rsplit("/", 1)[-1]
+            label = {"assumed-role": "role session of"}.get(kind_, kind_.replace("-", " "))
+            return f"{label} {name} (account {account})", account
+        return value, None
+    if kind == "Service":
+        return f"AWS service {value}", None
+    if kind == "CanonicalUser":
+        return f"canonical user {value[:12]}…", None
+    if kind == "Federated":
+        return f"users signed in through {value}", None
+    return f"{kind} {value}", None
+
+
+def _describe_resource(arn: str) -> str:
+    if arn == "*":
+        return "any resource"
+    if ":s3:::" not in arn:
+        return arn
+    bucket, _, key = arn.split(":::", 1)[1].partition("/")
+    if not key:
+        return f"bucket {bucket}"
+    return f"all files in {bucket}" if key == "*" else s3_uri(bucket, key)
+
+
+def _describe_condition(operator: str, key: str, values: Any) -> tuple[str, bool]:
+    """One condition -> (plain text, whether it narrows down who can use the statement)."""
+    base = operator.split(":")[-1]
+    if_exists = base.lower().endswith("ifexists")
+    base = base[:-8] if if_exists else base
+    lowered, texts = key.lower(), [str(v) for v in _as_list(values)]
+    label = _CONDITION_KEYS.get(lowered, key)
+    restricts = lowered in _RESTRICTING_KEYS and "not" not in base.lower() and base.lower() != "null"
+    if lowered == "aws:securetransport" and base.lower() == "bool":
+        text = "over HTTPS" if texts[0].lower() == "true" else "not over HTTPS"
+    elif base.lower() == "null":
+        text = f"{label} {'not set' if texts[0].lower() == 'true' else 'is set'}"
+    else:
+        text = f"{label} {_CONDITION_OPERATORS.get(base.lower(), base)} {', '.join(texts)}"
+    return text + (" (when present)" if if_exists else ""), restricts
+
+
+def explain_policy(policy: dict | str | None, own_account: str | None = None) -> list[PolicyStatement]:
+    """Bucket policy (dict or JSON text) -> one PolicyStatement per statement, in plain English.
+    With own_account, principals from any other account are listed in `other_accounts`."""
+    if not policy:
+        return []
+    policy = json.loads(policy) if isinstance(policy, str) else policy
+    explained = []
+    for i, stmt in enumerate(_as_list(policy.get("Statement", []))):
+        who, accounts, anyone = [], [], False
+        principal_key = "NotPrincipal" if "NotPrincipal" in stmt else "Principal"
+        principal = stmt.get(principal_key, {})
+        entries = [("AWS", "*")] if principal == "*" else [
+            (kind, value) for kind, values in principal.items() for value in _as_list(values)]
+        for kind, value in entries:
+            text, account = _describe_principal(kind, value)
+            who.append(text)
+            anyone = anyone or (kind == "AWS" and value == "*")
+            if account and account != own_account and own_account is not None:
+                accounts.append(account)
+        if principal_key == "NotPrincipal":
+            who, anyone = ["everyone except " + ", ".join(who)], True
+
+        action_key = "NotAction" if "NotAction" in stmt else "Action"
+        raw_actions = [str(a) for a in _as_list(stmt.get(action_key, []))]
+        actions = [_POLICY_ACTIONS.get(a.lower(), a) for a in raw_actions]
+        writes = action_key == "NotAction" or any(
+            "*" in a or a.lower().split(":", 1)[-1].startswith(_WRITE_VERBS) for a in raw_actions)
+        if action_key == "NotAction":
+            actions = ["everything except " + ", ".join(actions)]
+
+        resource_key = "NotResource" if "NotResource" in stmt else "Resource"
+        resources = [_describe_resource(str(r)) for r in _as_list(stmt.get(resource_key, []))]
+        if resource_key == "NotResource":
+            resources = ["everything except " + ", ".join(resources)]
+
+        conditions, restricted = [], False
+        for operator, pairs in (stmt.get("Condition") or {}).items():
+            for key, values in pairs.items():
+                text, restricts = _describe_condition(operator, key, values)
+                conditions.append(text)
+                restricted = restricted or restricts
+        explained.append(PolicyStatement(
+            sid=str(stmt.get("Sid") or f"#{i + 1}"), effect=stmt.get("Effect", "Allow"), who=who, actions=actions,
+            resources=resources, conditions=conditions, anyone=anyone, restricted=restricted, writes=writes,
+            other_accounts=sorted(set(accounts))))
+    return explained
+
+
+def policy_findings(statements: list[PolicyStatement]) -> list[tuple[str, str]]:
+    """Plain-language risks in an explained bucket policy -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    for st in statements:
+        if st.effect != "Allow":
+            continue
+        name = f"Statement {st.sid}"
+        if st.public:
+            change = " That includes changing or deleting data." if st.writes else ""
+            found.append(("warn", f"{name} lets anyone on the internet: {', '.join(st.actions)} "
+                                  f"(on {', '.join(st.resources)}).{change}"))
+        elif st.anyone:
+            found.append(("info", f"{name} is open to everyone, but only when: {'; '.join(st.conditions)}."))
+        if any(w.startswith("everyone except") for w in st.who):
+            found.append(("warn", f"{name} uses Allow with NotPrincipal: everyone except the listed principals "
+                                  "gets access."))
+        if st.other_accounts:
+            found.append(("info", f"{name} gives other AWS accounts access ({', '.join(st.other_accounts)}): "
+                                  f"{', '.join(st.actions)}."))
+    if statements and not any(st.effect == "Deny" and "not over HTTPS" in st.conditions for st in statements):
+        found.append(("info", "No statement blocks plain HTTP. A Deny when aws:SecureTransport is false "
+                              "makes every request use HTTPS."))
     return found
 
 
@@ -774,15 +1276,22 @@ class S3Analyzer:
 
     Anywhere a `uri` is taken you can pass 's3://bucket/prefix' or 'bucket/prefix'.
     Scans accept `limit` (stop after N keys) and `progress` (called with the running count).
+    `prices` overrides S3_PRICES (USD per GB-month by storage class) for cost estimates.
     """
 
     def __init__(self, session: Any = None, *, region: str | None = None, profile: str | None = None,
-                 client: Any = None):
+                 client: Any = None, prices: dict[str, float] | None = None):
         self.session = session or boto3.Session(profile_name=profile, region_name=region)
         self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
+        # STS and S3 Control may be unreachable from a VPC-only notebook: fail fast instead of hanging.
+        self._quick_config = Config(connect_timeout=5, read_timeout=15, retries={"max_attempts": 2})
         self.client = client or self.session.client("s3", config=self._config)
+        self.prices = {**S3_PRICES, **(prices or {})}
         self._regional_clients: dict[str, Any] = {}
+        self._cloudwatch_clients: dict[str, Any] = {}
         self._regions: dict[str, str] = {}
+        self._account_id: str | None = None
+        self._account_id_checked = False
 
     # ------------------------------------------------------------------ buckets
 
@@ -833,12 +1342,58 @@ class S3Analyzer:
 
     def _client_for(self, bucket: str) -> Any:
         """S3 client in the bucket's own region (bucket-config APIs and presigned URLs need it)."""
-        region = self._safe_region(bucket)
+        return self._s3_in(self._safe_region(bucket))
+
+    def _s3_in(self, region: str | None) -> Any:
         if not region or region == self.client.meta.region_name:
             return self.client
         if region not in self._regional_clients:
             self._regional_clients[region] = self.session.client("s3", region_name=region, config=self._config)
         return self._regional_clients[region]
+
+    def _cloudwatch_in(self, region: str) -> Any:
+        if region not in self._cloudwatch_clients:
+            self._cloudwatch_clients[region] = self.session.client("cloudwatch", region_name=region)
+        return self._cloudwatch_clients[region]
+
+    def account_id(self) -> str | None:
+        """Your AWS account id (cached), or None if STS can't be reached."""
+        if not self._account_id_checked:
+            self._account_id_checked = True
+            try:
+                self._account_id = self.session.client("sts", config=self._quick_config).get_caller_identity()["Account"]
+            except (ClientError, BotoCoreError):
+                pass
+        return self._account_id
+
+    def account_public_access_block(self) -> dict[str, bool]:
+        """Account-level Block Public Access settings ({} if never set). Needs s3:GetAccountPublicAccessBlock."""
+        account = self.account_id()
+        if account is None:
+            raise ValueError("Couldn't look up the account id (sts:GetCallerIdentity)")
+        control = self.session.client("s3control", region_name=self.client.meta.region_name or "us-east-1",
+                                      config=self._quick_config)
+        try:
+            return control.get_public_access_block(AccountId=account)["PublicAccessBlockConfiguration"]
+        except ClientError as exc:
+            if _error_code(exc) == "NoSuchPublicAccessBlockConfiguration":
+                return {}
+            raise
+
+    def bucket_policy(self, bucket: str) -> dict | None:
+        """The bucket policy document, or None if the bucket has none. See explain_policy."""
+        bucket, _ = parse_s3_uri(bucket)
+        try:
+            return json.loads(self._client_for(bucket).get_bucket_policy(Bucket=bucket)["Policy"])
+        except ClientError as exc:
+            if _error_code(exc) == "NoSuchBucketPolicy":
+                return None
+            raise
+
+    def versioning_status(self, bucket: str) -> str:
+        """'Enabled', 'Suspended' or 'Disabled'."""
+        bucket, _ = parse_s3_uri(bucket)
+        return self._client_for(bucket).get_bucket_versioning(Bucket=bucket).get("Status", "Disabled")
 
     def bucket_config(self, bucket: str) -> BucketConfig:
         """Versioning, encryption, public access, ownership, lock, lifecycle, replication, logging, tags."""
@@ -871,6 +1426,12 @@ class S3Analyzer:
         if "policy" not in cfg.errors:
             cfg.has_policy = resp is not None
             cfg.policy_is_public = resp["PolicyStatus"].get("IsPublic", False) if resp else None
+        if cfg.has_policy is not False:
+            resp = get("policy_document", "get_bucket_policy", ("NoSuchBucketPolicy",))
+            if resp:
+                cfg.policy, cfg.has_policy = json.loads(resp["Policy"]), True
+            elif "policy_document" not in cfg.errors:
+                cfg.has_policy, cfg.policy_is_public = False, None
         if resp := get("ownership", "get_bucket_ownership_controls", ("OwnershipControlsNotFoundError",)):
             cfg.object_ownership = resp["OwnershipControls"]["Rules"][0]["ObjectOwnership"]
         resp = get("object_lock", "get_object_lock_configuration", ("ObjectLockConfigurationNotFoundError",))
@@ -893,7 +1454,7 @@ class S3Analyzer:
         """Object count and size per storage type from CloudWatch (published daily, free, instant -
         the fastest way to size a bucket with millions of objects). Needs cloudwatch:ListMetrics/GetMetricData."""
         bucket, _ = parse_s3_uri(bucket)
-        cloudwatch = self.session.client("cloudwatch", region_name=self.bucket_region(bucket))
+        cloudwatch = self._cloudwatch_in(self.bucket_region(bucket))
         result = BucketMetrics(bucket=bucket)
         metrics = [
             metric
@@ -975,9 +1536,10 @@ class S3Analyzer:
 
     def summarize(self, uri: str, *, top_n: int = 10, folder_depth: int = 1, limit: int | None = None,
                   progress: Callable[[int], None] | None = None) -> PrefixSummary:
-        """One pass over the prefix: totals, file types, storage classes, folders, size/age histograms, largest."""
+        """One pass over the prefix: totals, file types, storage classes, folders, size/age histograms,
+        largest, and estimated monthly storage cost."""
         scan = self.iter_objects(uri, limit=None if limit is None else limit + 1, progress=progress)
-        return summarize_objects(scan, uri, top_n=top_n, folder_depth=folder_depth, limit=limit)
+        return summarize_objects(scan, uri, top_n=top_n, folder_depth=folder_depth, limit=limit, prices=self.prices)
 
     def folder_tree(self, uri: str, *, depth: int = 2, limit: int | None = None,
                     progress: Callable[[int], None] | None = None) -> FolderTree:
@@ -1042,6 +1604,8 @@ class S3Analyzer:
                 else:
                     stats.noncurrent.add(version["Size"])
                     noncurrent_by_key[version["Key"]].add(version["Size"])
+                    stats.noncurrent_cost += object_monthly_cost(
+                        version["Size"], version.get("StorageClass", "STANDARD"), self.prices) or 0.0
             for marker in page.get("DeleteMarkers", []):
                 stats.delete_markers += 1
                 stats.deleted_keys += marker["IsLatest"]
@@ -1053,6 +1617,77 @@ class S3Analyzer:
                 break
         stats.top_noncurrent = heapq.nlargest(top_n, noncurrent_by_key.items(), key=lambda kv: kv[1].size)
         return stats
+
+    def deleted_files(self, uri: str, *, deleted_after: Any = None, limit: int | None = None,
+                      progress: Callable[[int], None] | None = None) -> DeletedFiles:
+        """Keys under `uri` whose latest version is a delete marker (versioned buckets). Deleting the
+        marker (s3:DeleteObjectVersion) brings back `last_version`. deleted_after: datetime, '2024-05-01' or '7d'."""
+        bucket, prefix = parse_s3_uri(uri)
+        since = parse_time(deleted_after)
+        result = DeletedFiles(uri=s3_uri(bucket, prefix))
+        markers: dict[str, dict] = {}
+        newest: dict[str, ObjectVersion] = {}
+        kept: dict[str, Stat] = defaultdict(Stat)
+        cost: dict[str, float] = defaultdict(float)
+        seen = 0
+        for page in self.client.get_paginator("list_object_versions").paginate(Bucket=bucket, Prefix=prefix):
+            markers.update((m["Key"], m) for m in page.get("DeleteMarkers", []) if m["IsLatest"])
+            for v in page.get("Versions", []):
+                if v["IsLatest"]:
+                    continue
+                key, storage_class = v["Key"], v.get("StorageClass", "STANDARD")
+                kept[key].add(v["Size"])
+                cost[key] += object_monthly_cost(v["Size"], storage_class, self.prices) or 0.0
+                if key not in newest or v["LastModified"] > newest[key].last_modified:
+                    newest[key] = ObjectVersion(key, v["VersionId"], False, v["LastModified"], v["Size"],
+                                                storage_class=storage_class)
+            seen += len(page.get("Versions", [])) + len(page.get("DeleteMarkers", []))
+            if progress:
+                progress(seen)
+            if limit is not None and seen >= limit:
+                result.truncated = bool(page.get("IsTruncated"))
+                break
+        result.files = sorted(
+            (DeletedObject(key, m["LastModified"], m["VersionId"], newest.get(key), kept.get(key, Stat()), cost[key])
+             for key, m in markers.items() if since is None or m["LastModified"] >= since),
+            key=lambda d: d.deleted, reverse=True)
+        return result
+
+    def simulate_lifecycle(self, uri: str, *, move_after: int | dict[int, str] | None = None, to: str | None = None,
+                           delete_after: int | None = None, limit: int | None = None,
+                           progress: Callable[[int], None] | None = None) -> LifecycleImpact:
+        """What a lifecycle rule on `uri` would move or delete if it ran today, and the cost before and after.
+        See simulate_lifecycle_objects for the arguments."""
+        scan = self.iter_objects(uri, limit=None if limit is None else limit + 1, progress=progress)
+        return simulate_lifecycle_objects(scan, uri, move_after=move_after, to=to, delete_after=delete_after,
+                                          prices=self.prices, limit=limit)
+
+    def bucket_reports(self, *, match: str | None = None, metrics: bool = True, max_workers: int = 8,
+                       progress: Callable[[int], None] | None = None) -> list[BucketReport]:
+        """Settings (and CloudWatch size unless metrics=False) for every bucket, checked in parallel.
+        match: only buckets whose name matches this glob, e.g. 'sagemaker-*'."""
+        buckets = [b for b in self.list_buckets() if match is None or fnmatch.fnmatchcase(b.name, match)]
+        for region in {b.region for b in buckets if b.region}:
+            self._s3_in(region)  # boto3 sessions aren't thread-safe: make every client before the threads start
+            if metrics:
+                self._cloudwatch_in(region)
+
+        def check(bucket: BucketInfo) -> BucketReport:
+            report = BucketReport(bucket, self.bucket_config(bucket.name))
+            if metrics:
+                try:
+                    report.metrics = self.bucket_metrics(bucket.name)
+                except (ClientError, BotoCoreError) as exc:
+                    report.metrics_error = _error_code(exc) if isinstance(exc, ClientError) else type(exc).__name__
+            return report
+
+        reports: list[BucketReport] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for report in pool.map(check, buckets):
+                reports.append(report)
+                if progress:
+                    progress(len(reports))
+        return reports
 
     def object_versions(self, uri: str) -> list[ObjectVersion]:
         """Full version history of one key, newest first (includes delete markers)."""
@@ -1407,7 +2042,7 @@ _CSS = """<style>
 .s3a img{max-width:100%;max-height:480px;border:1px solid rgba(127,127,127,.3)}
 </style>"""
 
-_NUMERIC_RE = re.compile(r"^-?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
+_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 
 
 def _esc(value: Any) -> str:
@@ -1558,11 +2193,38 @@ def _share(part: float, whole: float) -> float:
 
 
 def _stat_table(title: str, label: str, stats: dict[str, Stat], total_count: int, total_size: int, *,
-                by: str = "size", name: Callable[[str], str] = str) -> _Table:
-    rows = [[name(key), f"{st.count:,}", human_size(st.size)] for key, st in stats.items()]
+                by: str = "size", name: Callable[[str], str] = str,
+                costs: dict[str, float | None] | None = None) -> _Table:
+    rows = [[name(key), f"{st.count:,}", human_size(st.size)] + ([human_money(costs.get(key))] if costs else [])
+            for key, st in stats.items()]
     bars = [_share(st.size, total_size) if by == "size" else _share(st.count, total_count) for st in stats.values()]
-    return _Table([label, "Objects", "Size"], rows, title=title, bars=bars,
+    return _Table([label, "Objects", "Size"] + (["Est. $/month"] if costs else []), rows, title=title, bars=bars,
                   bar_label="% of size" if by == "size" else "% of objects")
+
+
+def _policy_table(statements: list[PolicyStatement], title: str = "") -> _Table:
+    return _Table(["Statement", "Effect", "Who", "Can", "On", "When"],
+                  [[st.sid, st.effect, "\n".join(st.who), "\n".join(st.actions), "\n".join(st.resources),
+                    "\n".join(st.conditions) or "always"] for st in statements], title=title, max_rows=0)
+
+
+def _exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
+    """One-word public access status for the overview table."""
+    if cfg.policy_is_public:
+        return "PUBLIC (policy)"
+    if any(settings and all(settings.values()) for settings in (account_block, cfg.public_access_block)):
+        return "blocked"
+    if "public_access_block" in cfg.errors:
+        return f"? ({cfg.errors['public_access_block']})"
+    return "not blocked"
+
+
+def _block_label(settings: dict[str, bool] | None) -> str:
+    """Block Public Access settings -> 'all on' / '2/4 on' / 'not set'."""
+    if not settings:
+        return "not set"
+    on = sum(bool(v) for v in settings.values())
+    return "all on" if on == len(settings) else f"{on}/{len(settings)} on"
 
 
 def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Table:
@@ -1595,11 +2257,7 @@ def _encryption_label(cfg: BucketConfig) -> str:
 def _public_access_label(cfg: BucketConfig) -> str:
     if "public_access_block" in cfg.errors:
         return f"? ({cfg.errors['public_access_block']})"
-    settings = cfg.public_access_block
-    if not settings:
-        return "not set"
-    on = sum(bool(v) for v in settings.values())
-    return "all on" if on == len(settings) else f"{on}/{len(settings)} on"
+    return _block_label(cfg.public_access_block)
 
 
 def _section(cfg: BucketConfig, section: str, text: str) -> str:
@@ -1690,7 +2348,7 @@ class S3View:
             print(_render_text(blocks, self.max_rows))
 
     @contextmanager
-    def _progress(self, label: str = "Scanning") -> Iterator[Callable[[int], None]]:
+    def _progress(self, label: str = "Scanning", unit: str = "objects") -> Iterator[Callable[[int], None]]:
         last_update = [0.0]
         handle = None
         if self.use_html:
@@ -1704,9 +2362,9 @@ class S3View:
                 return
             last_update[0] = now
             if handle is not None:
-                handle.update(HTML(f'<div style="opacity:.6">{_esc(label)}... {count:,} objects</div>'))
+                handle.update(HTML(f'<div style="opacity:.6">{_esc(label)}... {count:,} {_esc(unit)}</div>'))
             else:
-                print(f"\r{label}... {count:,} objects", end="", file=sys.stderr, flush=True)
+                print(f"\r{label}... {count:,} {unit}", end="", file=sys.stderr, flush=True)
 
         try:
             yield tick
@@ -1728,6 +2386,17 @@ class S3View:
         self._show([_Title("S3View commands", "Data versions of each live on .core (S3Analyzer)"),
                     _Table(["Command", "What it shows"], rows, max_rows=0)])
 
+    def _price_basis(self) -> str:
+        basis = "us-east-1 list prices" if self.core.prices == S3_PRICES else "your prices"
+        return f"estimated at {basis}, storage only"
+
+    def _account_block(self) -> dict[str, bool] | None:
+        """Account-level Block Public Access, or None when it can't be read."""
+        try:
+            return self.core.account_public_access_block()
+        except (ClientError, BotoCoreError, ValueError):
+            return None
+
     # ------------------------------------------------------------------ buckets
 
     @_friendly_errors
@@ -1743,13 +2412,16 @@ class S3View:
 
     @_friendly_errors
     def bucket_info(self, bucket: str, *, metrics: bool = True) -> None:
-        """Bucket settings, risks, and CloudWatch size / object count (instant, even for huge buckets)."""
+        """Bucket settings, policy in plain English, risks, and CloudWatch size, object count and
+        estimated monthly cost (instant, even for huge buckets)."""
         cfg = self.core.bucket_config(bucket)
+        account_block = self._account_block()
         cards = [
             ("Region", cfg.region or "?"),
             ("Versioning", _section(cfg, "versioning", cfg.versioning or "?")),
             ("Encryption", _encryption_label(cfg)),
             ("Block public access", _public_access_label(cfg)),
+            ("Account block public access", "?" if account_block is None else _block_label(account_block)),
             ("Bucket policy", _section(cfg, "policy", "public" if cfg.policy_is_public else
                                        "private" if cfg.has_policy else "none")),
             ("Object ownership", _section(cfg, "ownership", cfg.object_ownership or "-")),
@@ -1772,18 +2444,28 @@ class S3View:
                                         "new or empty buckets have none)."))
                 else:
                     count = "-" if usage.object_count is None else f"{usage.object_count:,}"
-                    cards = [("Objects", count), ("Total size", human_size(usage.total_size))] + cards
+                    costs = cloudwatch_cost(usage.size_by_storage_type, self.core.prices)
+                    monthly = sum(c for c in costs.values() if c)
+                    cards = [("Objects", count), ("Total size", human_size(usage.total_size)),
+                             ("Est. cost / month", human_money(monthly))] + cards
                     total = usage.total_size
                     storage_table = _Table(
-                        ["Storage type", "Size"],
-                        [[kind, human_size(size)] for kind, size in usage.size_by_storage_type.items()],
-                        title=f"Size by storage type (CloudWatch, {_fmt_dt(usage.as_of)} UTC)",
+                        ["Storage type", "Size", "Est. $/month"],
+                        [[kind, human_size(size), human_money(costs[kind])]
+                         for kind, size in usage.size_by_storage_type.items()],
+                        title=f"Size by storage type (CloudWatch, {_fmt_dt(usage.as_of)} UTC; "
+                              f"all versions; cost {self._price_basis()})",
                         bars=[_share(size, total) for size in usage.size_by_storage_type.values()],
                         bar_label="% of size")
+        statements = explain_policy(cfg.policy, self.core.account_id())
         blocks.append(_Cards(cards))
-        blocks += [_Note(message, level) for level, message in bucket_findings(cfg)]
+        blocks += [_Note(message, level) for level, message in bucket_findings(cfg, account_block)]
+        blocks += [_Note(message, level) for level, message in policy_findings(statements)]
         if storage_table:
             blocks.append(storage_table)
+        if statements:
+            blocks.append(_policy_table(statements, f"Bucket policy ({_plural(len(statements), 'statement')}; "
+                                                    "policy() shows the JSON)"))
         if cfg.lifecycle_rules:
             blocks.append(_Table(["Rule", "Status", "Applies to", "Actions"],
                                  [[r.get("ID", "-"), r.get("Status"), _rule_scope(r), _rule_actions(r)]
@@ -1794,6 +2476,81 @@ class S3View:
                                   for r in cfg.replication_rules], title="Replication rules"))
         if cfg.tags:
             blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(cfg.tags.items())], title="Tags"))
+        self._show(blocks)
+
+    @_friendly_errors
+    def overview(self, match: str | None = None, *, metrics: bool = True) -> None:
+        """Every bucket in one table: size, estimated cost, versioning, encryption, public access,
+        lifecycle and warnings. match='sagemaker-*' checks only matching bucket names."""
+        with self._progress("Checking buckets", unit="buckets") as tick:
+            reports = self.core.bucket_reports(match=match, metrics=metrics, progress=tick)
+        account_block, account = self._account_block(), self.core.account_id()
+        rows: list[tuple[int, list[str]]] = []
+        warnings: list[list[str]] = []
+        objects = size = 0
+        cost = 0.0
+        missing_metrics: list[str] = []
+        for report in reports:
+            cfg, usage = report.config, report.metrics
+            found = bucket_findings(cfg, account_block) + policy_findings(explain_policy(cfg.policy, account))
+            bucket_warnings = [message for level, message in found if level == "warn"]
+            warnings += [[cfg.name, message] for message in bucket_warnings]
+            bucket_size = bucket_cost = bucket_objects = None
+            if usage is not None and usage.as_of is not None:
+                bucket_size, bucket_objects = usage.total_size, usage.object_count
+                bucket_cost = sum(c for c in cloudwatch_cost(usage.size_by_storage_type, self.core.prices).values() if c)
+                size, cost, objects = size + bucket_size, cost + bucket_cost, objects + (bucket_objects or 0)
+            elif metrics:
+                missing_metrics.append(f"{cfg.name} ({report.metrics_error})" if report.metrics_error else cfg.name)
+            enabled_rules = sum(rule.get("Status") == "Enabled" for rule in cfg.lifecycle_rules)
+            rows.append((-1 if bucket_size is None else bucket_size, [
+                cfg.name, cfg.region or "?", "-" if bucket_objects is None else f"{bucket_objects:,}",
+                human_size(bucket_size), human_money(bucket_cost), _section(cfg, "versioning", cfg.versioning or "?"),
+                _encryption_label(cfg), _exposure(cfg, account_block),
+                _section(cfg, "lifecycle", str(enabled_rules)), str(len(bucket_warnings))]))
+        rows.sort(key=lambda row: row[0], reverse=True)
+        blocks: list[Any] = [
+            _Title(f"All buckets ({len(reports)})", f"names matching {match!r}" if match else ""),
+            _Cards([("Buckets", f"{len(reports):,}"), ("Objects", f"{objects:,}" if metrics else "-"),
+                    ("Total size", human_size(size if metrics else None)),
+                    ("Est. cost / month", human_money(cost if metrics else None)),
+                    ("Buckets with warnings", f"{len({bucket for bucket, _ in warnings}):,}"),
+                    ("Account block public access", "?" if account_block is None else _block_label(account_block)),
+                    ("Regions", f"{len({r.config.region for r in reports if r.config.region}):,}")]),
+        ]
+        if missing_metrics:
+            blocks.append(_Note(f"No CloudWatch size for {_plural(len(missing_metrics), 'bucket')}: "
+                                f"{', '.join(missing_metrics[:10])}{' …' if len(missing_metrics) > 10 else ''}. "
+                                "Metrics arrive once a day; new or empty buckets have none."))
+        blocks.append(_Table(
+            ["Bucket", "Region", "Objects", "Size", "Est. $/month", "Versioning", "Encryption", "Public access",
+             "Lifecycle rules", "Warnings"], [row for _, row in rows],
+            title=f"Buckets by size (CloudWatch, all versions; cost {self._price_basis()})",
+            bars=[_share(max(s, 0), size) for s, _ in rows], bar_label="% of size", max_rows=0))
+        if warnings:
+            blocks.append(_Table(["Bucket", "Warning"], warnings,
+                                 title="Warnings (bucket_info(name) shows every finding for one bucket)"))
+        self._show(blocks)
+
+    @_friendly_errors
+    def policy(self, bucket: str) -> None:
+        """Bucket policy in plain English: who can do what, on which files, when; risks; the raw JSON."""
+        name = parse_s3_uri(bucket)[0]
+        document = self.core.bucket_policy(name)
+        blocks: list[Any] = [_Title(f"Bucket policy of s3://{name}")]
+        if document is None:
+            blocks.append(_Note("This bucket has no bucket policy. Access comes only from IAM policies "
+                                "(and ACLs, if they're enabled)."))
+            return self._show(blocks)
+        statements = explain_policy(document, self.core.account_id())
+        blocks.append(_Cards([
+            ("Statements", f"{len(statements):,}"), ("Allow", f"{sum(st.effect == 'Allow' for st in statements):,}"),
+            ("Deny", f"{sum(st.effect == 'Deny' for st in statements):,}"),
+            ("Open to anyone", f"{sum(st.public for st in statements):,}"),
+            ("Other accounts", ", ".join(sorted({a for st in statements for a in st.other_accounts})) or "none"),
+        ]))
+        blocks += [_Note(message, level) for level, message in policy_findings(statements)]
+        blocks += [_policy_table(statements), _Text(json.dumps(document, indent=2), title="Policy JSON")]
         self._show(blocks)
 
     # ------------------------------------------------------------------ listing
@@ -1821,16 +2578,16 @@ class S3View:
 
     @_friendly_errors
     def summary(self, uri: str, *, top_n: int = 10, folder_depth: int = 1, limit: int | None = None) -> None:
-        """Full dashboard for a prefix: totals, findings, folders, file types, storage classes,
-        size and age distribution, largest objects. Lists every key once (use limit= on huge prefixes)."""
+        """Full dashboard for a prefix: totals, estimated monthly cost, findings, folders, file types,
+        storage classes, size and age distribution, largest objects. Lists every key once (use limit= on huge prefixes)."""
         with self._progress() as tick:
             s = self.core.summarize(uri, top_n=top_n, folder_depth=folder_depth, limit=limit, progress=tick)
         base = base_prefix(parse_s3_uri(s.uri)[1])
         blocks: list[Any] = [_Title(f"Summary of {s.uri}", f"{s.object_count:,} objects scanned in {s.scan_seconds:.1f}s")]
+        findings = [_Note(message, level) for level, message in summary_findings(s, self.core.prices)]
         if not s.object_count:
             blocks.append(_Note("No objects under this prefix."))
-            blocks += [_Note(message, level) for level, message in summary_findings(s)]
-            return self._show(blocks)
+            return self._show(blocks + findings)
         blocks.append(_Cards([
             ("Objects", f"{s.object_count:,}{'+' if s.truncated else ''}"),
             ("Total size", human_size(s.total_size)),
@@ -1841,13 +2598,15 @@ class S3View:
             ("File types", f"{len(s.by_extension):,}"),
             ("Oldest change", human_age(s.oldest.last_modified if s.oldest else None)),
             ("Newest change", human_age(s.newest.last_modified if s.newest else None)),
+            ("Est. cost / month", human_money(s.monthly_cost)),
         ]))
-        blocks += [_Note(message, level) for level, message in summary_findings(s)]
+        blocks += findings
         n, size = s.object_count, s.total_size
         blocks += [
             _stat_table(f"Folders (depth {folder_depth})", "Folder", s.by_folder, n, size, name=_folder_label),
             _stat_table("File types", "Extension", s.by_extension, n, size),
-            _stat_table("Storage classes", "Storage class", s.by_storage_class, n, size),
+            _stat_table(f"Storage classes (current versions; cost {self._price_basis()})", "Storage class",
+                        s.by_storage_class, n, size, costs=s.cost_by_storage_class),
             _stat_table("Object size distribution", "Size band", s.size_histogram, n, size, by="count"),
             _stat_table("Last modified", "Age", s.age_histogram, n, size, by="count"),
             _objects_table(f"Largest {len(s.largest)} objects", s.largest, base),
@@ -1977,7 +2736,8 @@ class S3View:
             _Title(f"Versions under {v.uri}"),
             _Cards([("Current objects", f"{v.current.count:,}"), ("Current size", human_size(v.current.size)),
                     ("Noncurrent versions", f"{v.noncurrent.count:,}"), ("Noncurrent size", human_size(v.noncurrent.size)),
-                    ("Delete markers", f"{v.delete_markers:,}"), ("Deleted keys (still billed)", f"{v.deleted_keys:,}")]),
+                    ("Delete markers", f"{v.delete_markers:,}"), ("Deleted keys (still billed)", f"{v.deleted_keys:,}"),
+                    ("Noncurrent est. cost / month", human_money(v.noncurrent_cost))]),
         ]
         if v.truncated:
             blocks.append(_Note(f"Stopped at limit={limit:,} versions; numbers are partial.", "warn"))
@@ -1986,6 +2746,9 @@ class S3View:
             blocks.append(_Note(f"Old versions add {human_size(v.noncurrent.size)} ({extra:.0%} on top of current data). "
                                 "A NoncurrentVersionExpiration lifecycle rule would clean them up.",
                                 "warn" if extra > 0.25 else "info"))
+        if v.deleted_keys:
+            blocks.append(_Note(f"{_plural(v.deleted_keys, 'deleted file')} can still be listed (and maybe restored) "
+                                "with deleted(uri)."))
         if v.top_noncurrent:
             blocks.append(_Table(["Key", "Old versions", "Old versions size"],
                                  [[k, f"{st.count:,}", human_size(st.size)] for k, st in v.top_noncurrent],
@@ -2002,13 +2765,63 @@ class S3View:
                     _Table(["Size", "Modified (UTC)", "Age", "", "Version id"], rows)])
 
     @_friendly_errors
+    def deleted(self, uri: str, *, deleted_after: Any = None, limit: int | None = None) -> None:
+        """Deleted files you can still bring back (versioned buckets), most recent first,
+        e.g. deleted(uri, deleted_after='7d'). Shows the call that restores one; never changes anything."""
+        with self._progress("Listing versions") as tick:
+            d = self.core.deleted_files(uri, deleted_after=deleted_after, limit=limit, progress=tick)
+        bucket, prefix = parse_s3_uri(d.uri)
+        restorable = [f for f in d.files if f.restorable]
+        since = f"deleted since {_fmt_dt(parse_time(deleted_after))} UTC" if deleted_after is not None else ""
+        blocks: list[Any] = [
+            _Title(f"Deleted files under {d.uri}", since),
+            _Cards([("Deleted files", f"{len(d.files):,}"), ("Can be restored", f"{len(restorable):,}"),
+                    ("Size to restore", human_size(sum(f.last_version.size for f in restorable))),
+                    ("Old versions kept", human_size(sum(f.old_versions.size for f in d.files))),
+                    ("Their est. cost / month", human_money(sum(f.monthly_cost for f in d.files)))]),
+        ]
+        if d.truncated:
+            blocks.append(_Note(f"Stopped at limit={limit:,} versions; the list is partial.", "warn"))
+        if not d.files:
+            try:
+                status = self.core.versioning_status(bucket)
+            except (ClientError, BotoCoreError):
+                status = None
+            if status == "Disabled":
+                blocks.append(_Note("Versioning is off for this bucket, so deleted files are gone for good. "
+                                    "Turning versioning on protects future deletes.", "warn"))
+            else:
+                blocks.append(_Note("No deleted files here."))
+            return self._show(blocks)
+        if len(restorable) < len(d.files):
+            blocks.append(_Note(f"{_plural(len(d.files) - len(restorable), 'delete marker')} have no versions left, "
+                                "so there's nothing to restore. A lifecycle rule with ExpiredObjectDeleteMarker "
+                                "removes them."))
+        base = base_prefix(prefix)
+        blocks.append(_Table(
+            ["Key", "Deleted (UTC)", "When", "Last version size", "Versions kept", "Delete marker version id"],
+            [[relative_key(f.key, base), _fmt_dt(f.deleted), human_age(f.deleted),
+              human_size(f.last_version.size) if f.last_version else "nothing to restore", f"{f.old_versions.count:,}",
+              f.marker_version_id] for f in d.files], title="Deleted files"))
+        if restorable:
+            example = restorable[0]
+            blocks.append(_Text(
+                "import boto3\n\n"
+                "# Deleting the delete marker brings the last version back (needs s3:DeleteObjectVersion).\n"
+                f"boto3.client('s3').delete_object(\n    Bucket={bucket!r},\n    Key={example.key!r},\n"
+                f"    VersionId={example.marker_version_id!r},\n)", title="How to restore a file"))
+        self._show(blocks)
+
+    @_friendly_errors
     def uploads(self, uri: str, *, with_sizes: bool = True) -> None:
         """Incomplete multipart uploads (billed, but invisible in normal listings)."""
         uploads = self.core.incomplete_uploads(uri, with_sizes=with_sizes)
         total = sum(u.size or 0 for u in uploads)
+        cost = (object_monthly_cost(total, "STANDARD", self.core.prices) or 0.0) if with_sizes else None
         blocks: list[Any] = [
             _Title(f"Incomplete multipart uploads under {s3_uri(*parse_s3_uri(uri))}"),
-            _Cards([("Uploads", f"{len(uploads):,}")] + ([("Stored parts", human_size(total))] if with_sizes else [])),
+            _Cards([("Uploads", f"{len(uploads):,}")] + ([("Stored parts", human_size(total)),
+                    ("Est. cost / month (STANDARD rate)", human_money(cost))] if with_sizes else [])),
         ]
         if uploads:
             blocks.append(_Note("These parts cost storage until aborted; add an AbortIncompleteMultipartUpload "
@@ -2017,6 +2830,69 @@ class S3View:
                              [[u.key, _fmt_dt(u.initiated), human_age(u.initiated),
                                "-" if u.parts is None else str(u.parts), human_size(u.size), u.upload_id[:16] + "…"]
                               for u in uploads]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def what_if(self, uri: str, *, move_after: int | dict[int, str] | None = None, to: str | None = None,
+                delete_after: int | None = None, limit: int | None = None) -> None:
+        """Preview a lifecycle rule before adding it: what it would move or delete today and the money
+        saved, e.g. what_if(uri, move_after=30, to='STANDARD_IA') or what_if(uri, delete_after=365)."""
+        with self._progress() as tick:
+            impact = self.core.simulate_lifecycle(uri, move_after=move_after, to=to, delete_after=delete_after,
+                                                  limit=limit, progress=tick)
+        moved = Stat(sum(st.count for st in impact.moves.values()), sum(st.size for st in impact.moves.values()))
+        savings = impact.monthly_savings
+        cards = [
+            ("Files checked", f"{impact.scanned.count:,}{'+' if impact.truncated else ''}"),
+            ("Would move", f"{moved.count:,} ({human_size(moved.size)})"),
+            ("Would delete", f"{impact.expired.count:,} ({human_size(impact.expired.size)})"),
+            ("Cost now / month", human_money(impact.cost_before)),
+            ("Cost after / month", human_money(impact.cost_after)),
+            ("Saving / month", human_money(savings)),
+            ("One-time cost", human_money(impact.one_time_cost)),
+        ]
+        if savings > 0 and impact.one_time_cost > 0:
+            months = impact.one_time_cost / savings
+            cards.append(("Pays for itself in", "under a month" if months < 1 else f"{months:,.1f} months"))
+        blocks: list[Any] = [_Title(f"Lifecycle what-if for {impact.uri}", impact.describe()), _Cards(cards)]
+        if impact.truncated:
+            blocks.append(_Note(f"Scan stopped at limit={limit:,}; numbers cover only part of the prefix.", "warn"))
+        if not (moved.count or impact.expired.count or impact.too_small.count):
+            blocks.append(_Note("Nothing under this prefix is old enough for this rule today."))
+        elif savings <= 0:
+            blocks.append(_Note("This rule would not lower the monthly bill for these files.", "warn"))
+        if impact.too_small.count:
+            blocks.append(_Note(f"{_plural(impact.too_small.count, 'file')} ({human_size(impact.too_small.size)}) "
+                                "are old enough to move but under 128 KB. S3 lifecycle doesn't move files that small, "
+                                "so they stay where they are."))
+        if impact.early_removals.count:
+            blocks.append(_Note(f"{_plural(impact.early_removals.count, 'file')} would leave their storage class before "
+                                "its minimum duration (30 days for IA, 90 for Glacier IR / Glacier, 180 for Deep Archive). "
+                                "S3 bills the remaining days once; that's part of the one-time cost.", "warn"))
+        if moved.count:
+            blocks.append(_Note("Savings count storage only. Reading files in IA and Glacier Instant Retrieval adds a "
+                                "retrieval fee per GB, and GLACIER / DEEP_ARCHIVE files must be restored before reading."))
+        if impact.expired.count:
+            try:
+                versioned = self.core.versioning_status(uri) != "Disabled"
+            except (ClientError, BotoCoreError):
+                versioned = False
+            if versioned:
+                blocks.append(_Note("Versioning is on: a lifecycle delete keeps the old data as a noncurrent version, "
+                                    "billed until a NoncurrentVersionExpiration rule removes it. The saving above "
+                                    "needs that rule too.", "warn"))
+        parts = [(f"move to {cls}", st) for cls, st in impact.moves.items()]
+        parts += [("delete", impact.expired)] if impact.expired.count else []
+        parts += [("stay (under 128 KB)", impact.too_small)] if impact.too_small.count else []
+        parts.append(("no change", Stat(impact.scanned.count - sum(st.count for _, st in parts),
+                                        impact.scanned.size - sum(st.size for _, st in parts))))
+        blocks.append(_Table(["What happens", "Files", "Size"],
+                             [[label, f"{st.count:,}", human_size(st.size)] for label, st in parts],
+                             title=f"If the rule ran today (cost {self._price_basis()})",
+                             bars=[_share(st.count, impact.scanned.count) for _, st in parts], bar_label="% of files"))
+        blocks.append(_Text(json.dumps({"Rules": [impact.rule()]}, indent=2),
+                            title="The rule: put_bucket_lifecycle_configuration replaces ALL of a bucket's rules, "
+                                  "so add this to the existing list"))
         self._show(blocks)
 
     # ------------------------------------------------------------------ objects

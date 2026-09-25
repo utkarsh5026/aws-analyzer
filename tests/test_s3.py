@@ -12,6 +12,7 @@ from moto import mock_aws
 import s3 as s3mod
 from s3 import (
     GB,
+    KB,
     MB,
     TB,
     BucketConfig,
@@ -20,17 +21,24 @@ from s3 import (
     S3View,
     build_folder_tree,
     bucket_findings,
+    cloudwatch_cost,
     compare_objects,
     detect_format,
+    explain_policy,
     file_extension,
     find_duplicate_groups,
     folder_of,
+    human_money,
     human_size,
     make_filter,
+    object_monthly_cost,
     objects_to_df,
     parse_s3_uri,
     parse_size,
     parse_time,
+    policy_findings,
+    simulate_lifecycle_objects,
+    storage_type_class,
     summarize_objects,
     summary_findings,
 )
@@ -80,6 +88,15 @@ def test_parse_time():
     assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone.utc)
     assert parse_time(datetime(2024, 5, 1, 10)).tzinfo == timezone.utc
     assert parse_time("2024-05-01T10:00:00Z") == datetime(2024, 5, 1, 10, tzinfo=timezone.utc)
+
+
+def test_human_money():
+    assert human_money(12.346) == "$12.35"
+    assert human_money(0.004) == "<$0.01"
+    assert human_money(0) == "$0.00"
+    assert human_money(12345.6) == "$12,346"
+    assert human_money(-3) == "-$3.00"
+    assert human_money(None) == "-"
 
 
 def test_human_size():
@@ -208,6 +225,7 @@ def test_summary_findings():
     s = summarize_objects(many_small + [obj("p/ice.csv", 5, storage_class="DEEP_ARCHIVE")], "s3://b/p/", now=NOW)
     text = " ".join(m for _, m in summary_findings(s))
     assert "under 1 MB" in text and "DEEP_ARCHIVE" in text and "90+ days" in text
+    assert "In STANDARD_IA it would cost about $0.02/month less" in text  # 2 GB x ($0.023 - $0.0125)
 
 
 def test_bucket_findings():
@@ -220,6 +238,174 @@ def test_bucket_findings():
                         lifecycle_rules=[{"Status": "Enabled", "NoncurrentVersionExpiration": {"NoncurrentDays": 30},
                                           "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}}])
     assert bucket_findings(safe) == []
+
+
+def test_bucket_findings_uses_account_block_public_access():
+    cfg = BucketConfig(name="b", encryption="AES256")
+    assert any("may still apply" in m for _, m in bucket_findings(cfg))
+    assert not any("Block Public Access" in m for _, m in bucket_findings(cfg, {"A": True, "B": True}))
+    assert any("this bucket or the account" in m for _, m in bucket_findings(cfg, {}))
+
+
+# --------------------------------------------------------------------------- cost
+
+
+def test_object_monthly_cost():
+    assert object_monthly_cost(GB, "STANDARD") == pytest.approx(0.023)
+    assert object_monthly_cost(GB, "STANDARD_IA") == pytest.approx(0.0125)
+    assert object_monthly_cost(KB, "STANDARD_IA") == pytest.approx(128 * KB * 0.0125 / GB)  # billed as 128 KB
+    assert object_monthly_cost(0, "GLACIER") == pytest.approx((32 * KB * 0.0036 + 8 * KB * 0.023) / GB)
+    assert object_monthly_cost(GB, "OUTPOSTS") is None
+    assert object_monthly_cost(GB, "STANDARD", {"STANDARD": 0.03}) == pytest.approx(0.03)
+
+
+@pytest.mark.parametrize("storage_type, cls", [
+    ("StandardStorage", "STANDARD"), ("StandardIAStorage", "STANDARD_IA"), ("StandardIASizeOverhead", "STANDARD_IA"),
+    ("OneZoneIAStorage", "ONEZONE_IA"), ("GlacierInstantRetrievalStorage", "GLACIER_IR"),
+    ("GlacierStorage", "GLACIER"), ("GlacierObjectOverhead", "GLACIER"), ("GlacierS3ObjectOverhead", "STANDARD"),
+    ("DeepArchiveStorage", "DEEP_ARCHIVE"), ("DeepArchiveStagingStorage", "STANDARD"),
+    ("IntelligentTieringFAStorage", "INTELLIGENT_TIERING"), ("IntelligentTieringIAStorage", "STANDARD_IA"),
+    ("IntelligentTieringAIAStorage", "GLACIER_IR"), ("IntelligentTieringAAStorage", "GLACIER"),
+    ("IntelligentTieringDAAStorage", "DEEP_ARCHIVE"), ("SomethingNew", None),
+])
+def test_storage_type_class(storage_type, cls):
+    assert storage_type_class(storage_type) == cls
+
+
+def test_cloudwatch_cost():
+    costs = cloudwatch_cost({"StandardStorage": 10 * GB, "GlacierStorage": GB, "SomethingNew": GB})
+    assert costs == {"StandardStorage": pytest.approx(0.23), "GlacierStorage": pytest.approx(0.0036),
+                     "SomethingNew": None}
+
+
+def test_summary_cost_and_small_files_in_ia():
+    tiny = [obj(f"p/tiny{i}", KB, storage_class="STANDARD_IA") for i in range(1000)]
+    s = summarize_objects([obj("p/big.bin", 10 * GB), obj("p/ia.bin", GB, storage_class="STANDARD_IA"),
+                           obj("p/edge.bin", GB, storage_class="OUTPOSTS")] + tiny, "s3://b/p/", now=NOW)
+    ia_cost = (GB + 1000 * 128 * KB) * 0.0125 / GB
+    assert s.cost_by_storage_class == {"STANDARD": pytest.approx(0.23), "STANDARD_IA": pytest.approx(ia_cost),
+                                       "OUTPOSTS": None}
+    assert s.monthly_cost == pytest.approx(0.23 + ia_cost)
+    assert (s.below_minimum["STANDARD_IA"].count, s.below_minimum["STANDARD_IA"].size) == (1000, 1000 * KB)
+    level, message = next(f for f in summary_findings(s) if "128 KB" in f[1])
+    assert level == "warn" and "In STANDARD they would cost" in message
+
+
+# ---------------------------------------------------------------------- lifecycle
+
+
+def lifecycle_objects():
+    return [
+        obj("logs/new.log", MB, days_old=5),
+        obj("logs/month.log", MB, days_old=45),
+        obj("logs/old.log", MB, days_old=400),
+        obj("logs/tiny.log", KB, days_old=400),
+        obj("logs/ia.log", MB, days_old=45, storage_class="STANDARD_IA"),
+        obj("logs/deep.log", MB, days_old=400, storage_class="DEEP_ARCHIVE"),
+        obj("logs/", 0),  # folder marker
+    ]
+
+
+def test_simulate_lifecycle_moves():
+    impact = simulate_lifecycle_objects(lifecycle_objects(), "s3://b/logs/", move_after=30, to="standard_ia", now=NOW)
+    assert impact.scanned.count == 6 and impact.transitions == [(30, "STANDARD_IA")]
+    assert impact.moves["STANDARD_IA"].count == 2  # month + old; ia.log is there already, deep.log is colder
+    assert impact.too_small.count == 1  # tiny.log: lifecycle doesn't move objects under 128 KB
+    assert impact.expired.count == 0 and impact.early_removals.count == 0
+    assert impact.monthly_savings == pytest.approx(2 * MB * (0.023 - 0.0125) / GB)
+    assert impact.one_time_cost == pytest.approx(2 * 0.01 / 1000)  # two transition requests
+    assert impact.describe() == "move to STANDARD_IA after 30 days"
+    assert impact.rule() == {"ID": "logs-lifecycle", "Status": "Enabled", "Filter": {"Prefix": "logs/"},
+                             "Transitions": [{"Days": 30, "StorageClass": "STANDARD_IA"}]}
+
+
+def test_simulate_lifecycle_steps_and_expiry():
+    impact = simulate_lifecycle_objects(lifecycle_objects(), "s3://b/logs/", move_after={30: "STANDARD_IA", 180: "GLACIER"},
+                                        delete_after=365, now=NOW)
+    assert impact.expired.count == 3  # old, tiny and deep: every size expires
+    assert {cls: st.count for cls, st in impact.moves.items()} == {"STANDARD_IA": 1}
+    assert impact.early_removals.count == 0  # deep.log is past DEEP_ARCHIVE's 180 days
+    assert impact.cost_after < impact.cost_before
+    assert impact.rule()["Expiration"] == {"Days": 365} and len(impact.rule()["Transitions"]) == 2
+
+
+def test_simulate_lifecycle_follows_the_s3_waterfall():
+    objects = [obj("ia.bin", MB, days_old=100, storage_class="STANDARD_IA"),
+               obj("it.bin", MB, days_old=100, storage_class="INTELLIGENT_TIERING")]
+    impact = simulate_lifecycle_objects(objects, move_after=0, to="INTELLIGENT_TIERING", now=NOW)
+    assert impact.moves["INTELLIGENT_TIERING"].count == 1  # IA -> Intelligent-Tiering is allowed
+    assert simulate_lifecycle_objects(objects, move_after=30, to="STANDARD_IA", now=NOW).moves == {}
+
+
+def test_simulate_lifecycle_bills_early_removal():
+    impact = simulate_lifecycle_objects([obj("x", GB, days_old=10, storage_class="GLACIER")], "s3://b/",
+                                        move_after=0, to="DEEP_ARCHIVE", now=NOW)
+    assert impact.early_removals.count == 1  # GLACIER keeps objects for 90 days
+    assert impact.one_time_cost == pytest.approx(object_monthly_cost(GB, "GLACIER") * 80 / 30 + 0.05 / 1000)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {},
+    {"move_after": 30},
+    {"to": "GLACIER"},
+    {"move_after": 10, "to": "STANDARD_IA"},  # IA needs 30 days
+    {"move_after": 30, "to": "STANDARD"},
+    {"move_after": {30: "GLACIER", 60: "STANDARD_IA"}},  # has to get colder
+    {"move_after": {30: "STANDARD_IA", 40: "GLACIER"}},  # 30 days in IA first
+    {"move_after": {0: "INTELLIGENT_TIERING", 30: "STANDARD_IA"}},  # S3 can't move Intelligent-Tiering to IA
+    {"move_after": {30: "GLACIER"}, "to": "GLACIER"},
+    {"move_after": 30, "to": "GLACIER", "delete_after": 30},  # delete after the last move
+])
+def test_simulate_lifecycle_rejects_rules_s3_would(kwargs):
+    with pytest.raises(ValueError):
+        simulate_lifecycle_objects([], **kwargs)
+
+
+# ------------------------------------------------------------------------- policy
+
+POLICY = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "PublicRead", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject",
+         "Resource": "arn:aws:s3:::b/public/*"},
+        {"Sid": "Partner", "Effect": "Allow",
+         "Principal": {"AWS": ["arn:aws:iam::999988887777:role/service-role/Loader", "arn:aws:iam::123456789012:root"]},
+         "Action": ["s3:PutObject", "s3:ListBucket"], "Resource": ["arn:aws:s3:::b", "arn:aws:s3:::b/*"]},
+        {"Sid": "VpcOnly", "Effect": "Allow", "Principal": "*", "Action": "s3:*", "Resource": "arn:aws:s3:::b/*",
+         "Condition": {"StringEquals": {"aws:SourceVpce": "vpce-123"}}},
+        {"Sid": "HttpsOnly", "Effect": "Deny", "Principal": {"AWS": "*"}, "Action": "s3:*", "Resource": "arn:aws:s3:::b/*",
+         "Condition": {"Bool": {"aws:SecureTransport": "false"}}},
+    ],
+}
+
+
+def policy_for(bucket):
+    return json.loads(json.dumps(POLICY).replace("arn:aws:s3:::b", f"arn:aws:s3:::{bucket}"))
+
+
+def test_explain_policy():
+    public, partner, vpc, https = explain_policy(json.dumps(POLICY), own_account="123456789012")
+    assert public.public and public.who == ["anyone (public)"] and public.actions == ["read files"]
+    assert public.resources == ["s3://b/public/*"] and not public.writes
+    assert partner.who == ["role Loader (account 999988887777)", "account 123456789012"]
+    assert partner.other_accounts == ["999988887777"] and partner.writes and not partner.anyone
+    assert partner.actions == ["upload / overwrite files", "list files"]
+    assert partner.resources == ["bucket b", "all files in b"]
+    assert vpc.anyone and vpc.restricted and not vpc.public and vpc.conditions == ["VPC endpoint = vpce-123"]
+    assert https.effect == "Deny" and https.conditions == ["not over HTTPS"]
+    assert explain_policy(None) == []
+
+
+def test_policy_findings():
+    text = " ".join(m for _, m in policy_findings(explain_policy(POLICY, own_account="123456789012")))
+    assert "lets anyone on the internet: read files" in text
+    assert "999988887777" in text and "only when: VPC endpoint = vpce-123" in text
+    assert "plain HTTP" not in text  # the Deny on aws:SecureTransport covers it
+    assert any("plain HTTP" in m for _, m in policy_findings(explain_policy({"Statement": [POLICY["Statement"][1]]})))
+    [everyone] = explain_policy({"Statement": [{"Effect": "Allow", "NotPrincipal": {"AWS": "arn:aws:iam::1:user/bob"},
+                                                "Action": "s3:GetObject", "Resource": "*"}]})
+    assert everyone.who == ["everyone except user bob (account 1)"] and everyone.public
+    assert any("NotPrincipal" in m for _, m in policy_findings([everyone]))
 
 
 def test_objects_to_df():
@@ -352,6 +538,7 @@ def test_versions_and_history(core, aws):
     assert stats.noncurrent.size == len(b"v1") + len(b"v2-longer") + len(b"bye")
     assert (stats.delete_markers, stats.deleted_keys) == (1, 1)
     assert stats.top_noncurrent[0][0] == "doc.txt"
+    assert stats.noncurrent_cost == pytest.approx(stats.noncurrent.size * 0.023 / GB)
     history = core.object_versions("s3://versioned/doc.txt")
     assert [v.size for v in history] == [2, 9, 2] and history[0].is_latest
     assert core.object_versions("s3://versioned/gone.txt")[0].is_delete_marker
@@ -450,6 +637,68 @@ def test_bucket_metrics(core):
     assert "StandardStorage" in metrics.size_by_storage_type and metrics.total_size > 0
 
 
+def test_bucket_policy(core, aws):
+    assert core.bucket_policy(BUCKET) is None
+    cfg = core.bucket_config(BUCKET)
+    assert cfg.has_policy is False and cfg.policy is None
+    aws.put_bucket_policy(Bucket=BUCKET, Policy=json.dumps(policy_for(BUCKET)))
+    assert core.bucket_policy(f"s3://{BUCKET}")["Statement"][0]["Sid"] == "PublicRead"
+    cfg = core.bucket_config(BUCKET)
+    assert cfg.has_policy and cfg.policy["Statement"][1]["Sid"] == "Partner"
+
+
+def test_account_public_access_block(core):
+    assert core.account_id() == "123456789012"
+    assert core.account_public_access_block() == {}
+    boto3.client("s3control", region_name="us-east-1").put_public_access_block(
+        AccountId="123456789012", PublicAccessBlockConfiguration={
+            "BlockPublicAcls": True, "IgnorePublicAcls": True, "BlockPublicPolicy": True, "RestrictPublicBuckets": True})
+    assert all(core.account_public_access_block().values())
+
+
+def test_bucket_reports(core, aws):
+    aws.create_bucket(Bucket="sagemaker-us-east-1-123456789012")
+    reports = core.bucket_reports()
+    assert sorted(r.bucket.name for r in reports) == [BUCKET, "sagemaker-us-east-1-123456789012"]
+    data_lake = next(r for r in reports if r.bucket.name == BUCKET)
+    assert data_lake.config.region == "us-east-1" and data_lake.metrics.object_count == 14
+    only = core.bucket_reports(match="sagemaker-*", metrics=False)
+    assert [r.bucket.name for r in only] == ["sagemaker-us-east-1-123456789012"] and only[0].metrics is None
+
+
+def test_deleted_files(core, aws):
+    aws.create_bucket(Bucket="versioned")
+    aws.put_bucket_versioning(Bucket="versioned", VersioningConfiguration={"Status": "Enabled"})
+    for body in (b"v1", b"v2-longer"):
+        aws.put_object(Bucket="versioned", Key="docs/report.txt", Body=body)
+    aws.delete_object(Bucket="versioned", Key="docs/report.txt")
+    aws.put_object(Bucket="versioned", Key="docs/back.txt", Body=b"x")
+    aws.delete_object(Bucket="versioned", Key="docs/back.txt")
+    aws.put_object(Bucket="versioned", Key="docs/back.txt", Body=b"again")  # re-created, so not deleted
+    aws.put_object(Bucket="versioned", Key="docs/purged.txt", Body=b"gone")
+    purged = aws.list_object_versions(Bucket="versioned", Prefix="docs/purged.txt")["Versions"][0]["VersionId"]
+    aws.delete_object(Bucket="versioned", Key="docs/purged.txt")
+    aws.delete_object(Bucket="versioned", Key="docs/purged.txt", VersionId=purged)  # only the marker is left
+
+    found = {f.key: f for f in core.deleted_files("s3://versioned/docs/").files}
+    assert set(found) == {"docs/report.txt", "docs/purged.txt"}
+    report = found["docs/report.txt"]
+    assert report.restorable and report.last_version.size == len(b"v2-longer")
+    assert (report.old_versions.count, report.old_versions.size) == (2, len(b"v1") + len(b"v2-longer"))
+    assert report.monthly_cost > 0 and not found["docs/purged.txt"].restorable
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert core.deleted_files("s3://versioned/", deleted_after=later).files == []
+    # The restore the UI suggests: delete the delete marker.
+    aws.delete_object(Bucket="versioned", Key="docs/report.txt", VersionId=report.marker_version_id)
+    assert aws.get_object(Bucket="versioned", Key="docs/report.txt")["Body"].read() == b"v2-longer"
+
+
+def test_simulate_lifecycle(core):
+    impact = core.simulate_lifecycle(f"s3://{BUCKET}/big/", move_after=0, to="GLACIER")
+    assert impact.moves["GLACIER"].count == 1 and impact.monthly_savings > 0
+    assert core.simulate_lifecycle(f"s3://{BUCKET}/", move_after=30, to="STANDARD_IA").moves == {}  # all new
+
+
 def test_presigned_url_and_download(core, tmp_path):
     url = core.presigned_url(f"s3://{BUCKET}/docs/readme.md", expires=60)
     assert BUCKET in url and "readme.md" in url
@@ -494,6 +743,31 @@ def test_ui_text_reports(ui, capsys, aws):
     assert "summary(" in run(capsys, ui.help)
 
 
+def test_ui_cost_policy_overview_what_if_deleted(ui, capsys, aws):
+    root = f"s3://{BUCKET}/"
+    assert "Est. cost / month" in run(capsys, ui.summary, root)
+    assert "Est. $/month" in run(capsys, ui.bucket_info, BUCKET)
+    assert "no bucket policy" in run(capsys, ui.policy, BUCKET)
+    aws.put_bucket_policy(Bucket=BUCKET, Policy=json.dumps(policy_for(BUCKET)))
+    out = run(capsys, ui.policy, BUCKET)
+    assert "lets anyone on the internet" in out and "Policy JSON" in out and "999988887777" in out
+    assert "PublicRead" in run(capsys, ui.bucket_info, BUCKET)
+    overview = run(capsys, ui.overview)
+    assert "All buckets (1)" in overview and "Buckets by size" in overview and "Warnings" in overview
+    what_if = run(capsys, ui.what_if, root, move_after=0, to="GLACIER")
+    assert "move to GLACIER" in what_if and '"StorageClass": "GLACIER"' in what_if and "under 128 KB" in what_if
+    small = run(capsys, ui.what_if, f"{root}raw/", move_after=0, to="GLACIER")  # old enough, but all under 128 KB
+    assert "under 128 KB" in small and "Nothing under this prefix" not in small
+    assert "move_after= needs to=" in run(capsys, ui.what_if, root, move_after=30)
+    assert "Versioning is off" in run(capsys, ui.deleted, root)
+    aws.create_bucket(Bucket="versioned")
+    aws.put_bucket_versioning(Bucket="versioned", VersioningConfiguration={"Status": "Enabled"})
+    aws.put_object(Bucket="versioned", Key="a.txt", Body=b"a")
+    aws.delete_object(Bucket="versioned", Key="a.txt")
+    deleted = run(capsys, ui.deleted, "s3://versioned/")
+    assert "How to restore a file" in deleted and "Key='a.txt'" in deleted
+
+
 def test_ui_turns_errors_into_notes(ui, capsys):
     out = run(capsys, ui.head, f"s3://{BUCKET}/missing.csv")
     assert "[!]" in out and "not found" in out
@@ -518,6 +792,8 @@ def test_ui_html_mode(core, monkeypatch):
     ui = S3View(core, mode="html")
     ui.summary(f"s3://{BUCKET}/")
     ui.preview(f"s3://{BUCKET}/raw/2024/01/events.csv")
+    ui.overview()
+    ui.what_if(f"s3://{BUCKET}/", move_after=0, to="GLACIER")
     html_out = "".join(shown)
     assert '<div class="s3a">' in html_out and 'class="fill"' in html_out and "<table" in html_out
 
