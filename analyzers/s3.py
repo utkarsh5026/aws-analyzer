@@ -29,6 +29,9 @@ Quick start
     ui.policy("my-bucket")                          # bucket policy in plain English
     ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
     ui.deleted("s3://my-bucket/data/")              # deleted files you can still restore
+    ui.duplicates("s3://my-bucket/data/")           # identical files (size, ETag, SHA-256) and what they cost
+    ui.download("s3://my-bucket/data/")             # a file or folder to the notebook's disk, with progress
+    ui.download_zip("s3://my-bucket/data/")         # the same as one .zip, once size / disk / access checks pass
 
     s3 = ui.core                                    # same analyzer, raw data
     summary = s3.summarize("s3://my-bucket/data/")
@@ -65,7 +68,7 @@ import time
 import zipfile
 import zlib
 from xml.etree import ElementTree
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -1108,6 +1111,49 @@ class FolderDownload:
 
 
 @dataclass
+class ZipPlan:
+    """What download_zip would put in a .zip, and whether this notebook can make it (see S3Analyzer.plan_zip)."""
+
+    uri: str
+    path: str  # the .zip file it would write
+    max_size: int  # bytes of files allowed in one zip
+    max_files: int
+    files: list[tuple[ObjectInfo, str]] = field(default_factory=list)  # (object, its name in the zip), key order
+    archived: Stat = field(default_factory=Stat)  # GLACIER / DEEP_ARCHIVE files left out (they need a restore)
+    left_out: dict[str, str] = field(default_factory=dict)  # key -> why it isn't in the zip
+    more: bool = False  # counting stopped at max_files: there are more files
+    disk_free: int | None = None  # bytes free where the zip goes
+    memory_free: int | None = None  # RAM available, when it can be read
+    read_error: str | None = None  # what reading one file returned, e.g. 'AccessDenied'; None = it worked
+    probed: str | None = None  # the key read to check access (None = nothing to read)
+
+    @property
+    def size(self) -> int:
+        return sum(obj.size for obj, _ in self.files)
+
+    @property
+    def space_needed(self) -> int:
+        """Most the zip can take on disk: the files as they are, plus the zip's own headers."""
+        return self.size + self.size // 1000 + sum(130 + 2 * len(name.encode()) for _, name in self.files) + 100
+
+    @property
+    def can_download(self) -> bool:
+        return all(ok is not False for _, ok, _ in zip_checks(self))
+
+
+@dataclass
+class ZipDownload:
+    """What S3Analyzer.download_zip did: the checks it ran (plan) and the zip it wrote."""
+
+    plan: ZipPlan
+    written: bool = False  # False: a check failed, or dry_run=True
+    zip_size: int = 0
+    files: Stat = field(default_factory=Stat)  # files in the zip
+    failed: dict[str, str] = field(default_factory=dict)  # key -> error, files that couldn't be read while zipping
+    seconds: float = 0.0
+
+
+@dataclass
 class ArchiveEntry:
     name: str
     size: int
@@ -1462,6 +1508,10 @@ def find_duplicate_groups(objects: Iterable[ObjectInfo], *, min_size: int | str 
     return dupes
 
 
+_ZIP_SMALL_FILE = 8 * MB  # download_zip fetches files up to this size ahead, 16 at a time; bigger ones stream
+_ALREADY_COMPRESSED = {"gz", "tgz", "bz2", "xz", "zst", "zip", "7z", "rar", "jar", "whl", "parquet", "orc", "npz",
+                       "png", "jpg", "jpeg", "gif", "webp", "mp3", "m4a", "aac", "ogg", "flac", "mp4", "mov", "webm",
+                       "docx", "xlsx", "pptx"}  # stored in a zip as they are: compressing them again gains nothing
 DUPLICATE_METHODS = ("etag", "hash", "strict")
 HASH_HEAD_BYTES = 64 * KB  # find_duplicates hashes this much of a file first; the rest only if the starts match
 
@@ -1688,6 +1738,86 @@ def duplicate_findings(report: DuplicateReport) -> list[tuple[str, str]]:
         found.append(("info", f"{_plural(by_etag, 'group')} matched on size + ETag without reading the files: the "
                               "ETag is S3's checksum of the content (the MD5, for a file uploaded in one part). "
                               "method='strict' reads every file to confirm with SHA-256."))
+    return found
+
+
+def zip_checks(plan: ZipPlan) -> list[tuple[str, bool | None, str]]:
+    """Whether a zip can be made -> [(check, passed, details)]; passed is None for a note that doesn't block it.
+    Checks: something to zip and not too many files, the size limit, disk space, memory and read access."""
+    files, size = len(plan.files), plan.size
+    rows: list[tuple[str, bool | None, str]] = []
+    if not files:
+        what = (f"all {_plural(plan.archived.count, 'file')} are in GLACIER / DEEP_ARCHIVE" if plan.archived.count
+                else "no files under this prefix")
+        return [("Files", False, what)]
+    else:
+        rows.append(("Files", not plan.more, f"more than {plan.max_files:,}: over the max_files limit" if plan.more
+                     else f"{files:,} of the {plan.max_files:,} allowed (max_files=)"))
+    at_least = "at least " if plan.more else ""
+    rows.append(("Size", size <= plan.max_size,
+                 f"{at_least}{human_size(size)} of the {human_size(plan.max_size)} allowed (max_size=)"))
+    if plan.disk_free is None:
+        rows.append(("Disk space", None, "couldn't check the free space"))
+    else:
+        rows.append(("Disk space", plan.space_needed <= plan.disk_free,
+                     f"{at_least}{human_size(plan.space_needed)} needed, {human_size(plan.disk_free)} free in "
+                     f"{os.path.dirname(plan.path) or '.'}"))
+    held = min(size, 16 * _ZIP_SMALL_FILE)
+    free = "" if plan.memory_free is None else f"; {human_size(plan.memory_free)} free"
+    rows.append(("Memory", True if plan.memory_free is None or plan.memory_free > held else None,
+                 f"files stream into the zip, at most about {human_size(held + MB)} at a time{free}"))
+    if plan.probed is None:
+        rows.append(("Read access", None, "nothing to read: the files are empty"))
+    elif plan.read_error:
+        rows.append(("Read access", False, f"{plan.read_error} reading {plan.probed}"))
+    else:
+        rows.append(("Read access", True, f"read the first byte of {plan.probed}"))
+    if plan.archived.count:
+        rows.append(("Archived files", None, f"{_plural(plan.archived.count, 'file')} "
+                                             f"({human_size(plan.archived.size)}) left out: restore them first"))
+    return rows
+
+
+def _nice_size(size: int) -> str:
+    """A max_size= value just above `size`: 3.3 MB -> '4MB', 340 MB -> '400MB', 3.2 GB -> '4GB'."""
+    if size < 100 * MB:
+        return f"{max(1, math.ceil(size / MB))}MB"
+    if size < GB:
+        return f"{math.ceil(size / (100 * MB)) * 100}MB"
+    return f"{math.ceil(size / GB)}GB"
+
+
+def zip_findings(plan: ZipPlan) -> list[tuple[str, str]]:
+    """What stops a zip, or what's left out of it, and what to do -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    size = plan.size
+    if not plan.files and not plan.archived.count:
+        found.append(("warn", "Nothing to zip: there are no files under this prefix. Check the path (keys are "
+                              "case-sensitive); ls(uri) shows what's there."))
+    if plan.more:
+        found.append(("warn", f"There are more than {plan.max_files:,} files here, so it stopped counting. Pass a "
+                              f"bigger max_files= (and max_size=), or zip a sub-folder; tree(uri) shows their sizes."))
+    elif size > plan.max_size:
+        room = (f" (the disk has {human_size(plan.disk_free)} free)" if plan.disk_free is not None else "")
+        found.append(("warn", f"The files take {human_size(size)}, over the {human_size(plan.max_size)} limit. Pass "
+                              f"max_size='{_nice_size(size)}' to zip them anyway{room}, or zip a sub-folder; "
+                              "tree(uri) shows their sizes."))
+    if plan.disk_free is not None and plan.space_needed > plan.disk_free and plan.files:
+        found.append(("warn", f"The disk doesn't have room: the zip needs up to {human_size(plan.space_needed)} and "
+                              f"{human_size(plan.disk_free)} is free in {os.path.dirname(plan.path) or '.'}. Delete "
+                              "files you don't need there, or pass path= on a disk with more room."))
+    if plan.read_error:
+        found.append(("warn", f"The notebook's role can't read these files ({plan.read_error} on {plan.probed}). It "
+                              "needs s3:GetObject on them, and kms:Decrypt on the key when they're encrypted with "
+                              "SSE-KMS."))
+    if plan.archived.count:
+        found.append(("warn" if not plan.files else "info",
+                       f"{_plural(plan.archived.count, 'file')} ({human_size(plan.archived.size)}) in GLACIER / "
+                       "DEEP_ARCHIVE can't go in the zip until they're restored (restore_object, or the S3 console)."))
+    unsafe = [key for key, why in plan.left_out.items() if why not in ARCHIVE_CLASSES]
+    if unsafe:
+        found.append(("info", f"{_plural(len(unsafe), 'file')} left out because their names would unzip outside the "
+                              "folder or clash with another file's (the table lists them)."))
     return found
 
 
@@ -2154,11 +2284,46 @@ def _pool_size(client: Any) -> int:
     return getattr(getattr(getattr(client, "meta", None), "config", None), "max_pool_connections", None) or 10
 
 
+def _free_space(path: str) -> int:
+    """Bytes free on the disk that holds `path` (or the nearest folder above it that exists)."""
+    folder = os.path.abspath(path)
+    while not os.path.isdir(folder):
+        folder = os.path.dirname(folder)
+    return shutil.disk_usage(folder).free
+
+
+def _memory_available() -> int | None:
+    """RAM the notebook can still use (MemAvailable on Linux), or None when it can't be read."""
+    try:
+        with open("/proc/meminfo") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * KB
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def _zip_name(key: str, base: str, used: set[str]) -> str | None:
+    """The name a file gets in the zip, relative to `base`; None if it would unzip outside the folder or clash."""
+    name = relative_key(key, base)
+    if name.startswith("/"):
+        return None
+    name = posixpath.normpath(name)
+    if name in (".", "..") or name.startswith("../") or name in used:
+        return None
+    used.add(name)
+    return name
+
+
 def _check_disk_space(path: str, needed: int) -> None:
     folder = os.path.abspath(path)
     while not os.path.isdir(folder):
         folder = os.path.dirname(folder)
-    free = shutil.disk_usage(folder).free
+    free = _free_space(folder)
     if needed > free:
         raise ValueError(f"Not enough disk space: {human_size(needed)} to download, {human_size(free)} free in "
                          f"{folder}. Pass limit=, or a path on a bigger disk.")
@@ -2326,6 +2491,12 @@ def _columnar_info(fmt: str, handle: Any) -> dict[str, Any]:
     if hasattr(reader, "count_rows"):
         info["rows"] = reader.count_rows()
     return info
+
+
+def _zip_time_of(moment: datetime) -> tuple[int, int, int, int, int, int]:
+    """A file's time as a zip stores it (zip can't hold times before 1980)."""
+    moment = moment.astimezone(timezone.utc) if moment.tzinfo else moment
+    return max((moment.year, moment.month, moment.day, moment.hour, moment.minute, moment.second), (1980, 1, 1, 0, 0, 0))
 
 
 def _zip_time(stamp: tuple[int, ...]) -> datetime | None:
@@ -3565,6 +3736,157 @@ class S3Analyzer:
             elif error is not None:
                 raise error
         return failed
+
+    def plan_zip(self, uri: str, path: str | None = None, *, max_size: int | str = "100MB", max_files: int = 10_000,
+                 progress: Callable[[int], None] | None = None) -> ZipPlan:
+        """Check whether a file or folder can be zipped here, without downloading it: what would go in, the size
+        and file-count limits, free disk space and memory, and whether the files can be read (one 1-byte read).
+        `path` is the .zip to write (default: named after the folder, in the current directory)."""
+        bucket, key = parse_s3_uri(uri)
+        limit = parse_size(max_size)
+        if limit is None:
+            raise ValueError("max_size can't be None; pass a size such as '2GB'")
+        first = self.client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1).get("Contents", [])
+        single = bool(key) and not key.endswith("/") and bool(first) and first[0]["Key"] == key
+        if single:  # a file (it lists first among the keys it prefixes)
+            base, name = base_prefix(key), key.rsplit("/", 1)[-1]
+        else:
+            base = key if not key or key.endswith("/") else key + "/"  # 's3://b/data' means the folder data/
+            name = base.rstrip("/").rsplit("/", 1)[-1] or bucket
+        if path is None:
+            path = f"{name}.zip"
+        elif os.path.isdir(path):
+            path = os.path.join(path, f"{name}.zip")
+        elif not path.lower().endswith(".zip"):
+            path += ".zip"
+        plan = ZipPlan(uri=s3_uri(bucket, key if single else base), path=os.path.abspath(path), max_size=limit,
+                       max_files=max_files)
+        if single:
+            item = first[0]
+            listing: Iterable[ObjectInfo] = [ObjectInfo(bucket, key, item["Size"], item["LastModified"],
+                                                        item.get("StorageClass", "STANDARD"),
+                                                        item.get("ETag", "").strip('"'))]
+        else:
+            listing = self.iter_objects(plan.uri, progress=progress)
+        used: set[str] = set()
+        for obj in listing:
+            if obj.is_folder_marker or obj.key.endswith("/"):
+                continue
+            if len(plan.files) + len(plan.left_out) >= max_files:
+                plan.more = True
+                break
+            name_in_zip = _zip_name(obj.key, base, used)
+            if obj.storage_class in ARCHIVE_CLASSES:
+                plan.archived.add(obj.size)
+                plan.left_out[obj.key] = obj.storage_class
+            elif name_in_zip is None:
+                plan.left_out[obj.key] = "its name would unzip outside the folder, or clash with another file's"
+            else:
+                plan.files.append((obj, name_in_zip))
+        try:
+            plan.disk_free = _free_space(os.path.dirname(plan.path))
+        except OSError:
+            pass
+        plan.memory_free = _memory_available()
+        probe = next((obj for obj, _ in plan.files if obj.size), None)
+        if probe is not None:
+            plan.probed = probe.key
+            try:
+                self.client.get_object(Bucket=bucket, Key=probe.key, Range="bytes=0-0")["Body"].close()
+            except ClientError as exc:
+                plan.read_error = _error_code(exc)
+        return plan
+
+    def download_zip(self, uri: str, path: str | None = None, *, max_size: int | str = "100MB",
+                     max_files: int = 10_000, dry_run: bool = False, max_workers: int = 8,
+                     progress: Callable[[int, int], None] | None = None,
+                     list_progress: Callable[[int], None] | None = None) -> ZipDownload:
+        """Zip a file or a folder (with its sub-folders) into one .zip on the notebook's disk, after plan_zip's
+        checks pass: at most max_size of files (100 MB by default) and max_files files, room on the disk, and read
+        access. Nothing is written when a check fails, or with dry_run=True. Already-compressed files (parquet,
+        gz, images, ...) are stored as they are, the rest compressed. progress gets (bytes zipped, bytes to zip)."""
+        plan = self.plan_zip(uri, path, max_size=max_size, max_files=max_files, progress=list_progress)
+        result = ZipDownload(plan)
+        if dry_run or not plan.can_download:
+            return result
+        started, done = time.monotonic(), [0]
+
+        def report() -> None:
+            if progress:
+                progress(done[0], plan.size)
+
+        window = 16 if plan.memory_free is None or plan.memory_free > 2 * 16 * _ZIP_SMALL_FILE else 2
+        part = plan.path + ".part"  # renamed once complete, so a stopped zip never looks finished
+        try:
+            with zipfile.ZipFile(part, "w", allowZip64=True) as archive, \
+                    ThreadPoolExecutor(max_workers=max(1, min(max_workers, _pool_size(self.client)))) as pool:
+                ahead: deque[tuple[ObjectInfo, str, Any]] = deque()
+                pending = iter(plan.files)
+
+                def fetch_ahead() -> None:
+                    while len(ahead) < window:
+                        item = next(pending, None)
+                        if item is None:
+                            return
+                        obj, name = item
+                        small = obj.size <= _ZIP_SMALL_FILE
+                        ahead.append((obj, name, pool.submit(self._read_object, obj) if small else None))
+
+                fetch_ahead()
+                report()
+                try:
+                    while ahead:
+                        obj, name, future = ahead.popleft()
+                        fetch_ahead()
+                        info = zipfile.ZipInfo(name, date_time=_zip_time_of(obj.last_modified))
+                        info.compress_type = (zipfile.ZIP_STORED if file_extension(name).rsplit(".", 1)[-1]
+                                              in _ALREADY_COMPRESSED else zipfile.ZIP_DEFLATED)
+                        info.file_size = obj.size  # lets zipfile pick ZIP64 for files over 2 GB
+                        info.external_attr = 0o644 << 16  # unzipped files: readable, writable by you
+                        try:
+                            if future is not None:
+                                data = future.result()
+                                archive.writestr(info, data)
+                                done[0] += len(data)
+                            else:
+                                self._stream_into(archive, info, obj, done, report)
+                        except (ClientError, BotoCoreError) as exc:
+                            result.failed[obj.key] = (_error_code(exc) if isinstance(exc, ClientError)
+                                                      else type(exc).__name__)
+                            continue
+                        result.files.add(obj.size)
+                        report()
+                except BaseException:
+                    for _, _, future in ahead:
+                        if future is not None:
+                            future.cancel()
+                    raise
+            os.replace(part, plan.path)
+        except BaseException:
+            if os.path.exists(part):
+                os.remove(part)
+            raise
+        result.written, result.zip_size = True, os.path.getsize(plan.path)
+        result.seconds = time.monotonic() - started
+        return result
+
+    def _read_object(self, obj: ObjectInfo) -> bytes:
+        match = {"IfMatch": f'"{obj.etag}"'} if obj.etag else {}  # the file listed, not one written since
+        return self.client.get_object(Bucket=obj.bucket, Key=obj.key, **match)["Body"].read()
+
+    def _stream_into(self, archive: zipfile.ZipFile, info: zipfile.ZipInfo, obj: ObjectInfo, done: list[int],
+                     report: Callable[[], None]) -> None:
+        """Copy a big object into the zip 1 MB at a time, so it never sits in memory whole."""
+        match = {"IfMatch": f'"{obj.etag}"'} if obj.etag else {}
+        body = self.client.get_object(Bucket=obj.bucket, Key=obj.key, **match)["Body"]
+        try:
+            with archive.open(info, "w") as entry:
+                while chunk := body.read(MB):
+                    entry.write(chunk)
+                    done[0] += len(chunk)
+                    report()
+        finally:
+            body.close()
 
 
 # =============================================================================
@@ -4911,6 +5233,55 @@ class S3View:
                                     "says why. Running download() again retries them.", "warn"))
             blocks.append(_Table(["Key", "Why"], [[relative_key(k, parse_s3_uri(d.uri)[1]), why]
                                                   for k, why in sorted(d.skipped.items())], title="Not downloaded"))
+        self._show(blocks)
+
+    @_friendly_errors
+    def download_zip(self, uri: str, path: str | None = None, *, max_size: int | str = "100MB",
+                     max_files: int = 10_000, dry_run: bool = False) -> None:
+        """Download a file or folder as one .zip, after checking this notebook can: size limit (100 MB by default),
+        file count, disk space, memory and read access. dry_run=True only runs the checks."""
+        with self._progress("Listing", unit="files") as list_tick, self._progress("Zipping", unit="B") as tick:
+            z = self.core.download_zip(uri, path, max_size=max_size, max_files=max_files, dry_run=dry_run,
+                                       progress=tick, list_progress=list_tick)
+        plan = z.plan
+        checks = zip_checks(plan)
+        can = plan.can_download
+        files = f"{len(plan.files):,}{'+' if plan.more else ''}"
+        blocks: list[Any] = [_Title(f"Zip of {plan.uri}", f"{_plural(len(plan.files), 'file')} · "
+                                                        f"{human_size(plan.size)} → {plan.path}")]
+        cards = [("Can download", "yes" if can else "no"), ("Files", files), ("Size", human_size(plan.size)),
+                 ("Limit", human_size(plan.max_size)), ("Free disk", human_size(plan.disk_free))]
+        if z.written:
+            saved = _share(plan.size - z.zip_size, plan.size)
+            cards += [("Zip size", human_size(z.zip_size)), ("Took", _duration(z.seconds))]
+            smaller = f", {saved:.0%} smaller than the files" if saved >= 0.01 else ""
+            blocks += [_Cards(cards), _Note(
+                f"Saved {plan.path} ({human_size(z.zip_size)}{smaller}). To get it onto your computer, right-click "
+                "it in JupyterLab's file browser and choose Download.", "ok")]
+        elif can:
+            options = {"max_size": (max_size, "100MB"), "max_files": (max_files, 10_000)}
+            args = "".join(f", {k}={v!r}" for k, (v, default) in options.items() if v != default)
+            blocks += [_Cards(cards), _Note(f"It can be downloaded: every check passed. Run "
+                                            f"download_zip({plan.uri!r}{args}) to make the zip.", "ok")]
+        else:
+            why = {"Files": "too many files" if plan.more else "nothing to zip", "Size": "over the size limit",
+                   "Disk space": "not enough disk space", "Read access": "the files can't be read"}
+            failed = ", ".join(why.get(name, name) for name, ok, _ in checks if ok is False)
+            blocks += [_Cards(cards), _Note(f"Can't zip this here yet: {failed}. Nothing was downloaded; the notes "
+                                            "below say what to change.", "warn")]
+        blocks += [_Note(message, level) for level, message in zip_findings(plan)]
+        if z.failed:
+            blocks.append(_Note(f"{_plural(len(z.failed), 'file')} couldn't be read while zipping, so the zip leaves "
+                                "them out (the table lists them). Running download_zip() again retries them.", "warn"))
+        blocks.append(_Table(["Check", "Result", "Details"],
+                             [[name, "✓ ok" if ok else "✗ no" if ok is False else "· note", details]
+                              for name, ok, details in checks], title="Can this notebook make the zip?", max_rows=0))
+        left_out = {**plan.left_out, **z.failed}
+        if left_out:
+            base = parse_s3_uri(plan.uri)[1]
+            blocks.append(_Table(["Key", "Why it isn't in the zip"],
+                                 [[relative_key(key, base_prefix(base)) or key, why]
+                                  for key, why in sorted(left_out.items())], title="Left out"))
         self._show(blocks)
 
     @_friendly_errors

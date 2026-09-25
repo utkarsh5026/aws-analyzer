@@ -320,6 +320,17 @@ ui.link("s3://acme-ml-data/curated/features/churn/train.parquet", expires=900)  
       <p><code>download()</code> copies a file, or a whole folder with its sub-folders, to the notebook's disk with a progress bar, and says where it went. For a table file it also shows the pandas call that opens it. A file already downloaded (same size and time) is skipped, so if a big download stops, run it again to pick up where it left off. Files in GLACIER or DEEP_ARCHIVE are listed as needing a restore, and nothing starts if the disk doesn't have room.</p>
       <div class="code"><pre><code class="lang-py">ui.download("s3://acme-ml-data/curated/features/churn/train.parquet")        # into the current folder
 ui.download("s3://acme-ml-data/curated/features/churn/", "/tmp/churn")     # a folder, keeping its sub-folders</code></pre></div>
+      <p>To get a folder onto your own computer, <code>download_zip()</code> packs it into one <code>.zip</code>. It first checks that this notebook can make it, and downloads nothing if a check fails:</p>
+      <ul>
+        <li><strong>Size and file count</strong>: at most <code>max_size</code> of files (100 MB by default) and <code>max_files</code> files (10,000). It stops counting at <code>max_files</code>, so the answer comes quickly even on a huge folder.</li>
+        <li><strong>Disk space</strong>: the zip has to fit where it's written.</li>
+        <li><strong>Memory</strong>: files stream into the zip, so only a few MB are held at a time; it shows what's free.</li>
+        <li><strong>Read access</strong>: it reads one byte of one file, which fails if the role lacks <code>s3:GetObject</code> (or <code>kms:Decrypt</code> for SSE-KMS files).</li>
+      </ul>
+      <p>When a check fails, the report says what to change, such as the <code>max_size=</code> that would fit. Files in GLACIER or DEEP_ARCHIVE are left out and listed. Parquet, gzip and image files go in as they are, since compressing them again gains nothing; the rest are compressed. Once it's written, right-click the zip in JupyterLab's file browser and choose Download.</p>
+      <div class="code"><pre><code class="lang-py">ui.download_zip("s3://acme-ml-data/curated/features/churn/", dry_run=True)   # only the checks
+ui.download_zip("s3://acme-ml-data/curated/features/churn/")                 # churn.zip, if it's under 100 MB
+ui.download_zip("s3://acme-ml-data/reports/", "/tmp/reports.zip", max_size="1GB")</code></pre></div>
 
       <!-- ============================================================ summary -->
       <h2 id="summary">What's in a folder</h2>
@@ -398,7 +409,8 @@ with s3.open("s3://acme-ml-data/raw/events/dt=2025-09-01/part-00000.json.gz") as
     first_line = f.readline()
 
 s3.download("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.tar.gz", "/tmp/")
-s3.download_folder("s3://acme-ml-data/curated/features/churn/", "/tmp/churn")   # every file, sub-folders kept</code></pre></div>
+s3.download_folder("s3://acme-ml-data/curated/features/churn/", "/tmp/churn")   # every file, sub-folders kept
+s3.plan_zip("s3://acme-ml-data/curated/").can_download   # would download_zip() work here? (downloads nothing)</code></pre></div>
       <p>For worked examples that load a JSON export, a CSV, an Excel workbook or a whole folder and build on it, see <a href="#build">Build your own analysis</a>.</p>
 
       <!-- ============================================================ documents -->
@@ -556,7 +568,7 @@ rows = [ObjectInfo("acme-ml-data", "raw/a.json", 1_200_000, datetime(2025, 1, 5,
         ObjectInfo("acme-ml-data", "raw/b.json", 800_000, datetime(2025, 6, 1, tzinfo=timezone.utc), "STANDARD_IA")]
 summarize_objects(rows, "s3://acme-ml-data/raw/").monthly_cost
 simulate_lifecycle_objects(rows, "s3://acme-ml-data/raw/", move_after=30, to="GLACIER_IR").monthly_savings</code></pre></div>
-      <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, the duplicate finder's steps (<code>files_to_hash</code>, <code>group_duplicates</code>, <code>duplicate_folders</code>, <code>duplicate_findings</code>), <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
+      <p>Also pure: <code>build_folder_tree</code>, <code>make_filter</code>, <code>find_duplicate_groups</code>, the duplicate finder's steps (<code>files_to_hash</code>, <code>group_duplicates</code>, <code>duplicate_folders</code>, <code>duplicate_findings</code>), <code>zip_checks</code>, <code>zip_findings</code>, <code>compare_objects</code>, <code>summary_findings</code>, <code>bucket_findings</code>, <code>policy_findings</code>, <code>object_monthly_cost</code>, <code>cloudwatch_cost</code>, <code>parse_avro</code> and <code>sniff_format</code>.</p>
 
       <!-- ============================================================ build -->
       <h2 id="build">Build your own analysis</h2>
@@ -790,6 +802,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>preview(uri, n=20)</code></td><td>What's inside a file (see <a href="#file-types">file types</a>)</td></tr>
           <tr><td><code>document(uri, pages=None)</code></td><td>Full text of a PDF, Word or PowerPoint file, page by page or slide by slide</td></tr>
           <tr><td><code>download(uri, path=None)</code></td><td>Download a file or a folder, with a progress bar; running it again resumes</td></tr>
+          <tr><td><code>download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)</code></td><td>A file or folder as one .zip, after checking size, file count, disk space, memory and read access</td></tr>
           <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
           <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
         </tbody>

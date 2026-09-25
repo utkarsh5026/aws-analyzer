@@ -33,6 +33,8 @@ from s3 import (
     ObjectInfo,
     S3Analyzer,
     S3View,
+    Stat,
+    ZipPlan,
     build_folder_tree,
     bucket_findings,
     cloudwatch_cost,
@@ -64,6 +66,8 @@ from s3 import (
     storage_type_class,
     summarize_objects,
     summary_findings,
+    zip_checks,
+    zip_findings,
 )
 
 NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -326,6 +330,52 @@ def test_duplicate_folders_and_findings():
     assert "warn: Stopped reading at max_read=1.0 GB: 2 files (10 B)" in text and "max_read='1GB'" in text
     assert ("2 files could only be compared by ETag, because they couldn't be read: 1 in GLACIER, which needs a "
             "restore first, 1 AccessDenied (needs s3:GetObject)") in text
+
+
+def zip_plan(**changes):
+    plan = ZipPlan(uri="s3://b/data/", path="/tmp/out/data.zip", max_size=100 * MB, max_files=10_000,
+                   files=[(obj("data/a.csv", 10 * MB), "a.csv"), (obj("data/b/c.csv", 5 * MB), "b/c.csv")],
+                   disk_free=50 * GB, memory_free=8 * GB, probed="data/a.csv")
+    for name, value in changes.items():
+        setattr(plan, name, value)
+    return plan
+
+
+def findings_text(plan):
+    return "\n".join(f"{level}: {message}" for level, message in zip_findings(plan))
+
+
+def test_zip_checks_and_findings():
+    ok = zip_plan()
+    assert ok.can_download and ok.size == 15 * MB and 15 * MB < ok.space_needed < 16 * MB
+    assert [(name, passed) for name, passed, _ in zip_checks(ok)] == [
+        ("Files", True), ("Size", True), ("Disk space", True), ("Memory", True), ("Read access", True)]
+    assert zip_findings(ok) == []
+
+    big = zip_plan(max_size=10 * MB)
+    assert not big.can_download and ("Size", False) in [(n, p) for n, p, _ in zip_checks(big)]
+    assert ("warn: The files take 15.0 MB, over the 10.0 MB limit. Pass max_size='15MB' to zip them anyway (the "
+            "disk has 50.0 GB free)") in findings_text(big)
+    disk = zip_plan(disk_free=MB)
+    assert not disk.can_download and "The disk doesn't have room" in findings_text(disk)
+    assert "pass path= on a disk with more room" in findings_text(disk)
+    denied = zip_plan(read_error="AccessDenied")
+    assert not denied.can_download and "AccessDenied on data/a.csv" in findings_text(denied)
+    assert "s3:GetObject" in findings_text(denied) and "kms:Decrypt" in findings_text(denied)
+    more = zip_plan(more=True)
+    assert not more.can_download and "more than 10,000 files" in findings_text(more)
+
+    cold = zip_plan(files=[], archived=Stat(2, 3 * MB), left_out={"data/x": "GLACIER", "data/y": "GLACIER"})
+    assert zip_checks(cold) == [("Files", False, "all 2 files are in GLACIER / DEEP_ARCHIVE")]
+    assert "warn: 2 files (3.0 MB) in GLACIER / DEEP_ARCHIVE can't go in the zip" in findings_text(cold)
+    some_cold = zip_plan(archived=Stat(1, MB), left_out={"data/x": "GLACIER", "data/../y": "outside"})
+    assert some_cold.can_download and ("Archived files", None) in [(n, p) for n, p, _ in zip_checks(some_cold)]
+    assert "info: 1 file (1.0 MB) in GLACIER" in findings_text(some_cold)
+    assert "info: 1 file left out because their names would unzip outside the folder" in findings_text(some_cold)
+    assert "Nothing to zip" in findings_text(zip_plan(files=[]))
+    unknown = zip_plan(disk_free=None, memory_free=None, probed=None)
+    assert unknown.can_download and [p for _, p, _ in zip_checks(unknown)] == [True, True, None, True, None]
+    assert [s3mod._nice_size(n) for n in (3 * MB + 1, 340 * MB, 3 * GB + 1)] == ["4MB", "400MB", "4GB"]
 
 
 def test_progress_text():
@@ -811,6 +861,68 @@ def test_find_duplicates_in_a_versioned_bucket(core, aws):
     report = core.find_duplicates("s3://versioned-dupes/")
     assert report.versioning == "Enabled"
     assert any("Versioning is on" in message for _, message in duplicate_findings(report))
+
+
+def test_download_zip(core, aws, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    seen = []
+    z = core.download_zip(f"s3://{BUCKET}/raw", progress=lambda *done: seen.append(done))  # the folder raw/
+    assert z.written and z.plan.uri == f"s3://{BUCKET}/raw/" and z.plan.path == str(tmp_path / "raw.zip")
+    with zipfile.ZipFile(tmp_path / "raw.zip") as archive:
+        assert sorted(archive.namelist()) == ["2024/01/events-copy.csv", "2024/01/events.csv", "2024/02/empty.txt",
+                                              "2024/02/events.csv.gz"]
+        assert archive.read("2024/01/events.csv") == CSV and archive.testzip() is None
+        assert archive.getinfo("2024/02/events.csv.gz").compress_type == zipfile.ZIP_STORED  # already compressed
+        assert archive.getinfo("2024/01/events.csv").compress_type == zipfile.ZIP_DEFLATED
+    assert (z.files.count, seen[-1]) == (4, (z.plan.size, z.plan.size)) and z.zip_size > 0
+    assert not (tmp_path / "raw.zip.part").exists()
+
+    one = core.download_zip(f"s3://{BUCKET}/docs/readme.md", "readme")  # '.zip' is added
+    assert one.plan.path == str(tmp_path / "readme.zip") and zipfile.ZipFile(one.plan.path).namelist() == ["readme.md"]
+    monkeypatch.setattr(s3mod, "_ZIP_SMALL_FILE", 1024)  # big files stream into the zip instead of being read whole
+    big = core.download_zip(f"s3://{BUCKET}/big/", str(tmp_path))  # a folder: big.zip goes in it
+    assert zipfile.ZipFile(big.plan.path).read("file.bin") == b"x" * (2 * MB)
+
+    dry = core.download_zip(f"s3://{BUCKET}/", "dry.zip", dry_run=True)
+    assert dry.plan.can_download and not dry.written and not (tmp_path / "dry.zip").exists()
+    assert dry.plan.left_out == {"archive/old.csv": "GLACIER"} and dry.plan.probed and dry.plan.read_error is None
+    over = core.download_zip(f"s3://{BUCKET}/", "over.zip", max_size="1KB")
+    assert not over.plan.can_download and not over.written and not (tmp_path / "over.zip").exists()
+    few = core.plan_zip(f"s3://{BUCKET}/", max_files=3)
+    assert few.more and len(few.files) + len(few.left_out) == 3 and not few.can_download
+    aws.put_object(Bucket=BUCKET, Key="raw//etc/escape.txt", Body=b"x")
+    assert "raw//etc/escape.txt" in core.plan_zip(f"s3://{BUCKET}/raw/").left_out
+    monkeypatch.setattr(s3mod, "_free_space", lambda path: 10)
+    assert not core.download_zip(f"s3://{BUCKET}/raw/", "full-disk.zip").written
+    with pytest.raises(ValueError, match="max_size"):
+        core.plan_zip(f"s3://{BUCKET}/raw/", max_size=None)
+
+
+def test_download_zip_when_reads_fail(core, tmp_path, monkeypatch):
+    real = core.client.get_object
+
+    def denied(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+
+    def one_denied(**kwargs):  # the 1-byte check passes; zipping this file fails
+        return denied() if kwargs["Key"].endswith("events-copy.csv") and "Range" not in kwargs else real(**kwargs)
+
+    monkeypatch.setattr(core.client, "get_object", one_denied)
+    z = core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "part.zip"))
+    assert z.written and z.failed == {"raw/2024/01/events-copy.csv": "AccessDenied"} and z.files.count == 3
+    assert "2024/01/events-copy.csv" not in zipfile.ZipFile(z.plan.path).namelist()
+
+    def stop(done, total):
+        if done:
+            raise KeyboardInterrupt  # the notebook's stop button, halfway
+    monkeypatch.setattr(core.client, "get_object", real)
+    with pytest.raises(KeyboardInterrupt):
+        core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "stopped.zip"), progress=stop)
+    assert not any(p.name.startswith("stopped") for p in tmp_path.iterdir())  # no half-written zip left behind
+
+    monkeypatch.setattr(core.client, "get_object", denied)
+    blocked = core.download_zip(f"s3://{BUCKET}/raw/", str(tmp_path / "denied.zip"))
+    assert blocked.plan.read_error == "AccessDenied" and not blocked.written
 
 
 def test_compare_progress_keeps_counting(core):
@@ -1535,6 +1647,22 @@ def test_ui_download_and_ls_of_a_file(ui, capsys, tmp_path, monkeypatch):
     monkeypatch.setattr(s3mod.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10))
     assert "Not enough disk space" in run(capsys, ui.download, f"s3://{BUCKET}/big/file.bin", "big.bin")
     assert "That's a file, not a folder" in run(capsys, ui.ls, f"s3://{BUCKET}/raw/2024/01/events.csv")
+
+
+def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = run(capsys, ui.download_zip, f"s3://{BUCKET}/raw/")
+    for expected in ("Zip of s3://data-lake/raw/", "Can download: yes", "Zip size:", "right-click it",
+                     "-- Can this notebook make the zip? --", "✓ ok", "Read access"):
+        assert expected in out
+    assert (tmp_path / "raw.zip").exists()
+    dry = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1GB", dry_run=True)
+    assert "It can be downloaded" in dry and "download_zip('s3://data-lake/', max_size='1GB')" in dry
+    assert "-- Left out --" in dry and "GLACIER" in dry and not (tmp_path / "data-lake.zip").exists()
+    over = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1KB")
+    assert "Can download: no" in over and "over the size limit" in over and "✗ no" in over and "max_size='3MB'" in over
+    assert "nothing to zip" in run(capsys, ui.download_zip, f"s3://{BUCKET}/nothing-here/")
+    assert "ValueError" in run(capsys, ui.download_zip, f"s3://{BUCKET}/raw/", max_size="lots")
 
 
 class FakeBar:
