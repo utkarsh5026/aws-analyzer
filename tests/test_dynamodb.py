@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -14,12 +15,14 @@ from dynamodb import (
     TableInfo,
     TableMetrics,
     build_filter,
+    capacity_cost,
     count_values,
     describe_filter,
     dynamo_type,
     flatten_item,
     format_value,
     from_dynamo,
+    human_money,
     item_size,
     items_table,
     items_to_df,
@@ -156,6 +159,7 @@ def test_profile_items():
     assert p.size_histogram["300 - 400 KB"].count == 1
     text = " ".join(m for _, m in profile_findings(p))
     assert "'total' holds different types" in text and "'note'" in text and "over 300 KB" in text
+    assert "scan('orders', where={'total': ('type', 'S')})" in text and "largest('orders') lists them" in text
     assert list(p.to_df()["attribute"]) == paths
 
 
@@ -213,10 +217,45 @@ def test_table_findings():
                         read_throttles=4)
     text = " ".join(m for _, m in table_findings(info, busy))
     assert "Point-in-time recovery is off" in text and "Deletion protection is off" in text
-    assert "4 read and 0 write throttle events" in text
-    assert "Reads averaged 9 units/s" in text and "Writes peaked at 2%" in text
+    assert "about $0.40/month at this table's size" in text  # 2 GB at $0.20
+    assert "update-continuous-backups --table-name t --point-in-time-recovery-specification" in text
+    assert "aws dynamodb update-table --table-name t --deletion-protection-enabled" in text
+    assert "4 read and 0 write throttle events" in text and "value_counts('t', 'id')" in text
+    assert "Reads averaged 9 units/s" in text and "raise the capacity or turn on auto scaling" in text
+    # Writes use 2% of 5 units: 1 unit leaves the busiest period at 70%; reads (90% used) stay at 10.
+    assert "Writes peaked at 2% of the 5 provisioned units" in text and "costs $3.32/month" in text
+    assert "10 read / 1 write units (the busiest period at 70% use) would cost $1.42" in text
+    assert "on-demand at this traffic about <$0.01" in text and "saves up to $3.32/month" in text
     safe = TableInfo("t", status="ACTIVE", partition_key="id", pitr=True, deletion_protection=True)
     assert table_findings(safe) == []
+
+
+def test_table_findings_price_idle_capacity():
+    idle = TableInfo("big", partition_key="id", read_capacity=1000, write_capacity=1000, pitr=True,
+                     deletion_protection=True)
+    quiet_day = TableMetrics("big", 24, 300, read_units=86_400.0, write_units=0.0, peak_reads=2.0, peak_writes=0.0)
+    [(level, message)] = table_findings(idle, quiet_day)
+    assert level == "warn" and message.startswith("Reads peaked at under 1% of the 1,000 provisioned units")
+    assert f"costs {human_money(capacity_cost(1000, 1000))}/month" in message
+    assert "3 read / 1 write units" in message and "on-demand at this traffic about $0.33" in message
+    assert table_findings(idle, quiet_day, {**DYNAMODB_PRICES, "read_capacity_hour": 0.0, "write_capacity_hour": 0.0}) == []
+
+
+def test_table_findings_name_missing_permissions():
+    info = TableInfo("t", partition_key="id", deletion_protection=True,
+                     errors={"pitr": "AccessDeniedException", "tags": "ThrottlingException"})
+    [(_, message)] = table_findings(info)
+    assert message == ("Couldn't read point-in-time recovery (AccessDeniedException; needs "
+                       "dynamodb:DescribeContinuousBackups), tags (ThrottlingException).")
+
+
+def test_count_arguments():
+    assert [ddbmod._as_count(v, "n") for v in (None, 5, 5.0, "10,000", "10k", "1.5k", "2M")] == [
+        None, 5, 5, 10_000, 10_000, 1500, 2_000_000]
+    with pytest.raises(ValueError, match="or None for no limit"):
+        ddbmod._as_count("lots", "limit")
+    with pytest.raises(ValueError, match="n takes a number of items"):
+        ddbmod._as_int(None, "n")
 
 
 # ------------------------------------------------------------------- AWS (moto)
@@ -282,6 +321,14 @@ def test_list_tables_and_describe(core):
     assert "Point-in-time recovery is off" in " ".join(m for _, m in table_findings(info))
     assert core.keys(TABLE, "by-status") == ["status", "created"]
     assert core.key_attributes(TABLE, "by-status") == ["status", "created", "pk", "sk"]
+
+
+def test_table_reports(core):
+    reports = {r.info.name: r for r in core.table_reports()}
+    assert set(reports) == {TABLE, "counters"} and reports[TABLE].info.tags == {"team": "ml"}
+    assert reports["counters"].info.pitr is False and not reports["counters"].metrics.has_data
+    only = core.table_reports(match="count*", metrics=False)
+    assert [r.info.name for r in only] == ["counters"] and only[0].metrics is None
 
 
 def test_get(core):
@@ -419,15 +466,21 @@ def run(capsys, fn, *args, **kwargs):
 
 def test_ui_text_reports(ui, capsys):
     out = run(capsys, ui.tables)
-    assert "DynamoDB tables in us-east-1 (2)" in out and "pk (S) + sk (S)" in out and "provisioned 5 R / 5 W" in out
+    for expected in ("DynamoDB tables in us-east-1 (2)", "pk (string) + sk (string)",
+                     "provisioned: 5 read / 5 write units", "Tables with warnings: 2", "Point-in-time recovery is off"):
+        assert expected in out
+    out = run(capsys, ui.tables, "count*")
+    assert "DynamoDB tables in us-east-1 (1)" in out and "orders" not in out
     out = run(capsys, ui.table_info, TABLE)
     for expected in ("Point-in-time recovery", "by-status", "query('orders', <status>, sort=<created>, index='by-status')",
-                     "Estimated monthly cost", "team"):
+                     "Estimated monthly cost", "team", "Table class: standard", "TTL: off", "Stream: off",
+                     "status (string) + created (string)", "update-continuous-backups --table-name orders"):
         assert expected in out
     out = run(capsys, ui.scan, TABLE, 3)
-    assert "USER#0" in out and "call .more()" in out
+    assert "USER#0" in out and "call .more()" in out and "Read cost (on-demand): " in out
     out = run(capsys, ui.get, TABLE, "USER#1", "PROFILE", as_json=True)
     assert "    city" in out and "string set" in out and "(partition key)" in out and '"zip": "411001"' in out
+    assert "Read cost: 1 read unit (0.5 if eventually consistent)" in out and "Write cost: 1 write unit" in out
     out = run(capsys, ui.query, TABLE, "USER#2", ("begins_with", "ORDER#"), n=3)
     assert "sk begins_with 'ORDER#'" in out and "ORDER#0002" in out
     assert "status = 'failed'" in run(capsys, ui.query, TABLE, "failed", index="by-status")
@@ -457,15 +510,34 @@ def test_ui_more_pages_through(ui, capsys):
 def test_ui_notes_empty_results(ui, capsys):
     assert "Keys are case-sensitive" in run(capsys, ui.query, TABLE, "user#1")
     assert "No item with this key" in run(capsys, ui.get, TABLE, "USER#1", "NOPE")
-    assert "No items matched" in run(capsys, ui.scan, TABLE, where={"status": "lost"})
+    out = run(capsys, ui.scan, TABLE, where={"status": "lost"})
+    assert "No items matched" in out and "Values are typed" in out
 
 
 def test_ui_turns_errors_into_notes(ui, capsys):
     out = run(capsys, ui.scan, "missing")
-    assert "[!]" in out and "table not found in us-east-1" in out
+    assert "[!]" in out and "table 'missing' not found in us-east-1" in out and "tables() lists" in out
+    assert "Did you mean 'orders'?" in run(capsys, ui.scan, "Orders")
+    assert "Did you mean 'counters'?" in run(capsys, ui.sql, 'SELECT * FROM "counter"')
     assert "no index 'nope'" in run(capsys, ui.query, TABLE, "x", index="nope")
     assert "ValueError" in run(capsys, ui.scan, TABLE, where={"status": ("~", 1)})
     assert "pass 2 values" in run(capsys, ui.get, TABLE, "USER#1")
+    assert "limit takes a number of items" in run(capsys, ui.value_counts, TABLE, "status", limit="lots")
+    assert "missing 1 required positional argument" in run(capsys, ui.scan)
+
+
+def test_ui_accepts_counts_as_text(ui, capsys):
+    out = run(capsys, ui.value_counts, TABLE, "status", limit="10k")
+    assert "46 items read (the whole table)" in out
+
+
+def test_ui_without_a_region(monkeypatch, capsys):
+    for name in ("AWS_DEFAULT_REGION", "AWS_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", os.devnull)
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    ui = DynamoDBView(mode="text")  # no traceback here...
+    assert "No AWS region is set" in run(capsys, ui.tables)  # ...and a note that says what to pass
 
 
 def test_ui_hides_extra_columns(core, capsys):

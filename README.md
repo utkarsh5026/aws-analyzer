@@ -171,7 +171,7 @@ Read-only. Grant what you need:
 ui = DynamoDBView()                # uses the notebook's execution role and region
 ui.help()                          # every command with a one-line description
 
-ui.tables()                        # every table in the region: key, items, size, billing, est. cost
+ui.tables()                        # every table in the region: key, items, size, est. cost, warnings
 ui.table_info("orders")            # indexes and how to query each, capacity, usage, backups, risks
 ui.scan("orders")                  # the first 20 items as a table...
 ui.more()                          # ...and the next 20
@@ -188,8 +188,8 @@ binary is `bytes`. Nothing in the file writes to a table.
 
 | Command | Shows |
 |---|---|
-| `tables()` | Every table in the region with its key, item count, size, billing mode, indexes and estimated monthly cost |
-| `table_info(table)` | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks (no point-in-time recovery, throttling, capacity far above or near what's used) |
+| `tables(match=None)` | Every table in the region in one table: key, item count, size, billing mode, indexes, estimated monthly cost (including on-demand requests at the last 24 hours' rate) and a list of warnings. `match="prod-*"` checks only matching names |
+| `table_info(table)` | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks, each with what to do about it: no point-in-time recovery (with its cost and the command that turns it on), throttling, capacity near its limit, or capacity far above what's used (with what less capacity or on-demand would cost) |
 | `scan(table, n=20, where=, index=, attributes=)` | Items from the start of the table (or an index) as a table: key attributes first, then the others by how many items have them, nested maps as `address.city` columns. Shows how many items were read to find them and the read units used |
 | `query(table, partition, sort=None, index=, where=, descending=)` | Items sharing one partition key, in sort-key order, on the table or an index |
 | `sample(table, n=20)` | About n items spread across the whole key space. `scan` shows the start of the table, which can all be one partition key; this reads a few items from many slices of it |
@@ -248,6 +248,7 @@ ddb.value_counts("orders", "status").counts         # {'paid': Stat(count=..., s
 ddb.count("orders", where={"status": "failed"}).matched
 ddb.describe("orders")                              # TableInfo: keys, indexes, capacity, TTL, backups, tags
 ddb.table_metrics("orders", hours=24)               # consumed units, busiest period, throttle events
+ddb.table_reports(match="prod-*")                   # [TableReport]: describe() + usage for every table
 
 for item in ddb.iter_items("orders", limit=None):   # stream a full scan without holding it in memory
     ...
@@ -256,7 +257,7 @@ for item in ddb.iter_items("orders", limit=None):   # stream a full scan without
 The analysis functions are pure (no AWS calls), so they also work on items you already have, for example a
 DynamoDB export to S3: `from_dynamo_item`, `to_dynamo`, `items_to_df`, `flatten_item`, `profile_items`,
 `count_values`, `item_size`, `key_pattern`, `build_filter`, `table_findings`, `profile_findings`,
-`table_monthly_cost`.
+`table_monthly_cost`, `capacity_cost`, `request_cost`.
 
 ```python
 rows = S3Analyzer().read_jsonl("s3://my-bucket/AWSDynamoDB/01234-abcd/data/part.json.gz")   # from s3.py

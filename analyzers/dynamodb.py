@@ -22,7 +22,7 @@ Quick start
 -----------
     ui = DynamoDBView()                               # or DynamoDBView(DynamoDBAnalyzer(region="eu-west-1"))
     ui.help()                                         # list every command
-    ui.tables()                                       # every table: keys, items, size, billing, cost
+    ui.tables()                                       # every table: keys, items, size, cost, warnings
     ui.table_info("orders")                           # keys, indexes and how to query each, capacity, backups
     ui.scan("orders")                                 # the first 20 items as a table...
     ui.more()                                         # ...and the next 20
@@ -40,6 +40,8 @@ Quick start
 from __future__ import annotations
 
 import base64
+import difflib
+import fnmatch
 import functools
 import heapq
 import html
@@ -62,7 +64,7 @@ import boto3
 from boto3.dynamodb.conditions import Attr, ConditionBase, ConditionExpressionBuilder, Key
 from boto3.dynamodb.types import Binary, TypeSerializer
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
 # =============================================================================
 # 1. Helpers: conversion and formatting
@@ -147,6 +149,36 @@ def _require(module: str, purpose: str) -> Any:
 
 def _error_code(exc: ClientError) -> str:
     return exc.response.get("Error", {}).get("Code", "Unknown")
+
+
+def _error_name(exc: ClientError | BotoCoreError) -> str:
+    return _error_code(exc) if isinstance(exc, ClientError) else type(exc).__name__
+
+
+def _why(code: str, permission: str) -> str:
+    """'AccessDeniedException' -> 'AccessDeniedException; needs dynamodb:Scan'. Other codes stay as they are."""
+    return f"{code}; needs {permission}" if "denied" in code.lower() or code == "UnauthorizedOperation" else code
+
+
+_COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE)
+
+
+def _as_int(value: Any, name: str, *, hint: str = "") -> int:
+    """A number-of-items argument: 1000, '10,000', '10k' or '2m' -> int."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer():
+        return int(value)
+    match = _COUNT_RE.match(value) if isinstance(value, str) else None
+    if match:
+        number = float(match.group(1).replace(",", "").replace("_", "")) * {"": 1, "k": 1000, "m": 10**6}[
+            match.group(2).lower()]
+        if number.is_integer():
+            return int(number)
+    raise ValueError(f"{name} takes a number of items, like 1000 or '10k'{hint}; got {value!r}")
+
+
+def _as_count(value: Any, name: str) -> int | None:
+    """Like _as_int, for limits where None means no limit."""
+    return None if value is None else _as_int(value, name, hint=", or None for no limit")
 
 
 def _clip(text: str, width: int = 90) -> str:
@@ -482,6 +514,15 @@ class TableMetrics:
     @property
     def has_data(self) -> bool:
         return self.read_units is not None or self.write_units is not None
+
+
+@dataclass
+class TableReport:
+    """One table in the all-tables overview."""
+
+    info: TableInfo
+    metrics: TableMetrics | None = None
+    metrics_error: str | None = None
 
 
 @dataclass
@@ -936,7 +977,7 @@ def table_monthly_cost(info: TableInfo, prices: dict[str, float] | None = None,
         global_indexes = [i for i in info.indexes if i.kind == "global"]
         reads = info.read_capacity + sum(i.read_capacity or 0 for i in global_indexes)
         writes = (info.write_capacity or 0) + sum(i.write_capacity or 0 for i in global_indexes)
-        cost["capacity"] = HOURS_PER_MONTH * (reads * prices["read_capacity_hour"] + writes * prices["write_capacity_hour"])
+        cost["capacity"] = capacity_cost(reads, writes, prices)
     if info.on_demand and metrics is not None and metrics.has_data:
         spent = request_cost(metrics.read_units or 0.0, metrics.write_units or 0.0, prices)
         cost["requests"] = spent * HOURS_PER_MONTH / metrics.hours
@@ -951,40 +992,116 @@ def request_cost(read_units: float = 0.0, write_units: float = 0.0, prices: dict
     return (read_units * prices["read_request"] + write_units * prices["write_request"]) / 1e6
 
 
+def capacity_cost(read_capacity: float = 0, write_capacity: float = 0, prices: dict[str, float] | None = None) -> float:
+    """USD per month for provisioned read and write capacity units."""
+    prices = DYNAMODB_PRICES if prices is None else prices
+    return HOURS_PER_MONTH * (read_capacity * prices["read_capacity_hour"] + write_capacity * prices["write_capacity_hour"])
+
+
+TARGET_USE = 0.7  # suggested capacity leaves the busiest period at 70% of it (auto scaling's default target)
+
+_LARGE_ITEM_ADVICE = ("Keeping large attributes (documents, blobs, long text) in S3 with a pointer in the item, or "
+                      "compressing them, cuts the cost of every read.")
+
+# describe() section -> (what it is, the permission that reads it)
+_SECTIONS = {
+    "describe": ("the table", "dynamodb:DescribeTable"),
+    "ttl": ("time to live", "dynamodb:DescribeTimeToLive"),
+    "pitr": ("point-in-time recovery", "dynamodb:DescribeContinuousBackups"),
+    "tags": ("tags", "dynamodb:ListTagsOfResource"),
+}
+
+
+def _table_ref(table: str) -> str:
+    return repr(table) if table else "<table>"
+
+
 def profile_findings(profile: TableProfile) -> list[tuple[str, str]]:
     """Plain-language data-quality and cost notes about profiled items -> [(level, message)]."""
     found: list[tuple[str, str]] = []
     if not profile.items:
         return found
+    table = _table_ref(profile.table)
     for attr in profile.attributes.values():
         kinds = [(kind, n) for kind, n in attr.types.most_common() if kind != "NULL"]
         if len(kinds) > 1:
             mix = ", ".join(f"{TYPE_NAMES.get(kind, kind)} in {n:,}" for kind, n in kinds)
+            odd = kinds[-1][0]
             found.append(("warn", f"'{attr.path}' holds different types ({mix} items). A filter or key condition "
-                                  "matches one type only, so the other items silently drop out."))
+                                  "matches one type only, so the other items silently drop out. Find the "
+                                  f"{TYPE_NAMES.get(odd, odd)} ones with "
+                                  f"scan({table}, where={{{attr.path!r}: ('type', {odd!r})}})."))
     empties = [a for a in profile.attributes.values() if a.empty]
     if empties:
         listed = ", ".join(f"'{a.path}' ({_plural(a.empty, 'item')})" for a in empties[:8])
-        found.append(("info", f"Empty strings or binary values in {listed}."))
+        found.append(("info", f"Empty strings or binary values in {listed}. They count as present, so "
+                              f"where={{{empties[0].path!r}: ('exists',)}} matches them too; if they mean "
+                              "\"unknown\", add ('!=', '') to filters."))
     big = profile.size_histogram.get("300 - 400 KB", Stat()).count
     if big:
         found.append(("warn", f"{_plural(big, 'item')} over 300 KB. DynamoDB rejects items over 400 KB, and one "
-                              "strongly consistent read of an item that size costs up to 100 read units."))
+                              "strongly consistent read of an item that size costs up to 100 read units. "
+                              f"largest({table}) lists them. {_LARGE_ITEM_ADVICE}"))
     if profile.avg_size > 4 * KB:
         units = read_units(math.ceil(profile.avg_size))
         found.append(("info", f"The average item is {human_size(profile.avg_size)}, so reading one costs "
                               f"{_units(units)} read units (half that eventually consistent). Reading fewer "
-                              "attributes doesn't lower this: the whole item is billed."))
+                              f"attributes doesn't lower this: the whole item is billed. {_LARGE_ITEM_ADVICE}"))
     singles = sum(1 for a in profile.attributes.values() if a.depth == 0 and a.count == 1)
     if profile.items >= 20 and singles >= 20:
         found.append(("info", f"{singles:,} attributes appear in only one item. Attribute names built from data "
-                              "(dates, IDs) can't be indexed and are hard to query."))
+                              "(dates, IDs) can't be indexed and are hard to query. Keeping that data in a map, "
+                              "or as separate items with the date or ID in the sort key, makes it queryable."))
     return found
 
 
-def table_findings(info: TableInfo, metrics: TableMetrics | None = None) -> list[tuple[str, str]]:
-    """Plain-language risks and cost notes for a table -> [(level, message)]."""
+def _capacity_findings(info: TableInfo, metrics: TableMetrics, prices: dict[str, float]) -> list[tuple[str, str]]:
+    """Provisioned capacity against CloudWatch's busiest period: near the limit, or paying for unused units."""
     found: list[tuple[str, str]] = []
+    minutes = metrics.period // 60
+    low: list[str] = []
+    suggested = {"Reads": info.read_capacity or 0, "Writes": info.write_capacity or 0}
+    for label, peak, capacity in (("Reads", metrics.peak_reads, info.read_capacity),
+                                  ("Writes", metrics.peak_writes, info.write_capacity)):
+        if not capacity:
+            continue
+        share = (peak or 0.0) / capacity
+        if share >= 0.8:
+            found.append(("warn", f"{label} averaged {_units(peak)} units/s in the busiest {minutes} minutes, "
+                                  f"{share:.0%} of the {capacity:,} provisioned. Short bursts above it get throttled: "
+                                  "raise the capacity or turn on auto scaling."))
+        elif share < 0.2:
+            shown = "under 1%" if 0 < share < 0.01 else f"{share:.0%}"
+            low.append(f"{label.lower()} peaked at {shown} of the {capacity:,} provisioned units")
+            suggested[label] = max(1, math.ceil((peak or 0.0) / TARGET_USE))
+    if not low:
+        return found
+    now = capacity_cost(info.read_capacity or 0, info.write_capacity or 0, prices)
+    lowered = capacity_cost(suggested["Reads"], suggested["Writes"], prices)
+    on_demand = request_cost(metrics.read_units or 0.0, metrics.write_units or 0.0, prices) * HOURS_PER_MONTH / metrics.hours
+    options = []
+    if lowered < now:
+        options.append(f"{suggested['Reads']:,} read / {suggested['Writes']:,} write units (the busiest period at "
+                       f"{TARGET_USE:.0%} use) would cost {human_money(lowered)}")
+    if on_demand < now:
+        options.append(f"on-demand at this traffic about {human_money(on_demand)}")
+    if not options:
+        return found
+    saving = now - min(lowered, on_demand)
+    text = "; ".join(low)
+    found.append(("warn" if saving >= 10 else "info",
+                  f"{text[0].upper()}{text[1:]} in the last {metrics.hours}h. The table's own capacity costs "
+                  f"{human_money(now)}/month; {' and '.join(options)}. If the last {metrics.hours}h were typical, "
+                  f"that saves up to {human_money(saving)}/month. Auto scaling can also adjust the capacity for you."))
+    return found
+
+
+def table_findings(info: TableInfo, metrics: TableMetrics | None = None,
+                   prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
+    """Plain-language risks and cost notes for a table, each with what to do about it -> [(level, message)]."""
+    prices = DYNAMODB_PRICES if prices is None else prices
+    found: list[tuple[str, str]] = []
+    pk = info.partition_key or "<partition key>"
     if info.status and info.status != "ACTIVE":
         found.append(("info", f"The table is {info.status}."))
     for idx in info.indexes:
@@ -992,31 +1109,35 @@ def table_findings(info: TableInfo, metrics: TableMetrics | None = None) -> list
             state = "backfilling" if idx.backfilling else idx.status
             found.append(("info", f"Index {idx.name} is {state}; queries on it may miss items until it's done."))
     if "pitr" not in info.errors and info.pitr is False:
+        price = (f", for about {human_money(info.size_bytes / GB * prices['pitr'])}/month at this table's size"
+                 if info.size_bytes else "")
         found.append(("warn", "Point-in-time recovery is off: an accidental delete or bad write can't be rolled "
-                              "back. Turning it on keeps continuous backups for up to 35 days."))
+                              f"back. Turning it on keeps continuous backups for up to 35 days{price}: "
+                              f"aws dynamodb update-continuous-backups --table-name {info.name} "
+                              "--point-in-time-recovery-specification PointInTimeRecoveryEnabled=true"))
     if info.deletion_protection is False:
-        found.append(("info", "Deletion protection is off, so one DeleteTable call removes the table."))
+        found.append(("info", "Deletion protection is off, so one DeleteTable call removes the table. To turn it on: "
+                              f"aws dynamodb update-table --table-name {info.name} --deletion-protection-enabled"))
     if metrics and (metrics.read_throttles or metrics.write_throttles):
+        if info.on_demand:
+            fix = ("On an on-demand table this usually means one partition key gets most of the traffic, or traffic "
+                   "more than doubled suddenly")
+        else:
+            fix = "Raise the capacity or turn on auto scaling; if that doesn't help, one partition key may be hot"
         found.append(("warn", f"{metrics.read_throttles:,} read and {metrics.write_throttles:,} write throttle "
-                              f"events in the last {metrics.hours}h: some requests were rejected and retried."))
+                              f"events in the last {metrics.hours}h: some requests were rejected and retried, which "
+                              f"slows the application. {fix}. value_counts({info.name!r}, {pk!r}) shows whether a "
+                              "few partition keys hold most of the items."))
     if metrics and metrics.has_data and not info.on_demand:
-        minutes = metrics.period // 60
-        for label, peak, capacity in (("Reads", metrics.peak_reads, info.read_capacity),
-                                      ("Writes", metrics.peak_writes, info.write_capacity)):
-            if not capacity:
-                continue
-            share = (peak or 0.0) / capacity
-            if share >= 0.8:
-                found.append(("warn", f"{label} averaged {_units(peak)} units/s in the busiest {minutes} minutes, "
-                                      f"{share:.0%} of the {capacity:,} provisioned. Short bursts above it get throttled."))
-            elif share < 0.2:
-                found.append(("info", f"{label} peaked at {share:.0%} of the {capacity:,} provisioned units in the "
-                                      f"last {metrics.hours}h. Less capacity, auto scaling or on-demand could cost less."))
+        found += _capacity_findings(info, metrics, prices)
     if info.avg_item_size and info.avg_item_size > 4 * KB:
         found.append(("info", f"Items average {human_size(info.avg_item_size)}, so each read of one item costs "
-                              f"{_units(read_units(math.ceil(info.avg_item_size)))} read units."))
+                              f"{_units(read_units(math.ceil(info.avg_item_size)))} read units. {_LARGE_ITEM_ADVICE} "
+                              f"largest({info.name!r}) shows the biggest items."))
     if info.errors:
-        found.append(("info", "Couldn't read: " + ", ".join(f"{k} ({v})" for k, v in info.errors.items())))
+        parts = [f"{_SECTIONS.get(k, (k, ''))[0]} ({_why(v, _SECTIONS[k][1]) if k in _SECTIONS else v})"
+                 for k, v in info.errors.items()]
+        found.append(("info", "Couldn't read " + ", ".join(parts) + "."))
     return found
 
 
@@ -1042,13 +1163,30 @@ class DynamoDBAnalyzer:
                  client: Any = None, prices: dict[str, float] | None = None):
         self.session = session or boto3.Session(profile_name=profile, region_name=region)
         self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
-        self.client = client or self.session.client("dynamodb", config=self._config)
+        self._client = client
+        self._cloudwatch_client: Any = None
         self.prices = {**DYNAMODB_PRICES, **(prices or {})}
         self._tables: dict[str, TableInfo] = {}
 
     @property
+    def client(self) -> Any:
+        """The DynamoDB client, made on first use so a missing region shows up as a readable error."""
+        if self._client is None:
+            try:
+                self._client = self.session.client("dynamodb", config=self._config)
+            except NoRegionError:
+                raise ValueError("No AWS region is set, and DynamoDB tables are regional. Pass one: "
+                                 "DynamoDBView(DynamoDBAnalyzer(region='us-east-1')), or set AWS_DEFAULT_REGION.") from None
+        return self._client
+
+    @property
     def region(self) -> str:
         return self.client.meta.region_name
+
+    def _cloudwatch(self) -> Any:
+        if self._cloudwatch_client is None:
+            self._cloudwatch_client = self.session.client("cloudwatch", region_name=self.region)
+        return self._cloudwatch_client
 
     # ------------------------------------------------------------------ tables
 
@@ -1066,10 +1204,36 @@ class DynamoDBAnalyzer:
     def _safe_table(self, name: str) -> TableInfo:
         try:
             return self.table(name, refresh=True)
-        except ClientError as exc:
-            return TableInfo(name, errors={"describe": _error_code(exc)})
-        except BotoCoreError as exc:
-            return TableInfo(name, errors={"describe": type(exc).__name__})
+        except (ClientError, BotoCoreError) as exc:
+            return TableInfo(name, errors={"describe": _error_name(exc)})
+
+    def table_reports(self, *, match: str | None = None, metrics: bool = True, max_workers: int = 8,
+                      progress: Callable[[int], None] | None = None) -> list[TableReport]:
+        """describe() (and CloudWatch usage unless metrics=False) for every table, checked in parallel.
+        match: only tables whose name matches this glob, e.g. 'prod-*'."""
+        names = [n for n in self.list_table_names() if match is None or fnmatch.fnmatchcase(n, match)]
+        if metrics and names:
+            self._cloudwatch()  # boto3 sessions aren't thread-safe: make the client before the threads start
+
+        def check(name: str) -> TableReport:
+            try:
+                report = TableReport(self.describe(name))
+            except (ClientError, BotoCoreError) as exc:
+                return TableReport(TableInfo(name, errors={"describe": _error_name(exc)}))
+            if metrics:
+                try:
+                    report.metrics = self.table_metrics(name)
+                except (ClientError, BotoCoreError) as exc:
+                    report.metrics_error = _error_name(exc)
+            return report
+
+        reports: list[TableReport] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for report in pool.map(check, names):
+                reports.append(report)
+                if progress:
+                    progress(len(reports))
+        return reports
 
     def table(self, table: str, *, refresh: bool = False) -> TableInfo:
         """Keys, indexes, billing and DynamoDB's item count / size estimate (one DescribeTable call, cached)."""
@@ -1084,10 +1248,8 @@ class DynamoDBAnalyzer:
         def get(section: str, call: Callable[[], Any]) -> Any:
             try:
                 return call()
-            except ClientError as exc:
-                info.errors[section] = _error_code(exc)
-            except BotoCoreError as exc:
-                info.errors[section] = type(exc).__name__
+            except (ClientError, BotoCoreError) as exc:
+                info.errors[section] = _error_name(exc)
             return None
 
         if resp := get("ttl", lambda: self.client.describe_time_to_live(TableName=table)):
@@ -1122,8 +1284,7 @@ class DynamoDBAnalyzer:
             "Period": period, "Stat": "Sum"}} for i, name in enumerate(names)]
         now = _utcnow()
         values: dict[str, list[float]] = {name: [] for name in names}
-        cloudwatch = self.session.client("cloudwatch", region_name=self.region)
-        for page in cloudwatch.get_paginator("get_metric_data").paginate(
+        for page in self._cloudwatch().get_paginator("get_metric_data").paginate(
                 MetricDataQueries=queries, StartTime=now - timedelta(hours=hours), EndTime=now):
             for series in page["MetricDataResults"]:
                 values[names[int(series["Id"][1:])]] += series.get("Values", [])
@@ -1241,6 +1402,7 @@ class DynamoDBAnalyzer:
         """Page through a scan or query until n items came back, the data ran out, or scan_limit items were
         read. Stopping inside a page sets last_key to the last item returned, so passing it back as
         start_key resumes right after that item."""
+        n, scan_limit = _as_count(n, "n"), _as_count(scan_limit, "scan_limit")
         if n is not None and n < 1:
             raise ValueError("n must be at least 1 (or None for everything)")
         page = ItemPage(table=table, index=index, operation=operation, keys=self.key_attributes(table, index))
@@ -1283,6 +1445,7 @@ class DynamoDBAnalyzer:
         items can all share a few partition keys; this reads a few items from each of `segments` slices
         of the key space (parallel-scan segments, fetched in parallel; default one per item, up to 100).
         scan_limit caps the items read."""
+        n, scan_limit = _as_int(n, "n"), _as_count(scan_limit, "scan_limit")
         if n < 1:
             raise ValueError("n must be at least 1")
         segments = segments or min(n, 100)
@@ -1323,6 +1486,7 @@ class DynamoDBAnalyzer:
         """Run a PartiQL statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#1'). Parameters fill
         the ? placeholders in order. Pages are kept whole (so you may get a few more than n) and last_key
         continues exactly, as next_token=. Without the partition key in WHERE, a SELECT scans the table."""
+        n = _as_count(n, "n")
         params: dict[str, Any] = {"Statement": statement, "ReturnConsumedCapacity": "TOTAL"}
         if parameters:
             params["Parameters"] = [to_dynamo(p) for p in parameters]
@@ -1359,6 +1523,7 @@ class DynamoDBAnalyzer:
     def _pages(self, params: dict[str, Any], stats: ReadStats, *, limit: int | None = None,
                progress: Callable[[int], None] | None = None) -> Iterator[dict[str, Any]]:
         """Scan responses (up to 1 MB each) until the end of the table or until `limit` items were read."""
+        limit = _as_count(limit, "limit")
         params = dict(params, ReturnConsumedCapacity="TOTAL")
         started = time.monotonic()
         try:
@@ -1419,6 +1584,7 @@ class DynamoDBAnalyzer:
                 index: str | None = None, progress: Callable[[int], None] | None = None) -> ItemPage:
         """The n biggest items (by DynamoDB's sizing rules), biggest first, among the first `limit` items
         read (None = the whole table)."""
+        n = _as_int(n, "n")
         page = ItemPage(table=table, index=index, operation="largest", keys=self.key_attributes(table, index))
         items = self.iter_items(table, where=where, index=index, limit=limit, progress=progress, stats=page.stats)
         page.items = [item for _, _, item in heapq.nlargest(n, ((item_size(it), i, it) for i, it in enumerate(items)))]
@@ -1641,14 +1807,26 @@ def _target(table: str, index: str | None) -> str:
 
 
 def _keys_label(info: TableInfo | IndexInfo, types: dict[str, str]) -> str:
-    """'pk (S) + sk (N)'."""
-    return " + ".join(f"{k} ({types.get(k, '?')})" for k in info.keys if k) or "-"
+    """'pk (string) + sk (number)'."""
+    return " + ".join(f"{k} ({TYPE_NAMES.get(types.get(k, ''), '?')})" for k in info.keys if k) or "-"
+
+
+def _capacity_label(read: int | None, write: int | None) -> str:
+    return f"{_count(read)} read / {_count(write)} write units"
 
 
 def _billing_label(info: TableInfo) -> str:
     if info.on_demand:
         return "on-demand"
-    return f"provisioned {_count(info.read_capacity)} R / {_count(info.write_capacity)} W"
+    return "provisioned: " + _capacity_label(info.read_capacity, info.write_capacity)
+
+
+_TABLE_CLASSES = {"STANDARD": "standard", "STANDARD_INFREQUENT_ACCESS": "standard-infrequent access (cheaper storage)"}
+_STREAM_VIEWS = {"KEYS_ONLY": "on: keys only", "NEW_IMAGE": "on: new item", "OLD_IMAGE": "on: old item",
+                 "NEW_AND_OLD_IMAGES": "on: old and new item"}
+_TTL_STATES = {"DISABLED": "off", "ENABLING": "turning on", "DISABLING": "turning off"}
+_NO_MATCH = ("No items matched. Values are typed: '100' (text) doesn't match 100 (a number); "
+             "schema() shows each attribute's type.")
 
 
 def _projection_label(idx: IndexInfo) -> str:
@@ -1731,9 +1909,9 @@ def _friendly_errors(method: Callable) -> Callable:
             error = exc.response.get("Error", {})
             code, message = error.get("Code", "Error"), error.get("Message", str(exc))
             if code == "ResourceNotFoundException":
-                message = f"table not found in {self.core.region} (names are case-sensitive, and tables are regional)"
+                message = self._not_found(method.__name__, args, kwargs)
             self._show([_Note(f"{code}: {message}  [{method.__name__}]", "warn")])
-        except (BotoCoreError, ValueError, ImportError) as exc:
+        except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
             self._show([_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")])
 
     return wrapper
@@ -1807,6 +1985,22 @@ class DynamoDBView:
         self._show([_Title("DynamoDBView commands", "Data versions of each live on .core (DynamoDBAnalyzer)"),
                     _Table(["Command", "What it shows"], rows, max_rows=0)])
 
+    def _not_found(self, command: str, args: tuple, kwargs: dict) -> str:
+        """Why a table wasn't found, with the closest names in the region ('Orders' -> 'orders')."""
+        name = kwargs.get("statement" if command == "sql" else "table", args[0] if args else "")
+        if command == "sql":
+            match = _FROM_RE.search(str(name))
+            name = (match.group(1) or match.group(2)) if match else ""
+        text = f"table {name!r} not found in {self.core.region}" if name else f"table not found in {self.core.region}"
+        try:
+            names = self.core.list_table_names()
+        except (ClientError, BotoCoreError):
+            names = []
+        close = [n for n in names if n.lower() == str(name).lower()] or difflib.get_close_matches(str(name), names, n=3)
+        if close:
+            return text + f". Did you mean {' or '.join(map(repr, close))}? Names are case-sensitive."
+        return text + " (names are case-sensitive, and tables are regional). tables() lists every table in the region."
+
     def _price_basis(self) -> str:
         return "us-east-1 list prices" if self.core.prices == DYNAMODB_PRICES else "your prices"
 
@@ -1836,7 +2030,8 @@ class DynamoDBView:
         cards = [("Items", f"{len(page.items):,}")]
         if st.scanned > st.matched:
             cards.append(("Items read", f"{st.scanned:,}"))
-        cards += [("Read units", _units(st.read_units)), ("Time", f"{st.seconds:.1f}s")]
+        cards += [("Read units", _units(st.read_units)), ("Read cost (on-demand)", self._read_cost(st)),
+                  ("Time", f"{st.seconds:.1f}s")]
         blocks: list[Any] = [_Title(title + (f"  (page {number})" if number > 1 else ""), sub), _Cards(cards)]
         if not page.items:
             blocks.append(_Note(empty))
@@ -1853,25 +2048,64 @@ class DynamoDBView:
     # ------------------------------------------------------------------ tables
 
     @_friendly_errors
-    def tables(self) -> None:
-        """Every table in the region: key, item count, size, billing mode, indexes and estimated monthly cost."""
-        infos = sorted(self.core.list_tables(), key=lambda t: t.name)
-        costs = [sum(table_monthly_cost(t, self.core.prices).values()) if not t.errors else None for t in infos]
-        rows = [[t.name, t.status or "?", _count(t.item_count), human_size(t.size_bytes),
-                 _keys_label(t, t.attribute_types), _billing_label(t) if not t.errors else "-",
-                 str(len(t.indexes)), human_money(cost), human_age(t.created)] for t, cost in zip(infos, costs)]
-        blocks: list[Any] = [_Title(
-            f"DynamoDB tables in {self.core.region} ({len(infos)})",
-            f"{human_size(sum(t.size_bytes or 0 for t in infos))} in total · item counts and sizes are DynamoDB's "
-            f"estimates, refreshed about every 6 hours · cost is storage + provisioned capacity at {self._price_basis()}")]
-        if not infos:
-            blocks.append(_Note(f"No tables in {self.core.region}. Tables are regional: try "
-                                "DynamoDBView(DynamoDBAnalyzer(region=...))."))
+    def tables(self, match: str | None = None, *, metrics: bool = True) -> None:
+        """Every table in the region: key, items, size, billing, estimated monthly cost and warnings.
+        match='prod-*' checks only matching table names."""
+        with self._progress("Checking tables", unit="tables") as tick:
+            reports = sorted(self.core.table_reports(match=match, metrics=metrics, progress=tick),
+                             key=lambda r: r.info.name)
+        rows: list[list[str]] = []
+        warnings: list[list[str]] = []
+        unreadable: list[str] = []
+        no_usage: list[str] = []
+        total = 0.0
+        for report in reports:
+            t, usage = report.info, report.metrics
+            if "describe" in t.errors:
+                unreadable.append(f"{t.name} ({_why(t.errors['describe'], 'dynamodb:DescribeTable')})")
+                rows.append([t.name, "?", "-", "-", "-", "-", "-", "-", "-", "-"])
+                continue
+            cost = sum(table_monthly_cost(t, self.core.prices, usage).values())
+            total += cost
+            found = [message for level, message in table_findings(t, usage, self.core.prices) if level == "warn"]
+            warnings += [[t.name, message] for message in found]
+            if report.metrics_error:
+                no_usage.append(f"{t.name} ({_why(report.metrics_error, 'cloudwatch:GetMetricData')})")
+            rows.append([t.name, t.status or "?", _count(t.item_count), human_size(t.size_bytes),
+                         _keys_label(t, t.attribute_types), _billing_label(t), str(len(t.indexes)), human_money(cost),
+                         str(len(found)), human_age(t.created)])
+        if metrics:
+            basis = f"storage, capacity, backups and on-demand requests at the last 24h's rate, at {self._price_basis()}"
         else:
-            blocks.append(_Table(["Table", "Status", "Items", "Size", "Key", "Billing", "Indexes", "Est. $/month",
-                                  "Created"], rows, max_rows=0))
-        blocks += [_Note(f"{t.name}: couldn't describe ({', '.join(t.errors.values())})", "warn")
-                   for t in infos if t.errors]
+            basis = f"storage, capacity and backups at {self._price_basis()} (on-demand requests not included)"
+        blocks: list[Any] = [
+            _Title(f"DynamoDB tables in {self.core.region} ({len(reports)})",
+                   (f"names matching {match!r} · " if match else "") + "item counts and sizes are DynamoDB's "
+                   f"estimates, refreshed about every 6 hours · cost is {basis}"),
+            _Cards([("Tables", f"{len(reports):,}"),
+                    ("Total size", human_size(sum(r.info.size_bytes or 0 for r in reports))),
+                    ("Est. cost / month", human_money(total)),
+                    ("Tables with warnings", f"{len({name for name, _ in warnings}):,}")]),
+        ]
+        if not reports:
+            where = f"matching {match!r} " if match else ""
+            blocks.append(_Note(f"No tables {where}in {self.core.region}. Tables are regional: try "
+                                "DynamoDBView(DynamoDBAnalyzer(region='eu-west-1'))."))
+            self._show(blocks)
+            return
+        if unreadable:
+            blocks.append(_Note(f"Couldn't describe {', '.join(unreadable)}.", "warn"))
+        if no_usage:
+            blocks.append(_Note(f"No CloudWatch usage for {', '.join(no_usage[:10])}{' …' if len(no_usage) > 10 else ''}: "
+                                "their on-demand request cost and capacity checks are missing."))
+        blocks.append(_Table(["Table", "Status", "Items", "Size", "Key", "Billing", "Indexes", "Est. $/month",
+                              "Warnings", "Created"], rows, max_rows=0))
+        if warnings:
+            blocks.append(_Table(["Table", "Warning"], warnings,
+                                 title="Warnings (table_info(name) shows every finding for one table)", max_rows=0))
+        else:
+            blocks.append(_Note("table_info(name) shows one table's indexes and how to query each, usage, cost "
+                                "and every finding."))
         self._show(blocks)
 
     @_friendly_errors
@@ -1885,10 +2119,12 @@ class DynamoDBView:
             try:
                 usage = self.core.table_metrics(table, hours=hours)
             except (ClientError, BotoCoreError) as exc:
-                blocks.append(_Note(f"CloudWatch metrics unavailable: {exc}", "warn"))
+                blocks.append(_Note(f"No CloudWatch usage ({_why(_error_name(exc), 'cloudwatch:GetMetricData')}), so "
+                                    "the capacity checks and the on-demand request cost are missing.", "warn"))
         types = info.attribute_types
         cost = table_monthly_cost(info, self.core.prices, usage)
-        ttl = f"on ({info.ttl_attribute})" if info.ttl_status == "ENABLED" else (info.ttl_status or "off").lower()
+        ttl = (f"on ({info.ttl_attribute})" if info.ttl_status == "ENABLED"
+               else _TTL_STATES.get(info.ttl_status or "DISABLED", str(info.ttl_status).lower()))
         pitr = "off" if not info.pitr else "on" + (f", {info.pitr_days} days" if info.pitr_days else "")
         encryption = info.encryption + (f" ({info.kms_key.rsplit('/', 1)[-1]})" if info.kms_key else "")
         cards = [
@@ -1900,8 +2136,8 @@ class DynamoDBView:
             ("Sort key", f"{info.sort_key} ({TYPE_NAMES.get(types.get(info.sort_key, ''), '?')})" if info.sort_key else "none"),
             ("Billing", _billing_label(info)),
             ("Est. cost / month", human_money(sum(cost.values()))),
-            ("Table class", info.table_class),
-            ("Stream", info.stream or "off"),
+            ("Table class", _TABLE_CLASSES.get(info.table_class, info.table_class)),
+            ("Stream", _STREAM_VIEWS.get(info.stream, "on") if info.stream else "off"),
             ("TTL", _section(info, "ttl", ttl)),
             ("Point-in-time recovery", _section(info, "pitr", pitr)),
             ("Deletion protection", "on" if info.deletion_protection else "off"),
@@ -1911,7 +2147,7 @@ class DynamoDBView:
         if info.replicas:
             cards.append(("Replicas", ", ".join(info.replicas)))
         blocks.append(_Cards(cards))
-        blocks += [_Note(message, level) for level, message in table_findings(info, usage)]
+        blocks += [_Note(message, level) for level, message in table_findings(info, usage, self.core.prices)]
 
         def capacity(idx: IndexInfo | None) -> list[str]:
             if info.on_demand:
@@ -1919,7 +2155,7 @@ class DynamoDBView:
             if idx is not None and idx.kind == "local":
                 return ["the table's"]
             source = idx or info
-            return [f"{_count(source.read_capacity)} R / {_count(source.write_capacity)} W"]
+            return [_capacity_label(source.read_capacity, source.write_capacity)]
 
         rows = [["(table)", "table", _keys_label(info, types), "all attributes", _count(info.item_count),
                  human_size(info.size_bytes), *capacity(None), _query_hint(info, None)]]
@@ -1960,7 +2196,8 @@ class DynamoDBView:
             return self.core.scan(table, n, where=where, index=index, attributes=attributes, start_key=start,
                                   scan_limit=scan_limit, progress=tick)
 
-        empty = "The table is empty." if where is None else "No items matched."
+        scan_limit = _as_count(scan_limit, "scan_limit")
+        empty = "The table is empty." if where is None else _NO_MATCH
         if where is not None and scan_limit:
             empty += f" Each page reads at most {scan_limit:,} items (scan_limit); pass scan_limit=None to read on."
         self._page(f"Scan {_target(table, index)}", f"where {describe_filter(where)}" if where else
@@ -1998,7 +2235,7 @@ class DynamoDBView:
 
         sub = "spread across the table" + (f" · where {describe_filter(where)}" if where else "")
         self._page(f"Sample of {_target(table, index)}", sub, fetch,
-                   empty="The table is empty." if where is None else "No items matched.")
+                   empty="The table is empty." if where is None else _NO_MATCH)
 
     @_friendly_errors
     def more(self) -> None:
@@ -2027,11 +2264,13 @@ class DynamoDBView:
         blocks.append(_Cards([
             ("Attributes", f"{len(item):,}"),
             ("Size (estimate)", human_size(size)),
-            ("Read cost", f"{_units(read_units(size))} RCU strong · {_units(read_units(size, consistent=False))} eventual"),
-            ("Write cost", f"{write_units(size):,} WCU"),
+            ("Read cost", f"{_units(read_units(size))} read unit{'' if read_units(size) == 1 else 's'} "
+                          f"({_units(read_units(size, consistent=False))} if eventually consistent)"),
+            ("Write cost", _plural(write_units(size), "write unit")),
         ]))
         if size > 300 * KB:
-            blocks.append(_Note(f"This item is {human_size(size)}; DynamoDB rejects items over 400 KB.", "warn"))
+            blocks.append(_Note(f"This item is {human_size(size)}; DynamoDB rejects items over 400 KB. {_LARGE_ITEM_ADVICE}",
+                                "warn"))
         blocks.append(_Table(["Attribute", "Type", "Value"], _item_rows(item, list(primary)), tree=True, max_rows=0))
         if as_json:
             blocks.append(_Text(to_json(item, indent=2), title="JSON"))
@@ -2039,7 +2278,7 @@ class DynamoDBView:
 
     @_friendly_errors
     def sql(self, statement: str, *parameters: Any, n: int = 50) -> None:
-        """Run PartiQL: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#42'); more() continues.
+        """Run a SQL-like (PartiQL) statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#42'); more() continues.
         Without the partition key in WHERE, a SELECT scans the whole table."""
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
             return self.core.sql(statement, *parameters, n=n, next_token=start, progress=tick)
@@ -2107,6 +2346,7 @@ class DynamoDBView:
                      index: str | None = None, top: int = 30) -> None:
         """How often each value of an attribute occurs ('address.city' reaches into maps).
         On the partition key this is each item collection's size: hot or oversized partitions stand out."""
+        limit, top = _as_count(limit, "limit"), _as_int(top, "top")
         with self._progress() as tick:
             vc = self.core.value_counts(table, attribute, limit=limit, where=where, index=index, progress=tick)
         st = vc.stats
@@ -2136,6 +2376,7 @@ class DynamoDBView:
     def largest(self, table: str, n: int = 10, *, limit: int | None = 10_000, where: Any = None,
                 index: str | None = None) -> None:
         """The biggest items (DynamoDB's size rules; the limit is 400 KB) among the first `limit` items read."""
+        n, limit = _as_int(n, "n"), _as_count(limit, "limit")
         with self._progress() as tick:
             page = self.core.largest(table, n, limit=limit, where=where, index=index, progress=tick)
         st = page.stats
@@ -2148,7 +2389,8 @@ class DynamoDBView:
                     ("Read cost (on-demand)", self._read_cost(st)), ("Time", f"{st.seconds:.1f}s")]),
         ]
         if any(size > 300 * KB for size in sizes):
-            blocks.append(_Note("Some items are over 300 KB, close to DynamoDB's 400 KB item limit.", "warn"))
+            blocks.append(_Note(f"Some items are over 300 KB, close to DynamoDB's 400 KB item limit. {_LARGE_ITEM_ADVICE}",
+                                "warn"))
         blocks.append(_Table([*page.keys, "Size", "Read units", "Attributes"],
                              [[format_value(item.get(k), 60) for k in page.keys]
                               + [human_size(size), _units(read_units(size)), f"{len(item):,}"]
