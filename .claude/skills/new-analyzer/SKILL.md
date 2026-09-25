@@ -1,7 +1,7 @@
 ---
 name: new-analyzer
-description: Scaffold a new AWS service analyzer - analyzers/<service>.py with the five-section layout and the duplicated helpers, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service such as the planned bedrock_kb (Bedrock Knowledge Bases).
-argument-hint: "<module name, e.g. bedrock_kb> [what users should be able to see first]"
+description: Scaffold a new AWS service analyzer - analyzers/<service>.py with the five-section layout and the duplicated helpers, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
+argument-hint: "<module name, e.g. sagemaker> [what users should be able to see first]"
 ---
 
 # New analyzer
@@ -11,7 +11,7 @@ users will `import` it). The rest, if given, says what users need from it.
 
 A new analyzer is a new copy-paste file with the same shape as `analyzers/s3.py` and `analyzers/dynamodb.py`.
 Read CLAUDE.md's "Hard constraints" and "Architecture of an analyzer file" first. Everything below follows them.
-`dynamodb.py` is the newest and smallest analyzer, so model the new one on it.
+`dynamodb.py` is the smallest analyzer, so model the new one on it; `bedrock_kb.py` and its tests show how to test a service moto doesn't cover (botocore `Stubber` on injected clients).
 
 ## 1. Research the service (before writing code)
 
@@ -103,7 +103,7 @@ CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check t
   set up in SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
 - `docs/index.html`: add a card for the new guide next to the existing ones.
-- `CLAUDE.md`: update the list of analyzers (`bedrock_kb.py` is planned), the price tables, the moto extras
+- `CLAUDE.md`: update the list of analyzers, the price tables, the moto extras (or the Stubber note, as for Bedrock)
   and anything service-specific a future session needs.
 
 ## 6. Demo data and verification

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>aws-analyzer Guides</title>
-<meta name="description" content="Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets and DynamoDB tables from a SageMaker notebook.">
+<meta name="description" content="Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables and Bedrock knowledge bases from a SageMaker notebook.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
 <script>
 // This page used to be the S3 guide, so old links to its sections (e.g. /#costs) go to where they are now.
@@ -117,7 +117,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
     </header>
 
     <h2 id="services">Guides</h2>
-    <p>Each guide covers setting up in SageMaker, every command with real screenshots, and the IAM permissions it needs.</p>
+    <p>Each guide covers setting up in SageMaker, every command with examples of its output, and the IAM permissions it needs.</p>
     <!-- One card per service. A new analyzer gets its own guide (docs/<service>.html) and a card here. -->
     <div class="services">
       <a class="service" href="s3.html">
@@ -144,11 +144,23 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
         </ul>
         <span class="go">Open the DynamoDB guide →</span>
       </a>
+      <a class="service" href="bedrock_kb.html">
+        <span class="file">bedrock_kb.py</span>
+        <h3>Amazon Bedrock Knowledge Bases</h3>
+        <p class="what">Knowledge bases, what they retrieve, and the answers built on them.</p>
+        <ul>
+          <li>Settings in plain English, sync health and failed documents</li>
+          <li>Search with sources, pages and highlighted passages</li>
+          <li>Answers with each claim linked to its source</li>
+          <li>Compare search settings and measure retrieval hit rate</li>
+        </ul>
+        <span class="go">Open the Knowledge Bases guide →</span>
+      </a>
     </div>
 
     <h2 id="pattern">Every service works the same way</h2>
     <p>The files don't depend on each other, so copy only the ones you need. Each guide shows how to get the file into SageMaker: upload it, fetch it from a cell, or copy it from S3 when the notebook has no internet access.</p>
-    <div class="code"><pre><code><span class="t-k">from</span> s3 <span class="t-k">import</span> S3View      <span class="t-c"># or: from dynamodb import DynamoDBView</span>
+    <div class="code"><pre><code><span class="t-k">from</span> s3 <span class="t-k">import</span> S3View      <span class="t-c"># or: from dynamodb import DynamoDBView, from bedrock_kb import BedrockKBView</span>
 
 ui = S3View()              <span class="t-c"># uses the notebook's IAM role; nothing to configure</span>
 ui.help()                  <span class="t-c"># every command, with a one-line description</span>

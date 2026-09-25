@@ -59,8 +59,19 @@ IAM_ACTION = {
     "s3:GetPublicAccessBlock": "s3:GetBucketPublicAccessBlock",
     "s3control:GetPublicAccessBlock": "s3:GetAccountPublicAccessBlock",
     "dynamodb:ExecuteStatement": "dynamodb:PartiQLSelect",
+    "bedrock-runtime:Converse": "bedrock:InvokeModel",
     "sts:GetCallerIdentity": None,  # needs no permission
 }
+# boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:).
+IAM_PREFIX = {"bedrock-agent": "bedrock", "bedrock-agent-runtime": "bedrock", "bedrock-runtime": "bedrock"}
+
+
+def iam_action(candidate: str) -> str | None:
+    """'s3:ListObjectsV2' -> 's3:ListBucket', 'bedrock-agent:GetKnowledgeBase' -> 'bedrock:GetKnowledgeBase'."""
+    if candidate in IAM_ACTION:
+        return IAM_ACTION[candidate]
+    service, _, name = candidate.partition(":")
+    return f"{IAM_PREFIX.get(service, service)}:{name}"
 
 
 class Report:
@@ -183,6 +194,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)}
     ops = _operations(services)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    # Strings that are keyword values or compared with something (engine="converse", kind == "scan") are labels,
+    # not operation names handed to a client.
+    labels = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.keyword)}
+    labels |= {id(c) for n in ast.walk(tree) if isinstance(n, ast.Compare) for c in (n.left, *n.comparators)}
     found: dict[str, int] = {}
     for node in ast.walk(tree):
         name = None
@@ -190,13 +205,14 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             target = ast.get_source_segment(source, node.func.value) or ""
             if "client" in target.lower() or node.func.attr not in defined:
                 name = node.func.attr
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops:
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops
+              and id(node) not in labels):
             name = node.value  # getattr(client, "get_bucket_policy"), get_paginator("list_objects_v2"), ...
         if name and name not in found:
             found[name] = getattr(node, "lineno", 0)
     for name, lineno in sorted(found.items(), key=lambda kv: kv[1]):
         candidates = [f"{service}:{op}" for service, op in ops[name]]
-        actions = [IAM_ACTION.get(c, c) for c in candidates]
+        actions = [iam_action(c) for c in candidates]
         documented = [c for c, a in zip(candidates, actions) if a is None or _documented(a, readme)]
         apis.setdefault(rel, set()).add(" | ".join(documented or candidates))
         op = ops[name][0][1]
@@ -237,7 +253,7 @@ def main() -> int:
         for rel, names in sorted(apis.items()):
             print(f"\nAWS operations in {rel} ({len(names)}):")
             for name in sorted(names):
-                actions = [IAM_ACTION.get(c, c) or "(none needed)" for c in name.split(" | ")]
+                actions = [iam_action(c) or "(none needed)" for c in name.split(" | ")]
                 print(f"  {name:<52} IAM: {' | '.join(actions)}")
     print(f"\nrules: {len(files)} analyzers, {len(report.errors)} errors, {len(report.warnings)} warnings")
     return 1 if report.errors else 0
