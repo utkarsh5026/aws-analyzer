@@ -49,10 +49,16 @@ import inspect
 import io
 import json
 import lzma
+import math
+import mimetypes
 import os
 import re
+import struct
 import sys
+import tarfile
 import time
+import zipfile
+import zlib
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -190,28 +196,253 @@ def file_extension(key: str) -> str:
 
 _TEXT_EXTS = (
     "txt", "log", "md", "rst", "yaml", "yml", "xml", "html", "htm", "py", "sql", "ini", "cfg",
-    "conf", "toml", "sh", "js", "ts", "out", "err", "properties",
+    "conf", "toml", "sh", "js", "ts", "out", "err", "properties", "r", "scala", "java", "go", "rs",
+    "c", "cpp", "h", "css", "jsx", "tsx", "tf", "srt", "vtt",
 )
 _FORMAT_BY_EXT = {
-    "csv": "csv", "tsv": "tsv", "tab": "tsv",
-    "parquet": "parquet", "pq": "parquet",
-    "json": "json", "jsonl": "jsonl", "ndjson": "jsonl",
+    "csv": "csv", "tsv": "tsv", "tab": "tsv", "psv": "psv",
+    "parquet": "parquet", "pq": "parquet", "orc": "orc", "feather": "arrow", "arrow": "arrow", "ipc": "arrow",
+    "avro": "avro", "xlsx": "excel", "xlsm": "excel", "xls": "excel",
+    "json": "json", "jsonl": "jsonl", "ndjson": "jsonl", "ipynb": "notebook",
+    "zip": "zip", "tar": "tar", "tgz": "tar",
+    "npy": "npy", "npz": "npz", "safetensors": "safetensors", "pt": "torch", "pth": "torch", "ckpt": "torch",
+    "pkl": "pickle", "pickle": "pickle", "joblib": "pickle",
     "png": "image", "jpg": "image", "jpeg": "image", "gif": "image", "webp": "image", "bmp": "image",
+    "wav": "audio", "mp3": "audio", "flac": "audio", "ogg": "audio", "m4a": "audio", "aac": "audio",
+    "mp4": "video", "webm": "video", "mov": "video", "m4v": "video", "pdf": "pdf",
     **{ext: "text" for ext in _TEXT_EXTS},
 }
+_CSV_SEPARATORS = {"csv": ",", "tsv": "\t", "psv": "|"}
+
+
+def _zstd_reader(stream: Any) -> Any:
+    try:
+        from compression import zstd  # Python 3.14+
+    except ImportError:
+        try:
+            zstandard = importlib.import_module("zstandard")
+        except ImportError as exc:
+            raise ImportError("Reading .zst needs Python 3.14+ or the zstandard package (pip install zstandard)") from exc
+        return zstandard.ZstdDecompressor().stream_reader(stream, read_across_frames=True)
+    return zstd.ZstdFile(stream)
+
+
 _DECOMPRESSORS: dict[str, Callable[[Any], Any]] = {
     "gz": lambda f: gzip.GzipFile(fileobj=f),
-    "gzip": lambda f: gzip.GzipFile(fileobj=f),
     "bz2": bz2.BZ2File,
     "xz": lzma.LZMAFile,
+    "zst": _zstd_reader,
 }
+_CODEC_ALIASES = {"gz": "gz", "gzip": "gz", "tgz": "gz", "bz2": "bz2", "xz": "xz", "zst": "zst", "zstd": "zst"}
 
 
 def detect_format(key: str) -> tuple[str | None, str | None]:
-    """Guess (format, compression) from the key: 'x.csv.gz' -> ('csv', 'gz'), 'x.bin' -> (None, None)."""
+    """Guess (format, compression) from the key: 'x.csv.gz' -> ('csv', 'gz'), 'm.tgz' -> ('tar', 'gz'),
+    'x.bin' -> (None, None)."""
     parts = key.rsplit("/", 1)[-1].lower().split(".")
-    compression = parts.pop() if len(parts) > 1 and parts[-1] in _DECOMPRESSORS else None
+    if len(parts) > 1 and parts[-1] == "tgz":
+        return "tar", "gz"
+    compression = _CODEC_ALIASES[parts.pop()] if len(parts) > 1 and parts[-1] in _CODEC_ALIASES else None
     return (_FORMAT_BY_EXT.get(parts[-1]) if len(parts) > 1 else None), compression
+
+
+_MAGIC_CODECS = [(b"\x1f\x8b", "gz"), (b"\xfd7zXZ\x00", "xz"), (b"\x28\xb5\x2f\xfd", "zst")]
+_MAGIC_FORMATS = [  # (offset, leading bytes, format)
+    (0, b"PAR1", "parquet"), (0, b"ORC", "orc"), (0, b"ARROW1", "arrow"), (0, b"FEA1", "arrow"),
+    (0, b"Obj\x01", "avro"), (0, b"\x93NUMPY", "npy"), (0, b"%PDF-", "pdf"),
+    (0, b"PK\x03\x04", "zip"), (0, b"PK\x05\x06", "zip"),
+    (0, b"\x89PNG\r\n\x1a\n", "image"), (0, b"\xff\xd8\xff", "image"), (0, b"GIF8", "image"),
+    (257, b"ustar", "tar"),
+]
+_IMAGE_MIMES = [(b"\x89PNG", "image/png"), (b"\xff\xd8\xff", "image/jpeg"), (b"GIF8", "image/gif"),
+                (b"BM", "image/bmp"), (b"RIFF", "image/webp")]
+
+
+def sniff_format(head: bytes) -> tuple[str | None, str | None]:
+    """Guess (format, compression) from an object's first bytes (512 is enough), for files
+    whose name has no extension or the wrong one."""
+    for magic, codec in _MAGIC_CODECS:
+        if head.startswith(magic):
+            return None, codec
+    if head.startswith(b"BZh") and head[3:4].isdigit():
+        return None, "bz2"
+    for offset, magic, fmt in _MAGIC_FORMATS:
+        if head[offset:offset + len(magic)] == magic:
+            return fmt, None
+    if head.lstrip()[:1] in (b"{", b"["):
+        return "json", None
+    return None, None
+
+
+# ---- Avro object container files (no extra package needed)
+
+
+def _avro_long(buf: bytes, pos: int) -> tuple[int, int]:
+    """Zig-zag varint at buf[pos:] -> (value, next position)."""
+    shift = result = 0
+    while True:
+        if pos >= len(buf):
+            raise ValueError("Truncated Avro data")
+        byte = buf[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return (result >> 1) ^ -(result & 1), pos
+        shift += 7
+
+
+def _avro_names(schema: Any, names: dict[str, Any]) -> dict[str, Any]:
+    """Collect every named type (record / enum / fixed) so references to it can be resolved."""
+    if isinstance(schema, list):
+        for branch in schema:
+            _avro_names(branch, names)
+    elif isinstance(schema, dict):
+        if schema.get("type") in ("record", "error", "enum", "fixed") and "name" in schema:
+            name, namespace = schema["name"], schema.get("namespace")
+            for alias in {name, name.rsplit(".", 1)[-1], f"{namespace}.{name}" if namespace else name}:
+                names[alias] = schema
+        for child in [f["type"] for f in schema.get("fields", [])] + [schema.get("items"), schema.get("values")]:
+            if child is not None:
+                _avro_names(child, names)
+    return names
+
+
+def _avro_read(schema: Any, buf: bytes, pos: int, names: dict[str, Any]) -> tuple[Any, int]:
+    """Decode one value of `schema` at buf[pos:] -> (value, next position)."""
+    if isinstance(schema, list):  # union: branch index, then the value
+        index, pos = _avro_long(buf, pos)
+        return _avro_read(schema[index], buf, pos, names)
+    if isinstance(schema, dict):
+        kind = schema["type"]
+        if kind in ("record", "error"):
+            record = {}
+            for f in schema["fields"]:
+                record[f["name"]], pos = _avro_read(f["type"], buf, pos, names)
+            return record, pos
+        if kind == "enum":
+            index, pos = _avro_long(buf, pos)
+            return schema["symbols"][index], pos
+        if kind == "fixed":
+            return buf[pos:pos + schema["size"]], pos + schema["size"]
+        if kind in ("array", "map"):
+            items: list[Any] = []
+            while True:  # blocks of items; a negative count is followed by the block's byte size
+                count, pos = _avro_long(buf, pos)
+                if count == 0:
+                    break
+                if count < 0:
+                    count, (_, pos) = -count, _avro_long(buf, pos)
+                for _ in range(count):
+                    if kind == "map":
+                        key, pos = _avro_read("string", buf, pos, names)
+                        value, pos = _avro_read(schema["values"], buf, pos, names)
+                        items.append((key, value))
+                    else:
+                        value, pos = _avro_read(schema["items"], buf, pos, names)
+                        items.append(value)
+            return (dict(items) if kind == "map" else items), pos
+        value, pos = _avro_read(kind, buf, pos, names)  # e.g. {"type": "long", "logicalType": ...}
+        logical = schema.get("logicalType")
+        if logical in ("timestamp-millis", "timestamp-micros") and isinstance(value, int):
+            scale = 1000 if logical == "timestamp-millis" else 1_000_000
+            value = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=value / scale)
+        elif logical == "date" and isinstance(value, int):
+            value = date(1970, 1, 1) + timedelta(days=value)
+        return value, pos
+    if schema == "null":
+        return None, pos
+    if schema == "boolean":
+        return buf[pos] != 0, pos + 1
+    if schema in ("int", "long"):
+        return _avro_long(buf, pos)
+    if schema == "float":
+        return struct.unpack_from("<f", buf, pos)[0], pos + 4
+    if schema == "double":
+        return struct.unpack_from("<d", buf, pos)[0], pos + 8
+    if schema in ("bytes", "string"):
+        size, pos = _avro_long(buf, pos)
+        data = buf[pos:pos + size]
+        return (data.decode("utf-8", "replace") if schema == "string" else data), pos + size
+    if schema in names:
+        return _avro_read(names[schema], buf, pos, names)
+    raise ValueError(f"Unsupported Avro type {schema!r}")
+
+
+def _avro_decompress(codec: str, block: bytes) -> bytes:
+    if codec == "null":
+        return block
+    if codec == "deflate":
+        return zlib.decompress(block, -15)
+    if codec == "bzip2":
+        return bz2.decompress(block)
+    if codec == "xz":
+        return lzma.decompress(block)
+    if codec == "zstandard":
+        with _zstd_reader(io.BytesIO(block)) as reader:
+            return reader.read()
+    if codec == "snappy":  # raw snappy + a 4-byte CRC
+        for module, call in (("snappy", "decompress"), ("cramjam", "snappy.decompress_raw")):
+            try:
+                target: Any = importlib.import_module(module)
+            except ImportError:
+                continue
+            for part in call.split("."):
+                target = getattr(target, part)
+            return bytes(target(block[:-4]))
+        raise ImportError("Avro snappy blocks need python-snappy or cramjam (pip install python-snappy)")
+    raise ValueError(f"Unsupported Avro codec {codec!r}")
+
+
+def parse_avro(data: bytes, n: int | None = None) -> tuple[Any, str, list[Any], bool]:
+    """Avro object container bytes -> (schema, codec, records, complete). Decodes up to `n` records;
+    `data` may be just the start of a file (complete=False when it stops at a cut-off block)."""
+    if not data.startswith(b"Obj\x01"):
+        raise ValueError("Not an Avro container file")
+    pos, meta = 4, {}
+    while True:
+        count, pos = _avro_long(data, pos)
+        if count == 0:
+            break
+        if count < 0:
+            count, (_, pos) = -count, _avro_long(data, pos)
+        for _ in range(count):
+            key, pos = _avro_read("string", data, pos, {})
+            meta[key], pos = _avro_read("bytes", data, pos, {})
+    sync, pos = data[pos:pos + 16], pos + 16
+    schema = json.loads(meta["avro.schema"])
+    codec = meta.get("avro.codec", b"null").decode()
+    names = _avro_names(schema, {})
+    records: list[Any] = []
+    while pos < len(data) and (n is None or len(records) < n):
+        try:
+            count, pos = _avro_long(data, pos)
+            size, pos = _avro_long(data, pos)
+        except ValueError:
+            return schema, codec, records, False
+        if pos + size + 16 > len(data):
+            return schema, codec, records, False
+        block = _avro_decompress(codec, data[pos:pos + size])
+        if data[pos + size:pos + size + 16] != sync:
+            raise ValueError("Avro sync marker doesn't match; the file may be corrupt")
+        pos += size + 16
+        block_pos = 0
+        for _ in range(count if n is None else min(count, n - len(records))):
+            record, block_pos = _avro_read(schema, block, block_pos, names)
+            records.append(record)
+    return schema, codec, records, pos >= len(data)
+
+
+def _avro_type_name(schema: Any) -> str:
+    if isinstance(schema, list):
+        return " | ".join(_avro_type_name(branch) for branch in schema)
+    if isinstance(schema, dict):
+        kind = schema.get("logicalType") or schema["type"]
+        if kind == "array":
+            return f"array<{_avro_type_name(schema['items'])}>"
+        if kind == "map":
+            return f"map<{_avro_type_name(schema['values'])}>"
+        return f"{kind} {schema['name']}" if kind in ("record", "enum", "fixed") and "name" in schema else kind
+    return str(schema)
 
 
 def _plural(count: int, word: str) -> str:
@@ -535,9 +766,30 @@ class BucketReport:
 
 
 @dataclass
+class ArchiveEntry:
+    name: str
+    size: int
+    modified: datetime | None = None
+    is_dir: bool = False
+
+
+@dataclass
+class ArchiveListing:
+    """Files inside a zip / tar archive (see S3Analyzer.list_archive)."""
+
+    uri: str
+    kind: str  # 'zip' | 'tar'
+    entries: list[ArchiveEntry] = field(default_factory=list)
+    total_files: int | None = None  # None when the listing stopped early
+    complete: bool = True
+    bytes_read: int | None = None  # compressed tar: how much of the archive was streamed
+
+
+@dataclass
 class Preview:
     """First look at an object. kind: 'table' (DataFrame), 'json', 'text' (list of lines),
-    'image' (bytes), 'binary' (bytes) or 'unavailable'."""
+    'listing' (list of dicts: archive members, notebook cells, tensors, arrays), 'image' (bytes),
+    'media' (presigned URL for audio / video / PDF), 'binary' (bytes) or 'unavailable'."""
 
     uri: str
     kind: str
@@ -1225,6 +1477,7 @@ class _BodyReader(io.RawIOBase):
 
     def __init__(self, body: Any):
         self._body = body
+        self.bytes_read = 0
 
     def readable(self) -> bool:
         return True
@@ -1232,6 +1485,7 @@ class _BodyReader(io.RawIOBase):
     def readinto(self, buffer: Any) -> int:
         data = self._body.read(len(buffer))
         buffer[: len(data)] = data
+        self.bytes_read += len(data)
         return len(data)
 
     def close(self) -> None:
@@ -1269,6 +1523,85 @@ class _RangeReader(io.RawIOBase):
         buffer[: len(data)] = data
         self._pos += len(data)
         return len(data)
+
+
+# What a broken or mislabeled file can raise while being decoded (pyarrow's errors subclass ValueError / OSError).
+_DATA_ERRORS = (ValueError, ImportError, OSError, EOFError, zlib.error, lzma.LZMAError, zipfile.BadZipFile,
+                tarfile.TarError)
+_READ_ERRORS = (*_DATA_ERRORS, KeyError, IndexError, struct.error)  # + malformed headers, while previewing
+
+
+def _read_arrow_table(fmt: str, handle: Any, nrows: int | None, columns: list[str] | None) -> Any:
+    """Parquet / ORC / Feather (Arrow IPC) from a seekable file -> pyarrow Table (first nrows only
+    reads the row groups / stripes / batches it needs)."""
+    pa = _require("pyarrow", f"Reading {fmt}")
+    if fmt == "parquet":
+        parquet = _require("pyarrow.parquet", "Reading parquet").ParquetFile(handle)
+        if nrows is None:
+            return parquet.read(columns=columns)
+        chunks = parquet.iter_batches(batch_size=max(nrows, 1), columns=columns)
+        empty = parquet.schema_arrow.empty_table()
+    elif fmt == "orc":
+        orc = _require("pyarrow.orc", "Reading ORC").ORCFile(handle)
+        if nrows is None:
+            return orc.read(columns=columns)
+        chunks = (orc.read_stripe(i, columns=columns) for i in range(orc.nstripes))
+        empty = orc.schema.empty_table()
+    elif fmt == "arrow":
+        try:
+            reader = _require("pyarrow.ipc", "Reading Feather / Arrow").open_file(handle)
+        except pa.ArrowInvalid:  # Feather V1 (pre-2020) isn't an Arrow IPC file
+            handle.seek(0)
+            table = _require("pyarrow.feather", "Reading Feather").read_table(handle, columns=columns)
+            return table if nrows is None else table.slice(0, nrows)
+        if nrows is None:
+            table = reader.read_all()
+            return table.select(columns) if columns else table
+        chunks = (reader.get_batch(i) for i in range(reader.num_record_batches))
+        empty = reader.schema.empty_table()
+    else:
+        raise ValueError(f"Not a columnar format: {fmt!r}")
+    batches, rows = [], 0
+    for batch in chunks if nrows > 0 else ():
+        batches.append(batch)
+        rows += batch.num_rows
+        if rows >= nrows:
+            break
+    table = pa.Table.from_batches(batches).slice(0, nrows) if batches else empty
+    return table.select(columns) if columns and (fmt == "arrow" or not batches) else table
+
+
+def _columnar_info(fmt: str, handle: Any) -> dict[str, Any]:
+    """Rows, columns and layout of an ORC / Feather file from its metadata."""
+    if fmt == "orc":
+        orc = _require("pyarrow.orc", "Reading ORC").ORCFile(handle)
+        return {"rows": orc.nrows, "stripes": orc.nstripes, "compression": getattr(orc, "compression", None),
+                "columns": [(f.name, str(f.type)) for f in orc.schema]}
+    pa = _require("pyarrow", "Reading Feather / Arrow")
+    try:
+        reader = _require("pyarrow.ipc", "Reading Feather / Arrow").open_file(handle)
+    except pa.ArrowInvalid:
+        return {}
+    info: dict[str, Any] = {"batches": reader.num_record_batches,
+                            "columns": [(f.name, str(f.type)) for f in reader.schema]}
+    if hasattr(reader, "count_rows"):
+        info["rows"] = reader.count_rows()
+    return info
+
+
+def _zip_time(stamp: tuple[int, ...]) -> datetime | None:
+    try:
+        return datetime(*stamp, tzinfo=timezone.utc)
+    except (TypeError, ValueError):  # zip allows dates like 1980-00-00
+        return None
+
+
+def _npy_header(fp: Any) -> tuple[tuple[int, ...], bool, Any]:
+    """Read a .npy header from `fp` -> (shape, fortran_order, dtype); fp is left at the first data byte."""
+    npformat = _require("numpy.lib.format", "Reading .npy")
+    version = npformat.read_magic(fp)
+    read_header = npformat.read_array_header_1_0 if version == (1, 0) else npformat.read_array_header_2_0
+    return read_header(fp)
 
 
 class S3Analyzer:
@@ -1769,15 +2102,23 @@ class S3Analyzer:
                 return False
             raise
 
-    def open(self, uri: str, *, decompress: bool = True) -> io.BufferedIOBase:
-        """Streaming binary reader (use as a context manager). .gz/.bz2/.xz are decompressed on the fly."""
+    def open(self, uri: str, *, decompress: bool = True, compression: str | None = None) -> io.BufferedIOBase:
+        """Streaming binary reader (use as a context manager). .gz / .bz2 / .xz / .zst are decompressed
+        on the fly. compression overrides the codec guessed from the name ('gz', 'bz2', 'xz', 'zst'; '' = none)."""
         bucket, key = parse_s3_uri(uri)
+        codec = (detect_format(key)[1] if compression is None else _CODEC_ALIASES.get(compression, compression)
+                 ) if decompress else None
+        if codec and codec not in _DECOMPRESSORS:
+            raise ValueError(f"Unknown compression {codec!r}; use one of {', '.join(_DECOMPRESSORS)}")
         body = self.client.get_object(Bucket=bucket, Key=key)["Body"]
         stream = io.BufferedReader(_BodyReader(body), buffer_size=256 * KB)
-        compression = detect_format(key)[1]
-        if not (decompress and compression):
+        if not codec:
             return stream
-        reader = _DECOMPRESSORS[compression](stream)
+        try:
+            reader = _DECOMPRESSORS[codec](stream)
+        except BaseException:
+            stream.close()
+            raise
         close_reader = reader.close
 
         def close() -> None:  # decompressors don't close a file object they were handed
@@ -1786,7 +2127,10 @@ class S3Analyzer:
             finally:
                 stream.close()
 
-        reader.close = close
+        try:
+            reader.close = close
+        except AttributeError:  # C-level readers (zstandard) close their source themselves
+            pass
         return reader
 
     def read_bytes(self, uri: str, start: int | None = None, end: int | None = None) -> bytes:
@@ -1795,20 +2139,21 @@ class S3Analyzer:
         extra = {"Range": f"bytes={start or 0}-{'' if end is None else end}"} if start or end is not None else {}
         return self.client.get_object(Bucket=bucket, Key=key, **extra)["Body"].read()
 
-    def _read_head(self, uri: str, max_bytes: int) -> tuple[bytes, bool]:
+    def _read_head(self, uri: str, max_bytes: int, compression: str | None = None) -> tuple[bytes, bool]:
         """First max_bytes of the (decompressed) object, and whether there was more."""
-        with self.open(uri) as stream:
+        with self.open(uri, compression=compression) as stream:
             data = stream.read(max_bytes + 1)
         return data[:max_bytes], len(data) > max_bytes
 
-    def read_text(self, uri: str, *, max_bytes: int = MB, encoding: str = "utf-8") -> str:
+    def read_text(self, uri: str, *, max_bytes: int = MB, encoding: str = "utf-8", compression: str | None = None) -> str:
         """Decoded text of the first `max_bytes` (decompressed) bytes."""
-        return self._read_head(uri, max_bytes)[0].decode(encoding, errors="replace")
+        return self._read_head(uri, max_bytes, compression)[0].decode(encoding, errors="replace")
 
-    def read_lines(self, uri: str, n: int = 20, *, encoding: str = "utf-8", max_line_chars: int = 100_000) -> list[str]:
+    def read_lines(self, uri: str, n: int = 20, *, encoding: str = "utf-8", max_line_chars: int = 100_000,
+                   compression: str | None = None) -> list[str]:
         """First n lines; downloads only as much as needed."""
         lines: list[str] = []
-        with io.TextIOWrapper(self.open(uri), encoding=encoding, errors="replace") as text:
+        with io.TextIOWrapper(self.open(uri, compression=compression), encoding=encoding, errors="replace") as text:
             while len(lines) < n:
                 line = text.readline(max_line_chars)
                 if not line:
@@ -1816,15 +2161,16 @@ class S3Analyzer:
                 lines.append(line.rstrip("\r\n"))
         return lines
 
-    def read_json(self, uri: str) -> Any:
+    def read_json(self, uri: str, *, compression: str | None = None) -> Any:
         """Parse a whole JSON document (reads the full object)."""
-        with self.open(uri) as stream:
+        with self.open(uri, compression=compression) as stream:
             return json.load(stream)
 
-    def read_jsonl(self, uri: str, n: int | None = None, *, encoding: str = "utf-8") -> list[Any]:
+    def read_jsonl(self, uri: str, n: int | None = None, *, encoding: str = "utf-8",
+                   compression: str | None = None) -> list[Any]:
         """Parse JSON-lines records; n limits how many (only that much is downloaded)."""
         records: list[Any] = []
-        with io.TextIOWrapper(self.open(uri), encoding=encoding) as text:
+        with io.TextIOWrapper(self.open(uri, compression=compression), encoding=encoding) as text:
             for line in text:
                 if line.strip():
                     records.append(json.loads(line))
@@ -1832,28 +2178,75 @@ class S3Analyzer:
                         break
         return records
 
+    def read_avro(self, uri: str, n: int | None = None, *, compression: str | None = None) -> list[Any]:
+        """Records from an Avro container file (codecs null, deflate, bzip2, xz, zstandard; snappy needs
+        python-snappy). n limits how many; then only the start of the file is downloaded."""
+        return self._avro(uri, n, compression)[2]
+
+    def _avro(self, uri: str, n: int | None, compression: str | None) -> tuple[Any, str, list[Any], bool]:
+        if n is None:
+            with self.open(uri, compression=compression) as stream:
+                return parse_avro(stream.read())
+        window = MB
+        while True:  # read more of the file until n records are decoded (or it's all read)
+            data, more = self._read_head(uri, window, compression)
+            schema, codec, records, _ = parsed = parse_avro(data, n)
+            if len(records) >= n or not more:
+                return schema, codec, records[:n], parsed[3] and not more
+            window *= 4
+
+    def read_npy(self, uri: str, *, nrows: int | None = None, compression: str | None = None) -> Any:
+        """NumPy .npy array (never unpickles). With nrows on an uncompressed file only those rows
+        are downloaded."""
+        np = _require("numpy", "Reading .npy")
+        bucket, key = parse_s3_uri(uri)
+        codec = detect_format(key)[1] if compression is None else compression
+        with self._random_access(bucket, key, codec, buffer_size=64 * KB) as handle:
+            shape, fortran, dtype = _npy_header(handle)
+            if dtype.hasobject:
+                raise ValueError("This .npy holds Python objects (a pickle); not loaded, because unpickling can run code")
+            if nrows is None or fortran or not shape:
+                handle.seek(0)
+                array = _require("numpy.lib.format", "Reading .npy").read_array(handle, allow_pickle=False)
+                return array if nrows is None or not shape else array[:nrows]
+            rows = min(nrows, shape[0])
+            data = handle.read(rows * math.prod(shape[1:]) * dtype.itemsize)
+            return np.frombuffer(data, dtype=dtype).reshape((rows, *shape[1:]))
+
     def read_df(self, uri: str, *, nrows: int | None = None, columns: list[str] | None = None,
-                fmt: str | None = None, **kwargs: Any):
-        """Load csv / tsv / json / jsonl / parquet (optionally .gz/.bz2/.xz) into a pandas DataFrame.
-        nrows reads just the first rows; for parquet only the needed row group is fetched.
-        Extra kwargs go to pandas.read_csv for csv/tsv."""
+                fmt: str | None = None, compression: str | None = None, **kwargs: Any):
+        """Load a table into a pandas DataFrame: csv / tsv / psv / json / jsonl / parquet / orc /
+        feather (arrow) / avro / excel (xlsx, xls) / npy, optionally .gz / .bz2 / .xz / .zst compressed.
+        nrows reads just the first rows (parquet, orc and feather fetch only what they need).
+        Extra kwargs go to pandas.read_csv (csv / tsv / psv) or pandas.read_excel (e.g. sheet_name=)."""
         pd = _require("pandas", "read_df")
         bucket, key = parse_s3_uri(uri)
-        fmt = fmt or detect_format(key)[0]
-        if fmt == "parquet":
-            pq = _require("pyarrow.parquet", "Reading parquet")
-            with self._seekable(bucket, key) as handle:
-                parquet = pq.ParquetFile(handle)
-                if nrows is None:
-                    return parquet.read(columns=columns).to_pandas()
-                batch = next(parquet.iter_batches(batch_size=max(nrows, 1), columns=columns), None)
-                return (batch.slice(0, nrows) if batch is not None else parquet.schema_arrow.empty_table()).to_pandas()
-        if fmt in ("csv", "tsv"):
-            kwargs.setdefault("sep", "\t" if fmt == "tsv" else ",")
-            with self.open(uri) as stream:
+        guessed_fmt, guessed_codec = detect_format(key)
+        fmt = fmt or guessed_fmt
+        codec = guessed_codec if compression is None else compression
+        if fmt in ("parquet", "orc", "arrow"):
+            with self._random_access(bucket, key, codec) as handle:
+                return _read_arrow_table(fmt, handle, nrows, columns).to_pandas()
+        if fmt == "excel":
+            with self._random_access(bucket, key, codec) as handle:
+                return pd.read_excel(handle, nrows=nrows, usecols=columns, **kwargs)
+        if fmt in _CSV_SEPARATORS:
+            kwargs.setdefault("sep", _CSV_SEPARATORS[fmt])
+            with self.open(uri, compression=codec or "") as stream:
                 return pd.read_csv(stream, nrows=nrows, usecols=columns, **kwargs)
-        if fmt in ("json", "jsonl"):
-            records = self.read_jsonl(uri, n=nrows) if fmt == "jsonl" else self.read_json(uri)
+        if fmt == "npy":
+            array = self.read_npy(uri, nrows=nrows, compression=codec or "")
+            if array.ndim > 2:
+                raise ValueError(f"A {array.ndim}-dimensional array doesn't fit in a table; use read_npy")
+            frame = pd.DataFrame(array)
+            return frame[columns] if columns else frame
+        if fmt in ("json", "jsonl", "avro"):
+            if fmt == "jsonl":
+                records = self.read_jsonl(uri, n=nrows, compression=codec or "")
+            elif fmt == "avro":
+                records = self.read_avro(uri, n=nrows, compression=codec or "")
+            else:
+                records = self.read_json(uri, compression=codec or "")
             records = records if isinstance(records, list) else [records]
             records = records if nrows is None else records[:nrows]
             if records and all(isinstance(r, dict) for r in records):
@@ -1861,11 +2254,20 @@ class S3Analyzer:
             else:
                 frame = pd.DataFrame({"value": records})
             return frame[columns] if columns else frame
-        raise ValueError(f"Can't tell how to read {key!r} as a table; pass fmt='csv'|'tsv'|'json'|'jsonl'|'parquet'")
+        raise ValueError(f"Can't tell how to read {key!r} as a table; pass fmt='csv'|'tsv'|'psv'|'json'|'jsonl'|"
+                         "'parquet'|'orc'|'arrow'|'avro'|'excel'|'npy'")
 
-    def _seekable(self, bucket: str, key: str) -> io.BufferedReader:
+    def _seekable(self, bucket: str, key: str, *, buffer_size: int = MB) -> io.BufferedReader:
         size = self.client.head_object(Bucket=bucket, Key=key)["ContentLength"]
-        return io.BufferedReader(_RangeReader(self.client, bucket, key, size), buffer_size=MB)
+        return io.BufferedReader(_RangeReader(self.client, bucket, key, size), buffer_size=buffer_size)
+
+    def _random_access(self, bucket: str, key: str, codec: str | None = None, *,
+                       buffer_size: int = MB) -> io.BufferedIOBase:
+        """Seekable reader: ranged GETs, or (for a compressed object) the whole thing decompressed in memory."""
+        if not codec:
+            return self._seekable(bucket, key, buffer_size=buffer_size)
+        with self.open(s3_uri(bucket, key), compression=codec) as stream:
+            return io.BytesIO(stream.read())
 
     def parquet_info(self, uri: str) -> dict[str, Any]:
         """Row count, row groups, schema and compression from the parquet footer (a few KB downloaded)."""
@@ -1882,64 +2284,310 @@ class S3Analyzer:
                 "created_by": meta.created_by,
             }
 
+    def list_archive(self, uri: str, *, limit: int = 1000, max_bytes: int = 256 * MB,
+                     compression: str | None = None) -> ArchiveListing:
+        """Files inside a .zip / .tar / .tar.gz / .tgz (e.g. a SageMaker model.tar.gz) without extracting it.
+        A zip's index sits at its end, so only that is downloaded. A compressed tar has no index: it's
+        streamed from the start and the listing stops after `max_bytes` of it (complete=False)."""
+        bucket, key = parse_s3_uri(uri)
+        fmt, codec = detect_format(key)
+        codec = codec if compression is None else compression
+        if fmt not in ("zip", "tar", "npz", "torch", "excel"):
+            fmt = sniff_format(self.read_bytes(uri, 0, 511))[0] or "tar"
+        listing = ArchiveListing(uri=s3_uri(bucket, key), kind="tar" if fmt == "tar" else "zip")
+        if listing.kind == "zip":
+            with self._random_access(bucket, key, codec, buffer_size=256 * KB) as handle, zipfile.ZipFile(handle) as archive:
+                infos = archive.infolist()
+            listing.total_files = len(infos)
+            listing.entries = [ArchiveEntry(i.filename, i.file_size, _zip_time(i.date_time), i.is_dir())
+                               for i in infos[:limit]]
+            listing.complete = len(infos) <= limit
+            return listing
+        raw = None
+        if codec:
+            raw = _BodyReader(self.client.get_object(Bucket=bucket, Key=key)["Body"])
+            stream = _DECOMPRESSORS[codec](io.BufferedReader(raw, buffer_size=256 * KB))
+        else:  # plain tar: seek from header to header instead of downloading the contents
+            stream = self._seekable(bucket, key, buffer_size=64 * KB)
+        try:
+            with tarfile.open(fileobj=stream, mode="r|" if codec else "r:") as archive:
+                for member in archive:
+                    if len(listing.entries) >= limit or (raw is not None and raw.bytes_read > max_bytes):
+                        listing.complete = False
+                        break
+                    listing.entries.append(ArchiveEntry(member.name, member.size,
+                                                        datetime.fromtimestamp(member.mtime, timezone.utc),
+                                                        member.isdir()))
+        finally:
+            stream.close()
+            if raw is not None:
+                listing.bytes_read = raw.bytes_read
+                raw.close()
+        listing.total_files = len(listing.entries) if listing.complete else None
+        return listing
+
+    def safetensors_info(self, uri: str) -> dict[str, Any]:
+        """Tensor names, dtypes and shapes plus metadata from a .safetensors header (only the header is read)."""
+        head = self.read_bytes(uri, 0, 7)
+        header_size = int.from_bytes(head, "little") if len(head) == 8 else 0
+        if not 2 <= header_size <= 100 * MB:
+            raise ValueError("Not a safetensors file (bad header length)")
+        header = json.loads(self.read_bytes(uri, 8, 8 + header_size - 1))
+        metadata = header.pop("__metadata__", None) or {}
+        tensors = [{"tensor": name, "dtype": spec.get("dtype"), "shape": tuple(spec.get("shape", [])),
+                    "parameters": math.prod(spec.get("shape", []))} for name, spec in header.items()]
+        return {"tensors": tensors, "metadata": metadata}
+
     def preview(self, uri: str, n: int = 20, *, max_bytes: int = 512 * KB) -> Preview:
-        """Best-effort look at an object: DataFrame for tabular files, parsed JSON, text lines,
-        image bytes or a binary sample. Downloads only what it needs."""
+        """Best-effort look at an object: a DataFrame for tables (csv, tsv, psv, json, jsonl, parquet, orc,
+        feather, avro, excel, npy), the files in an archive (zip, tar, tar.gz, model.tar.gz, npz, PyTorch
+        checkpoints), tensors in a .safetensors file, notebook cells, parsed JSON, text lines, an image,
+        an audio / video player or PDF link, or a binary sample. Files without an extension are recognised
+        by their first bytes. Downloads only what it needs."""
         bucket, key = parse_s3_uri(uri)
         meta = self.client.head_object(Bucket=bucket, Key=key)
         fmt, compression = detect_format(key)
-        preview = Preview(uri=s3_uri(bucket, key), kind="text", size=meta["ContentLength"], format=fmt,
-                          compression=compression, content_type=meta.get("ContentType"))
+        p = Preview(uri=s3_uri(bucket, key), kind="text", size=meta["ContentLength"], format=fmt,
+                    compression=compression, content_type=meta.get("ContentType"))
         storage_class = meta.get("StorageClass", "STANDARD")
         if storage_class in ARCHIVE_CLASSES and 'ongoing-request="false"' not in meta.get("Restore", ""):
-            preview.kind, preview.note = "unavailable", f"Object is in {storage_class}; restore it before reading."
-            return preview
-        if fmt is None and (preview.content_type or "").startswith("image/"):
-            fmt = preview.format = "image"
+            p.kind, p.note = "unavailable", f"Object is in {storage_class}; restore it before reading."
+            return p
+        sniffed = False
+        if p.size:
+            fmt, p.compression, sniffed, p.note = self._confirm_format(bucket, key, fmt, compression)
+        if fmt is None:
+            content_type = p.content_type or ""
+            fmt = next((kind for kind in ("image", "audio", "video") if content_type.startswith(kind + "/")),
+                       "pdf" if content_type == "application/pdf" else None)
+        p.format = fmt
+        codec = p.compression or ""
         try:
-            if fmt in ("csv", "tsv", "jsonl", "parquet"):
-                preview.kind, preview.data = "table", self.read_df(uri, nrows=n)
-                if fmt == "parquet":
-                    preview.info = self.parquet_info(uri)
-                return preview
-            if fmt == "image" and preview.size <= 10 * MB:
-                preview.kind, preview.data = "image", self.read_bytes(uri)
-                return preview
-            data, preview.truncated = self._read_head(uri, max_bytes)
-            if fmt == "json":
-                if not preview.truncated:
-                    try:
-                        parsed = json.loads(data)
-                    except ValueError:
-                        pass  # maybe JSON lines with a .json name - tried below
-                    else:
-                        if isinstance(parsed, list) and parsed and all(isinstance(r, dict) for r in parsed):
-                            pd = _require("pandas", "Table preview")
-                            preview.kind, preview.data = "table", pd.json_normalize(parsed[:n])
-                            preview.info["records"] = len(parsed)
-                        else:
-                            preview.kind, preview.data = "json", parsed
-                        return preview
-                try:  # Firehose / Spark often write JSON lines into '.json' files
-                    preview.kind, preview.data = "table", self.read_df(uri, nrows=n, fmt="jsonl")
-                    preview.format = "jsonl"
-                    return preview
+            handler = getattr(self, f"_preview_{fmt}", None) if fmt else None
+            if handler is None or not handler(p, uri, n, codec):
+                self._preview_as_text(p, uri, n, codec, max_bytes, sniffed)
+        except _READ_ERRORS as exc:  # broken or mislabeled file, missing optional package: show raw content
+            try:
+                data, p.truncated = self._read_head(uri, min(max_bytes, 64 * KB), codec)
+            except _READ_ERRORS:
+                data, p.truncated = self._read_head(uri, min(max_bytes, 64 * KB), "")
+            p.kind = "binary" if _looks_binary(data) else "text"
+            p.data = data[:512] if p.kind == "binary" else data.decode("utf-8", "replace").splitlines()[:n]
+            p.note = " ".join(filter(None, [p.note, f"Couldn't read it as {fmt or 'a known format'}: {exc}"]))
+        return p
+
+    def _confirm_format(self, bucket: str, key: str, fmt: str | None, codec: str | None
+                        ) -> tuple[str | None, str | None, bool, str]:
+        """Check the name's guess against the first bytes -> (format, compression, sniffed, note)."""
+        uri = s3_uri(bucket, key)
+        sniffed_fmt, sniffed_codec = sniff_format(self.read_bytes(uri, 0, 511))
+        note = ""
+        if codec and sniffed_codec != codec:
+            note = f"The name says .{codec} but the content isn't {codec}-compressed; reading it as-is."
+            codec = None
+        elif sniffed_codec and not codec:
+            codec = sniffed_codec
+        if fmt is None and codec:  # 'logs.gz', or a compressed file with no extension: look inside
+            try:
+                sniffed_fmt = sniff_format(self._read_head(uri, 512, codec)[0])[0]
+            except _READ_ERRORS:
+                sniffed_fmt = None
+        return fmt or sniffed_fmt, codec, fmt is None and sniffed_fmt is not None, note
+
+    # One _preview_<format> per format; each fills in the Preview and returns True (False = show as text).
+
+    def _preview_csv(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        p.kind, p.data = "table", self.read_df(uri, nrows=n, fmt=p.format, compression=codec)
+        return True
+
+    _preview_tsv = _preview_psv = _preview_jsonl = _preview_csv
+
+    def _preview_parquet(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        p.kind, p.data = "table", self.read_df(uri, nrows=n, fmt="parquet", compression=codec)
+        if not codec:
+            p.info = self.parquet_info(uri)
+        return True
+
+    def _preview_orc(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        with self._random_access(bucket, key, codec) as handle:
+            p.info = _columnar_info(p.format, handle)
+            handle.seek(0)
+            p.kind, p.data = "table", _read_arrow_table(p.format, handle, n, None).to_pandas()
+        return True
+
+    _preview_arrow = _preview_orc
+
+    def _preview_avro(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        schema, avro_codec, records, _ = self._avro(uri, n, codec)
+        fields = schema.get("fields", []) if isinstance(schema, dict) else []
+        p.info = {"codec": avro_codec, "columns": [(f["name"], _avro_type_name(f["type"])) for f in fields]}
+        pd = _require("pandas", "Table preview")
+        rows = records if all(isinstance(r, dict) for r in records) else [{"value": r} for r in records]
+        p.kind, p.data = "table", pd.json_normalize(rows) if rows else pd.DataFrame(columns=[f["name"] for f in fields])
+        return True
+
+    def _preview_excel(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        pd = _require("pandas", "Reading Excel")
+        bucket, key = parse_s3_uri(uri)
+        with self._random_access(bucket, key, codec) as handle, pd.ExcelFile(handle) as workbook:
+            sheets = workbook.sheet_names
+            p.info = {"sheets": sheets, "sheet": sheets[0]}
+            p.kind, p.data = "table", workbook.parse(sheets[0], nrows=n)
+        return True
+
+    def _preview_npy(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        with self._random_access(bucket, key, codec, buffer_size=64 * KB) as handle:
+            shape, fortran, dtype = _npy_header(handle)
+        p.info = {"shape": shape, "dtype": str(dtype)}
+        array = self.read_npy(uri, nrows=n, compression=codec)
+        if array.ndim <= 2:
+            p.kind, p.data = "table", _require("pandas", "Table preview").DataFrame(array)
+        else:
+            p.kind, p.data = "text", repr(array[: min(n, 2)]).splitlines()[:n]
+        return True
+
+    def _preview_zip(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        listing = self.list_archive(uri, limit=max(n, 200), compression=codec)
+        p.kind = "listing"
+        p.data = [{"name": e.name, "size": e.size, "modified": e.modified} for e in listing.entries if not e.is_dir]
+        files = sum(not e.is_dir for e in listing.entries)
+        p.info = {"files": f"{files:,}" + ("" if listing.complete else "+"),
+                  "unpacked_size": sum(e.size for e in listing.entries)}
+        if not listing.complete:
+            read = f" after reading {human_size(listing.bytes_read)}" if listing.bytes_read else ""
+            p.note = f"Listing stopped{read}; there are more files (S3Analyzer.list_archive has limit= / max_bytes=)."
+        return True
+
+    _preview_tar = _preview_zip
+
+    def _preview_torch(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        head = self.read_bytes(uri, 0, 3)
+        if head.startswith(b"PK"):
+            self._preview_zip(p, uri, n, codec)
+        else:
+            p.kind, p.data = "binary", self.read_bytes(uri, 0, 511)
+        p.note = ("PyTorch checkpoint. Not loaded: torch.load unpickles, which can run code from the file. "
+                  "If you trust it: torch.load(ui.core.open(uri), weights_only=True).")
+        return True
+
+    def _preview_pickle(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        p.kind, p.data = "binary", self.read_bytes(uri, 0, 511)
+        p.note = ("Pickle file. Not opened: unpickling can run code from the file. "
+                  "If you trust it: pickle.load(ui.core.open(uri)).")
+        return True
+
+    def _preview_npz(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        bucket, key = parse_s3_uri(uri)
+        arrays = []
+        with self._random_access(bucket, key, codec, buffer_size=256 * KB) as handle, zipfile.ZipFile(handle) as archive:
+            for info in archive.infolist()[: max(n, 200)]:
+                with archive.open(info) as member:
+                    shape, _, dtype = _npy_header(io.BytesIO(member.read(16 * KB)))
+                arrays.append({"array": info.filename.removesuffix(".npy"), "shape": shape, "dtype": str(dtype),
+                               "size": info.file_size})
+        p.kind, p.data, p.info = "listing", arrays, {"arrays": len(arrays)}
+        return True
+
+    def _preview_safetensors(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        details = self.safetensors_info(uri)
+        tensors = details["tensors"]
+        p.kind, p.data = "listing", tensors[: max(n, 100)]
+        p.info = {"tensors": len(tensors), "parameters": sum(t["parameters"] for t in tensors),
+                  "dtypes": sorted({t["dtype"] for t in tensors if t["dtype"]}), "metadata": details["metadata"]}
+        return True
+
+    def _preview_notebook(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        if p.size > 50 * MB:
+            raise ValueError("notebook is over 50 MB")
+        notebook = self.read_json(uri, compression=codec)
+        cells, meta = notebook.get("cells", []), notebook.get("metadata", {})
+        rows = []
+        for i, cell in enumerate(cells[: max(n, 50)]):
+            source = cell.get("source", "")
+            lines = ("".join(source) if isinstance(source, list) else source).splitlines()
+            first = next((line.strip() for line in lines if line.strip()), "")
+            rows.append({"#": i + 1, "type": cell.get("cell_type", "?"), "starts with": first[:100],
+                         "lines": len(lines), "outputs": len(cell.get("outputs", []))})
+        p.kind, p.data = "listing", rows
+        p.info = {k: v for k, v in {"kernel": meta.get("kernelspec", {}).get("display_name"),
+                                    "language": meta.get("language_info", {}).get("name"), "cells": len(cells)}.items()
+                  if v is not None}
+        return True
+
+    def _preview_image(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        if p.size > 10 * MB:
+            return False
+        p.kind, p.data = "image", self.read_bytes(uri)
+        mime = p.content_type if (p.content_type or "").startswith("image/") else None
+        p.info["mime"] = mime or next((m for magic, m in _IMAGE_MIMES if p.data.startswith(magic)), "image/png")
+        return True
+
+    def _preview_audio(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        p.kind, p.data = "media", self.presigned_url(uri)
+        mime = p.content_type if (p.content_type or "").startswith(p.format + "/") else None
+        p.info = {"media": p.format, "mime": mime or mimetypes.guess_type(uri)[0] or f"{p.format}/*"}
+        return True
+
+    _preview_video = _preview_audio
+
+    def _preview_pdf(self, p: Preview, uri: str, n: int, codec: str) -> bool:
+        url = self.presigned_url(uri)
+        try:
+            pypdf = importlib.import_module("pypdf")
+        except ImportError:
+            p.kind, p.data, p.info = "media", url, {"media": "pdf"}
+            p.note = "Install pypdf (pip install pypdf) to see the page count and first page's text here."
+            return True
+        bucket, key = parse_s3_uri(uri)
+        try:
+            with self._random_access(bucket, key, codec) as handle:
+                reader = pypdf.PdfReader(handle)
+                text = reader.pages[0].extract_text() if len(reader.pages) else ""
+                title = reader.metadata.title if reader.metadata else None
+                p.info = {k: v for k, v in {"pages": len(reader.pages), "title": title, "url": url}.items() if v}
+        except (pypdf.errors.PyPdfError, *_READ_ERRORS) as exc:
+            p.kind, p.data, p.info = "media", url, {"media": "pdf"}
+            p.note = f"pypdf couldn't read this PDF ({exc}); the link may still open it."
+            return True
+        lines = text.splitlines()
+        p.kind, p.data, p.truncated = "text", lines[:n], len(lines) > n
+        return True
+
+    def _preview_as_text(self, p: Preview, uri: str, n: int, codec: str, max_bytes: int, sniffed: bool) -> None:
+        """JSON, text lines or a binary sample (also the fallback for everything else)."""
+        data, p.truncated = self._read_head(uri, max_bytes, codec)
+        if p.format == "json":
+            if not p.truncated:
+                try:
+                    parsed = json.loads(data)
                 except ValueError:
-                    preview.kind = "text"
-                    preview.note = (f"JSON is larger than the {human_size(max_bytes)} preview window; showing raw text."
-                                    if preview.truncated else "Not valid JSON; showing raw text.")
-            if _looks_binary(data):
-                preview.kind, preview.data = "binary", data[:512]
-                return preview
-            lines = data.decode("utf-8", errors="replace").splitlines()
-            preview.truncated = preview.truncated or len(lines) > n
-            preview.data = lines[:n]
-        except (ValueError, ImportError) as exc:  # parse errors, missing pandas/pyarrow: fall back to raw text
-            data, preview.truncated = self._read_head(uri, min(max_bytes, 64 * KB))
-            preview.kind = "binary" if _looks_binary(data) else "text"
-            preview.data = data[:512] if preview.kind == "binary" else data.decode("utf-8", "replace").splitlines()[:n]
-            preview.note = f"Couldn't parse as {fmt}: {exc}"
-        return preview
+                    pass  # maybe JSON lines with a .json name - tried below
+                else:
+                    if isinstance(parsed, list) and parsed and all(isinstance(r, dict) for r in parsed):
+                        pd = _require("pandas", "Table preview")
+                        p.kind, p.data = "table", pd.json_normalize(parsed[:n])
+                        p.info["records"] = len(parsed)
+                    else:
+                        p.kind, p.data = "json", parsed
+                    return
+            try:  # Firehose / Spark often write JSON lines into '.json' files
+                p.kind, p.data = "table", self.read_df(uri, nrows=n, fmt="jsonl", compression=codec)
+                p.format = "jsonl"
+                return
+            except ValueError:
+                p.kind = "text"
+                if not sniffed:  # a '[...' log line without an extension isn't worth a warning
+                    p.note = (f"JSON is larger than the {human_size(max_bytes)} preview window; showing raw text."
+                              if p.truncated else "Not valid JSON; showing raw text.")
+        if _looks_binary(data):
+            p.kind, p.data = "binary", data[:512]
+            return
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        p.kind = "text"
+        p.truncated = p.truncated or len(lines) > n
+        p.data = lines[:n]
 
     def presigned_url(self, uri: str, *, expires: int = 3600) -> str:
         """Temporary HTTPS link to download the object without AWS credentials."""
@@ -2012,6 +2660,13 @@ class _Image:
 class _Link:
     url: str
     label: str
+
+
+@dataclass
+class _Media:
+    url: str
+    kind: str  # 'audio' | 'video'
+    mime: str
 
 
 _CSS = """<style>
@@ -2110,6 +2765,10 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             out.append(f'<img src="data:{_esc(block.mime)};base64,{base64.b64encode(block.data).decode()}">')
         elif isinstance(block, _Link):
             out.append(f'<a href="{_esc(block.url)}" target="_blank" rel="noopener">{_esc(block.label)}</a>')
+        elif isinstance(block, _Media):
+            size = ' style="max-width:100%;max-height:480px"' if block.kind == "video" else ""
+            out.append(f'<{block.kind} controls preload="metadata"{size}><source src="{_esc(block.url)}" '
+                       f'type="{_esc(block.mime)}"></{block.kind}>')
     out.append("</div>")
     return "".join(out)
 
@@ -2172,6 +2831,8 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             out.append(f"(image, {human_size(len(block.data))} - open in a notebook to see it)")
         elif isinstance(block, _Link):
             out += [block.label, block.url]
+        elif isinstance(block, _Media):
+            out += [f"({block.kind}: open this link in a browser to play it)", block.url]
     return "\n".join(out)
 
 
@@ -2235,6 +2896,51 @@ def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Ta
 
 def _folder_label(folder: str) -> str:
     return folder or "(files at this level)"
+
+
+_FORMAT_LABELS = {"arrow": "feather / arrow", "excel": "excel", "torch": "PyTorch checkpoint",
+                  "notebook": "Jupyter notebook", "npy": "NumPy array", "npz": "NumPy arrays (npz)"}
+_INFO_CARDS = {  # Preview.info key -> card label, in display order
+    "rows": "Rows", "records": "Records", "columns": "Columns", "row_groups": "Row groups", "stripes": "Stripes",
+    "batches": "Record batches", "sheets": "Sheets", "codec": "Codec", "compression": "Compression",
+    "files": "Files", "unpacked_size": "Unpacked size", "arrays": "Arrays", "shape": "Shape", "dtype": "Dtype",
+    "tensors": "Tensors", "parameters": "Parameters", "dtypes": "Dtypes", "kernel": "Kernel",
+    "language": "Language", "cells": "Cells", "pages": "Pages", "title": "Title",
+}
+_LISTING_TITLES = {"zip": "Files", "tar": "Files", "torch": "Files in the checkpoint", "npz": "Arrays",
+                   "safetensors": "Tensors", "notebook": "Cells"}
+
+
+def _card_value(key: str, value: Any) -> str:
+    if key == "columns":
+        return f"{len(value):,}"
+    if key.endswith("size") and isinstance(value, int):
+        return human_size(value)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    if isinstance(value, (list, tuple)) and key != "shape":
+        return ", ".join(map(str, value))
+    return str(value)
+
+
+def _listing_table(rows: list[dict[str, Any]], title: str) -> _Table:
+    """list of dicts -> table; sizes, dates and big numbers formatted for reading."""
+    if not rows:
+        return _Table(["(empty)"], [], title=title)
+
+    def cell(key: str, value: Any) -> str:
+        if value is None:
+            return "-"
+        if key.endswith("size") and isinstance(value, int):
+            return human_size(value)
+        if isinstance(value, datetime):
+            return _fmt_dt(value)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return f"{value:,}"
+        return str(value)
+
+    headers = list(rows[0])
+    return _Table(headers, [[cell(k, row.get(k)) for k in headers] for row in rows], title=title)
 
 
 def _hexdump(data: bytes) -> str:
@@ -2316,7 +3022,7 @@ def _friendly_errors(method: Callable) -> Callable:
             if code in ("404", "NoSuchKey", "NotFound"):
                 message = "object not found"
             self._show([_Note(f"{code}: {message}  [{method.__name__}]", "warn")])
-        except (BotoCoreError, ValueError, ImportError) as exc:
+        except (BotoCoreError, *_DATA_ERRORS) as exc:
             self._show([_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")])
 
     return wrapper
@@ -2921,33 +3627,45 @@ class S3View:
 
     @_friendly_errors
     def preview(self, uri: str, n: int = 20) -> None:
-        """Peek inside an object: table for csv/tsv/jsonl/json/parquet (+ parquet schema),
-        pretty JSON, text lines, image, or hex dump. Downloads only what it needs."""
+        """Peek inside a file: tables (csv, tsv, psv, json, jsonl, parquet, orc, feather, avro, excel, npy)
+        with their schema, archive contents (zip, tar, tar.gz, model.tar.gz, npz, .pt), safetensors tensors,
+        notebook cells, pretty JSON, text, images, audio / video players, PDFs, or a hex dump.
+        Downloads only what it needs; files without an extension are recognised by their content."""
         p = self.core.preview(uri, n=n)
-        detail = " · ".join(filter(None, [human_size(p.size), p.format or p.content_type,
-                                          f"{p.compression}-compressed" if p.compression else ""]))
+        detail = " · ".join(filter(None, [human_size(p.size), _FORMAT_LABELS.get(p.format or "", p.format)
+                                          or p.content_type, f"{p.compression}-compressed" if p.compression else ""]))
         blocks: list[Any] = [_Title(f"Preview of {p.uri}", detail)]
         if p.note:
             blocks.append(_Note(p.note, "warn"))
+        cards = [(label, _card_value(key, p.info[key])) for key, label in _INFO_CARDS.items()
+                 if p.info.get(key) not in (None, "", [])]
+        if cards:
+            blocks.append(_Cards(cards))
         if p.kind == "table":
-            if "rows" in p.info:
-                blocks.append(_Cards([("Rows", f"{p.info['rows']:,}"), ("Columns", f"{len(p.info['columns']):,}"),
-                                      ("Row groups", f"{p.info['row_groups']:,}"),
-                                      ("Compression", str(p.info.get("compression") or "-"))]))
-            elif "records" in p.info:
-                blocks.append(_Cards([("Records", f"{p.info['records']:,}")]))
             blocks.append(_Frame(p.data, title=f"First {len(p.data):,} rows"))
-            if "columns" in p.info:
-                blocks.append(_Table(["Column", "Type"], [list(c) for c in p.info["columns"]], title="Schema"))
+        elif p.kind == "listing":
+            blocks.append(_listing_table(p.data, _LISTING_TITLES.get(p.format or "", "Contents")))
         elif p.kind == "json":
             text = json.dumps(p.data, indent=2, default=str, ensure_ascii=False)
             blocks.append(_Text(_clip(text, 20_000)))
         elif p.kind == "text":
             blocks.append(_Text("\n".join(p.data or []), title=f"First {len(p.data or [])} lines"))
         elif p.kind == "image":
-            blocks.append(_Image(p.data, p.content_type or "image/png"))
+            blocks.append(_Image(p.data, p.info.get("mime") or p.content_type or "image/png"))
+        elif p.kind == "media" and p.info.get("media") in ("audio", "video"):
+            blocks += [_Media(p.data, p.info["media"], p.info.get("mime", "")),
+                       _Link(p.data, "Open in a new tab (link valid 1 hour)")]
+        elif p.kind == "media":
+            blocks.append(_Link(p.data, "Open the PDF (link valid 1 hour)"))
         elif p.kind == "binary":
             blocks.append(_Text(_hexdump(p.data), title="Binary content (first 512 bytes)"))
+        if p.info.get("url") and p.kind != "media":
+            blocks.append(_Link(p.info["url"], "Open the file (link valid 1 hour)"))
+        if p.info.get("columns"):
+            blocks.append(_Table(["Column", "Type"], [list(c) for c in p.info["columns"]], title="Schema"))
+        if p.info.get("metadata"):
+            blocks.append(_Table(["Key", "Value"], [[k, _clip(str(v), 200)] for k, v in p.info["metadata"].items()],
+                                 title="Metadata"))
         if p.truncated and p.kind == "text":
             blocks.append(_Note(f"Showing the first {n} lines; pass n= for more."))
         self._show(blocks)

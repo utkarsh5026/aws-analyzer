@@ -57,7 +57,7 @@ Sizes accept `1024`, `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-0
 | `uploads(uri)` | Incomplete multipart uploads (billed but invisible in normal listings) and what they cost |
 | `what_if(uri, move_after=, to=, delete_after=)` | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves |
 | `head(uri)` | All object metadata, user metadata and tags |
-| `preview(uri, n=20)` | CSV/TSV/JSON/JSONL/Parquet as a DataFrame (+ parquet schema and row count), pretty JSON, text lines, images, hex dump. `.gz`/`.bz2`/`.xz` are decompressed on the fly. Only downloads what it needs. |
+| `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, or a hex dump. Only downloads what it needs. |
 | `link(uri)` | Clickable presigned download link |
 
 ### Getting the data (`S3Analyzer`)
@@ -74,7 +74,11 @@ files = s3.find("s3://my-bucket/data/", extensions=["csv"], modified_after="7d")
 df = objects_to_df(files)                           # key, size, last_modified, storage_class, ...
 
 df = s3.read_df("s3://my-bucket/data/big.parquet", nrows=1000, columns=["id", "ts"])
+df = s3.read_df("s3://my-bucket/reports/q1.xlsx", sheet_name="Summary")
+df = s3.read_df("s3://my-bucket/spark/part-00000", fmt="parquet")   # no extension: say what it is
 s3.parquet_info("s3://my-bucket/data/big.parquet")  # rows, row groups, schema (reads only the footer)
+s3.list_archive("s3://my-bucket/job/output/model.tar.gz").entries   # files inside, without extracting
+s3.read_avro("s3://my-bucket/events.avro", n=100), s3.read_npy(uri, nrows=10), s3.safetensors_info(uri)
 s3.read_lines("s3://my-bucket/logs/app.log.gz", 50)
 s3.read_json(...), s3.read_jsonl(..., n=100), s3.read_text(...), s3.read_bytes(uri, 0, 1023)
 with s3.open("s3://my-bucket/data/x.csv.gz") as f: ...   # streaming, decompressed
@@ -88,6 +92,29 @@ impact = s3.simulate_lifecycle("s3://my-bucket/logs/", move_after=30, to="STANDA
 impact.monthly_savings, impact.rule()               # USD per month, the rule as a dict
 s3.deleted_files("s3://my-bucket/data/", deleted_after="7d").files   # [DeletedObject]
 ```
+
+### File types
+
+`preview` and `read_df` pick the reader from the file name, and from the first bytes when the name has
+no extension or the wrong one (Spark's `part-00000`, a Firehose object, a `.gz` that isn't gzipped).
+
+| Kind | Extensions | `preview` shows | `read_df` |
+|---|---|---|---|
+| Delimited text | `.csv` `.tsv` `.psv` | first rows | ✓ |
+| JSON | `.json` `.jsonl` `.ndjson` | table of records, or pretty JSON | ✓ |
+| Columnar | `.parquet` `.orc` `.feather` `.arrow` | first rows, schema, row count (reads only what it needs) | ✓ |
+| Avro | `.avro` | first rows, schema, codec (built-in reader; snappy needs `python-snappy`) | ✓ |
+| Excel | `.xlsx` `.xlsm` `.xls` | sheet names, first rows (needs `openpyxl`; `.xls` needs `xlrd`) | ✓ `sheet_name=` |
+| NumPy | `.npy` `.npz` | shape, dtype, first rows / the arrays inside | ✓ `.npy` up to 2-D |
+| Archives | `.zip` `.tar` `.tar.gz` `.tgz` | the files inside, e.g. a SageMaker `model.tar.gz` | |
+| Models | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib` | tensors, shapes, parameter count / files inside; pickles are never loaded | |
+| Notebooks | `.ipynb` | kernel and cells | |
+| Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player | |
+| PDF | `.pdf` | link; page count and first page's text with `pypdf` installed | |
+| Text | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more | first lines | |
+
+Any of them can also be compressed: `.gz`, `.bz2`, `.xz`, or `.zst` (Python 3.14+, or `pip install zstandard`).
+Packages in the table are optional; without them `preview` says what to install.
 
 The aggregation functions are pure (no AWS calls), so they also work on your own lists of `ObjectInfo`,
 for example rows loaded from an S3 Inventory report: `summarize_objects`, `build_folder_tree`,

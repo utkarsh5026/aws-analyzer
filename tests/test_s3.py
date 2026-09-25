@@ -1,10 +1,19 @@
 import gzip
+import importlib
 import io
 import json
-from datetime import datetime, timedelta, timezone
+import pickle
+import tarfile
+import zipfile
+from datetime import date, datetime, timedelta, timezone
 
 import boto3
+import fastavro
+import numpy as np
+import pandas as pd
 import pyarrow as pa
+import pyarrow.feather as feather
+import pyarrow.orc as orc
 import pyarrow.parquet as pq
 import pytest
 from moto import mock_aws
@@ -33,11 +42,13 @@ from s3 import (
     make_filter,
     object_monthly_cost,
     objects_to_df,
+    parse_avro,
     parse_s3_uri,
     parse_size,
     parse_time,
     policy_findings,
     simulate_lifecycle_objects,
+    sniff_format,
     storage_type_class,
     summarize_objects,
     summary_findings,
@@ -118,9 +129,26 @@ def test_file_extension(key, expected):
 @pytest.mark.parametrize("key, expected", [
     ("x.csv.gz", ("csv", "gz")), ("logs.gz", (None, "gz")), ("p.snappy.parquet", ("parquet", None)),
     ("a/b.jsonl.bz2", ("jsonl", "bz2")), ("README", (None, None)), ("img.PNG", ("image", None)),
+    ("model.tar.gz", ("tar", "gz")), ("m.tgz", ("tar", "gz")), ("x.csv.zst", ("csv", "zst")), ("x.gzip", (None, "gz")),
+    ("t.orc", ("orc", None)), ("t.feather", ("arrow", None)), ("e.avro", ("avro", None)), ("b.xlsx", ("excel", None)),
+    ("d.psv", ("psv", None)), ("a.npy", ("npy", None)), ("w.safetensors", ("safetensors", None)),
+    ("nb.ipynb", ("notebook", None)), ("s.mp3", ("audio", None)), ("v.mp4", ("video", None)), ("d.pdf", ("pdf", None)),
+    ("m.pth", ("torch", None)), ("m.pkl", ("pickle", None)),
 ])
 def test_detect_format(key, expected):
     assert detect_format(key) == expected
+
+
+@pytest.mark.parametrize("head, expected", [
+    (b"PAR1\x15\x04", ("parquet", None)), (b"ORC\x0a", ("orc", None)), (b"ARROW1\x00\x00", ("arrow", None)),
+    (b"Obj\x01\x04", ("avro", None)), (b"\x93NUMPY\x01\x00", ("npy", None)), (b"%PDF-1.7", ("pdf", None)),
+    (b"PK\x03\x04", ("zip", None)), (b"\x89PNG\r\n\x1a\n", ("image", None)), (b"\xff\xd8\xff\xe0", ("image", None)),
+    (b"\x1f\x8b\x08", (None, "gz")), (b"BZh91AY", (None, "bz2")), (b"\xfd7zXZ\x00", (None, "xz")),
+    (b"\x28\xb5\x2f\xfd", (None, "zst")), (b"  {\"a\": 1}", ("json", None)), (b"[1, 2]", ("json", None)),
+    (bytes(257) + b"ustar", ("tar", None)), (b"id,name\n1,a", (None, None)), (b"BZhello", (None, None)), (b"", (None, None)),
+])
+def test_sniff_format(head, expected):
+    assert sniff_format(head) == expected
 
 
 def test_folder_of():
@@ -289,6 +317,48 @@ def test_summary_cost_and_small_files_in_ia():
     assert (s.below_minimum["STANDARD_IA"].count, s.below_minimum["STANDARD_IA"].size) == (1000, 1000 * KB)
     level, message = next(f for f in summary_findings(s) if "128 KB" in f[1])
     assert level == "warn" and "In STANDARD they would cost" in message
+
+
+# --------------------------------------------------------------------------- avro
+
+AVRO_SCHEMA = {"type": "record", "name": "Event", "namespace": "acme", "fields": [
+    {"name": "id", "type": "long"},
+    {"name": "name", "type": "string"},
+    {"name": "score", "type": ["null", "double"]},
+    {"name": "tags", "type": {"type": "array", "items": "string"}},
+    {"name": "counts", "type": {"type": "map", "values": "int"}},
+    {"name": "kind", "type": {"type": "enum", "name": "Kind", "symbols": ["A", "B"]}},
+    {"name": "at", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "day", "type": {"type": "int", "logicalType": "date"}},
+    {"name": "address", "type": ["null", {"type": "record", "name": "Address", "fields": [{"name": "city", "type": "string"}]}]},
+    {"name": "home", "type": ["null", "acme.Address"]},
+]}
+
+
+def avro_bytes(count=500, codec="deflate"):
+    records = [{"id": i, "name": f"n{i}", "score": None if i % 2 else i / 2, "tags": ["x"] * (i % 3),
+                "counts": {"a": i, "b": -i}, "kind": "AB"[i % 2], "at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                "day": date(2024, 1, 2), "address": None if i % 2 else {"city": "Pune"},
+                "home": {"city": "Delhi"} if i % 3 == 0 else None} for i in range(count)]
+    buffer = io.BytesIO()
+    fastavro.writer(buffer, fastavro.parse_schema(AVRO_SCHEMA), records, codec=codec, sync_interval=2000)
+    return buffer.getvalue(), records
+
+
+@pytest.mark.parametrize("codec", ["null", "deflate", "bzip2", "xz"])
+def test_parse_avro_matches_fastavro(codec):
+    data, records = avro_bytes(codec=codec)
+    schema, got_codec, got, complete = parse_avro(data)
+    assert got == list(fastavro.reader(io.BytesIO(data))) and got_codec == codec and complete
+    assert schema["name"].endswith("Event") and got[0]["day"] == date(2024, 1, 2) and got[0]["address"] == {"city": "Pune"}
+    assert parse_avro(data, n=3)[2] == got[:3]
+    _, _, part, complete = parse_avro(data[: len(data) // 2])  # a cut-off download: whole blocks only
+    assert not complete and 0 < len(part) < len(records) and part == got[: len(part)]
+
+
+def test_parse_avro_rejects_other_files():
+    with pytest.raises(ValueError):
+        parse_avro(b"PAR1 not avro")
 
 
 # ---------------------------------------------------------------------- lifecycle
@@ -706,6 +776,241 @@ def test_presigned_url_and_download(core, tmp_path):
     assert path.endswith("readme.md") and open(path).read().startswith("# Title")
 
 
+# ------------------------------------------------------------------------ formats
+
+FORMATS = "formats"
+TABLE = pa.table({"id": list(range(50)), "name": [f"n{i}" for i in range(50)]})
+
+
+def zip_bytes(files):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def tar_bytes(files, mode="w:gz"):
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode=mode) as archive:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def to_bytes(write, *args, **kwargs):
+    buffer = io.BytesIO()
+    write(*args, buffer, **kwargs)
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def formats(aws):
+    aws.create_bucket(Bucket=FORMATS)
+
+    def put(key, body, **kwargs):
+        aws.put_object(Bucket=FORMATS, Key=key, Body=body, **kwargs)
+
+    parquet = to_bytes(pq.write_table, TABLE)
+    put("tables/t.orc", to_bytes(orc.write_table, TABLE, stripe_size=64))
+    put("tables/t.feather", to_bytes(feather.write_feather, TABLE, chunksize=10))
+    put("tables/t.avro", avro_bytes()[0])
+    put("tables/t.psv", b"a|b\n1|x\n2|y\n")
+    excel = io.BytesIO()
+    with pd.ExcelWriter(excel) as writer:
+        pd.DataFrame({"x": [1, 2, 3]}).to_excel(writer, sheet_name="first", index=False)
+        pd.DataFrame({"y": ["a"]}).to_excel(writer, sheet_name="second", index=False)
+    put("tables/book.xlsx", excel.getvalue())
+    put("tables/matrix.npy", to_bytes(lambda a, f: np.save(f, a), np.arange(300, dtype="float32").reshape(100, 3)))
+    put("tables/cube.npy", to_bytes(lambda a, f: np.save(f, a), np.zeros((2, 3, 4))))
+    put("tables/objects.npy", to_bytes(lambda a, f: np.save(f, a, allow_pickle=True), np.array([{"a": 1}], dtype=object)))
+    put("spark/part-00000", parquet)  # no extension: recognised from its first bytes
+    put("firehose/events", gzip.compress(b'{"a": 1}\n{"a": 2}\n'))
+    put("logs/app.log.gz", b"plain text, not gzip\nline 2\n")
+    put("logs/bracket-log", b"[2024-01-01 10:00] started\n[2024-01-01 10:01] done\n")
+    put("archives/data.zip", zip_bytes({"a.csv": b"x\n" * 100, "docs/readme.md": b"# hi", "empty/": b""}))
+    put("models/job-1/output/model.tar.gz", tar_bytes({"model.pth": b"w" * 5000, "code/inference.py": b"def model_fn(): pass",
+                                                       "config.json": b"{}"}))
+    put("archives/plain.tar", tar_bytes({"one.txt": b"1", "two.txt": b"22"}, mode="w"))
+    put("models/arrays.npz", to_bytes(lambda f: np.savez_compressed(f, weights=np.ones((4, 5)), bias=np.zeros(5, dtype="int8"))))
+    header = json.dumps({"__metadata__": {"format": "pt"}, "layer.weight": {"dtype": "F32", "shape": [2, 3], "data_offsets": [0, 24]},
+                         "layer.bias": {"dtype": "F16", "shape": [3], "data_offsets": [24, 30]}}).encode()
+    put("models/model.safetensors", len(header).to_bytes(8, "little") + header + bytes(30))
+    put("models/model.pth", zip_bytes({"archive/data.pkl": pickle.dumps({"w": 1}), "archive/version": b"3"}))
+    put("models/model.pkl", pickle.dumps({"w": 1}))
+    notebook = {"nbformat": 4, "metadata": {"kernelspec": {"display_name": "Python 3"}, "language_info": {"name": "python"}},
+                "cells": [{"cell_type": "markdown", "source": ["# Title\n", "text"]},
+                          {"cell_type": "code", "source": "\nimport s3\nui = s3.S3View()", "outputs": [{}, {}]}]}
+    put("notebooks/explore.ipynb", json.dumps(notebook).encode())
+    put("media/clip.mp3", b"ID3" + bytes(100))
+    put("media/movie.mp4", bytes(64))
+    put("docs/report.pdf", pdf_bytes("Hello S3"))
+    put("docs/broken.pdf", b"%PDF-1.4\nnot really a pdf")
+    return FORMATS
+
+
+def pdf_bytes(text):
+    """A one-page PDF with `text` on it, xref offsets and all."""
+    stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode()
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> >> >>",
+               b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+def uri_of(key):
+    return f"s3://{FORMATS}/{key}"
+
+
+@pytest.mark.parametrize("key, kind, fmt", [
+    ("tables/t.orc", "table", "orc"),
+    ("tables/t.feather", "table", "arrow"),
+    ("tables/t.avro", "table", "avro"),
+    ("tables/t.psv", "table", "psv"),
+    ("tables/book.xlsx", "table", "excel"),
+    ("tables/matrix.npy", "table", "npy"),
+    ("tables/cube.npy", "text", "npy"),
+    ("tables/objects.npy", "binary", "npy"),  # holds a pickle: never loaded
+    ("spark/part-00000", "table", "parquet"),
+    ("firehose/events", "table", "jsonl"),
+    ("logs/app.log.gz", "text", "text"),
+    ("logs/bracket-log", "text", "json"),
+    ("archives/data.zip", "listing", "zip"),
+    ("models/job-1/output/model.tar.gz", "listing", "tar"),
+    ("archives/plain.tar", "listing", "tar"),
+    ("models/arrays.npz", "listing", "npz"),
+    ("models/model.safetensors", "listing", "safetensors"),
+    ("models/model.pth", "listing", "torch"),
+    ("models/model.pkl", "binary", "pickle"),
+    ("notebooks/explore.ipynb", "listing", "notebook"),
+    ("media/clip.mp3", "media", "audio"),
+    ("media/movie.mp4", "media", "video"),
+])
+def test_preview_formats(core, formats, key, kind, fmt):
+    p = core.preview(uri_of(key), n=5)
+    assert (p.kind, p.format) == (kind, fmt), p.note
+
+
+def test_preview_details_for_new_formats(core, formats):
+    orc_preview = core.preview(uri_of("tables/t.orc"), n=5)
+    assert len(orc_preview.data) == 5 and orc_preview.info["rows"] == 50 and ("id", "int64") in orc_preview.info["columns"]
+    assert core.preview(uri_of("tables/t.feather")).info["batches"] == 5
+    avro = core.preview(uri_of("tables/t.avro"), n=4)
+    assert len(avro.data) == 4 and avro.info["codec"] == "deflate" and ("score", "null | double") in avro.info["columns"]
+    excel = core.preview(uri_of("tables/book.xlsx"))
+    assert excel.info["sheets"] == ["first", "second"] and list(excel.data["x"]) == [1, 2, 3]
+    matrix = core.preview(uri_of("tables/matrix.npy"), n=5)
+    assert matrix.info == {"shape": (100, 3), "dtype": "float32"} and matrix.data.shape == (5, 3)
+    assert "pickle" in core.preview(uri_of("tables/objects.npy")).note
+    spark = core.preview(uri_of("spark/part-00000"), n=3)
+    assert spark.info["rows"] == 50 and len(spark.data) == 3
+    firehose = core.preview(uri_of("firehose/events"))
+    assert firehose.compression == "gz" and list(firehose.data["a"]) == [1, 2]
+    misnamed = core.preview(uri_of("logs/app.log.gz"))
+    assert misnamed.data[0] == "plain text, not gzip" and "isn't gz-compressed" in misnamed.note
+    assert core.preview(uri_of("logs/bracket-log")).note == ""  # looked like JSON, but it's just a log
+    archive = core.preview(uri_of("archives/data.zip"))
+    assert [row["name"] for row in archive.data] == ["a.csv", "docs/readme.md"] and archive.info["files"] == "2"
+    model = core.preview(uri_of("models/job-1/output/model.tar.gz"))
+    assert [row["name"] for row in model.data] == ["model.pth", "code/inference.py", "config.json"]
+    assert model.info["unpacked_size"] == 5000 + len(b"def model_fn(): pass") + 2
+    arrays = {row["array"]: row for row in core.preview(uri_of("models/arrays.npz")).data}
+    assert arrays["weights"]["shape"] == (4, 5) and arrays["bias"]["dtype"] == "int8"
+    tensors = core.preview(uri_of("models/model.safetensors"))
+    assert tensors.info["parameters"] == 9 and tensors.info["dtypes"] == ["F16", "F32"]
+    assert tensors.info["metadata"] == {"format": "pt"}
+    assert "weights_only" in core.preview(uri_of("models/model.pth")).note
+    assert "unpickling" in core.preview(uri_of("models/model.pkl")).note
+    notebook = core.preview(uri_of("notebooks/explore.ipynb"))
+    assert notebook.info == {"kernel": "Python 3", "language": "python", "cells": 2}
+    assert notebook.data[1] == {"#": 2, "type": "code", "starts with": "import s3", "lines": 3, "outputs": 2}
+    clip = core.preview(uri_of("media/clip.mp3"))
+    assert clip.data.startswith("https://") and clip.info == {"media": "audio", "mime": "audio/mpeg"}
+
+
+def test_preview_pdf(core, formats):
+    p = core.preview(uri_of("docs/report.pdf"))
+    if importlib.util.find_spec("pypdf") is None:  # pypdf is optional: without it, a link
+        assert p.kind == "media" and p.data.startswith("https://") and "pip install pypdf" in p.note
+    else:
+        assert p.kind == "text" and p.data == ["Hello S3"] and p.info["pages"] == 1
+        assert p.info["url"].startswith("https://")
+    broken = core.preview(uri_of("docs/broken.pdf"))
+    assert broken.kind == "media" and broken.data.startswith("https://")
+
+
+def test_read_df_new_formats(core, formats):
+    assert list(core.read_df(uri_of("tables/t.orc"), nrows=3)["id"]) == [0, 1, 2]
+    assert core.read_df(uri_of("tables/t.orc"), columns=["name"]).shape == (50, 1)
+    assert list(core.read_df(uri_of("tables/t.feather"), nrows=12, columns=["id"]).columns) == ["id"]
+    assert len(core.read_df(uri_of("tables/t.feather"))) == 50
+    assert core.read_df(uri_of("tables/t.avro"), nrows=2)["address.city"].tolist()[0] == "Pune"
+    assert list(core.read_df(uri_of("tables/book.xlsx"), sheet_name="second")["y"]) == ["a"]
+    assert list(core.read_df(uri_of("tables/t.psv"))["b"]) == ["x", "y"]
+    assert core.read_df(uri_of("tables/matrix.npy"), nrows=4).shape == (4, 3)
+    assert len(core.read_df(uri_of("spark/part-00000"), fmt="parquet")) == 50
+    assert list(core.read_df(uri_of("firehose/events"), fmt="jsonl", compression="gz")["a"]) == [1, 2]
+    with pytest.raises(ValueError):
+        core.read_df(uri_of("tables/cube.npy"))
+    with pytest.raises(ValueError):
+        core.read_df(uri_of("tables/objects.npy"))
+
+
+def test_read_npy_and_avro(core, formats):
+    matrix = core.read_npy(uri_of("tables/matrix.npy"), nrows=2)
+    assert matrix.tolist() == [[0, 1, 2], [3, 4, 5]] and core.read_npy(uri_of("tables/matrix.npy")).shape == (100, 3)
+    assert core.read_npy(uri_of("tables/cube.npy")).shape == (2, 3, 4)
+    records = core.read_avro(uri_of("tables/t.avro"))
+    assert len(records) == 500 and core.read_avro(uri_of("tables/t.avro"), n=3) == records[:3]
+
+
+def test_list_archive(core, formats):
+    zipped = core.list_archive(uri_of("archives/data.zip"))
+    assert zipped.kind == "zip" and zipped.complete and zipped.total_files == 3
+    model = uri_of("models/job-1/output/model.tar.gz")
+    full = core.list_archive(model)
+    assert full.kind == "tar" and full.complete and full.total_files == 3 and full.bytes_read > 0
+    first = core.list_archive(model, limit=1)
+    assert [e.name for e in first.entries] == ["model.pth"] and not first.complete and first.total_files is None
+    assert not core.list_archive(model, max_bytes=0).complete
+    plain = core.list_archive(uri_of("archives/plain.tar"))
+    assert [(e.name, e.size) for e in plain.entries] == [("one.txt", 1), ("two.txt", 2)] and plain.bytes_read is None
+
+
+def test_safetensors_info(core, formats):
+    info = core.safetensors_info(uri_of("models/model.safetensors"))
+    assert info["tensors"][0] == {"tensor": "layer.weight", "dtype": "F32", "shape": (2, 3), "parameters": 6}
+    with pytest.raises(ValueError):
+        core.safetensors_info(uri_of("tables/t.psv"))
+
+
+def test_zstd(core, aws):
+    try:
+        from compression import zstd
+
+        compress = zstd.compress
+    except ImportError:
+        zstandard = pytest.importorskip("zstandard", reason="needs Python 3.14+ or the zstandard package")
+        compress = zstandard.ZstdCompressor().compress
+    aws.create_bucket(Bucket="zstd")
+    aws.put_object(Bucket="zstd", Key="t.csv.zst", Body=compress(CSV))
+    aws.put_object(Bucket="zstd", Key="noext", Body=compress(b'{"a": 1}\n'))
+    assert list(core.read_df("s3://zstd/t.csv.zst")["name"]) == ["a", "b", "c"]
+    assert core.preview("s3://zstd/noext").compression == "zst"
+
+
 # ----------------------------------------------------------------------------- UI
 
 
@@ -768,6 +1073,18 @@ def test_ui_cost_policy_overview_what_if_deleted(ui, capsys, aws):
     assert "How to restore a file" in deleted and "Key='a.txt'" in deleted
 
 
+def test_ui_previews_new_formats(ui, capsys, formats):
+    model = run(capsys, ui.preview, uri_of("models/job-1/output/model.tar.gz"))
+    assert "-- Files --" in model and "model.pth" in model and "Unpacked size" in model
+    assert "-- Cells --" in run(capsys, ui.preview, uri_of("notebooks/explore.ipynb"))
+    tensors = run(capsys, ui.preview, uri_of("models/model.safetensors"))
+    assert "Parameters: 9" in tensors and "layer.weight" in tensors and "-- Metadata --" in tensors
+    assert "https://" in run(capsys, ui.preview, uri_of("media/clip.mp3"))
+    assert "Sheets: first, second" in run(capsys, ui.preview, uri_of("tables/book.xlsx"))
+    assert "isn't gz-compressed" in run(capsys, ui.preview, uri_of("logs/app.log.gz"))
+    assert "Codec: deflate" in run(capsys, ui.preview, uri_of("tables/t.avro"))
+
+
 def test_ui_turns_errors_into_notes(ui, capsys):
     out = run(capsys, ui.head, f"s3://{BUCKET}/missing.csv")
     assert "[!]" in out and "not found" in out
@@ -794,7 +1111,13 @@ def test_ui_html_mode(core, monkeypatch):
     ui.preview(f"s3://{BUCKET}/raw/2024/01/events.csv")
     ui.overview()
     ui.what_if(f"s3://{BUCKET}/", move_after=0, to="GLACIER")
+    aws = boto3.client("s3", region_name="us-east-1")
+    aws.put_object(Bucket=BUCKET, Key="media/clip.mp3", Body=b"ID3")
+    aws.put_object(Bucket=BUCKET, Key="media/model.tar.gz", Body=tar_bytes({"model.pth": b"w"}))
+    ui.preview(f"s3://{BUCKET}/media/clip.mp3")
+    ui.preview(f"s3://{BUCKET}/media/model.tar.gz")
     html_out = "".join(shown)
+    assert '<audio controls preload="metadata"><source src="https://' in html_out and "model.pth" in html_out
     assert '<div class="s3a">' in html_out and 'class="fill"' in html_out and "<table" in html_out
 
 
