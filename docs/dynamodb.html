@@ -207,7 +207,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <div class="code"><pre><code class="lang-py">from dynamodb import DynamoDBView
 
 ui = DynamoDBView()   # uses the notebook's IAM role and region
-ui.help()             # every command with a one-line description</code></pre></div>
+ui.help()             # every command, grouped by task; ui.help("scan") shows one in full</code></pre></div>
         </li>
         <li>
           <strong>Optional:</strong> another region or AWS profile, plain-text output, or longer tables. Tables are regional, so if <code>tables()</code> comes back empty, check the region first.
@@ -234,6 +234,7 @@ ui.query("acme-app", "CUSTOMER#1042")         # everything stored under one part
 ui.get("acme-app", "CUSTOMER#1042", "PROFILE")   # one item, nested fields laid out
 ui.schema("acme-app")                         # which attributes the items hold, and their types
 df = ui.core.scan("acme-app", n=5000).to_df() # a pandas DataFrame</code></pre></div>
+      <p><strong>Reading a report.</strong> Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, with status cells such as <code>FAILED</code> in colour, and at the bottom a <strong>Next</strong> row of two or three commands with the arguments filled in from this report, such as <code>get('acme-app', 'USER#42', 'ORDER#0017')</code>. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. <code>ui.help()</code> lists every command by task; <code>ui.help("scan")</code> shows one in full.</p>
       <p>Items come back as plain Python, not DynamoDB JSON: numbers are <code>int</code> or <code>float</code> (not <code>Decimal</code>), sets are sets, binary is <code>bytes</code>, and maps and lists are dicts and lists. A key value is converted to the key's type, so <code>"42"</code> works for a number key.</p>
 
       <!-- ============================================================ tables -->
@@ -457,7 +458,7 @@ items_to_df(items, keys=["pk", "sk"])</code></pre></div>
 
       <!-- ============================================================ reference -->
       <h2 id="reference">Command reference</h2>
-      <p>Every <code>DynamoDBView</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <p>Every <code>DynamoDBView</code> command. <code>ui.help()</code> prints the same list grouped by task, and <code>ui.help("scan")</code> shows one command's full description.</p>
       <div class="table-wrap ref"><table>
         <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
         <tbody>
@@ -473,7 +474,7 @@ items_to_df(items, keys=["pk", "sk"])</code></pre></div>
           <tr><td><code>value_counts(table, attribute, limit=10_000, where=, index=, top=30)</code></td><td>How often each value occurs, and the size of those items</td></tr>
           <tr><td><code>largest(table, n=10, limit=10_000, where=, index=)</code></td><td>The biggest items</td></tr>
           <tr><td><code>count(table, where=, index=)</code></td><td>Exact item count, next to DynamoDB's estimate</td></tr>
-          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+          <tr><td><code>help(command=None)</code></td><td>This list, grouped by task; <code>help("name")</code> shows one command in full</td></tr>
         </tbody>
       </table></div>
 

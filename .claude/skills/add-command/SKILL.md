@@ -37,14 +37,16 @@ Write the report as the user will see it: a text mock, like the `mode="text"` ou
   it, and the next step (a command, a setting, or the exact call to copy). Use `warn` only for things worth
   acting on.
 - **Tables.** Put the detail here, the longest table last, with bars where a share matters.
+- **Next.** The two or three commands the user would run after reading this, with the arguments filled in from
+  the result (`get('orders', 'USER#0', 'ORDER#0000')`, not `get(table, key...)`).
 - **The one-argument call.** Pick defaults so it's useful: a sensible `n` / `top`, a scan `limit=` that stops
   early, and a note saying the result is partial.
 - **Failure paths.** Plan what shows instead of a traceback when a section can't be read (AccessDenied), an
   optional package is missing, or the input is wrong.
 
 Name the command in the same style as the existing ones: short, and a noun or verb the user would guess
-(`largest`, `value_counts`, `what_if`). The docstring's first line is the help() text, so it describes what the
-user will see.
+(`largest`, `value_counts`, `what_if`). The docstring's first paragraph is the help() text, so it describes what
+the user will see. Add the command to the View's `_GROUPS` under the task it belongs to.
 
 If the request left real choices open (what to rank by, what counts as "too big"), show the mock and confirm it
 before building.
@@ -63,9 +65,11 @@ Build in section order, so each layer can be tested on its own:
    `ClientError` per config section into `errors` instead of raising, so one missing permission doesn't take
    down the whole report.
 4. **Section 5, View method.** Decorate it with `@_friendly_errors` and annotate it `-> None`. Wrap long calls in
-   `with self._progress(...) as tick:` and pass `progress=tick`. Build blocks (`_Title`, `_Cards`, `_Note`,
-   `_Table`, `_Text`) and end with `self._show(blocks)`. Never print or build HTML directly. Show the price basis
-   (`self._price_basis()`) next to any estimate.
+   `with self._progress(...) as tick:` and pass `progress=tick`. Build blocks (`_Title`, `_Cards`, `_Findings`,
+   `_Note`, `_Table`, `_Text`, and last `_Next` with calls made by `_call(...)`) and end with `self._show(blocks)`.
+   Never print or build HTML directly. Show the price basis (`self._price_basis()`) next to any estimate. Give a
+   card a tone only when a warning in the same report is about it; show statuses in tables as `_Tone` cells, a
+   snippet to copy as `_Text(code=True)`, and raw JSON or tags with `collapsed=True`.
 
 If you change a duplicated helper along the way (the list is in CLAUDE.md), run `/sync-helpers` afterwards.
 

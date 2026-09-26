@@ -215,7 +215,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <div class="code"><pre><code class="lang-py">from s3 import S3View
 
 ui = S3View()     # uses the notebook's IAM role
-ui.help()         # every command with a one-line description</code></pre></div>
+ui.help()         # every command, grouped by task; ui.help("summary") shows one in full</code></pre></div>
         </li>
         <li>
           <strong>Optional:</strong> another AWS profile or region, plain-text output, or longer tables:
@@ -242,6 +242,7 @@ ui.summary("s3://acme-ml-data/curated/")             # what's in a folder, and w
 ui.find("s3://acme-ml-data/", extensions="parquet", min_size="100MB")
 ui.preview("s3://acme-ml-data/curated/features/churn/train.parquet")
 df = ui.core.read_df("s3://acme-ml-data/curated/features/churn/train.parquet")   # a pandas DataFrame</code></pre></div>
+      <p><strong>Reading a report.</strong> Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, with status cells such as <code>FAILED</code> in colour, and at the bottom a <strong>Next</strong> row of two or three commands with the arguments filled in from this report, such as <code>tree('s3://acme-ml-data/curated/')</code>. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. <code>ui.help()</code> lists every command by task; <code>ui.help("summary")</code> shows one in full.</p>
       <p>Anywhere a location is expected you can write <code>s3://bucket/prefix</code> or just <code>bucket/prefix</code>. Sizes accept <code>1024</code>, <code>"10MB"</code> or <code>"1.5GB"</code>. Times accept a <code>datetime</code>, <code>"2025-05-01"</code>, or an age such as <code>"7d"</code>, <code>"12h"</code> or <code>"2w"</code> (meaning that long ago).</p>
 
       <!-- ============================================================ buckets -->
@@ -778,7 +779,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
 
       <!-- ============================================================ reference -->
       <h2 id="reference">Command reference</h2>
-      <p>Every <code>S3View</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <p>Every <code>S3View</code> command. <code>ui.help()</code> prints the same list grouped by task, and <code>ui.help("summary")</code> shows one command's full description.</p>
       <div class="table-wrap ref"><table>
         <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
         <tbody>
@@ -804,7 +805,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>download(uri, path=None)</code></td><td>Download a file or a folder, with a progress bar; running it again resumes</td></tr>
           <tr><td><code>download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)</code></td><td>A file or folder as one .zip, after checking size, file count, disk space, memory and read access</td></tr>
           <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
-          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+          <tr><td><code>help(command=None)</code></td><td>This list, grouped by task; <code>help("name")</code> shows one command in full</td></tr>
         </tbody>
       </table></div>
 

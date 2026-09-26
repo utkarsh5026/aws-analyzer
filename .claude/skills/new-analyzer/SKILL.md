@@ -73,8 +73,10 @@ Then build the file:
    `Config(retries={"max_attempts": 10, "mode": "adaptive"})`. Record config sections the caller can't read in
    `errors`. Long reads take `limit=` and `progress=`.
 6. **The View.** `__init__(core=None, *, mode="auto", max_rows=50)`, plus `_show`, `_progress`, `help` and
-   `_price_basis` copied from the other Views. Every command is decorated with `@_friendly_errors`, and its
-   docstring's first line is its help() text. `_friendly_errors` gets a service-specific not-found message.
+   `_price_basis` copied from the other Views, and the service's own `_GROUPS` (commands by task, for help()) and
+   `_START` (the first two or three calls to try). Every command is decorated with `@_friendly_errors`, and its
+   docstring's first paragraph is its help() text. `_friendly_errors` gets a service-specific not-found message.
+   Set the file's `_BADGE` (the chip before each report title) and CSS root class.
 
 Build each command the way `/add-command` does: the data model, then the pure function and its findings, then
 the analyzer method, then the View method.

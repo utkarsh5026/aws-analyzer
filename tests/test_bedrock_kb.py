@@ -1177,7 +1177,8 @@ def test_ui_search_and_chunk(aws, ui, capsys):
                      "Bedrock's default search", "Passages: 2", "Top score: 0.71", "Files: 2",
                      "Est. cost: <$0.01 (question embedding)", "[1] refund-policy.pdf p.3 (score 0.71)",
                      "    team=billing · year=2024", "    Refunds are issued within 5-7 business days",
-                     "[2] eu-returns.pdf (score 0.50)", "Scores are relative", "chunk(1) shows"):
+                     "[2] eu-returns.pdf (score 0.50)", "Scores are relative", "  chunk(1)   ",
+                     "ask('How long do refunds take?'"):
         assert expected in out
     out = run(capsys, ui.chunk, 1)
     for expected in ("Result #1: refund-policy.pdf p.3", "Score: 0.710", "Page: 3", "Tokens (estimate): ~32",
@@ -1218,8 +1219,8 @@ def test_ui_ask(aws, ui, capsys):
                      "Refunds are issued within 5-7 business days of receiving the item [1]. EU orders can be returned",
                      "within 14 days [2][3]. Contact support", "-- Sources --", "#  File               Page  Passage",
                      '1  refund-policy.pdf     3  "Refunds are issued within 5-7 business days',
-                     "Estimated from characters: RetrieveAndGenerate doesn't return token counts. "
-                     'engine="converse" gives exact ones.', "follow_up("):
+                     "Tokens and cost are estimated from characters: RetrieveAndGenerate doesn't return "
+                     "token counts.", "engine='converse'", "follow_up("):
         assert expected in out
     assert "Source #2: eu-returns.pdf" in run(capsys, ui.chunk, 2)
 
@@ -1254,7 +1255,7 @@ def test_ui_ask_converse_and_follow_up(aws, ui, capsys):
                      "Tokens: 1,234 in + 56 out", "Est. cost: <$0.01", "Refunds take 5-7 business days [1].",
                      "#  File               Page  Cited  Passage"):
         assert expected in out
-    assert "Estimated from characters" not in out
+    assert "estimated from characters" not in out
     # the follow-up searches with both questions, and sends the first turn (without its markers) as history
     aws.runtime.add_response("retrieve", retrieve_resp(passage("Digital goods can't be refunded.", "digital.pdf")),
                              search_params("How long do refunds take? And for digital goods?"))
@@ -1337,7 +1338,7 @@ def test_ui_compare(aws, ui, capsys):
     for expected in ("Compare searches in support-docs: what is error E1234?", "Settings tried: 4",
                      "SEMANTIC n=2 vs HYBRID n=2: 33% overlap", "HYBRID found 1 passage SEMANTIC missed at n=2, "
                      "including its top result", "Rank of each passage under each setting", "SEMANTIC n=2  SEMANTIC n=3",
-                     "errors.pdf p.3", "search('what is error E1234?', search_type='HYBRID', n=3)"):
+                     "errors.pdf p.3", "search('what is error E1234?', 3, search_type='HYBRID'"):
         assert expected in out
 
 
@@ -1395,7 +1396,7 @@ def test_ui_progress_options(capsys, monkeypatch):
 
 def test_ui_help(ui, capsys):
     out = run(capsys, ui.help)
-    assert "BedrockKBView commands" in out and "kb_info(kb: 'str | None' = None)" in out
+    assert "BedrockKBView commands" in out and "kb_info(kb=None)" in out
 
 
 def test_ui_html_mode(aws, core, monkeypatch):
@@ -1448,3 +1449,24 @@ def test_html_escapes_answers():
 def test_dataclasses_default_cleanly():
     assert DataSourceInfo("x").errors == {} and IngestionJob("j").duration is None
     assert Passage(1, "t").source == "(unknown source)" and Passage(1, "t", uri="s3://b/k.pdf", page=2).key
+
+
+def test_render_findings_tones_and_next():
+    blocks = [kbmod._Cards([("Last sync", "FAILED 2h ago", "bad")]),
+              kbmod._Findings([("warn", "run documents(status='FAILED')")]),
+              kbmod._Table(["Status"], [[kbmod._Tone("FAILED", "bad")]]),
+              kbmod._Next([("chunk(1)", "result #1 in full")])]
+    text = kbmod._render_text(blocks, 50)
+    assert "Last sync: FAILED 2h ago (!)" in text and "-- Findings: 1 warning --" in text and "  chunk(1)   " in text
+    rendered = kbmod._render_html(blocks, 50)
+    assert 'class="card bad"' in rendered and '<span class="pill bad">FAILED</span>' in rendered
+    assert "documents(status=&#x27;FAILED&#x27;)</code>" in rendered and '<div class="kba">' in rendered
+
+
+def test_ui_help_groups_every_command(ui, capsys):
+    out = run(capsys, ui.help)
+    commands = {name for name in vars(BedrockKBView) if not name.startswith("_")
+                and callable(getattr(BedrockKBView, name))}
+    assert commands == {name for names in BedrockKBView._GROUPS.values() for name in names}
+    assert "Start here:" in out and "-- Search and answer --" in out
+    assert "engine='converse' gives exact tokens" in run(capsys, ui.help, "ask")

@@ -1777,3 +1777,83 @@ def test_text_tables_cap_rows():
     table = s3mod._Table(["n"], [[str(i)] for i in range(10)])
     out = s3mod._render_text([table], 3)
     assert "7 more rows" in out
+
+
+def test_findings_panel_puts_warnings_first():
+    found = [("info", "a note"), ("warn", "call documents(status='FAILED') <b>now</b>"), ("info", "another")]
+    text = s3mod._render_text([s3mod._Findings(found)], 50)
+    assert "-- Findings: 1 warning, 2 notes --" in text
+    assert text.index("[!] call") < text.index("[i] a note") < text.index("[i] another")
+    rendered = s3mod._render_html([s3mod._Findings(found)], 50)
+    assert "Findings · 1 warning · 2 notes" in rendered and "&lt;b&gt;now&lt;/b&gt;" in rendered
+    assert '<code title="Click to select, then copy">documents(status=&#x27;FAILED&#x27;)</code>' in rendered
+    assert s3mod._render_text([s3mod._Findings([], empty="No issues found.")], 50).strip() == "[ok] No issues found."
+    assert s3mod._render_text([s3mod._Findings([])], 50).strip() == ""
+
+
+def test_prose_marks_commands_and_escapes_them():
+    rendered = s3mod._prose("run x('<script>alert(1)</script>') (see what_if), then aws s3api get-bucket-policy "
+                            "--bucket b --output json.")
+    assert "<script>" not in rendered and "x(&#x27;&lt;script&gt;alert(1)&lt;/script&gt;&#x27;)</code>" in rendered
+    assert "(see what_if)" in rendered  # a word in brackets isn't a call
+    assert ">aws s3api get-bucket-policy --bucket b --output json</code>." in rendered
+    assert s3mod._prose("plain text") == "plain text"
+
+
+def test_call_formats_next_steps():
+    from decimal import Decimal
+
+    assert s3mod._call("tree", "s3://b/", depth=2) == "tree('s3://b/', depth=2)"
+    assert s3mod._call("more") == "more()"
+    assert (s3mod._call("scan", "t", where={"n": Decimal("42"), "r": ("between", Decimal("1.5"), 2)})
+            == "scan('t', where={'n': 42, 'r': ('between', 1.5, 2)})")
+    assert s3mod._call("x", (1,), [2]) == "x((1,), [2])"
+
+
+def test_render_tones_pills_scroll_folds_and_next():
+    blocks = [s3mod._Cards([("Encryption", "none", "warn"), ("Objects", "12")]),
+              s3mod._Table(["Status", "N"], [[s3mod._Tone("FAILED", "bad"), s3mod._Tone("3", "warn")]] * 35),
+              s3mod._Table(["Tag", "Value"], [["env", "prod"]], title="Tags", collapsed=True),
+              s3mod._Table(["Call"], [["query('t', 1)"]], code_cols=(0,)),
+              s3mod._Text("{}", title="JSON", code=True),
+              s3mod._Next([("summary('s3://b/')", "what's in it"), ("more()", "")])]
+    rendered = s3mod._render_html(blocks, 50)
+    assert 'class="card warn"' in rendered and '<div class="card"><div class="l">Objects' in rendered
+    assert '<span class="pill bad">FAILED</span>' in rendered and '<td class="n"><span class="pill warn">3</span>' in rendered
+    assert 'class="tw scroll"' in rendered  # 35 rows: a scroll box with a sticky header
+    assert '<details class="sec"><summary>Tags (1)</summary>' in rendered
+    assert '<td class="c"><code' in rendered and '<pre class="code"' in rendered and "select all" in rendered
+    assert '<span class="nl">Next</span>' in rendered and '<span class="badge">S3</span>' not in rendered
+    assert '<span class="badge">S3</span>' in s3mod._render_html([s3mod._Title("Summary")], 50)
+    text = s3mod._render_text(blocks, 50)
+    assert "Encryption: none (!)   Objects: 12" in text and "FAILED" in text and "pill" not in text
+    assert "Next:\n  summary('s3://b/')   what's in it\n  more()" in text
+
+
+def test_text_tables_say_how_to_see_hidden_rows():
+    rows = [[str(i)] for i in range(10)]
+    assert "7 more rows not shown (the view shows 3; ui.max_rows = 0 shows all)" in s3mod._render_text(
+        [s3mod._Table(["n"], rows)], 3)
+    assert s3mod._render_text([s3mod._Table(["n"], rows, max_rows=4)], 3).endswith("6 more rows not shown")
+
+
+def test_ui_help_groups_every_command(ui, capsys):
+    out = run(capsys, ui.help)
+    commands = {name for name in vars(S3View) if not name.startswith("_") and callable(getattr(S3View, name))}
+    assert commands == {name for names in S3View._GROUPS.values() for name in names}  # a new command needs a group
+    assert "Start here:" in out and "-- Explore a folder --" in out and "-- Other --" not in out
+    assert "summary(uri, *, top_n=10, folder_depth=1, limit=None)" in out and "'str'" not in out and "->" not in out
+    out = run(capsys, ui.help, "what_if")
+    assert "what_if(uri, *, move_after=None" in out and "what_if(uri, delete_after=365)" in out
+    assert run(capsys, ui.help, ui.ls).startswith("\nls(uri, *, limit=500)")
+    assert "Did you mean 'summary'?" in run(capsys, ui.help, "sumary")
+
+
+def test_ui_next_steps_are_filled_in(ui, capsys, aws):
+    root = f"s3://{BUCKET}/"
+    out = run(capsys, ui.summary, root)
+    assert f"tree('{root}')" in out and f"duplicates('{root}')" in out
+    assert f"summary('{root}')" in run(capsys, ui.bucket_info, BUCKET)
+    assert f"preview('{root}big/file.bin')" in run(capsys, ui.largest, root, 1)
+    out = run(capsys, ui.ls, root)
+    assert f"summary('{root}')" in out and f"ls('{root}archive/')" in out

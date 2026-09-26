@@ -21,9 +21,11 @@ report against these rules (the existing code follows them, so match it):
   message says what's wrong and why it matters, puts a price on it when it can ("costing $12.40/month"), and
   names the next step: a command to run (`"... (see what_if)"`), a setting to change, or the exact call to copy.
   For example, `table_info` shows the `query(...)` call for each index, `deleted` shows the restore call, and
-  `what_if` shows the rule's JSON.
+  `what_if` shows the rule's JSON. Views show findings as one `_Findings` panel (warnings first; `empty=` says so
+  when every check passed), and a main report ends with a `_Next` block: two or three calls worth running next,
+  with the arguments filled in from the report by `_call(...)` (`get('orders', 'USER#0', 'ORDER#0000')`).
 - **Put the answer first.** Start with a title and cards holding the few numbers that matter, then the tables of
-  detail. Use units people know: `human_size`, `human_money` (USD per month), `human_age`, and comma-separated
+  detail. A card gets a tone (`("Encryption", "none", "warn")`) only when a warning in the same report is about it. Use units people know: `human_size`, `human_money` (USD per month), `human_age`, and comma-separated
   counts. Avoid raw bytes, epoch times and DynamoDB JSON.
 - **Be forgiving about input.** Accept `s3://bucket/prefix` or `bucket/prefix`, `"10MB"`, `"7d"` or
   `"2024-05-01"`, and key values of the wrong type (`"42"` for a number key). Pick sensible defaults so the
@@ -33,8 +35,9 @@ report against these rules (the existing code follows them, so match it):
   command itself read or cost.
 - **Never show a traceback.** A missing permission, a missing optional package or a broken file becomes a short note
   that says what's missing and how to fix it. The rest of the report still renders.
-- **Keep it discoverable.** `help()` is the entry point, so the first line of each command's docstring should read
-  as a plain description of what the user will see.
+- **Keep it discoverable.** `help()` is the entry point, so the first paragraph of each command's docstring should
+  read as a plain description of what the user will see. Every public View command goes in one of the View's
+  `_GROUPS` (a test checks it), and `help("name")` shows the whole docstring.
 
 ## Commands
 
@@ -57,10 +60,11 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
 ## Hard constraints
 
 - **No imports between analyzers and no shared module.** Each file must work alone in a notebook. Helpers that
-  every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, the render blocks and
-  `_render_html` / `_render_text`, `_friendly_errors`, `View._progress` with `_progress_bar_class` /
-  `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are deliberately duplicated in all three
-  analyzers. When you fix or change one of them, check the copies in the other two.
+  every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, `_prose`, `_call`,
+  `_signature`, the render blocks and `_render_html` / `_render_text` with their small helpers, `_friendly_errors`,
+  `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
+  deliberately duplicated in all three analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
+  `_START` differ between the copies. When you fix or change one of them, check the copies in the other two.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, openpyxl, etc. are optional and are
   imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an ImportError
   that says what to `pip install`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
@@ -98,15 +102,27 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
 
 How the View layer works:
 
-- Methods build a list of render blocks (`_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, in S3 also `_Frame`,
-  `_Image`, `_Link`, `_Media`, and in Bedrock `_Passage` (a retrieved passage with `<mark>` highlights) and `_Answer`
-  (an answer with shaded cited spans and `[n]` superscripts)) and pass them to `self._show(blocks)`, which renders HTML in Jupyter or plain text
-  elsewhere (`mode="auto" | "html" | "text"`). Don't emit HTML or print directly; add to the block list so both
-  renderers handle it.
+- Methods build a list of render blocks (`_Title`, `_Cards`, `_Findings`, `_Table`, `_Note`, `_Text`, `_Next`, in
+  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, and in Bedrock `_Passage` (a retrieved passage with `<mark>`
+  highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
+  `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
+  Don't emit HTML or print directly; add to the block list so both renderers handle it.
+- The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
+  interactive uses CSS or `<details>`. What the blocks offer:
+  - Cards take an optional tone: `(label, value, "warn" | "bad" | "ok")`. Text mode adds ` (!)` to warn and bad.
+  - A table cell can be `_Tone(text, tone)`, a coloured pill in HTML and plain text elsewhere. `code_cols` shows
+    columns of calls as code, and `prose_cols` passes columns of tool-written sentences (the Warnings tables)
+    through `_prose`. Tables over 30 rows scroll under a sticky header.
+  - `_Table(collapsed=True)` / `_Text(collapsed=True)` fold a secondary view (tags, raw JSON) under its title, and
+    `_Text(code=True)` marks a snippet to copy: one click selects all of it.
+  - `_prose` renders every tool-written sentence (notes, findings, table titles, subtitles): it escapes the text
+    and shows the calls in it (`documents(status='FAILED')`) and AWS CLI commands as code that one click selects.
+    Never use it on table cells that hold data.
 - Every public View method is decorated with `@_friendly_errors`, which turns `ClientError` / `BotoCoreError` /
   data-decoding errors into a warning note instead of a traceback.
-- `help()` lists public View methods by introspection, using the **first line of each docstring** as the
-  description.
+- `help()` lists public View methods by introspection, grouped by the View's `_GROUPS` (anything missing lands
+  in "Other"), with their signatures without type hints and the **first paragraph of each docstring** as the
+  description, after a "Start here" `_Next` from `_START`. `help("name")` shows one command's whole docstring.
 - Long operations wrap the analyzer call in `with self._progress(label, unit) as tick:` and pass `progress=tick`.
   The analyzer calls `progress(count)` with a running count, or `progress(done, total)` when it knows the total
   (a new total starts a new bar; `unit="B"` counts bytes). `_progress` shows a tqdm bar when tqdm is installed and a

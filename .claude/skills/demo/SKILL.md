@@ -64,6 +64,7 @@ against the product rules in CLAUDE.md:
 - Does the answer come first?
 - Are all values in human units?
 - Does every finding name a next step?
+- Do the Next calls use this report's real arguments, and do they run as written?
 - Are estimates and partial results labelled?
 
 Say what you'd change, with the line of output that shows it.
