@@ -97,9 +97,11 @@ CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check t
 ## 5. Docs
 
 - `README.md`:
-  - In the service table at the top, set the status to ✅ and link the file.
-  - Add a `## <Service> quick start` section with the same parts as the DynamoDB one: quick start, the commands
-    table, "Getting the data", cost notes, and IAM permissions.
+  - Add a row to the "Services" table (what it shows you, the file and its guide) and a link to the new section
+    in the links under the title.
+  - Add a `## <Service>` section with the same parts as the DynamoDB one: a one-line intro with the file and guide,
+    a screenshot, quick start, the commands tables (one per `_GROUPS` group), and under "Reference" the folded
+    "Getting the data", cost notes, and IAM permissions.
   - Update the Development paragraph if it names the guides.
 - `docs/<service>.html`: a new guide. Copy `docs/dynamodb.html`'s structure, CSS and theme handling, and cover
   set up in SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
