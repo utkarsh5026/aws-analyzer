@@ -1783,7 +1783,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
 def _in_notebook() -> bool:
     try:
-        from IPython import get_ipython
+        from IPython.core.getipython import get_ipython
     except ImportError:
         return False
     shell = get_ipython()
@@ -2068,7 +2068,8 @@ class DynamoDBView:
 
                 if handle[0] is None:
                     handle[0] = display(HTML(""), display_id=True)
-                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+                if handle[0] is not None:  # display() returns None outside IPython
+                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
                 width[0] = max(width[0], len(text))
                 print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)

@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import importlib
+import importlib.util
 import io
 import itertools
 import json
@@ -9,6 +10,7 @@ import tarfile
 import types
 import zipfile
 from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 
 import boto3
 import fastavro
@@ -79,6 +81,12 @@ def obj(key, size, days_old=0.0, storage_class="STANDARD", etag="etag"):
     return ObjectInfo("b", key, size, NOW - timedelta(days=days_old), storage_class, etag)
 
 
+def monthly(size, storage_class):
+    cost = object_monthly_cost(size, storage_class)
+    assert cost is not None, f"no list price for {storage_class}"
+    return cost
+
+
 # ----------------------------------------------------------------------------- helpers
 
 
@@ -113,7 +121,8 @@ def test_parse_time():
     assert parse_time("7d", now=NOW) == NOW - timedelta(days=7)
     assert parse_time("12h", now=NOW) == NOW - timedelta(hours=12)
     assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone.utc)
-    assert parse_time(datetime(2024, 5, 1, 10)).tzinfo == timezone.utc
+    naive = parse_time(datetime(2024, 5, 1, 10))
+    assert naive is not None and naive.tzinfo == timezone.utc
     assert parse_time("2024-05-01T10:00:00Z") == datetime(2024, 5, 1, 10, tzinfo=timezone.utc)
 
 
@@ -201,7 +210,7 @@ def test_summarize_objects():
     assert [s.age_histogram[k].count for k in ("< 1 day", "1 - 7 days", "1 - 4 weeks", "1 - 3 years")] == [1, 1, 1, 1]
     assert [o.size for o in s.largest] == [2 * MB, 100]
     assert (s.cold_standard.count, s.cold_standard.size) == (1, 2 * MB)
-    assert s.oldest.key == "p/a/2.csv" and s.newest.key == "p/root.txt"
+    assert s.oldest and s.oldest.key == "p/a/2.csv" and s.newest and s.newest.key == "p/root.txt"
     assert s.uri == "s3://b/p/"
 
 
@@ -278,8 +287,7 @@ def test_group_duplicates_merges_etags_by_content_hash():
     # Keep: readable (not GLACIER), in the folder with the smallest share of copies (raw/), then the oldest.
     assert [o.key for o in group.objects] == ["raw/a.csv", "raw/b.csv", "copy/a.csv", "old/a.csv"]
     assert group.matched_by == "SHA-256 + ETag" and group.sha256 == "h1" and group.reclaimable == 300
-    assert group.monthly_cost == pytest.approx(object_monthly_cost(100, "STANDARD") * 2
-                                               + object_monthly_cost(100, "GLACIER"))
+    assert group.monthly_cost == pytest.approx(monthly(100, "STANDARD") * 2 + monthly(100, "GLACIER"))
     assert (report.scanned.count, report.candidates.count, report.candidates.size) == (7, 6, 600)
     assert report.not_compared.count == 1  # raw/d.csv: same size, another ETag, not read
     assert report.files_by_folder == {"raw/": 5, "copy/": 1, "old/": 1}
@@ -621,7 +629,7 @@ def test_simulate_lifecycle_bills_early_removal():
     impact = simulate_lifecycle_objects([obj("x", GB, days_old=10, storage_class="GLACIER")], "s3://b/",
                                         move_after=0, to="DEEP_ARCHIVE", now=NOW)
     assert impact.early_removals.count == 1  # GLACIER keeps objects for 90 days
-    assert impact.one_time_cost == pytest.approx(object_monthly_cost(GB, "GLACIER") * 80 / 30 + 0.05 / 1000)
+    assert impact.one_time_cost == pytest.approx(monthly(GB, "GLACIER") * 80 / 30 + 0.05 / 1000)
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -1163,7 +1171,7 @@ def zip_bytes(files):
     return buffer.getvalue()
 
 
-def tar_bytes(files, mode="w:gz"):
+def tar_bytes(files, mode: Literal["w:gz", "w"] = "w:gz"):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode=mode) as archive:
         for name, data in files.items():
@@ -1192,7 +1200,7 @@ def formats(aws):
     put("tables/t.avro", avro_bytes()[0])
     put("tables/t.psv", b"a|b\n1|x\n2|y\n")
     excel = io.BytesIO()
-    with pd.ExcelWriter(excel) as writer:
+    with pd.ExcelWriter(excel) as writer:  # pyright: ignore[reportArgumentType]  # pandas' buffer protocol is stricter than BytesIO
         pd.DataFrame({"x": [1, 2, 3]}).to_excel(writer, sheet_name="first", index=False)
         pd.DataFrame({"y": ["a"]}).to_excel(writer, sheet_name="second", index=False)
     put("tables/book.xlsx", excel.getvalue())
@@ -1266,7 +1274,7 @@ CORE = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/
 APP = '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Pages>{pages}</Pages></Properties>'
 
 
-def run(text):
+def docx_run(text):
     return f'<w:r><w:t xml:space="preserve">{text}</w:t></w:r>'
 
 
@@ -1274,13 +1282,13 @@ def para(text, style=None, numbered=False, outline=None):
     props = (f'<w:pStyle w:val="{style}"/>' if style else "") + \
             ('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>' if numbered else "") + \
             (f'<w:outlineLvl w:val="{outline}"/>' if outline is not None else "")
-    return f"<w:p>{f'<w:pPr>{props}</w:pPr>' if props else ''}{run(text) if text else ''}</w:p>"
+    return f"<w:p>{f'<w:pPr>{props}</w:pPr>' if props else ''}{docx_run(text) if text else ''}</w:p>"
 
 
 DOCX_BODY = "".join([
     para("Churn study", style="Titre"),  # a localized style id; styles.xml names it "Title"
     para("Data", style="Heading1"),  # not in styles.xml: recognised by its id
-    '<w:p>' + run("Rows: ") + '<w:r><w:t>2,000</w:t><w:tab/><w:t>ok</w:t></w:r>'
+    '<w:p>' + docx_run("Rows: ") + '<w:r><w:t>2,000</w:t><w:tab/><w:t>ok</w:t></w:r>'
     '<w:del><w:r><w:delText>removed</w:delText></w:r></w:del></w:p>',
     para("direct bullet", numbered=True),
     para("style bullet", style="MyList"),  # its style is based on a numbered style
@@ -1505,7 +1513,7 @@ def test_safetensors_info(core, formats):
 
 def test_zstd(core, aws):
     try:
-        from compression import zstd
+        from compression import zstd  # pyright: ignore[reportMissingImports]  # Python 3.14+
 
         compress = zstd.compress
     except ImportError:

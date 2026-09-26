@@ -73,7 +73,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator
 
 import boto3
 from botocore.config import Config
@@ -230,7 +230,7 @@ _CSV_SEPARATORS = {"csv": ",", "tsv": "\t", "psv": "|"}
 
 def _zstd_reader(stream: Any) -> Any:
     try:
-        from compression import zstd  # Python 3.14+
+        from compression import zstd  # pyright: ignore[reportMissingImports]  # Python 3.14+
     except ImportError:
         try:
             zstandard = importlib.import_module("zstandard")
@@ -2125,9 +2125,9 @@ def explain_policy(policy: dict | str | None, own_account: str | None = None) ->
     With own_account, principals from any other account are listed in `other_accounts`."""
     if not policy:
         return []
-    policy = json.loads(policy) if isinstance(policy, str) else policy
+    doc = json.loads(policy) if isinstance(policy, str) else policy
     explained = []
-    for i, stmt in enumerate(_as_list(policy.get("Statement", []))):
+    for i, stmt in enumerate(_as_list(doc.get("Statement", []))):
         who, accounts, anyone = [], [], False
         principal_key = "NotPrincipal" if "NotPrincipal" in stmt else "Principal"
         principal = stmt.get(principal_key, {})
@@ -2559,8 +2559,8 @@ class S3Analyzer:
         if bucket in self._regions:
             return self._regions[bucket]
         try:
-            location = self.client.get_bucket_location(Bucket=bucket).get("LocationConstraint")
-            region = {None: "us-east-1", "": "us-east-1", "EU": "eu-west-1"}.get(location, location)
+            location = self.client.get_bucket_location(Bucket=bucket).get("LocationConstraint") or "us-east-1"
+            region = "eu-west-1" if location == "EU" else location
         except ClientError as exc:
             region = self._region_header(exc.response)
             if not region:
@@ -2867,7 +2867,8 @@ class S3Analyzer:
         def side(i: int) -> Callable[[int], None] | None:
             def tick(count: int) -> None:
                 seen[i] = count
-                progress(sum(seen))
+                if progress:
+                    progress(sum(seen))
 
             return tick if progress else None
 
@@ -3057,7 +3058,7 @@ class S3Analyzer:
                 return False
             raise
 
-    def open(self, uri: str, *, decompress: bool = True, compression: str | None = None) -> io.BufferedIOBase:
+    def open(self, uri: str, *, decompress: bool = True, compression: str | None = None) -> BinaryIO:
         """Streaming binary reader (use as a context manager). .gz / .bz2 / .xz / .zst are decompressed
         on the fly. compression overrides the codec guessed from the name ('gz', 'bz2', 'xz', 'zst'; '' = none)."""
         bucket, key = parse_s3_uri(uri)
@@ -3424,10 +3425,11 @@ class S3Analyzer:
 
     def _preview_orc(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         bucket, key = parse_s3_uri(uri)
+        fmt = p.format or "orc"  # preview() sets it before picking this handler
         with self._random_access(bucket, key, codec) as handle:
-            p.info = _columnar_info(p.format, handle)
+            p.info = _columnar_info(fmt, handle)
             handle.seek(0)
-            p.kind, p.data = "table", _read_arrow_table(p.format, handle, n, None).to_pandas()
+            p.kind, p.data = "table", _read_arrow_table(fmt, handle, n, None).to_pandas()
         return True
 
     _preview_arrow = _preview_orc
@@ -3545,7 +3547,7 @@ class S3Analyzer:
 
     def _preview_audio(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         p.kind, p.data = "media", self.presigned_url(uri)
-        mime = p.content_type if (p.content_type or "").startswith(p.format + "/") else None
+        mime = p.content_type if (p.content_type or "").startswith(f"{p.format}/") else None
         p.info = {"media": p.format, "mime": mime or mimetypes.guess_type(uri)[0] or f"{p.format}/*"}
         return True
 
@@ -3567,7 +3569,7 @@ class S3Analyzer:
             return True
         p.kind, p.data = "document", doc.parts[0]
         p.info = {"pages": doc.page_count, "title": doc.title, "author": doc.author, "url": url,
-                  "excerpt": "Page 1" + (f" of {doc.page_count}" if doc.page_count > 1 else "")}
+                  "excerpt": "Page 1" + (f" of {doc.page_count}" if (doc.page_count or 0) > 1 else "")}
         if not doc.parts[0].strip():
             p.note = "Page 1 has no text layer (probably a scanned image); reading it needs OCR."
         return True
@@ -4124,7 +4126,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
 def _in_notebook() -> bool:
     try:
-        from IPython import get_ipython
+        from IPython.core.getipython import get_ipython
     except ImportError:
         return False
     shell = get_ipython()
@@ -4479,7 +4481,8 @@ class S3View:
 
                 if handle[0] is None:
                     handle[0] = display(HTML(""), display_id=True)
-                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+                if handle[0] is not None:  # display() returns None outside IPython
+                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
                 width[0] = max(width[0], len(text))
                 print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
@@ -4953,7 +4956,7 @@ class S3View:
         blocks: list[Any] = [
             _Title(f"Deleted files under {d.uri}", since),
             _Cards([("Deleted files", f"{len(d.files):,}"), ("Can be restored", f"{len(restorable):,}"),
-                    ("Size to restore", human_size(sum(f.last_version.size for f in restorable))),
+                    ("Size to restore", human_size(sum(f.last_version.size for f in d.files if f.last_version))),
                     ("Old versions kept", human_size(sum(f.old_versions.size for f in d.files))),
                     ("Their est. cost / month", human_money(sum(f.monthly_cost for f in d.files)))]),
         ]

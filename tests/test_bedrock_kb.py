@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import boto3
 import pytest
@@ -80,7 +81,7 @@ def ago(**kwargs):
 
 
 def kb_desc(kb_id=KB_ID, name="support-docs", *, status="ACTIVE", store="OPENSEARCH_SERVERLESS", reasons=None):
-    storage = {"type": store}
+    storage: dict[str, Any] = {"type": store}
     if store == "OPENSEARCH_SERVERLESS":
         storage["opensearchServerlessConfiguration"] = {
             "collectionArn": f"arn:aws:aoss:us-east-1:{ACCOUNT}:collection/abc123", "vectorIndexName": "kb-index",
@@ -153,7 +154,7 @@ REFUND_TEXT = ("Refunds are issued within 5-7 business days of receiving the ret
 EU_TEXT = "Customers in the EU can return any order within 14 days of delivery, no reason needed."
 
 
-def passage(text=REFUND_TEXT, key="refund-policy.pdf", *, score=0.71, page=3, chunk="chunk-1", meta=None, ds=DS_ID):
+def passage(text=REFUND_TEXT, key="refund-policy.pdf", *, score=0.71, page: int | None = 3, chunk="chunk-1", meta=None, ds=DS_ID):
     uri = f"s3://support-docs-bucket/policies/{key}"
     md = {"x-amz-bedrock-kb-source-uri": uri, "x-amz-bedrock-kb-chunk-id": chunk,
           "x-amz-bedrock-kb-data-source-id": ds, **(meta or {})}
@@ -287,7 +288,7 @@ def test_parse_ingestion_job():
     assert j.duration == timedelta(minutes=4) and not j.ok and j.failure_reasons == ["boom"]
     assert parse_ingestion_job(job()).ok
     running = parse_ingestion_job(job(status="IN_PROGRESS", started=ago(minutes=10)))
-    assert running.running and running.duration >= timedelta(minutes=10)
+    assert running.running and running.duration is not None and running.duration >= timedelta(minutes=10)
 
 
 @pytest.mark.parametrize("cfg, expected", [
@@ -526,7 +527,7 @@ def test_build_prompt():
     with pytest.raises(ValueError, match="needs \\{sources\\}"):
         build_prompt("q", [], template="Answer: {question}")
     with pytest.raises(ValueError, match="Passage objects"):
-        build_prompt("q", [42])
+        build_prompt("q", [42])  # pyright: ignore[reportArgumentType]
 
 
 def test_parse_citation_markers():

@@ -407,8 +407,8 @@ def test_sample_spreads_over_segments(core):
 def test_sql(core):
     page = core.sql('SELECT * FROM "orders" WHERE pk = ?', "USER#3")
     assert len(page.items) == 9 and page.keys == ["pk", "sk"] and page.table == TABLE
-    assert ddbmod._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1').groups() == (
-        "orders", None, "by-status")
+    match = ddbmod._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1')
+    assert match and match.groups() == ("orders", None, "by-status")
 
 
 def test_count_value_counts_largest(core):
