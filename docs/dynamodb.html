@@ -244,7 +244,7 @@ df = ui.core.scan("acme-app", n=5000).to_df() # a pandas DataFrame</code></pre><
       <p><code>tables()</code> describes every table in the region in parallel: status, item count, size, key, billing mode, number of indexes, and estimated monthly cost for storage and provisioned capacity. It reads no items, so it's instant however big the tables are.</p>
       <div class="code"><pre><code class="lang-py">ui.tables()</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-tables-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-tables-light.webp" alt="tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age" width="984" height="209" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-tables-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-tables-light.webp" alt="tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age" width="984" height="718" loading="lazy"></picture></div>
         <figcaption><code>ui.tables()</code>: item counts and sizes are DynamoDB's own estimates, which it refreshes about every 6 hours.</figcaption>
       </figure>
 
@@ -254,7 +254,7 @@ df = ui.core.scan("acme-app", n=5000).to_df() # a pandas DataFrame</code></pre><
 ui.table_info("acme-app", hours=24 * 7)       # a week of usage
 ui.table_info("acme-app", metrics=False)      # skip CloudWatch</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-table-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-table-info-light.webp" alt="table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage" width="984" height="853" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-table-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-table-info-light.webp" alt="table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage" width="984" height="890" loading="lazy"></picture></div>
         <figcaption><code>ui.table_info("acme-app")</code>: for an on-demand table the monthly cost includes reads and writes at the last 24 hours' rate.</figcaption>
       </figure>
 
@@ -278,7 +278,7 @@ ui.query("acme-app", "CUSTOMER#1042", sort=("between", "ORDER#2026-06", "ORDER#2
 ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), descending=True, n=5)   # latest 5
 ui.query("acme-app", "failed", index="by-status")                     # on a global index</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-query-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-query-light.webp" alt="query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings" width="984" height="375" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-query-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-query-light.webp" alt="query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings" width="984" height="419" loading="lazy"></picture></div>
         <figcaption><code>ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), n=8, attributes=["status", "created_at", "total", "currency", "coupon"])</code></figcaption>
       </figure>
 
@@ -288,7 +288,7 @@ ui.query("acme-app", "failed", index="by-status")                     # on a glo
 ui.get("acme-app", {"pk": "CUSTOMER#1042", "sk": "PROFILE"})
 ui.get("acme-app", "CUSTOMER#1042", "PROFILE", as_json=True)   # add a JSON copy</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-get-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-get-light.webp" alt="get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price" width="984" height="703" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-get-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-get-light.webp" alt="get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price" width="984" height="796" loading="lazy"></picture></div>
         <figcaption><code>ui.get("acme-app", "CUSTOMER#1042", "ORDER#2026-08-14#7731")</code></figcaption>
       </figure>
 
@@ -320,7 +320,7 @@ ui.sql('SELECT pk, sk, total FROM "acme-app"."by-status" WHERE status = ?', "fai
       <div class="code"><pre><code class="lang-py">ui.scan("acme-app", 10, where={"status": "failed", "total": (">", 300)},
         attributes=["status", "created_at", "total", "failure_reason"])</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-scan-filter-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-scan-filter-light.webp" alt="scan() with a filter: 10 items returned after reading 1,098, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300" width="984" height="489" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-scan-filter-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-scan-filter-light.webp" alt="scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300" width="984" height="541" loading="lazy"></picture></div>
         <figcaption>A filter runs after DynamoDB reads the items, so you pay for everything read, not just what matches.</figcaption>
       </figure>
       <p>If you search by an attribute often, a <code>query</code> on a key or a global index is far cheaper than a filtered scan. A filtered <code>ui.scan</code> reads at most 100,000 items per page (<code>scan_limit=</code>); <code>more()</code> continues from there.</p>
@@ -338,7 +338,7 @@ ui.sql('SELECT pk, sk, total FROM "acme-app"."by-status" WHERE status = ?', "fai
 ui.schema("acme-app", where={"sk": ("begins_with", "ORDER#")})   # just the orders
 ui.schema("acme-app", n=5000, max_depth=3)                        # more items, deeper maps</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-schema-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-schema-light.webp" alt="schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items" width="984" height="1724" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-schema-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-schema-light.webp" alt="schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items" width="984" height="2178" loading="lazy"></picture></div>
         <figcaption><code>ui.schema("acme-app")</code>: an old import stored some US zip codes as numbers, so a filter on <code>address.zip</code> silently misses them.</figcaption>
       </figure>
 
@@ -349,7 +349,7 @@ ui.schema("acme-app", n=5000, max_depth=3)                        # more items, 
 ui.value_counts("acme-app", "address.country")          # dots reach into maps
 ui.value_counts("acme-app", "pk", limit=None)           # items per partition key, whole table</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/dynamodb-value-counts-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-value-counts-light.webp" alt="value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes" width="984" height="337" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/dynamodb-value-counts-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/dynamodb-value-counts-light.webp" alt="value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes" width="984" height="417" loading="lazy"></picture></div>
         <figcaption><code>ui.value_counts("acme-app", "status")</code>: “(not set)” is customers and tickets, which have no status.</figcaption>
       </figure>
       <div class="code"><pre><code class="lang-py">ui.largest("acme-app")                                  # the 10 biggest items, by DynamoDB's sizing rules

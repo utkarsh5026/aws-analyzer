@@ -255,7 +255,7 @@ ui.overview()                     # every bucket in one table
 ui.overview("sagemaker-*")        # only buckets whose name matches
 ui.overview(metrics=False)        # skip CloudWatch: faster, but no sizes or costs</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/overview-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/overview-light.webp" alt="overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, and a list of warnings" width="984" height="550" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/overview-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/overview-light.webp" alt="overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, and a list of warnings" width="984" height="677" loading="lazy"></picture></div>
         <figcaption><code>ui.overview()</code>: sizes and costs cover all versions, from CloudWatch's daily storage metrics.</figcaption>
       </figure>
 
@@ -264,7 +264,7 @@ ui.overview(metrics=False)        # skip CloudWatch: faster, but no sizes or cos
       <div class="code"><pre><code class="lang-py">ui.bucket_info("acme-ml-data")
 ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bucket-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bucket-info-light.webp" alt="bucket_info(): cards for objects, size, cost, region, versioning, encryption and public access, warnings, size by storage type with cost, the bucket policy and lifecycle rules" width="984" height="1014" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bucket-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bucket-info-light.webp" alt="bucket_info(): cards for objects, size, cost, region, versioning, encryption and public access, warnings, size by storage type with cost, the bucket policy and lifecycle rules" width="984" height="1213" loading="lazy"></picture></div>
         <figcaption><code>ui.bucket_info("acme-ml-data")</code></figcaption>
       </figure>
 
@@ -272,7 +272,7 @@ ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code>
       <p><code>policy()</code> turns the bucket policy into a table of who can do what, on which files, and under which conditions. It flags statements open to the whole internet, access from other AWS accounts, and whether plain HTTP is allowed. The raw JSON is shown underneath.</p>
       <div class="code"><pre><code class="lang-py">ui.policy("acme-ml-data")</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/policy-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/policy-light.webp" alt="policy(): statement counts, findings about public and cross-account access, and a table of statements in plain English" width="984" height="534" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/policy-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/policy-light.webp" alt="policy(): statement counts, findings about public and cross-account access, and a table of statements in plain English" width="984" height="552" loading="lazy"></picture></div>
         <figcaption><code>ui.policy("acme-ml-data")</code></figcaption>
       </figure>
 
@@ -284,7 +284,7 @@ ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code>
 ui.ls("s3://acme-ml-data/training")                # 'training' is read as the folder 'training/'
 ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at every level</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total" width="984" height="422" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total" width="984" height="327" loading="lazy"></picture></div>
         <figcaption><code>ui.tree("s3://acme-ml-data/curated/", depth=3)</code></figcaption>
       </figure>
 
@@ -294,7 +294,7 @@ ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at ev
 ui.find("s3://acme-ml-data/raw/", regex=r"dt=2025-0[1-3]-\d\d/", extensions=["json", "csv"])
 ui.find("s3://acme-ml-data/archive/", storage_classes="GLACIER", limit=None)   # no cap on matches</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/find-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/find-light.webp" alt="find(): the number of matches, their total size and a table of matching model.tar.gz files" width="984" height="221" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/find-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/find-light.webp" alt="find(): the number of matches, their total size and a table of matching model.tar.gz files" width="984" height="391" loading="lazy"></picture></div>
         <figcaption>Model artifacts over 4 GB from the last 90 days.</figcaption>
       </figure>
       <div class="table-wrap"><table>
@@ -340,7 +340,7 @@ ui.download_zip("s3://acme-ml-data/reports/", "/tmp/reports.zip", max_size="1GB"
 ui.summary("s3://acme-ml-data/raw/", folder_depth=2, top_n=20)   # break down two folder levels, top 20 largest
 ui.summary("s3://acme-ml-data/", limit=100_000)                  # stop after 100,000 keys (a quick sample)</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/summary-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/summary-light.webp" alt="summary(): cards with object count, size and estimated cost, findings about small files, archived data and cold data, then tables by folder, file type and storage class" width="984" height="1064" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/summary-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/summary-light.webp" alt="summary(): cards with object count, size and estimated cost, findings about small files, archived data and cold data, then tables by folder, file type and storage class" width="984" height="1300" loading="lazy"></picture></div>
         <figcaption>The top of <code>ui.summary("s3://acme-ml-data/")</code>. Further down: size and age histograms and the largest objects.</figcaption>
       </figure>
 
@@ -352,15 +352,15 @@ ui.preview("s3://acme-ml-data/training/churn-xgb-2025-09-01-1030/output/model.ta
 ui.preview("s3://acme-ml-data/models/tiny-llm/model.safetensors")
 ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-parquet-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-parquet-light.webp" alt="preview() of a Parquet file: row, column and row-group counts, the first rows, and the schema" width="984" height="547" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/preview-parquet-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-parquet-light.webp" alt="preview() of a Parquet file: row, column and row-group counts, the first rows, and the schema" width="984" height="701" loading="lazy"></picture></div>
         <figcaption>A Parquet file: only the footer and the first row group are downloaded.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-model-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-model-light.webp" alt="preview() of a SageMaker model.tar.gz: the number of files, unpacked size, and each file's name, size and date" width="984" height="265" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/preview-model-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-model-light.webp" alt="preview() of a SageMaker model.tar.gz: the number of files, unpacked size, and each file's name, size and date" width="984" height="340" loading="lazy"></picture></div>
         <figcaption>A SageMaker <code>model.tar.gz</code>, listed without extracting it.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-safetensors-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-safetensors-light.webp" alt="preview() of a safetensors file: tensor count, total parameters, dtypes, and a table of tensors with shapes" width="984" height="399" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/preview-safetensors-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-safetensors-light.webp" alt="preview() of a safetensors file: tensor count, total parameters, dtypes, and a table of tensors with shapes" width="984" height="941" loading="lazy"></picture></div>
         <figcaption>A <code>.safetensors</code> model: only its header is read, so this is instant even for a multi-GB file.</figcaption>
       </figure>
 
@@ -423,15 +423,15 @@ ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf")       # full tex
 ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf", pages=[2])       # just page 2
 ui.document("s3://acme-ml-data/docs/q3-ml-platform-review.pptx", pages=[2, 3])   # slides 2-3, with speaker notes</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-docx-light.webp" alt="preview() of a Word document: word, paragraph, heading and table counts, title and author, the first paragraphs, the outline of headings and the first table" width="984" height="721" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/preview-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-docx-light.webp" alt="preview() of a Word document: word, paragraph, heading and table counts, title and author, the first paragraphs, the outline of headings and the first table" width="984" height="1102" loading="lazy"></picture></div>
         <figcaption>A Word model card: the outline and the first table come straight from the document.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-pptx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-pptx-light.webp" alt="preview() of a PowerPoint deck: slide and word counts, and a table of slides with title, text, word count and whether there are speaker notes" width="984" height="265" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/preview-pptx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-pptx-light.webp" alt="preview() of a PowerPoint deck: slide and word counts, and a table of slides with title, text, word count and whether there are speaker notes" width="984" height="365" loading="lazy"></picture></div>
         <figcaption>A PowerPoint deck, in the order it's presented.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/document-pdf-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/document-pdf-light.webp" alt="document() of a PDF: page count, word count, title and author, then the text of each page" width="984" height="421" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/document-pdf-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/document-pdf-light.webp" alt="document() of a PDF: page count, word count, title and author, then the text of each page" width="984" height="379" loading="lazy"></picture></div>
         <figcaption><code>ui.document(...)</code> on a two-page PDF.</figcaption>
       </figure>
       <p>To use the text in Python (for search, summaries, or checking what a knowledge base will ingest), <code>read_document()</code> returns a <code>Document</code>:</p>
@@ -464,7 +464,7 @@ ui.what_if("s3://acme-ml-data/logs/", move_after=30, to="STANDARD_IA")
 ui.what_if("s3://acme-ml-data/tmp/", delete_after=7)
 ui.what_if("s3://acme-ml-data/raw/", move_after=0, to="INTELLIGENT_TIERING")</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/what-if-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/what-if-light.webp" alt="what_if(): files checked, files that would move, monthly cost now and after, saving, one-time cost and payback time, a table of what happens to the files, and the rule as JSON" width="984" height="772" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/what-if-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/what-if-light.webp" alt="what_if(): files checked, files that would move, monthly cost now and after, saving, one-time cost and payback time, a table of what happens to the files, and the rule as JSON" width="984" height="877" loading="lazy"></picture></div>
         <figcaption>Moving training outputs to STANDARD_IA after 30 days and to GLACIER after 180.</figcaption>
       </figure>
       <p>To add the rule yourself (the tool never changes your buckets):</p>
@@ -500,7 +500,7 @@ ui.duplicates("s3://acme-ml-data/models/", method="strict")           # hash eve
 df = report.to_df()              # one row per file: group, role ('keep' / 'copy'), key, size, sha256, ...
 copies = df[df.role == "copy"]   # everything but the file to keep in each group</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/duplicates-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/duplicates-light.webp" alt="duplicates(): duplicate groups, redundant copies, reclaimable space and a table of identical files" width="984" height="340" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/duplicates-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/duplicates-light.webp" alt="duplicates(): duplicate groups, redundant copies, reclaimable space and a table of identical files" width="984" height="1100" loading="lazy"></picture></div>
         <figcaption><code>ui.duplicates(...)</code>: groups of identical files and the space their copies take.</figcaption>
       </figure>
 
@@ -516,7 +516,7 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))</code
       <div class="code"><pre><code class="lang-py">ui.deleted("s3://acme-ml-data/")
 ui.deleted("s3://acme-ml-data/curated/", deleted_after="7d")    # only files deleted in the last week</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/deleted-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/deleted-light.webp" alt="deleted(): counts of deleted and restorable files, a table with each file's deletion time, size and delete-marker version id, and example restore code" width="984" height="411" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/deleted-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/deleted-light.webp" alt="deleted(): counts of deleted and restorable files, a table with each file's deletion time, size and delete-marker version id, and example restore code" width="984" height="497" loading="lazy"></picture></div>
         <figcaption><code>ui.deleted("s3://acme-ml-data/")</code></figcaption>
       </figure>
       <p>Restoring means deleting the delete marker, which needs <code>s3:DeleteObjectVersion</code>. To bring back everything deleted under a folder in the last day:</p>

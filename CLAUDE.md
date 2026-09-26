@@ -167,8 +167,10 @@ were used. A model missing from `MODEL_PRICES` shows its cost as unknown rather 
   guide (`s3.html`, `dynamodb.html`, `bedrock_kb.html`) that links back to it. A new analyzer gets its own
   `docs/<service>.html`, a card on `index.html` and a link in README. `index.html` also forwards old `/#section`
   links (from when it was the S3 guide) to `s3.html`, so keep its own ids in the `own` list there. The screenshots
-  (`docs/images/*-{light,dark}.webp`) are the tool's own output from a demo bucket, demo tables and demo knowledge
-  bases (`/demo --html`, then 1476 px wide WebP; `bedrock-*` for the Bedrock guide).
+  (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by `.claude/skills/demo/shots.py` from the
+  "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's fake Bedrock: `shots.py <name>` remakes
+  one figure and sets its `<img height=>`. Remake the affected figures when a report's look changes, and check
+  their captions and alt text still match.
 - Versions in `requirements-dev.txt` are pinned and updated by Dependabot; the `python_version < "3.11"` lines are
   intentionally held back. `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
   explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.

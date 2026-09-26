@@ -539,9 +539,10 @@ every request against the service model.
 The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
 whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
 its own guide (`docs/s3.html`, `docs/dynamodb.html`, `docs/bedrock_kb.html`); a new analyzer gets a new guide and a
-card on the home page. The screenshots are the tool's own output from a demo bucket, demo tables and demo
-knowledge bases with synthetic data (`.claude/skills/demo/demo.py`; Bedrock's are served by a simulated Bedrock,
-since moto has none).
+card on the home page. The screenshots are the tool's own output from demo buckets, tables and knowledge bases
+with synthetic data; `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
+`.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
+Bedrock, since moto has none.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
