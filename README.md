@@ -26,6 +26,25 @@ Jupyter when `ipywidgets` is installed) with the rate and the time left, when tq
 SageMaker. Without it you get a plain line with the same numbers. Every View takes `progress="plain"` to always use
 that line, or `progress="off"` for none.
 
+## Reading a report
+
+Every report has the same shape, so the answer is always in the same place:
+
+1. **Title and cards**: the few numbers that matter. A card turns amber (or red) when a finding below is about it,
+   such as `Encryption: none` or `Point-in-time recovery: off`. In text mode those cards end in `(!)`.
+2. **Findings**: what's wrong or worth knowing, warnings first. Each says why it matters, what it costs when that can
+   be priced, and the next step. When every check passes, the report says so.
+3. **Tables of detail.** Status cells such as `FAILED` or `PUBLIC` are coloured. Long tables scroll under a fixed
+   header, and secondary views (tags, the raw policy JSON) are folded: click to open them.
+4. **Next**: two or three commands worth running next, with the arguments filled in from this report, such as
+   `get('orders', 'USER#0', 'ORDER#0000')` after a scan or `chunk(1)` after a search.
+
+In the notebook, one click on a command anywhere in a report (`documents(status='FAILED')`,
+`aws dynamodb update-table ...`) or on a code block (a restore call, a lifecycle rule, a sync command) selects all of
+it, ready to copy. The HTML is plain HTML and CSS, with no JavaScript, so a report still works when the notebook is
+reopened. `ui.help()` lists every command grouped by task, with a few to start with; `ui.help("summary")` shows one
+command's full description.
+
 | Service | File | Status |
 |---|---|---|
 | S3 | [`analyzers/s3.py`](analyzers/s3.py) | ✅ |
@@ -58,7 +77,7 @@ install instead of failing; install it and run the cell again.
 
 ```python
 ui = S3View()                      # uses the notebook's execution role
-ui.help()                          # every command with a one-line description
+ui.help()                          # every command, grouped by task; ui.help("summary") shows one in full
 
 ui.overview()                      # every bucket: size, monthly cost, security warnings
 ui.bucket_info("my-bucket")
@@ -223,7 +242,7 @@ Every `DynamoDBView` command works with boto3 alone; IPython, used for the HTML 
 
 ```python
 ui = DynamoDBView()                # uses the notebook's execution role and region
-ui.help()                          # every command with a one-line description
+ui.help()                          # every command, grouped by task; ui.help("scan") shows one in full
 
 ui.tables()                        # every table in the region: key, items, size, est. cost, warnings
 ui.table_info("orders")            # indexes and how to query each, capacity, usage, backups, risks
@@ -358,7 +377,7 @@ Bedrock model you have access to works.
 
 ```python
 ui = BedrockKBView()               # uses the notebook's execution role and region
-ui.help()                          # every command with a one-line description
+ui.help()                          # every command, grouped by task; ui.help("ask") shows one in full
 
 ui.kbs()                           # every knowledge base: status, store, embedding model, last sync, warnings
 ui.use("support-docs")             # later commands use this knowledge base (a name, ID or ARN)
@@ -520,9 +539,10 @@ every request against the service model.
 The guides in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
 whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service has
 its own guide (`docs/s3.html`, `docs/dynamodb.html`, `docs/bedrock_kb.html`); a new analyzer gets a new guide and a
-card on the home page. The screenshots are the tool's own output from a demo bucket, demo tables and demo
-knowledge bases with synthetic data (`.claude/skills/demo/demo.py`; Bedrock's are served by a simulated Bedrock,
-since moto has none).
+card on the home page. The screenshots are the tool's own output from demo buckets, tables and knowledge bases
+with synthetic data; `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
+`.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
+Bedrock, since moto has none.
 
 [CI](.github/workflows/ci.yml) runs the same checks on Python 3.10 to 3.14 for every pull request and push
 to `main`, and also imports each analyzer on its own with only boto3 installed. The versions in

@@ -225,7 +225,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         elif not op.startswith(READ_PREFIXES) and not acknowledged:
             report.error(where, f"{name} ({candidates[0]}) is not a read-only operation; nothing may write to AWS")
         if not documented:
-            report.warn(where, f"{name} needs `{' or '.join(actions)}`, which README.md's IAM permissions don't list")
+            report.warn(where, f"{name} needs `{' or '.join(a for a in actions if a)}`, which README.md's IAM permissions don't list")
 
 
 def _documented(action: str, readme: str) -> bool:

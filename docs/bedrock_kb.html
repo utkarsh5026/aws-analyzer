@@ -209,7 +209,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <div class="code"><pre><code class="lang-py">from bedrock_kb import BedrockKBView
 
 ui = BedrockKBView()   # uses the notebook's IAM role and region
-ui.help()              # every command with a one-line description</code></pre></div>
+ui.help()              # every command, grouped by task; ui.help("ask") shows one in full</code></pre></div>
         </li>
         <li>
           <strong>Optional:</strong> another region or AWS profile, a default knowledge base, or plain-text output. Knowledge bases are regional, so if <code>kbs()</code> comes back empty, check the region first.
@@ -236,6 +236,7 @@ ui.chunk(1)                                  # the full text and metadata of res
 ui.ask("How long do refunds take?")          # an answer with [1][2] citations
 ui.follow_up("And for digital goods?")       # the next question in the same conversation
 ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find the right file?</code></pre></div>
+      <p><strong>Reading a report.</strong> Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, with status cells such as <code>FAILED</code> in colour, and at the bottom a <strong>Next</strong> row of two or three commands with the arguments filled in from this report, such as <code>chunk(1)</code>. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. <code>ui.help()</code> lists every command by task; <code>ui.help("ask")</code> shows one in full.</p>
       <p>Commands take <code>kb=</code>: a name in any case, the 10-character ID, or the ARN. Without it they use the one set by <code>use()</code>, else the only knowledge base in the region, else they list the ones there and say how to pick.</p>
 
       <!-- ============================================================ kbs -->
@@ -245,7 +246,7 @@ ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find t
       <p><code>kbs()</code> describes every knowledge base in the region, in parallel: status, type, vector store, embedding model, how many data sources it has, how many documents the last successful sync read, when the last sync ran and how it went, and the vector store's estimated idle cost. Below the table, the warnings for each one, such as a data source that has never been synced or a sync that failed.</p>
       <div class="code"><pre><code class="lang-py">ui.kbs()</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-kbs-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-kbs-light.webp" alt="kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed" width="984" height="804" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-kbs-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-kbs-light.webp" alt="kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed" width="984" height="885" loading="lazy"></picture></div>
         <figcaption><code>ui.kbs()</code>: every knowledge base here has something to look at. The idle cost is estimated for OpenSearch Serverless only; the other vector stores show “-”.</figcaption>
       </figure>
 
@@ -260,7 +261,7 @@ ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find t
       <div class="code"><pre><code class="lang-py">ui.kb_info("support-docs")
 ui.kb_info()                                 # the default knowledge base</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-kb-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-kb-info-light.webp" alt="kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags" width="984" height="1181" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-kb-info-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-kb-info-light.webp" alt="kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags" width="984" height="1116" loading="lazy"></picture></div>
         <figcaption><code>ui.kb_info("support-docs")</code>: the findings come first, each with what to do next. Below them, each data source's chunking, parsing and deletion policy in plain English.</figcaption>
       </figure>
       <p>Findings cover a failed knowledge base, data sources that were never synced, the last sync failing or leaving documents unindexed, no metadata files (so <code>where=</code> filters match nothing), chunking that is off or has no overlap, the <code>RETAIN</code> deletion policy, and what an OpenSearch Serverless store costs while idle. A section the notebook's role can't read shows as <code>? (AccessDeniedException)</code> and a note; the rest of the report still renders.</p>
@@ -279,15 +280,15 @@ ui.unsynced()                                # S3 files added or changed since t
       </ul>
       <div class="code"><span class="label">What a sync looks like</span><pre><code class="lang-sh">aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456 --region us-east-1</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-syncs-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-syncs-light.webp" alt="syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source" width="984" height="644" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-syncs-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-syncs-light.webp" alt="syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source" width="984" height="647" loading="lazy"></picture></div>
         <figcaption><code>ui.syncs("support-docs")</code>: why a sync failed, in the same row, and the command that starts the next one. You run it; the tool never does.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-documents-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-documents-light.webp" alt="documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4" width="984" height="452" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-documents-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-documents-light.webp" alt="documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4" width="984" height="476" loading="lazy"></picture></div>
         <figcaption><code>ui.documents("support-docs")</code>: without <code>status=</code> it lists only the documents that aren't indexed, with Bedrock's reason for each.</figcaption>
       </figure>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-unsynced-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-unsynced-light.webp" alt="unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command" width="984" height="457" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-unsynced-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-unsynced-light.webp" alt="unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command" width="984" height="480" loading="lazy"></picture></div>
         <figcaption><code>ui.unsynced("support-docs")</code>: two files changed after the last sync, so searches and answers don't see those changes yet.</figcaption>
       </figure>
 
@@ -300,7 +301,7 @@ ui.search("error E1234", search_type="HYBRID")            # meaning and keywords
 ui.search("refund window", rerank=True)                   # re-order with a reranking model (Cohere Rerank 3.5)
 ui.chunk(2)                                               # result #2 in full, with its metadata and IDs</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-search-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-search-light.webp" alt="search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding" width="984" height="639" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-search-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-search-light.webp" alt="search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding" width="984" height="677" loading="lazy"></picture></div>
         <figcaption><code>ui.search("How long do refunds take?")</code>: two passages from the refund policy, then three weaker ones. The words from the question are highlighted.</figcaption>
       </figure>
       <p>Scores are relative: compare them with each other, not against a fixed cutoff, since they depend on the vector store and the embedding model. The findings say what to try next:</p>
@@ -320,7 +321,7 @@ ui.ask("How long do refunds take?", model="sonnet", n=10)
 ui.ask("How long do refunds take?", engine="converse")     # exact tokens and cost
 ui.chunk(1)                                                # source [1] in full</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-ask-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-ask-light.webp" alt="ask(): an answer about refund times with a [1] and a [2] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf" width="984" height="386" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-ask-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-ask-light.webp" alt="ask(): an answer about refund times with a [1] and a [2] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf" width="984" height="405" loading="lazy"></picture></div>
         <figcaption><code>ui.ask("How long do refunds take?")</code>: cited spans are shaded and link to their source. The last sentence cites nothing, so the answer is 77% grounded. Tokens are an estimate here, because RetrieveAndGenerate doesn't report them.</figcaption>
       </figure>
 
@@ -330,7 +331,7 @@ ui.chunk(1)                                                # source [1] in full<
         <div class="card"><h4><code>engine="converse"</code></h4><p>Retrieve, then the model through Bedrock Converse: exact token counts and cost, any model, and your own <code>prompt=</code> with <code>{sources}</code> and <code>{question}</code>. The passages go in as numbered sources the model must cite as <code>[n]</code>.</p></div>
       </div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-ask-converse-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-ask-converse-light.webp" alt="ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two" width="984" height="430" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-ask-converse-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-ask-converse-light.webp" alt="ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two" width="984" height="419" loading="lazy"></picture></div>
         <figcaption><code>ui.ask("How long do refunds take?", engine="converse", model="sonnet")</code>: exact token counts, and the Cited column shows which of the passages the model used.</figcaption>
       </figure>
       <p>With <code>engine="converse"</code>, the sources are sent as data, never as instructions (a document that says “ignore your instructions” is just text), and the model is told to say plainly when they don't hold the answer. <code>bedrock_kb.DEFAULT_PROMPT</code> is the template it uses; copy it to write your own.</p>
@@ -349,7 +350,7 @@ ui.ask("How long do refunds take?", engine="converse", prompt=MY_PROMPT)</code><
 ui.models("claude")
 ui = BedrockKBView(BedrockKBAnalyzer(default_model="sonnet"))   # a different default</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-models-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-models-light.webp" alt="models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5" width="984" height="471" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-models-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-models-light.webp" alt="models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5" width="984" height="477" loading="lazy"></picture></div>
         <figcaption><code>ui.models()</code>: the ID to pass as <code>model=</code>, how each model is called, and what it costs per million tokens.</figcaption>
       </figure>
       <p>The answer's findings flag an answer that cites nothing (it may be the model's own knowledge), one where less than half is backed by a citation, Bedrock's default “unable to assist” reply (the passages didn't hold the answer: run <code>search()</code> on the question), a guardrail stepping in, and an answer cut off at <code>max_tokens</code>.</p>
@@ -383,7 +384,7 @@ ui.search("refund window", where={"orAll": [{"equals": {"key": "team", "value": 
       <div class="code"><pre><code class="lang-py">ui.compare("refund window for EU orders")                       # SEMANTIC and HYBRID, n=5 and n=10
 ui.compare("error E1234", n=10, search_types=("SEMANTIC", "HYBRID"))</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-compare-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-compare-light.webp" alt="compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting" width="984" height="709" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-compare-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-compare-light.webp" alt="compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting" width="984" height="722" loading="lazy"></picture></div>
         <figcaption><code>ui.compare("what does error E1234 mean?", n=(2, 5))</code>: both search types find the same passages, but only HYBRID puts the one with the exact error code first.</figcaption>
       </figure>
 
@@ -398,7 +399,7 @@ ui.evaluate(cases)
 ui.evaluate(cases, n=10, search_type="HYBRID")          # did that help?
 ui.evaluate(df)                                        # or a DataFrame with question and expected columns</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/bedrock-evaluate-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-evaluate-light.webp" alt="evaluate(): six questions, hit rate 83% and MRR 0.75; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source second, and a table of each question, its expected source, its rank and what came up first" width="984" height="516" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/bedrock-evaluate-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/bedrock-evaluate-light.webp" alt="evaluate(): six questions, hit rate 83% and MRR 0.72; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source third, and a table of each question, its expected source, its rank and what came up first" width="984" height="571" loading="lazy"></picture></div>
         <figcaption><code>ui.evaluate(cases)</code>: the miss is <code>holiday-shipping.md</code>, which was added after the last sync. The <code>unsynced()</code> screenshot above shows it.</figcaption>
       </figure>
       <p>Findings list the questions that missed, a file that keeps coming up first instead, and the usual fixes: <code>search_type="HYBRID"</code> for codes and names, a larger <code>n=</code>, smaller chunks (a new data source), or <code>where=</code> filters.</p>
@@ -532,7 +533,7 @@ report.hit_rate, report.mrr, report.to_df()</code></pre></div>
 
       <!-- ============================================================ reference -->
       <h2 id="reference">Command reference</h2>
-      <p>Every <code>BedrockKBView</code> command. <code>ui.help()</code> prints the same list with the full signatures.</p>
+      <p>Every <code>BedrockKBView</code> command. <code>ui.help()</code> prints the same list grouped by task, and <code>ui.help("ask")</code> shows one command's full description.</p>
       <div class="table-wrap ref"><table>
         <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
         <tbody>
@@ -549,7 +550,7 @@ report.hit_rate, report.mrr, report.to_df()</code></pre></div>
           <tr><td><code>compare(question, kb=None, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=None)</code></td><td>Each passage's rank under each search setting, overlap and findings</td></tr>
           <tr><td><code>evaluate(cases, kb=None, n=5, search_type=None, where=None)</code></td><td>Retrieval hit rate and MRR on test questions</td></tr>
           <tr><td><code>models(match=None)</code></td><td>Models for <code>ask()</code>: the ID to pass, how it's called, and its price</td></tr>
-          <tr><td><code>help()</code></td><td>This list, with signatures</td></tr>
+          <tr><td><code>help(command=None)</code></td><td>This list, grouped by task; <code>help("name")</code> shows one command in full</td></tr>
         </tbody>
       </table></div>
 

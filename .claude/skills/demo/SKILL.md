@@ -64,6 +64,7 @@ against the product rules in CLAUDE.md:
 - Does the answer come first?
 - Are all values in human units?
 - Does every finding name a next step?
+- Do the Next calls use this report's real arguments, and do they run as written?
 - Are estimates and partial results labelled?
 
 Say what you'd change, with the line of output that shows it.
@@ -82,11 +83,24 @@ moto is not real AWS. Don't report these as bugs:
 
 `--html PATH` also writes the notebook rendering of every report to a standalone page. Put it in the scratchpad
 unless the user names a place, and give them the path. `--theme light|dark` sets the page theme. The
-docs screenshots are `docs/images/<command>-{light,dark}.webp` (Bedrock's are `bedrock-<command>-...`), and
-each is taken from such a page in a browser. This script makes the pages but doesn't take screenshots. To
-match the existing ones, open the page in a 1016 px wide viewport at device scale 1.5, with the color scheme
-set to the theme, screenshot the last report's root element (`div.s3a`, `div.ddb` or `div.kba`), and save it
-as WebP. That gives 1476 px wide images, shown at `width="984"` in the guide.
+docs screenshots are `docs/images/<command>-{light,dark}.webp` (Bedrock's are `bedrock-<command>-...`).
+
+`shots.py`, next to `demo.py`, makes them: for every figure in the guides it runs the figure's command against
+a scene in moto, renders the notebook HTML, screenshots it in headless Chrome (984 CSS px wide at 1.5x, so
+1476 px), trims the empty space below, writes the light and dark WebP and sets the `<img height=>` in the
+guide. It needs Pillow (`pip install pillow`) and Chrome (`$CHROME`, or Playwright's headless shell).
+
+```bash
+.venv/bin/python .claude/skills/demo/shots.py --list                 # every figure and the command behind it
+.venv/bin/python .claude/skills/demo/shots.py summary what-if        # remake these
+.venv/bin/python .claude/skills/demo/shots.py                        # remake all of them (about 2 minutes)
+```
+
+The S3 and DynamoDB scenes are the "acme" ones the guides are written around (`acme-ml-data`, `acme-app`),
+at production scale: moto holds the files a figure opens, and the scene adds the listing, CloudWatch numbers and
+DescribeTable counts around them. Bedrock's figures use `seed_bedrock_kb()`. After remaking a figure, look at it,
+and check that its caption and `alt` text in the guide still say what it shows (counts in them come from the
+scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
 
 ## Real AWS
 

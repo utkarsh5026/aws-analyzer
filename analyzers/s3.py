@@ -42,6 +42,7 @@ Quick start
 from __future__ import annotations
 
 import bz2
+import difflib
 import fnmatch
 import functools
 import gzip
@@ -73,7 +74,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, BinaryIO, Callable, Iterable, Iterator
 
 import boto3
 from botocore.config import Config
@@ -230,7 +231,7 @@ _CSV_SEPARATORS = {"csv": ",", "tsv": "\t", "psv": "|"}
 
 def _zstd_reader(stream: Any) -> Any:
     try:
-        from compression import zstd  # Python 3.14+
+        from compression import zstd  # pyright: ignore[reportMissingImports]  # Python 3.14+
     except ImportError:
         try:
             zstandard = importlib.import_module("zstandard")
@@ -1912,7 +1913,7 @@ def bucket_findings(cfg: BucketConfig, account_block: dict[str, bool] | None = N
                                   "overwritten or deleted object is kept (and billed) forever."))
         if not any("AbortIncompleteMultipartUpload" in rule for rule in enabled):
             found.append(("info", "No lifecycle rule aborts incomplete multipart uploads; leftover parts are billed "
-                                  "until aborted (see incomplete uploads)."))
+                                  f"until aborted: uploads('s3://{cfg.name}/') lists them."))
     if cfg.errors:
         found.append(("info", "Couldn't read: " + ", ".join(f"{k} ({v})" for k, v in cfg.errors.items())))
     return found
@@ -2125,9 +2126,9 @@ def explain_policy(policy: dict | str | None, own_account: str | None = None) ->
     With own_account, principals from any other account are listed in `other_accounts`."""
     if not policy:
         return []
-    policy = json.loads(policy) if isinstance(policy, str) else policy
+    doc = json.loads(policy) if isinstance(policy, str) else policy
     explained = []
-    for i, stmt in enumerate(_as_list(policy.get("Statement", []))):
+    for i, stmt in enumerate(_as_list(doc.get("Statement", []))):
         who, accounts, anyone = [], [], False
         principal_key = "NotPrincipal" if "NotPrincipal" in stmt else "Principal"
         principal = stmt.get(principal_key, {})
@@ -2559,8 +2560,8 @@ class S3Analyzer:
         if bucket in self._regions:
             return self._regions[bucket]
         try:
-            location = self.client.get_bucket_location(Bucket=bucket).get("LocationConstraint")
-            region = {None: "us-east-1", "": "us-east-1", "EU": "eu-west-1"}.get(location, location)
+            location = self.client.get_bucket_location(Bucket=bucket).get("LocationConstraint") or "us-east-1"
+            region = "eu-west-1" if location == "EU" else location
         except ClientError as exc:
             region = self._region_header(exc.response)
             if not region:
@@ -2867,7 +2868,8 @@ class S3Analyzer:
         def side(i: int) -> Callable[[int], None] | None:
             def tick(count: int) -> None:
                 seen[i] = count
-                progress(sum(seen))
+                if progress:
+                    progress(sum(seen))
 
             return tick if progress else None
 
@@ -3057,7 +3059,7 @@ class S3Analyzer:
                 return False
             raise
 
-    def open(self, uri: str, *, decompress: bool = True, compression: str | None = None) -> io.BufferedIOBase:
+    def open(self, uri: str, *, decompress: bool = True, compression: str | None = None) -> BinaryIO:
         """Streaming binary reader (use as a context manager). .gz / .bz2 / .xz / .zst are decompressed
         on the fly. compression overrides the codec guessed from the name ('gz', 'bz2', 'xz', 'zst'; '' = none)."""
         bucket, key = parse_s3_uri(uri)
@@ -3424,10 +3426,11 @@ class S3Analyzer:
 
     def _preview_orc(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         bucket, key = parse_s3_uri(uri)
+        fmt = p.format or "orc"  # preview() sets it before picking this handler
         with self._random_access(bucket, key, codec) as handle:
-            p.info = _columnar_info(p.format, handle)
+            p.info = _columnar_info(fmt, handle)
             handle.seek(0)
-            p.kind, p.data = "table", _read_arrow_table(p.format, handle, n, None).to_pandas()
+            p.kind, p.data = "table", _read_arrow_table(fmt, handle, n, None).to_pandas()
         return True
 
     _preview_arrow = _preview_orc
@@ -3545,7 +3548,7 @@ class S3Analyzer:
 
     def _preview_audio(self, p: Preview, uri: str, n: int, codec: str) -> bool:
         p.kind, p.data = "media", self.presigned_url(uri)
-        mime = p.content_type if (p.content_type or "").startswith(p.format + "/") else None
+        mime = p.content_type if (p.content_type or "").startswith(f"{p.format}/") else None
         p.info = {"media": p.format, "mime": mime or mimetypes.guess_type(uri)[0] or f"{p.format}/*"}
         return True
 
@@ -3567,7 +3570,7 @@ class S3Analyzer:
             return True
         p.kind, p.data = "document", doc.parts[0]
         p.info = {"pages": doc.page_count, "title": doc.title, "author": doc.author, "url": url,
-                  "excerpt": "Page 1" + (f" of {doc.page_count}" if doc.page_count > 1 else "")}
+                  "excerpt": "Page 1" + (f" of {doc.page_count}" if (doc.page_count or 0) > 1 else "")}
         if not doc.parts[0].strip():
             p.note = "Page 1 has no text layer (probably a scanned image); reading it needs OCR."
         return True
@@ -3902,18 +3905,21 @@ class _Title:
 
 @dataclass
 class _Cards:
-    items: list[tuple[str, str]]
+    items: list[tuple[str, ...]]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
 
 
 @dataclass
 class _Table:
     headers: list[str]
-    rows: list[list[Any]]
+    rows: list[list[Any]]  # cells are text, or _Tone for a coloured status
     title: str = ""
     bars: list[float] | None = None  # 0..1 per row, drawn as an extra column
     bar_label: str = "Share"
     tree: bool = False  # first column holds indented tree labels
     max_rows: int | None = None  # None = view default, 0 = no cap
+    code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
+    prose_cols: tuple[int, ...] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
+    collapsed: bool = False  # a secondary view: folded under its title in HTML
 
 
 @dataclass
@@ -3927,6 +3933,30 @@ class _Text:
     text: str
     title: str = ""
     wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
+    code: bool = False  # a snippet to copy: in HTML one click selects all of it
+    collapsed: bool = False  # a secondary view (raw JSON): folded under its title in HTML
+
+
+@dataclass
+class _Findings:
+    items: list[tuple[str, str]]  # (level, message) pairs from a *_findings function
+    empty: str = ""  # said (as an ok note) when there are none; nothing when blank
+
+
+@dataclass
+class _Next:
+    items: list[tuple[str, str]]  # (call, what it shows): the commands worth running next, arguments filled in
+    title: str = "Next"
+
+
+@dataclass
+class _Tone:
+    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
+    text: str
+    tone: str = "warn"  # 'warn' | 'bad' | 'ok'
+
+    def __str__(self) -> str:
+        return self.text
 
 
 @dataclass
@@ -3957,37 +3987,119 @@ class _Media:
 _CSS = """<style>
 .s3a{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .s3a h3{margin:10px 0 2px;font-size:16px}
+.s3a h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
 .s3a h4{margin:14px 0 4px;font-size:13px}
 .s3a .sub{opacity:.65;font-size:12px;margin-bottom:6px}
 .s3a .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 .s3a .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
+.s3a .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
+.s3a .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
+.s3a .card.ok{border-color:rgba(16,185,129,.7)}
 .s3a .card .l{font-size:11px;opacity:.65}
 .s3a .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .s3a .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
+.s3a .tw.scroll{max-height:640px;overflow:auto}
 .s3a table.t{border-collapse:collapse;width:auto;font-size:inherit}
 .s3a table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
+.s3a .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
+.s3a .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
 .s3a table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
 .s3a table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
+.s3a table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
+.s3a table.t td.s{white-space:nowrap}
 .s3a table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .s3a table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .s3a table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
 .s3a .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
 .s3a .track{vertical-align:middle;margin-right:6px}
 .s3a .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
+.s3a .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
+.s3a .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
+.s3a .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
+.s3a .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
 .s3a .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
+.s3a .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
 .s3a .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
+.s3a .note.warn::before{content:"\\26A0\\FE0E"}
 .s3a .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
+.s3a .note.ok::before{content:"\\2713"}
+.s3a .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
+.s3a code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
+.s3a code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
 .s3a .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
 .s3a pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
 .s3a pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
+.s3a pre.code{user-select:all;-webkit-user-select:all;cursor:text}
+.s3a .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
+.s3a details.sec{margin:14px 0 4px}
+.s3a details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
+.s3a .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
+.s3a .next{border-top:1px dashed rgba(127,127,127,.35)}
+.s3a .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
+.s3a .next .nw{font-size:12px;opacity:.65;margin-left:6px}
 .s3a img{max-width:100%;max-height:480px;border:1px solid rgba(127,127,127,.3)}
 </style>"""
 
+_BADGE = "S3"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
+# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
+# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
+_CALL_RE = re.compile(r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
+                      r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
+                      r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)")
+_TONES = ("warn", "bad", "ok")
+_MARKS = {"warn": "[!] ", "ok": "[ok] "}  # text-mode prefix of a note by level; anything else is "[i] "
+_SELECT = ' title="Click to select, then copy"'
 
 
 def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
+
+
+def _prose(value: Any) -> str:
+    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
+    The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
+    pieces = _CALL_RE.split("" if value is None else str(value))
+    return "".join(f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece) for i, piece in enumerate(pieces))
+
+
+def _call(name: str, *args: Any, **kwargs: Any) -> str:
+    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
+    def literal(value: Any) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
+        if type(value).__name__ == "Decimal":
+            return str(value)
+        if isinstance(value, dict):
+            return "{" + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, (list, tuple)):
+            inner = ", ".join(map(literal, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
+            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+        return repr(value)
+
+    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
+
+
+def _signature(function: Callable) -> str:
+    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
+    sig = inspect.signature(function)
+    params = [p.replace(annotation=inspect.Parameter.empty) for name, p in sig.parameters.items() if name != "self"]
+    return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
+
+
+def _tone(item: tuple[str, ...]) -> str:
+    """The tone of a card: its third element, when it's one this renderer colours."""
+    return item[2] if len(item) > 2 and item[2] in _TONES else ""
+
+
+def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Warnings first, then notes, each in the order they were found."""
+    return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
+
+
+def _counts(findings: list[tuple[str, str]], sep: str) -> str:
+    """'2 warnings · 3 notes'."""
+    warns = sum(level == "warn" for level, _ in findings)
+    return sep.join(filter(None, [_plural(warns, "warning") if warns else "",
+                                  _plural(len(findings) - warns, "note") if len(findings) > warns else ""]))
 
 
 def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
@@ -3996,23 +4108,43 @@ def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int
     return rows, len(table.rows) - len(rows)
 
 
+def _hidden(count: int, table: _Table, default_max: int) -> str:
+    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
+    text = f"... {count:,} more rows not shown"
+    return text + (f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)" if table.max_rows is None else "")
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out = [_CSS, '<div class="s3a">']
     for block in blocks:
         if isinstance(block, _Title):
-            out.append(f"<h3>{_esc(block.text)}</h3>")
+            out.append(f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>')
             if block.sub:
-                out.append(f'<div class="sub">{_esc(block.sub)}</div>')
+                out.append(f'<div class="sub">{_prose(block.sub)}</div>')
         elif isinstance(block, _Cards):
-            cards = "".join(f'<div class="card"><div class="l">{_esc(label)}</div><div class="v">{_esc(value)}</div></div>'
-                            for label, value in block.items)
+            cards = "".join(f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
+                            f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>' for item in block.items)
             out.append(f'<div class="cards">{cards}</div>')
         elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_esc(block.text)}</div>')
+            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
+        elif isinstance(block, _Findings):
+            items = _ordered(block.items)
+            if items:
+                notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
+                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
+                out.append(f'<div class="fd">{head}{notes}</div>')
+            elif block.empty:
+                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
+        elif isinstance(block, _Next):
+            if block.items:
+                items = "".join(f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
+                                + (f'<span class="nw">{_esc(why)}</span>' if why else "") + "</span>"
+                                for call, why in block.items)
+                out.append(f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>')
         elif isinstance(block, _Table):
-            if block.title:
-                out.append(f"<h4>{_esc(block.title)}</h4>")
             if not block.rows:
+                if block.title:
+                    out.append(f"<h4>{_prose(block.title)}</h4>")
                 out.append('<div class="more">(none)</div>')
                 continue
             rows, hidden = _visible_rows(block, max_rows)
@@ -4023,24 +4155,50 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 cells = []
                 for j, cell in enumerate(row):
                     text = "" if cell is None else str(cell)
-                    css = "tree" if block.tree and j == 0 else ("n" if _NUMERIC_RE.match(text) else "")
-                    cells.append(f'<td class="{css}">{_esc(text)}</td>' if css else f"<td>{_esc(text)}</td>")
+                    inner = _esc(text)
+                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
+                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
+                    if block.tree and j == 0:
+                        css = "tree"
+                    elif j in block.code_cols and text:
+                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
+                    elif j in block.prose_cols:
+                        css, inner = "", _prose(text)
+                    elif _NUMERIC_RE.match(text):
+                        css = "n"
+                    else:
+                        css = "s" if len(text) <= 16 and "\n" not in text else ""
+                    cells.append(f'<td class="{css}">{inner}</td>' if css else f"<td>{inner}</td>")
                 if block.bars is not None:
                     pct = max(0.0, min(1.0, block.bars[i])) * 100
                     cells.append(f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
                                  f"</span></span>{pct:.1f}%</td>")
                 body.append(f"<tr>{''.join(cells)}</tr>")
-            out.append(f'<div class="tw"><table class="t"><thead><tr>{head}</tr></thead>'
-                       f'<tbody>{"".join(body)}</tbody></table></div>')
+            table = (f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
+                     f'</thead><tbody>{"".join(body)}</tbody></table></div>')
             if hidden:
-                out.append(f'<div class="more">... {hidden:,} more rows not shown</div>')
+                table += f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
+            if block.collapsed:
+                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")} '
+                           f"({len(block.rows):,})</summary>{table}</details>")
+            else:
+                if block.title:
+                    out.append(f"<h4>{_prose(block.title)}</h4>")
+                out.append(table)
         elif isinstance(block, _Text):
-            if block.title:
-                out.append(f"<h4>{_esc(block.title)}</h4>")
-            out.append(f'<pre class="wrap">{_esc(block.text)}</pre>' if block.wrap else f"<pre>{_esc(block.text)}</pre>")
+            css = " ".join(filter(None, ["wrap" if block.wrap else "", "code" if block.code else ""]))
+            pre = (f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>' if css
+                   else f"<pre>{_esc(block.text)}</pre>")
+            if block.collapsed:
+                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>')
+            else:
+                hint = '<span class="hint">click it to select all, then copy</span>' if block.code else ""
+                if block.title or hint:
+                    out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
+                out.append(pre)
         elif isinstance(block, _Frame):
             if block.title:
-                out.append(f"<h4>{_esc(block.title)}</h4>")
+                out.append(f"<h4>{_prose(block.title)}</h4>")
             pd = _require("pandas", "Table rendering")
             with pd.option_context("display.max_colwidth", 120):
                 frame = block.df.to_html(max_rows=max_rows or None, max_cols=40, border=0, classes="t")
@@ -4076,15 +4234,27 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             out += ["", block.text, "=" * min(len(block.text), 100)] + ([block.sub] if block.sub else [])
         elif isinstance(block, _Cards):
             line = ""
-            for label, value in block.items:
-                item = f"{label}: {value}"
+            for entry in block.items:
+                item = f"{entry[0]}: {entry[1]}" + (" (!)" if _tone(entry) in ("warn", "bad") else "")
                 if line and len(line) + len(item) > 100:
                     out.append(line)
                     line = ""
                 line += ("   " if line else "") + item
             out.append(line)
         elif isinstance(block, _Note):
-            out.append({"warn": "[!] ", "ok": "[ok] "}.get(block.level, "[i] ") + block.text)
+            out.append(_MARKS.get(block.level, "[i] ") + block.text)
+        elif isinstance(block, _Findings):
+            items = _ordered(block.items)
+            if items:
+                out += ["", f"-- Findings: {_counts(items, ', ')} --"]
+                out += [_MARKS.get(level, "[i] ") + message for level, message in items]
+            elif block.empty:
+                out.append("[ok] " + block.empty)
+        elif isinstance(block, _Next):
+            if block.items:
+                width = max(len(call) for call, _ in block.items)
+                out += ["", f"{block.title}:"]
+                out += [f"  {call.ljust(width)}   {why}".rstrip() for call, why in block.items]
         elif isinstance(block, _Table):
             out.append("")
             if block.title:
@@ -4104,7 +4274,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
             out += [line_of(headers), "  ".join("-" * w for w in widths)] + [line_of(r) for r in cells]
             if hidden:
-                out.append(f"... {hidden:,} more rows not shown")
+                out.append(_hidden(hidden, block, max_rows))
         elif isinstance(block, _Text):
             if block.title:
                 out += ["", f"-- {block.title} --"]
@@ -4124,7 +4294,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
 def _in_notebook() -> bool:
     try:
-        from IPython import get_ipython
+        from IPython.core.getipython import get_ipython
     except ImportError:
         return False
     shell = get_ipython()
@@ -4232,6 +4402,14 @@ def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Ta
     return _Table(["Key", "Size", "Last modified (UTC)", "Age", "Storage class"],
                   [[relative_key(o.key, base), human_size(o.size), _fmt_dt(o.last_modified), human_age(o.last_modified),
                     o.storage_class] for o in objects], title=title)
+
+
+def _file_steps(bucket: str, objects: list[ObjectInfo]) -> list[tuple[str, str]]:
+    """Next steps after a list of files: look at the first one."""
+    if not objects:
+        return []
+    uri = s3_uri(bucket, objects[0].key)
+    return [(_call("preview", uri), "what's inside the first one"), (_call("head", uri), "all its metadata")]
 
 
 def _folder_label(folder: str) -> str:
@@ -4395,6 +4573,17 @@ class S3View:
     rate and time left), 'plain' (always that line) or 'off'.
     """
 
+    _GROUPS = {  # help() lists the commands in these groups, in this order
+        "Buckets": ("buckets", "overview", "bucket_info", "policy"),
+        "Explore a folder": ("ls", "tree", "summary", "find", "largest", "newest", "oldest", "compare"),
+        "Cut cost": ("duplicates", "what_if", "uploads"),
+        "Versions and deleted files": ("versions", "history", "deleted"),
+        "Open a file": ("head", "preview", "document", "download", "download_zip", "link"),
+        "Help": ("help",),
+    }
+    _START = (("overview()", "every bucket: size, cost and warnings"),
+              ("summary('s3://bucket/prefix/')", "what's in a folder and what it costs"))
+
     def __init__(self, core: S3Analyzer | None = None, *, mode: str = "auto", max_rows: int = 50,
                  progress: str = "auto"):
         if mode not in ("auto", "html", "text"):
@@ -4479,7 +4668,8 @@ class S3View:
 
                 if handle[0] is None:
                     handle[0] = display(HTML(""), display_id=True)
-                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+                if handle[0] is not None:  # display() returns None outside IPython
+                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
                 width[0] = max(width[0], len(text))
                 print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
@@ -4494,17 +4684,35 @@ class S3View:
             if getattr(self, "_progress_owner", None) is clear:
                 self._progress_owner = None
 
-    def help(self) -> None:
-        """This list."""
-        rows = []
-        for name, member in vars(type(self)).items():
-            if name.startswith("_") or not callable(member):
-                continue
-            target = inspect.unwrap(member)
-            params = str(inspect.signature(target)).replace("(self, ", "(").replace("(self)", "()")
-            rows.append([f"{name}{params}", (inspect.getdoc(target) or "").split("\n")[0]])
-        self._show([_Title("S3View commands", "Data versions of each live on .core (S3Analyzer)"),
-                    _Table(["Command", "What it shows"], rows, max_rows=0)])
+    def help(self, command: Any = None) -> None:
+        """Every command, grouped by task; help('name') shows one command in full."""
+        view = type(self).__name__
+        commands = {name: inspect.unwrap(member) for name, member in vars(type(self)).items()
+                    if not name.startswith("_") and callable(member)}
+
+        def about(name: str) -> str:  # the docstring's first paragraph, on one line
+            return " ".join((inspect.getdoc(commands[name]) or "").split("\n\n")[0].split())
+
+        if command is not None:
+            name = getattr(command, "__name__", str(command))
+            if name not in commands:
+                close = difflib.get_close_matches(name, list(commands), n=3)
+                hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+                self._show([_Note(f"{view} has no command {name!r}.{hint} help() lists them all.", "warn")])
+                return
+            self._show([_Title(f"{name}{_signature(commands[name])}", f"{view} command · help() lists them all"),
+                        _Text(inspect.getdoc(commands[name]) or "(no description)", wrap=True)])
+            return
+        grouped = {name for names in self._GROUPS.values() for name in names}
+        groups = {**self._GROUPS, "Other": tuple(name for name in commands if name not in grouped)}
+        blocks: list[Any] = [_Title(f"{view} commands", "help('name') shows one in full · the data behind each report "
+                                                        f"comes from .core ({type(self.core).__name__})"),
+                             _Next(list(self._START), title="Start here")]
+        for group, names in groups.items():
+            rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
+            if rows:
+                blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
+        self._show(blocks)
 
     def _price_basis(self) -> str:
         basis = "us-east-1 list prices" if self.core.prices == S3_PRICES else "your prices"
@@ -4528,6 +4736,8 @@ class S3View:
             _Title(f"S3 buckets ({len(buckets)})", " · ".join(f"{r}: {n}" for r, n in regions.most_common())),
             _Table(["Bucket", "Region", "Created (UTC)", "Age"],
                    [[b.name, b.region or "-", _fmt_dt(b.created), human_age(b.created)] for b in buckets], max_rows=0),
+            _Next([("overview()", "size, cost and warnings of every bucket")]
+                  + ([(_call("bucket_info", buckets[0].name), "one bucket's settings and risks")] if buckets else [])),
         ])
 
     @_friendly_errors
@@ -4536,14 +4746,17 @@ class S3View:
         estimated monthly cost (instant, even for huge buckets)."""
         cfg = self.core.bucket_config(bucket)
         account_block = self._account_block()
+        blocked = any(settings and all(settings.values()) for settings in (account_block, cfg.public_access_block))
+        open_to_public = "warn" if not blocked and "public_access_block" not in cfg.errors else ""
         cards = [
             ("Region", cfg.region or "?"),
             ("Versioning", _section(cfg, "versioning", cfg.versioning or "?")),
-            ("Encryption", _encryption_label(cfg)),
-            ("Block public access", _public_access_label(cfg)),
-            ("Account block public access", "?" if account_block is None else _block_label(account_block)),
+            ("Encryption", _encryption_label(cfg), "" if cfg.encryption or "encryption" in cfg.errors else "warn"),
+            ("Block public access", _public_access_label(cfg), open_to_public),
+            ("Account block public access", "?" if account_block is None else _block_label(account_block),
+             open_to_public),
             ("Bucket policy", _section(cfg, "policy", "public" if cfg.policy_is_public else
-                                       "private" if cfg.has_policy else "none")),
+                                       "private" if cfg.has_policy else "none"), "bad" if cfg.policy_is_public else ""),
             ("Object ownership", _section(cfg, "ownership", cfg.object_ownership or "-")),
             ("Object lock", _section(cfg, "object_lock", "on" if cfg.object_lock else "off")),
             ("Lifecycle rules", _section(cfg, "lifecycle", str(len(cfg.lifecycle_rules)))),
@@ -4579,8 +4792,8 @@ class S3View:
                         bar_label="% of size")
         statements = explain_policy(cfg.policy, self.core.account_id())
         blocks.append(_Cards(cards))
-        blocks += [_Note(message, level) for level, message in bucket_findings(cfg, account_block)]
-        blocks += [_Note(message, level) for level, message in policy_findings(statements)]
+        blocks.append(_Findings(bucket_findings(cfg, account_block) + policy_findings(statements),
+                                empty="No issues found by these checks."))
         if storage_table:
             blocks.append(storage_table)
         if statements:
@@ -4595,7 +4808,14 @@ class S3View:
                                  [[r.get("ID", "-"), r.get("Status"), r.get("Destination", {}).get("Bucket", "-")]
                                   for r in cfg.replication_rules], title="Replication rules"))
         if cfg.tags:
-            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(cfg.tags.items())], title="Tags"))
+            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(cfg.tags.items())], title="Tags",
+                                 collapsed=True))
+        root = s3_uri(cfg.name, "")
+        blocks.append(_Next([(_call("summary", root), "what's in it: folders, file types, cost, findings")]
+                            + ([(_call("policy", cfg.name), "the policy in plain English, and its JSON")]
+                               if statements else [])
+                            + ([(_call("versions", root), "old versions and deleted files still billed")]
+                               if cfg.versioning == "Enabled" else [(_call("tree", root), "folder sizes")])))
         self._show(blocks)
 
     @_friendly_errors
@@ -4605,7 +4825,7 @@ class S3View:
         with self._progress("Checking buckets", unit="buckets") as tick:
             reports = self.core.bucket_reports(match=match, metrics=metrics, progress=tick)
         account_block, account = self._account_block(), self.core.account_id()
-        rows: list[tuple[int, list[str]]] = []
+        rows: list[tuple[int, list[Any]]] = []  # cells are text, or _Tone for a coloured status
         warnings: list[list[str]] = []
         objects = size = 0
         cost = 0.0
@@ -4623,18 +4843,23 @@ class S3View:
             elif metrics:
                 missing_metrics.append(f"{cfg.name} ({report.metrics_error})" if report.metrics_error else cfg.name)
             enabled_rules = sum(rule.get("Status") == "Enabled" for rule in cfg.lifecycle_rules)
+            exposure, encryption = _exposure(cfg, account_block), _encryption_label(cfg)
+            exposed = {"blocked": "ok", "not blocked": "warn"}.get(exposure, "bad" if "PUBLIC" in exposure else "")
             rows.append((-1 if bucket_size is None else bucket_size, [
                 cfg.name, cfg.region or "?", "-" if bucket_objects is None else f"{bucket_objects:,}",
                 human_size(bucket_size), human_money(bucket_cost), _section(cfg, "versioning", cfg.versioning or "?"),
-                _encryption_label(cfg), _exposure(cfg, account_block),
-                _section(cfg, "lifecycle", str(enabled_rules)), str(len(bucket_warnings))]))
+                _Tone(encryption, "warn" if encryption == "none" else ""),
+                _Tone(exposure, exposed),
+                _section(cfg, "lifecycle", str(enabled_rules)),
+                _Tone(str(len(bucket_warnings)), "warn" if bucket_warnings else "")]))
         rows.sort(key=lambda row: row[0], reverse=True)
         blocks: list[Any] = [
             _Title(f"All buckets ({len(reports)})", f"names matching {match!r}" if match else ""),
             _Cards([("Buckets", f"{len(reports):,}"), ("Objects", f"{objects:,}" if metrics else "-"),
                     ("Total size", human_size(size if metrics else None)),
                     ("Est. cost / month", human_money(cost if metrics else None)),
-                    ("Buckets with warnings", f"{len({bucket for bucket, _ in warnings}):,}"),
+                    ("Buckets with warnings", f"{len({bucket for bucket, _ in warnings}):,}",
+                     "warn" if warnings else "ok"),
                     ("Account block public access", "?" if account_block is None else _block_label(account_block)),
                     ("Regions", f"{len({r.config.region for r in reports if r.config.region}):,}")]),
         ]
@@ -4648,8 +4873,15 @@ class S3View:
             title=f"Buckets by size (CloudWatch, all versions; cost {self._price_basis()})",
             bars=[_share(max(s, 0), size) for s, _ in rows], bar_label="% of size", max_rows=0))
         if warnings:
-            blocks.append(_Table(["Bucket", "Warning"], warnings,
+            blocks.append(_Table(["Bucket", "Warning"], warnings, prose_cols=(1,),
                                  title="Warnings (bucket_info(name) shows every finding for one bucket)"))
+        if rows:
+            flagged = Counter(bucket for bucket, _ in warnings).most_common(1)
+            biggest = rows[0][1][0]
+            look = flagged[0][0] if flagged else biggest
+            blocks.append(_Next([(_call("bucket_info", look), "why it's flagged, and what to change" if flagged
+                                  else "its settings, policy and cost"),
+                                 (_call("summary", s3_uri(biggest)), "what's in the biggest bucket")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -4669,8 +4901,9 @@ class S3View:
             ("Open to anyone", f"{sum(st.public for st in statements):,}"),
             ("Other accounts", ", ".join(sorted({a for st in statements for a in st.other_accounts})) or "none"),
         ]))
-        blocks += [_Note(message, level) for level, message in policy_findings(statements)]
-        blocks += [_policy_table(statements), _Text(json.dumps(document, indent=2), title="Policy JSON")]
+        blocks += [_Findings(policy_findings(statements)), _policy_table(statements),
+                   _Text(json.dumps(document, indent=2), title="Policy JSON", collapsed=True),
+                   _Next([(_call("bucket_info", name), "the bucket's other settings and risks")])]
         self._show(blocks)
 
     # ------------------------------------------------------------------ listing
@@ -4696,6 +4929,12 @@ class S3View:
             blocks.append(_Note("Nothing here. Check the prefix (keys are case-sensitive)."))
         else:
             blocks.append(_Table(["Name", "Size", "Last modified (UTC)", "Storage class"], rows, max_rows=0))
+            bucket = parse_s3_uri(listing.uri)[0]
+            steps = [(_call("summary", listing.uri), "sizes, file types and cost of everything below")]
+            steps += [(_call("ls", s3_uri(bucket, listing.folders[0])), "one level down")] if listing.folders else []
+            steps += [(_call("preview", s3_uri(bucket, listing.objects[0].key)), "what's inside the first file")
+                      ] if listing.objects else []
+            blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -4706,10 +4945,10 @@ class S3View:
             s = self.core.summarize(uri, top_n=top_n, folder_depth=folder_depth, limit=limit, progress=tick)
         base = base_prefix(parse_s3_uri(s.uri)[1])
         blocks: list[Any] = [_Title(f"Summary of {s.uri}", f"{s.object_count:,} objects scanned in {s.scan_seconds:.1f}s")]
-        findings = [_Note(message, level) for level, message in summary_findings(s, self.core.prices)]
+        findings = _Findings(summary_findings(s, self.core.prices), empty="No issues found by these checks.")
         if not s.object_count:
             blocks.append(_Note("No objects under this prefix."))
-            return self._show(blocks + findings)
+            return self._show(blocks + [findings])
         blocks.append(_Cards([
             ("Objects", f"{s.object_count:,}{'+' if s.truncated else ''}"),
             ("Total size", human_size(s.total_size)),
@@ -4722,7 +4961,7 @@ class S3View:
             ("Newest change", human_age(s.newest.last_modified if s.newest else None)),
             ("Est. cost / month", human_money(s.monthly_cost)),
         ]))
-        blocks += findings
+        blocks.append(findings)
         n, size = s.object_count, s.total_size
         blocks += [
             _stat_table(f"Folders (depth {folder_depth})", "Folder", s.by_folder, n, size, name=_folder_label),
@@ -4733,6 +4972,14 @@ class S3View:
             _stat_table("Last modified", "Age", s.age_histogram, n, size, by="count"),
             _objects_table(f"Largest {len(s.largest)} objects", s.largest, base),
         ]
+        steps = [(_call("tree", s.uri), "the folders below, level by level"),
+                 (_call("duplicates", s.uri), "identical files and what the copies cost")]
+        if s.cold_standard.size >= GB:
+            steps.append((_call("what_if", s.uri, move_after=90, to="STANDARD_IA"),
+                          "the saving if files unchanged for 90 days moved to STANDARD_IA"))
+        else:
+            steps.append((_call("find", s.uri, min_size="1GB"), "every file of 1 GB or more"))
+        blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -4752,6 +4999,12 @@ class S3View:
             blocks.append(_Note(f"Scan stopped at limit={limit:,}; sizes are partial.", "warn"))
         blocks.append(_Table(["Folder", "Objects", "Size"], rows, bars=bars, bar_label="% of size",
                              tree=True, max_rows=max_rows))
+        top = max((path for path in tree.folders if path.count("/") == 1), key=lambda p: tree.folders[p].size,
+                  default=None)
+        if top:
+            bucket, prefix = parse_s3_uri(tree.uri)
+            blocks.append(_Next([(_call("summary", s3_uri(bucket, base_prefix(prefix) + top)),
+                                  "the biggest folder in detail: file types, cost, findings")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -4776,7 +5029,7 @@ class S3View:
         ]
         if hit_limit:
             blocks.append(_Note(f"Stopped at limit={limit:,} matches.", "warn"))
-        blocks.append(_objects_table("Matches", matches, base_prefix(prefix)))
+        blocks += [_objects_table("Matches", matches, base_prefix(prefix)), _Next(_file_steps(bucket, matches))]
         self._show(blocks)
 
     @_friendly_errors
@@ -4799,7 +5052,8 @@ class S3View:
 
     def _top(self, title: str, uri: str, objects: list[ObjectInfo]) -> None:
         bucket, prefix = parse_s3_uri(uri)
-        self._show([_Title(f"{title} in {s3_uri(bucket, prefix)}"), _objects_table("", objects, base_prefix(prefix))])
+        self._show([_Title(f"{title} in {s3_uri(bucket, prefix)}"), _objects_table("", objects, base_prefix(prefix)),
+                    _Next(_file_steps(bucket, objects))])
 
     @_friendly_errors
     def duplicates(self, uri: str, *, method: str = "hash", min_size: int | str = 1,
@@ -4822,10 +5076,10 @@ class S3View:
                f"files of at least {human_size(smallest)}" if smallest > 1 else "",
                f"took {_duration(report.scan_seconds)}"]
         blocks: list[Any] = [_Title(f"Duplicate files in {report.uri}", " · ".join(filter(None, sub)))]
-        findings = [_Note(message, level) for level, message in duplicate_findings(report)]
+        findings = _Findings(duplicate_findings(report))
         if not report.scanned.count:
             blocks.append(_Note("No files under this prefix. Check the prefix (keys are case-sensitive)."))
-            return self._show(blocks + findings)
+            return self._show(blocks + [findings])
         blocks.append(_Cards([
             ("Duplicate groups", f"{len(report.groups):,}"),
             ("Redundant copies", f"{report.copies:,}"),
@@ -4839,7 +5093,7 @@ class S3View:
         elif not report.groups and not report.not_compared.count:
             blocks.append(_Note(f"No duplicates: the {_plural(report.candidates.count, 'file')} that share a size "
                                 "with another file all have different contents.", "ok"))
-        blocks += findings
+        blocks.append(findings)
         if not report.groups:
             return self._show(blocks)
 
@@ -4874,7 +5128,13 @@ class S3View:
         blocks.append(_Text(f"report = ui.core.find_duplicates({report.uri!r}{args})\n"
                             "df = report.to_df()              # one row per file: group, role, key, size, sha256, ...\n"
                             "copies = df[df.role == 'copy']   # every file but the one to keep in each group",
-                            title="Get the list in pandas (nothing is deleted here)"))
+                            title="Get the list in pandas (nothing is deleted here)", code=True))
+        copied = next((f for f in folders if f.all_copies), None) or next((f for f in folders if f.outside), None)
+        if copied:
+            bucket = parse_s3_uri(report.uri)[0]
+            other = next(f for f in copied.elsewhere if f != copied.folder)
+            blocks.append(_Next([(_call("compare", s3_uri(bucket, copied.folder), s3_uri(bucket, other)),
+                                  "whether one folder is a full copy of the other")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -4923,13 +5183,15 @@ class S3View:
             blocks.append(_Note(f"Old versions add {human_size(v.noncurrent.size)} ({extra:.0%} on top of current data). "
                                 "A NoncurrentVersionExpiration lifecycle rule would clean them up.",
                                 "warn" if extra > 0.25 else "info"))
-        if v.deleted_keys:
-            blocks.append(_Note(f"{_plural(v.deleted_keys, 'deleted file')} can still be listed (and maybe restored) "
-                                "with deleted(uri)."))
         if v.top_noncurrent:
             blocks.append(_Table(["Key", "Old versions", "Old versions size"],
                                  [[k, f"{st.count:,}", human_size(st.size)] for k, st in v.top_noncurrent],
                                  title="Keys with the most noncurrent data"))
+        steps = [(_call("deleted", v.uri), f"the {_plural(v.deleted_keys, 'deleted file')} you may be able to restore")
+                 ] if v.deleted_keys else []
+        steps += [(_call("history", s3_uri(parse_s3_uri(v.uri)[0], v.top_noncurrent[0][0])),
+                   "every version of the key with the most old data")] if v.top_noncurrent else []
+        blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -4953,7 +5215,7 @@ class S3View:
         blocks: list[Any] = [
             _Title(f"Deleted files under {d.uri}", since),
             _Cards([("Deleted files", f"{len(d.files):,}"), ("Can be restored", f"{len(restorable):,}"),
-                    ("Size to restore", human_size(sum(f.last_version.size for f in restorable))),
+                    ("Size to restore", human_size(sum(f.last_version.size for f in d.files if f.last_version))),
                     ("Old versions kept", human_size(sum(f.old_versions.size for f in d.files))),
                     ("Their est. cost / month", human_money(sum(f.monthly_cost for f in d.files)))]),
         ]
@@ -4986,7 +5248,9 @@ class S3View:
                 "import boto3\n\n"
                 "# Deleting the delete marker brings the last version back (needs s3:DeleteObjectVersion).\n"
                 f"boto3.client('s3').delete_object(\n    Bucket={bucket!r},\n    Key={example.key!r},\n"
-                f"    VersionId={example.marker_version_id!r},\n)", title="How to restore a file"))
+                f"    VersionId={example.marker_version_id!r},\n)", title="How to restore a file", code=True))
+            blocks.append(_Next([(_call("history", s3_uri(bucket, example.key)),
+                                  "every version of that file, to pick the one to bring back")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -5070,7 +5334,7 @@ class S3View:
                              bars=[_share(st.count, impact.scanned.count) for _, st in parts], bar_label="% of files"))
         blocks.append(_Text(json.dumps({"Rules": [impact.rule()]}, indent=2),
                             title="The rule: put_bucket_lifecycle_configuration replaces ALL of a bucket's rules, "
-                                  "so add this to the existing list"))
+                                  "so add this to the existing list", code=True))
         self._show(blocks)
 
     # ------------------------------------------------------------------ objects
@@ -5095,6 +5359,8 @@ class S3View:
             blocks.append(_Note("Tags: no permission to read (s3:GetObjectTagging)."))
         elif info["tags"]:
             blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in info["tags"].items()], title="Tags"))
+        blocks.append(_Next([(_call("preview", info["uri"]), "what's inside it"),
+                             (_call("link", info["uri"]), "a download link that works without AWS access")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -5148,6 +5414,9 @@ class S3View:
                                  title="Metadata"))
         if p.truncated and p.kind == "text":
             blocks.append(_Note(f"Showing the first {n} lines; pass n= for more."))
+        document = p.format in ("pdf", "docx", "pptx")
+        steps = [(_call("document", p.uri), "the full text, page by page")] if document else []
+        blocks.append(_Next(steps + [(_call("download", p.uri), "a copy in this notebook's folder")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -5203,7 +5472,7 @@ class S3View:
             opener = _PANDAS_READERS.get(detect_format(key)[0] or "")
             if opener:
                 blocks.append(_Text(f"import pandas as pd\n\ndf = pd.{opener.format(path=repr(local))}",
-                                    title="Open it"))
+                                    title="Open it", code=True))
             return self._show(blocks)
         with self._progress("Listing", unit="files") as list_tick, self._progress("Downloading", unit="B") as tick:
             d = self.core.download_folder(uri, path, limit=limit, progress=tick, list_progress=list_tick)
@@ -5249,7 +5518,8 @@ class S3View:
         files = f"{len(plan.files):,}{'+' if plan.more else ''}"
         blocks: list[Any] = [_Title(f"Zip of {plan.uri}", f"{_plural(len(plan.files), 'file')} · "
                                                         f"{human_size(plan.size)} → {plan.path}")]
-        cards = [("Can download", "yes" if can else "no"), ("Files", files), ("Size", human_size(plan.size)),
+        cards = [("Can download", "yes" if can else "no", "ok" if can else "bad"), ("Files", files),
+                 ("Size", human_size(plan.size)),
                  ("Limit", human_size(plan.max_size)), ("Free disk", human_size(plan.disk_free))]
         if z.written:
             saved = _share(plan.size - z.zip_size, plan.size)
@@ -5269,12 +5539,13 @@ class S3View:
             failed = ", ".join(why.get(name, name) for name, ok, _ in checks if ok is False)
             blocks += [_Cards(cards), _Note(f"Can't zip this here yet: {failed}. Nothing was downloaded; the notes "
                                             "below say what to change.", "warn")]
-        blocks += [_Note(message, level) for level, message in zip_findings(plan)]
+        blocks.append(_Findings(zip_findings(plan)))
         if z.failed:
             blocks.append(_Note(f"{_plural(len(z.failed), 'file')} couldn't be read while zipping, so the zip leaves "
                                 "them out (the table lists them). Running download_zip() again retries them.", "warn"))
         blocks.append(_Table(["Check", "Result", "Details"],
-                             [[name, "✓ ok" if ok else "✗ no" if ok is False else "· note", details]
+                             [[name, _Tone("✓ ok", "ok") if ok else _Tone("✗ no", "bad") if ok is False else "· note",
+                               details]
                               for name, ok, details in checks], title="Can this notebook make the zip?", max_rows=0))
         left_out = {**plan.left_out, **z.failed}
         if left_out:

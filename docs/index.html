@@ -163,8 +163,9 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
     <div class="code"><pre><code><span class="t-k">from</span> s3 <span class="t-k">import</span> S3View      <span class="t-c"># or: from dynamodb import DynamoDBView, from bedrock_kb import BedrockKBView</span>
 
 ui = S3View()              <span class="t-c"># uses the notebook's IAM role; nothing to configure</span>
-ui.help()                  <span class="t-c"># every command, with a one-line description</span>
+ui.help()                  <span class="t-c"># every command, grouped by task; ui.help("name") shows one in full</span>
 s3 = ui.core               <span class="t-c"># the analyzer behind the view: returns data instead of a report</span></code></pre></div>
+    <p>Every report reads the same way: cards with the numbers that matter (amber or red when something needs a look), findings that each end in what to do, the tables of detail, and a <strong>Next</strong> row of the commands worth running next, with the arguments already filled in. One click on any command in a report selects all of it, ready to copy.</p>
 
     <footer>
       <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>.</p>

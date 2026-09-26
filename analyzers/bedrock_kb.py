@@ -1093,7 +1093,7 @@ _PARSERS = {
 def describe_parsing(cfg: dict[str, Any] | None) -> str:
     """parsingConfiguration -> plain English: 'Default: the text only (...)'."""
     cfg = cfg or {}
-    strategy = cfg.get("parsingStrategy")
+    strategy: str | None = cfg.get("parsingStrategy")
     if not strategy:
         return "Default: the text only (images and charts inside files are skipped)"
     text = _PARSERS.get(strategy, strategy)
@@ -2438,18 +2438,21 @@ class _Title:
 
 @dataclass
 class _Cards:
-    items: list[tuple[str, str]]
+    items: list[tuple[str, ...]]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
 
 
 @dataclass
 class _Table:
     headers: list[str]
-    rows: list[list[Any]]
+    rows: list[list[Any]]  # cells are text, or _Tone for a coloured status
     title: str = ""
     bars: list[float] | None = None  # 0..1 per row, drawn as an extra column
     bar_label: str = "Share"
     tree: bool = False  # first column holds indented tree labels
     max_rows: int | None = None  # None = view default, 0 = no cap
+    code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
+    prose_cols: tuple[int, ...] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
+    collapsed: bool = False  # a secondary view: folded under its title in HTML
 
 
 @dataclass
@@ -2462,7 +2465,31 @@ class _Note:
 class _Text:
     text: str
     title: str = ""
-    wrap: bool = False
+    wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
+    code: bool = False  # a snippet to copy: in HTML one click selects all of it
+    collapsed: bool = False  # a secondary view (raw JSON): folded under its title in HTML
+
+
+@dataclass
+class _Findings:
+    items: list[tuple[str, str]]  # (level, message) pairs from a *_findings function
+    empty: str = ""  # said (as an ok note) when there are none; nothing when blank
+
+
+@dataclass
+class _Next:
+    items: list[tuple[str, str]]  # (call, what it shows): the commands worth running next, arguments filled in
+    title: str = "Next"
+
+
+@dataclass
+class _Tone:
+    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
+    text: str
+    tone: str = "warn"  # 'warn' | 'bad' | 'ok'
+
+    def __str__(self) -> str:
+        return self.text
 
 
 @dataclass
@@ -2487,29 +2514,56 @@ class _Answer:
 _CSS = """<style>
 .kba{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .kba h3{margin:10px 0 2px;font-size:16px}
+.kba h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
 .kba h4{margin:14px 0 4px;font-size:13px}
 .kba .sub{opacity:.65;font-size:12px;margin-bottom:6px}
 .kba .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 .kba .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
+.kba .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
+.kba .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
+.kba .card.ok{border-color:rgba(16,185,129,.7)}
 .kba .card .l{font-size:11px;opacity:.65}
 .kba .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .kba .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
+.kba .tw.scroll{max-height:640px;overflow:auto}
 .kba table.t{border-collapse:collapse;width:auto;font-size:inherit}
 .kba table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
+.kba .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
+.kba .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
 .kba table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
 .kba table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
+.kba table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
+.kba table.t td.s{white-space:nowrap}
 .kba table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kba table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .kba table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
 .kba .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
 .kba .track{vertical-align:middle;margin-right:6px}
 .kba .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
+.kba .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
+.kba .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
+.kba .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
+.kba .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
 .kba .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
+.kba .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
 .kba .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
+.kba .note.warn::before{content:"\\26A0\\FE0E"}
 .kba .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
+.kba .note.ok::before{content:"\\2713"}
+.kba .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
+.kba code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
+.kba code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
 .kba .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
 .kba pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
 .kba pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
+.kba pre.code{user-select:all;-webkit-user-select:all;cursor:text}
+.kba .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
+.kba details.sec{margin:14px 0 4px}
+.kba details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
+.kba .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
+.kba .next{border-top:1px dashed rgba(127,127,127,.35)}
+.kba .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
+.kba .next .nw{font-size:12px;opacity:.65;margin-left:6px}
 .kba .psg{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 10px;margin:6px 0;max-width:900px}
 .kba .psg .ph{font-weight:600;font-size:12px}
 .kba .psg .pm{opacity:.65;font-size:12px}
@@ -2520,11 +2574,66 @@ _CSS = """<style>
 .kba .ans sup{font-size:10px;opacity:.75;margin-left:1px}
 </style>"""
 
+_BADGE = "Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
+# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
+# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
+_CALL_RE = re.compile(r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
+                      r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
+                      r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)")
+_TONES = ("warn", "bad", "ok")
+_MARKS = {"warn": "[!] ", "ok": "[ok] "}  # text-mode prefix of a note by level; anything else is "[i] "
+_SELECT = ' title="Click to select, then copy"'
 
 
 def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
+
+
+def _prose(value: Any) -> str:
+    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
+    The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
+    pieces = _CALL_RE.split("" if value is None else str(value))
+    return "".join(f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece) for i, piece in enumerate(pieces))
+
+
+def _call(name: str, *args: Any, **kwargs: Any) -> str:
+    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
+    def literal(value: Any) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
+        if type(value).__name__ == "Decimal":
+            return str(value)
+        if isinstance(value, dict):
+            return "{" + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items()) + "}"
+        if isinstance(value, (list, tuple)):
+            inner = ", ".join(map(literal, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
+            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+        return repr(value)
+
+    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
+
+
+def _signature(function: Callable) -> str:
+    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
+    sig = inspect.signature(function)
+    params = [p.replace(annotation=inspect.Parameter.empty) for name, p in sig.parameters.items() if name != "self"]
+    return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
+
+
+def _tone(item: tuple[str, ...]) -> str:
+    """The tone of a card: its third element, when it's one this renderer colours."""
+    return item[2] if len(item) > 2 and item[2] in _TONES else ""
+
+
+def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Warnings first, then notes, each in the order they were found."""
+    return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
+
+
+def _counts(findings: list[tuple[str, str]], sep: str) -> str:
+    """'2 warnings · 3 notes'."""
+    warns = sum(level == "warn" for level, _ in findings)
+    return sep.join(filter(None, [_plural(warns, "warning") if warns else "",
+                                  _plural(len(findings) - warns, "note") if len(findings) > warns else ""]))
 
 
 def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
@@ -2533,23 +2642,43 @@ def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int
     return rows, len(table.rows) - len(rows)
 
 
+def _hidden(count: int, table: _Table, default_max: int) -> str:
+    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
+    text = f"... {count:,} more rows not shown"
+    return text + (f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)" if table.max_rows is None else "")
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out = [_CSS, '<div class="kba">']
     for block in blocks:
         if isinstance(block, _Title):
-            out.append(f"<h3>{_esc(block.text)}</h3>")
+            out.append(f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>')
             if block.sub:
-                out.append(f'<div class="sub">{_esc(block.sub)}</div>')
+                out.append(f'<div class="sub">{_prose(block.sub)}</div>')
         elif isinstance(block, _Cards):
-            cards = "".join(f'<div class="card"><div class="l">{_esc(label)}</div><div class="v">{_esc(value)}</div></div>'
-                            for label, value in block.items)
+            cards = "".join(f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
+                            f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>' for item in block.items)
             out.append(f'<div class="cards">{cards}</div>')
         elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_esc(block.text)}</div>')
+            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
+        elif isinstance(block, _Findings):
+            items = _ordered(block.items)
+            if items:
+                notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
+                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
+                out.append(f'<div class="fd">{head}{notes}</div>')
+            elif block.empty:
+                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
+        elif isinstance(block, _Next):
+            if block.items:
+                items = "".join(f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
+                                + (f'<span class="nw">{_esc(why)}</span>' if why else "") + "</span>"
+                                for call, why in block.items)
+                out.append(f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>')
         elif isinstance(block, _Table):
-            if block.title:
-                out.append(f"<h4>{_esc(block.title)}</h4>")
             if not block.rows:
+                if block.title:
+                    out.append(f"<h4>{_prose(block.title)}</h4>")
                 out.append('<div class="more">(none)</div>')
                 continue
             rows, hidden = _visible_rows(block, max_rows)
@@ -2560,21 +2689,47 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 cells = []
                 for j, cell in enumerate(row):
                     text = "" if cell is None else str(cell)
-                    css = "tree" if block.tree and j == 0 else ("n" if _NUMERIC_RE.match(text) else "")
-                    cells.append(f'<td class="{css}">{_esc(text)}</td>' if css else f"<td>{_esc(text)}</td>")
+                    inner = _esc(text)
+                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
+                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
+                    if block.tree and j == 0:
+                        css = "tree"
+                    elif j in block.code_cols and text:
+                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
+                    elif j in block.prose_cols:
+                        css, inner = "", _prose(text)
+                    elif _NUMERIC_RE.match(text):
+                        css = "n"
+                    else:
+                        css = "s" if len(text) <= 16 and "\n" not in text else ""
+                    cells.append(f'<td class="{css}">{inner}</td>' if css else f"<td>{inner}</td>")
                 if block.bars is not None:
                     pct = max(0.0, min(1.0, block.bars[i])) * 100
                     cells.append(f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
                                  f"</span></span>{pct:.1f}%</td>")
                 body.append(f"<tr>{''.join(cells)}</tr>")
-            out.append(f'<div class="tw"><table class="t"><thead><tr>{head}</tr></thead>'
-                       f'<tbody>{"".join(body)}</tbody></table></div>')
+            table = (f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
+                     f'</thead><tbody>{"".join(body)}</tbody></table></div>')
             if hidden:
-                out.append(f'<div class="more">... {hidden:,} more rows not shown</div>')
+                table += f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
+            if block.collapsed:
+                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")} '
+                           f"({len(block.rows):,})</summary>{table}</details>")
+            else:
+                if block.title:
+                    out.append(f"<h4>{_prose(block.title)}</h4>")
+                out.append(table)
         elif isinstance(block, _Text):
-            if block.title:
-                out.append(f"<h4>{_esc(block.title)}</h4>")
-            out.append(f'<pre class="wrap">{_esc(block.text)}</pre>' if block.wrap else f"<pre>{_esc(block.text)}</pre>")
+            css = " ".join(filter(None, ["wrap" if block.wrap else "", "code" if block.code else ""]))
+            pre = (f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>' if css
+                   else f"<pre>{_esc(block.text)}</pre>")
+            if block.collapsed:
+                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>')
+            else:
+                hint = '<span class="hint">click it to select all, then copy</span>' if block.code else ""
+                if block.title or hint:
+                    out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
+                out.append(pre)
         elif isinstance(block, _Passage):
             head = " · ".join(filter(None, [f"#{block.rank}", block.source, block.detail,
                                             "" if block.score is None else f"score {block.score:.2f}"]))
@@ -2662,15 +2817,27 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             out += ["", block.text, "=" * min(len(block.text), 100)] + ([block.sub] if block.sub else [])
         elif isinstance(block, _Cards):
             line = ""
-            for label, value in block.items:
-                item = f"{label}: {value}"
+            for entry in block.items:
+                item = f"{entry[0]}: {entry[1]}" + (" (!)" if _tone(entry) in ("warn", "bad") else "")
                 if line and len(line) + len(item) > 100:
                     out.append(line)
                     line = ""
                 line += ("   " if line else "") + item
             out.append(line)
         elif isinstance(block, _Note):
-            out.append({"warn": "[!] ", "ok": "[ok] "}.get(block.level, "[i] ") + block.text)
+            out.append(_MARKS.get(block.level, "[i] ") + block.text)
+        elif isinstance(block, _Findings):
+            items = _ordered(block.items)
+            if items:
+                out += ["", f"-- Findings: {_counts(items, ', ')} --"]
+                out += [_MARKS.get(level, "[i] ") + message for level, message in items]
+            elif block.empty:
+                out.append("[ok] " + block.empty)
+        elif isinstance(block, _Next):
+            if block.items:
+                width = max(len(call) for call, _ in block.items)
+                out += ["", f"{block.title}:"]
+                out += [f"  {call.ljust(width)}   {why}".rstrip() for call, why in block.items]
         elif isinstance(block, _Table):
             out.append("")
             if block.title:
@@ -2690,7 +2857,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
             out += [line_of(headers), "  ".join("-" * w for w in widths)] + [line_of(r) for r in cells]
             if hidden:
-                out.append(f"... {hidden:,} more rows not shown")
+                out.append(_hidden(hidden, block, max_rows))
         elif isinstance(block, _Text):
             if block.title:
                 out += ["", f"-- {block.title} --"]
@@ -2710,7 +2877,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
 
 def _in_notebook() -> bool:
     try:
-        from IPython import get_ipython
+        from IPython.core.getipython import get_ipython
     except ImportError:
         return False
     shell = get_ipython()
@@ -2803,10 +2970,25 @@ def _sync_label(job: IngestionJob | None) -> str:
     return text + (f", {_plural(job.failed, 'doc')} failed" if job.failed else "")
 
 
-def _job_row(job: IngestionJob, names: dict[str, str]) -> list[str]:
+def _status_tone(status: str | None) -> str:
+    """A knowledge base's or data source's status at a glance: FAILED is bad, anything but ACTIVE / AVAILABLE a
+    warning (it's being created, updated or deleted)."""
+    return "bad" if status == "FAILED" else "" if status in ("ACTIVE", "AVAILABLE", None, "") else "warn"
+
+
+def _sync_tone(job: IngestionJob | None) -> str:
+    """How a sync reads at a glance: a failed one is bad; never synced, stopped or with failed documents, a warning."""
+    if job is not None and job.status == "FAILED":
+        return "bad"
+    return "warn" if job is None or job.failed or job.status == "STOPPED" else ""
+
+
+def _job_row(job: IngestionJob, names: dict[str, str]) -> list[Any]:
     return [names.get(job.data_source_id) or job.data_source_id, _fmt_dt(job.started), human_duration(job.duration),
-            _JOB_STATES.get(job.status, job.status.lower()), f"{job.scanned:,}", f"{job.new:,}", f"{job.modified:,}",
-            f"{job.deleted:,}", f"{job.failed:,}", _reasons_text(job.failure_reasons, 1) if job.failure_reasons else ""]
+            _Tone(_JOB_STATES.get(job.status, job.status.lower()), _sync_tone(job) if job.status != "COMPLETE" else ""),
+            f"{job.scanned:,}", f"{job.new:,}", f"{job.modified:,}", f"{job.deleted:,}",
+            _Tone(f"{job.failed:,}", "warn" if job.failed else ""),
+            _reasons_text(job.failure_reasons, 1) if job.failure_reasons else ""]
 
 
 def _meta_label(metadata: dict[str, Any]) -> str:
@@ -2887,6 +3069,17 @@ class BedrockKBView:
     progress: 'auto' (a tqdm bar while long commands run, when tqdm is installed; else a line with the count,
     rate and time left), 'plain' (always that line) or 'off'.
     """
+
+    _GROUPS = {  # help() lists the commands in these groups, in this order
+        "Knowledge bases": ("kbs", "use", "kb_info"),
+        "What's indexed": ("syncs", "documents", "unsynced"),
+        "Search and answer": ("search", "chunk", "ask", "follow_up", "models"),
+        "Measure retrieval": ("compare", "evaluate"),
+        "Help": ("help",),
+    }
+    _START = (("kbs()", "every knowledge base: status, last sync, cost and warnings"),
+              ("use('name')", "pick the knowledge base later commands use"),
+              ("ask('a question')", "an answer with citations"))
 
     def __init__(self, core: BedrockKBAnalyzer | None = None, *, kb: str | None = None, mode: str = "auto",
                  max_rows: int = 50, progress: str = "auto"):
@@ -2975,7 +3168,8 @@ class BedrockKBView:
 
                 if handle[0] is None:
                     handle[0] = display(HTML(""), display_id=True)
-                handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+                if handle[0] is not None:  # display() returns None outside IPython
+                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
             else:
                 width[0] = max(width[0], len(text))
                 print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
@@ -2990,17 +3184,35 @@ class BedrockKBView:
             if getattr(self, "_progress_owner", None) is clear:
                 self._progress_owner = None
 
-    def help(self) -> None:
-        """This list."""
-        rows = []
-        for name, member in vars(type(self)).items():
-            if name.startswith("_") or not callable(member):
-                continue
-            target = inspect.unwrap(member)
-            params = str(inspect.signature(target)).replace("(self, ", "(").replace("(self)", "()")
-            rows.append([f"{name}{params}", (inspect.getdoc(target) or "").split("\n")[0]])
-        self._show([_Title("BedrockKBView commands", "Data versions of each live on .core (BedrockKBAnalyzer)"),
-                    _Table(["Command", "What it shows"], rows, max_rows=0)])
+    def help(self, command: Any = None) -> None:
+        """Every command, grouped by task; help('name') shows one command in full."""
+        view = type(self).__name__
+        commands = {name: inspect.unwrap(member) for name, member in vars(type(self)).items()
+                    if not name.startswith("_") and callable(member)}
+
+        def about(name: str) -> str:  # the docstring's first paragraph, on one line
+            return " ".join((inspect.getdoc(commands[name]) or "").split("\n\n")[0].split())
+
+        if command is not None:
+            name = getattr(command, "__name__", str(command))
+            if name not in commands:
+                close = difflib.get_close_matches(name, list(commands), n=3)
+                hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+                self._show([_Note(f"{view} has no command {name!r}.{hint} help() lists them all.", "warn")])
+                return
+            self._show([_Title(f"{name}{_signature(commands[name])}", f"{view} command · help() lists them all"),
+                        _Text(inspect.getdoc(commands[name]) or "(no description)", wrap=True)])
+            return
+        grouped = {name for names in self._GROUPS.values() for name in names}
+        groups = {**self._GROUPS, "Other": tuple(name for name in commands if name not in grouped)}
+        blocks: list[Any] = [_Title(f"{view} commands", "help('name') shows one in full · the data behind each report "
+                                                        f"comes from .core ({type(self.core).__name__})"),
+                             _Next(list(self._START), title="Start here")]
+        for group, names in groups.items():
+            rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
+            if rows:
+                blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
+        self._show(blocks)
 
     def _explain(self, code: str, message: str) -> str:
         """The AWS error message plus what to do about it."""
@@ -3029,6 +3241,10 @@ class BedrockKBView:
         except (ClientError, BotoCoreError):
             found = []
         return found[0] if found else "<profile id>"
+
+    def _on(self, kb_id: str, name: str) -> dict[str, str]:
+        """kb= for a next step's call, unless it's the knowledge base commands already use without one."""
+        return {} if self.kb in (kb_id, name) else {"kb": name}
 
     def _price_basis(self, models: bool = False) -> str:
         default = self.core.model_prices == MODEL_PRICES if models else self.core.prices == BEDROCK_PRICES
@@ -3059,7 +3275,9 @@ class BedrockKBView:
         kb_id = self.core.resolve(kb)
         self.kb, self._conversation = kb_id, None
         name = self.core.kb_name(kb_id)
-        self._show([_Note(f"Using knowledge base {name} ({kb_id}) from now on. kb_info() describes it.", "ok")])
+        self._show([_Note(f"Using knowledge base {name} ({kb_id}) from now on.", "ok"),
+                    _Next([("kb_info()", "its settings in plain English, data sources and syncs"),
+                           (_call("search", "a question your documents answer"), "the passages it retrieves")])])
 
     @_friendly_errors
     def kbs(self) -> None:
@@ -3067,7 +3285,7 @@ class BedrockKBView:
         last sync, estimated idle cost and warnings."""
         with self._progress("Checking knowledge bases", unit="knowledge bases") as tick:
             infos = sorted(self.core.list_knowledge_bases(progress=tick), key=lambda i: i.name.lower())
-        rows: list[list[str]] = []
+        rows: list[list[Any]] = []  # cells are text, or _Tone for a coloured status
         warnings: list[list[str]] = []
         unreadable: list[str] = []
         idle: dict[str, float] = {}  # collection -> $/month, so knowledge bases sharing one count it once
@@ -3086,20 +3304,24 @@ class BedrockKBView:
                 idle[collection] = cost
             never += sum(1 for ds in info.data_sources if ds.last_sync is None and "ingestion" not in ds.errors)
             scanned = [ds.last_success.scanned for ds in info.data_sources if ds.last_success]
-            rows.append([info.name, info.id, info.status, _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "-"),
+            rows.append([info.name, info.id, _Tone(info.status, _status_tone(info.status)),
+                         _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "-"),
                          store_name(info.vector_store), _model_label(info.embedding_model),
                          _section(info, "data_sources", f"{len(info.data_sources):,}"),
-                         f"{sum(scanned):,}" if scanned else "-", _section(info, "ingestion", _sync_label(info.last_sync)),
-                         idle_cost_label(info, self.core.prices) if cost is not None else "-", str(len(found))])
+                         f"{sum(scanned):,}" if scanned else "-",
+                         _Tone(_section(info, "ingestion", _sync_label(info.last_sync)),
+                               "" if "ingestion" in info.errors else _sync_tone(info.last_sync)),
+                         idle_cost_label(info, self.core.prices) if cost is not None else "-",
+                         _Tone(str(len(found)), "warn" if found else "")])
         blocks: list[Any] = [
             _Title(f"Knowledge bases in {self.core.region} ({len(infos)})",
                    "documents = files the last successful sync read · idle cost is the OpenSearch Serverless minimum "
                    f"at {self._price_basis()}, before any searches"),
             _Cards([("Knowledge bases", f"{len(infos):,}"),
                     ("Data sources", f"{sum(len(i.data_sources) for i in infos):,}"),
-                    ("Never synced", f"{never:,} data source{'' if never == 1 else 's'}"),
+                    ("Never synced", f"{never:,} data source{'' if never == 1 else 's'}", "warn" if never else ""),
                     ("Est. idle cost / month", human_money(sum(idle.values())) if idle else "-"),
-                    ("With warnings", f"{len({name for name, _ in warnings}):,}")]),
+                    ("With warnings", f"{len({name for name, _ in warnings}):,}", "warn" if warnings else "ok")]),
         ]
         if not infos:
             blocks.append(_Note(f"No knowledge bases in {self.core.region}. They're regional: try "
@@ -3111,11 +3333,15 @@ class BedrockKBView:
         blocks.append(_Table(["Name", "ID", "Status", "Type", "Vector store", "Embedding model", "Sources", "Documents",
                               "Last sync", "Est. idle $/month", "Warnings"], rows, max_rows=0))
         if warnings:
-            blocks.append(_Table(["Knowledge base", "Warning"], warnings, max_rows=0,
+            blocks.append(_Table(["Knowledge base", "Warning"], warnings, max_rows=0, prose_cols=(1,),
                                  title="Warnings (kb_info(name) shows every finding for one knowledge base)"))
-        else:
-            blocks.append(_Note("kb_info(name) shows one knowledge base's settings in plain English, its data sources "
-                                "and syncs, and every finding."))
+        readable = [info.name for info in infos if "describe" not in info.errors]
+        if readable:
+            flagged = Counter(name for name, _ in warnings).most_common(1)
+            look = flagged[0][0] if flagged else readable[0]
+            blocks.append(_Next([(_call("kb_info", look), "why it's flagged, and what to change" if flagged
+                                  else "its settings in plain English, data sources and syncs"),
+                                 (_call("use", look), "make it the one later commands use")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -3128,14 +3354,16 @@ class BedrockKBView:
                                                           else "")
         blocks: list[Any] = [
             _Title(f"Knowledge base {info.name}", " · ".join(filter(None, [info.id, _clip(info.description, 120)]))),
-            _Cards([("Status", info.status or "?"), ("Type", _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "?")),
+            _Cards([("Status", info.status or "?", _status_tone(info.status)),
+                    ("Type", _KB_TYPES.get(info.kb_type, info.kb_type.lower() or "?")),
                     ("Vector store", store_name(info.vector_store)), ("Embedding model", embedding),
                     ("Data sources", _section(info, "data_sources", f"{len(info.data_sources):,}")),
-                    ("Last sync", _section(info, "ingestion", _sync_label(info.last_sync))),
+                    ("Last sync", _section(info, "ingestion", _sync_label(info.last_sync)),
+                     "" if "ingestion" in info.errors else _sync_tone(info.last_sync)),
                     ("Est. idle cost / month", human_money(cost) if cost is not None else "not estimated"),
                     ("Created", _fmt_dt(info.created))]),
         ]
-        blocks += [_Note(message, level) for level, message in kb_findings(info, prices=self.core.prices)]
+        blocks.append(_Findings(kb_findings(info, prices=self.core.prices), empty="No issues found by these checks."))
         settings = [["Vector store", describe_vector_store(info.vector_store_detail)],
                     ["Embedding model", embedding],
                     ["Idle cost", f"about {human_money(cost)}/month ({self._price_basis()})" if cost is not None
@@ -3148,7 +3376,8 @@ class BedrockKBView:
                  _section(ds, "data_source", describe_parsing(ds.parsing))
                  + (f"; then {ds.transformation}" if ds.transformation else ""),
                  _DELETION.get(ds.deletion_policy or "", ds.deletion_policy or "-"),
-                 _section(ds, "ingestion", _sync_label(ds.last_sync))] for ds in info.data_sources]
+                 _Tone(_section(ds, "ingestion", _sync_label(ds.last_sync)),
+                       "" if "ingestion" in ds.errors else _sync_tone(ds.last_sync))] for ds in info.data_sources]
         blocks.append(_Table(["Data source", "Type", "Location", "Chunking", "Parsing", "When deleted", "Last sync"],
                              rows, title="Data sources", max_rows=0))
         jobs = sorted((job for ds in info.data_sources for job in ds.jobs), key=lambda j: j.started or _EPOCH,
@@ -3159,10 +3388,14 @@ class BedrockKBView:
                                   "Failed"], [_job_row(job, names)[:9] for job in jobs],
                                  title="Recent syncs (syncs() shows more, with reasons)", max_rows=0))
         if info.tags:
-            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(info.tags.items())], title="Tags"))
-        hint = "" if self.kb in (info.id, info.name) else f", kb={info.name!r}"
-        blocks.append(_Note(f"Try it: search('a question your documents answer'{hint}) shows the passages it "
-                            "retrieves, with scores and sources. syncs() and documents() show what's indexed."))
+            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(info.tags.items())], title="Tags",
+                                 collapsed=True))
+        on = self._on(info.id, info.name)
+        steps = [(_call("search", "a question your documents answer", **on), "try it: the passages it retrieves"),
+                 (_call("syncs", **on), "sync history, and why syncs failed")]
+        if any(ds.source_type == "S3" for ds in info.data_sources):
+            steps.append((_call("unsynced", **on), "files changed in S3 since the last sync"))
+        blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -3179,9 +3412,12 @@ class BedrockKBView:
         sub = f"newest first · {_plural(len(jobs), 'sync')}" + (f" of data source {data_source}" if data_source else "")
         blocks: list[Any] = [
             _Title(f"Syncs of {name}", sub),
-            _Cards([("Syncs shown", f"{len(jobs):,}"), ("Failed", f"{sum(j.status == 'FAILED' for j in jobs):,}"),
+            _Cards([("Syncs shown", f"{len(jobs):,}"),
+                    ("Failed", f"{sum(j.status == 'FAILED' for j in jobs):,}",
+                     "warn" if any(j.status == "FAILED" for j in jobs) else ""),
                     ("Last successful", human_age(last_ok.started) if last_ok else "none shown"),
-                    ("Docs failed (latest)", f"{latest.failed:,}" if latest else "-"),
+                    ("Docs failed (latest)", f"{latest.failed:,}" if latest else "-",
+                     "warn" if latest and latest.failed else ""),
                     ("Latest took", human_duration(latest.duration) if latest else "-")]),
         ]
         if not jobs:
@@ -3189,14 +3425,20 @@ class BedrockKBView:
                                 + "; ".join(sync_command(kb_id, ds.id, self.core.region) for ds in sources[:3]), "warn"))
             self._show(blocks)
             return
-        blocks += [_Note(message, level) for level, message in sync_findings(jobs, names)]
+        blocks.append(_Findings(sync_findings(jobs, names), empty="No issues found by these checks."))
         blocks.append(_Table(["Data source", "Started", "Took", "Status", "Scanned", "New", "Modified", "Deleted",
                               "Failed", "Why it failed"], [_job_row(job, names) for job in jobs], max_rows=0))
         picked = [ds for ds in sources if not data_source or data_source in (ds.id, ds.name)] or sources
         commands = [f"{sync_command(kb_id, ds.id, self.core.region)}   # {ds.name}" for ds in picked[:5]]
         commands.append(f"# or from Python: {sync_call(kb_id, picked[0].id, self.core.region)}" if picked else "")
         blocks.append(_Text("\n".join(filter(None, commands)),
-                            title="To sync again (this tool never starts a sync: it changes the index)"))
+                            title="To sync again (this tool never starts a sync: it changes the index)", code=True))
+        on = self._on(kb_id, name)
+        steps = [(_call("documents", status="FAILED", **on), "which documents failed, and why")
+                 ] if any(j.failed for j in jobs) else []
+        if any(ds.source_type == "S3" for ds in picked):
+            steps.append((_call("unsynced", **on), "files changed in S3 since the last sync"))
+        blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -3214,8 +3456,9 @@ class BedrockKBView:
         if status:
             sub += f" · showing status {status.upper()}"
         cards = [("Documents", f"{summary.total:,}")]
-        cards += [(_DOC_STATES.get(state, state.title()), f"{count:,}") for state, count in
-                  sorted(summary.counts.items(), key=lambda kv: _DOC_ORDER.index(kv[0]) if kv[0] in _DOC_ORDER else 99)]
+        cards += [(_DOC_STATES.get(state, state.title()), f"{count:,}", "bad" if "FAILED" in state and count else "")
+                  for state, count in sorted(summary.counts.items(),
+                                             key=lambda kv: _DOC_ORDER.index(kv[0]) if kv[0] in _DOC_ORDER else 99)]
         blocks: list[Any] = [_Title(f"Documents in {self.core.kb_name(kb_id)}", sub), _Cards(cards)]
         for ds_id, code in summary.errors.items():
             ds = sources.get(ds_id)
@@ -3244,7 +3487,8 @@ class BedrockKBView:
                                     "documents(status='INDEXED') lists them."))
         elif not status and ordered:
             blocks.append(_Note(f"All {len(ordered):,} documents read are indexed and searchable.", "ok"))
-        rows = [[_DOC_STATES.get(d.status, d.status), d.name or d.uri, sources[d.data_source_id].name
+        rows = [[_Tone(_DOC_STATES.get(d.status, d.status), "" if d.status == "INDEXED" else
+                       "bad" if "FAILED" in d.status else "warn"), d.name or d.uri, sources[d.data_source_id].name
                  if d.data_source_id in sources else d.data_source_id, d.reason or "", human_age(d.updated)]
                 for d in ordered[:n]]
         if docs or status:
@@ -3253,6 +3497,11 @@ class BedrockKBView:
         if len(ordered) > n:
             blocks.append(_Note(f"{len(ordered) - n:,} more not shown: pass n= for more, or use .core.documents(...) "
                                 "for all of them."))
+        on = self._on(kb_id, self.core.kb_name(kb_id))
+        steps = [(_call("syncs", **on), "sync history, and why syncs failed")]
+        if any(ds.source_type == "S3" for ds in sources.values()):
+            steps.append((_call("unsynced", **on), "files changed in S3 since the last sync"))
+        blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -3269,10 +3518,11 @@ class BedrockKBView:
             _Title(f"Changes since the last sync: {self.core.kb_name(kb_id)}",
                    "S3 files compared with the start of each data source's last successful sync"),
             _Cards([("Data sources checked", f"{len(checked):,} of {len(results):,}"),
-                    ("Files", f"{sum(f.files for f in checked):,}"), ("Changed since sync", f"{changed:,}"),
+                    ("Files", f"{sum(f.files for f in checked):,}"),
+                    ("Changed since sync", f"{changed:,}", "warn" if changed else "ok" if checked else ""),
                     ("Oldest last sync", human_age(min(syncs)) if syncs else "-")]),
         ]
-        blocks += [_Note(message, level) for level, message in freshness_findings(results, kb_id, region)]
+        blocks.append(_Findings(freshness_findings(results, kb_id, region)))
         for fresh in checked:
             ds = fresh.data_source
             if fresh.truncated:
@@ -3288,7 +3538,8 @@ class BedrockKBView:
         if stale:
             lines = [f"{sync_command(kb_id, ds.id, region)}   # {ds.name}" for ds in stale]
             lines.append(f"# or from Python: {sync_call(kb_id, stale[0].id, region)}")
-            blocks.append(_Text("\n".join(lines), title="To sync (this tool never starts a sync: it changes the index)"))
+            blocks.append(_Text("\n".join(lines), title="To sync (this tool never starts a sync: it changes the index)",
+                                code=True))
         self._show(blocks)
 
     # ---------------------------------------------------------------- retrieval
@@ -3317,20 +3568,25 @@ class BedrockKBView:
                     ("Est. cost", human_money(query_cost(1, bool(r.reranked), self.core.prices))
                      + (" (question embedding and reranking)" if r.reranked else " (question embedding)"))]),
         ]
-        blocks += [_Note(message, level) for level, message in retrieval_findings(r)]
+        blocks.append(_Findings(retrieval_findings(r)))
         blocks += _passage_blocks(r.passages, terms)
         if r.passages:
-            blocks.append(_Note("chunk(1) shows the full text and metadata of result #1; ask(question) answers the "
-                                "question from passages like these, with citations."))
+            same = {**self._on(r.kb_id, r.kb_name), **({"where": where} if where is not None else {}),
+                    **({"search_type": search_type} if search_type else {})}
+            blocks.append(_Next([("chunk(1)", "result #1 in full, with its metadata"),
+                                 (_call("ask", r.question, **same), "an answer from passages like these"),
+                                 (_call("compare", r.question, **self._on(r.kb_id, r.kb_name)),
+                                  "how other search settings rank them")]))
         self._show(blocks)
 
     @_friendly_errors
     def chunk(self, rank: int = 1) -> None:
         """The full text and metadata of result #rank from the last search or ask, and the call that opens its file."""
-        if self._last is None:
+        last = self._last
+        if last is None:
             raise _Hint("Nothing to show yet: run search('...') or ask('...') first, then chunk(1).")
-        answer = isinstance(self._last, Answer)
-        passages = self._last.sources if answer else self._last.passages
+        answer = isinstance(last, Answer)
+        passages = last.sources if answer else last.passages
         rank = _as_int(rank, "rank")
         if not 1 <= rank <= len(passages):
             raise ValueError(f"rank goes from 1 to {len(passages)}: the last {'answer' if answer else 'search'} has "
@@ -3350,8 +3606,9 @@ class BedrockKBView:
         if not rows:
             blocks.append(_Note("No metadata on this passage: where= filters need a <file>.metadata.json next to each "
                                 "file, then a sync."))
-        blocks.append(_Table(["Field", "Value"], [["Chunk ID", p.chunk_id or "-"], ["Data source", p.data_source_id or "-"],
-                                                   ["Location type", p.location_type or "-"]], title="Where it's stored"))
+        stored = [["Chunk ID", p.chunk_id or "-"], ["Data source", p.data_source_id or "-"],
+                  ["Location type", p.location_type or "-"]]
+        blocks.append(_Table(["Field", "Value"], stored, title="Where it's stored", collapsed=True))
         if p.uri.startswith("s3://"):
             blocks.append(_Note(f"To open the whole file: S3View().preview({p.uri!r}), from s3.py in this repo "
                                 "(import s3 first)."))
@@ -3378,13 +3635,13 @@ class BedrockKBView:
         used = len(a.cited)
         blocks: list[Any] = [
             _Title(f"{title} {a.kb_name or a.kb_id}: {_clip(a.question, 80)}", sub),
-            _Cards([("Grounded", f"{a.grounded_share:.0%}"), ("Sources used", f"{used:,}"),
+            _Cards([("Grounded", f"{a.grounded_share:.0%}", "warn" if a.text.strip() and a.grounded_share < .5 else ""),
+                    ("Sources used", f"{used:,}"),
                     ("Model", f"{short_model(a.model)} ({engine})"), ("Tokens", tokens), ("Est. cost", self._cost_label(a)),
                     ("Time", f"{a.seconds:.1f}s")]),
             _Answer(a.text, a.citations, inline=a.engine == "converse"),
         ]
-        findings = answer_findings(a)
-        blocks += [_Note(message, level) for level, message in findings if level == "warn"]
+        blocks.append(_Findings(answer_findings(a)))
         cited = set(a.cited)
         terms = question_terms(a.question)
         headers = ["#", "File", "Page"] + ([] if a.engine == "kb" else ["Cited"]) + ["Passage"]
@@ -3392,13 +3649,16 @@ class BedrockKBView:
                 + ([] if a.engine == "kb" else ["yes" if i in cited else ""])
                 + [f'"{best_snippet(p.text, terms, 90)}"'] for i, p in enumerate(a.sources, 1)]
         blocks.append(_Table(headers, rows, title="Sources", max_rows=0))
-        blocks += [_Note(message, level) for level, message in findings if level != "warn"]
         blocks += notes or []
         if a.tokens_estimated:
-            blocks.append(_Note("Estimated from characters: RetrieveAndGenerate doesn't return token counts. "
-                                'engine="converse" gives exact ones.'))
-        if a.sources:
-            blocks.append(_Note("chunk(n) shows source #n in full; follow_up('...') asks a follow-up question."))
+            blocks.append(_Note("Tokens and cost are estimated from characters: RetrieveAndGenerate doesn't return "
+                                "token counts."))
+        steps = [("chunk(1)", "source #1 in full, with its metadata")] if a.sources else []
+        steps.append(("follow_up('...')", "a follow-up question that keeps this conversation"))
+        if a.tokens_estimated and title == "Ask":  # a follow-up's question alone lacks the earlier turns
+            steps.append((_call("ask", a.question, engine="converse", **self._on(a.kb_id, a.kb_name or a.kb_id)),
+                          "the same question with exact tokens and cost"))
+        blocks.append(_Next(steps))
         return blocks
 
     @_friendly_errors
@@ -3498,8 +3758,7 @@ class BedrockKBView:
         sub = "overlap = passages both settings found, out of all they found" + (
             f" · where {describe_filter(where)}" if where is not None else "")
         blocks: list[Any] = [_Title(f"Compare searches in {c.kb_name}: {_clip(c.question, 80)}", sub), _Cards(cards)]
-        found = comparison_findings(c)
-        blocks += [_Note(message, level) for level, message in sorted(found, key=lambda f: f[0] != "warn")]
+        blocks.append(_Findings(comparison_findings(c)))
         terms = question_terms(c.question)
         rows = [[p.source, best_snippet(p.text, terms, 70)] + ["-" if ranks[label] is None else str(ranks[label])
                                                                 for label in labels] for p, ranks in c.ranks()]
@@ -3507,9 +3766,9 @@ class BedrockKBView:
                              max_rows=0))
         if labels:
             kind, size = _setting(labels[-1])
-            setting = f", search_type={kind!r}" if kind != "DEFAULT" else ""
-            blocks.append(_Note(f"search({_clip(c.question, 60)!r}{setting}, n={size}) shows one setting's passages in "
-                                "full."))
+            setting = {"search_type": kind} if kind != "DEFAULT" else {}
+            blocks.append(_Next([(_call("search", c.question, int(size), **setting, **self._on(c.kb_id, c.kb_name)),
+                                  "one setting's passages in full")]))
         self._show(blocks)
 
     @_friendly_errors
@@ -3526,20 +3785,22 @@ class BedrockKBView:
         blocks: list[Any] = [
             _Title(f"Retrieval check on {report.kb_name}: {_plural(len(report.cases), 'question')}", " · ".join(sub)),
             _Cards([(f"Hit rate @{report.k}", f"{report.hit_rate:.0%}"), ("MRR", f"{report.mrr:.2f}"),
-                    ("Questions", f"{len(report.cases):,}"), ("Missed", f"{len(report.missed):,}"),
+                    ("Questions", f"{len(report.cases):,}"),
+                    ("Missed", f"{len(report.missed):,}", "warn" if report.missed else "ok"),
                     ("Time", f"{report.seconds:.1f}s"),
                     ("Est. cost", human_money(query_cost(len(report.cases), prices=self.core.prices)))]),
         ]
-        found = eval_findings(report)
-        blocks += [_Note(message, level) for level, message in found]
-        if not found:
-            blocks.append(_Note("Every expected source came up first.", "ok"))
+        blocks.append(_Findings(eval_findings(report), empty="Every expected source came up first."))
         rows = [[c.question, c.expected if isinstance(c.expected, str) else ", ".join(map(str, c.expected)),
                  "missed" if c.rank is None else f"#{c.rank}",
                  ", ".join(list(dict.fromkeys(c.top_sources))[:2]) or "-"]
                 for c in report.cases]
         blocks.append(_Table(["Question", "Expected", "Rank", "Came up first"], rows, max_rows=0))
         blocks.append(_Note("MRR (mean reciprocal rank) averages 1/rank: 1.00 means the expected source always came "
-                            "first, 0.50 second on average. compare(question) shows how search settings change one "
-                            "question's results."))
+                            "first, 0.50 second on average."))
+        if report.missed:
+            question = report.missed[0].question
+            on = self._on(report.kb_id, report.kb_name)
+            blocks.append(_Next([(_call("search", question, report.k, **on), "what came up instead for the first miss"),
+                                 (_call("compare", question, **on), "whether another search setting finds it")]))
         self._show(blocks)

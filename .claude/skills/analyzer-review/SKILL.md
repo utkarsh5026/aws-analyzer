@@ -47,7 +47,8 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
   explained where it first appears? Is the raw form still reachable as a secondary view?
 - **Findings lead to an action.** Is every finding a `(level, message)` pair that says what's wrong, why it
   matters, the monthly price where one can be computed, and a next step: a command, a setting, or the exact
-  call to copy? Is `warn` reserved for things worth acting on?
+  call to copy? Is `warn` reserved for things worth acting on? Are they shown as one `_Findings` panel, and does
+  the report end with a `_Next` block whose calls are filled in from the result and run as written?
 - **Answer first.** Is there a title with a subtitle that says what was read, then three to six cards with the
   deciding number, then the tables? Are the units ones people know (`human_size`, `human_money` per month,
   `human_age`, commas)? Watch for raw bytes, epoch times, `Decimal` or `{"S": ...}`.
@@ -59,8 +60,8 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
 - **No tracebacks.** Is the View method `@_friendly_errors`? Is a config section the caller can't read recorded
   in `errors`, so it shows as a note that names the missing permission? Does a missing optional package go
   through `_require`? Is there a readable error for bad input (`ValueError` with a hint)?
-- **Discoverable.** Does the docstring's first line read well in `ui.help()`? Is the name what a user would
-  guess, and consistent with the neighbouring commands?
+- **Discoverable.** Does the docstring's first paragraph read well in `ui.help()`, and is the command in the right
+  `_GROUPS` entry? Is the name what a user would guess, and consistent with the neighbouring commands?
 
 ## 4. Constraints rules.py can't see
 

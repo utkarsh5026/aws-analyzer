@@ -407,8 +407,8 @@ def test_sample_spreads_over_segments(core):
 def test_sql(core):
     page = core.sql('SELECT * FROM "orders" WHERE pk = ?', "USER#3")
     assert len(page.items) == 9 and page.keys == ["pk", "sk"] and page.table == TABLE
-    assert ddbmod._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1').groups() == (
-        "orders", None, "by-status")
+    match = ddbmod._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1')
+    assert match and match.groups() == ("orders", None, "by-status")
 
 
 def test_count_value_counts_largest(core):
@@ -477,7 +477,8 @@ def test_ui_text_reports(ui, capsys):
                      "status (string) + created (string)", "update-continuous-backups --table-name orders"):
         assert expected in out
     out = run(capsys, ui.scan, TABLE, 3)
-    assert "USER#0" in out and "call .more()" in out and "Read cost (on-demand): " in out
+    assert "USER#0" in out and "  more()   " in out and "Read cost (on-demand): " in out
+    assert "get('orders', 'USER#0', " in out and "schema('orders')" in out  # next steps, filled in
     out = run(capsys, ui.get, TABLE, "USER#1", "PROFILE", as_json=True)
     assert "    city" in out and "string set" in out and "(partition key)" in out and '"zip": "411001"' in out
     assert "Read cost: 1 read unit (0.5 if eventually consistent)" in out and "Write cost: 1 write unit" in out
@@ -503,7 +504,7 @@ def test_ui_more_pages_through(ui, capsys):
     assert "Nothing to continue" in run(capsys, ui.more)
     run(capsys, ui.query, TABLE, "USER#1", n=5)
     out = run(capsys, ui.more)
-    assert "(page 2)" in out and "ORDER#0005" in out and "call .more()" not in out  # 9 items: 5 + 4
+    assert "(page 2)" in out and "ORDER#0005" in out and "more()" not in out  # 9 items: 5 + 4
     assert "Nothing to continue" in run(capsys, ui.more)
 
 
@@ -583,3 +584,33 @@ def test_html_escapes_item_values():
     blocks = [ddbmod._Title("<b>x</b>"), ddbmod._Table(["Value"], [["<script>alert(1)</script>"]])]
     rendered = ddbmod._render_html(blocks, 50)
     assert "<script>alert" not in rendered and "&lt;script&gt;" in rendered
+
+
+def test_render_findings_tones_and_next():
+    blocks = [ddbmod._Cards([("Point-in-time recovery", "off", "warn")]),
+              ddbmod._Findings([("info", "b"), ("warn", "a: aws dynamodb update-table --table-name t")]),
+              ddbmod._Next([("sample('t')", "a few items")])]
+    text = ddbmod._render_text(blocks, 50)
+    assert "Point-in-time recovery: off (!)" in text and "-- Findings: 1 warning, 1 note --\n[!] a:" in text
+    assert "Next:\n  sample('t')   a few items" in text
+    rendered = ddbmod._render_html(blocks, 50)
+    assert 'class="card warn"' in rendered and '<span class="badge">DynamoDB</span>' in ddbmod._render_html(
+        [ddbmod._Title("Table t")], 50)
+    assert ">aws dynamodb update-table --table-name t</code>" in rendered and '<div class="ddb">' in rendered
+
+
+def test_ui_help_groups_every_command(ui, capsys):
+    out = run(capsys, ui.help)
+    commands = {name for name in vars(DynamoDBView) if not name.startswith("_")
+                and callable(getattr(DynamoDBView, name))}
+    assert commands == {name for names in DynamoDBView._GROUPS.values() for name in names}
+    assert "-- Look at items --" in out and "get(table, *key, as_json=False)" in out and "'str'" not in out
+    assert "Did you mean 'scan'" in run(capsys, ui.help, "scna")
+
+
+def test_ui_next_steps_are_filled_in(ui, capsys):
+    out = run(capsys, ui.value_counts, TABLE, "status")
+    assert "scan('orders', where={'status': " in out
+    assert "query('orders', 'USER#1')" in run(capsys, ui.get, TABLE, "USER#1", "PROFILE")
+    out = run(capsys, ui.table_info, TABLE)
+    assert "sample('orders')" in out and "schema('orders')" in out and "-- Findings: " in out
