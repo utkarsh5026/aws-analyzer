@@ -156,11 +156,23 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
         </ul>
         <span class="go">Open the Knowledge Bases guide →</span>
       </a>
+      <a class="service" href="sagemaker_env.html">
+        <span class="file">sagemaker_env.py</span>
+        <h3>Amazon SageMaker</h3>
+        <p class="what">The notebook you're working in, and everything else SageMaker bills you for.</p>
+        <ul>
+          <li>This notebook's type, cost so far and idle shutdown</li>
+          <li>Its CPU, memory, disk and GPU use right now</li>
+          <li>What fills the disk, and what's safe to clear</li>
+          <li>What's running in the region, and what looks forgotten</li>
+        </ul>
+        <span class="go">Open the SageMaker guide →</span>
+      </a>
     </div>
 
     <h2 id="pattern">Every service works the same way</h2>
     <p>The files don't depend on each other, so copy only the ones you need. Each guide shows how to get the file into SageMaker: upload it, fetch it from a cell, or copy it from S3 when the notebook has no internet access.</p>
-    <div class="code"><pre><code><span class="t-k">from</span> s3 <span class="t-k">import</span> S3View      <span class="t-c"># or: from dynamodb import DynamoDBView, from bedrock_kb import BedrockKBView</span>
+    <div class="code"><pre><code><span class="t-k">from</span> s3 <span class="t-k">import</span> S3View      <span class="t-c"># or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env</span>
 
 ui = S3View()              <span class="t-c"># uses the notebook's IAM role; nothing to configure</span>
 ui.help()                  <span class="t-c"># every command, grouped by task; ui.help("name") shows one in full</span>

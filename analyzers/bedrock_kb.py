@@ -74,19 +74,20 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 HOURS_PER_MONTH = 730
 
 # USD, us-east-1 list prices, read from aws.amazon.com/bedrock/pricing and
-# aws.amazon.com/opensearch-service/pricing on 2026-09-25. Other regions differ; pass
-# BedrockKBAnalyzer(prices={...}) to use your own.
+# aws.amazon.com/opensearch-service/pricing on 2026-09-25 and checked against the AWS Price List API on
+# 2026-09-27. Other regions differ; pass BedrockKBAnalyzer(prices={...}) to use your own.
 BEDROCK_PRICES: dict[str, float] = {
     "opensearch_ocu_hour": 0.24,  # per OpenSearch Compute Unit hour; indexing and search OCUs cost the same
     "opensearch_min_ocus": 2,  # a classic vector collection bills 1 indexing + 1 search OCU even when idle
-    "rerank_per_1k_queries": 2.00,  # Cohere Rerank 3.5 (Amazon Rerank 1.0 is $1.00 where it's offered)
+    "rerank_per_1k_queries": 2.00,  # Cohere Rerank 3.5, the default reranker
+    "amazon_rerank_per_1k_queries": 1.00,  # Amazon Rerank 1.0 (us-west-2 price; it isn't offered in us-east-1)
     "embedding_per_million_tokens": 0.02,  # Amazon Titan Text Embeddings V2, to embed each question
 }
 
 # USD per million input / output tokens, on demand in us-east-1 (in-region and US cross-region inference
-# profiles), read from aws.amazon.com/bedrock/pricing on 2026-09-25. Global profiles ('global.' IDs) cost about
-# 10% less for Anthropic models. Keys are pieces of Bedrock model IDs, and the longest matching key wins; pass
-# BedrockKBAnalyzer(model_prices={...}) to add models or use your own prices.
+# profiles), read from aws.amazon.com/bedrock/pricing on 2026-09-25 and checked against the AWS Price List API on
+# 2026-09-27. Global profiles ('global.' IDs) use GLOBAL_MODEL_PRICES below. Keys are pieces of Bedrock model IDs,
+# and the longest matching key wins; pass BedrockKBAnalyzer(model_prices={...}) to add models or use your own prices.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
     "claude-fable-5-1": (11.00, 55.00),
     "claude-fable-5": (11.00, 55.00),
@@ -117,6 +118,25 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
     "llama3-3-70b": (0.72, 0.72),
     "mistral-large-3": (0.50, 1.50),
     "deepseek.r1": (1.35, 5.40),
+}
+
+# USD per million input / output tokens through a global cross-region profile ('global.' IDs), for the models where
+# it costs less than MODEL_PRICES (same source and dates). model_price() uses these for a 'global.' ID unless
+# model_prices= changed that model's price, in which case your price applies to every profile.
+GLOBAL_MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-fable-5": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "nova-2-lite": (0.30, 2.50),
 }
 
 DEFAULT_MODEL = "anthropic.claude-opus-5"  # Claude Opus 5; resolve_model() finds the ID or profile to call it with
@@ -481,10 +501,19 @@ def model_price(
     model: str, model_prices: dict[str, tuple[float, float]] | None = None
 ) -> tuple[float, float] | None:
     """(USD per 1M input tokens, per 1M output tokens) for a model ID, profile ID or ARN; None when it isn't in the
-    table. The longest matching key wins, so 'claude-opus-5-5' isn't priced as 'claude-opus-5'."""
+    table. The longest matching key wins, so 'claude-opus-5-5' isn't priced as 'claude-opus-5'. A global profile
+    ('global.anthropic.claude-opus-5-v1:0') gets its GLOBAL_MODEL_PRICES price unless `model_prices` changed the
+    model's list price."""
     prices = MODEL_PRICES if model_prices is None else model_prices
+    is_global = (model or "").rsplit("/", 1)[-1].lower().startswith("global.")
     for key in sorted(prices, key=len, reverse=True):
         if _family_match(key, model):
+            if (
+                is_global
+                and key in GLOBAL_MODEL_PRICES
+                and prices[key] == MODEL_PRICES.get(key)
+            ):
+                return GLOBAL_MODEL_PRICES[key]
             return prices[key]
     return None
 
@@ -1316,15 +1345,12 @@ def parse_models(
         ):
             continue
         options = sorted(served.get(model_id, []), key=preference)
-        price = model_price(model_id, model_prices)
         info = ModelInfo(
             id=model_id,
             name=summary.get("modelName", ""),
             provider=summary.get("providerName", ""),
             invoke_id=model_id,
             arn=summary.get("modelArn", ""),
-            price_in=price[0] if price else None,
-            price_out=price[1] if price else None,
             status=(summary.get("modelLifecycle") or {}).get("status", "ACTIVE"),
         )
         if "ON_DEMAND" not in (summary.get("inferenceTypesSupported") or []):
@@ -1338,6 +1364,9 @@ def parse_models(
                 info.via = (
                     "provisioned only" if known else "inference profile (unknown)"
                 )
+        price = model_price(info.invoke_id, model_prices)  # a global profile can cost less
+        if price:
+            info.price_in, info.price_out = price
         found.append(info)
     for profile in profiles:
         if profile.get("type") == "APPLICATION":
@@ -1898,17 +1927,24 @@ def idle_cost_label(
 
 def query_cost(
     n_queries: int,
-    rerank: bool = False,
+    rerank: bool | str = False,
     prices: dict[str, float] | None = None,
     *,
     question_tokens: int = 20,
 ) -> float:
-    """Estimated USD for n searches: embedding each question (about question_tokens tokens) and, with rerank=True,
-    the reranking model. The vector store's own charges aren't included."""
+    """Estimated USD for n searches: embedding each question (about question_tokens tokens) and, with `rerank`, the
+    reranking model: True or 'cohere' for Cohere Rerank 3.5, 'amazon' or 'amazon.rerank-v1:0' (or its ARN) for
+    Amazon Rerank. The vector store's own charges aren't included."""
     prices = BEDROCK_PRICES if prices is None else prices
     per_query = question_tokens * prices["embedding_per_million_tokens"] / 1e6
     if rerank:
-        per_query += prices["rerank_per_1k_queries"] / 1000
+        model = _RERANK_ALIASES.get(str(rerank).lower(), str(rerank))
+        key = (
+            "amazon_rerank_per_1k_queries"
+            if "amazon.rerank" in model
+            else "rerank_per_1k_queries"
+        )
+        per_query += prices[key] / 1000
     return n_queries * per_query
 
 
@@ -3264,9 +3300,7 @@ class BedrockKBAnalyzer:
             params["inferenceConfig"] = inference
         started = time.monotonic()
         try:
-            resp = self._llm_client().converse(
-                **params
-            )  # read-only: generates text, changes no AWS resource
+            resp = self._llm_client().converse(**params)  # read-only: generates text, changes no AWS resource
         except ClientError as exc:
             reason = str(exc.response.get("Error", {}).get("Message", "")).lower()
             if _error_code(exc) != "ValidationException" or "system" not in reason:
@@ -3277,9 +3311,7 @@ class BedrockKBAnalyzer:
                 "role": "user",
                 "content": [{"text": f"{system}\n\n{user}"}],
             }
-            resp = self._llm_client().converse(
-                **params
-            )  # read-only: generates text, changes no AWS resource
+            resp = self._llm_client().converse(**params)  # read-only: generates text, changes no AWS resource
         answer = parse_converse(resp, sources)
         answer.question, answer.model, answer.prompt = question, invoke_id, user
         answer.seconds, answer.max_tokens = (
@@ -5430,7 +5462,7 @@ class BedrockKBView:
                     ("Time", f"{r.seconds:.1f}s"),
                     (
                         "Est. cost",
-                        human_money(query_cost(1, bool(r.reranked), self.core.prices))
+                        human_money(query_cost(1, r.reranked or False, self.core.prices))
                         + (
                             " (question embedding and reranking)"
                             if r.reranked

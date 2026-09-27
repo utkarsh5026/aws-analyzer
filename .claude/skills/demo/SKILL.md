@@ -26,6 +26,7 @@ service is given, run a short tour:
 - s3: `ui.overview(); ui.bucket_info("demo-lake"); ui.summary("s3://demo-lake/")`
 - dynamodb: `ui.tables(); ui.table_info("orders"); ui.schema("orders")`
 - bedrock_kb: `ui.kbs(); ui.kb_info("support-docs"); ui.search("How long do refunds take?", kb="support-docs")`
+- sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
 - other services: `ui.help()` and then the service's overview command
 
 `--help` describes the demo data. Most useful:
@@ -55,6 +56,14 @@ service is given, run a short tour:
   - `ask()` (the default engine) cites every sentence but the last one, so answers come out partly grounded.
     `engine="converse"` returns exact token counts.
   - `models()` lists Claude, Llama, Nova and Mistral text models, on demand or through `us.` profiles.
+- **SageMaker** (moto has no Studio, so the seeder hands the analyzer fake sagemaker / sts / cloudwatch clients and a
+  fake machine root):
+  - This code "runs" in the JupyterLab space `churn-analysis` on an `ml.g5.2xlarge`: 2 days up, idle GPU, a domain
+    without idle shutdown, and a home volume 88% full with Jupyter trash, a Hugging Face cache, checkpoints and
+    year-old parquet files (sparse files, so nothing big is written).
+  - `running()`: notebook instances `old-experiment` (9 days, no auto-stop) and `team-reporting` (auto-stop), stopped
+    `archive-2024` and `sandbox`, a Code Editor app in space `forecasting`, endpoints `churn-v1` (no traffic),
+    `churn-v2` (busy) and a serverless one, and a spot training job.
 
 ## Reading the output
 

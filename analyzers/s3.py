@@ -1759,8 +1759,9 @@ AGE_BANDS: list[
 ]
 ARCHIVE_CLASSES = {"GLACIER", "DEEP_ARCHIVE"}  # need a restore before GetObject works
 
-# Storage price in USD per GB-month (GB = 2**30 bytes): us-east-1 list prices for the first 50 TB.
-# Other regions and volume tiers differ; pass S3Analyzer(prices={...}) to use your own.
+# Storage price in USD per GB-month (GB = 2**30 bytes): us-east-1 list prices for the first 50 TB, checked
+# against the AWS Price List API on 2026-09-27. Other regions and volume tiers differ; pass
+# S3Analyzer(prices={...}) to use your own.
 S3_PRICES: dict[str, float] = {
     "STANDARD": 0.023,
     "INTELLIGENT_TIERING": 0.023,  # frequent-access tier; listings don't say which tier an object is in
@@ -1771,6 +1772,7 @@ S3_PRICES: dict[str, float] = {
     "DEEP_ARCHIVE": 0.00099,
     "REDUCED_REDUNDANCY": 0.024,
     "EXPRESS_ONEZONE": 0.11,
+    "STAGING": 0.021,  # not a class: multipart uploads to GLACIER / DEEP_ARCHIVE still in progress (flat rate)
 }
 # USD per 1,000 lifecycle transition requests into each class (us-east-1).
 S3_TRANSITION_PRICES: dict[str, float] = {
@@ -1856,9 +1858,11 @@ _STORAGE_TYPE_PREFIXES = [  # CloudWatch StorageType prefix -> class whose price
 
 def storage_type_class(storage_type: str) -> str | None:
     """CloudWatch StorageType ('StandardIAStorage', 'GlacierObjectOverhead', ...) -> the storage
-    class whose price applies to it, or None if unknown."""
-    if "S3ObjectOverhead" in storage_type or "Staging" in storage_type:
-        return "STANDARD"  # archive index data and archive uploads in progress are billed as STANDARD
+    class whose price applies to it ('STAGING' for archive uploads in progress), or None if unknown."""
+    if "S3ObjectOverhead" in storage_type:
+        return "STANDARD"  # the 8 KB of archive index data per object is billed as STANDARD
+    if "Staging" in storage_type:
+        return "STAGING"
     return next(
         (
             cls

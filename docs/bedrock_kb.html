@@ -434,11 +434,11 @@ report.hit_rate, report.mrr, report.to_df()</code></pre></div>
       <h2 id="cost">Cost</h2>
       <div class="grid2">
         <div class="card"><h4>The idle vector store</h4><p>A classic OpenSearch Serverless vector collection bills at least 2 OCUs around the clock, about $350/month at us-east-1 list prices, even with no searches. Collections sharing a KMS key share those OCUs; dev-test collections bill half, and NextGen collections scale to zero.</p></div>
-        <div class="card"><h4>Answers</h4><p>Priced per million input and output tokens by model (<code>MODEL_PRICES</code>). With the default engine the tokens are an estimate; <code>engine="converse"</code> reports exact counts. A model not in the table shows its cost as unknown.</p></div>
-        <div class="card"><h4>Searches</h4><p>A search embeds the question (a fraction of a cent) and, with <code>rerank=</code>, pays for reranking (about $2 per 1,000 searches for Cohere Rerank 3.5). <code>compare</code> and <code>evaluate</code> only search.</p></div>
+        <div class="card"><h4>Answers</h4><p>Priced per million input and output tokens by model (<code>MODEL_PRICES</code>, and <code>GLOBAL_MODEL_PRICES</code> for the cheaper <code>global.</code> profiles). With the default engine the tokens are an estimate; <code>engine="converse"</code> reports exact counts. A model not in the table shows its cost as unknown.</p></div>
+        <div class="card"><h4>Searches</h4><p>A search embeds the question (a fraction of a cent) and, with <code>rerank=</code>, pays for reranking (about $2 per 1,000 searches for Cohere Rerank 3.5, $1 for Amazon Rerank). <code>compare</code> and <code>evaluate</code> only search.</p></div>
         <div class="card"><h4>Listing stops early</h4><p><code>documents()</code> reads at most 10,000 documents and <code>unsynced()</code> lists at most 100,000 objects, and they say when they stopped.</p></div>
       </div>
-      <p>Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25 (<code>BEDROCK_PRICES</code> and <code>MODEL_PRICES</code>), and every report says whether it used list prices or yours. For another region or a negotiated price, pass your own:</p>
+      <p>Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25 and checked against the AWS Price List API on 2026-09-27 (<code>BEDROCK_PRICES</code>, <code>MODEL_PRICES</code> and <code>GLOBAL_MODEL_PRICES</code>), and every report says whether it used list prices or yours. For another region or a negotiated price, pass your own:</p>
       <div class="code"><pre><code class="lang-py">ui = BedrockKBView(BedrockKBAnalyzer(
     prices={"opensearch_ocu_hour": 0.26, "opensearch_min_ocus": 1},
     model_prices={"claude-sonnet-5": (2.00, 10.00)},    # $ per 1M input and output tokens

@@ -37,6 +37,7 @@ READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "
                  "Retrieve")
 PARTIQL = {"ExecuteStatement", "BatchExecuteStatement", "ExecuteTransaction"}
 PRAGMA = "# read-only:"
+REGEX_METHODS = {"search", "match", "fullmatch", "findall", "finditer", "sub", "subn", "split"}
 
 # IAM action for operations whose permission isn't simply <service>:<OperationName>.
 IAM_ACTION = {
@@ -203,7 +204,8 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         name = None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in ops:
             target = ast.get_source_segment(source, node.func.value) or ""
-            if "client" in target.lower() or node.func.attr not in defined:
+            # pattern.search(...) is a regex, not SageMaker's Search, unless it's called on a client
+            if "client" in target.lower() or (node.func.attr not in defined and node.func.attr not in REGEX_METHODS):
                 name = node.func.attr
         elif (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in ops
               and id(node) not in labels):
