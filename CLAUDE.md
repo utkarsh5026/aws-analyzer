@@ -42,7 +42,7 @@ report against these rules (the existing code follows them, so match it):
 ## Commands
 
 ```bash
-pip install -r requirements-dev.txt            # pinned versions; moto, pytest, ruff, fastavro, openpyxl, pypdf, tqdm
+pip install -r requirements-dev.txt            # pinned versions; moto, pytest, ruff, fastavro, openpyxl, pypdf, pypdfium2, pillow, tqdm
 python -m pytest                               # all tests (moto, no AWS account needed)
 python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
@@ -65,9 +65,10 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
   deliberately duplicated in all three analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
   `_START` differ between the copies. When you fix or change one of them, check the copies in the other two.
-- **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, openpyxl, etc. are optional and are
-  imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an ImportError
-  that says what to `pip install`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
+- **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
+  optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
+  ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image",
+  ..., "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
   notebook widget) is the exception that fails quietly: `_progress_bar_class` loads it with `importlib`, and without
   it the progress line is plain text.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
@@ -103,8 +104,9 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
 How the View layer works:
 
 - Methods build a list of render blocks (`_Title`, `_Cards`, `_Findings`, `_Table`, `_Note`, `_Text`, `_Next`, in
-  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, and in Bedrock `_Passage` (a retrieved passage with `<mark>`
-  highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
+  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages` (PDF pages drawn as pictures) and `_Flow` (a Word
+  document laid out: headings, lists, tables and its pictures in place), and in Bedrock `_Passage` (a retrieved
+  passage with `<mark>` highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.
 - The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
