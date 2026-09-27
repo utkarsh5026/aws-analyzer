@@ -183,8 +183,8 @@ installed, so you only need the second one, and only for the file types it lists
 
 ```python
 %pip install boto3 pandas pyarrow      # the commands below
-# optional: Excel, PDF, .zst, snappy Avro, progress bars
-%pip install openpyxl xlrd pypdf zstandard python-snappy tqdm
+# optional: Excel, PDF text and pages, .zst, snappy Avro, progress bars
+%pip install openpyxl xlrd pypdf pypdfium2 pillow zstandard python-snappy tqdm
 ```
 
 <details>
@@ -197,6 +197,7 @@ installed, so you only need the second one, and only for the file types it lists
 | `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview` and `read_df`, and `parquet_info` |
 | `openpyxl` / `xlrd` | Excel `.xlsx` / `.xlsm` and old `.xls` |
 | `pypdf` | PDF text in `preview`, `document`, `read_pdf` |
+| `pypdfium2` + `pillow` | PDF pages drawn as pictures, the way they print (scanned pages too), in `preview`, `document`, `render_pdf`. `pillow` also shrinks big pictures in Word files before showing them |
 | `zstandard` | `.zst` files before Python 3.14 |
 | `python-snappy` | Avro files compressed with snappy |
 | `tqdm` | Progress bars with the time left while long commands run (`ipywidgets` makes them notebook widgets). Without it, a plain progress line |
@@ -269,8 +270,8 @@ Grouped the way `ui.help()` lists them.
 | Command | Shows |
 |:---|:---|
 | `head(uri)` | All object metadata, user metadata and tags |
-| `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, or a hex dump. Only downloads what it needs. |
-| `document(uri, pages=None)` | Full text of a PDF, Word `.docx` or PowerPoint `.pptx`, page by page or slide by slide (PDFs need `pypdf`) |
+| `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, a PDF's first pages as they look (scans too), a Word file with its pictures in place, or a hex dump. Only downloads what it needs. |
+| `document(uri, pages=None, pictures=None)` | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages |
 | `download(uri, path=None)` | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it |
 | `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
 | `link(uri)` | Clickable presigned download link |
@@ -299,6 +300,8 @@ s3.list_archive("s3://my-bucket/job/output/model.tar.gz").entries   # files insi
 s3.read_avro("s3://my-bucket/events.avro", n=100), s3.read_npy(uri, nrows=10), s3.safetensors_info(uri)
 doc = s3.read_document("s3://my-bucket/docs/policy.pdf")   # also .docx / .pptx: doc.text, doc.parts, doc.title
 s3.read_pdf(uri, pages=[1, 2]), s3.read_docx(uri).headings, s3.read_pptx(uri).notes
+pages = s3.render_pdf(uri, pages=[1, 2])            # [Picture]: each one shows itself in a notebook; .data is PNG / JPEG
+s3.read_docx(uri, pictures=True).pictures           # the pictures in a Word file, in reading order
 s3.read_lines("s3://my-bucket/logs/app.log.gz", 50)
 s3.read_json(...), s3.read_jsonl(..., n=100), s3.read_text(...), s3.read_bytes(uri, 0, 1023)
 with s3.open("s3://my-bucket/data/x.csv.gz") as f: ...   # streaming, decompressed
@@ -324,7 +327,8 @@ for example rows loaded from an S3 Inventory report: `summarize_objects`, `build
 `bucket_findings`, `explain_policy`, `policy_findings`, `object_monthly_cost`, `cloudwatch_cost`, the duplicate
 finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
 have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
-file parsers `parse_docx`, `parse_pptx`, `parse_pdf`, `parse_avro`.
+file parsers `parse_docx` (`pictures=True` for its pictures), `parse_pptx`, `parse_pdf`, `parse_avro`, and
+`render_pdf_pages`, which draws a PDF's pages from a local file or bytes.
 
 </details>
 
@@ -346,8 +350,8 @@ no extension or the wrong one (Spark's `part-00000`, a Firehose object, a `.gz` 
 | Models | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib` | tensors, shapes, parameter count / files inside; pickles are never loaded | |
 | Notebooks | `.ipynb` | kernel and cells | |
 | Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player | |
-| PDF | `.pdf` | page count, title and first page's text (needs `pypdf`; without it, a link) | |
-| Word | `.docx` `.docm` `.dotx` | first paragraphs, outline, first table, word count (no package needed) | |
+| PDF | `.pdf` | the first 3 pages as they look, scanned pages too (needs `pypdfium2` + `pillow`), page count, title and first page's text (needs `pypdf`); without either, a link | |
+| Word | `.docx` `.docm` `.dotx` | the first paragraphs laid out with their headings, lists, tables and pictures in place; word count (no package needed) | |
 | PowerPoint | `.pptx` `.pptm` `.ppsx` | every slide's title and text, speaker notes (no package needed) | |
 | Old Office | `.doc` `.ppt` `.msg` | recognised, with how to convert them (the old binary format can't be read) | |
 | Text | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more | first lines | |

@@ -42,6 +42,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -78,6 +79,7 @@ FIGURES = [
     Figure("preview-docx", "s3", f'ui.preview("{LAKE}/docs/model-card-churn-xgb.docx")'),
     Figure("preview-pptx", "s3", f'ui.preview("{LAKE}/docs/q3-ml-platform-review.pptx")'),
     Figure("document-pdf", "s3", f'ui.document("{LAKE}/docs/data-retention-policy.pdf")'),
+    Figure("preview-scan", "s3", f'ui.preview("{LAKE}/docs/invoices/vendor-invoice-0471.pdf")'),
     Figure("what-if", "s3", f'ui.what_if("{LAKE}/training/", move_after={{30: "STANDARD_IA", 180: "GLACIER"}})'),
     Figure("duplicates", "s3", f'ui.duplicates("{LAKE}/public-samples/")'),
     Figure("deleted", "s3", f'ui.deleted("{LAKE}/")'),
@@ -164,6 +166,9 @@ P_NS = ('xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"')
 REL_NS = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"'
 REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+DRAWING_NS = (f'xmlns:r="{REL}" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+              'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+              'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"')
 
 
 def _core(title: str, author: str) -> str:
@@ -172,21 +177,70 @@ def _core(title: str, author: str) -> str:
             '</cp:coreProperties>')
 
 
-def _docx(parts: list[tuple[str, str | list[list[str]]]], title: str, author: str) -> bytes:
-    """parts: (style, text) paragraphs (style '' = body, 'Bullet' = a numbered list item) or ('table', rows)."""
+def _docx(parts: list[tuple[str, Any]], title: str, author: str) -> bytes:
+    """parts: (style, text) paragraphs (style '' = body, 'Bullet' = a numbered list item), ('table', rows) or
+    ('picture', (PNG bytes, alt text))."""
     def para(style: str, text: str) -> str:
         props = ('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>' if style == "Bullet"
                  else f'<w:pStyle w:val="{style}"/>' if style else "")
         return f'<w:p><w:pPr>{props}</w:pPr><w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
 
+    def picture(ref: str, alt: str) -> str:
+        return (f'<w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="Picture" descr="{alt}"/><a:graphic>'
+                f'<a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="{ref}"/></pic:blipFill></pic:pic>'
+                '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>')
+
+    media = {f"rId{i}": content for i, (style, content) in enumerate(parts) if style == "picture"}
     body = "".join('<w:tbl>' + "".join('<w:tr>' + "".join(f'<w:tc>{para("", cell)}</w:tc>' for cell in row) + '</w:tr>'
-                                       for row in content) + '</w:tbl>' if style == "table" else para(style, content)
-                   for style, content in parts)
+                                       for row in content) + '</w:tbl>' if style == "table"
+                   else picture(f"rId{i}", content[1]) if style == "picture" else para(style, content)
+                   for i, (style, content) in enumerate(parts))
     styles = "".join(f'<w:style w:type="paragraph" w:styleId="{sid}"><w:name w:val="{name}"/></w:style>'
                      for sid, name in (("Title", "Title"), ("Heading1", "heading 1"), ("Heading2", "heading 2")))
+    rels = "".join(f'<Relationship Id="{ref}" Target="media/{ref}.png" Type="{REL}/image"/>' for ref in media)
     return _zip({"[Content_Types].xml": "<Types/>",
-                 "word/document.xml": f"<w:document {W_NS}><w:body>{body}</w:body></w:document>",
+                 "word/document.xml": f"<w:document {W_NS} {DRAWING_NS}><w:body>{body}</w:body></w:document>",
+                 "word/_rels/document.xml.rels": f"<Relationships {REL_NS}>{rels}</Relationships>",
+                 **{f"word/media/{ref}.png": png for ref, (png, _) in media.items()},
                  "word/styles.xml": f"<w:styles {W_NS}>{styles}</w:styles>", "docProps/core.xml": _core(title, author)})
+
+
+def _bar_chart(title: str, bars: list[tuple[str, float]]) -> bytes:
+    """A PNG bar chart, like one pasted into a Word document."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (1200, 560), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((40, 24), title, fill=(30, 30, 30), font_size=34)
+    top = max(value for _, value in bars)
+    for i, (label, value) in enumerate(bars):
+        left, height = 110 + i * 270, round(380 * value / top)
+        draw.rectangle((left, 480 - height, left + 150, 480), fill=(15, 118, 110))
+        draw.text((left, 440 - height), f"{value:.0%}", fill=(30, 30, 30), font_size=28)
+        draw.text((left, 494), label, fill=(80, 80, 80), font_size=28)
+    draw.line((80, 480, 1160, 480), fill=(160, 160, 160), width=2)
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _scanned_pdf(pages: list[list[str]], seed: int) -> bytes:
+    """A PDF of page images with no text layer, like one from an office scanner: slightly grey, speckled,
+    a little crooked and soft."""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    rng, scans = random.Random(seed), []
+    for lines in pages:
+        image = Image.new("L", (1275, 1650), 244)  # US letter at 150 dpi
+        draw = ImageDraw.Draw(image)
+        for i, line in enumerate(lines):
+            draw.text((120, 150 + i * 46), line, fill=35, font_size=30 if i else 44)
+        for _ in range(6000):
+            image.putpixel((rng.randrange(1275), rng.randrange(1650)), rng.randrange(170, 235))
+        scans.append(image.rotate(rng.uniform(-0.9, 0.9), fillcolor=244).filter(ImageFilter.GaussianBlur(0.6)))
+    buffer = io.BytesIO()
+    scans[0].save(buffer, "PDF", save_all=True, append_images=scans[1:], resolution=150)
+    return buffer.getvalue()
 
 
 def _pptx(slides: list[tuple[str, str, str]], title: str, author: str) -> bytes:
@@ -483,6 +537,9 @@ def seed_s3_docs() -> dict:
         ("Heading1", "Evaluation"),
         ("table", [["Metric", "Validation", "Holdout"], ["AUC", "0.91", "0.89"], ["Precision@10%", "0.62", "0.58"],
                    ["Recall@10%", "0.47", "0.44"]]),
+        ("picture", (_bar_chart("Churn rate by plan, holdout set", [("Free", 0.31), ("Basic", 0.18), ("Pro", 0.11),
+                                                                    ("Enterprise", 0.05)]),
+                     "Bar chart: churn is highest on the free plan and lowest on enterprise")),
         ("Heading1", "Limitations"),
         ("", "Customers on the enterprise plan are under-represented (4% of the data); treat their scores with care."),
         ("Heading2", "Owners"),
@@ -502,6 +559,16 @@ def seed_s3_docs() -> dict:
         ["Exceptions", "", "Data under legal hold is kept until the hold is lifted.",
          "Ask the data platform team before deleting anything in archive/."],
     ], "Data retention policy", "Data platform team"), 90)
+    put("docs/invoices/vendor-invoice-0471.pdf", _scanned_pdf([
+        ["INVOICE  2025-0471", "", "Harbourside Labelling Ltd.", "12 Harbour Road, Bristol BS1 4RN", "",
+         "Bill to: Acme ML platform team", "Date: 3 September 2025", "",
+         "Item                                   Hours      Amount",
+         "Image labelling, churn study          120      $4,800.00",
+         "Quality review                          16        $640.00", "",
+         "Total due                                          $5,440.00", "", "Payment within 30 days."],
+        ["Terms", "", "Invoices are due within 30 days of the invoice date.",
+         "Late payments carry 1.5% interest per month.", "", "Questions: accounts team, extension 204."],
+    ], seed=471), 9)
     for key, body in (("curated/exports/customers-eu.csv", 16_000), ("curated/exports/old-features.parquet", 24_000),
                       ("curated/exports/q3-report.csv", 8_000)):  # deleted since: versioning keeps them
         put(key, random.Random(key).randbytes(body), 40)

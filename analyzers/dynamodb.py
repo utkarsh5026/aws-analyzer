@@ -61,7 +61,12 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable, Iterator
 
 import boto3
-from boto3.dynamodb.conditions import Attr, ConditionBase, ConditionExpressionBuilder, Key
+from boto3.dynamodb.conditions import (
+    Attr,
+    ConditionBase,
+    ConditionExpressionBuilder,
+    Key,
+)
 from boto3.dynamodb.types import Binary, TypeSerializer
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
@@ -75,8 +80,16 @@ ITEM_SIZE_LIMIT = 400 * KB  # DynamoDB rejects bigger items
 HOURS_PER_MONTH = 730
 
 TYPE_NAMES = {
-    "S": "string", "N": "number", "B": "binary", "BOOL": "boolean", "NULL": "null",
-    "M": "map", "L": "list", "SS": "string set", "NS": "number set", "BS": "binary set",
+    "S": "string",
+    "N": "number",
+    "B": "binary",
+    "BOOL": "boolean",
+    "NULL": "null",
+    "M": "map",
+    "L": "list",
+    "SS": "string set",
+    "NS": "number set",
+    "BS": "binary set",
 }
 
 # USD, us-east-1 list prices for the standard table class, before the free tier. Other regions
@@ -113,7 +126,13 @@ def human_age(when: datetime | None, now: datetime | None = None) -> str:
     if when is None:
         return "-"
     seconds = ((now or _utcnow()) - when).total_seconds()
-    for unit, size in (("y", 365 * 86400), ("mo", 30 * 86400), ("d", 86400), ("h", 3600), ("m", 60)):
+    for unit, size in (
+        ("y", 365 * 86400),
+        ("mo", 30 * 86400),
+        ("d", 86400),
+        ("h", 3600),
+        ("m", 60),
+    ):
         if seconds >= size:
             return f"{int(seconds // size)}{unit} ago"
     return "just now"
@@ -140,11 +159,15 @@ def _plural(count: int, word: str) -> str:
     return f"{count:,} {word}{'' if count == 1 else 's'}"
 
 
-def _require(module: str, purpose: str) -> Any:
+def _require(module: str, purpose: str, package: str | None = None) -> Any:
+    """Import an optional package, or say what to pip install. package: its pip name when that differs (pillow)."""
     try:
         return importlib.import_module(module)
     except ImportError as exc:
-        raise ImportError(f"{purpose} needs `{module.split('.')[0]}` (pip install {module.split('.')[0]})") from exc
+        package = package or module.split(".")[0]
+        raise ImportError(
+            f"{purpose} needs `{package}` (pip install {package})"
+        ) from exc
 
 
 def _error_code(exc: ClientError) -> str:
@@ -157,7 +180,11 @@ def _error_name(exc: ClientError | BotoCoreError) -> str:
 
 def _why(code: str, permission: str) -> str:
     """'AccessDeniedException' -> 'AccessDeniedException; needs dynamodb:Scan'. Other codes stay as they are."""
-    return f"{code}; needs {permission}" if "denied" in code.lower() or code == "UnauthorizedOperation" else code
+    return (
+        f"{code}; needs {permission}"
+        if "denied" in code.lower() or code == "UnauthorizedOperation"
+        else code
+    )
 
 
 _COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE)
@@ -165,20 +192,30 @@ _COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE
 
 def _as_int(value: Any, name: str, *, hint: str = "") -> int:
     """A number-of-items argument: 1000, '10,000', '10k' or '2m' -> int."""
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value).is_integer():
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and float(value).is_integer()
+    ):
         return int(value)
     match = _COUNT_RE.match(value) if isinstance(value, str) else None
     if match:
-        number = float(match.group(1).replace(",", "").replace("_", "")) * {"": 1, "k": 1000, "m": 10**6}[
-            match.group(2).lower()]
+        number = (
+            float(match.group(1).replace(",", "").replace("_", ""))
+            * {"": 1, "k": 1000, "m": 10**6}[match.group(2).lower()]
+        )
         if number.is_integer():
             return int(number)
-    raise ValueError(f"{name} takes a number of items, like 1000 or '10k'{hint}; got {value!r}")
+    raise ValueError(
+        f"{name} takes a number of items, like 1000 or '10k'{hint}; got {value!r}"
+    )
 
 
 def _as_count(value: Any, name: str) -> int | None:
     """Like _as_int, for limits where None means no limit."""
-    return None if value is None else _as_int(value, name, hint=", or None for no limit")
+    return (
+        None if value is None else _as_int(value, name, hint=", or None for no limit")
+    )
 
 
 def _clip(text: str, width: int = 90) -> str:
@@ -192,7 +229,9 @@ def _number(text: str) -> int | float:
 
 
 def _binary(raw: Any) -> bytes:
-    return bytes(raw) if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)  # exports hold base64 text
+    return (
+        bytes(raw) if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)
+    )  # exports hold base64 text
 
 
 def _raw_bytes(value: Any) -> bytes:
@@ -248,8 +287,10 @@ def to_dynamo(value: Any) -> dict[str, Any]:
     try:
         return _SERIALIZER.serialize(_decimals(value))
     except TypeError as exc:
-        raise ValueError(f"DynamoDB can't store a {type(value).__name__} ({exc}). Dates are usually stored as "
-                         "ISO strings or epoch numbers: pass the form your table uses.") from exc
+        raise ValueError(
+            f"DynamoDB can't store a {type(value).__name__} ({exc}). Dates are usually stored as "
+            "ISO strings or epoch numbers: pass the form your table uses."
+        ) from exc
 
 
 def dynamo_type(value: Any) -> str:
@@ -274,7 +315,9 @@ def dynamo_type(value: Any) -> str:
 
 
 def _number_size(value: Any) -> int:
-    digits = Decimal(str(value)).normalize().as_tuple().digits  # significant digits, trailing zeros dropped
+    digits = (
+        Decimal(str(value)).normalize().as_tuple().digits
+    )  # significant digits, trailing zeros dropped
     return math.ceil(len(digits) / 2) + 1
 
 
@@ -288,8 +331,12 @@ def value_size(value: Any) -> int:
         return _number_size(value)
     if isinstance(value, (bytes, bytearray, Binary)):
         return len(_raw_bytes(value))
-    if isinstance(value, dict):  # 3 bytes per map, 1 per element, plus each element's name and value
-        return 3 + sum(len(str(k).encode("utf-8")) + value_size(v) + 1 for k, v in value.items())
+    if isinstance(
+        value, dict
+    ):  # 3 bytes per map, 1 per element, plus each element's name and value
+        return 3 + sum(
+            len(str(k).encode("utf-8")) + value_size(v) + 1 for k, v in value.items()
+        )
     if isinstance(value, (list, tuple)):
         return 3 + sum(value_size(v) + 1 for v in value)
     if isinstance(value, (set, frozenset)):
@@ -300,7 +347,9 @@ def value_size(value: Any) -> int:
 def item_size(item: dict[str, Any]) -> int:
     """Approximate item size as DynamoDB counts it (attribute names + values). The limit is 400 KB;
     a read unit covers 4 KB (strongly consistent) and a write unit 1 KB."""
-    return sum(len(name.encode("utf-8")) + value_size(value) for name, value in item.items())
+    return sum(
+        len(name.encode("utf-8")) + value_size(value) for name, value in item.items()
+    )
 
 
 def read_units(size: int, *, consistent: bool = True) -> float:
@@ -358,13 +407,19 @@ def format_value(value: Any, width: int = 80, *, oneline: bool = True) -> str:
     return _clip(text, width)
 
 
-def flatten_item(item: dict[str, Any], *, max_depth: int | None = None) -> dict[str, Any]:
+def flatten_item(
+    item: dict[str, Any], *, max_depth: int | None = None
+) -> dict[str, Any]:
     """Nested maps -> dotted columns: {'address': {'city': 'Pune'}} -> {'address.city': 'Pune'}.
     Lists, sets and empty maps stay as values."""
     flat: dict[str, Any] = {}
 
     def walk(path: str, value: Any, depth: int) -> None:
-        if isinstance(value, dict) and value and (max_depth is None or depth < max_depth):
+        if (
+            isinstance(value, dict)
+            and value
+            and (max_depth is None or depth < max_depth)
+        ):
             for name, child in value.items():
                 walk(f"{path}.{name}", child, depth + 1)
         else:
@@ -413,7 +468,9 @@ class ReadStats:
 
     scanned: int = 0  # items DynamoDB read (and billed), before `where` filtered them
     matched: int = 0  # items that came back (= scanned when there is no filter)
-    read_units: float = 0.0  # capacity consumed (read request units on on-demand tables)
+    read_units: float = (
+        0.0  # capacity consumed (read request units on on-demand tables)
+    )
     truncated: bool = False  # stopped before the end (limit, scan_limit or n reached)
     seconds: float = 0.0
 
@@ -432,7 +489,9 @@ class IndexInfo:
     partition_key: str
     sort_key: str | None = None
     projection: str = "ALL"  # 'ALL' | 'KEYS_ONLY' | 'INCLUDE'
-    projected: list[str] = field(default_factory=list)  # extra attributes of an INCLUDE projection
+    projected: list[str] = field(
+        default_factory=list
+    )  # extra attributes of an INCLUDE projection
     status: str | None = None  # global indexes only
     backfilling: bool = False
     item_count: int | None = None
@@ -455,7 +514,9 @@ class TableInfo:
     arn: str = ""
     partition_key: str = ""
     sort_key: str | None = None
-    attribute_types: dict[str, str] = field(default_factory=dict)  # key attributes (table + indexes) -> S / N / B
+    attribute_types: dict[str, str] = field(
+        default_factory=dict
+    )  # key attributes (table + indexes) -> S / N / B
     item_count: int | None = None
     size_bytes: int | None = None
     created: datetime | None = None
@@ -487,7 +548,11 @@ class TableInfo:
 
     @property
     def avg_item_size(self) -> float | None:
-        return self.size_bytes / self.item_count if self.item_count and self.size_bytes is not None else None
+        return (
+            self.size_bytes / self.item_count
+            if self.item_count and self.size_bytes is not None
+            else None
+        )
 
     def index(self, name: str) -> IndexInfo:
         for idx in self.indexes:
@@ -506,7 +571,9 @@ class TableMetrics:
     period: int
     read_units: float | None = None  # capacity consumed in total; None = no data points
     write_units: float | None = None
-    peak_reads: float | None = None  # units per second, averaged over the busiest period
+    peak_reads: float | None = (
+        None  # units per second, averaged over the busiest period
+    )
     peak_writes: float | None = None
     read_throttles: int = 0
     write_throttles: int = 0
@@ -531,7 +598,9 @@ class ItemPage:
 
     table: str
     items: list[dict[str, Any]] = field(default_factory=list)
-    keys: list[str] = field(default_factory=list)  # key attributes (the index's, then the table's)
+    keys: list[str] = field(
+        default_factory=list
+    )  # key attributes (the index's, then the table's)
     index: str | None = None
     operation: str = "scan"  # 'scan' | 'query' | 'sample' | 'sql' | 'largest'
     stats: ReadStats = field(default_factory=ReadStats)
@@ -574,7 +643,9 @@ class AttributeProfile:
     examples: list[Any] = field(default_factory=list)  # the first few distinct values
     low: Any = None  # numbers: smallest and largest value
     high: Any = None
-    min_len: int | None = None  # strings, binary, maps, lists, sets: shortest and longest
+    min_len: int | None = (
+        None  # strings, binary, maps, lists, sets: shortest and longest
+    )
     max_len: int | None = None
     empty: int = 0  # '' and empty binary values
     distinct_capped: bool = False  # more than DISTINCT_CAP distinct values
@@ -621,11 +692,19 @@ class TableProfile:
     items: int = 0
     total_size: int = 0
     max_size: int = 0
-    attributes: dict[str, AttributeProfile] = field(default_factory=dict)  # keys first, map fields under their map
-    key_patterns: dict[str, dict[str, int]] = field(default_factory=dict)  # key attribute -> shape -> items
+    attributes: dict[str, AttributeProfile] = field(
+        default_factory=dict
+    )  # keys first, map fields under their map
+    key_patterns: dict[str, dict[str, int]] = field(
+        default_factory=dict
+    )  # key attribute -> shape -> items
     size_histogram: dict[str, Stat] = field(default_factory=dict)
-    largest: list[tuple[int, dict[str, Any]]] = field(default_factory=list)  # (size, key values), biggest first
-    approx_item_count: int | None = None  # the table's own estimate, for "profiled n of ~N"
+    largest: list[tuple[int, dict[str, Any]]] = field(
+        default_factory=list
+    )  # (size, key values), biggest first
+    approx_item_count: int | None = (
+        None  # the table's own estimate, for "profiled n of ~N"
+    )
     stats: ReadStats = field(default_factory=ReadStats)
 
     @property
@@ -635,12 +714,27 @@ class TableProfile:
     def to_df(self):
         """One row per attribute: type(s), how many items have it, distinct values, range, examples."""
         pd = _require("pandas", "TableProfile.to_df")
-        return pd.DataFrame([{
-            "attribute": a.path, "depth": a.depth, "type": a.main_type, "types": dict(a.types), "items": a.count,
-            "fill_rate": a.count / self.items if self.items else 0.0, "distinct": a.distinct,
-            "distinct_capped": a.distinct_capped, "min": a.low, "max": a.high, "min_len": a.min_len,
-            "max_len": a.max_len, "empty": a.empty, "examples": a.examples,
-        } for a in self.attributes.values()])
+        return pd.DataFrame(
+            [
+                {
+                    "attribute": a.path,
+                    "depth": a.depth,
+                    "type": a.main_type,
+                    "types": dict(a.types),
+                    "items": a.count,
+                    "fill_rate": a.count / self.items if self.items else 0.0,
+                    "distinct": a.distinct,
+                    "distinct_capped": a.distinct_capped,
+                    "min": a.low,
+                    "max": a.high,
+                    "min_len": a.min_len,
+                    "max_len": a.max_len,
+                    "empty": a.empty,
+                    "examples": a.examples,
+                }
+                for a in self.attributes.values()
+            ]
+        )
 
 
 @dataclass
@@ -650,13 +744,16 @@ class ValueCounts:
     attribute: str
     table: str = ""
     items: int = 0  # items looked at
-    counts: dict[Any, Stat] = field(default_factory=dict)  # value -> items with it, most common first
+    counts: dict[Any, Stat] = field(
+        default_factory=dict
+    )  # value -> items with it, most common first
     missing: Stat = field(default_factory=Stat)  # items without the attribute
     stats: ReadStats = field(default_factory=ReadStats)
 
 
-def items_table(items: list[dict[str, Any]], keys: Iterable[str] = (), *,
-                flatten: bool = True) -> tuple[list[str], list[dict[str, Any]]]:
+def items_table(
+    items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatten: bool = True
+) -> tuple[list[str], list[dict[str, Any]]]:
     """(columns, rows) for showing items side by side: key attributes first, then the other attributes
     by how many items have them. With flatten=True nested maps become 'parent.child' columns."""
     counts: Counter = Counter()
@@ -666,10 +763,15 @@ def items_table(items: list[dict[str, Any]], keys: Iterable[str] = (), *,
             counts[name] += 1
             first_seen.setdefault(name, len(first_seen))
     leading = [k for k in dict.fromkeys(keys) if k in counts]
-    tops = leading + sorted((n for n in counts if n not in leading), key=lambda n: (-counts[n], first_seen[n]))
+    tops = leading + sorted(
+        (n for n in counts if n not in leading),
+        key=lambda n: (-counts[n], first_seen[n]),
+    )
     if not flatten:
         return tops, list(items)
-    columns: dict[str, dict[str, None]] = defaultdict(dict)  # top-level attribute -> its columns, in order
+    columns: dict[str, dict[str, None]] = defaultdict(
+        dict
+    )  # top-level attribute -> its columns, in order
     rows = []
     for item in items:
         row: dict[str, Any] = {}
@@ -681,7 +783,9 @@ def items_table(items: list[dict[str, Any]], keys: Iterable[str] = (), *,
     return [column for top in tops for column in columns[top]], rows
 
 
-def items_to_df(items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatten: bool = True):
+def items_to_df(
+    items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatten: bool = True
+):
     """Items -> pandas DataFrame, key attributes first. flatten=True turns nested maps into
     'parent.child' columns; lists and sets stay as Python objects in their cell."""
     pd = _require("pandas", "items_to_df")
@@ -693,7 +797,9 @@ def items_to_df(items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatte
 # 3. Pure analysis (no AWS calls - works on any list of plain item dicts)
 # =============================================================================
 
-ITEM_SIZE_BANDS: list[tuple[str, int | None]] = [  # (label, exclusive upper bound in bytes)
+ITEM_SIZE_BANDS: list[
+    tuple[str, int | None]
+] = [  # (label, exclusive upper bound in bytes)
     ("< 1 KB", KB),
     ("1 - 4 KB", 4 * KB),
     ("4 - 16 KB", 16 * KB),
@@ -712,7 +818,13 @@ def _band(value: float, bands: list[tuple[str, int | None]]) -> str:
 
 _KEY_SEPARATORS = re.compile(r"([#|])")
 _SEGMENT_SHAPES = [
-    (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE), "<uuid>"),
+    (
+        re.compile(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            re.IGNORECASE,
+        ),
+        "<uuid>",
+    ),
     (re.compile(r"\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?"), "<date>"),
     (re.compile(r"[+-]?\d+(\.\d+)?"), "<number>"),
     (re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+"), "<email>"),
@@ -735,21 +847,33 @@ def key_pattern(value: Any) -> str:
     """Shape of a key value, to spot the entity types of a single-table design:
     'USER#42' -> 'USER#<number>', 'ORDER#2024-05-01#a1b2' -> 'ORDER#<date>#<id>', 'PROFILE' -> 'PROFILE'."""
     if not isinstance(value, str):
-        return {"N": "<number>", "B": "<binary>"}.get(dynamo_type(value), f"<{dynamo_type(value)}>")
+        return {"N": "<number>", "B": "<binary>"}.get(
+            dynamo_type(value), f"<{dynamo_type(value)}>"
+        )
     parts = _KEY_SEPARATORS.split(value)
-    return "".join(part if part in ("#", "|") else _segment_shape(part, len(parts) > 1 and i == 0)
-                   for i, part in enumerate(parts))
+    return "".join(
+        part if part in ("#", "|") else _segment_shape(part, len(parts) > 1 and i == 0)
+        for i, part in enumerate(parts)
+    )
 
 
-def profile_items(items: Iterable[dict[str, Any]], table: str = "", *, keys: Iterable[str] = (),
-                  max_depth: int = 2, top_n: int = 10) -> TableProfile:
+def profile_items(
+    items: Iterable[dict[str, Any]],
+    table: str = "",
+    *,
+    keys: Iterable[str] = (),
+    max_depth: int = 2,
+    top_n: int = 10,
+) -> TableProfile:
     """One pass over items -> TableProfile: every attribute (and map field down to max_depth) with its
     types, fill rate, distinct values, range and examples, plus key shapes and item sizes.
     Works on any plain dicts, e.g. from_dynamo_item() rows of a DynamoDB export in S3."""
     keys = list(dict.fromkeys(keys))
     profile = TableProfile(table=table, keys=keys)
     found: dict[str, AttributeProfile] = {}
-    children: dict[str | None, list[str]] = defaultdict(list)  # parent path -> child paths, first seen first
+    children: dict[str | None, list[str]] = defaultdict(
+        list
+    )  # parent path -> child paths, first seen first
     patterns: dict[str, Counter] = {k: Counter() for k in keys}
     sizes = {label: Stat() for label, _ in ITEM_SIZE_BANDS}
     largest: list[tuple[int, int, dict[str, Any]]] = []  # min-heap of the top_n biggest
@@ -786,14 +910,19 @@ def profile_items(items: Iterable[dict[str, Any]], table: str = "", *, keys: Ite
         paths = children[parent]
         rank = {path: j for j, path in enumerate(paths)}
         lead = [k for k in keys if k in rank] if parent is None else []
-        for path in lead + sorted((p for p in paths if p not in lead), key=lambda p: (-found[p].count, rank[p])):
+        for path in lead + sorted(
+            (p for p in paths if p not in lead),
+            key=lambda p: (-found[p].count, rank[p]),
+        ):
             yield path
             yield from ordered(path)
 
     profile.attributes = {path: found[path] for path in ordered(None)}
     profile.key_patterns = {k: dict(c.most_common()) for k, c in patterns.items() if c}
     profile.size_histogram = sizes
-    profile.largest = [(size, key) for size, _, key in sorted(largest, key=lambda e: (-e[0], e[1]))]
+    profile.largest = [
+        (size, key) for size, _, key in sorted(largest, key=lambda e: (-e[0], e[1]))
+    ]
     return profile
 
 
@@ -816,14 +945,28 @@ def count_values(items: Iterable[dict[str, Any]], attribute: str) -> ValueCounts
             result.missing.add(size)
         else:
             counts[_hashable(value)].add(size)
-    result.counts = dict(sorted(counts.items(), key=lambda kv: (-kv[1].count, -kv[1].size)))
+    result.counts = dict(
+        sorted(counts.items(), key=lambda kv: (-kv[1].count, -kv[1].size))
+    )
     return result
 
 
 _OPERATORS = {
-    "=": "eq", "==": "eq", "!=": "ne", "<>": "ne", "<": "lt", "<=": "lte", ">": "gt", ">=": "gte",
-    "between": "between", "begins_with": "begins_with", "contains": "contains", "in": "is_in",
-    "exists": "exists", "not_exists": "not_exists", "type": "attribute_type",
+    "=": "eq",
+    "==": "eq",
+    "!=": "ne",
+    "<>": "ne",
+    "<": "lt",
+    "<=": "lte",
+    ">": "gt",
+    ">=": "gte",
+    "between": "between",
+    "begins_with": "begins_with",
+    "contains": "contains",
+    "in": "is_in",
+    "exists": "exists",
+    "not_exists": "not_exists",
+    "type": "attribute_type",
 }
 _ARITY = {"between": 2, "exists": 0, "not_exists": 0}  # everything else takes one value
 _SORT_KEY_OPERATORS = {"eq", "lt", "lte", "gt", "gte", "between", "begins_with"}
@@ -835,15 +978,25 @@ def _condition(attr: Attr | Key, spec: Any, *, key: bool = False) -> ConditionBa
         return attr.eq(spec)
     op = spec[0] if spec and isinstance(spec[0], str) else None
     if op is None or op.lower() not in _OPERATORS:
-        raise ValueError(f"Can't read condition {spec!r}: use a value, or (operator, value) with one of "
-                         + ", ".join(_OPERATORS))
+        raise ValueError(
+            f"Can't read condition {spec!r}: use a value, or (operator, value) with one of "
+            + ", ".join(_OPERATORS)
+        )
     method, args = _OPERATORS[op.lower()], list(spec[1:])
     if key and method not in _SORT_KEY_OPERATORS:
-        raise ValueError(f"Sort key conditions can be =, <, <=, >, >=, between or begins_with, not {op!r}")
+        raise ValueError(
+            f"Sort key conditions can be =, <, <=, >, >=, between or begins_with, not {op!r}"
+        )
     if method == "is_in":
-        args = [list(args[0]) if len(args) == 1 and isinstance(args[0], (list, tuple, set, frozenset)) else args]
+        args = [
+            list(args[0])
+            if len(args) == 1 and isinstance(args[0], (list, tuple, set, frozenset))
+            else args
+        ]
     if len(args) != _ARITY.get(method, 1):
-        raise ValueError(f"{op!r} takes {_plural(_ARITY.get(method, 1), 'value')}, got {spec!r}")
+        raise ValueError(
+            f"{op!r} takes {_plural(_ARITY.get(method, 1), 'value')}, got {spec!r}"
+        )
     return getattr(attr, method)(*args)
 
 
@@ -860,7 +1013,9 @@ def build_filter(where: Any) -> ConditionBase | None:
     if where is None or isinstance(where, ConditionBase):
         return where
     if not isinstance(where, dict):
-        raise ValueError("where= takes a dict like {'status': 'failed'} or a boto3 condition")
+        raise ValueError(
+            "where= takes a dict like {'status': 'failed'} or a boto3 condition"
+        )
     conditions = [_condition(Attr(name), spec) for name, spec in where.items()]
     return functools.reduce(lambda a, b: a & b, conditions) if conditions else None
 
@@ -901,21 +1056,32 @@ def _path_expression(path: str, names: dict[str, str]) -> str:
     return ".".join(parts)
 
 
-def _expression_params(*, key: ConditionBase | None = None, where: ConditionBase | None = None,
-                       attributes: Iterable[str] | None = None) -> dict[str, Any]:
+def _expression_params(
+    *,
+    key: ConditionBase | None = None,
+    where: ConditionBase | None = None,
+    attributes: Iterable[str] | None = None,
+) -> dict[str, Any]:
     """KeyConditionExpression / FilterExpression / ProjectionExpression with shared placeholders."""
     builder = ConditionExpressionBuilder()
     params: dict[str, Any] = {}
     names: dict[str, str] = {}
     values: dict[str, Any] = {}
-    for name, condition, is_key in (("KeyConditionExpression", key, True), ("FilterExpression", where, False)):
+    for name, condition, is_key in (
+        ("KeyConditionExpression", key, True),
+        ("FilterExpression", where, False),
+    ):
         if condition is not None:
             built = builder.build_expression(condition, is_key_condition=is_key)
             params[name] = built.condition_expression
             names.update(built.attribute_name_placeholders)
-            values.update({k: to_dynamo(v) for k, v in built.attribute_value_placeholders.items()})
+            values.update(
+                {k: to_dynamo(v) for k, v in built.attribute_value_placeholders.items()}
+            )
     if attributes:
-        params["ProjectionExpression"] = ", ".join(_path_expression(path, names) for path in attributes)
+        params["ProjectionExpression"] = ", ".join(
+            _path_expression(path, names) for path in attributes
+        )
     if names:
         params["ExpressionAttributeNames"] = names
     if values:
@@ -932,76 +1098,133 @@ def parse_table(desc: dict[str, Any]) -> TableInfo:
         arn=desc.get("TableArn", ""),
         partition_key=keys.get("HASH", ""),
         sort_key=keys.get("RANGE"),
-        attribute_types={a["AttributeName"]: a["AttributeType"] for a in desc.get("AttributeDefinitions", [])},
+        attribute_types={
+            a["AttributeName"]: a["AttributeType"]
+            for a in desc.get("AttributeDefinitions", [])
+        },
         item_count=desc.get("ItemCount"),
         size_bytes=desc.get("TableSizeBytes"),
         created=desc.get("CreationDateTime"),
-        billing_mode=desc.get("BillingModeSummary", {}).get("BillingMode", "PROVISIONED"),
+        billing_mode=desc.get("BillingModeSummary", {}).get(
+            "BillingMode", "PROVISIONED"
+        ),
         table_class=desc.get("TableClassSummary", {}).get("TableClass", "STANDARD"),
         deletion_protection=desc.get("DeletionProtectionEnabled"),
         replicas=[r["RegionName"] for r in desc.get("Replicas", [])],
     )
     if not info.on_demand:
         throughput = desc.get("ProvisionedThroughput", {})
-        info.read_capacity, info.write_capacity = throughput.get("ReadCapacityUnits"), throughput.get("WriteCapacityUnits")
+        info.read_capacity, info.write_capacity = (
+            throughput.get("ReadCapacityUnits"),
+            throughput.get("WriteCapacityUnits"),
+        )
     stream = desc.get("StreamSpecification", {})
     if stream.get("StreamEnabled"):
         info.stream = stream.get("StreamViewType", "on")
     sse = desc.get("SSEDescription") or {}
     if sse.get("Status") in ("ENABLED", "UPDATING") and sse.get("SSEType") == "KMS":
         info.encryption, info.kms_key = "KMS", sse.get("KMSMasterKeyArn")
-    for kind, section in (("global", "GlobalSecondaryIndexes"), ("local", "LocalSecondaryIndexes")):
+    for kind, section in (
+        ("global", "GlobalSecondaryIndexes"),
+        ("local", "LocalSecondaryIndexes"),
+    ):
         for idx in desc.get(section) or []:
-            index_keys = {k["KeyType"]: k["AttributeName"] for k in idx.get("KeySchema", [])}
+            index_keys = {
+                k["KeyType"]: k["AttributeName"] for k in idx.get("KeySchema", [])
+            }
             projection = idx.get("Projection", {})
-            throughput = idx.get("ProvisionedThroughput", {}) if kind == "global" and not info.on_demand else {}
-            info.indexes.append(IndexInfo(
-                name=idx["IndexName"], kind=kind, partition_key=index_keys.get("HASH", ""),
-                sort_key=index_keys.get("RANGE"), projection=projection.get("ProjectionType", "ALL"),
-                projected=projection.get("NonKeyAttributes", []), status=idx.get("IndexStatus"),
-                backfilling=bool(idx.get("Backfilling")), item_count=idx.get("ItemCount"),
-                size_bytes=idx.get("IndexSizeBytes"), read_capacity=throughput.get("ReadCapacityUnits"),
-                write_capacity=throughput.get("WriteCapacityUnits")))
+            throughput = (
+                idx.get("ProvisionedThroughput", {})
+                if kind == "global" and not info.on_demand
+                else {}
+            )
+            info.indexes.append(
+                IndexInfo(
+                    name=idx["IndexName"],
+                    kind=kind,
+                    partition_key=index_keys.get("HASH", ""),
+                    sort_key=index_keys.get("RANGE"),
+                    projection=projection.get("ProjectionType", "ALL"),
+                    projected=projection.get("NonKeyAttributes", []),
+                    status=idx.get("IndexStatus"),
+                    backfilling=bool(idx.get("Backfilling")),
+                    item_count=idx.get("ItemCount"),
+                    size_bytes=idx.get("IndexSizeBytes"),
+                    read_capacity=throughput.get("ReadCapacityUnits"),
+                    write_capacity=throughput.get("WriteCapacityUnits"),
+                )
+            )
     return info
 
 
-def table_monthly_cost(info: TableInfo, prices: dict[str, float] | None = None,
-                       metrics: TableMetrics | None = None) -> dict[str, float]:
+def table_monthly_cost(
+    info: TableInfo,
+    prices: dict[str, float] | None = None,
+    metrics: TableMetrics | None = None,
+) -> dict[str, float]:
     """Estimated USD per month: 'storage' (table + indexes), 'capacity' (provisioned tables: table and
     global indexes at today's settings), 'requests' (on-demand tables, given `metrics`: the reads and
     writes of that window, extended to a month) and 'backup' (point-in-time recovery, when on)."""
     prices = DYNAMODB_PRICES if prices is None else prices
-    stored = ((info.size_bytes or 0) + sum(i.size_bytes or 0 for i in info.indexes)) / GB
-    cost = {"storage": stored * prices["storage_ia" if info.table_class == "STANDARD_INFREQUENT_ACCESS" else "storage"]}
+    stored = (
+        (info.size_bytes or 0) + sum(i.size_bytes or 0 for i in info.indexes)
+    ) / GB
+    cost = {
+        "storage": stored
+        * prices[
+            "storage_ia"
+            if info.table_class == "STANDARD_INFREQUENT_ACCESS"
+            else "storage"
+        ]
+    }
     if not info.on_demand and info.read_capacity is not None:
         global_indexes = [i for i in info.indexes if i.kind == "global"]
         reads = info.read_capacity + sum(i.read_capacity or 0 for i in global_indexes)
-        writes = (info.write_capacity or 0) + sum(i.write_capacity or 0 for i in global_indexes)
+        writes = (info.write_capacity or 0) + sum(
+            i.write_capacity or 0 for i in global_indexes
+        )
         cost["capacity"] = capacity_cost(reads, writes, prices)
     if info.on_demand and metrics is not None and metrics.has_data:
-        spent = request_cost(metrics.read_units or 0.0, metrics.write_units or 0.0, prices)
+        spent = request_cost(
+            metrics.read_units or 0.0, metrics.write_units or 0.0, prices
+        )
         cost["requests"] = spent * HOURS_PER_MONTH / metrics.hours
     if info.pitr:
         cost["backup"] = (info.size_bytes or 0) / GB * prices["pitr"]
     return cost
 
 
-def request_cost(read_units: float = 0.0, write_units: float = 0.0, prices: dict[str, float] | None = None) -> float:
+def request_cost(
+    read_units: float = 0.0,
+    write_units: float = 0.0,
+    prices: dict[str, float] | None = None,
+) -> float:
     """USD for on-demand reads and writes (request units, e.g. ReadStats.read_units)."""
     prices = DYNAMODB_PRICES if prices is None else prices
-    return (read_units * prices["read_request"] + write_units * prices["write_request"]) / 1e6
+    return (
+        read_units * prices["read_request"] + write_units * prices["write_request"]
+    ) / 1e6
 
 
-def capacity_cost(read_capacity: float = 0, write_capacity: float = 0, prices: dict[str, float] | None = None) -> float:
+def capacity_cost(
+    read_capacity: float = 0,
+    write_capacity: float = 0,
+    prices: dict[str, float] | None = None,
+) -> float:
     """USD per month for provisioned read and write capacity units."""
     prices = DYNAMODB_PRICES if prices is None else prices
-    return HOURS_PER_MONTH * (read_capacity * prices["read_capacity_hour"] + write_capacity * prices["write_capacity_hour"])
+    return HOURS_PER_MONTH * (
+        read_capacity * prices["read_capacity_hour"]
+        + write_capacity * prices["write_capacity_hour"]
+    )
 
 
 TARGET_USE = 0.7  # suggested capacity leaves the busiest period at 70% of it (auto scaling's default target)
 
-_LARGE_ITEM_ADVICE = ("Keeping large attributes (documents, blobs, long text) in S3 with a pointer in the item, or "
-                      "compressing them, cuts the cost of every read.")
+_LARGE_ITEM_ADVICE = (
+    "Keeping large attributes (documents, blobs, long text) in S3 with a pointer in the item, or "
+    "compressing them, cuts the cost of every read."
+)
 
 # describe() section -> (what it is, the permission that reads it)
 _SECTIONS = {
@@ -1025,79 +1248,134 @@ def profile_findings(profile: TableProfile) -> list[tuple[str, str]]:
     for attr in profile.attributes.values():
         kinds = [(kind, n) for kind, n in attr.types.most_common() if kind != "NULL"]
         if len(kinds) > 1:
-            mix = ", ".join(f"{TYPE_NAMES.get(kind, kind)} in {n:,}" for kind, n in kinds)
+            mix = ", ".join(
+                f"{TYPE_NAMES.get(kind, kind)} in {n:,}" for kind, n in kinds
+            )
             odd = kinds[-1][0]
-            found.append(("warn", f"'{attr.path}' holds different types ({mix} items). A filter or key condition "
-                                  "matches one type only, so the other items silently drop out. Find the "
-                                  f"{TYPE_NAMES.get(odd, odd)} ones with "
-                                  f"scan({table}, where={{{attr.path!r}: ('type', {odd!r})}})."))
+            found.append(
+                (
+                    "warn",
+                    f"'{attr.path}' holds different types ({mix} items). A filter or key condition "
+                    "matches one type only, so the other items silently drop out. Find the "
+                    f"{TYPE_NAMES.get(odd, odd)} ones with "
+                    f"scan({table}, where={{{attr.path!r}: ('type', {odd!r})}}).",
+                )
+            )
     empties = [a for a in profile.attributes.values() if a.empty]
     if empties:
-        listed = ", ".join(f"'{a.path}' ({_plural(a.empty, 'item')})" for a in empties[:8])
-        found.append(("info", f"Empty strings or binary values in {listed}. They count as present, so "
-                              f"where={{{empties[0].path!r}: ('exists',)}} matches them too; if they mean "
-                              "\"unknown\", add ('!=', '') to filters."))
+        listed = ", ".join(
+            f"'{a.path}' ({_plural(a.empty, 'item')})" for a in empties[:8]
+        )
+        found.append(
+            (
+                "info",
+                f"Empty strings or binary values in {listed}. They count as present, so "
+                f"where={{{empties[0].path!r}: ('exists',)}} matches them too; if they mean "
+                "\"unknown\", add ('!=', '') to filters.",
+            )
+        )
     big = profile.size_histogram.get("300 - 400 KB", Stat()).count
     if big:
-        found.append(("warn", f"{_plural(big, 'item')} over 300 KB. DynamoDB rejects items over 400 KB, and one "
-                              "strongly consistent read of an item that size costs up to 100 read units. "
-                              f"largest({table}) lists them. {_LARGE_ITEM_ADVICE}"))
+        found.append(
+            (
+                "warn",
+                f"{_plural(big, 'item')} over 300 KB. DynamoDB rejects items over 400 KB, and one "
+                "strongly consistent read of an item that size costs up to 100 read units. "
+                f"largest({table}) lists them. {_LARGE_ITEM_ADVICE}",
+            )
+        )
     if profile.avg_size > 4 * KB:
         units = read_units(math.ceil(profile.avg_size))
-        found.append(("info", f"The average item is {human_size(profile.avg_size)}, so reading one costs "
-                              f"{_units(units)} read units (half that eventually consistent). Reading fewer "
-                              f"attributes doesn't lower this: the whole item is billed. {_LARGE_ITEM_ADVICE}"))
-    singles = sum(1 for a in profile.attributes.values() if a.depth == 0 and a.count == 1)
+        found.append(
+            (
+                "info",
+                f"The average item is {human_size(profile.avg_size)}, so reading one costs "
+                f"{_units(units)} read units (half that eventually consistent). Reading fewer "
+                f"attributes doesn't lower this: the whole item is billed. {_LARGE_ITEM_ADVICE}",
+            )
+        )
+    singles = sum(
+        1 for a in profile.attributes.values() if a.depth == 0 and a.count == 1
+    )
     if profile.items >= 20 and singles >= 20:
-        found.append(("info", f"{singles:,} attributes appear in only one item. Attribute names built from data "
-                              "(dates, IDs) can't be indexed and are hard to query. Keeping that data in a map, "
-                              "or as separate items with the date or ID in the sort key, makes it queryable."))
+        found.append(
+            (
+                "info",
+                f"{singles:,} attributes appear in only one item. Attribute names built from data "
+                "(dates, IDs) can't be indexed and are hard to query. Keeping that data in a map, "
+                "or as separate items with the date or ID in the sort key, makes it queryable.",
+            )
+        )
     return found
 
 
-def _capacity_findings(info: TableInfo, metrics: TableMetrics, prices: dict[str, float]) -> list[tuple[str, str]]:
+def _capacity_findings(
+    info: TableInfo, metrics: TableMetrics, prices: dict[str, float]
+) -> list[tuple[str, str]]:
     """Provisioned capacity against CloudWatch's busiest period: near the limit, or paying for unused units."""
     found: list[tuple[str, str]] = []
     minutes = metrics.period // 60
     low: list[str] = []
     suggested = {"Reads": info.read_capacity or 0, "Writes": info.write_capacity or 0}
-    for label, peak, capacity in (("Reads", metrics.peak_reads, info.read_capacity),
-                                  ("Writes", metrics.peak_writes, info.write_capacity)):
+    for label, peak, capacity in (
+        ("Reads", metrics.peak_reads, info.read_capacity),
+        ("Writes", metrics.peak_writes, info.write_capacity),
+    ):
         if not capacity:
             continue
         share = (peak or 0.0) / capacity
         if share >= 0.8:
-            found.append(("warn", f"{label} averaged {_units(peak)} units/s in the busiest {minutes} minutes, "
-                                  f"{share:.0%} of the {capacity:,} provisioned. Short bursts above it get throttled: "
-                                  "raise the capacity or turn on auto scaling."))
+            found.append(
+                (
+                    "warn",
+                    f"{label} averaged {_units(peak)} units/s in the busiest {minutes} minutes, "
+                    f"{share:.0%} of the {capacity:,} provisioned. Short bursts above it get throttled: "
+                    "raise the capacity or turn on auto scaling.",
+                )
+            )
         elif share < 0.2:
             shown = "under 1%" if 0 < share < 0.01 else f"{share:.0%}"
-            low.append(f"{label.lower()} peaked at {shown} of the {capacity:,} provisioned units")
+            low.append(
+                f"{label.lower()} peaked at {shown} of the {capacity:,} provisioned units"
+            )
             suggested[label] = max(1, math.ceil((peak or 0.0) / TARGET_USE))
     if not low:
         return found
     now = capacity_cost(info.read_capacity or 0, info.write_capacity or 0, prices)
     lowered = capacity_cost(suggested["Reads"], suggested["Writes"], prices)
-    on_demand = request_cost(metrics.read_units or 0.0, metrics.write_units or 0.0, prices) * HOURS_PER_MONTH / metrics.hours
+    on_demand = (
+        request_cost(metrics.read_units or 0.0, metrics.write_units or 0.0, prices)
+        * HOURS_PER_MONTH
+        / metrics.hours
+    )
     options = []
     if lowered < now:
-        options.append(f"{suggested['Reads']:,} read / {suggested['Writes']:,} write units (the busiest period at "
-                       f"{TARGET_USE:.0%} use) would cost {human_money(lowered)}")
+        options.append(
+            f"{suggested['Reads']:,} read / {suggested['Writes']:,} write units (the busiest period at "
+            f"{TARGET_USE:.0%} use) would cost {human_money(lowered)}"
+        )
     if on_demand < now:
         options.append(f"on-demand at this traffic about {human_money(on_demand)}")
     if not options:
         return found
     saving = now - min(lowered, on_demand)
     text = "; ".join(low)
-    found.append(("warn" if saving >= 10 else "info",
-                  f"{text[0].upper()}{text[1:]} in the last {metrics.hours}h. The table's own capacity costs "
-                  f"{human_money(now)}/month; {' and '.join(options)}. If the last {metrics.hours}h were typical, "
-                  f"that saves up to {human_money(saving)}/month. Auto scaling can also adjust the capacity for you."))
+    found.append(
+        (
+            "warn" if saving >= 10 else "info",
+            f"{text[0].upper()}{text[1:]} in the last {metrics.hours}h. The table's own capacity costs "
+            f"{human_money(now)}/month; {' and '.join(options)}. If the last {metrics.hours}h were typical, "
+            f"that saves up to {human_money(saving)}/month. Auto scaling can also adjust the capacity for you.",
+        )
+    )
     return found
 
 
-def table_findings(info: TableInfo, metrics: TableMetrics | None = None,
-                   prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
+def table_findings(
+    info: TableInfo,
+    metrics: TableMetrics | None = None,
+    prices: dict[str, float] | None = None,
+) -> list[tuple[str, str]]:
     """Plain-language risks and cost notes for a table, each with what to do about it -> [(level, message)]."""
     prices = DYNAMODB_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
@@ -1107,36 +1385,68 @@ def table_findings(info: TableInfo, metrics: TableMetrics | None = None,
     for idx in info.indexes:
         if idx.backfilling or (idx.status and idx.status != "ACTIVE"):
             state = "backfilling" if idx.backfilling else idx.status
-            found.append(("info", f"Index {idx.name} is {state}; queries on it may miss items until it's done."))
+            found.append(
+                (
+                    "info",
+                    f"Index {idx.name} is {state}; queries on it may miss items until it's done.",
+                )
+            )
     if "pitr" not in info.errors and info.pitr is False:
-        price = (f", for about {human_money(info.size_bytes / GB * prices['pitr'])}/month at this table's size"
-                 if info.size_bytes else "")
-        found.append(("warn", "Point-in-time recovery is off: an accidental delete or bad write can't be rolled "
-                              f"back. Turning it on keeps continuous backups for up to 35 days{price}: "
-                              f"aws dynamodb update-continuous-backups --table-name {info.name} "
-                              "--point-in-time-recovery-specification PointInTimeRecoveryEnabled=true"))
+        price = (
+            f", for about {human_money(info.size_bytes / GB * prices['pitr'])}/month at this table's size"
+            if info.size_bytes
+            else ""
+        )
+        found.append(
+            (
+                "warn",
+                "Point-in-time recovery is off: an accidental delete or bad write can't be rolled "
+                f"back. Turning it on keeps continuous backups for up to 35 days{price}: "
+                f"aws dynamodb update-continuous-backups --table-name {info.name} "
+                "--point-in-time-recovery-specification PointInTimeRecoveryEnabled=true",
+            )
+        )
     if info.deletion_protection is False:
-        found.append(("info", "Deletion protection is off, so one DeleteTable call removes the table. To turn it on: "
-                              f"aws dynamodb update-table --table-name {info.name} --deletion-protection-enabled"))
+        found.append(
+            (
+                "info",
+                "Deletion protection is off, so one DeleteTable call removes the table. To turn it on: "
+                f"aws dynamodb update-table --table-name {info.name} --deletion-protection-enabled",
+            )
+        )
     if metrics and (metrics.read_throttles or metrics.write_throttles):
         if info.on_demand:
-            fix = ("On an on-demand table this usually means one partition key gets most of the traffic, or traffic "
-                   "more than doubled suddenly")
+            fix = (
+                "On an on-demand table this usually means one partition key gets most of the traffic, or traffic "
+                "more than doubled suddenly"
+            )
         else:
             fix = "Raise the capacity or turn on auto scaling; if that doesn't help, one partition key may be hot"
-        found.append(("warn", f"{metrics.read_throttles:,} read and {metrics.write_throttles:,} write throttle "
-                              f"events in the last {metrics.hours}h: some requests were rejected and retried, which "
-                              f"slows the application. {fix}. value_counts({info.name!r}, {pk!r}) shows whether a "
-                              "few partition keys hold most of the items."))
+        found.append(
+            (
+                "warn",
+                f"{metrics.read_throttles:,} read and {metrics.write_throttles:,} write throttle "
+                f"events in the last {metrics.hours}h: some requests were rejected and retried, which "
+                f"slows the application. {fix}. value_counts({info.name!r}, {pk!r}) shows whether a "
+                "few partition keys hold most of the items.",
+            )
+        )
     if metrics and metrics.has_data and not info.on_demand:
         found += _capacity_findings(info, metrics, prices)
     if info.avg_item_size and info.avg_item_size > 4 * KB:
-        found.append(("info", f"Items average {human_size(info.avg_item_size)}, so each read of one item costs "
-                              f"{_units(read_units(math.ceil(info.avg_item_size)))} read units. {_LARGE_ITEM_ADVICE} "
-                              f"largest({info.name!r}) shows the biggest items."))
+        found.append(
+            (
+                "info",
+                f"Items average {human_size(info.avg_item_size)}, so each read of one item costs "
+                f"{_units(read_units(math.ceil(info.avg_item_size)))} read units. {_LARGE_ITEM_ADVICE} "
+                f"largest({info.name!r}) shows the biggest items.",
+            )
+        )
     if info.errors:
-        parts = [f"{_SECTIONS.get(k, (k, ''))[0]} ({_why(v, _SECTIONS[k][1]) if k in _SECTIONS else v})"
-                 for k, v in info.errors.items()]
+        parts = [
+            f"{_SECTIONS.get(k, (k, ''))[0]} ({_why(v, _SECTIONS[k][1]) if k in _SECTIONS else v})"
+            for k, v in info.errors.items()
+        ]
         found.append(("info", "Couldn't read " + ", ".join(parts) + "."))
     return found
 
@@ -1145,7 +1455,9 @@ def table_findings(info: TableInfo, metrics: TableMetrics | None = None,
 # 4. DynamoDBAnalyzer - pure logic layer (talks to AWS, returns data)
 # =============================================================================
 
-_FROM_RE = re.compile(r'\bFROM\s+(?:"([^"]+)"|([\w.-]+))(?:\."([^"]+)")?', re.IGNORECASE)
+_FROM_RE = re.compile(
+    r'\bFROM\s+(?:"([^"]+)"|([\w.-]+))(?:\."([^"]+)")?', re.IGNORECASE
+)
 
 
 class DynamoDBAnalyzer:
@@ -1159,10 +1471,21 @@ class DynamoDBAnalyzer:
     `prices` overrides DYNAMODB_PRICES for cost estimates.
     """
 
-    def __init__(self, session: Any = None, *, region: str | None = None, profile: str | None = None,
-                 client: Any = None, prices: dict[str, float] | None = None):
-        self.session = session or boto3.Session(profile_name=profile, region_name=region)
-        self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
+    def __init__(
+        self,
+        session: Any = None,
+        *,
+        region: str | None = None,
+        profile: str | None = None,
+        client: Any = None,
+        prices: dict[str, float] | None = None,
+    ):
+        self.session = session or boto3.Session(
+            profile_name=profile, region_name=region
+        )
+        self._config = Config(
+            retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50
+        )
         self._client = client
         self._cloudwatch_client: Any = None
         self.prices = {**DYNAMODB_PRICES, **(prices or {})}
@@ -1175,8 +1498,10 @@ class DynamoDBAnalyzer:
             try:
                 self._client = self.session.client("dynamodb", config=self._config)
             except NoRegionError:
-                raise ValueError("No AWS region is set, and DynamoDB tables are regional. Pass one: "
-                                 "DynamoDBView(DynamoDBAnalyzer(region='us-east-1')), or set AWS_DEFAULT_REGION.") from None
+                raise ValueError(
+                    "No AWS region is set, and DynamoDB tables are regional. Pass one: "
+                    "DynamoDBView(DynamoDBAnalyzer(region='us-east-1')), or set AWS_DEFAULT_REGION."
+                ) from None
         return self._client
 
     @property
@@ -1185,13 +1510,19 @@ class DynamoDBAnalyzer:
 
     def _cloudwatch(self) -> Any:
         if self._cloudwatch_client is None:
-            self._cloudwatch_client = self.session.client("cloudwatch", region_name=self.region)
+            self._cloudwatch_client = self.session.client(
+                "cloudwatch", region_name=self.region
+            )
         return self._cloudwatch_client
 
     # ------------------------------------------------------------------ tables
 
     def list_table_names(self) -> list[str]:
-        return [name for page in self.client.get_paginator("list_tables").paginate() for name in page.get("TableNames", [])]
+        return [
+            name
+            for page in self.client.get_paginator("list_tables").paginate()
+            for name in page.get("TableNames", [])
+        ]
 
     def list_tables(self, *, details: bool = True) -> list[TableInfo]:
         """Every table in the region. details=True describes each one (in parallel) for keys, counts and billing."""
@@ -1207,11 +1538,21 @@ class DynamoDBAnalyzer:
         except (ClientError, BotoCoreError) as exc:
             return TableInfo(name, errors={"describe": _error_name(exc)})
 
-    def table_reports(self, *, match: str | None = None, metrics: bool = True, max_workers: int = 8,
-                      progress: Callable[[int], None] | None = None) -> list[TableReport]:
+    def table_reports(
+        self,
+        *,
+        match: str | None = None,
+        metrics: bool = True,
+        max_workers: int = 8,
+        progress: Callable[[int], None] | None = None,
+    ) -> list[TableReport]:
         """describe() (and CloudWatch usage unless metrics=False) for every table, checked in parallel.
         match: only tables whose name matches this glob, e.g. 'prod-*'."""
-        names = [n for n in self.list_table_names() if match is None or fnmatch.fnmatchcase(n, match)]
+        names = [
+            n
+            for n in self.list_table_names()
+            if match is None or fnmatch.fnmatchcase(n, match)
+        ]
         if metrics and names:
             self._cloudwatch()  # boto3 sessions aren't thread-safe: make the client before the threads start
 
@@ -1219,7 +1560,9 @@ class DynamoDBAnalyzer:
             try:
                 report = TableReport(self.describe(name))
             except (ClientError, BotoCoreError) as exc:
-                return TableReport(TableInfo(name, errors={"describe": _error_name(exc)}))
+                return TableReport(
+                    TableInfo(name, errors={"describe": _error_name(exc)})
+                )
             if metrics:
                 try:
                     report.metrics = self.table_metrics(name)
@@ -1238,7 +1581,9 @@ class DynamoDBAnalyzer:
     def table(self, table: str, *, refresh: bool = False) -> TableInfo:
         """Keys, indexes, billing and DynamoDB's item count / size estimate (one DescribeTable call, cached)."""
         if refresh or table not in self._tables:
-            self._tables[table] = parse_table(self.client.describe_table(TableName=table)["Table"])
+            self._tables[table] = parse_table(
+                self.client.describe_table(TableName=table)["Table"]
+            )
         return self._tables[table]
 
     def describe(self, table: str) -> TableInfo:
@@ -1252,11 +1597,20 @@ class DynamoDBAnalyzer:
                 info.errors[section] = _error_name(exc)
             return None
 
-        if resp := get("ttl", lambda: self.client.describe_time_to_live(TableName=table)):
+        if resp := get(
+            "ttl", lambda: self.client.describe_time_to_live(TableName=table)
+        ):
             ttl = resp.get("TimeToLiveDescription", {})
-            info.ttl_status, info.ttl_attribute = ttl.get("TimeToLiveStatus"), ttl.get("AttributeName")
-        if resp := get("pitr", lambda: self.client.describe_continuous_backups(TableName=table)):
-            pitr = resp.get("ContinuousBackupsDescription", {}).get("PointInTimeRecoveryDescription", {})
+            info.ttl_status, info.ttl_attribute = (
+                ttl.get("TimeToLiveStatus"),
+                ttl.get("AttributeName"),
+            )
+        if resp := get(
+            "pitr", lambda: self.client.describe_continuous_backups(TableName=table)
+        ):
+            pitr = resp.get("ContinuousBackupsDescription", {}).get(
+                "PointInTimeRecoveryDescription", {}
+            )
             info.pitr = pitr.get("PointInTimeRecoveryStatus") == "ENABLED"
             info.pitr_days = pitr.get("RecoveryPeriodInDays")
             info.pitr_earliest = pitr.get("EarliestRestorableDateTime")
@@ -1268,7 +1622,9 @@ class DynamoDBAnalyzer:
         tags: dict[str, str] = {}
         token = None
         while True:
-            resp = self.client.list_tags_of_resource(ResourceArn=arn, **({"NextToken": token} if token else {}))
+            resp = self.client.list_tags_of_resource(
+                ResourceArn=arn, **({"NextToken": token} if token else {})
+            )
             tags.update({t["Key"]: t["Value"] for t in resp.get("Tags", [])})
             token = resp.get("NextToken")
             if not token:
@@ -1277,23 +1633,58 @@ class DynamoDBAnalyzer:
     def table_metrics(self, table: str, *, hours: int = 24) -> TableMetrics:
         """Read / write units consumed (in total and in the busiest period) and throttle events from
         CloudWatch, for the table itself (not its indexes). Needs cloudwatch:GetMetricData."""
-        period = max(300, math.ceil(hours * 3600 / 1440 / 60) * 60)  # at most ~1,440 points per metric
-        names = ["ConsumedReadCapacityUnits", "ConsumedWriteCapacityUnits", "ReadThrottleEvents", "WriteThrottleEvents"]
-        queries = [{"Id": f"m{i}", "MetricStat": {
-            "Metric": {"Namespace": "AWS/DynamoDB", "MetricName": name, "Dimensions": [{"Name": "TableName", "Value": table}]},
-            "Period": period, "Stat": "Sum"}} for i, name in enumerate(names)]
+        period = max(
+            300, math.ceil(hours * 3600 / 1440 / 60) * 60
+        )  # at most ~1,440 points per metric
+        names = [
+            "ConsumedReadCapacityUnits",
+            "ConsumedWriteCapacityUnits",
+            "ReadThrottleEvents",
+            "WriteThrottleEvents",
+        ]
+        queries = [
+            {
+                "Id": f"m{i}",
+                "MetricStat": {
+                    "Metric": {
+                        "Namespace": "AWS/DynamoDB",
+                        "MetricName": name,
+                        "Dimensions": [{"Name": "TableName", "Value": table}],
+                    },
+                    "Period": period,
+                    "Stat": "Sum",
+                },
+            }
+            for i, name in enumerate(names)
+        ]
         now = _utcnow()
         values: dict[str, list[float]] = {name: [] for name in names}
-        for page in self._cloudwatch().get_paginator("get_metric_data").paginate(
-                MetricDataQueries=queries, StartTime=now - timedelta(hours=hours), EndTime=now):
+        for page in (
+            self._cloudwatch()
+            .get_paginator("get_metric_data")
+            .paginate(
+                MetricDataQueries=queries,
+                StartTime=now - timedelta(hours=hours),
+                EndTime=now,
+            )
+        ):
             for series in page["MetricDataResults"]:
                 values[names[int(series["Id"][1:])]] += series.get("Values", [])
-        reads, writes = values["ConsumedReadCapacityUnits"], values["ConsumedWriteCapacityUnits"]
+        reads, writes = (
+            values["ConsumedReadCapacityUnits"],
+            values["ConsumedWriteCapacityUnits"],
+        )
         return TableMetrics(
-            table, hours, period,
-            read_units=sum(reads) if reads else None, write_units=sum(writes) if writes else None,
-            peak_reads=max(reads) / period if reads else None, peak_writes=max(writes) / period if writes else None,
-            read_throttles=int(sum(values["ReadThrottleEvents"])), write_throttles=int(sum(values["WriteThrottleEvents"])))
+            table,
+            hours,
+            period,
+            read_units=sum(reads) if reads else None,
+            write_units=sum(writes) if writes else None,
+            peak_reads=max(reads) / period if reads else None,
+            peak_writes=max(writes) / period if writes else None,
+            read_throttles=int(sum(values["ReadThrottleEvents"])),
+            write_throttles=int(sum(values["WriteThrottleEvents"])),
+        )
 
     # -------------------------------------------------------------------- keys
 
@@ -1306,7 +1697,9 @@ class DynamoDBAnalyzer:
         """Every key attribute an item read from the table / index carries, the index's first. Tables of
         items show these first, and they make up the start key of the next page."""
         info = self.table(table)
-        return list(dict.fromkeys((info.index(index).keys if index else []) + info.keys))
+        return list(
+            dict.fromkeys((info.index(index).keys if index else []) + info.keys)
+        )
 
     def _key_value(self, table: str, name: str, value: Any) -> Any:
         """Match a key value to its declared type, so '42' works for a number key and 42 for a string key."""
@@ -1315,8 +1708,14 @@ class DynamoDBAnalyzer:
             try:
                 return _number(value.strip())
             except InvalidOperation:
-                raise ValueError(f"{name} is a number key, and {value!r} isn't a number") from None
-        if kind == "S" and isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+                raise ValueError(
+                    f"{name} is a number key, and {value!r} isn't a number"
+                ) from None
+        if (
+            kind == "S"
+            and isinstance(value, (int, float, Decimal))
+            and not isinstance(value, bool)
+        ):
             return str(value)
         return value
 
@@ -1330,7 +1729,9 @@ class DynamoDBAnalyzer:
         elif len(key) == len(names):
             given = dict(zip(names, key))
         else:
-            raise ValueError(f"{table}'s key is ({', '.join(names)}): pass {_plural(len(names), 'value')} or a dict")
+            raise ValueError(
+                f"{table}'s key is ({', '.join(names)}): pass {_plural(len(names), 'value')} or a dict"
+            )
         missing = [name for name in names if name not in given]
         if missing:
             raise ValueError(f"Missing key attribute {', '.join(missing)} for {table}")
@@ -1338,44 +1739,92 @@ class DynamoDBAnalyzer:
 
     # ------------------------------------------------------------------- items
 
-    def get(self, table: str, *key: Any, consistent: bool = False) -> dict[str, Any] | None:
+    def get(
+        self, table: str, *key: Any, consistent: bool = False
+    ) -> dict[str, Any] | None:
         """One item by primary key: get('orders', 'USER#1', 'ORDER#7') or get('orders', {'pk': ..., 'sk': ...}).
         None when there's no such item."""
         primary = self.primary_key(table, key)
-        resp = self.client.get_item(TableName=table, Key={k: to_dynamo(v) for k, v in primary.items()},
-                                    ConsistentRead=consistent)
+        resp = self.client.get_item(
+            TableName=table,
+            Key={k: to_dynamo(v) for k, v in primary.items()},
+            ConsistentRead=consistent,
+        )
         return from_dynamo_item(resp["Item"]) if "Item" in resp else None
 
-    def _projection(self, table: str, index: str | None, attributes: str | Iterable[str] | None) -> list[str] | None:
+    def _projection(
+        self, table: str, index: str | None, attributes: str | Iterable[str] | None
+    ) -> list[str] | None:
         """Attributes to read, always with the key attributes (tables need them, and so does the next page)."""
         if attributes is None:
             return None
         attributes = [attributes] if isinstance(attributes, str) else list(attributes)
         return list(dict.fromkeys(self.key_attributes(table, index) + attributes))
 
-    def _scan_params(self, table: str, index: str | None, where: Any, attributes: Any,
-                     consistent: bool = False) -> dict[str, Any]:
-        params = {"TableName": table,
-                  **_expression_params(where=build_filter(where), attributes=self._projection(table, index, attributes))}
+    def _scan_params(
+        self,
+        table: str,
+        index: str | None,
+        where: Any,
+        attributes: Any,
+        consistent: bool = False,
+    ) -> dict[str, Any]:
+        params = {
+            "TableName": table,
+            **_expression_params(
+                where=build_filter(where),
+                attributes=self._projection(table, index, attributes),
+            ),
+        }
         if index:
             params["IndexName"] = index
         if consistent:
             params["ConsistentRead"] = True
         return params
 
-    def scan(self, table: str, n: int | None = 100, *, where: Any = None, index: str | None = None,
-             attributes: str | Iterable[str] | None = None, start_key: Any = None, scan_limit: int | None = None,
-             consistent: bool = False, progress: Callable[[int], None] | None = None) -> ItemPage:
+    def scan(
+        self,
+        table: str,
+        n: int | None = 100,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        start_key: Any = None,
+        scan_limit: int | None = None,
+        consistent: bool = False,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """Up to n items from the start of the table (or index), or after `start_key` (a page's last_key).
         With `where`, keeps reading until n items match; scan_limit caps how many items are read."""
         params = self._scan_params(table, index, where, attributes, consistent)
-        return self._read("scan", table, index, params, n=n, start_key=start_key, scan_limit=scan_limit,
-                          progress=progress)
+        return self._read(
+            "scan",
+            table,
+            index,
+            params,
+            n=n,
+            start_key=start_key,
+            scan_limit=scan_limit,
+            progress=progress,
+        )
 
-    def query(self, table: str, partition: Any, sort: Any = None, *, n: int | None = 100, where: Any = None,
-              index: str | None = None, attributes: str | Iterable[str] | None = None, descending: bool = False,
-              start_key: Any = None, scan_limit: int | None = None, consistent: bool = False,
-              progress: Callable[[int], None] | None = None) -> ItemPage:
+    def query(
+        self,
+        table: str,
+        partition: Any,
+        sort: Any = None,
+        *,
+        n: int | None = 100,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        descending: bool = False,
+        start_key: Any = None,
+        scan_limit: int | None = None,
+        consistent: bool = False,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """Items whose partition key is `partition`, in sort-key order (on the table, or on `index`).
         sort narrows the sort key: a value, or ('begins_with', 'ORDER#'), ('between', a, b), ('>=', x) ...
         descending=True starts from the highest sort key."""
@@ -1383,29 +1832,63 @@ class DynamoDBAnalyzer:
         condition = Key(keys[0]).eq(self._key_value(table, keys[0], partition))
         if sort is not None:
             if len(keys) < 2:
-                raise ValueError(f"{index or table} has no sort key, so sort= can't be used")
+                raise ValueError(
+                    f"{index or table} has no sort key, so sort= can't be used"
+                )
             op, *args = sort if isinstance(sort, tuple) else ("=", sort)
-            condition &= _condition(Key(keys[1]), (op, *(self._key_value(table, keys[1], a) for a in args)), key=True)
-        params = {"TableName": table, "ScanIndexForward": not descending,
-                  **_expression_params(key=condition, where=build_filter(where),
-                                       attributes=self._projection(table, index, attributes))}
+            condition &= _condition(
+                Key(keys[1]),
+                (op, *(self._key_value(table, keys[1], a) for a in args)),
+                key=True,
+            )
+        params = {
+            "TableName": table,
+            "ScanIndexForward": not descending,
+            **_expression_params(
+                key=condition,
+                where=build_filter(where),
+                attributes=self._projection(table, index, attributes),
+            ),
+        }
         if index:
             params["IndexName"] = index
         if consistent:
             params["ConsistentRead"] = True
-        return self._read("query", table, index, params, n=n, start_key=start_key, scan_limit=scan_limit,
-                          progress=progress)
+        return self._read(
+            "query",
+            table,
+            index,
+            params,
+            n=n,
+            start_key=start_key,
+            scan_limit=scan_limit,
+            progress=progress,
+        )
 
-    def _read(self, operation: str, table: str, index: str | None, params: dict[str, Any], *, n: int | None,
-              start_key: Any = None, scan_limit: int | None = None,
-              progress: Callable[[int], None] | None = None) -> ItemPage:
+    def _read(
+        self,
+        operation: str,
+        table: str,
+        index: str | None,
+        params: dict[str, Any],
+        *,
+        n: int | None,
+        start_key: Any = None,
+        scan_limit: int | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """Page through a scan or query until n items came back, the data ran out, or scan_limit items were
         read. Stopping inside a page sets last_key to the last item returned, so passing it back as
         start_key resumes right after that item."""
         n, scan_limit = _as_count(n, "n"), _as_count(scan_limit, "scan_limit")
         if n is not None and n < 1:
             raise ValueError("n must be at least 1 (or None for everything)")
-        page = ItemPage(table=table, index=index, operation=operation, keys=self.key_attributes(table, index))
+        page = ItemPage(
+            table=table,
+            index=index,
+            operation=operation,
+            keys=self.key_attributes(table, index),
+        )
         params = dict(params, ReturnConsumedCapacity="TOTAL")
         if start_key:
             params["ExclusiveStartKey"] = start_key
@@ -1413,24 +1896,33 @@ class DynamoDBAnalyzer:
         call = getattr(self.client, operation)
         started = time.monotonic()
         while True:
-            caps = [n - len(page.items)] if n is not None and not filtered else []  # a filter drops items after the read
+            caps = (
+                [n - len(page.items)] if n is not None and not filtered else []
+            )  # a filter drops items after the read
             if scan_limit is not None:
                 caps.append(scan_limit - page.stats.scanned)
             if caps:
                 params["Limit"] = max(1, min(caps))
             resp = call(**params)
             page.stats.scanned += resp.get("ScannedCount", 0)
-            page.stats.read_units += resp.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+            page.stats.read_units += resp.get("ConsumedCapacity", {}).get(
+                "CapacityUnits", 0.0
+            )
             raw = resp.get("Items", [])
             page.last_key = resp.get("LastEvaluatedKey")
             if n is not None and len(raw) > n - len(page.items):
                 raw = raw[: n - len(page.items)]
-                page.last_key = {name: raw[-1][name] for name in page.keys if name in raw[-1]}
+                page.last_key = {
+                    name: raw[-1][name] for name in page.keys if name in raw[-1]
+                }
             page.items += [from_dynamo_item(item) for item in raw]
             if progress:
                 progress(page.stats.scanned)
-            if (page.last_key is None or (n is not None and len(page.items) >= n)
-                    or (scan_limit is not None and page.stats.scanned >= scan_limit)):
+            if (
+                page.last_key is None
+                or (n is not None and len(page.items) >= n)
+                or (scan_limit is not None and page.stats.scanned >= scan_limit)
+            ):
                 break
             params["ExclusiveStartKey"] = page.last_key
         page.stats.matched = len(page.items)
@@ -1438,9 +1930,18 @@ class DynamoDBAnalyzer:
         page.stats.seconds = time.monotonic() - started
         return page
 
-    def sample(self, table: str, n: int = 100, *, where: Any = None, index: str | None = None,
-               attributes: str | Iterable[str] | None = None, segments: int | None = None,
-               scan_limit: int | None = None, progress: Callable[[int], None] | None = None) -> ItemPage:
+    def sample(
+        self,
+        table: str,
+        n: int = 100,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        segments: int | None = None,
+        scan_limit: int | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """About n items spread over the whole table. scan() starts at the beginning, where the first
         items can all share a few partition keys; this reads a few items from each of `segments` slices
         of the key space (parallel-scan segments, fetched in parallel; default one per item, up to 100).
@@ -1449,27 +1950,52 @@ class DynamoDBAnalyzer:
         if n < 1:
             raise ValueError("n must be at least 1")
         segments = segments or min(n, 100)
-        params = dict(self._scan_params(table, index, where, attributes), TotalSegments=segments)
-        page = ItemPage(table=table, index=index, operation="sample", keys=self.key_attributes(table, index))
-        budget = None if scan_limit is None else math.ceil(scan_limit / segments)  # items each segment may read
-        cursors: dict[int, Any] = dict.fromkeys(range(segments))  # open segment -> where to resume it
+        params = dict(
+            self._scan_params(table, index, where, attributes), TotalSegments=segments
+        )
+        page = ItemPage(
+            table=table,
+            index=index,
+            operation="sample",
+            keys=self.key_attributes(table, index),
+        )
+        budget = (
+            None if scan_limit is None else math.ceil(scan_limit / segments)
+        )  # items each segment may read
+        cursors: dict[int, Any] = dict.fromkeys(
+            range(segments)
+        )  # open segment -> where to resume it
         spent: dict[int, int] = dict.fromkeys(range(segments), 0)
         started = time.monotonic()
 
         def read(job: tuple[int, Any, int | None], share: int) -> ItemPage:
             segment, start, limit = job
-            return self._read("scan", table, index, dict(params, Segment=segment), n=share, start_key=start,
-                              scan_limit=limit)
+            return self._read(
+                "scan",
+                table,
+                index,
+                dict(params, Segment=segment),
+                n=share,
+                start_key=start,
+                scan_limit=limit,
+            )
 
         with ThreadPoolExecutor(max_workers=min(segments, 16)) as pool:
             while cursors and len(page.items) < n:
-                jobs = [(s, cursors[s], None if budget is None else budget - spent[s]) for s in cursors]
+                jobs = [
+                    (s, cursors[s], None if budget is None else budget - spent[s])
+                    for s in cursors
+                ]
                 share = math.ceil((n - len(page.items)) / len(jobs))
-                for (segment, _, _), part in zip(jobs, pool.map(read, jobs, [share] * len(jobs))):
+                for (segment, _, _), part in zip(
+                    jobs, pool.map(read, jobs, [share] * len(jobs))
+                ):
                     page.items += part.items
                     page.stats.add(part.stats)
                     spent[segment] += part.stats.scanned
-                    if part.last_key is None or (budget is not None and spent[segment] >= budget):
+                    if part.last_key is None or (
+                        budget is not None and spent[segment] >= budget
+                    ):
                         del cursors[segment]
                     else:
                         cursors[segment] = part.last_key
@@ -1481,13 +2007,23 @@ class DynamoDBAnalyzer:
         page.stats.seconds = time.monotonic() - started
         return page
 
-    def sql(self, statement: str, *parameters: Any, n: int | None = 100, next_token: str | None = None,
-            consistent: bool = False, progress: Callable[[int], None] | None = None) -> ItemPage:
+    def sql(
+        self,
+        statement: str,
+        *parameters: Any,
+        n: int | None = 100,
+        next_token: str | None = None,
+        consistent: bool = False,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """Run a PartiQL statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#1'). Parameters fill
         the ? placeholders in order. Pages are kept whole (so you may get a few more than n) and last_key
         continues exactly, as next_token=. Without the partition key in WHERE, a SELECT scans the table."""
         n = _as_count(n, "n")
-        params: dict[str, Any] = {"Statement": statement, "ReturnConsumedCapacity": "TOTAL"}
+        params: dict[str, Any] = {
+            "Statement": statement,
+            "ReturnConsumedCapacity": "TOTAL",
+        }
         if parameters:
             params["Parameters"] = [to_dynamo(p) for p in parameters]
         if consistent:
@@ -1505,7 +2041,9 @@ class DynamoDBAnalyzer:
         started = time.monotonic()
         while True:
             resp = self.client.execute_statement(**params)
-            page.stats.read_units += resp.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+            page.stats.read_units += resp.get("ConsumedCapacity", {}).get(
+                "CapacityUnits", 0.0
+            )
             page.items += [from_dynamo_item(item) for item in resp.get("Items", [])]
             page.last_key = resp.get("NextToken")
             if progress:
@@ -1520,8 +2058,14 @@ class DynamoDBAnalyzer:
 
     # ---------------------------------------------------------------- analysis
 
-    def _pages(self, params: dict[str, Any], stats: ReadStats, *, limit: int | None = None,
-               progress: Callable[[int], None] | None = None) -> Iterator[dict[str, Any]]:
+    def _pages(
+        self,
+        params: dict[str, Any],
+        stats: ReadStats,
+        *,
+        limit: int | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> Iterator[dict[str, Any]]:
         """Scan responses (up to 1 MB each) until the end of the table or until `limit` items were read."""
         limit = _as_count(limit, "limit")
         params = dict(params, ReturnConsumedCapacity="TOTAL")
@@ -1532,7 +2076,9 @@ class DynamoDBAnalyzer:
                     params["Limit"] = max(1, limit - stats.scanned)
                 resp = self.client.scan(**params)
                 stats.scanned += resp.get("ScannedCount", 0)
-                stats.read_units += resp.get("ConsumedCapacity", {}).get("CapacityUnits", 0.0)
+                stats.read_units += resp.get("ConsumedCapacity", {}).get(
+                    "CapacityUnits", 0.0
+                )
                 yield resp
                 if progress:
                     progress(stats.scanned)
@@ -1546,10 +2092,17 @@ class DynamoDBAnalyzer:
         finally:
             stats.seconds += time.monotonic() - started
 
-    def iter_items(self, table: str, *, where: Any = None, index: str | None = None,
-                   attributes: str | Iterable[str] | None = None, limit: int | None = None,
-                   progress: Callable[[int], None] | None = None,
-                   stats: ReadStats | None = None) -> Iterator[dict[str, Any]]:
+    def iter_items(
+        self,
+        table: str,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        limit: int | None = None,
+        progress: Callable[[int], None] | None = None,
+        stats: ReadStats | None = None,
+    ) -> Iterator[dict[str, Any]]:
         """Stream a scan's items without keeping them in memory. `limit` caps the items read; pass
         stats=ReadStats() to see afterwards what the scan read and cost."""
         stats = ReadStats() if stats is None else stats
@@ -1559,8 +2112,14 @@ class DynamoDBAnalyzer:
                 stats.matched += 1
                 yield from_dynamo_item(raw)
 
-    def count(self, table: str, *, where: Any = None, index: str | None = None,
-              progress: Callable[[int], None] | None = None) -> ReadStats:
+    def count(
+        self,
+        table: str,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> ReadStats:
         """Exact item count (of items matching `where`) as ReadStats.matched: a full scan with Select=COUNT.
         No items come back, but every item is still read and billed. table(t).item_count is an instant
         estimate, refreshed about every 6 hours."""
@@ -1570,29 +2129,72 @@ class DynamoDBAnalyzer:
             stats.matched += resp.get("Count", 0)
         return stats
 
-    def value_counts(self, table: str, attribute: str, *, limit: int | None = 10_000, where: Any = None,
-                     index: str | None = None, progress: Callable[[int], None] | None = None) -> ValueCounts:
+    def value_counts(
+        self,
+        table: str,
+        attribute: str,
+        *,
+        limit: int | None = 10_000,
+        where: Any = None,
+        index: str | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> ValueCounts:
         """How often each value of `attribute` (a dotted path reaches into maps) occurs among the first
         `limit` items read (None = the whole table). On the partition key: the size of each item collection."""
         stats = ReadStats()
-        items = self.iter_items(table, where=where, index=index, limit=limit, progress=progress, stats=stats)
+        items = self.iter_items(
+            table, where=where, index=index, limit=limit, progress=progress, stats=stats
+        )
         result = count_values(items, attribute)
         result.table, result.stats = table, stats
         return result
 
-    def largest(self, table: str, n: int = 10, *, limit: int | None = 10_000, where: Any = None,
-                index: str | None = None, progress: Callable[[int], None] | None = None) -> ItemPage:
+    def largest(
+        self,
+        table: str,
+        n: int = 10,
+        *,
+        limit: int | None = 10_000,
+        where: Any = None,
+        index: str | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> ItemPage:
         """The n biggest items (by DynamoDB's sizing rules), biggest first, among the first `limit` items
         read (None = the whole table)."""
         n = _as_int(n, "n")
-        page = ItemPage(table=table, index=index, operation="largest", keys=self.key_attributes(table, index))
-        items = self.iter_items(table, where=where, index=index, limit=limit, progress=progress, stats=page.stats)
-        page.items = [item for _, _, item in heapq.nlargest(n, ((item_size(it), i, it) for i, it in enumerate(items)))]
+        page = ItemPage(
+            table=table,
+            index=index,
+            operation="largest",
+            keys=self.key_attributes(table, index),
+        )
+        items = self.iter_items(
+            table,
+            where=where,
+            index=index,
+            limit=limit,
+            progress=progress,
+            stats=page.stats,
+        )
+        page.items = [
+            item
+            for _, _, item in heapq.nlargest(
+                n, ((item_size(it), i, it) for i, it in enumerate(items))
+            )
+        ]
         return page
 
-    def profile(self, table: str, n: int = 1000, *, where: Any = None, index: str | None = None,
-                spread: bool = True, max_depth: int = 2,
-                progress: Callable[[int], None] | None = None) -> TableProfile:
+    def profile(
+        self,
+        table: str,
+        n: int = 1000,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        spread: bool = True,
+        max_depth: int = 2,
+        progress: Callable[[int], None] | None = None,
+    ) -> TableProfile:
         """Profile about n items: attribute names, types, fill rate, distinct values, ranges, examples,
         key shapes and item sizes. spread=True samples across the whole table (see sample);
         spread=False reads from the start of it."""
@@ -1603,7 +2205,9 @@ class DynamoDBAnalyzer:
         info = self.table(table)
         result = profile_items(page.items, table, keys=page.keys, max_depth=max_depth)
         result.index, result.stats = index, page.stats
-        result.approx_item_count = info.index(index).item_count if index else info.item_count
+        result.approx_item_count = (
+            info.index(index).item_count if index else info.item_count
+        )
         return result
 
 
@@ -1620,7 +2224,9 @@ class _Title:
 
 @dataclass
 class _Cards:
-    items: list[tuple[str, ...]]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
+    items: list[
+        tuple[str, ...]
+    ]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
 
 
 @dataclass
@@ -1633,7 +2239,9 @@ class _Table:
     tree: bool = False  # first column holds indented tree labels
     max_rows: int | None = None  # None = view default, 0 = no cap
     code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
-    prose_cols: tuple[int, ...] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
+    prose_cols: tuple[
+        int, ...
+    ] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
     collapsed: bool = False  # a secondary view: folded under its title in HTML
 
 
@@ -1649,7 +2257,9 @@ class _Text:
     title: str = ""
     wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
     code: bool = False  # a snippet to copy: in HTML one click selects all of it
-    collapsed: bool = False  # a secondary view (raw JSON): folded under its title in HTML
+    collapsed: bool = (
+        False  # a secondary view (raw JSON): folded under its title in HTML
+    )
 
 
 @dataclass
@@ -1660,13 +2270,16 @@ class _Findings:
 
 @dataclass
 class _Next:
-    items: list[tuple[str, str]]  # (call, what it shows): the commands worth running next, arguments filled in
+    items: list[
+        tuple[str, str]
+    ]  # (call, what it shows): the commands worth running next, arguments filled in
     title: str = "Next"
 
 
 @dataclass
 class _Tone:
     """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
+
     text: str
     tone: str = "warn"  # 'warn' | 'bad' | 'ok'
 
@@ -1733,11 +2346,16 @@ _BADGE = "DynamoDB"  # the chip before each report's title, so reports from diff
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 # A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
 # or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
-_CALL_RE = re.compile(r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
-                      r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
-                      r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)")
+_CALL_RE = re.compile(
+    r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
+    r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
+    r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)"
+)
 _TONES = ("warn", "bad", "ok")
-_MARKS = {"warn": "[!] ", "ok": "[ok] "}  # text-mode prefix of a note by level; anything else is "[i] "
+_MARKS = {
+    "warn": "[!] ",
+    "ok": "[ok] ",
+}  # text-mode prefix of a note by level; anything else is "[i] "
 _SELECT = ' title="Click to select, then copy"'
 
 
@@ -1749,18 +2367,30 @@ def _prose(value: Any) -> str:
     """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
     The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
     pieces = _CALL_RE.split("" if value is None else str(value))
-    return "".join(f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece) for i, piece in enumerate(pieces))
+    return "".join(
+        f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece)
+        for i, piece in enumerate(pieces)
+    )
 
 
 def _call(name: str, *args: Any, **kwargs: Any) -> str:
     """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
-    def literal(value: Any) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
+
+    def literal(
+        value: Any,
+    ) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
         if type(value).__name__ == "Decimal":
             return str(value)
         if isinstance(value, dict):
-            return "{" + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items()) + "}"
+            return (
+                "{"
+                + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items())
+                + "}"
+            )
         if isinstance(value, (list, tuple)):
-            inner = ", ".join(map(literal, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
+            inner = ", ".join(map(literal, value)) + (
+                "," if isinstance(value, tuple) and len(value) == 1 else ""
+            )
             return f"[{inner}]" if isinstance(value, list) else f"({inner})"
         return repr(value)
 
@@ -1770,8 +2400,14 @@ def _call(name: str, *args: Any, **kwargs: Any) -> str:
 def _signature(function: Callable) -> str:
     """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
     sig = inspect.signature(function)
-    params = [p.replace(annotation=inspect.Parameter.empty) for name, p in sig.parameters.items() if name != "self"]
-    return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
+    params = [
+        p.replace(annotation=inspect.Parameter.empty)
+        for name, p in sig.parameters.items()
+        if name != "self"
+    ]
+    return str(
+        sig.replace(parameters=params, return_annotation=inspect.Signature.empty)
+    )
 
 
 def _tone(item: tuple[str, ...]) -> str:
@@ -1787,8 +2423,15 @@ def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
 def _counts(findings: list[tuple[str, str]], sep: str) -> str:
     """'2 warnings · 3 notes'."""
     warns = sum(level == "warn" for level, _ in findings)
-    return sep.join(filter(None, [_plural(warns, "warning") if warns else "",
-                                  _plural(len(findings) - warns, "note") if len(findings) > warns else ""]))
+    return sep.join(
+        filter(
+            None,
+            [
+                _plural(warns, "warning") if warns else "",
+                _plural(len(findings) - warns, "note") if len(findings) > warns else "",
+            ],
+        )
+    )
 
 
 def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
@@ -1800,36 +2443,53 @@ def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int
 def _hidden(count: int, table: _Table, default_max: int) -> str:
     """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
     text = f"... {count:,} more rows not shown"
-    return text + (f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)" if table.max_rows is None else "")
+    return text + (
+        f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)"
+        if table.max_rows is None
+        else ""
+    )
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out = [_CSS, '<div class="ddb">']
     for block in blocks:
         if isinstance(block, _Title):
-            out.append(f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>')
+            out.append(
+                f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>'
+            )
             if block.sub:
                 out.append(f'<div class="sub">{_prose(block.sub)}</div>')
         elif isinstance(block, _Cards):
-            cards = "".join(f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
-                            f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>' for item in block.items)
+            cards = "".join(
+                f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
+                f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
+                for item in block.items
+            )
             out.append(f'<div class="cards">{cards}</div>')
         elif isinstance(block, _Note):
             out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
         elif isinstance(block, _Findings):
             items = _ordered(block.items)
             if items:
-                notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
+                notes = "".join(
+                    f'<div class="note {level}">{_prose(message)}</div>'
+                    for level, message in items
+                )
                 head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
                 out.append(f'<div class="fd">{head}{notes}</div>')
             elif block.empty:
                 out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
         elif isinstance(block, _Next):
             if block.items:
-                items = "".join(f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
-                                + (f'<span class="nw">{_esc(why)}</span>' if why else "") + "</span>"
-                                for call, why in block.items)
-                out.append(f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>')
+                items = "".join(
+                    f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
+                    + (f'<span class="nw">{_esc(why)}</span>' if why else "")
+                    + "</span>"
+                    for call, why in block.items
+                )
+                out.append(
+                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>'
+                )
         elif isinstance(block, _Table):
             if not block.rows:
                 if block.title:
@@ -1838,7 +2498,9 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 continue
             rows, hidden = _visible_rows(block, max_rows)
             head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
-            head += f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
+            head += (
+                f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
+            )
             body = []
             for i, row in enumerate(rows):
                 cells = []
@@ -1857,31 +2519,56 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                         css = "n"
                     else:
                         css = "s" if len(text) <= 16 and "\n" not in text else ""
-                    cells.append(f'<td class="{css}">{inner}</td>' if css else f"<td>{inner}</td>")
+                    cells.append(
+                        f'<td class="{css}">{inner}</td>'
+                        if css
+                        else f"<td>{inner}</td>"
+                    )
                 if block.bars is not None:
                     pct = max(0.0, min(1.0, block.bars[i])) * 100
-                    cells.append(f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                                 f"</span></span>{pct:.1f}%</td>")
+                    cells.append(
+                        f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
+                        f"</span></span>{pct:.1f}%</td>"
+                    )
                 body.append(f"<tr>{''.join(cells)}</tr>")
-            table = (f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
-                     f'</thead><tbody>{"".join(body)}</tbody></table></div>')
+            table = (
+                f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
+                f"</thead><tbody>{''.join(body)}</tbody></table></div>"
+            )
             if hidden:
-                table += f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
+                table += (
+                    f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
+                )
             if block.collapsed:
-                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")} '
-                           f"({len(block.rows):,})</summary>{table}</details>")
+                out.append(
+                    f'<details class="sec"><summary>{_prose(block.title or "Details")} '
+                    f"({len(block.rows):,})</summary>{table}</details>"
+                )
             else:
                 if block.title:
                     out.append(f"<h4>{_prose(block.title)}</h4>")
                 out.append(table)
         elif isinstance(block, _Text):
-            css = " ".join(filter(None, ["wrap" if block.wrap else "", "code" if block.code else ""]))
-            pre = (f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>' if css
-                   else f"<pre>{_esc(block.text)}</pre>")
+            css = " ".join(
+                filter(
+                    None, ["wrap" if block.wrap else "", "code" if block.code else ""]
+                )
+            )
+            pre = (
+                f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>'
+                if css
+                else f"<pre>{_esc(block.text)}</pre>"
+            )
             if block.collapsed:
-                out.append(f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>')
+                out.append(
+                    f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
+                )
             else:
-                hint = '<span class="hint">click it to select all, then copy</span>' if block.code else ""
+                hint = (
+                    '<span class="hint">click it to select all, then copy</span>'
+                    if block.code
+                    else ""
+                )
                 if block.title or hint:
                     out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
                 out.append(pre)
@@ -1899,11 +2586,15 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
     out: list[str] = []
     for block in blocks:
         if isinstance(block, _Title):
-            out += ["", block.text, "=" * min(len(block.text), 100)] + ([block.sub] if block.sub else [])
+            out += ["", block.text, "=" * min(len(block.text), 100)] + (
+                [block.sub] if block.sub else []
+            )
         elif isinstance(block, _Cards):
             line = ""
             for entry in block.items:
-                item = f"{entry[0]}: {entry[1]}" + (" (!)" if _tone(entry) in ("warn", "bad") else "")
+                item = f"{entry[0]}: {entry[1]}" + (
+                    " (!)" if _tone(entry) in ("warn", "bad") else ""
+                )
                 if line and len(line) + len(item) > 100:
                     out.append(line)
                     line = ""
@@ -1922,7 +2613,10 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             if block.items:
                 width = max(len(call) for call, _ in block.items)
                 out += ["", f"{block.title}:"]
-                out += [f"  {call.ljust(width)}   {why}".rstrip() for call, why in block.items]
+                out += [
+                    f"  {call.ljust(width)}   {why}".rstrip()
+                    for call, why in block.items
+                ]
         elif isinstance(block, _Table):
             out.append("")
             if block.title:
@@ -1931,16 +2625,28 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 out.append("(none)")
                 continue
             rows, hidden = _visible_rows(block, max_rows)
-            headers = list(block.headers) + ([block.bar_label] if block.bars is not None else [])
-            cells = [[_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
-                     + ([_text_bar(block.bars[i])] if block.bars is not None else []) for i, row in enumerate(rows)]
-            widths = [max([len(h)] + [len(r[j]) for r in cells]) for j, h in enumerate(headers)]
+            headers = list(block.headers) + (
+                [block.bar_label] if block.bars is not None else []
+            )
+            cells = [
+                [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
+                + ([_text_bar(block.bars[i])] if block.bars is not None else [])
+                for i, row in enumerate(rows)
+            ]
+            widths = [
+                max([len(h)] + [len(r[j]) for r in cells])
+                for j, h in enumerate(headers)
+            ]
 
             def line_of(values: list[str], widths: list[int] = widths) -> str:
-                return "  ".join(v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
-                                 for v, w in zip(values, widths)).rstrip()
+                return "  ".join(
+                    v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                    for v, w in zip(values, widths)
+                ).rstrip()
 
-            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [line_of(r) for r in cells]
+            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [
+                line_of(r) for r in cells
+            ]
             if hidden:
                 out.append(_hidden(hidden, block, max_rows))
         elif isinstance(block, _Text):
@@ -1972,15 +2678,27 @@ def _progress_bar_class(notebook: bool) -> Any:
 
 def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
     """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
-    options: dict[str, Any] = {"desc": label, "total": total, "leave": False, "delay": 0.5, "mininterval": 0.25,
-                               "dynamic_ncols": True, "disable": False, "unit_scale": True}
+    options: dict[str, Any] = {
+        "desc": label,
+        "total": total,
+        "leave": False,
+        "delay": 0.5,
+        "mininterval": 0.25,
+        "dynamic_ncols": True,
+        "disable": False,
+        "unit_scale": True,
+    }
     if unit == "B":
         options.update(unit="B", unit_divisor=1024)
     else:
         known = total is not None
         counts = "{percentage:3.0f}%|{bar}| {n:,}/{total:,}" if known else "{n:,}"
-        timing = "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
-        options.update(unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]")
+        timing = (
+            "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
+        )
+        options.update(
+            unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]"
+        )
     return bar_class(**options)
 
 
@@ -1995,7 +2713,9 @@ def _duration(seconds: float) -> str:
     return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60):02d}m"
 
 
-def _progress_text(label: str, unit: str, count: int, total: int | None, elapsed: float) -> str:
+def _progress_text(
+    label: str, unit: str, count: int, total: int | None, elapsed: float
+) -> str:
     """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
     amount = human_size if unit == "B" else (lambda n: f"{n:,}")
     text = f"{label}... {amount(count)}"
@@ -2007,14 +2727,24 @@ def _progress_text(label: str, unit: str, count: int, total: int | None, elapsed
     text += f" · {_duration(elapsed)}"
     if elapsed >= 1 and count:
         rate = count / elapsed
-        text += f" · {human_size(rate)}/s" if unit == "B" else f" · {rate:,.0f}/s" if rate >= 10 else f" · {rate:.1f}/s"
+        text += (
+            f" · {human_size(rate)}/s"
+            if unit == "B"
+            else f" · {rate:,.0f}/s"
+            if rate >= 10
+            else f" · {rate:.1f}/s"
+        )
         if total and total > count:
             text += f" · about {_duration((total - count) / rate)} left"
     return text
 
 
 def _fmt_dt(moment: datetime | None) -> str:
-    return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    return (
+        "-"
+        if moment is None
+        else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    )
 
 
 def _share(part: float, whole: float) -> float:
@@ -2031,7 +2761,12 @@ def _target(table: str, index: str | None) -> str:
 
 def _keys_label(info: TableInfo | IndexInfo, types: dict[str, str]) -> str:
     """'pk (string) + sk (number)'."""
-    return " + ".join(f"{k} ({TYPE_NAMES.get(types.get(k, ''), '?')})" for k in info.keys if k) or "-"
+    return (
+        " + ".join(
+            f"{k} ({TYPE_NAMES.get(types.get(k, ''), '?')})" for k in info.keys if k
+        )
+        or "-"
+    )
 
 
 def _capacity_label(read: int | None, write: int | None) -> str:
@@ -2044,18 +2779,29 @@ def _billing_label(info: TableInfo) -> str:
     return "provisioned: " + _capacity_label(info.read_capacity, info.write_capacity)
 
 
-_TABLE_CLASSES = {"STANDARD": "standard", "STANDARD_INFREQUENT_ACCESS": "standard-infrequent access (cheaper storage)"}
-_STREAM_VIEWS = {"KEYS_ONLY": "on: keys only", "NEW_IMAGE": "on: new item", "OLD_IMAGE": "on: old item",
-                 "NEW_AND_OLD_IMAGES": "on: old and new item"}
+_TABLE_CLASSES = {
+    "STANDARD": "standard",
+    "STANDARD_INFREQUENT_ACCESS": "standard-infrequent access (cheaper storage)",
+}
+_STREAM_VIEWS = {
+    "KEYS_ONLY": "on: keys only",
+    "NEW_IMAGE": "on: new item",
+    "OLD_IMAGE": "on: old item",
+    "NEW_AND_OLD_IMAGES": "on: old and new item",
+}
 _TTL_STATES = {"DISABLED": "off", "ENABLING": "turning on", "DISABLING": "turning off"}
-_NO_MATCH = ("No items matched. Values are typed: '100' (text) doesn't match 100 (a number); "
-             "schema() shows each attribute's type.")
+_NO_MATCH = (
+    "No items matched. Values are typed: '100' (text) doesn't match 100 (a number); "
+    "schema() shows each attribute's type."
+)
 
 
 def _projection_label(idx: IndexInfo) -> str:
     if idx.projection == "INCLUDE":
         return "keys + " + ", ".join(idx.projected)
-    return {"ALL": "all attributes", "KEYS_ONLY": "keys only"}.get(idx.projection, idx.projection)
+    return {"ALL": "all attributes", "KEYS_ONLY": "keys only"}.get(
+        idx.projection, idx.projection
+    )
 
 
 def _query_hint(info: TableInfo, idx: IndexInfo | None) -> str:
@@ -2072,7 +2818,10 @@ def _section(info: TableInfo, section: str, text: str) -> str:
 def _types_label(attr: AttributeProfile) -> str:
     if len(attr.types) == 1:
         return TYPE_NAMES.get(attr.main_type, attr.main_type)
-    return " · ".join(f"{TYPE_NAMES.get(kind, kind)} {_share(n, attr.count):.0%}" for kind, n in attr.types.most_common())
+    return " · ".join(
+        f"{TYPE_NAMES.get(kind, kind)} {_share(n, attr.count):.0%}"
+        for kind, n in attr.types.most_common()
+    )
 
 
 def _distinct_label(attr: AttributeProfile) -> str:
@@ -2095,8 +2844,13 @@ def _range_label(attr: AttributeProfile) -> str:
     return ""
 
 
-def _item_rows(item: dict[str, Any], keys: list[str], *, max_depth: int = 6,
-               max_elements: int = 100) -> list[list[str]]:
+def _item_rows(
+    item: dict[str, Any],
+    keys: list[str],
+    *,
+    max_depth: int = 6,
+    max_elements: int = 100,
+) -> list[list[str]]:
     """Attribute / type / value rows for one item, with maps (and lists holding maps or lists) expanded."""
     rows: list[list[str]] = []
     roles = dict(zip(keys, ("partition key", "sort key")))
@@ -2104,15 +2858,35 @@ def _item_rows(item: dict[str, Any], keys: list[str], *, max_depth: int = 6,
     def walk(label: str, value: Any, depth: int) -> None:
         kind = dynamo_type(value)
         indent = "    " * depth
-        nested = isinstance(value, dict) or (isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value))
+        nested = isinstance(value, dict) or (
+            isinstance(value, list) and any(isinstance(v, (dict, list)) for v in value)
+        )
         if not (nested and value and depth < max_depth):
-            rows.append([indent + label, TYPE_NAMES.get(kind, kind), format_value(value, 2000, oneline=False)])
+            rows.append(
+                [
+                    indent + label,
+                    TYPE_NAMES.get(kind, kind),
+                    format_value(value, 2000, oneline=False),
+                ]
+            )
             return
-        rows.append([indent + label, TYPE_NAMES.get(kind, kind), _plural(len(value), "field" if kind == "M" else "element")])
-        children = value.items() if isinstance(value, dict) else ((f"[{i}]", v) for i, v in enumerate(value))
+        rows.append(
+            [
+                indent + label,
+                TYPE_NAMES.get(kind, kind),
+                _plural(len(value), "field" if kind == "M" else "element"),
+            ]
+        )
+        children = (
+            value.items()
+            if isinstance(value, dict)
+            else ((f"[{i}]", v) for i, v in enumerate(value))
+        )
         for i, (name, child) in enumerate(children):
             if i == max_elements:
-                rows.append([indent + "    …", "", f"{len(value) - max_elements:,} more"])
+                rows.append(
+                    [indent + "    …", "", f"{len(value) - max_elements:,} more"]
+                )
                 break
             walk(str(name), child, depth + 1)
 
@@ -2135,7 +2909,9 @@ def _friendly_errors(method: Callable) -> Callable:
                 message = self._not_found(method.__name__, args, kwargs)
             self._show([_Note(f"{code}: {message}  [{method.__name__}]", "warn")])
         except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
-            self._show([_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")])
+            self._show(
+                [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
+            )
 
     return wrapper
 
@@ -2157,12 +2933,21 @@ class DynamoDBView:
         "Understand the data": ("schema", "value_counts", "largest", "count"),
         "Help": ("help",),
     }
-    _START = (("tables()", "every table: items, size, cost and warnings"),
-              ("table_info('table')", "keys, indexes and how to query each"),
-              ("sample('table')", "a few items from across the table"))
+    _START = (
+        ("tables()", "every table: items, size, cost and warnings"),
+        ("table_info('table')", "keys, indexes and how to query each"),
+        ("sample('table')", "a few items from across the table"),
+    )
 
-    def __init__(self, core: DynamoDBAnalyzer | None = None, *, mode: str = "auto", max_rows: int = 50,
-                 max_columns: int = 30, progress: str = "auto"):
+    def __init__(
+        self,
+        core: DynamoDBAnalyzer | None = None,
+        *,
+        mode: str = "auto",
+        max_rows: int = 50,
+        max_columns: int = 30,
+        progress: str = "auto",
+    ):
         if mode not in ("auto", "html", "text"):
             raise ValueError("mode must be 'auto', 'html' or 'text'")
         if progress not in ("auto", "plain", "off"):
@@ -2172,7 +2957,9 @@ class DynamoDBView:
         self.max_rows = max_rows
         self.progress = progress
         self.max_columns = max_columns
-        self._pager: tuple[str, str, Callable, str, Any, int] | None = None  # what more() continues
+        self._pager: tuple[str, str, Callable, str, Any, int] | None = (
+            None  # what more() continues
+        )
 
     # ------------------------------------------------------------------ plumbing
 
@@ -2185,21 +2972,32 @@ class DynamoDBView:
             print(_render_text(blocks, self.max_rows))
 
     @contextmanager
-    def _progress(self, label: str = "Reading", unit: str = "items read") -> Iterator[Callable[..., None]]:
+    def _progress(
+        self, label: str = "Reading", unit: str = "items read"
+    ) -> Iterator[Callable[..., None]]:
         """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
         and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
         Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
         at a time: when a nested _progress starts showing, the outer one's bar goes away."""
-        bar_class = [_progress_bar_class(self.use_html and _in_notebook()) if self.progress == "auto" else None]
+        bar_class = [
+            _progress_bar_class(self.use_html and _in_notebook())
+            if self.progress == "auto"
+            else None
+        ]
         bar: list[Any] = [None]
         handle: list[Any] = [None]
-        started: list[Any] = [time.monotonic(), None]  # when the current total started, and that total
+        started: list[Any] = [
+            time.monotonic(),
+            None,
+        ]  # when the current total started, and that total
         shown, width, stopped = [0.0], [0], [False]
 
         def close_bar() -> None:
             if bar[0] is not None:
                 if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
-                    bar[0].total = bar[0].n  # done early (a file it couldn't read): no red "failed" widget
+                    bar[0].total = bar[
+                        0
+                    ].n  # done early (a file it couldn't read): no red "failed" widget
                 bar[0].close()
                 bar[0] = None
 
@@ -2248,7 +3046,9 @@ class DynamoDBView:
                 if handle[0] is None:
                     handle[0] = display(HTML(""), display_id=True)
                 if handle[0] is not None:  # display() returns None outside IPython
-                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+                    handle[0].update(
+                        HTML(f'<div style="opacity:.6">{_esc(text)}</div>')
+                    )
             else:
                 width[0] = max(width[0], len(text))
                 print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
@@ -2266,90 +3066,193 @@ class DynamoDBView:
     def help(self, command: Any = None) -> None:
         """Every command, grouped by task; help('name') shows one command in full."""
         view = type(self).__name__
-        commands = {name: inspect.unwrap(member) for name, member in vars(type(self)).items()
-                    if not name.startswith("_") and callable(member)}
+        commands = {
+            name: inspect.unwrap(member)
+            for name, member in vars(type(self)).items()
+            if not name.startswith("_") and callable(member)
+        }
 
         def about(name: str) -> str:  # the docstring's first paragraph, on one line
-            return " ".join((inspect.getdoc(commands[name]) or "").split("\n\n")[0].split())
+            return " ".join(
+                (inspect.getdoc(commands[name]) or "").split("\n\n")[0].split()
+            )
 
         if command is not None:
             name = getattr(command, "__name__", str(command))
             if name not in commands:
                 close = difflib.get_close_matches(name, list(commands), n=3)
-                hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
-                self._show([_Note(f"{view} has no command {name!r}.{hint} help() lists them all.", "warn")])
+                hint = (
+                    f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+                )
+                self._show(
+                    [
+                        _Note(
+                            f"{view} has no command {name!r}.{hint} help() lists them all.",
+                            "warn",
+                        )
+                    ]
+                )
                 return
-            self._show([_Title(f"{name}{_signature(commands[name])}", f"{view} command · help() lists them all"),
-                        _Text(inspect.getdoc(commands[name]) or "(no description)", wrap=True)])
+            self._show(
+                [
+                    _Title(
+                        f"{name}{_signature(commands[name])}",
+                        f"{view} command · help() lists them all",
+                    ),
+                    _Text(
+                        inspect.getdoc(commands[name]) or "(no description)", wrap=True
+                    ),
+                ]
+            )
             return
         grouped = {name for names in self._GROUPS.values() for name in names}
-        groups = {**self._GROUPS, "Other": tuple(name for name in commands if name not in grouped)}
-        blocks: list[Any] = [_Title(f"{view} commands", "help('name') shows one in full · the data behind each report "
-                                                        f"comes from .core ({type(self.core).__name__})"),
-                             _Next(list(self._START), title="Start here")]
+        groups = {
+            **self._GROUPS,
+            "Other": tuple(name for name in commands if name not in grouped),
+        }
+        blocks: list[Any] = [
+            _Title(
+                f"{view} commands",
+                "help('name') shows one in full · the data behind each report "
+                f"comes from .core ({type(self.core).__name__})",
+            ),
+            _Next(list(self._START), title="Start here"),
+        ]
         for group, names in groups.items():
-            rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
+            rows = [
+                [f"{name}{_signature(commands[name])}", about(name)]
+                for name in names
+                if name in commands
+            ]
             if rows:
-                blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
+                blocks.append(
+                    _Table(
+                        ["Command", "What it shows"],
+                        rows,
+                        title=group,
+                        max_rows=0,
+                        code_cols=(0,),
+                    )
+                )
         self._show(blocks)
 
     def _not_found(self, command: str, args: tuple, kwargs: dict) -> str:
         """Why a table wasn't found, with the closest names in the region ('Orders' -> 'orders')."""
-        name = kwargs.get("statement" if command == "sql" else "table", args[0] if args else "")
+        name = kwargs.get(
+            "statement" if command == "sql" else "table", args[0] if args else ""
+        )
         if command == "sql":
             match = _FROM_RE.search(str(name))
             name = (match.group(1) or match.group(2)) if match else ""
-        text = f"table {name!r} not found in {self.core.region}" if name else f"table not found in {self.core.region}"
+        text = (
+            f"table {name!r} not found in {self.core.region}"
+            if name
+            else f"table not found in {self.core.region}"
+        )
         try:
             names = self.core.list_table_names()
         except (ClientError, BotoCoreError):
             names = []
-        close = [n for n in names if n.lower() == str(name).lower()] or difflib.get_close_matches(str(name), names, n=3)
+        close = [
+            n for n in names if n.lower() == str(name).lower()
+        ] or difflib.get_close_matches(str(name), names, n=3)
         if close:
-            return text + f". Did you mean {' or '.join(map(repr, close))}? Names are case-sensitive."
-        return text + " (names are case-sensitive, and tables are regional). tables() lists every table in the region."
+            return (
+                text
+                + f". Did you mean {' or '.join(map(repr, close))}? Names are case-sensitive."
+            )
+        return (
+            text
+            + " (names are case-sensitive, and tables are regional). tables() lists every table in the region."
+        )
 
     def _price_basis(self) -> str:
-        return "us-east-1 list prices" if self.core.prices == DYNAMODB_PRICES else "your prices"
+        return (
+            "us-east-1 list prices"
+            if self.core.prices == DYNAMODB_PRICES
+            else "your prices"
+        )
 
     def _read_cost(self, stats: ReadStats) -> str:
         return human_money(request_cost(stats.read_units, prices=self.core.prices))
 
-    def _items_blocks(self, items: list[dict[str, Any]], keys: list[str], title: str = "") -> list[Any]:
+    def _items_blocks(
+        self, items: list[dict[str, Any]], keys: list[str], title: str = ""
+    ) -> list[Any]:
         """A table of items (one row each, one column per attribute) plus a note about hidden columns."""
         columns, rows = items_table(items, keys)
         shown = columns[: self.max_columns] if self.max_columns else columns
-        blocks: list[Any] = [_Table(shown, [[format_value(row[c]) if c in row else "" for c in shown] for row in rows],
-                                    title=title, max_rows=0)]
+        blocks: list[Any] = [
+            _Table(
+                shown,
+                [
+                    [format_value(row[c]) if c in row else "" for c in shown]
+                    for row in rows
+                ],
+                title=title,
+                max_rows=0,
+            )
+        ]
         if len(shown) < len(columns):
-            rest = columns[len(shown):]
-            blocks.append(_Note(f"{_plural(len(rest), 'more attribute')} not shown ({', '.join(rest[:6])}"
-                                f"{', …' if len(rest) > 6 else ''}): pass attributes=[...] to choose, "
-                                "or get a DataFrame of everything from .core (page.to_df())."))
+            rest = columns[len(shown) :]
+            blocks.append(
+                _Note(
+                    f"{_plural(len(rest), 'more attribute')} not shown ({', '.join(rest[:6])}"
+                    f"{', …' if len(rest) > 6 else ''}): pass attributes=[...] to choose, "
+                    "or get a DataFrame of everything from .core (page.to_df())."
+                )
+            )
         return blocks
 
-    def _page(self, title: str, sub: str, fetch: Callable[[Any, Callable[[int], None]], ItemPage], *,
-              empty: str, start: Any = None, number: int = 1) -> None:
+    def _page(
+        self,
+        title: str,
+        sub: str,
+        fetch: Callable[[Any, Callable[[int], None]], ItemPage],
+        *,
+        empty: str,
+        start: Any = None,
+        number: int = 1,
+    ) -> None:
         """Fetch one page of items, show it, and remember how to continue for more()."""
         with self._progress() as tick:
             page = fetch(start, tick)
-        self._pager = (title, sub, fetch, empty, page.last_key, number + 1) if page.has_more else None
+        self._pager = (
+            (title, sub, fetch, empty, page.last_key, number + 1)
+            if page.has_more
+            else None
+        )
         st = page.stats
         cards = [("Items", f"{len(page.items):,}")]
         if st.scanned > st.matched:
             cards.append(("Items read", f"{st.scanned:,}"))
-        cards += [("Read units", _units(st.read_units)), ("Read cost (on-demand)", self._read_cost(st)),
-                  ("Time", f"{st.seconds:.1f}s")]
-        blocks: list[Any] = [_Title(title + (f"  (page {number})" if number > 1 else ""), sub), _Cards(cards)]
+        cards += [
+            ("Read units", _units(st.read_units)),
+            ("Read cost (on-demand)", self._read_cost(st)),
+            ("Time", f"{st.seconds:.1f}s"),
+        ]
+        blocks: list[Any] = [
+            _Title(title + (f"  (page {number})" if number > 1 else ""), sub),
+            _Cards(cards),
+        ]
         if not page.items:
             blocks.append(_Note(empty))
         elif page.operation == "scan" and st.scanned >= max(1000, 10 * st.matched):
-            blocks.append(_Note(f"Read {st.scanned:,} items to return {st.matched:,}: a filter runs after the read, "
-                                "so every item read is billed. If you search by this attribute often, a query on a "
-                                "key or an index is far cheaper."))
+            blocks.append(
+                _Note(
+                    f"Read {st.scanned:,} items to return {st.matched:,}: a filter runs after the read, "
+                    "so every item read is billed. If you search by this attribute often, a query on a "
+                    "key or an index is far cheaper."
+                )
+            )
         if page.items:
             blocks += self._items_blocks(page.items, page.keys)
-        blocks.append(_Next(([("more()", "the next page")] if page.has_more else []) + self._item_steps(page)))
+        blocks.append(
+            _Next(
+                ([("more()", "the next page")] if page.has_more else [])
+                + self._item_steps(page)
+            )
+        )
         self._show(blocks)
 
     def _item_steps(self, page: ItemPage) -> list[tuple[str, str]]:
@@ -2361,9 +3264,19 @@ class DynamoDBView:
         steps = []
         first = page.items[0] if page.items else {}
         if keys and all(k in first for k in keys):
-            steps.append((_call("get", page.table, *[first[k] for k in keys]), "the first item in full"))
+            steps.append(
+                (
+                    _call("get", page.table, *[first[k] for k in keys]),
+                    "the first item in full",
+                )
+            )
         if page.table and page.operation != "largest":
-            steps.append((_call("schema", page.table), "every attribute's types, fill rate and examples"))
+            steps.append(
+                (
+                    _call("schema", page.table),
+                    "every attribute's types, fill rate and examples",
+                )
+            )
         return steps
 
     # ------------------------------------------------------------------ tables
@@ -2373,8 +3286,10 @@ class DynamoDBView:
         """Every table in the region: key, items, size, billing, estimated monthly cost and warnings.
         match='prod-*' checks only matching table names."""
         with self._progress("Checking tables", unit="tables") as tick:
-            reports = sorted(self.core.table_reports(match=match, metrics=metrics, progress=tick),
-                             key=lambda r: r.info.name)
+            reports = sorted(
+                self.core.table_reports(match=match, metrics=metrics, progress=tick),
+                key=lambda r: r.info.name,
+            )
         rows: list[list[Any]] = []  # cells are text, or _Tone for a coloured status
         warnings: list[list[str]] = []
         unreadable: list[str] = []
@@ -2383,56 +3298,132 @@ class DynamoDBView:
         for report in reports:
             t, usage = report.info, report.metrics
             if "describe" in t.errors:
-                unreadable.append(f"{t.name} ({_why(t.errors['describe'], 'dynamodb:DescribeTable')})")
+                unreadable.append(
+                    f"{t.name} ({_why(t.errors['describe'], 'dynamodb:DescribeTable')})"
+                )
                 rows.append([t.name, "?", "-", "-", "-", "-", "-", "-", "-", "-"])
                 continue
             cost = sum(table_monthly_cost(t, self.core.prices, usage).values())
             total += cost
-            found = [message for level, message in table_findings(t, usage, self.core.prices) if level == "warn"]
+            found = [
+                message
+                for level, message in table_findings(t, usage, self.core.prices)
+                if level == "warn"
+            ]
             warnings += [[t.name, message] for message in found]
             if report.metrics_error:
-                no_usage.append(f"{t.name} ({_why(report.metrics_error, 'cloudwatch:GetMetricData')})")
-            rows.append([t.name, _Tone(t.status or "?", "" if t.status == "ACTIVE" else "warn"), _count(t.item_count),
-                         human_size(t.size_bytes), _keys_label(t, t.attribute_types), _billing_label(t),
-                         str(len(t.indexes)), human_money(cost), _Tone(str(len(found)), "warn" if found else ""),
-                         human_age(t.created)])
+                no_usage.append(
+                    f"{t.name} ({_why(report.metrics_error, 'cloudwatch:GetMetricData')})"
+                )
+            rows.append(
+                [
+                    t.name,
+                    _Tone(t.status or "?", "" if t.status == "ACTIVE" else "warn"),
+                    _count(t.item_count),
+                    human_size(t.size_bytes),
+                    _keys_label(t, t.attribute_types),
+                    _billing_label(t),
+                    str(len(t.indexes)),
+                    human_money(cost),
+                    _Tone(str(len(found)), "warn" if found else ""),
+                    human_age(t.created),
+                ]
+            )
         if metrics:
             basis = f"storage, capacity, backups and on-demand requests at the last 24h's rate, at {self._price_basis()}"
         else:
             basis = f"storage, capacity and backups at {self._price_basis()} (on-demand requests not included)"
         blocks: list[Any] = [
-            _Title(f"DynamoDB tables in {self.core.region} ({len(reports)})",
-                   (f"names matching {match!r} · " if match else "") + "item counts and sizes are DynamoDB's "
-                   f"estimates, refreshed about every 6 hours · cost is {basis}"),
-            _Cards([("Tables", f"{len(reports):,}"),
-                    ("Total size", human_size(sum(r.info.size_bytes or 0 for r in reports))),
+            _Title(
+                f"DynamoDB tables in {self.core.region} ({len(reports)})",
+                (f"names matching {match!r} · " if match else "")
+                + "item counts and sizes are DynamoDB's "
+                f"estimates, refreshed about every 6 hours · cost is {basis}",
+            ),
+            _Cards(
+                [
+                    ("Tables", f"{len(reports):,}"),
+                    (
+                        "Total size",
+                        human_size(sum(r.info.size_bytes or 0 for r in reports)),
+                    ),
                     ("Est. cost / month", human_money(total)),
-                    ("Tables with warnings", f"{len({name for name, _ in warnings}):,}",
-                     "warn" if warnings else "ok")]),
+                    (
+                        "Tables with warnings",
+                        f"{len({name for name, _ in warnings}):,}",
+                        "warn" if warnings else "ok",
+                    ),
+                ]
+            ),
         ]
         if not reports:
             where = f"matching {match!r} " if match else ""
-            blocks.append(_Note(f"No tables {where}in {self.core.region}. Tables are regional: try "
-                                "DynamoDBView(DynamoDBAnalyzer(region='eu-west-1'))."))
+            blocks.append(
+                _Note(
+                    f"No tables {where}in {self.core.region}. Tables are regional: try "
+                    "DynamoDBView(DynamoDBAnalyzer(region='eu-west-1'))."
+                )
+            )
             self._show(blocks)
             return
         if unreadable:
             blocks.append(_Note(f"Couldn't describe {', '.join(unreadable)}.", "warn"))
         if no_usage:
-            blocks.append(_Note(f"No CloudWatch usage for {', '.join(no_usage[:10])}{' …' if len(no_usage) > 10 else ''}: "
-                                "their on-demand request cost and capacity checks are missing."))
-        blocks.append(_Table(["Table", "Status", "Items", "Size", "Key", "Billing", "Indexes", "Est. $/month",
-                              "Warnings", "Created"], rows, max_rows=0))
+            blocks.append(
+                _Note(
+                    f"No CloudWatch usage for {', '.join(no_usage[:10])}{' …' if len(no_usage) > 10 else ''}: "
+                    "their on-demand request cost and capacity checks are missing."
+                )
+            )
+        blocks.append(
+            _Table(
+                [
+                    "Table",
+                    "Status",
+                    "Items",
+                    "Size",
+                    "Key",
+                    "Billing",
+                    "Indexes",
+                    "Est. $/month",
+                    "Warnings",
+                    "Created",
+                ],
+                rows,
+                max_rows=0,
+            )
+        )
         if warnings:
-            blocks.append(_Table(["Table", "Warning"], warnings, prose_cols=(1,),
-                                 title="Warnings (table_info(name) shows every finding for one table)", max_rows=0))
+            blocks.append(
+                _Table(
+                    ["Table", "Warning"],
+                    warnings,
+                    prose_cols=(1,),
+                    title="Warnings (table_info(name) shows every finding for one table)",
+                    max_rows=0,
+                )
+            )
         readable = [r.info for r in reports if "describe" not in r.info.errors]
         if readable:
             flagged = Counter(name for name, _ in warnings).most_common(1)
-            look = flagged[0][0] if flagged else max(readable, key=lambda t: t.size_bytes or 0).name
-            blocks.append(_Next([(_call("table_info", look), "why it's flagged, and what to change" if flagged
-                                  else "its indexes and how to query each, usage and cost"),
-                                 (_call("sample", look), "a few of its items")]))
+            look = (
+                flagged[0][0]
+                if flagged
+                else max(readable, key=lambda t: t.size_bytes or 0).name
+            )
+            blocks.append(
+                _Next(
+                    [
+                        (
+                            _call("table_info", look),
+                            "why it's flagged, and what to change"
+                            if flagged
+                            else "its indexes and how to query each, usage and cost",
+                        ),
+                        (_call("sample", look), "a few of its items"),
+                    ]
+                )
+            )
         self._show(blocks)
 
     @_friendly_errors
@@ -2446,28 +3437,55 @@ class DynamoDBView:
             try:
                 usage = self.core.table_metrics(table, hours=hours)
             except (ClientError, BotoCoreError) as exc:
-                blocks.append(_Note(f"No CloudWatch usage ({_why(_error_name(exc), 'cloudwatch:GetMetricData')}), so "
-                                    "the capacity checks and the on-demand request cost are missing.", "warn"))
+                blocks.append(
+                    _Note(
+                        f"No CloudWatch usage ({_why(_error_name(exc), 'cloudwatch:GetMetricData')}), so "
+                        "the capacity checks and the on-demand request cost are missing.",
+                        "warn",
+                    )
+                )
         types = info.attribute_types
         cost = table_monthly_cost(info, self.core.prices, usage)
-        ttl = (f"on ({info.ttl_attribute})" if info.ttl_status == "ENABLED"
-               else _TTL_STATES.get(info.ttl_status or "DISABLED", str(info.ttl_status).lower()))
-        pitr = "off" if not info.pitr else "on" + (f", {info.pitr_days} days" if info.pitr_days else "")
-        encryption = info.encryption + (f" ({info.kms_key.rsplit('/', 1)[-1]})" if info.kms_key else "")
+        ttl = (
+            f"on ({info.ttl_attribute})"
+            if info.ttl_status == "ENABLED"
+            else _TTL_STATES.get(
+                info.ttl_status or "DISABLED", str(info.ttl_status).lower()
+            )
+        )
+        pitr = (
+            "off"
+            if not info.pitr
+            else "on" + (f", {info.pitr_days} days" if info.pitr_days else "")
+        )
+        encryption = info.encryption + (
+            f" ({info.kms_key.rsplit('/', 1)[-1]})" if info.kms_key else ""
+        )
         cards = [
             ("Status", info.status or "?", "" if info.status == "ACTIVE" else "warn"),
             ("Items (estimate)", _count(info.item_count)),
             ("Size (estimate)", human_size(info.size_bytes)),
             ("Average item", human_size(info.avg_item_size)),
-            ("Partition key", f"{info.partition_key} ({TYPE_NAMES.get(types.get(info.partition_key, ''), '?')})"),
-            ("Sort key", f"{info.sort_key} ({TYPE_NAMES.get(types.get(info.sort_key, ''), '?')})" if info.sort_key else "none"),
+            (
+                "Partition key",
+                f"{info.partition_key} ({TYPE_NAMES.get(types.get(info.partition_key, ''), '?')})",
+            ),
+            (
+                "Sort key",
+                f"{info.sort_key} ({TYPE_NAMES.get(types.get(info.sort_key, ''), '?')})"
+                if info.sort_key
+                else "none",
+            ),
             ("Billing", _billing_label(info)),
             ("Est. cost / month", human_money(sum(cost.values()))),
             ("Table class", _TABLE_CLASSES.get(info.table_class, info.table_class)),
             ("Stream", _STREAM_VIEWS.get(info.stream, "on") if info.stream else "off"),
             ("TTL", _section(info, "ttl", ttl)),
-            ("Point-in-time recovery", _section(info, "pitr", pitr),
-             "warn" if info.pitr is False and "pitr" not in info.errors else ""),
+            (
+                "Point-in-time recovery",
+                _section(info, "pitr", pitr),
+                "warn" if info.pitr is False and "pitr" not in info.errors else "",
+            ),
             ("Deletion protection", "on" if info.deletion_protection else "off"),
             ("Encryption", encryption),
             ("Created", _fmt_dt(info.created)),
@@ -2475,8 +3493,12 @@ class DynamoDBView:
         if info.replicas:
             cards.append(("Replicas", ", ".join(info.replicas)))
         blocks.append(_Cards(cards))
-        blocks.append(_Findings(table_findings(info, usage, self.core.prices),
-                                empty="No issues found by these checks."))
+        blocks.append(
+            _Findings(
+                table_findings(info, usage, self.core.prices),
+                empty="No issues found by these checks.",
+            )
+        )
 
         def capacity(idx: IndexInfo | None) -> list[str]:
             if info.on_demand:
@@ -2486,96 +3508,255 @@ class DynamoDBView:
             source = idx or info
             return [_capacity_label(source.read_capacity, source.write_capacity)]
 
-        rows = [["(table)", "table", _keys_label(info, types), "all attributes", _count(info.item_count),
-                 human_size(info.size_bytes), *capacity(None), _query_hint(info, None)]]
-        rows += [[idx.name, f"{idx.kind} index", _keys_label(idx, types), _projection_label(idx),
-                  _count(idx.item_count), human_size(idx.size_bytes), *capacity(idx), _query_hint(info, idx)]
-                 for idx in info.indexes]
-        headers = ["Read from", "Kind", "Key", "Projection", "Items", "Size"] + ([] if info.on_demand else ["Capacity"])
-        blocks.append(_Table(headers + ["Query with"], rows, title="Table and indexes", max_rows=0,
-                             code_cols=(len(headers),)))
-        labels = {"storage": "Storage (table + indexes)", "capacity": "Provisioned capacity",
-                  "requests": f"On-demand reads and writes (at the last {hours}h's rate)",
-                  "backup": "Point-in-time recovery"}
-        blocks.append(_Table(["Cost", "Est. $/month"], [[labels[k], human_money(v)] for k, v in cost.items()],
-                             title=f"Estimated monthly cost ({self._price_basis()})"))
+        rows = [
+            [
+                "(table)",
+                "table",
+                _keys_label(info, types),
+                "all attributes",
+                _count(info.item_count),
+                human_size(info.size_bytes),
+                *capacity(None),
+                _query_hint(info, None),
+            ]
+        ]
+        rows += [
+            [
+                idx.name,
+                f"{idx.kind} index",
+                _keys_label(idx, types),
+                _projection_label(idx),
+                _count(idx.item_count),
+                human_size(idx.size_bytes),
+                *capacity(idx),
+                _query_hint(info, idx),
+            ]
+            for idx in info.indexes
+        ]
+        headers = ["Read from", "Kind", "Key", "Projection", "Items", "Size"] + (
+            [] if info.on_demand else ["Capacity"]
+        )
+        blocks.append(
+            _Table(
+                headers + ["Query with"],
+                rows,
+                title="Table and indexes",
+                max_rows=0,
+                code_cols=(len(headers),),
+            )
+        )
+        labels = {
+            "storage": "Storage (table + indexes)",
+            "capacity": "Provisioned capacity",
+            "requests": f"On-demand reads and writes (at the last {hours}h's rate)",
+            "backup": "Point-in-time recovery",
+        }
+        blocks.append(
+            _Table(
+                ["Cost", "Est. $/month"],
+                [[labels[k], human_money(v)] for k, v in cost.items()],
+                title=f"Estimated monthly cost ({self._price_basis()})",
+            )
+        )
         if usage and usage.has_data:
             minutes = usage.period // 60
-            rows = [["Read units", _units(usage.read_units), _units(usage.peak_reads),
-                     "on-demand" if info.on_demand else _count(info.read_capacity)],
-                    ["Write units", _units(usage.write_units), _units(usage.peak_writes),
-                     "on-demand" if info.on_demand else _count(info.write_capacity)],
-                    ["Read throttle events", f"{usage.read_throttles:,}", "", ""],
-                    ["Write throttle events", f"{usage.write_throttles:,}", "", ""]]
-            blocks.append(_Table(["Metric", f"Last {hours}h", f"Busiest {minutes} min, per second", "Provisioned"],
-                                 rows, title="Usage (CloudWatch, table only)"))
+            rows = [
+                [
+                    "Read units",
+                    _units(usage.read_units),
+                    _units(usage.peak_reads),
+                    "on-demand" if info.on_demand else _count(info.read_capacity),
+                ],
+                [
+                    "Write units",
+                    _units(usage.write_units),
+                    _units(usage.peak_writes),
+                    "on-demand" if info.on_demand else _count(info.write_capacity),
+                ],
+                ["Read throttle events", f"{usage.read_throttles:,}", "", ""],
+                ["Write throttle events", f"{usage.write_throttles:,}", "", ""],
+            ]
+            blocks.append(
+                _Table(
+                    [
+                        "Metric",
+                        f"Last {hours}h",
+                        f"Busiest {minutes} min, per second",
+                        "Provisioned",
+                    ],
+                    rows,
+                    title="Usage (CloudWatch, table only)",
+                )
+            )
         elif usage:
-            blocks.append(_Note(f"No reads or writes recorded in CloudWatch in the last {hours}h."))
+            blocks.append(
+                _Note(
+                    f"No reads or writes recorded in CloudWatch in the last {hours}h."
+                )
+            )
         if info.tags:
-            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(info.tags.items())], title="Tags",
-                                 collapsed=True))
-        blocks.append(_Next([(_call("sample", info.name), "a few items from across the table"),
-                             (_call("schema", info.name), "every attribute's types, fill rate and examples")]))
+            blocks.append(
+                _Table(
+                    ["Tag", "Value"],
+                    [[k, v] for k, v in sorted(info.tags.items())],
+                    title="Tags",
+                    collapsed=True,
+                )
+            )
+        blocks.append(
+            _Next(
+                [
+                    (_call("sample", info.name), "a few items from across the table"),
+                    (
+                        _call("schema", info.name),
+                        "every attribute's types, fill rate and examples",
+                    ),
+                ]
+            )
+        )
         self._show(blocks)
 
     # ------------------------------------------------------------------- items
 
     @_friendly_errors
-    def scan(self, table: str, n: int = 20, *, where: Any = None, index: str | None = None,
-             attributes: str | Iterable[str] | None = None, scan_limit: int | None = 100_000) -> None:
+    def scan(
+        self,
+        table: str,
+        n: int = 20,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        scan_limit: int | None = 100_000,
+    ) -> None:
         """Items from the start of the table (or an index) as a table; more() shows the next page.
         where= filters, e.g. where={'status': 'failed', 'total': ('>', 100)}."""
+
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
-            return self.core.scan(table, n, where=where, index=index, attributes=attributes, start_key=start,
-                                  scan_limit=scan_limit, progress=tick)
+            return self.core.scan(
+                table,
+                n,
+                where=where,
+                index=index,
+                attributes=attributes,
+                start_key=start,
+                scan_limit=scan_limit,
+                progress=tick,
+            )
 
         scan_limit = _as_count(scan_limit, "scan_limit")
         empty = "The table is empty." if where is None else _NO_MATCH
         if where is not None and scan_limit:
             empty += f" Each page reads at most {scan_limit:,} items (scan_limit); pass scan_limit=None to read on."
-        self._page(f"Scan {_target(table, index)}", f"where {describe_filter(where)}" if where else
-                   "from the start of the table", fetch, empty=empty)
+        self._page(
+            f"Scan {_target(table, index)}",
+            f"where {describe_filter(where)}"
+            if where
+            else "from the start of the table",
+            fetch,
+            empty=empty,
+        )
 
     @_friendly_errors
-    def query(self, table: str, partition: Any, sort: Any = None, *, n: int = 20, where: Any = None,
-              index: str | None = None, attributes: str | Iterable[str] | None = None,
-              descending: bool = False) -> None:
+    def query(
+        self,
+        table: str,
+        partition: Any,
+        sort: Any = None,
+        *,
+        n: int = 20,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        descending: bool = False,
+    ) -> None:
         """Items sharing one partition key, in sort-key order: query('orders', 'USER#42', sort=('begins_with', 'ORDER#')).
         index= queries a secondary index; descending=True starts from the highest sort key."""
         keys = self.core.keys(table, index)
 
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
-            return self.core.query(table, partition, sort, n=n, where=where, index=index, attributes=attributes,
-                                   descending=descending, start_key=start, progress=tick)
+            return self.core.query(
+                table,
+                partition,
+                sort,
+                n=n,
+                where=where,
+                index=index,
+                attributes=attributes,
+                descending=descending,
+                start_key=start,
+                progress=tick,
+            )
 
         condition = f"{keys[0]} = {partition!r}"
         if sort is not None and len(keys) > 1:
             condition += ", " + describe_condition(keys[1], sort)
-        sub = " · ".join(filter(None, [f"where {describe_filter(where)}" if where else "",
-                                       "highest sort key first" if descending else ""]))
-        empty = (f"No items with {keys[0]} = {partition!r}" + (" and that sort key" if sort is not None else "")
-                 + (" matching the filter" if where else "") + ". Keys are case-sensitive and typed: "
-                 "'42' (a string) and 42 (a number) are different keys.")
-        self._page(f"Query {_target(table, index)}: {condition}", sub, fetch, empty=empty)
+        sub = " · ".join(
+            filter(
+                None,
+                [
+                    f"where {describe_filter(where)}" if where else "",
+                    "highest sort key first" if descending else "",
+                ],
+            )
+        )
+        empty = (
+            f"No items with {keys[0]} = {partition!r}"
+            + (" and that sort key" if sort is not None else "")
+            + (" matching the filter" if where else "")
+            + ". Keys are case-sensitive and typed: "
+            "'42' (a string) and 42 (a number) are different keys."
+        )
+        self._page(
+            f"Query {_target(table, index)}: {condition}", sub, fetch, empty=empty
+        )
 
     @_friendly_errors
-    def sample(self, table: str, n: int = 20, *, where: Any = None, index: str | None = None,
-               attributes: str | Iterable[str] | None = None, scan_limit: int | None = 100_000) -> None:
+    def sample(
+        self,
+        table: str,
+        n: int = 20,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        attributes: str | Iterable[str] | None = None,
+        scan_limit: int | None = 100_000,
+    ) -> None:
         """About n items spread across the whole table (scan() only shows its start): a better first look."""
-        def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
-            return self.core.sample(table, n, where=where, index=index, attributes=attributes, scan_limit=scan_limit,
-                                    progress=tick)
 
-        sub = "spread across the table" + (f" · where {describe_filter(where)}" if where else "")
-        self._page(f"Sample of {_target(table, index)}", sub, fetch,
-                   empty="The table is empty." if where is None else _NO_MATCH)
+        def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
+            return self.core.sample(
+                table,
+                n,
+                where=where,
+                index=index,
+                attributes=attributes,
+                scan_limit=scan_limit,
+                progress=tick,
+            )
+
+        sub = "spread across the table" + (
+            f" · where {describe_filter(where)}" if where else ""
+        )
+        self._page(
+            f"Sample of {_target(table, index)}",
+            sub,
+            fetch,
+            empty="The table is empty." if where is None else _NO_MATCH,
+        )
 
     @_friendly_errors
     def more(self) -> None:
         """Next page of the last scan / query / sql."""
         if self._pager is None:
-            self._show([_Note("Nothing to continue: the last scan, query or sql returned everything "
-                              "(or none has run yet).")])
+            self._show(
+                [
+                    _Note(
+                        "Nothing to continue: the last scan, query or sql returned everything "
+                        "(or none has run yet)."
+                    )
+                ]
+            )
             return
         title, sub, fetch, empty, start, number = self._pager
         self._page(title, sub, fetch, empty=empty, start=start, number=number)
@@ -2586,170 +3767,392 @@ class DynamoDBView:
         The key can also be a dict: get('orders', {'pk': ..., 'sk': ...}). as_json=True adds a JSON copy."""
         primary = self.core.primary_key(table, key)
         item = self.core.get(table, primary)
-        blocks: list[Any] = [_Title(f"Item in {table}", ", ".join(f"{k} = {format_value(v, 60)}"
-                                                                   for k, v in primary.items()))]
+        blocks: list[Any] = [
+            _Title(
+                f"Item in {table}",
+                ", ".join(f"{k} = {format_value(v, 60)}" for k, v in primary.items()),
+            )
+        ]
         if item is None:
-            blocks.append(_Note("No item with this key. Keys are case-sensitive and typed: '42' (a string) and "
-                                "42 (a number) are different keys.", "warn"))
+            blocks.append(
+                _Note(
+                    "No item with this key. Keys are case-sensitive and typed: '42' (a string) and "
+                    "42 (a number) are different keys.",
+                    "warn",
+                )
+            )
             self._show(blocks)
             return
         size = item_size(item)
-        blocks.append(_Cards([
-            ("Attributes", f"{len(item):,}"),
-            ("Size (estimate)", human_size(size), "warn" if size > 300 * KB else ""),
-            ("Read cost", f"{_units(read_units(size))} read unit{'' if read_units(size) == 1 else 's'} "
-                          f"({_units(read_units(size, consistent=False))} if eventually consistent)"),
-            ("Write cost", _plural(write_units(size), "write unit")),
-        ]))
+        blocks.append(
+            _Cards(
+                [
+                    ("Attributes", f"{len(item):,}"),
+                    (
+                        "Size (estimate)",
+                        human_size(size),
+                        "warn" if size > 300 * KB else "",
+                    ),
+                    (
+                        "Read cost",
+                        f"{_units(read_units(size))} read unit{'' if read_units(size) == 1 else 's'} "
+                        f"({_units(read_units(size, consistent=False))} if eventually consistent)",
+                    ),
+                    ("Write cost", _plural(write_units(size), "write unit")),
+                ]
+            )
+        )
         if size > 300 * KB:
-            blocks.append(_Note(f"This item is {human_size(size)}; DynamoDB rejects items over 400 KB. {_LARGE_ITEM_ADVICE}",
-                                "warn"))
-        blocks.append(_Table(["Attribute", "Type", "Value"], _item_rows(item, list(primary)), tree=True, max_rows=0))
+            blocks.append(
+                _Note(
+                    f"This item is {human_size(size)}; DynamoDB rejects items over 400 KB. {_LARGE_ITEM_ADVICE}",
+                    "warn",
+                )
+            )
+        blocks.append(
+            _Table(
+                ["Attribute", "Type", "Value"],
+                _item_rows(item, list(primary)),
+                tree=True,
+                max_rows=0,
+            )
+        )
         if as_json:
             blocks.append(_Text(to_json(item, indent=2), title="JSON"))
         keys = list(primary)
         if len(keys) > 1:
-            blocks.append(_Next([(_call("query", table, primary[keys[0]]),
-                                  f"every item with {keys[0]} = {format_value(primary[keys[0]], 40)}")]))
+            blocks.append(
+                _Next(
+                    [
+                        (
+                            _call("query", table, primary[keys[0]]),
+                            f"every item with {keys[0]} = {format_value(primary[keys[0]], 40)}",
+                        )
+                    ]
+                )
+            )
         self._show(blocks)
 
     @_friendly_errors
     def sql(self, statement: str, *parameters: Any, n: int = 50) -> None:
         """Run a SQL-like (PartiQL) statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#42'); more() continues.
         Without the partition key in WHERE, a SELECT scans the whole table."""
-        def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
-            return self.core.sql(statement, *parameters, n=n, next_token=start, progress=tick)
 
-        sub = _clip(" ".join(statement.split()), 200) + (f"  with {list(parameters)!r}" if parameters else "")
+        def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
+            return self.core.sql(
+                statement, *parameters, n=n, next_token=start, progress=tick
+            )
+
+        sub = _clip(" ".join(statement.split()), 200) + (
+            f"  with {list(parameters)!r}" if parameters else ""
+        )
         self._page("PartiQL", sub, fetch, empty="No items came back.")
 
     # ---------------------------------------------------------------- analysis
 
     @_friendly_errors
-    def schema(self, table: str, n: int = 1000, *, where: Any = None, index: str | None = None,
-               spread: bool = True, max_depth: int = 2) -> None:
+    def schema(
+        self,
+        table: str,
+        n: int = 1000,
+        *,
+        where: Any = None,
+        index: str | None = None,
+        spread: bool = True,
+        max_depth: int = 2,
+    ) -> None:
         """What the items look like: every attribute's types, fill rate, examples and range, key patterns.
         Map fields are nested under their map. Reads about n items spread across the table."""
         with self._progress("Sampling") as tick:
-            p = self.core.profile(table, n, where=where, index=index, spread=spread, max_depth=max_depth,
-                                  progress=tick)
+            p = self.core.profile(
+                table,
+                n,
+                where=where,
+                index=index,
+                spread=spread,
+                max_depth=max_depth,
+                progress=tick,
+            )
         of = f" of ~{p.approx_item_count:,}" if p.approx_item_count else ""
         how = "spread across the table" if spread else "from the start of the table"
-        blocks: list[Any] = [_Title(f"Schema of {_target(table, index)}",
-                                    f"{p.items:,} items{of} profiled, {how}"
-                                    + (f" · where {describe_filter(where)}" if where else ""))]
+        blocks: list[Any] = [
+            _Title(
+                f"Schema of {_target(table, index)}",
+                f"{p.items:,} items{of} profiled, {how}"
+                + (f" · where {describe_filter(where)}" if where else ""),
+            )
+        ]
         if not p.items:
             blocks.append(_Note("No items to profile."))
             self._show(blocks)
             return
         top = sum(1 for a in p.attributes.values() if a.depth == 0)
-        blocks.append(_Cards([
-            ("Items profiled", f"{p.items:,}"),
-            ("Attributes", f"{top:,}"),
-            ("Map fields", f"{len(p.attributes) - top:,}"),
-            ("Average item", human_size(p.avg_size)),
-            ("Largest item", human_size(p.max_size)),
-            ("Read units", _units(p.stats.read_units)),
-        ]))
+        blocks.append(
+            _Cards(
+                [
+                    ("Items profiled", f"{p.items:,}"),
+                    ("Attributes", f"{top:,}"),
+                    ("Map fields", f"{len(p.attributes) - top:,}"),
+                    ("Average item", human_size(p.avg_size)),
+                    ("Largest item", human_size(p.max_size)),
+                    ("Read units", _units(p.stats.read_units)),
+                ]
+            )
+        )
         blocks.append(_Findings(profile_findings(p)))
         info = self.core.table(table)
-        roles = {info.partition_key: "partition key", **({info.sort_key: "sort key"} if info.sort_key else {})}
+        roles = {
+            info.partition_key: "partition key",
+            **({info.sort_key: "sort key"} if info.sort_key else {}),
+        }
         if index:
             idx = info.index(index)
-            roles.update({idx.partition_key: f"{index} partition key",
-                          **({idx.sort_key: f"{index} sort key"} if idx.sort_key else {})})
-        rows = [["    " * a.depth + a.name + (f"  ({roles[a.path]})" if a.depth == 0 and a.path in roles else ""),
-                 _types_label(a), _distinct_label(a), ", ".join(format_value(v, 30) for v in a.examples),
-                 _range_label(a)] for a in p.attributes.values()]
-        blocks.append(_Table(["Attribute", "Type", "Distinct", "Examples", "Range"], rows, title="Attributes",
-                             bars=[_share(a.count, p.items) for a in p.attributes.values()], bar_label="Present in",
-                             tree=True, max_rows=300))
+            roles.update(
+                {
+                    idx.partition_key: f"{index} partition key",
+                    **({idx.sort_key: f"{index} sort key"} if idx.sort_key else {}),
+                }
+            )
+        rows = [
+            [
+                "    " * a.depth
+                + a.name
+                + (f"  ({roles[a.path]})" if a.depth == 0 and a.path in roles else ""),
+                _types_label(a),
+                _distinct_label(a),
+                ", ".join(format_value(v, 30) for v in a.examples),
+                _range_label(a),
+            ]
+            for a in p.attributes.values()
+        ]
+        blocks.append(
+            _Table(
+                ["Attribute", "Type", "Distinct", "Examples", "Range"],
+                rows,
+                title="Attributes",
+                bars=[_share(a.count, p.items) for a in p.attributes.values()],
+                bar_label="Present in",
+                tree=True,
+                max_rows=300,
+            )
+        )
         for key, patterns in p.key_patterns.items():
             total = sum(patterns.values())
             shown = list(patterns.items())[:15]
-            blocks.append(_Table(["Pattern", "Items"], [[pattern, f"{count:,}"] for pattern, count in shown],
-                                 title=f"Key patterns: {key}" + (f" ({roles[key]})" if key in roles else ""),
-                                 bars=[_share(count, total) for _, count in shown], bar_label="% of items"))
-        blocks.append(_Table(["Item size", "Items"], [[label, f"{st.count:,}"] for label, st in p.size_histogram.items()],
-                             title="Item sizes", bars=[_share(st.count, p.items) for st in p.size_histogram.values()],
-                             bar_label="% of items"))
-        blocks.append(_Table([*p.keys, "Size", "Read units"],
-                             [[format_value(key.get(k), 60) for k in p.keys] + [human_size(size), _units(read_units(size))]
-                              for size, key in p.largest], title=f"Largest {len(p.largest)} items"))
-        grouping = [a for a in p.attributes.values() if a.depth == 0 and a.path not in roles
-                    and a.main_type in ("S", "N", "BOOL") and 1 < a.distinct <= 50 and not a.distinct_capped]
+            blocks.append(
+                _Table(
+                    ["Pattern", "Items"],
+                    [[pattern, f"{count:,}"] for pattern, count in shown],
+                    title=f"Key patterns: {key}"
+                    + (f" ({roles[key]})" if key in roles else ""),
+                    bars=[_share(count, total) for _, count in shown],
+                    bar_label="% of items",
+                )
+            )
+        blocks.append(
+            _Table(
+                ["Item size", "Items"],
+                [[label, f"{st.count:,}"] for label, st in p.size_histogram.items()],
+                title="Item sizes",
+                bars=[_share(st.count, p.items) for st in p.size_histogram.values()],
+                bar_label="% of items",
+            )
+        )
+        blocks.append(
+            _Table(
+                [*p.keys, "Size", "Read units"],
+                [
+                    [format_value(key.get(k), 60) for k in p.keys]
+                    + [human_size(size), _units(read_units(size))]
+                    for size, key in p.largest
+                ],
+                title=f"Largest {len(p.largest)} items",
+            )
+        )
+        grouping = [
+            a
+            for a in p.attributes.values()
+            if a.depth == 0
+            and a.path not in roles
+            and a.main_type in ("S", "N", "BOOL")
+            and 1 < a.distinct <= 50
+            and not a.distinct_capped
+        ]
         on_index = {"index": index} if index else {}
-        steps = [(_call("value_counts", table, max(grouping, key=lambda a: a.count).path, **on_index),
-                  "how often each of its values occurs")] if grouping else []
-        steps += [(_call("largest", table), "the biggest items in the table")] if p.max_size > 100 * KB else []
+        steps = (
+            [
+                (
+                    _call(
+                        "value_counts",
+                        table,
+                        max(grouping, key=lambda a: a.count).path,
+                        **on_index,
+                    ),
+                    "how often each of its values occurs",
+                )
+            ]
+            if grouping
+            else []
+        )
+        steps += (
+            [(_call("largest", table), "the biggest items in the table")]
+            if p.max_size > 100 * KB
+            else []
+        )
         blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
-    def value_counts(self, table: str, attribute: str, *, limit: int | None = 10_000, where: Any = None,
-                     index: str | None = None, top: int = 30) -> None:
+    def value_counts(
+        self,
+        table: str,
+        attribute: str,
+        *,
+        limit: int | None = 10_000,
+        where: Any = None,
+        index: str | None = None,
+        top: int = 30,
+    ) -> None:
         """How often each value of an attribute occurs ('address.city' reaches into maps).
         On the partition key this is each item collection's size: hot or oversized partitions stand out."""
         limit, top = _as_count(limit, "limit"), _as_int(top, "top")
         with self._progress() as tick:
-            vc = self.core.value_counts(table, attribute, limit=limit, where=where, index=index, progress=tick)
+            vc = self.core.value_counts(
+                table, attribute, limit=limit, where=where, index=index, progress=tick
+            )
         st = vc.stats
-        sub = f"{st.scanned:,} items read" + (f"; stopped at limit={limit:,}, pass limit=None to read the whole "
-                                               "table" if st.truncated else " (the whole table)")
-        blocks: list[Any] = [_Title(f"Values of {attribute} in {_target(table, index)}",
-                                    sub + (f" · where {describe_filter(where)}" if where else "")),
-                             _Cards([("Items", f"{vc.items:,}"), ("Distinct values", f"{len(vc.counts):,}"),
-                                     ("Without it", f"{vc.missing.count:,}"), ("Read units", _units(st.read_units)),
-                                     ("Read cost (on-demand)", self._read_cost(st))])]
+        sub = f"{st.scanned:,} items read" + (
+            f"; stopped at limit={limit:,}, pass limit=None to read the whole table"
+            if st.truncated
+            else " (the whole table)"
+        )
+        blocks: list[Any] = [
+            _Title(
+                f"Values of {attribute} in {_target(table, index)}",
+                sub + (f" · where {describe_filter(where)}" if where else ""),
+            ),
+            _Cards(
+                [
+                    ("Items", f"{vc.items:,}"),
+                    ("Distinct values", f"{len(vc.counts):,}"),
+                    ("Without it", f"{vc.missing.count:,}"),
+                    ("Read units", _units(st.read_units)),
+                    ("Read cost (on-demand)", self._read_cost(st)),
+                ]
+            ),
+        ]
         if attribute == self.core.keys(table, index)[0]:
-            blocks.append(_Note("This is the partition key, so each count is the size of one item collection. "
-                                "A few values holding most of the items (or data) can mean hot partitions."))
+            blocks.append(
+                _Note(
+                    "This is the partition key, so each count is the size of one item collection. "
+                    "A few values holding most of the items (or data) can mean hot partitions."
+                )
+            )
         shown = list(vc.counts.items())[:top]
-        rows = [[format_value(value), f"{s.count:,}", human_size(s.size)] for value, s in shown]
+        rows = [
+            [format_value(value), f"{s.count:,}", human_size(s.size)]
+            for value, s in shown
+        ]
         bars = [_share(s.count, vc.items) for _, s in shown]
         if vc.missing.count:
-            rows.append(["(not set)", f"{vc.missing.count:,}", human_size(vc.missing.size)])
+            rows.append(
+                ["(not set)", f"{vc.missing.count:,}", human_size(vc.missing.size)]
+            )
             bars.append(_share(vc.missing.count, vc.items))
-        blocks.append(_Table(["Value", "Items", "Size"], rows, bars=bars, bar_label="% of items", max_rows=0,
-                             title=f"Top {len(shown)} values" if len(vc.counts) > top else "Values"))
+        blocks.append(
+            _Table(
+                ["Value", "Items", "Size"],
+                rows,
+                bars=bars,
+                bar_label="% of items",
+                max_rows=0,
+                title=f"Top {len(shown)} values" if len(vc.counts) > top else "Values",
+            )
+        )
         if len(vc.counts) > top:
-            blocks.append(_Note(f"{len(vc.counts) - top:,} more values not shown; pass top= for more."))
+            blocks.append(
+                _Note(
+                    f"{len(vc.counts) - top:,} more values not shown; pass top= for more."
+                )
+            )
         common = shown[0][0] if shown else None
-        if isinstance(common, (str, int, float, Decimal)) and not isinstance(common, bool):
+        if isinstance(common, (str, int, float, Decimal)) and not isinstance(
+            common, bool
+        ):
             on_index = {"index": index} if index else {}
             biggest = shown[0][1].count
             if attribute == self.core.keys(table, index)[0]:
-                steps = [(_call("query", table, common, **on_index),
-                          f"the {biggest:,} items of the biggest item collection")] if biggest > 1 else []
+                steps = (
+                    [
+                        (
+                            _call("query", table, common, **on_index),
+                            f"the {biggest:,} items of the biggest item collection",
+                        )
+                    ]
+                    if biggest > 1
+                    else []
+                )
             else:
-                steps = [(_call("scan", table, where={attribute: common}, **on_index),
-                          f"items where {attribute} = {format_value(common, 30)}")]
+                steps = [
+                    (
+                        _call("scan", table, where={attribute: common}, **on_index),
+                        f"items where {attribute} = {format_value(common, 30)}",
+                    )
+                ]
             blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
-    def largest(self, table: str, n: int = 10, *, limit: int | None = 10_000, where: Any = None,
-                index: str | None = None) -> None:
+    def largest(
+        self,
+        table: str,
+        n: int = 10,
+        *,
+        limit: int | None = 10_000,
+        where: Any = None,
+        index: str | None = None,
+    ) -> None:
         """The biggest items (DynamoDB's size rules; the limit is 400 KB) among the first `limit` items read."""
         n, limit = _as_int(n, "n"), _as_count(limit, "limit")
         with self._progress() as tick:
-            page = self.core.largest(table, n, limit=limit, where=where, index=index, progress=tick)
+            page = self.core.largest(
+                table, n, limit=limit, where=where, index=index, progress=tick
+            )
         st = page.stats
         sizes = [item_size(item) for item in page.items]
-        sub = f"{st.scanned:,} items read" + (f"; stopped at limit={limit:,}, pass limit=None to read the whole "
-                                               "table" if st.truncated else " (the whole table)")
+        sub = f"{st.scanned:,} items read" + (
+            f"; stopped at limit={limit:,}, pass limit=None to read the whole table"
+            if st.truncated
+            else " (the whole table)"
+        )
         blocks: list[Any] = [
             _Title(f"Largest items in {_target(table, index)}", sub),
-            _Cards([("Largest", human_size(max(sizes, default=None))), ("Read units", _units(st.read_units)),
-                    ("Read cost (on-demand)", self._read_cost(st)), ("Time", f"{st.seconds:.1f}s")]),
+            _Cards(
+                [
+                    ("Largest", human_size(max(sizes, default=None))),
+                    ("Read units", _units(st.read_units)),
+                    ("Read cost (on-demand)", self._read_cost(st)),
+                    ("Time", f"{st.seconds:.1f}s"),
+                ]
+            ),
         ]
         if any(size > 300 * KB for size in sizes):
-            blocks.append(_Note(f"Some items are over 300 KB, close to DynamoDB's 400 KB item limit. {_LARGE_ITEM_ADVICE}",
-                                "warn"))
-        blocks.append(_Table([*page.keys, "Size", "Read units", "Attributes"],
-                             [[format_value(item.get(k), 60) for k in page.keys]
-                              + [human_size(size), _units(read_units(size)), f"{len(item):,}"]
-                              for item, size in zip(page.items, sizes)]))
+            blocks.append(
+                _Note(
+                    f"Some items are over 300 KB, close to DynamoDB's 400 KB item limit. {_LARGE_ITEM_ADVICE}",
+                    "warn",
+                )
+            )
+        blocks.append(
+            _Table(
+                [*page.keys, "Size", "Read units", "Attributes"],
+                [
+                    [format_value(item.get(k), 60) for k in page.keys]
+                    + [human_size(size), _units(read_units(size)), f"{len(item):,}"]
+                    for item, size in zip(page.items, sizes)
+                ],
+            )
+        )
         blocks.append(_Note("Sizes are estimates using DynamoDB's sizing rules."))
         blocks.append(_Next(self._item_steps(page)))
         self._show(blocks)
@@ -2761,9 +4164,21 @@ class DynamoDBView:
             st = self.core.count(table, where=where, index=index, progress=tick)
         info = self.core.table(table)
         estimate = info.index(index).item_count if index else info.item_count
-        self._show([
-            _Title(f"Count of {_target(table, index)}", f"where {describe_filter(where)}" if where else "full scan"),
-            _Cards([("Items" + (" matching" if where else ""), f"{st.matched:,}"), ("Items read", f"{st.scanned:,}"),
-                    ("Read units", _units(st.read_units)), ("Read cost (on-demand)", self._read_cost(st)),
-                    ("Time", f"{st.seconds:.1f}s"), ("DynamoDB's estimate", _count(estimate))]),
-        ])
+        self._show(
+            [
+                _Title(
+                    f"Count of {_target(table, index)}",
+                    f"where {describe_filter(where)}" if where else "full scan",
+                ),
+                _Cards(
+                    [
+                        ("Items" + (" matching" if where else ""), f"{st.matched:,}"),
+                        ("Items read", f"{st.scanned:,}"),
+                        ("Read units", _units(st.read_units)),
+                        ("Read cost (on-demand)", self._read_cost(st)),
+                        ("Time", f"{st.seconds:.1f}s"),
+                        ("DynamoDB's estimate", _count(estimate)),
+                    ]
+                ),
+            ]
+        )

@@ -229,7 +229,7 @@ ui = S3View(progress="plain")     # a plain progress line instead of tqdm bars (
       </ol>
       <div class="callout">
         <p><strong>Only boto3 is required.</strong> pandas, pyarrow and numpy (all preinstalled on SageMaker) are used for tables. A few file types need an extra package; the preview tells you which one when it's missing:</p>
-        <div class="code"><pre><code class="lang-sh">%pip install openpyxl pypdf zstandard python-snappy   # Excel, PDF text, .zst before Python 3.14, snappy Avro</code></pre></div>
+        <div class="code"><pre><code class="lang-sh">%pip install openpyxl pypdf pypdfium2 pillow zstandard python-snappy   # Excel, PDF text and pages, .zst before Python 3.14, snappy Avro</code></pre></div>
         <p>Commands that take a while show a <a href="https://github.com/tqdm/tqdm">tqdm</a> progress bar with the time left, when tqdm is installed (it usually is on SageMaker; <code>ipywidgets</code> makes it a notebook widget). Without it you get a plain line with the same numbers.</p>
       </div>
 
@@ -378,8 +378,8 @@ ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></
           <tr><td>Models</td><td><code>.safetensors</code> <code>.pt</code> <code>.pth</code> <code>.ckpt</code> <code>.pkl</code> <code>.joblib</code></td><td>Tensors and parameter count, or the files in a checkpoint. Pickles are never loaded, because unpickling can run code</td><td></td></tr>
           <tr><td>Notebooks</td><td><code>.ipynb</code></td><td>Kernel and a list of cells</td><td></td></tr>
           <tr><td>Images, audio, video</td><td><code>.png</code> <code>.jpg</code> <code>.gif</code> <code>.webp</code>, <code>.wav</code> <code>.mp3</code> <code>.flac</code>, <code>.mp4</code> <code>.webm</code> <code>.mov</code></td><td>The image, or a player</td><td></td></tr>
-          <tr><td>PDF</td><td><code>.pdf</code></td><td>Page count, title and the first page's text (needs <code>pypdf</code>; without it, a link). <a href="#documents">Full text</a> with <code>ui.document()</code></td><td></td></tr>
-          <tr><td>Word</td><td><code>.docx</code> <code>.docm</code> <code>.dotx</code></td><td>First paragraphs, outline of headings, first table, word count (no package needed)</td><td></td></tr>
+          <tr><td>PDF</td><td><code>.pdf</code></td><td>The first three pages as they look, scanned pages too (needs <code>pypdfium2</code> and <code>pillow</code>), with the page count, title and first page's text (needs <code>pypdf</code>); without either, a link. <a href="#documents">Every page</a> with <code>ui.document()</code></td><td></td></tr>
+          <tr><td>Word</td><td><code>.docx</code> <code>.docm</code> <code>.dotx</code></td><td>The first paragraphs laid out as in the document: headings, lists, tables and pictures in place; word count (no package needed)</td><td></td></tr>
           <tr><td>PowerPoint</td><td><code>.pptx</code> <code>.pptm</code> <code>.ppsx</code></td><td>Every slide's title and text, and which have speaker notes (no package needed)</td><td></td></tr>
           <tr><td>Old Office</td><td><code>.doc</code> <code>.ppt</code> <code>.msg</code></td><td>Recognised, with how to convert them to <code>.docx</code> / <code>.pptx</code> (their binary format can't be read here)</td><td></td></tr>
           <tr><td>Text</td><td><code>.txt</code> <code>.log</code> <code>.md</code> <code>.yaml</code> <code>.xml</code> <code>.sql</code> <code>.py</code> and more</td><td>First lines</td><td></td></tr>
@@ -416,15 +416,17 @@ s3.plan_zip("s3://acme-ml-data/curated/").can_download   # would download_zip() 
 
       <!-- ============================================================ documents -->
       <h2 id="documents">Read PDFs, Word and PowerPoint files</h2>
-      <p><code>preview()</code> gives a quick look; <code>ui.document()</code> shows the full text, page by page or slide by slide. Word and PowerPoint files are read with Python's standard library. PDFs need <code>pypdf</code> (<code>%pip install pypdf</code>).</p>
-      <div class="code"><pre><code class="lang-py">ui.preview("s3://acme-ml-data/docs/model-card-churn-xgb.docx")        # outline, first paragraphs, first table
+      <p><code>preview()</code> gives a quick look: a Word file laid out with its headings, lists, tables and pictures in place, and a PDF's first three pages as they look. <code>ui.document()</code> shows the whole thing, page by page or slide by slide. Word and PowerPoint files are read with Python's standard library. A PDF's text needs <code>pypdf</code>, and drawing its pages needs <code>pypdfium2</code> and <code>pillow</code> (<code>%pip install pypdf pypdfium2 pillow</code>).</p>
+      <div class="code"><pre><code class="lang-py">ui.preview("s3://acme-ml-data/docs/model-card-churn-xgb.docx")        # the first paragraphs, pictures in place
 ui.preview("s3://acme-ml-data/docs/q3-ml-platform-review.pptx")       # every slide's title and text
+ui.preview("s3://acme-ml-data/docs/invoices/vendor-invoice-0471.pdf") # the first pages as they look
 ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf")       # full text, page by page
 ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf", pages=[2])       # just page 2
+ui.document("s3://acme-ml-data/docs/data-retention-policy.pdf", pictures=True)   # every page drawn, text underneath
 ui.document("s3://acme-ml-data/docs/q3-ml-platform-review.pptx", pages=[2, 3])   # slides 2-3, with speaker notes</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/preview-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-docx-light.webp" alt="preview() of a Word document: word, paragraph, heading and table counts, title and author, the first paragraphs, the outline of headings and the first table" width="984" height="1102" loading="lazy"></picture></div>
-        <figcaption>A Word model card: the outline and the first table come straight from the document.</figcaption>
+        <div class="shot"><picture><source srcset="images/preview-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-docx-light.webp" alt="preview() of a Word document: word, paragraph, heading, table and picture counts, title and author, then the model card laid out as a document: its title, headings, bullet points, the evaluation table and a bar chart of churn by plan" width="984" height="1160" loading="lazy"></picture></div>
+        <figcaption>A Word model card, laid out as it reads: headings, bullets, the table and the chart where the author put them.</figcaption>
       </figure>
       <figure>
         <div class="shot"><picture><source srcset="images/preview-pptx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-pptx-light.webp" alt="preview() of a PowerPoint deck: slide and word counts, and a table of slides with title, text, word count and whether there are speaker notes" width="984" height="365" loading="lazy"></picture></div>
@@ -433,6 +435,10 @@ ui.document("s3://acme-ml-data/docs/q3-ml-platform-review.pptx", pages=[2, 3])  
       <figure>
         <div class="shot"><picture><source srcset="images/document-pdf-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/document-pdf-light.webp" alt="document() of a PDF: page count, word count, title and author, then the text of each page" width="984" height="379" loading="lazy"></picture></div>
         <figcaption><code>ui.document(...)</code> on a two-page PDF.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><picture><source srcset="images/preview-scan-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/preview-scan-light.webp" alt="preview() of a scanned invoice: a warning that page 1 has no text layer, the page count, and both pages drawn as pictures side by side" width="984" height="710" loading="lazy"></picture></div>
+        <figcaption>A scanned invoice has no text to show, so the preview draws its pages. <code>ui.document(...)</code> shows them full width.</figcaption>
       </figure>
       <p>To use the text in Python (for search, summaries, or checking what a knowledge base will ingest), <code>read_document()</code> returns a <code>Document</code>:</p>
       <div class="code"><pre><code class="lang-py">doc = ui.core.read_document("s3://acme-ml-data/docs/data-retention-policy.pdf")
@@ -446,11 +452,15 @@ deck.slide_titles, deck.notes                     # per slide
 card = ui.core.read_docx("s3://acme-ml-data/docs/model-card-churn-xgb.docx")
 card.headings, card.tables                        # [(level, text)], tables as rows of cells
 ui.core.read_pdf("s3://acme-ml-data/docs/data-retention-policy.pdf", pages=range(1, 3))
+pages = ui.core.render_pdf("s3://acme-ml-data/docs/invoices/vendor-invoice-0471.pdf")   # [Picture], one per page
+pages[0]                                          # shows the page in the notebook; pages[0].data is the PNG / JPEG
+card = ui.core.read_docx("s3://acme-ml-data/docs/model-card-churn-xgb.docx", pictures=True)
+card.pictures                                     # the pictures, in reading order, each with its alt text
 
 texts = {obj.key: ui.core.read_document(obj.uri).text                  # every PDF under a folder
          for obj in ui.core.find("s3://acme-ml-data/docs/", extensions="pdf")}</code></pre></div>
       <div class="callout">
-        <p><strong>Scanned PDFs</strong> are images with no text layer: their pages come back empty and the preview says so; reading them needs OCR (for example Amazon Textract). <strong>Password-protected PDFs</strong>: pass <code>password="..."</code>. <strong>Old <code>.doc</code> / <code>.ppt</code> files</strong> use a binary format this tool can't read; save them as <code>.docx</code> / <code>.pptx</code>, or convert them with LibreOffice: <code>soffice --headless --convert-to docx FILE.doc</code>.</p>
+        <p><strong>Scanned PDFs</strong> are images with no text layer: their text comes back empty and the preview says so, but <code>preview()</code> and <code>ui.document()</code> draw those pages, so you can still read them. Searching or copying their words needs OCR (for example Amazon Textract). <strong>Pictures in Word files</strong> show where they are in the text; formats browsers can't show (EMF and WMF, which Word uses for some charts) are named instead. One report shows at most 20 pages or pictures, so the notebook stays small. <strong>Password-protected PDFs</strong>: pass <code>password="..."</code>. <strong>Old <code>.doc</code> / <code>.ppt</code> files</strong> use a binary format this tool can't read; save them as <code>.docx</code> / <code>.pptx</code>, or convert them with LibreOffice: <code>soffice --headless --convert-to docx FILE.doc</code>.</p>
       </div>
 
       <!-- ============================================================ costs -->
@@ -801,7 +811,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>what_if(uri, move_after=, to=, delete_after=)</code></td><td>What a lifecycle rule would move, delete and save</td></tr>
           <tr><td><code>head(uri)</code></td><td>All of one object's metadata and tags</td></tr>
           <tr><td><code>preview(uri, n=20)</code></td><td>What's inside a file (see <a href="#file-types">file types</a>)</td></tr>
-          <tr><td><code>document(uri, pages=None)</code></td><td>Full text of a PDF, Word or PowerPoint file, page by page or slide by slide</td></tr>
+          <tr><td><code>document(uri, pages=None, pictures=None)</code></td><td>A PDF, Word or PowerPoint file as it reads, page by page or slide by slide: Word pictures in place, PDF pages without text (scans) drawn, or every page with <code>pictures=True</code></td></tr>
           <tr><td><code>download(uri, path=None)</code></td><td>Download a file or a folder, with a progress bar; running it again resumes</td></tr>
           <tr><td><code>download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)</code></td><td>A file or folder as one .zip, after checking size, file count, disk space, memory and read access</td></tr>
           <tr><td><code>link(uri, expires=3600)</code></td><td>A temporary download link</td></tr>
