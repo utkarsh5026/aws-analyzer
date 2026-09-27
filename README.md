@@ -773,10 +773,12 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
 <details>
 <summary><b>Cost and limits</b>: the prices used, idle vector store cost, and where commands stop</summary>
 
-- Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25,
-  and every report says whether it used list prices or yours. `BEDROCK_PRICES` holds the OpenSearch Serverless
-  OCU-hour, its idle minimum, reranking per 1,000 queries and question embedding; `MODEL_PRICES` holds $ per 1M
-  input and output tokens by model family. Pass your own:
+- Costs are estimates at us-east-1 list prices, read from the Bedrock and OpenSearch pricing pages on 2026-09-25
+  and checked against the AWS Price List API on 2026-09-27, and every report says whether it used list prices or
+  yours. `BEDROCK_PRICES` holds the OpenSearch Serverless OCU-hour, its idle minimum, reranking per 1,000 queries
+  (Cohere Rerank 3.5, and Amazon Rerank at half that) and question embedding; `MODEL_PRICES` holds $ per 1M
+  input and output tokens by model family, and `GLOBAL_MODEL_PRICES` the lower prices of `global.` profiles
+  (a price you set in `model_prices` applies to every profile of that model). Pass your own:
   `BedrockKBAnalyzer(prices={"opensearch_min_ocus": 1}, model_prices={"my-model": (1.0, 5.0)})`.
 - The idle cost is only estimated for OpenSearch Serverless: a classic vector collection bills 2 OCUs
   (about $350/month) even with no traffic. Collections that share a KMS key share those OCUs, dev-test collections

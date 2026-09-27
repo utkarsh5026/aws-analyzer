@@ -10,6 +10,7 @@ import bedrock_kb as kbmod
 from bedrock_kb import (
     BEDROCK_PRICES,
     DEFAULT_PROMPT,
+    MODEL_PRICES,
     Answer,
     BedrockKBAnalyzer,
     BedrockKBView,
@@ -935,8 +936,13 @@ def test_retrieval_findings():
 
 
 def test_query_cost():
-    assert query_cost(1000) == pytest.approx(1000 * 20 * 0.02 / 1e6)
-    assert query_cost(1000, rerank=True) == pytest.approx(2.0 + 1000 * 20 * 0.02 / 1e6)
+    embed = 1000 * 20 * 0.02 / 1e6
+    assert query_cost(1000) == pytest.approx(embed)
+    assert query_cost(1000, rerank=True) == pytest.approx(2.0 + embed)
+    assert query_cost(1000, "cohere.rerank-v3-5:0") == pytest.approx(2.0 + embed)
+    # Amazon Rerank costs half as much, whether named by alias, model ID or ARN
+    for amazon in ("amazon", "amazon.rerank-v1:0", "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0"):
+        assert query_cost(1000, amazon) == pytest.approx(1.0 + embed)
 
 
 def test_build_prompt():
@@ -1132,6 +1138,23 @@ def test_model_prices():
     assert generation_cost(10, 10, "acme.unknown") is None
 
 
+def test_model_prices_global_profiles():
+    assert model_price("global.anthropic.claude-opus-5-v1:0") == (5.00, 25.00)
+    assert model_price("us.anthropic.claude-opus-5-v1:0") == (5.50, 27.50)
+    assert model_price("global.anthropic.claude-opus-5-5-v1:0") == (4.00, 20.00)
+    assert model_price(
+        f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/global.amazon.nova-2-lite-v1:0"
+    ) == (0.30, 2.50)
+    # no lower global price listed: the regional one applies
+    assert model_price("global.anthropic.claude-sonnet-4-20250514-v1:0") == (3.00, 15.00)
+    # a price the caller set applies to every profile of that model
+    mine = {**MODEL_PRICES, "claude-opus-5": (4.00, 20.00)}
+    assert model_price("global.anthropic.claude-opus-5-v1:0", mine) == (4.00, 20.00)
+    assert generation_cost(
+        1_000_000, 100_000, "global.anthropic.claude-sonnet-5"
+    ) == pytest.approx(2.00 + 1.00)
+
+
 @pytest.mark.parametrize(
     "model_id, expected",
     [
@@ -1156,6 +1179,11 @@ def test_parse_models():
         OPUS_PROFILE,
     )
     assert (opus.price_in, opus.price_out) == (5.50, 27.50)
+    apac = {m.id: m for m in parse_models(MODEL_LIST, PROFILES, "ap-south-1")}
+    assert (  # no apac. profile here, so the global one: priced at its lower rate
+        apac["anthropic.claude-opus-5"].invoke_id,
+        apac["anthropic.claude-opus-5"].price_in,
+    ) == ("global.anthropic.claude-opus-5", 5.00)
     assert (
         parse_models(MODEL_LIST, PROFILES, "eu-west-1")[3].invoke_id
         == "eu.anthropic.claude-opus-5"

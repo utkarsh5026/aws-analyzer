@@ -138,9 +138,11 @@ How the View layer works:
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions.
 
 Cost estimates come from module-level price tables (`S3_PRICES`, `DYNAMODB_PRICES`, `BEDROCK_PRICES`, and
-`MODEL_PRICES` for $ per 1M tokens by model family; us-east-1 list prices with the date they were read) that callers
-override with `prices={...}` (and `model_prices={...}`); the View shows whether list prices or the caller's prices
-were used. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
+`MODEL_PRICES` for $ per 1M tokens by model family, with `GLOBAL_MODEL_PRICES` for the cheaper `global.` inference
+profiles; us-east-1 list prices with the date they were read) that callers override with `prices={...}` (and
+`model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
+AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
+AmazonBedrockFoundationModels|AmazonES>/current/us-east-1/index.json`), which is what AWS bills from. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 
 ## Tests
 

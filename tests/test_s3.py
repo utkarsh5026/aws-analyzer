@@ -761,7 +761,8 @@ def test_object_monthly_cost():
         ("GlacierObjectOverhead", "GLACIER"),
         ("GlacierS3ObjectOverhead", "STANDARD"),
         ("DeepArchiveStorage", "DEEP_ARCHIVE"),
-        ("DeepArchiveStagingStorage", "STANDARD"),
+        ("DeepArchiveStagingStorage", "STAGING"),
+        ("GlacierStagingStorage", "STAGING"),
         ("IntelligentTieringFAStorage", "INTELLIGENT_TIERING"),
         ("IntelligentTieringIAStorage", "STANDARD_IA"),
         ("IntelligentTieringAIAStorage", "GLACIER_IR"),
@@ -776,11 +777,17 @@ def test_storage_type_class(storage_type, cls):
 
 def test_cloudwatch_cost():
     costs = cloudwatch_cost(
-        {"StandardStorage": 10 * GB, "GlacierStorage": GB, "SomethingNew": GB}
+        {
+            "StandardStorage": 10 * GB,
+            "GlacierStorage": GB,
+            "GlacierStagingStorage": GB,
+            "SomethingNew": GB,
+        }
     )
     assert costs == {
         "StandardStorage": pytest.approx(0.23),
         "GlacierStorage": pytest.approx(0.0036),
+        "GlacierStagingStorage": pytest.approx(0.021),
         "SomethingNew": None,
     }
 
