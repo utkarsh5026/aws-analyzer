@@ -7,7 +7,8 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
-DynamoDB tables and Bedrock knowledge bases: what's there, what it costs, and what to do next.
+DynamoDB tables, Bedrock knowledge bases and the SageMaker notebook itself: what's there, what it costs, and what to
+do next.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-3776ab?logo=python&logoColor=white)](.github/workflows/ci.yml)
@@ -16,7 +17,8 @@ DynamoDB tables and Bedrock knowledge bases: what's there, what it costs, and wh
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
-[DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) · [Development](#development)
+[DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
+[SageMaker](#amazon-sagemaker) · [Development](#development)
 
 </div>
 
@@ -75,6 +77,7 @@ report still renders.
 | **Amazon S3** | • Every bucket's size, monthly cost and risks<br>• Find files and see what's in a folder<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
 | **Amazon DynamoDB** | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html) |
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html) |
+| **Amazon SageMaker** | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -96,7 +99,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 **2. Import it and look around.** It uses the notebook's IAM execution role, so there's nothing to configure:
 
 ```python
-from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb
+from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -133,8 +136,8 @@ Every file has the same two layers:
 
 | Layer | Class | What it does |
 |:---|:---|:---|
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
-| **UI** | `S3View`, `DynamoDBView`, `BedrockKBView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
+| **UI** | `S3View`, `DynamoDBView`, `BedrockKBView`, `SageMakerView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 ### Reading a report
 
@@ -818,6 +821,137 @@ policy that covers every command.
 
 </details>
 
+## Amazon SageMaker
+
+**The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
+costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, and which
+notebooks, apps and endpoints in the region look forgotten.
+
+📄 [`analyzers/sagemaker_env.py`](analyzers/sagemaker_env.py) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sagemaker-instance-dark.webp">
+  <img src="docs/images/sagemaker-instance-light.webp" alt="instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels">
+</picture>
+
+<p align="center"><sub><code>ui.instance()</code> in a Studio JupyterLab space: about $80 spent so far on a GPU that has sat idle, and nothing will stop the app tonight.</sub></p>
+
+The file isn't called `sagemaker.py`, so it doesn't hide the SageMaker Python SDK, which is also imported as
+`sagemaker`.
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install.
+
+```python
+from sagemaker_env import SageMakerView
+
+ui = SageMakerView()             # uses the notebook's execution role and region
+ui.help()                        # every command, grouped by task
+
+ui.instance()                    # this notebook: type, cost so far, idle shutdown, CPU / memory / disk / GPU now
+ui.disk()                        # what fills the disk, and the caches and trash that are safe to clear
+ui.running()                     # everything billing by the hour in the region, and what looks forgotten
+ui.instance("old-experiment")    # another notebook instance, or a Studio space by name
+```
+
+> [!NOTE]
+> `instance()` and `disk()` read the machine they run on, so run them in the notebook you want to know about: a
+> notebook instance, or a Studio JupyterLab, Code Editor or Studio Classic app. Anywhere else, `instance("name")` and
+> `running()` still work. Nothing in the file stops, deletes or changes anything; where that would help, the report
+> shows the command.
+
+### Commands (`SageMakerView`)
+
+Grouped the way `ui.help()` lists them.
+
+#### This notebook
+
+| Command | Shows |
+|:---|:---|
+| `instance(name=None)` | The notebook you're in: instance type with its vCPUs, memory and GPUs, price per hour, how long it has run and what that cost, what a month of it costs if it's never stopped, and **whether anything stops it when idle** (a notebook instance's auto-stop lifecycle configuration, or the Studio domain's idle shutdown), with the commands that turn it on. Then the machine right now: CPU load, memory, each disk and whether it survives a stop, GPU memory and use, the Jupyter kernels and the memory they hold, the biggest processes, and the Python and package versions. Settings: role, network, lifecycle configuration, image or platform, storage volume, space and domain. Findings: no idle shutdown, a disk or memory nearly full (and the other kernels holding memory), an idle GPU (and the CPU type with the same vCPUs and memory, with the saving), an instance far bigger than what's in use, Amazon Linux 1. `name=` shows another notebook instance or Studio space (`"d-abc123/analysis"` when two domains have one), without its machine |
+| `disk(path=None, top=20, limit="200k")` | How full the disk is and what fills it: the biggest folders as a tree three levels deep, the biggest files and when they last changed, and **the caches and trash that are safe to clear** (Jupyter's trash, pip and conda caches, Hugging Face and PyTorch downloads, notebook checkpoints), each with the command that empties it. Findings: a nearly full disk (with the command that makes the volume bigger and what that costs a month), what can be cleared, big files untouched for 90 days (and what they'd cost in S3). The default folder is where your notebooks live: `~/SageMaker` on a notebook instance, `/home/sagemaker-user` in Studio |
+
+#### Your account
+
+| Command | Shows |
+|:---|:---|
+| `running(metrics=True, days=7)` | Everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor, Studio Classic), endpoints, and training and processing jobs, with the instance, price per hour, how long each has run and whether it stops when idle, and each endpoint's requests over the last `days` days from CloudWatch. Stopped notebook instances are listed too, because their volumes are still billed. Findings, each with the command that stops it: notebooks and apps running for over 12 hours with nothing to stop them, endpoints with no requests, and the storage that stopped notebook instances keep |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>SageMakerAnalyzer</code>): the notebook, the machine and what's running, as Python objects</summary>
+
+`ui.core` is the `SageMakerAnalyzer`. Every UI command has a data method on it:
+
+```python
+sm = ui.core                                          # or SageMakerAnalyzer(region="eu-west-1", profile="dev")
+
+report = sm.instance()                                # InstanceReport: .env, .notebook, .machine, .identity
+report.notebook.instance_type, report.notebook.idle   # 'ml.g5.2xlarge', 'off'
+report.machine.memory_share, report.machine.gpus      # 0.37, [GPUInfo(name='NVIDIA A10G', busy=0.0, ...)]
+sm.notebook("old-experiment")                         # NotebookInfo for any notebook instance or Studio space
+sm.environment()                                      # Environment: where this code runs, from SageMaker's metadata
+sm.machine()                                          # Machine: this machine right now (local reads only)
+
+d = sm.disk("~/SageMaker", limit=None)                # DiskReport: folders, largest files, caches you can clear
+d.to_df()                                             # one row per folder
+
+r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
+r.to_df()                                             # one row per notebook, app, endpoint and job
+```
+
+The analysis functions are pure (no AWS calls), so they also work on responses you already have:
+`parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`,
+`parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`,
+`parse_process`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `folder_tree`,
+`idle_shutdown_commands`, `stop_command`, and the findings: `instance_findings`, `disk_findings`, `running_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost and limits</b>: the prices used, and what's measured and what's estimated</summary>
+
+- Costs are estimates at us-east-1 on-demand list prices, read from the AWS Price List API on 2026-09-27.
+  `INSTANCE_TYPES` holds the price per hour of 134 instance types, with their vCPUs, memory and GPUs; a type costs
+  the same per hour as a notebook instance, a Studio app, an endpoint or a job. `SAGEMAKER_PRICES` adds storage per
+  GB-month: $0.14 for a notebook instance's volume, $0.112 for a Studio space's, and S3 Standard's $0.023 to
+  compare with. For another region or a discount, pass your own:
+  `SageMakerAnalyzer(prices={"ml.g5.xlarge": 1.21, "notebook_storage": 0.15})`. A type that isn't in the table shows
+  its cost as unknown, and every report says whether it used list prices or yours.
+- "Cost since start" is the price per hour times how long it has run: since boot for the notebook instance you're
+  in, since the app started for a Studio app, and since its last change (about when it last started) for any other
+  notebook instance. Spot training jobs cost less than the on-demand price shown.
+- `instance()` reads CPU load (the 15-minute average) and memory as they are now, so the suggestion of a smaller
+  instance says "if that's typical". Whether a notebook instance stops when idle is read from its lifecycle
+  configuration script: AWS's auto-stop-idle sample and scripts like it.
+- `disk()` stops after 200,000 files by default and says so (`limit=None` measures everything). It stays on one disk
+  and doesn't follow links.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and which command needs which</summary>
+
+Read-only, per command:
+
+| Permission | Used by |
+|:---|:---|
+| `sagemaker:DescribeNotebookInstance`, `sagemaker:DescribeNotebookInstanceLifecycleConfig` | `instance` on a notebook instance, `running` |
+| `sagemaker:DescribeApp`, `sagemaker:DescribeSpace`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile` | `instance` in Studio; `running` reads the domains |
+| `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps` | `instance("space name")` |
+| `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running` |
+| `cloudwatch:GetMetricData` | `running`: endpoint requests |
+
+`sts:GetCallerIdentity` (who you're signed in as) needs no permission, and `disk()` only reads local files. Anything
+you can't read shows up as a note instead of an error. The `AmazonSageMakerFullAccess` managed policy, which many
+execution roles have, includes the `sagemaker:` permissions. The
+[SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html#permissions) has a ready-made IAM
+policy that covers every command.
+
+</details>
+
 ## Development
 
 ```bash
@@ -827,12 +961,14 @@ ruff check .                           # lint
 ```
 
 - **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
-  Bedrock, so the Bedrock Knowledge Bases tests use botocore's `Stubber` on real clients instead, which also checks
-  every request against the service model.
+  Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
+  tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
+  The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder.
 - **Guides** in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
   whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service
   has its own guide ([`docs/s3.html`](docs/s3.html), [`docs/dynamodb.html`](docs/dynamodb.html),
-  [`docs/bedrock_kb.html`](docs/bedrock_kb.html)); a new analyzer gets a new guide and a card on the home page.
+  [`docs/bedrock_kb.html`](docs/bedrock_kb.html), [`docs/sagemaker_env.html`](docs/sagemaker_env.html)); a new
+  analyzer gets a new guide and a card on the home page.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated

@@ -17,6 +17,7 @@ Scenes:
   dynamodb    acme-app (customers, their orders and support tickets in one table) and three other tables.
               DescribeTable reports item counts and sizes at production scale; moto holds ~1,700 real items.
   bedrock_kb  demo.py's fake Bedrock and support-docs knowledge base, as /demo uses it.
+  sagemaker_env  demo.py's fake SageMaker and fake machine: the JupyterLab space churn-analysis, as /demo uses it.
 
 Needs Pillow (pip install pillow) and Chrome: $CHROME, or the headless shell Playwright installs
 (npx playwright install chromium-headless-shell).
@@ -49,7 +50,8 @@ ROOT = HERE.parents[2]
 sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
-GUIDES = {"s3": "s3.html", "dynamodb": "dynamodb.html", "bedrock_kb": "bedrock_kb.html"}
+GUIDES = {"s3": "s3.html", "dynamodb": "dynamodb.html", "bedrock_kb": "bedrock_kb.html",
+          "sagemaker_env": "sagemaker_env.html"}
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
 NOW = datetime.now(timezone.utc)
@@ -111,6 +113,9 @@ FIGURES = [
            '    ("What does error E1234 mean?", "payment-errors"),\n'
            '    ("Can I return a faulty laptop?", "warranty.pdf"),\n'
            '    ("When do holiday orders ship?", "holiday-shipping"),\n]'),
+    Figure("sagemaker-instance", "sagemaker_env", "ui.instance()"),
+    Figure("sagemaker-disk", "sagemaker_env", "ui.disk()"),
+    Figure("sagemaker-running", "sagemaker_env", "ui.running()"),
 ]
 
 
@@ -800,7 +805,14 @@ def seed_bedrock_docs() -> dict:
     return demo.seed_bedrock_kb()
 
 
-SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs}
+def seed_sagemaker_docs() -> dict:
+    import demo
+
+    return demo.seed_sagemaker_env()
+
+
+SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs,
+          "sagemaker_env": seed_sagemaker_docs}
 
 
 # ----------------------------------------------------------------------------- rendering and screenshots

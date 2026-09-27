@@ -31,11 +31,20 @@ Demo data (moto, us-east-1, everything synthetic):
             sales-playbooks (Pinecone, never synced), hr-policies (S3 Vectors, no chunking), legacy-faq
             (FAILED, Aurora). Models: Claude and Llama through us. profiles, Nova and Mistral on demand, and
             embedding and rerank models that models() leaves out.
+  sagemaker_env  moto has no Studio, so the seeder hands the analyzer fake sagemaker / sts / cloudwatch
+            clients (checked against botocore's service model) and a fake machine: this code "runs" in the
+            JupyterLab space churn-analysis (ml.g5.2xlarge, 2 days, idle GPU, domain without idle shutdown) whose
+            home is 88% full, with Jupyter trash, a Hugging Face cache, checkpoints and year-old parquet files
+            (sparse files, so nothing big is written). running(): notebook instances old-experiment (9 days, no
+            auto-stop) and team-reporting (auto-stop), stopped archive-2024 and sandbox, a Code Editor app in
+            space forecasting, endpoints churn-v1 (no traffic), churn-v2 (busy) and a serverless one, and a spot
+            training job.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import gzip
 import importlib
 import io
@@ -713,7 +722,200 @@ def seed_bedrock_kb() -> dict:
                                          "bedrock": bedrock, "s3": s3}}
 
 
-SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb}
+# ----------------------------------------------------------------------------- SageMaker
+
+SM_DOMAIN = "d-acme12345678"
+SM_ROLE = f"arn:aws:iam::{ACCOUNT}:role/service-role/AmazonSageMaker-ExecutionRole-20240611"
+
+
+def seed_sagemaker_env() -> dict:
+    """A fake machine (metadata, /proc, a home folder of sparse files) and fake sagemaker / sts / cloudwatch clients.
+    moto has no Studio apps, spaces or ListApps."""
+    import tempfile
+
+    mod = importlib.import_module("sagemaker_env")
+    now = datetime.now(timezone.utc)
+    root = Path(tempfile.mkdtemp(prefix="sagemaker-demo-"))
+    space_arn = f"arn:aws:sagemaker:{REGION}:{ACCOUNT}:app/{SM_DOMAIN}/churn-analysis/JupyterLab/default"
+    meta = root / "opt/ml/metadata"
+    meta.mkdir(parents=True)
+    (meta / "resource-metadata.json").write_text(json.dumps({
+        "AppType": "JupyterLab", "DomainId": SM_DOMAIN, "SpaceName": "churn-analysis", "UserProfileName": "",
+        "ExecutionRoleArn": SM_ROLE, "ResourceArn": space_arn, "ResourceName": "default", "AppImageVersion": "latest"}))
+    proc = root / "proc"
+    proc.mkdir()
+    (proc / "loadavg").write_text("0.31 0.42 0.38 2/412 8812\n")
+    (proc / "meminfo").write_text("MemTotal:       32212254 kB\nMemFree:  9123456 kB\nMemAvailable:   20132659 kB\n")
+    (proc / "uptime").write_text(f"{2 * 86400 + 5 * 3600 + 120}.4 1000.0\n")
+    kernels = [(os.getpid(), 3_950_000, "-f /home/sagemaker-user/.local/share/jupyter/runtime/kernel-7f3a.json"),
+               (48211, 5_600_000, "-f /home/sagemaker-user/.local/share/jupyter/runtime/kernel-1c9e.json"),
+               (48377, 1_250_000, "-f /home/sagemaker-user/.local/share/jupyter/runtime/kernel-9b21.json")]
+    for pid, rss, args in kernels + [(311, 420_000, None), (290, 95_000, None)]:
+        folder = proc / str(pid)
+        folder.mkdir()
+        name = "python" if args else ("jupyter-lab" if pid == 311 else "sagemaker-idle-check")
+        (folder / "status").write_text(f"Name:\t{name}\nVmRSS:\t{rss} kB\n")
+        cmd = f"/opt/conda/bin/python -m ipykernel_launcher {args}" if args else f"/opt/conda/bin/{name}"
+        (folder / "cmdline").write_bytes(cmd.replace(" ", "\0").encode() + b"\0")
+    home = root / "home/sagemaker-user"
+    for rel, size, days in [
+        ("data/raw/events-2024.parquet", 9.8e9, 400), ("data/raw/events-2025-h1.parquet", 6.1e9, 390),
+        ("data/raw/events-2025-h2.parquet", 5.4e9, 21), ("data/features/train.parquet", 2.2e9, 3),
+        ("data/features/valid.parquet", 0.6e9, 3), ("models/xgb-2025-09/model.tar.gz", 0.9e9, 12),
+        ("models/bert-finetune/checkpoint-2000/pytorch_model.bin", 1.3e9, 2),
+        ("models/bert-finetune/checkpoint-4000/pytorch_model.bin", 1.3e9, 2),
+        (".local/share/Trash/files/events-2023.parquet", 4.1e9, 40),
+        (".cache/huggingface/hub/models--bert-base-uncased/model.safetensors", 0.44e9, 60),
+        (".cache/huggingface/hub/models--roberta-large/model.safetensors", 1.4e9, 9),
+        (".cache/pip/http-v2/wheels.bin", 0.8e9, 25),
+        ("notebooks/churn-eda.ipynb", 38e6, 0.1), ("notebooks/.ipynb_checkpoints/churn-eda-checkpoint.ipynb", 37e6, 0.1),
+        ("notebooks/feature-importance.ipynb", 4e6, 1), ("README.md", 3e3, 90),
+    ]:
+        path = home / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as f:
+            f.truncate(int(size))  # sparse: the size shows, nothing is written
+        when = (now - timedelta(days=days)).timestamp()
+        os.utime(path, (when, when))
+    gb = 1024**3
+    mod.SageMakerAnalyzer._disk_usage = staticmethod(
+        lambda path: (50 * gb, 44 * gb, 6 * gb) if "sagemaker-user" in str(path) else (40 * gb, 17 * gb, 23 * gb))
+    mod.SageMakerAnalyzer._cpu_count = staticmethod(lambda: 8)
+    mod.SageMakerAnalyzer._gpu_query = lambda self: "NVIDIA A10G, 0, 5, 23028\n"
+
+    def arn(kind: str, name: str) -> str:
+        return f"arn:aws:sagemaker:{REGION}:{ACCOUNT}:{kind}/{name}"
+
+    image = {"SageMakerImageArn": f"arn:aws:sagemaker:{REGION}:885854791233:image/sagemaker-distribution-gpu",
+             "SageMakerImageVersionAlias": "3.1.0"}
+    apps = {
+        "churn-analysis": {"DomainId": SM_DOMAIN, "SpaceName": "churn-analysis", "AppType": "JupyterLab",
+                           "AppName": "default", "Status": "InService",
+                           "CreationTime": now - timedelta(days=2, hours=5),
+                           "ResourceSpec": {"InstanceType": "ml.g5.2xlarge", **image}},
+        "forecasting": {"DomainId": SM_DOMAIN, "SpaceName": "forecasting", "AppType": "CodeEditor",
+                        "AppName": "default", "Status": "InService", "CreationTime": now - timedelta(days=5, hours=2),
+                        "ResourceSpec": {"InstanceType": "ml.m5.xlarge", **image}},
+    }
+    notebooks = {
+        "old-experiment": ("InService", "ml.m5.2xlarge", 100, now - timedelta(days=9, hours=3), None),
+        "team-reporting": ("InService", "ml.t3.medium", 20, now - timedelta(hours=6), "auto-stop-idle"),
+        "archive-2024": ("Stopped", "ml.m5.xlarge", 250, now - timedelta(days=210), None),
+        "sandbox": ("Stopped", "ml.t3.medium", 50, now - timedelta(days=35), None),
+    }
+
+    def notebook(name: str) -> dict:
+        status, instance, volume, changed, lifecycle = notebooks[name]
+        desc = {"NotebookInstanceName": name, "NotebookInstanceArn": arn("notebook-instance", name),
+                "NotebookInstanceStatus": status, "InstanceType": instance, "RoleArn": SM_ROLE,
+                "DirectInternetAccess": "Enabled", "VolumeSizeInGB": volume, "RootAccess": "Enabled",
+                "PlatformIdentifier": "notebook-al2023-v1", "CreationTime": now - timedelta(days=400),
+                "LastModifiedTime": changed, "Url": f"{name}.notebook.{REGION}.sagemaker.aws"}
+        if lifecycle:
+            desc["NotebookInstanceLifecycleConfigName"] = lifecycle
+        return desc
+
+    domain = {"DomainId": SM_DOMAIN, "DomainArn": arn("domain", SM_DOMAIN), "DomainName": "acme-ml",
+              "Status": "InService", "AuthMode": "IAM", "AppNetworkAccessType": "PublicInternetOnly",
+              "DefaultUserSettings": {"ExecutionRole": SM_ROLE},
+              "DefaultSpaceSettings": {"ExecutionRole": SM_ROLE}}
+    endpoints = {
+        "churn-v1": (now - timedelta(days=48), [("AllTraffic", "ml.m5.large", 1)], 0),
+        "churn-v2": (now - timedelta(days=12), [("AllTraffic", "ml.m5.xlarge", 2)], 184_220),
+        "sentiment-serverless": (now - timedelta(days=30), [("AllTraffic", None, 0)], 950),
+    }
+
+    def endpoint_summary(name: str) -> dict:
+        return {"EndpointName": name, "EndpointArn": arn("endpoint", name), "CreationTime": endpoints[name][0],
+                "LastModifiedTime": endpoints[name][0], "EndpointStatus": "InService"}
+
+    def describe_endpoint(EndpointName: str) -> dict:
+        created, variants, _ = endpoints[EndpointName]
+        return {**endpoint_summary(EndpointName), "EndpointConfigName": f"{EndpointName}-config",
+                "ProductionVariants": [
+                    {"VariantName": v, "CurrentServerlessConfig": {"MemorySizeInMB": 2048, "MaxConcurrency": 5}}
+                    if t is None else {"VariantName": v, "CurrentInstanceCount": n} for v, t, n in variants]}
+
+    def describe_endpoint_config(EndpointConfigName: str) -> dict:
+        name = EndpointConfigName.removesuffix("-config")
+        created, variants, _ = endpoints[name]
+        return {"EndpointConfigName": EndpointConfigName, "EndpointConfigArn": arn("endpoint-config", EndpointConfigName),
+                "CreationTime": created, "ProductionVariants": [
+                    {"VariantName": v, "ModelName": name, "ServerlessConfig": {"MemorySizeInMB": 2048, "MaxConcurrency": 5}}
+                    if t is None else {"VariantName": v, "ModelName": name, "InstanceType": t, "InitialInstanceCount": n}
+                    for v, t, n in variants]}
+
+    def space(DomainId: str, SpaceName: str) -> dict:
+        app_type = apps[SpaceName]["AppType"]
+        key = "JupyterLabAppSettings" if app_type == "JupyterLab" else "CodeEditorAppSettings"
+        return {"DomainId": DomainId, "SpaceName": SpaceName, "SpaceArn": arn("space", f"{DomainId}/{SpaceName}"),
+                "Status": "InService", "CreationTime": now - timedelta(days=90),
+                "SpaceSettings": {"AppType": app_type,
+                                  "SpaceStorageSettings": {"EbsStorageSettings": {"EbsVolumeSizeInGb": 50}},
+                                  key: {"DefaultResourceSpec": {"InstanceType": apps[SpaceName]["ResourceSpec"]["InstanceType"]},
+                                        "CodeRepositories": [{"RepositoryUrl": "https://github.com/acme/churn-model.git"}]}},
+                "OwnershipSettings": {"OwnerUserProfileName": "priya"},
+                "SpaceSharingSettings": {"SharingType": "Private"},
+                "Url": f"https://{DomainId}.studio.{REGION}.sagemaker.aws/jupyterlab/default"}
+
+    def training_job(TrainingJobName: str) -> dict:
+        return {"TrainingJobName": TrainingJobName, "TrainingJobArn": arn("training-job", TrainingJobName),
+                "TrainingJobStatus": "InProgress", "SecondaryStatus": "Training",
+                "CreationTime": now - timedelta(hours=3, minutes=10), "TrainingStartTime": now - timedelta(hours=3),
+                "AlgorithmSpecification": {"TrainingInputMode": "File"}, "EnableManagedSpotTraining": True,
+                "ResourceConfig": {"InstanceType": "ml.g5.2xlarge", "InstanceCount": 2, "VolumeSizeInGB": 50},
+                "StoppingCondition": {"MaxRuntimeInSeconds": 86400}, "ModelArtifacts": {"S3ModelArtifacts": ""}}
+
+    autostop = "#!/bin/bash\nset -e\nIDLE_TIME=3600\nwget .../scripts/auto-stop-idle/autostop.py\n"
+    sagemaker = _FakeAWS("sagemaker", {
+        "describe_app": lambda DomainId, AppType, AppName, SpaceName=None, UserProfileName=None: {
+            **apps[SpaceName], "AppArn": arn("app", f"{DomainId}/{SpaceName}/{AppType}/{AppName}")},
+        "describe_domain": lambda DomainId: domain,
+        "describe_space": space,
+        "describe_user_profile": lambda DomainId, UserProfileName: {
+            "DomainId": DomainId, "UserProfileName": UserProfileName, "UserSettings": {"ExecutionRole": SM_ROLE}},
+        "list_notebook_instances": lambda **_: {"NotebookInstances": [
+            {k: v for k, v in notebook(n).items() if k in ("NotebookInstanceName", "NotebookInstanceArn",
+                                                        "NotebookInstanceStatus", "InstanceType", "CreationTime",
+                                                        "LastModifiedTime", "NotebookInstanceLifecycleConfigName")}
+            for n in notebooks]},
+        "describe_notebook_instance": lambda NotebookInstanceName: notebook(NotebookInstanceName),
+        "describe_notebook_instance_lifecycle_config": lambda NotebookInstanceLifecycleConfigName: {
+            "NotebookInstanceLifecycleConfigName": NotebookInstanceLifecycleConfigName,
+            "OnStart": [{"Content": base64.b64encode(autostop.encode()).decode()}]},
+        "list_apps": lambda **_: {"Apps": list(apps.values()) + [
+            {"DomainId": SM_DOMAIN, "UserProfileName": "priya", "AppType": "JupyterServer", "AppName": "default",
+             "Status": "InService", "ResourceSpec": {"InstanceType": "system"}}]},
+        "list_domains": lambda **_: {"Domains": [{"DomainId": SM_DOMAIN, "DomainName": "acme-ml"}]},
+        "list_spaces": lambda **_: {"Spaces": [{"DomainId": SM_DOMAIN, "SpaceName": n} for n in apps]},
+        "list_endpoints": lambda **_: {"Endpoints": [endpoint_summary(n) for n in endpoints]},
+        "describe_endpoint": describe_endpoint,
+        "describe_endpoint_config": describe_endpoint_config,
+        "list_training_jobs": lambda **_: {"TrainingJobSummaries": [
+            {"TrainingJobName": "xgb-tuning-7", "TrainingJobArn": arn("training-job", "xgb-tuning-7"),
+             "CreationTime": now - timedelta(hours=3, minutes=10), "TrainingJobStatus": "InProgress"}]},
+        "describe_training_job": training_job,
+        "list_processing_jobs": lambda **_: {"ProcessingJobSummaries": []},
+    })
+
+    def metric_data(MetricDataQueries: list, StartTime, EndTime, **_) -> dict:
+        results = []
+        for q in MetricDataQueries:
+            dims = {d["Name"]: d["Value"] for d in q["MetricStat"]["Metric"]["Dimensions"]}
+            count = endpoints.get(dims.get("EndpointName"), (None, None, 0))[2]
+            results.append({"Id": q["Id"], "Label": "Invocations", "StatusCode": "Complete",
+                            "Timestamps": [EndTime] if count else [], "Values": [float(count)] if count else []})
+        return {"MetricDataResults": results}
+
+    sts = _FakeAWS("sts", {"get_caller_identity": lambda: {
+        "UserId": "AROAEXAMPLE:SageMaker", "Account": ACCOUNT,
+        "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/{SM_ROLE.rsplit('/', 1)[1]}/SageMaker"}})
+    cloudwatch = _FakeAWS("cloudwatch", {"get_metric_data": metric_data})
+    return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch}, "root": str(root)}
+
+
+SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb,
+           "sagemaker_env": seed_sagemaker_env}
 
 
 # ----------------------------------------------------------------------------- run
