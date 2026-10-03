@@ -93,11 +93,11 @@ Add tests to `tests/test_<service>.py`, each in the section with the matching `#
   - add the data method to "Getting the data" if it's new
   - list the pure function if it's public
   - add any new IAM permission to the permissions paragraph
-- In `docs/<service>.html`:
-  - add an entry under "Command reference" (`id="reference"`)
+- In `docs/<service>.md`:
+  - add a row to the table under "Command reference" (`{ #reference }`)
   - add a paragraph in the section where the command fits
   - add the IAM permission under "Permissions"
-  - Keep the page's existing markup and tone.
+  - Keep the page's existing Markdown conventions and tone, and check it with `mkdocs build --strict`.
 - If the command deserves a screenshot, say so and point to `/demo --html` (see the demo skill). Don't
   replace the images.
 - Update CLAUDE.md only if the command changes the architecture: a new block type, a new convention, or a new

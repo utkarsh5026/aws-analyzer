@@ -103,10 +103,12 @@ CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check t
     a screenshot, quick start, the commands tables (one per `_GROUPS` group), and under "Reference" the folded
     "Getting the data", cost notes, and IAM permissions.
   - Update the Development paragraph if it names the guides.
-- `docs/<service>.html`: a new guide. Copy `docs/dynamodb.html`'s structure, CSS and theme handling, and cover
-  set up in SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
+- `docs/<service>.md`: a new guide. Copy `docs/dynamodb.md`'s structure (front matter, hero, headings with
+  explicit ids, figures, callouts, troubleshooting entries, the `ref` command table), and cover set up in
+  SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
-- `docs/index.html`: add a card for the new guide next to the existing ones.
+- `docs/index.md`: add a card for the new guide next to the existing ones, and add the guide to `nav` in
+  `mkdocs.yml`. Check it with `mkdocs build --strict` (`pip install -r requirements-docs.txt`).
 - `CLAUDE.md`: update the list of analyzers, the price tables, the moto extras (or the Stubber note, as for Bedrock)
   and anything service-specific a future session needs.
 

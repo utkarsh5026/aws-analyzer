@@ -77,7 +77,7 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
 - **Tests.** Pure logic is tested without moto. There's a text-mode UI test, and a failure-path test where one
   exists. Tests don't depend on the real clock or on network access.
 - **Docs.** Check the README command table, "Getting the data", the pure-function list and the IAM paragraph;
-  `docs/<service>.html` (the command reference and permissions); and CLAUDE.md if a convention changed.
+  `docs/<service>.md` (the command reference and permissions); and CLAUDE.md if a convention changed.
 
 ## 5. Report
 

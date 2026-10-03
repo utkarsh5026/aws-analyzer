@@ -51,6 +51,9 @@ python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
 python -m pytest -k "policy"                   # by name
 ruff check .                                   # lint (errors only, see ruff.toml)
+pip install -r requirements-docs.txt           # the guide site: mkdocs, mkdocs-material
+mkdocs serve                                   # preview docs/ at http://127.0.0.1:8000
+mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
 ```
 
 CI (`.github/workflows/ci.yml`) also checks that each analyzer imports on its own with only boto3 installed.
@@ -218,19 +221,30 @@ never prints), and `S3Explorer` as the UI. How the UI works:
 
 - `README.md` is the user documentation: per service, a quick start, a command table, the pure functions, cost
   notes and IAM permissions. Update it together with the analyzer.
-- `docs/` is the guide site: plain static HTML published to GitHub Pages by `.github/workflows/pages.yml` on pushes
-  to `main` that touch `docs/`. `index.html` is the home page with one card per service; each service has its own
-  guide (`s3.html`, `dynamodb.html`, `bedrock_kb.html`, `sagemaker_env.html`) that links back to it. A new analyzer gets its own
-  `docs/<service>.html`, a card on `index.html` and a link in README. `index.html` also forwards old `/#section`
-  links (from when it was the S3 guide) to `s3.html`, so keep its own ids in the `own` list there. The screenshots
-  (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by `.claude/skills/demo/shots.py` from the
-  "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's fake Bedrock and SageMaker: `shots.py <name>` remakes
-  one figure and sets its `<img height=>`. The explorer is a live widget, so its figures (`explorer`, `explorer-docx`)
-  come from `explorer_shots.py`, which runs it in a real JupyterLab with Playwright (`pip install jupyterlab
-  playwright`). Remake the affected figures when a report's look changes, and check
+- `docs/` is the guide site: Markdown built by MkDocs with the Material theme (`mkdocs.yml`, versions pinned in
+  `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
+  pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
+  README links and old links still work. `index.md` is the home page with one card per service (Material grid
+  cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `sagemaker_env.md`). A new
+  analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
+  README. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
+  `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
+  (`## Permissions { #permissions }`) because README and other pages link to them; code blocks are fenced with a
+  language and an optional `title="IAM policy"`; callouts are `!!! note ""` / `!!! warning ""`, troubleshooting
+  entries `??? question "..."`, card grids `<div class="grid cards" markdown>`, the set-up steps
+  `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
+  styles them. A screenshot is two images and a caption:
+  `![alt](images/<name>-light.webp#only-light){ width="984" height="..." loading=lazy }`, the same line with
+  `-dark` / `#only-dark` (Material shows the one for the reader's theme), then `/// caption` ... `///`.
+  The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by
+  `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
+  fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
+  The explorer is a live widget, so its figures (`explorer`, `explorer-docx`) come from `explorer_shots.py`, which
+  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). Remake the affected figures when a report's look changes, and check
   their captions and alt text still match, in the guides and in README, which shows seven of them (`overview`,
   `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
   the `-dark` file in dark mode.
-- Versions in `requirements-dev.txt` are pinned and updated by Dependabot; the `python_version < "3.11"` lines are
-  intentionally held back. `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
+- Versions in `requirements-dev.txt` and `requirements-docs.txt` are pinned and updated by Dependabot; the
+  `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and
+  themes Material needs). `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
   explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.

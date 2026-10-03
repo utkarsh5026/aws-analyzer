@@ -1058,25 +1058,30 @@ policy that covers every command.
 pip install -r requirements-dev.txt    # pinned versions
 python -m pytest                       # every test, no AWS account needed
 ruff check .                           # lint
+
+pip install -r requirements-docs.txt   # the guide site
+mkdocs serve                           # preview it at http://127.0.0.1:8000
 ```
 
 - **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
   Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
   tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder.
-- **Guides** in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
-  whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service
-  has its own guide ([`docs/s3.html`](docs/s3.html), [`docs/dynamodb.html`](docs/dynamodb.html),
-  [`docs/bedrock_kb.html`](docs/bedrock_kb.html), [`docs/sagemaker_env.html`](docs/sagemaker_env.html)); a new
-  analyzer gets a new guide and a card on the home page.
+- **Guides** in `docs/` are Markdown, built with [MkDocs](https://www.mkdocs.org/) and the
+  [Material](https://squidfunk.github.io/mkdocs-material/) theme ([`mkdocs.yml`](mkdocs.yml)) and published to GitHub
+  Pages by [the Docs workflow](.github/workflows/pages.yml) whenever they change on `main`; pull requests build them
+  with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
+  service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
+  [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/sagemaker_env.md`](docs/sagemaker_env.md)); a new analyzer
+  gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
   Bedrock, since moto has none.
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
   `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
-  `requirements-dev.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly pull requests to update them
-  and the GitHub Actions the workflow uses.
+  `requirements-dev.txt` and `requirements-docs.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly
+  pull requests to update them and the GitHub Actions the workflows use.
 
 ## License
 

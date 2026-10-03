@@ -41,7 +41,7 @@ after touching anything that uses pandas, IPython or version-specific stdlib, or
 Rule **warnings** don't fail the run, but deal with each one that the current change caused:
 
 - *needs `svc:Action`, which README.md's IAM permissions don't list*: add the permission to that service's
-  IAM section in `README.md` and in `docs/<service>.html`. For S3, the action is often not the operation name
+  IAM section in `README.md` and in `docs/<service>.md`. For S3, the action is often not the operation name
   (`ListObjectsV2` → `s3:ListBucket`). `rules.py --apis` prints the mapping.
 - *execute_statement runs any PartiQL*: the analyzer must refuse anything but `SELECT` before calling it. Once
   it does, mark the call's line `# read-only: <how it's guarded>`.
