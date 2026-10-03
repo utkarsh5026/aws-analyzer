@@ -1237,6 +1237,10 @@ class FolderTree:
     )  # '' = files directly under the prefix
     total: Stat = field(default_factory=Stat)
     truncated: bool = False
+    # files directly in each folder shown (first `max_files` by key), and all of them counted
+    files: dict[str, list[ObjectInfo]] = field(default_factory=dict)
+    direct: dict[str, Stat] = field(default_factory=dict)
+    max_files: int = 0
 
 
 @dataclass
@@ -1988,12 +1992,20 @@ def build_folder_tree(
     *,
     depth: int = 2,
     limit: int | None = None,
+    files: int = 0,
 ) -> FolderTree:
-    """Aggregate objects into every folder level down to `depth` (each object counts toward all its ancestors)."""
+    """Aggregate objects into every folder level down to `depth` (each object counts toward all its ancestors).
+
+    With `files=N`, also keep the first N files (in key order) directly in each folder shown, and count
+    every file there in `direct`."""
     bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
     base = base_prefix(prefix)
-    tree = FolderTree(uri=s3_uri(bucket, prefix) if bucket else uri, depth=depth)
+    tree = FolderTree(
+        uri=s3_uri(bucket, prefix) if bucket else uri, depth=depth, max_files=files
+    )
     folders: dict[str, Stat] = defaultdict(Stat)
+    direct: dict[str, Stat] = defaultdict(Stat)
+    kept: dict[str, list[ObjectInfo]] = defaultdict(list)
     for i, obj in enumerate(objects):
         if limit is not None and i >= limit:
             tree.truncated = True
@@ -2001,12 +2013,20 @@ def build_folder_tree(
         if obj.is_folder_marker:
             continue
         tree.total.add(obj.size)
-        parts = relative_key(obj.key, base).split("/")[:-1][:depth]
+        all_parts = relative_key(obj.key, base).split("/")[:-1]
+        parts = all_parts[:depth]
         if not parts:
             folders[""].add(obj.size)
         for level in range(1, len(parts) + 1):
             folders["/".join(parts[:level]) + "/"].add(obj.size)
+        if files > 0 and len(all_parts) <= depth:
+            parent = "/".join(all_parts) + "/" if all_parts else ""
+            direct[parent].add(obj.size)
+            if len(kept[parent]) < files:
+                kept[parent].append(obj)
     tree.folders = dict(sorted(folders.items(), key=lambda kv: kv[0].split("/")))
+    tree.files = {k: sorted(v, key=lambda o: o.key) for k, v in kept.items()}
+    tree.direct = dict(direct)
     return tree
 
 
@@ -4064,13 +4084,14 @@ class S3Analyzer:
         *,
         depth: int = 2,
         limit: int | None = None,
+        files: int = 0,
         progress: Callable[[int], None] | None = None,
     ) -> FolderTree:
-        """Object count and size for every folder down to `depth` levels."""
+        """Object count and size for every folder down to `depth` levels, plus up to `files` files per folder."""
         scan = self.iter_objects(
             uri, limit=None if limit is None else limit + 1, progress=progress
         )
-        return build_folder_tree(scan, uri, depth=depth, limit=limit)
+        return build_folder_tree(scan, uri, depth=depth, limit=limit, files=files)
 
     def find(
         self,
@@ -7829,21 +7850,74 @@ class S3View:
 
     @_friendly_errors
     def tree(
-        self, uri: str, *, depth: int = 2, limit: int | None = None, max_rows: int = 300
+        self,
+        uri: str,
+        *,
+        depth: int = 2,
+        files: int = 10,
+        limit: int | None = None,
+        max_rows: int = 300,
     ) -> None:
-        """Folder tree with object count and size at every level down to `depth`."""
+        """Folder tree with object count and size at every level down to `depth`, and the files in each folder.
+
+        Each folder shown lists its first `files` files (by name) under its sub-folders, then one
+        "… N more files" row with their size; `files=0` shows folders only. Files deeper than `depth`
+        count toward their folder's size but aren't listed: raise `depth` or run `ls` on that folder."""
         with self._progress() as tick:
-            tree = self.core.folder_tree(uri, depth=depth, limit=limit, progress=tick)
-        rows, bars = [], []
-        for path, st in tree.folders.items():
-            parts = path.rstrip("/").split("/")
-            label = (
-                "(files at this level)"
-                if not path
-                else "    " * (len(parts) - 1) + parts[-1] + "/"
+            tree = self.core.folder_tree(
+                uri, depth=depth, limit=limit, files=max(files, 0), progress=tick
             )
-            rows.append([label, f"{st.count:,}", human_size(st.size)])
-            bars.append(_share(st.size, tree.total.size))
+        rows, bars = [], []
+        children: dict[str, list[str]] = defaultdict(list)
+        for path in tree.folders:
+            if path:
+                parent = path.rstrip("/").rpartition("/")[0]
+                children[parent + "/" if parent else ""].append(path)
+        hidden = 0
+
+        def walk(folder: str, level: int) -> None:
+            nonlocal hidden
+            pad = "    " * level
+            for sub in children.get(folder, []):
+                st = tree.folders[sub]
+                rows.append(
+                    [pad + sub.rstrip("/").split("/")[-1] + "/", f"{st.count:,}", human_size(st.size)]
+                )
+                bars.append(_share(st.size, tree.total.size))
+                walk(sub, level + 1)
+            shown = tree.files.get(folder, [])
+            for obj in shown:
+                rows.append([pad + obj.key.rsplit("/", 1)[-1], "", human_size(obj.size)])
+                bars.append(_share(obj.size, tree.total.size))
+            rest = tree.direct.get(folder, Stat())
+            more = rest.count - len(shown)
+            if more > 0:
+                hidden += more
+                size = rest.size - sum(o.size for o in shown)
+                noun = "file" if more == 1 else "files"
+                rows.append([f"{pad}… {more:,} more {noun}", f"{more:,}", human_size(size)])
+                bars.append(_share(size, tree.total.size))
+            if folder and level == depth:  # deepest level shown: what sits in its sub-folders
+                st = tree.folders[folder]
+                deeper, size = st.count - rest.count, st.size - rest.size
+                if deeper > 0:
+                    rows.append(
+                        [f"{pad}… {deeper:,} more in sub-folders", f"{deeper:,}", human_size(size)]
+                    )
+                    bars.append(_share(size, tree.total.size))
+
+        if tree.max_files:
+            walk("", 0)
+        else:
+            for path, st in tree.folders.items():
+                parts = path.rstrip("/").split("/")
+                label = (
+                    "(files at this level)"
+                    if not path
+                    else "    " * (len(parts) - 1) + parts[-1] + "/"
+                )
+                rows.append([label, f"{st.count:,}", human_size(st.size)])
+                bars.append(_share(st.size, tree.total.size))
         blocks: list[Any] = [
             _Title(
                 f"Folder tree of {tree.uri}",
@@ -7854,9 +7928,17 @@ class S3View:
             blocks.append(
                 _Note(f"Scan stopped at limit={limit:,}; sizes are partial.", "warn")
             )
+        if hidden:
+            blocks.append(
+                _Note(
+                    f"Showing up to {files:,} files per folder; {hidden:,} more are counted in the "
+                    f"'more files' rows. {_call('tree', tree.uri, depth=depth, files=files * 10)} lists more, "
+                    f"{_call('tree', tree.uri, depth=depth, files=0)} only the folders."
+                )
+            )
         blocks.append(
             _Table(
-                ["Folder", "Objects", "Size"],
+                ["Folder / file" if tree.max_files else "Folder", "Objects", "Size"],
                 rows,
                 bars=bars,
                 bar_label="% of size",

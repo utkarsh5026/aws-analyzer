@@ -246,7 +246,7 @@ Grouped the way `ui.help()` lists them.
 | Command | Shows |
 |:---|:---|
 | `ls(uri)` | One level of folders and files, like `aws s3 ls` |
-| `tree(uri, depth=2)` | Folder tree with count, size and share at every level |
+| `tree(uri, depth=2, files=10)` | Folder tree with count, size and share at every level, and the files in each folder (the first `files` by name, then one "… N more files" row; `files=0` for folders only) |
 | `summary(uri)` | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files) |
 | `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search by glob, regex, extension, size, date or storage class, e.g. `find(uri, pattern="*.csv", min_size="10MB", modified_after="7d")` |
 | `largest(uri)` / `newest(uri)` / `oldest(uri)` | The top-N objects under a prefix: the biggest, the newest or the oldest |
