@@ -282,6 +282,7 @@ ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code>
       <h3>Folders</h3>
       <div class="code"><pre><code class="lang-py">ui.ls("s3://acme-ml-data/")                        # one level, like `aws s3 ls` (fast anywhere)
 ui.ls("s3://acme-ml-data/training")                # 'training' is read as the folder 'training/'
+ui.ls("s3://acme-ml-data/docs/", details=True)     # + what's inside each file: pages, rows, picture sizes
 ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at every level, with the files</code></pre></div>
       <figure>
         <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total, with the files listed under each folder" width="984" height="813" loading="lazy"></picture></div>
@@ -386,6 +387,41 @@ ui.preview("s3://acme-ml-data/notebooks/churn-data-checks.ipynb")</code></pre></
         </tbody>
       </table></div>
       <p>Any of them can also be compressed: <code>.gz</code>, <code>.bz2</code>, <code>.xz</code>, or <code>.zst</code> (Python 3.14+, or <code>pip install zstandard</code>). Anything else is shown as text or a hex dump.</p>
+
+      <h3 id="file-details">What's inside many files at once</h3>
+      <p><code>preview()</code> opens one file. <code>file_details()</code> looks inside every file under a prefix and puts each kind in its own table: a PDF's pages, title and author and whether it has text, a Word file's words and headings, a deck's slides, each Excel sheet's size, a table's rows and column names, a picture's width and height, a video's length, the files in an archive. It reads only the parts each format needs, in 256 KB ranged requests: a PDF's page tree and first three pages, a parquet footer, a picture's first bytes, the first 256 KB of a CSV. It stops at <code>max_read</code> (1 GB by default) and says how much it read.</p>
+      <div class="code"><pre><code class="lang-py">ui.file_details("s3://acme-ml-data/docs/")                       # every file, up to limit=200 in key order
+ui.file_details("s3://acme-ml-data/docs/", extensions="pdf")     # only the PDFs: pages, text, title, author
+ui.file_details("s3://acme-ml-data/curated/", pattern="*.parquet", limit=None, max_read="5GB")
+ui.file_details("s3://acme-ml-data/docs/model-card-churn-xgb.docx")   # one file
+ui.ls("s3://acme-ml-data/docs/", details=True)                   # one level, with a "What's inside" column
+
+report = ui.core.file_details("s3://acme-ml-data/docs/", extensions="pdf")
+df = report.to_df()                                # one row per file: format, size, summary, pages, title, ...
+df[df.text == False]                               # the scanned PDFs</code></pre></div>
+      <p>The findings point out what to act on: scanned PDFs with no text, which need OCR before their words can be searched or sent to a model; PDFs that need a password; files whose content isn't what their name says (an HTML error page saved as <code>report.pdf</code>, parquet saved as <code>.csv</code>); parquet or CSV files in one folder whose columns differ, which breaks Athena, Glue and Spark tables; pictures in mixed sizes; and files it couldn't read, with why. Counts that come from the start of a file are marked: <code>≈</code> for an estimate (a CSV's rows from its first 256 KB) and <code>+</code> for a lower bound (a compressed CSV).</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Kind</th><th>What <code>file_details()</code> reports</th><th>What it reads</th></tr></thead>
+        <tbody>
+          <tr><td>PDF</td><td>Pages, whether the first 3 pages have text (none = probably scanned), page size (A4, Letter, …), title, author, the app that made it, creation date, PDF version, whether it needs a password</td><td>The page tree and the first 3 pages (needs <code>pypdf</code>)</td></tr>
+          <tr><td>Word</td><td>Words, pages (as Word last saved them), headings, tables, pictures, title, author, when it was last saved</td><td>The document's text (no package needed)</td></tr>
+          <tr><td>PowerPoint</td><td>Slides, words, slides with speaker notes, tables, pictures, title, author</td><td>The slides' text</td></tr>
+          <tr><td>Excel</td><td>Each sheet's name and rows × columns (header row included), title, author</td><td>The size Excel saves at the top of each sheet</td></tr>
+          <tr><td>Parquet</td><td>Rows, column names, row groups, compression, the program that wrote it</td><td>The footer (needs <code>pyarrow</code>)</td></tr>
+          <tr><td>ORC, Feather</td><td>Rows, column names, compression, stripes or record batches</td><td>The metadata (needs <code>pyarrow</code>)</td></tr>
+          <tr><td>Avro</td><td>Rows, column names, codec</td><td>Block headers, in files up to 64 MB</td></tr>
+          <tr><td>CSV, TSV, PSV, JSON lines</td><td>Column names (the header, or the first record's keys), rows: exact up to 256 KB, then estimated (<code>≈</code>), or a lower bound when compressed (<code>+</code>)</td><td>The first 256 KB</td></tr>
+          <tr><td>JSON</td><td>Records and their keys, or an object's keys; JSON lines saved as <code>.json</code> are recognised</td><td>The whole file, up to 16 MB</td></tr>
+          <tr><td>Pictures</td><td>Format (PNG, JPEG, GIF, BMP, WebP, TIFF) and width × height</td><td>The first 64 KB</td></tr>
+          <tr><td>Audio, video</td><td>Length; sample rate and mono / stereo (WAV, FLAC); width × height (MP4, MOV). An MP4 with no index is flagged as cut off</td><td>The header, or the MP4 <code>moov</code> box</td></tr>
+          <tr><td>Archives</td><td>Files inside and their unpacked size</td><td>A zip's index, or a tar's headers</td></tr>
+          <tr><td>Models, arrays</td><td>Tensors, parameters and dtypes (<code>.safetensors</code>); shape and dtype (<code>.npy</code>); arrays (<code>.npz</code>); files inside a PyTorch checkpoint. Pickles are never loaded</td><td>Headers only</td></tr>
+          <tr><td>Notebooks</td><td>Cells, code cells, outputs, kernel</td><td>The whole file, up to 50 MB</td></tr>
+          <tr><td>Text</td><td>Lines, exact or estimated</td><td>The first 256 KB</td></tr>
+          <tr><td>Old Office</td><td>Recognised, with how to convert it</td><td>Nothing</td></tr>
+        </tbody>
+      </table></div>
+      <p>Every file's format is checked against its first bytes, so a file with no extension (Spark's <code>part-00000</code>) is still described, and a wrong one is flagged. A file is read for at most 128 MB, and files in GLACIER or DEEP_ARCHIVE are skipped with the restore command to run. Without <code>pypdf</code> or <code>pyarrow</code>, those files are listed with what to install.</p>
 
       <h3>Load files into Python</h3>
       <p><code>ui.core</code> is the analyzer behind the view. Its readers return data instead of printing it.</p>
@@ -733,7 +769,8 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
         <div class="card"><h4>Scans list every key</h4><p><code>summary</code>, <code>tree</code>, <code>find</code>, <code>duplicates</code>, <code>compare</code> and <code>what_if</code> list 1,000 keys per request: about 1 to 3 minutes per million objects. A progress bar shows while they run.</p></div>
         <div class="card"><h4><code>duplicates</code> reads only what it must</h4><p>It downloads files only where same-size files have different ETags, 64 KB of each first, and stops at <code>max_read</code> (10 GB by default). That's free inside the bucket's region; <code>method="etag"</code> reads nothing.</p></div>
         <div class="card"><h4>Sample with <code>limit=</code></h4><p>Pass <code>limit=100_000</code> to stop early, or point the scan at a smaller prefix.</p></div>
-        <div class="card"><h4><code>ls</code> is always fast</h4><p>It lists a single level, however big the bucket is.</p></div>
+        <div class="card"><h4><code>file_details</code> reads a little of each file</h4><p>It looks inside the first 200 files (<code>limit=</code>), 8 at a time, in 256 KB ranged requests, and stops at <code>max_read</code> (1 GB by default). A PDF's page count or a parquet footer usually takes one or two requests.</p></div>
+        <div class="card"><h4><code>ls</code> is always fast</h4><p>It lists a single level, however big the bucket is. <code>details=True</code> also reads a little of each file listed.</p></div>
       </div>
 
       <!-- ============================================================ permissions -->
@@ -764,7 +801,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
     }
   ]
 }</code></pre></div>
-      <p>Files encrypted with SSE-KMS also need <code>kms:Decrypt</code> on their key to be previewed, read, downloaded or compared by <code>duplicates</code>. To scope the policy down, replace <code>"Resource": "*"</code> in the first statement with your buckets' ARNs, for example <code>arn:aws:s3:::acme-ml-data</code> and <code>arn:aws:s3:::acme-ml-data/*</code>.</p>
+      <p><code>s3:GetObject</code> is what <code>preview</code>, <code>file_details</code>, <code>ls(details=True)</code>, <code>duplicates</code> and the downloads read files with. Files encrypted with SSE-KMS also need <code>kms:Decrypt</code> on their key to be previewed, read, downloaded or compared by <code>duplicates</code>. To scope the policy down, replace <code>"Resource": "*"</code> in the first statement with your buckets' ARNs, for example <code>arn:aws:s3:::acme-ml-data</code> and <code>arn:aws:s3:::acme-ml-data/*</code>.</p>
 
       <!-- ============================================================ troubleshooting -->
       <h2 id="troubleshooting">Troubleshooting</h2>
@@ -797,10 +834,11 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>overview(match=None, metrics=True)</code></td><td>Every bucket: objects, size, estimated cost, versioning, encryption, public access, lifecycle rules, warnings</td></tr>
           <tr><td><code>bucket_info(bucket, metrics=True)</code></td><td>One bucket's settings, policy, lifecycle rules, risks, and size and cost by storage type</td></tr>
           <tr><td><code>policy(bucket)</code></td><td>The bucket policy in plain English, its risks and the JSON</td></tr>
-          <tr><td><code>ls(uri, limit=500)</code></td><td>One level of folders and files</td></tr>
+          <tr><td><code>ls(uri, limit=500, details=False)</code></td><td>One level of folders and files; <code>details=True</code> adds what's inside each file</td></tr>
           <tr><td><code>tree(uri, depth=2, files=10)</code></td><td>Folder tree with count, size and share at every level, and the files in each folder (<code>files=0</code> for folders only)</td></tr>
           <tr><td><code>summary(uri, top_n=10, folder_depth=1, limit=None)</code></td><td>Dashboard for a prefix, with cost and findings</td></tr>
           <tr><td><code>find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=, limit=1000)</code></td><td>Search</td></tr>
+          <tr><td><code>file_details(uri, pattern=None, extensions=None, limit=200, max_read="1GB")</code></td><td>What's inside each file: pages, titles and authors of PDFs, words, slides, sheet sizes, rows and columns, picture sizes, lengths, files in archives; scanned PDFs and mislabeled files (see <a href="#file-details">file details</a>)</td></tr>
           <tr><td><code>largest(uri, n=20)</code> · <code>newest</code> · <code>oldest</code></td><td>Top-N objects</td></tr>
           <tr><td><code>duplicates(uri, method="hash", min_size=1, max_read="10GB")</code></td><td>Identical files (by size, ETag and SHA-256), what their copies cost, which to keep, folders of copies</td></tr>
           <tr><td><code>compare(uri_a, uri_b)</code></td><td>Identical, different, only in A, only in B</td></tr>
