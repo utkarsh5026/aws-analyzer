@@ -265,10 +265,11 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
   fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
-  The explorer is a live widget, so its figures (`explorer`, `explorer-docx`) come from `explorer_shots.py`, which
-  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). Remake the affected figures when a report's look changes, and check
+  The explorer is a live widget, so its figures (`explorer`, `explorer-docx`, `explorer-buckets`, and `explorer-tour`,
+  an animated WebP of a pointer clicking through it) come from `explorer_shots.py`, which runs it in a real JupyterLab
+  with Playwright (`pip install jupyterlab playwright`). Remake the affected figures when a report's look changes, and check
   their captions and alt text still match, in the guides and in README, which shows seven of them (`overview`,
-  `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
+  `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
   the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the

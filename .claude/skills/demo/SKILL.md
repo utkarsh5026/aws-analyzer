@@ -112,11 +112,16 @@ and check that its caption and `alt` text in the guide still say what it shows (
 scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
 
 The S3 explorer (`s3_explorer.py`) is a live ipywidgets app, not a report, so `shots.py` can't draw it.
-`explorer_shots.py` starts JupyterLab in a temporary folder, runs the explorer on the acme scene and screenshots it
-the same size, light and dark. It needs `pip install jupyterlab playwright` on top of the dev requirements:
+`explorer_shots.py` starts JupyterLab in a temporary folder, runs the explorer on the acme scene, clicks its buttons
+when a figure needs that, and screenshots it the same size, light and dark. `explorer-tour`, the one README shows,
+is an animated WebP: a drawn pointer clicks from the list of buckets to a Parquet file and a Word file. To change
+what a figure shows, edit its `Figure` and `Step`s in `FIGURES`. The browser maps the system UI font, which the
+widgets' buttons use, to Liberation Sans, so the figures come out the same on any Linux machine. It needs
+`pip install jupyterlab playwright` on top of the dev requirements:
 
 ```bash
-.venv/bin/python .claude/skills/demo/explorer_shots.py              # explorer and explorer-docx (about a minute)
+.venv/bin/python .claude/skills/demo/explorer_shots.py              # every explorer figure (about four minutes)
+.venv/bin/python .claude/skills/demo/explorer_shots.py explorer-tour   # just the animation
 ```
 
 To click around the explorer yourself, start `jupyter lab` and seed the scene in the first cell the same way
