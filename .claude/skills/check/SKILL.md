@@ -14,7 +14,7 @@ Run everything CI runs, locally, and fix what it finds.
 Use `.venv/bin/python` if it exists, otherwise `python`:
 
 ```bash
-.venv/bin/python .claude/skills/check/run.py                  # ruff, imports, rules, pytest, drift
+.venv/bin/python .claude/skills/check/run.py                  # ruff, imports, package, rules, pytest, drift
 .venv/bin/python .claude/skills/check/run.py --matrix         # + pytest on CI's other Python versions (uv)
 .venv/bin/python .claude/skills/check/run.py -- -k policy     # arguments after -- go to pytest
 ```
@@ -33,6 +33,7 @@ after touching anything that uses pandas, IPython or version-specific stdlib, or
 |---|---|---|
 | `ruff` | `ruff check .` finds a real error (ruff.toml selects only E4/E7/E9/F) | Fix the code. Don't add `noqa` or change ruff.toml |
 | `imports` | an analyzer, copied alone into an empty directory, doesn't import with only boto3 (the same as CI's job) | Move the optional import inside the function that needs it, through `_require(module, purpose)` |
+| `package` | the wheel `pyproject.toml` builds fails `twine check --strict`, or doesn't import with only boto3 (skipped when `build` isn't installed; building fetches hatchling, so it needs the network) | A new analyzer needs its `force-include` line in `pyproject.toml` and its classes in `src/aws_analyzer/__init__.py`; a README that doesn't render on PyPI shows in twine's message |
 | `rules` | `rules.py` finds an error: a write API call, a top-level non-stdlib import, an import of another analyzer, missing `from __future__ import annotations`, section banners out of order, a public View method without `@_friendly_errors` or a docstring, or `print` / `display` outside the rendering plumbing | Follow the message. Each one names the rule from CLAUDE.md |
 | `pytest` | a test fails | Find the root cause. Change a test's expectation only when the behaviour change was intended, and say so |
 | `py3.X` | (`--matrix`) a test fails on that Python only | Usually pandas 2 vs 3 (copy-on-write, the default `str` dtype) or stdlib added after 3.10 |
@@ -41,7 +42,7 @@ after touching anything that uses pandas, IPython or version-specific stdlib, or
 Rule **warnings** don't fail the run, but deal with each one that the current change caused:
 
 - *needs `svc:Action`, which README.md's IAM permissions don't list*: add the permission to that service's
-  IAM section in `README.md` and in `docs/<service>.html`. For S3, the action is often not the operation name
+  IAM section in `README.md` and in `docs/<service>.md`. For S3, the action is often not the operation name
   (`ListObjectsV2` → `s3:ListBucket`). `rules.py --apis` prints the mapping.
 - *execute_statement runs any PartiQL*: the analyzer must refuse anything but `SELECT` before calling it. Once
   it does, mark the call's line `# read-only: <how it's guarded>`.

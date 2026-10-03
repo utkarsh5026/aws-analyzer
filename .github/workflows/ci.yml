@@ -71,12 +71,49 @@ jobs:
       - name: Pytest
         run: python -m pytest
 
+  # The PyPI package (pyproject.toml): build it the way the release workflow does, and check
+  # that `pip install aws-analyzer` gives a notebook every module with only boto3 installed.
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install build and twine (versions pinned in requirements-dev.txt)
+        run: >-
+          python -m pip install
+          "$(grep -E '^build==' requirements-dev.txt)"
+          "$(grep -E '^twine==' requirements-dev.txt)"
+          "$(grep -E '^readme-renderer\[md\]==' requirements-dev.txt)"
+      - name: Build the sdist, and the wheel from it
+        run: python -m build
+      - name: Check the metadata, and that the README renders on PyPI
+        run: twine check --strict dist/*
+      - name: Install the wheel with only boto3 and import every module
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel"
+          "$RUNNER_TEMP/wheel/bin/pip" install "$(grep -E '^boto3==' requirements-dev.txt)" dist/*.whl
+          cd "$RUNNER_TEMP" && "$RUNNER_TEMP/wheel/bin/python" -c "$SMOKE"
+        env:
+          SMOKE: |
+            import aws_analyzer
+            from aws_analyzer import s3, s3_explorer
+            for name in aws_analyzer.__all__[1:]:
+                getattr(aws_analyzer, name)
+            assert s3_explorer._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
+            print(f"aws-analyzer {aws_analyzer.__version__}: every module imports with only boto3")
+
   # One stable status to require in branch protection, so the rule doesn't need editing
   # when the Python matrix changes.
   ci-result:
     name: CI result
     if: always()
-    needs: [lint, test]
+    needs: [lint, test, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

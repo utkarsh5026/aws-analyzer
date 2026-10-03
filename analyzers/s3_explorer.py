@@ -34,6 +34,7 @@ import dataclasses
 import fnmatch
 import functools
 import html
+import importlib
 import re
 import sys
 import time
@@ -50,12 +51,18 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 
 def _s3_module(core: Any = None) -> Any:
-    """The s3.py this explorer builds on: the module `core` came from, else `import s3`, else the notebook
-    itself when s3.py was pasted into a cell. Raises ImportError that says how to get it."""
+    """The s3.py this explorer builds on: the module `core` came from, else the s3 next to this file when both
+    were installed with pip (aws_analyzer.s3), else `import s3`, else the notebook itself when s3.py was pasted
+    into a cell. Raises ImportError that says how to get it."""
     if core is not None:
         module = sys.modules.get(type(core).__module__)
         if module is not None and hasattr(module, "S3View"):
             return module
+    if __package__:
+        try:
+            return importlib.import_module(f"{__package__}.s3")
+        except ImportError:
+            pass
     try:
         import s3
 
@@ -536,6 +543,8 @@ def _friendly_errors(method: Callable) -> Callable:
         except ClientError as exc:
             error = exc.response.get("Error", {})
             self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{method.__name__}]")
+        except ImportError as exc:  # a missing optional package: the message says what to pip install
+            self._fail(f"{str(exc).rstrip('.')}.")
         except (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError))) as exc:
             self._fail(f"{type(exc).__name__}: {exc}  [{method.__name__}]")
         return None

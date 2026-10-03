@@ -96,8 +96,8 @@ docs screenshots are `docs/images/<command>-{light,dark}.webp` (Bedrock's are `b
 
 `shots.py`, next to `demo.py`, makes them: for every figure in the guides it runs the figure's command against
 a scene in moto, renders the notebook HTML, screenshots it in headless Chrome (984 CSS px wide at 1.5x, so
-1476 px), trims the empty space below, writes the light and dark WebP and sets the `<img height=>` in the
-guide. It needs Pillow (`pip install pillow`) and Chrome (`$CHROME`, or Playwright's headless shell).
+1476 px), trims the empty space below, writes the light and dark WebP and sets the `height=` of both images
+in the guide's Markdown. It needs Pillow (`pip install pillow`) and Chrome (`$CHROME`, or Playwright's headless shell).
 
 ```bash
 .venv/bin/python .claude/skills/demo/shots.py --list                 # every figure and the command behind it

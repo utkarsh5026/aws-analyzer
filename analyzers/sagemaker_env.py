@@ -62,7 +62,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable
 
 import boto3
 from botocore.config import Config
@@ -1597,9 +1597,10 @@ def instance_findings(
             and share is not None
             and share < 0.3
             and m.memory_used is not None
+            and m.load is not None
         ):
             need_memory = max(4.0, m.memory_used / GB * 1.5)
-            need_cpus = max(2, math.ceil(m.load[2] * 2)) if m.load else 2
+            need_cpus = max(2, math.ceil(m.load[2] * 2))
             cheaper = smaller_type(
                 nb.instance_type,
                 vcpus=need_cpus,
@@ -1743,7 +1744,7 @@ def disk_findings(
     found: list[tuple[str, str]] = []
     volume = report.volume
     full = volume is not None and not volume.elastic and _full(volume.share)
-    if full:
+    if full and volume is not None:  # full implies a volume; type checkers need it spelled out
         biggest = max(
             (e for e in report.folders.values() if "/" not in e.path),
             key=lambda e: e.size,
@@ -1933,7 +1934,7 @@ def running_findings(
     monthly = sum(cost for _, cost in storage)
     if monthly >= 1:
         oldest = min(
-            (b for b, _ in storage if b.since), key=lambda b: b.since, default=None
+            ((b.since, b.name) for b, _ in storage if b.since), default=None
         )
         keeps = (
             "keeps its storage volume"
@@ -1945,10 +1946,11 @@ def running_findings(
             f"({sum(b.volume_gb or 0 for b, _ in storage):,} GB), costing {human_money(monthly)}/month."
         )
         if oldest is not None:
+            since, name = oldest
             text += (
-                f" The one stopped longest is {oldest.name} ({human_age(oldest.since, now)}). Deleting a "
+                f" The one stopped longest is {name} ({human_age(since, now)}). Deleting a "
                 "notebook instance deletes its volume, so copy what you need to S3 first: aws sagemaker "
-                f"delete-notebook-instance --notebook-instance-name {oldest.name}"
+                f"delete-notebook-instance --notebook-instance-name {name}"
             )
         found.append(("info", text))
     spot = [b for b in report.resources if b.spot]
@@ -2681,7 +2683,7 @@ class SageMakerAnalyzer:
                 nb.idle = "unknown"
                 return nb
 
-        running = []
+        running: list[Billable] = []
         for nb in self._map(detail, summaries):
             b = Billable(
                 "notebook instance",
@@ -3176,14 +3178,14 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
         elif isinstance(block, _Next):
             if block.items:
-                items = "".join(
+                calls = "".join(
                     f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
                     + (f'<span class="nw">{_esc(why)}</span>' if why else "")
                     + "</span>"
                     for call, why in block.items
                 )
                 out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>'
+                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
                 )
         elif isinstance(block, _Table):
             if not block.rows:
@@ -3500,6 +3502,8 @@ def _friendly_errors(method: Callable) -> Callable:
             )
         except _Hint as exc:
             self._show([_Note(str(exc))])
+        except ImportError as exc:  # a missing optional package: the message says what to pip install
+            self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
         except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
             self._show(
                 [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
@@ -3518,6 +3522,7 @@ class SageMakerView:
     rate and time left), 'plain' (always that line) or 'off'.
     """
 
+    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "This notebook": ("instance", "disk"),
         "Your account": ("running",),
@@ -3550,22 +3555,28 @@ class SageMakerView:
 
     def _show(self, blocks: list[Any]) -> None:
         if self.use_html:
-            from IPython.display import HTML, display
-
-            display(HTML(_render_html(blocks, self.max_rows)))
-        else:
-            print(_render_text(blocks, self.max_rows))
+            try:
+                from IPython.display import HTML, display
+            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
+                self.use_html = False
+                note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
+                blocks = [*blocks, _Note(note, "warn")]
+            else:
+                display(HTML(_render_html(blocks, self.max_rows)))
+                return
+        print(_render_text(blocks, self.max_rows))
 
     @contextmanager
     def _progress(
         self, label: str = "Reading", unit: str = "items read"
-    ) -> Iterator[Callable[..., None]]:
+    ) -> Generator[Callable[..., None], None, None]:
         """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
         and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
         Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
         at a time: when a nested _progress starts showing, the outer one's bar goes away."""
+        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
         bar_class = [
-            _progress_bar_class(self.use_html and _in_notebook())
+            _progress_bar_class(notebook)
             if self.progress == "auto"
             else None
         ]
@@ -3597,7 +3608,7 @@ class SageMakerView:
                 width[0] = 0
 
         def take_over() -> None:
-            owner = getattr(self, "_progress_owner", None)
+            owner = self._progress_owner
             if owner is not clear:
                 if owner is not None:
                     owner()
@@ -3625,7 +3636,7 @@ class SageMakerView:
             shown[0] = now
             take_over()
             text = _progress_text(label, unit, count, total, now - started[0])
-            if self.use_html:
+            if notebook:
                 from IPython.display import HTML, display
 
                 if handle[0] is None:
@@ -3645,7 +3656,7 @@ class SageMakerView:
             raise
         finally:
             clear()
-            if getattr(self, "_progress_owner", None) is clear:
+            if self._progress_owner is clear:
                 self._progress_owner = None
 
     def help(self, command: Any = None) -> None:
@@ -3816,7 +3827,7 @@ class SageMakerView:
         findings = instance_findings(report, prices, allowed)
         warned = " ".join(message for level, message in findings if level == "warn")
         subject = nb.label if nb is not None else env.label
-        region = env.region or (nb.arn and _arn_part(nb.arn, 3)) or self.core.region
+        region = env.region or _arn_part(nb.arn if nb is not None else "", 3) or self.core.region
         blocks = [
             _Title(
                 subject[0].upper() + subject[1:],
@@ -4265,11 +4276,11 @@ class SageMakerView:
                 )
             )
         if report.other_disks:
-            shown = ", ".join(report.other_disks[:5]) + (
+            others = ", ".join(report.other_disks[:5]) + (
                 " …" if len(report.other_disks) > 5 else ""
             )
             blocks.append(
-                _Note(f"Not measured, because they're on another disk: {shown}.")
+                _Note(f"Not measured, because they're on another disk: {others}.")
             )
         steps = []
         biggest = next((entry for depth, entry in folder_tree(report, top=1)), None)

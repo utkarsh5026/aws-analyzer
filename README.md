@@ -11,6 +11,7 @@ DynamoDB tables, Bedrock knowledge bases and the SageMaker notebook itself: what
 do next.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
 [![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-3776ab?logo=python&logoColor=white)](.github/workflows/ci.yml)
 [![Needs only boto3](https://img.shields.io/badge/needs-boto3%20only-0f766e)](#get-started)
 [![Read-only](https://img.shields.io/badge/AWS%20access-read--only-0f766e)](#why-aws-analyzer)
@@ -54,8 +55,8 @@ show what they read or cost.
 <tr>
 <td width="33%" valign="top">
 <b>📄 One file, boto3 only</b><br>
-Copy one file next to your notebook: no package, no build step, and no file depends on another. pandas, pyarrow
-and the rest are optional.
+Copy one file next to your notebook (no file depends on another), or <code>pip install aws-analyzer</code>. pandas,
+pyarrow and the rest are optional.
 </td>
 <td width="33%" valign="top">
 <b>🔒 Read-only</b><br>
@@ -72,20 +73,23 @@ report still renders.
 
 ## Services
 
-| Service | What it shows you | File and guide |
-|:---|:---|:---|
-| **Amazon S3** | • Every bucket's size, monthly cost and risks<br>• Click through folders like a file explorer, or search them<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files | [`s3.py`](analyzers/s3.py), [`s3_explorer.py`](analyzers/s3_explorer.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
-| **Amazon DynamoDB** | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html) |
-| **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html) |
-| **Amazon SageMaker** | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html) |
+| Service                            | What it shows you                                                                                                                                                                                                                          | File and guide                                                                                                                            |
+| :--------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Click through folders like a file explorer, or search them<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                  | [`s3.py`](analyzers/s3.py), [`s3_explorer.py`](analyzers/s3_explorer.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
+| **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                    | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
+| **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate       | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
+| **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
 
 ## Get started
 
-**1. Put the file next to your notebook.** Pick whichever works where you are:
+**1. Install it, or put the file next to your notebook.** Pick whichever works where you are:
 
+- **Install it with pip**, in a notebook cell: `%pip install aws-analyzer`. That's every service, and only needs
+  boto3; `%pip install "aws-analyzer[all]"` also installs every optional package (pandas, pyarrow, the PDF and Excel
+  readers, progress bars). Then import from `aws_analyzer` instead of from the file (step 2).
 - **Upload it:** download [`analyzers/s3.py`](analyzers/s3.py) and drag it into JupyterLab's file browser, in the same
   folder as your notebook.
 - **Fetch it from a cell**, if the notebook can reach the internet:
@@ -100,6 +104,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 
 ```python
 from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env
+# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, S3Explorer)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -110,6 +115,10 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > [!NOTE]
 > Only boto3 is required, and SageMaker already has it. pandas, pyarrow and the other packages are optional: a
 > command that needs one that isn't installed says which to install instead of failing.
+>
+> Installed with pip, every `from s3 import ...` in this README and the guides becomes
+> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `sagemaker_env` and `s3_explorer`). The
+> Analyzer and View classes also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -134,10 +143,10 @@ numbers.
 
 Every file has the same two layers:
 
-| Layer | Class | What it does |
-|:---|:---|:---|
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
-| **UI** | `S3View`, `DynamoDBView`, `BedrockKBView`, `SageMakerView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| Layer     | Class                                                                      | What it does                                                                                                                  |
+| :-------- | :------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------- |
+| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
+| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `SageMakerView`                 | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 ### Reading a report
 
@@ -188,22 +197,24 @@ installed, so you only need the second one, and only for the file types it lists
 %pip install boto3 pandas pyarrow      # the commands below
 # optional: Excel, PDF text and pages, .zst, snappy Avro, progress bars
 %pip install openpyxl xlrd pypdf pypdfium2 pillow zstandard python-snappy tqdm
+# or, with pip instead of the file: all of the above and s3.py itself
+%pip install "aws-analyzer[all]"
 ```
 
 <details>
 <summary><b>What each package is for</b></summary>
 
-| Package | Needed for |
-|:---|:---|
-| `boto3` | Every command (required) |
-| `pandas` | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`, `to_df()`. Installs `numpy` for `.npy` / `.npz` |
-| `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview`, `read_df` and `file_details`, and `parquet_info` |
-| `openpyxl` / `xlrd` | Excel `.xlsx` / `.xlsm` and old `.xls` |
-| `pypdf` | PDF text in `preview`, `document`, `read_pdf`, and page counts in `file_details` |
+| Package                | Needed for                                                                                                                                                                        |
+| :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boto3`                | Every command (required)                                                                                                                                                          |
+| `pandas`               | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`, `to_df()`. Installs `numpy` for `.npy` / `.npz`                                                  |
+| `pyarrow`              | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview`, `read_df` and `file_details`, and `parquet_info`                                                                           |
+| `openpyxl` / `xlrd`    | Excel `.xlsx` / `.xlsm` and old `.xls`                                                                                                                                            |
+| `pypdf`                | PDF text in `preview`, `document`, `read_pdf`, and page counts in `file_details`                                                                                                  |
 | `pypdfium2` + `pillow` | PDF pages drawn as pictures, the way they print (scanned pages too), in `preview`, `document`, `render_pdf`. `pillow` also shrinks big pictures in Word files before showing them |
-| `zstandard` | `.zst` files before Python 3.14 |
-| `python-snappy` | Avro files compressed with snappy |
-| `tqdm` | Progress bars with the time left while long commands run (`ipywidgets` makes them notebook widgets). Without it, a plain progress line |
+| `zstandard`            | `.zst` files before Python 3.14                                                                                                                                                   |
+| `python-snappy`        | Avro files compressed with snappy                                                                                                                                                 |
+| `tqdm`                 | Progress bars with the time left while long commands run (`ipywidgets` makes them notebook widgets). Without it, a plain progress line                                            |
 
 IPython, used for the HTML output, comes with Jupyter. If a package is missing, the command tells you which one to
 install instead of failing; install it and run the cell again.
@@ -252,13 +263,13 @@ S3Explorer("s3://my-bucket/data/")             # or in a folder; S3 console link
 S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file shown
 ```
 
-| To | Do this |
-|:---|:---|
-| Open a folder | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder |
+| To                   | Do this                                                                                                                                                                                                               |
+| :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open a folder        | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder                                                                                                           |
 | See what's in a file | Click it. **Details** shows its metadata and tags, **Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour |
-| Go to a path | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter |
-| Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first |
-| Add up a folder | Open it and click **What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report) |
+| Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
+| Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first                                                                       |
+| Add up a folder      | Open it and click **What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
 
 Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
 lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the filter. Files in
@@ -298,51 +309,51 @@ Grouped the way `ui.help()` lists them.
 
 #### Buckets
 
-| Command | Shows |
-|:---|:---|
-| `buckets()` | All buckets with region, creation date, age |
-| `overview(match=None)` | Every bucket in one table: objects, size, estimated monthly cost, versioning, encryption, public access, lifecycle rules, and a list of warnings. `match="sagemaker-*"` checks only matching names |
-| `bucket_info(bucket)` | Versioning, encryption, public access (bucket and account level), bucket policy and lifecycle rules in plain English, ownership, object lock, replication, logging, inventory, tags, **plus CloudWatch object count, size and estimated monthly cost per storage type** (instant, even for billion-object buckets), and flagged risks |
-| `policy(bucket)` | The bucket policy in plain English (who can do what, on which files, under which conditions), its risks (public access, other accounts, no HTTPS requirement) and the raw JSON |
+| Command                | Shows                                                                                                                                                                                                                                                                                                                                 |
+| :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `buckets()`            | All buckets with region, creation date, age                                                                                                                                                                                                                                                                                           |
+| `overview(match=None)` | Every bucket in one table: objects, size, estimated monthly cost, versioning, encryption, public access, lifecycle rules, and a list of warnings. `match="sagemaker-*"` checks only matching names                                                                                                                                    |
+| `bucket_info(bucket)`  | Versioning, encryption, public access (bucket and account level), bucket policy and lifecycle rules in plain English, ownership, object lock, replication, logging, inventory, tags, **plus CloudWatch object count, size and estimated monthly cost per storage type** (instant, even for billion-object buckets), and flagged risks |
+| `policy(bucket)`       | The bucket policy in plain English (who can do what, on which files, under which conditions), its risks (public access, other accounts, no HTTPS requirement) and the raw JSON                                                                                                                                                        |
 
 #### Explore a folder
 
-| Command | Shows |
-|:---|:---|
-| `ls(uri, details=False)` | One level of folders and files, like `aws s3 ls`. `details=True` adds what's inside each file: a PDF's pages, a table's rows and columns, a picture's size |
-| `tree(uri, depth=2, files=10)` | Folder tree with count, size and share at every level, and the files in each folder (the first `files` by name, then one "… N more files" row; `files=0` for folders only) |
-| `summary(uri)` | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files) |
-| `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search by glob, regex, extension, size, date or storage class, e.g. `find(uri, pattern="*.csv", min_size="10MB", modified_after="7d")` |
-| `file_details(uri, pattern=, extensions=, limit=200, max_read="1GB")` | What's inside each file, a table per kind (see [what it reports](#file-details)): a PDF's pages, title, author and whether it has text, a Word file's words, a deck's slides, each Excel sheet's size, a table's rows and column names, a picture's size, a video's length, an archive's files. Findings: scanned PDFs that need OCR, password-protected files, files that aren't what their name says, table files in one folder with different columns. Reads only the parts each format needs |
-| `largest(uri)` / `newest(uri)` / `oldest(uri)` | The top-N objects under a prefix: the biggest, the newest or the oldest |
-| `compare(uri_a, uri_b)` | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync) |
+| Command                                                                                                               | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| :-------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ls(uri, details=False)`                                                                                              | One level of folders and files, like `aws s3 ls`. `details=True` adds what's inside each file: a PDF's pages, a table's rows and columns, a picture's size                                                                                                                                                                                                                                                                                                                                       |
+| `tree(uri, depth=2, files=10)`                                                                                        | Folder tree with count, size and share at every level, and the files in each folder (the first `files` by name, then one "… N more files" row; `files=0` for folders only)                                                                                                                                                                                                                                                                                                                       |
+| `summary(uri)`                                                                                                        | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files)                                                                                                                                                                                                   |
+| `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search by glob, regex, extension, size, date or storage class, e.g. `find(uri, pattern="*.csv", min_size="10MB", modified_after="7d")`                                                                                                                                                                                                                                                                                                                                                           |
+| `file_details(uri, pattern=, extensions=, limit=200, max_read="1GB")`                                                 | What's inside each file, a table per kind (see [what it reports](#file-details)): a PDF's pages, title, author and whether it has text, a Word file's words, a deck's slides, each Excel sheet's size, a table's rows and column names, a picture's size, a video's length, an archive's files. Findings: scanned PDFs that need OCR, password-protected files, files that aren't what their name says, table files in one folder with different columns. Reads only the parts each format needs |
+| `largest(uri)` / `newest(uri)` / `oldest(uri)`                                                                        | The top-N objects under a prefix: the biggest, the newest or the oldest                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `compare(uri_a, uri_b)`                                                                                               | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync)                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 #### Cut cost
 
-| Command | Shows |
-|:---|:---|
+| Command                                                       | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `duplicates(uri, method="hash", min_size=1, max_read="10GB")` | Identical files, the space and monthly cost of their copies, which copy to keep, and folders that hold nothing but copies (e.g. a backfill of files that exist elsewhere), plus the call that gets the list as a DataFrame. Files are matched by size and ETag, and where same-size files have different ETags (copies uploaded in parts of another size, or encrypted with SSE-KMS), by the SHA-256 of their content: the first 64 KB first, the whole file only where those match, reading at most `max_read`. `method="etag"` reads nothing; `method="strict"` hashes every file that shares its size |
-| `what_if(uri, move_after=, to=, delete_after=)` | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves |
-| `uploads(uri)` | Incomplete multipart uploads (billed but invisible in normal listings) and what they cost |
+| `what_if(uri, move_after=, to=, delete_after=)`               | Preview a lifecycle rule before adding it: how many files it would move or delete today, cost before and after, one-time cost and payback time, plus the rule's JSON. `move_after={30: "STANDARD_IA", 180: "GLACIER"}` for several moves                                                                                                                                                                                                                                                                                                                                                                 |
+| `uploads(uri)`                                                | Incomplete multipart uploads (billed but invisible in normal listings) and what they cost                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 #### Versions and deleted files
 
-| Command | Shows |
-|:---|:---|
-| `versions(uri)` | Current vs noncurrent versions, delete markers, what the old versions cost per month, keys holding the most old-version data |
-| `history(uri)` | Version history of one object |
+| Command                            | Shows                                                                                                                                                                                             |
+| :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `versions(uri)`                    | Current vs noncurrent versions, delete markers, what the old versions cost per month, keys holding the most old-version data                                                                      |
+| `history(uri)`                     | Version history of one object                                                                                                                                                                     |
 | `deleted(uri, deleted_after=None)` | Deleted files you can still bring back in a versioned bucket (most recent first), their size, the old versions kept, and the call that restores one. Read-only: it never restores anything itself |
 
 #### Open a file
 
-| Command | Shows |
-|:---|:---|
-| `head(uri)` | All object metadata, user metadata and tags |
-| `preview(uri, n=20)` | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, a PDF's first pages as they look (scans too), a Word file with its pictures in place, or a hex dump. Only downloads what it needs. |
-| `document(uri, pages=None, pictures=None)` | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages |
-| `download(uri, path=None)` | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it |
+| Command                                                                           | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| :-------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `head(uri)`                                                                       | All object metadata, user metadata and tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `preview(uri, n=20)`                                                              | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, a PDF's first pages as they look (scans too), a Word file with its pictures in place, or a hex dump. Only downloads what it needs.                                                                                                                                                                                    |
+| `document(uri, pages=None, pictures=None)`                                        | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages                                                                                                                                                                                              |
+| `download(uri, path=None)`                                                        | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it                                                                                                                                                                         |
 | `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
-| `link(uri)` | Clickable presigned download link |
+| `link(uri)`                                                                       | Clickable presigned download link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ### Reference
 
@@ -411,23 +422,23 @@ object and its name) says what's inside a file the way `file_details` does, and 
 `preview` and `read_df` pick the reader from the file name, and from the first bytes when the name has
 no extension or the wrong one (Spark's `part-00000`, a Firehose object, a `.gz` that isn't gzipped).
 
-| Kind | Extensions | `preview` shows | `read_df` |
-|:---|:---|:---|:---|
-| Delimited text | `.csv` `.tsv` `.psv` | first rows | ✓ |
-| JSON | `.json` `.jsonl` `.ndjson` | table of records, or pretty JSON | ✓ |
-| Columnar | `.parquet` `.orc` `.feather` `.arrow` | first rows, schema, row count (reads only what it needs) | ✓ |
-| Avro | `.avro` | first rows, schema, codec (built-in reader; snappy needs `python-snappy`) | ✓ |
-| Excel | `.xlsx` `.xlsm` `.xls` | sheet names, first rows (needs `openpyxl`; `.xls` needs `xlrd`) | ✓ `sheet_name=` |
-| NumPy | `.npy` `.npz` | shape, dtype, first rows / the arrays inside | ✓ `.npy` up to 2-D |
-| Archives | `.zip` `.tar` `.tar.gz` `.tgz` | the files inside, e.g. a SageMaker `model.tar.gz` | |
-| Models | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib` | tensors, shapes, parameter count / files inside; pickles are never loaded | |
-| Notebooks | `.ipynb` | kernel and cells | |
-| Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player | |
-| PDF | `.pdf` | the first 3 pages as they look, scanned pages too (needs `pypdfium2` + `pillow`), page count, title and first page's text (needs `pypdf`); without either, a link | |
-| Word | `.docx` `.docm` `.dotx` | the first paragraphs laid out with their headings, lists, tables and pictures in place; word count (no package needed) | |
-| PowerPoint | `.pptx` `.pptm` `.ppsx` | every slide's title and text, speaker notes (no package needed) | |
-| Old Office | `.doc` `.ppt` `.msg` | recognised, with how to convert them (the old binary format can't be read) | |
-| Text | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more | first lines | |
+| Kind                 | Extensions                                                                   | `preview` shows                                                                                                                                                   | `read_df`          |
+| :------------------- | :--------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------- |
+| Delimited text       | `.csv` `.tsv` `.psv`                                                         | first rows                                                                                                                                                        | ✓                  |
+| JSON                 | `.json` `.jsonl` `.ndjson`                                                   | table of records, or pretty JSON                                                                                                                                  | ✓                  |
+| Columnar             | `.parquet` `.orc` `.feather` `.arrow`                                        | first rows, schema, row count (reads only what it needs)                                                                                                          | ✓                  |
+| Avro                 | `.avro`                                                                      | first rows, schema, codec (built-in reader; snappy needs `python-snappy`)                                                                                         | ✓                  |
+| Excel                | `.xlsx` `.xlsm` `.xls`                                                       | sheet names, first rows (needs `openpyxl`; `.xls` needs `xlrd`)                                                                                                   | ✓ `sheet_name=`    |
+| NumPy                | `.npy` `.npz`                                                                | shape, dtype, first rows / the arrays inside                                                                                                                      | ✓ `.npy` up to 2-D |
+| Archives             | `.zip` `.tar` `.tar.gz` `.tgz`                                               | the files inside, e.g. a SageMaker `model.tar.gz`                                                                                                                 |                    |
+| Models               | `.safetensors` `.pt` `.pth` `.ckpt` `.pkl` `.joblib`                         | tensors, shapes, parameter count / files inside; pickles are never loaded                                                                                         |                    |
+| Notebooks            | `.ipynb`                                                                     | kernel and cells                                                                                                                                                  |                    |
+| Images, audio, video | `.png` `.jpg` `.gif` `.webp` / `.wav` `.mp3` `.flac` / `.mp4` `.webm` `.mov` | the image / a player                                                                                                                                              |                    |
+| PDF                  | `.pdf`                                                                       | the first 3 pages as they look, scanned pages too (needs `pypdfium2` + `pillow`), page count, title and first page's text (needs `pypdf`); without either, a link |                    |
+| Word                 | `.docx` `.docm` `.dotx`                                                      | the first paragraphs laid out with their headings, lists, tables and pictures in place; word count (no package needed)                                            |                    |
+| PowerPoint           | `.pptx` `.pptm` `.ppsx`                                                      | every slide's title and text, speaker notes (no package needed)                                                                                                   |                    |
+| Old Office           | `.doc` `.ppt` `.msg`                                                         | recognised, with how to convert them (the old binary format can't be read)                                                                                        |                    |
+| Text                 | `.txt` `.log` `.md` `.yaml` `.xml` `.sql` `.py` and more                     | first lines                                                                                                                                                       |                    |
 
 Any of them can also be compressed: `.gz`, `.bz2`, `.xz`, or `.zst` (Python 3.14+, or `pip install zstandard`).
 Packages in the table are optional; without them `preview` says what to install.
@@ -441,23 +452,23 @@ Each file's format comes from its name and is checked against its first bytes, s
 described and one with the wrong extension is flagged ("report.pdf is text, not a PDF"). Counts marked `≈` are
 estimates from the start of the file, and `+` marks a lower bound.
 
-| Kind | Extensions | Reports | Reads |
-|:---|:---|:---|:---|
-| PDF | `.pdf` | pages, whether the first 3 pages have text (none = probably scanned), page size (A4, Letter, …), title, author, the app that made it, creation date, PDF version, whether it needs a password | the page tree and first 3 pages (needs `pypdf`) |
-| Word | `.docx` `.docm` `.dotx` | words, pages (as Word last saved them), headings, tables, pictures, title, author, last saved | the document's text |
-| PowerPoint | `.pptx` `.pptm` `.ppsx` | slides, words, slides with speaker notes, tables, pictures, title, author | the slides' text |
-| Excel | `.xlsx` `.xlsm` | each sheet's name and rows × columns, title, author | the size saved at the top of each sheet |
-| Parquet | `.parquet` | rows, column names, row groups, compression, the program that wrote it | the footer (needs `pyarrow`) |
-| ORC, Feather | `.orc` `.feather` `.arrow` | rows, column names, compression, stripes / record batches | the metadata (needs `pyarrow`) |
-| Avro | `.avro` | rows, column names, codec | block headers, in files up to 64 MB |
-| CSV, JSON lines | `.csv` `.tsv` `.psv` `.jsonl` `.ndjson` | column names, rows: exact up to 256 KB, then `≈` estimated, or `+` when compressed | the first 256 KB |
-| JSON | `.json` | records and their keys, or an object's keys | up to 16 MB |
-| Pictures | `.png` `.jpg` `.gif` `.bmp` `.webp`, TIFF | format, width × height | the first 64 KB |
-| Audio, video | `.wav` `.flac` `.mp4` `.mov` `.m4a` | length; sample rate and channels; width × height | the header / the MP4 `moov` box |
-| Archives | `.zip` `.tar` `.tar.gz` `.tgz` | files inside, unpacked size | the zip index / tar headers |
-| Models, arrays | `.safetensors` `.npy` `.npz` `.pt` `.pth` `.pkl` | tensors, parameters, dtypes / shape / arrays / files inside; pickles are never loaded | headers only |
-| Notebooks | `.ipynb` | cells, code cells, outputs, kernel | up to 50 MB |
-| Text | `.txt` `.log` `.md` and more | lines | the first 256 KB |
+| Kind            | Extensions                                       | Reports                                                                                                                                                                                       | Reads                                           |
+| :-------------- | :----------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| PDF             | `.pdf`                                           | pages, whether the first 3 pages have text (none = probably scanned), page size (A4, Letter, …), title, author, the app that made it, creation date, PDF version, whether it needs a password | the page tree and first 3 pages (needs `pypdf`) |
+| Word            | `.docx` `.docm` `.dotx`                          | words, pages (as Word last saved them), headings, tables, pictures, title, author, last saved                                                                                                 | the document's text                             |
+| PowerPoint      | `.pptx` `.pptm` `.ppsx`                          | slides, words, slides with speaker notes, tables, pictures, title, author                                                                                                                     | the slides' text                                |
+| Excel           | `.xlsx` `.xlsm`                                  | each sheet's name and rows × columns, title, author                                                                                                                                           | the size saved at the top of each sheet         |
+| Parquet         | `.parquet`                                       | rows, column names, row groups, compression, the program that wrote it                                                                                                                        | the footer (needs `pyarrow`)                    |
+| ORC, Feather    | `.orc` `.feather` `.arrow`                       | rows, column names, compression, stripes / record batches                                                                                                                                     | the metadata (needs `pyarrow`)                  |
+| Avro            | `.avro`                                          | rows, column names, codec                                                                                                                                                                     | block headers, in files up to 64 MB             |
+| CSV, JSON lines | `.csv` `.tsv` `.psv` `.jsonl` `.ndjson`          | column names, rows: exact up to 256 KB, then `≈` estimated, or `+` when compressed                                                                                                            | the first 256 KB                                |
+| JSON            | `.json`                                          | records and their keys, or an object's keys                                                                                                                                                   | up to 16 MB                                     |
+| Pictures        | `.png` `.jpg` `.gif` `.bmp` `.webp`, TIFF        | format, width × height                                                                                                                                                                        | the first 64 KB                                 |
+| Audio, video    | `.wav` `.flac` `.mp4` `.mov` `.m4a`              | length; sample rate and channels; width × height                                                                                                                                              | the header / the MP4 `moov` box                 |
+| Archives        | `.zip` `.tar` `.tar.gz` `.tgz`                   | files inside, unpacked size                                                                                                                                                                   | the zip index / tar headers                     |
+| Models, arrays  | `.safetensors` `.npy` `.npz` `.pt` `.pth` `.pkl` | tensors, parameters, dtypes / shape / arrays / files inside; pickles are never loaded                                                                                                         | headers only                                    |
+| Notebooks       | `.ipynb`                                         | cells, code cells, outputs, kernel                                                                                                                                                            | up to 50 MB                                     |
+| Text            | `.txt` `.log` `.md` and more                     | lines                                                                                                                                                                                         | the first 256 KB                                |
 
 </details>
 
@@ -502,16 +513,16 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
 
 Read-only. Grant what you need:
 
-| Permission | For |
-|:---|:---|
-| `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | The list of buckets (also the explorer's first page), and each bucket's region |
-| `s3:ListBucket`, `s3:ListBucketVersions` | Listing files (also in the explorer), their old versions and delete markers |
-| `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts` | Incomplete multipart uploads |
-| `s3:GetObject` | Reading files: `preview`, `document`, `file_details`, `ls(details=True)`, `duplicates`, `download` / `download_zip` |
-| `s3:GetObjectTagging` | Object tags |
-| The `s3:GetBucket*` / `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` / `s3:GetInventoryConfiguration` family | The settings in `bucket_info`, including `s3:GetBucketPolicy` for `policy` |
-| `s3:GetAccountPublicAccessBlock` | The account-level public access setting |
-| `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData` | Bucket sizes |
+| Permission                                                                                                                                                        | For                                                                                                                 |
+| :---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ |
+| `s3:ListAllMyBuckets`, `s3:GetBucketLocation`                                                                                                                     | The list of buckets (also the explorer's first page), and each bucket's region                                      |
+| `s3:ListBucket`, `s3:ListBucketVersions`                                                                                                                          | Listing files (also in the explorer), their old versions and delete markers                                         |
+| `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts`                                                                                                    | Incomplete multipart uploads                                                                                        |
+| `s3:GetObject`                                                                                                                                                    | Reading files: `preview`, `document`, `file_details`, `ls(details=True)`, `duplicates`, `download` / `download_zip` |
+| `s3:GetObjectTagging`                                                                                                                                             | Object tags                                                                                                         |
+| The `s3:GetBucket*` / `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` / `s3:GetInventoryConfiguration` family | The settings in `bucket_info`, including `s3:GetBucketPolicy` for `policy`                                          |
+| `s3:GetAccountPublicAccessBlock`                                                                                                                                  | The account-level public access setting                                                                             |
+| `cloudwatch:ListMetrics`, `cloudwatch:GetMetricData`                                                                                                              | Bucket sizes                                                                                                        |
 
 Anything you can't read shows up as a note instead of an error. The
 [S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html#permissions) has a ready-made IAM policy that covers
@@ -572,46 +583,46 @@ Grouped the way `ui.help()` lists them.
 
 #### Tables
 
-| Command | Shows |
-|:---|:---|
-| `tables(match=None)` | Every table in the region in one table: key, item count, size, billing mode, indexes, estimated monthly cost (including on-demand requests at the last 24 hours' rate) and a list of warnings. `match="prod-*"` checks only matching names |
-| `table_info(table)` | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks, each with what to do about it: no point-in-time recovery (with its cost and the command that turns it on), throttling, capacity near its limit, or capacity far above what's used (with what less capacity or on-demand would cost) |
+| Command              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| :------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tables(match=None)` | Every table in the region in one table: key, item count, size, billing mode, indexes, estimated monthly cost (including on-demand requests at the last 24 hours' rate) and a list of warnings. `match="prod-*"` checks only matching names                                                                                                                                                                                                                                                                                                                             |
+| `table_info(table)`  | Keys and types, every index with its projection and **the `query(...)` call that reads it**, billing and capacity, CloudWatch usage over the last 24 hours (consumed units, busiest 5 minutes, throttling), TTL, stream, point-in-time recovery, deletion protection, encryption, tags, estimated monthly cost, and flagged risks, each with what to do about it: no point-in-time recovery (with its cost and the command that turns it on), throttling, capacity near its limit, or capacity far above what's used (with what less capacity or on-demand would cost) |
 
 #### Look at items
 
-| Command | Shows |
-|:---|:---|
-| `sample(table, n=20)` | About n items spread across the whole key space. `scan` shows the start of the table, which can all be one partition key; this reads a few items from many slices of it |
-| `scan(table, n=20, where=, index=, attributes=)` | Items from the start of the table (or an index) as a table: key attributes first, then the others by how many items have them, nested maps as `address.city` columns. Shows how many items were read to find them and the read units used |
-| `query(table, partition, sort=None, index=, where=, descending=)` | Items sharing one partition key, in sort-key order, on the table or an index |
-| `get(table, *key)` | One item with every nested map and list expanded, the type of each attribute, its size and read / write cost. `as_json=True` adds a JSON copy |
-| `sql(statement, *params)` | A PartiQL statement, e.g. `sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42")` |
-| `more()` | The next page of the last `scan`, `query` or `sql` |
+| Command                                                           | Shows                                                                                                                                                                                                                                     |
+| :---------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sample(table, n=20)`                                             | About n items spread across the whole key space. `scan` shows the start of the table, which can all be one partition key; this reads a few items from many slices of it                                                                   |
+| `scan(table, n=20, where=, index=, attributes=)`                  | Items from the start of the table (or an index) as a table: key attributes first, then the others by how many items have them, nested maps as `address.city` columns. Shows how many items were read to find them and the read units used |
+| `query(table, partition, sort=None, index=, where=, descending=)` | Items sharing one partition key, in sort-key order, on the table or an index                                                                                                                                                              |
+| `get(table, *key)`                                                | One item with every nested map and list expanded, the type of each attribute, its size and read / write cost. `as_json=True` adds a JSON copy                                                                                             |
+| `sql(statement, *params)`                                         | A PartiQL statement, e.g. `sql('SELECT * FROM "orders" WHERE pk = ?', "USER#42")`                                                                                                                                                         |
+| `more()`                                                          | The next page of the last `scan`, `query` or `sql`                                                                                                                                                                                        |
 
 #### Understand the data
 
-| Command | Shows |
-|:---|:---|
-| `schema(table, n=1000)` | Every attribute and map field: type (or mix of types), share of items that have it, distinct values, examples, range. Key patterns such as `USER#<number>` and `ORDER#<date>`, which show the entity types of a single-table design. Item sizes, the largest items, and findings: mixed types, empty strings, items near the 400 KB limit, attribute names built from data |
-| `value_counts(table, attribute)` | How often each value occurs, with the size of those items. On the partition key this is each item collection's size, so hot partitions stand out |
-| `largest(table, n=10)` | The biggest items by DynamoDB's sizing rules, and what reading each costs |
-| `count(table, where=None)` | Exact count (a full scan), next to DynamoDB's own estimate |
+| Command                          | Shows                                                                                                                                                                                                                                                                                                                                                                      |
+| :------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema(table, n=1000)`          | Every attribute and map field: type (or mix of types), share of items that have it, distinct values, examples, range. Key patterns such as `USER#<number>` and `ORDER#<date>`, which show the entity types of a single-table design. Item sizes, the largest items, and findings: mixed types, empty strings, items near the 400 KB limit, attribute names built from data |
+| `value_counts(table, attribute)` | How often each value occurs, with the size of those items. On the partition key this is each item collection's size, so hot partitions stand out                                                                                                                                                                                                                           |
+| `largest(table, n=10)`           | The biggest items by DynamoDB's sizing rules, and what reading each costs                                                                                                                                                                                                                                                                                                  |
+| `count(table, where=None)`       | Exact count (a full scan), next to DynamoDB's own estimate                                                                                                                                                                                                                                                                                                                 |
 
 ### Filters
 
 `where=` works on `scan`, `query`, `sample`, `schema`, `value_counts`, `largest` and `count`. It takes a dict, and
 every condition must match:
 
-| `where=` | Means |
-|:---|:---|
-| `{"status": "failed"}` | `status = 'failed'` |
-| `{"total": (">", 100)}` | also `"="`, `"!="`, `"<"`, `"<="`, `">="` |
-| `{"total": ("between", 10, 100)}` | both ends included |
-| `{"sk": ("begins_with", "ORDER#")}` | |
-| `{"tags": ("contains", "promo")}` | a substring, or a member of a set or list |
-| `{"status": ("in", ["paid", "shipped"])}` | |
-| `{"deleted_at": ("not_exists",)}` | also `("exists",)`, and `("type", "N")` to check the stored type |
-| `{"address.city": "Pune"}` | dots reach into maps |
+| `where=`                                  | Means                                                            |
+| :---------------------------------------- | :--------------------------------------------------------------- |
+| `{"status": "failed"}`                    | `status = 'failed'`                                              |
+| `{"total": (">", 100)}`                   | also `"="`, `"!="`, `"<"`, `"<="`, `">="`                        |
+| `{"total": ("between", 10, 100)}`         | both ends included                                               |
+| `{"sk": ("begins_with", "ORDER#")}`       |                                                                  |
+| `{"tags": ("contains", "promo")}`         | a substring, or a member of a set or list                        |
+| `{"status": ("in", ["paid", "shipped"])}` |                                                                  |
+| `{"deleted_at": ("not_exists",)}`         | also `("exists",)`, and `("type", "N")` to check the stored type |
+| `{"address.city": "Pune"}`                | dots reach into maps                                             |
 
 For OR and NOT, pass a boto3 condition instead: `where=Attr("a").eq(1) | Attr("b").exists()`. The `sort=` argument
 of `query` takes a value or one of the same tuples (`=`, `<`, `<=`, `>`, `>=`, `between`, `begins_with`). Key values
@@ -688,13 +699,13 @@ profile_items([from_dynamo_item(row["Item"]) for row in rows], keys=["pk", "sk"]
 
 Read-only. Grant what you need:
 
-| Permission | For |
-|:---|:---|
-| `dynamodb:ListTables` | The list of tables |
+| Permission                                                                                                                   | For                                  |
+| :--------------------------------------------------------------------------------------------------------------------------- | :----------------------------------- |
+| `dynamodb:ListTables`                                                                                                        | The list of tables                   |
 | `dynamodb:DescribeTable`, `dynamodb:DescribeTimeToLive`, `dynamodb:DescribeContinuousBackups`, `dynamodb:ListTagsOfResource` | A table's keys, indexes and settings |
-| `dynamodb:Scan`, `dynamodb:Query`, `dynamodb:GetItem` | Reading items |
-| `dynamodb:PartiQLSelect` | `sql` |
-| `cloudwatch:GetMetricData` | Usage |
+| `dynamodb:Scan`, `dynamodb:Query`, `dynamodb:GetItem`                                                                        | Reading items                        |
+| `dynamodb:PartiQLSelect`                                                                                                     | `sql`                                |
+| `cloudwatch:GetMetricData`                                                                                                   | Usage                                |
 
 Reading an index needs the permission on its ARN too (`arn:aws:dynamodb:<region>:<account>:table/orders/index/*`),
 and a table encrypted with a customer managed KMS key needs `kms:Decrypt`. Anything you can't read shows up as a
@@ -760,45 +771,45 @@ Grouped the way `ui.help()` lists them.
 
 #### Knowledge bases
 
-| Command | Shows |
-|:---|:---|
-| `kbs()` | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings |
-| `use(kb)` | Sets the knowledge base that later commands use when you don't pass `kb=`: a name in any case, the 10-character ID, or the ARN |
+| Command            | Shows                                                                                                                                                                                                                                                                   |
+| :----------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kbs()`            | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings                                                                                             |
+| `use(kb)`          | Sets the knowledge base that later commands use when you don't pass `kb=`: a name in any case, the 10-character ID, or the ARN                                                                                                                                          |
 | `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy), recent syncs, tags, and what to try next |
 
 #### What's indexed
 
-| Command | Shows |
-|:---|:---|
-| `syncs(kb=None, data_source=None, n=10)` | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again |
+| Command                                                   | Shows                                                                                                                                                                           |
+| :-------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `syncs(kb=None, data_source=None, n=10)`                  | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again                                   |
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the ones that aren't indexed with Bedrock's reason, and the sync command. `status="INDEXED"` or `"FAILED"` lists only those |
-| `unsynced(kb=None, data_source=None)` | S3 files added or changed since each data source's last successful sync, and the command to sync them |
+| `unsynced(kb=None, data_source=None)`                     | S3 files added or changed since each data source's last successful sync, and the command to sync them                                                                           |
 
 #### Search and answer
 
-| Command | Shows |
-|:---|:---|
-| `search(question, n=5, kb=, where=, search_type=, rerank=)` | Ranked passages: a score bar relative to the top result, file and page, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
-| `chunk(rank)` | The full text, metadata and IDs of result #rank from the last `search` or `ask`, and the `S3View().preview("s3://...")` call that opens its file |
-| `ask(question, kb=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens) |
-| `follow_up(question)` | The next question in the same RetrieveAndGenerate session (or Converse conversation). If the session has expired, starts a new one and says so |
-| `models(match=None)` | The text models you can use for `ask()` here: the ID to pass as `model=`, provider, on demand or through an inference profile, and $ per 1M tokens in and out |
+| Command                                                                                    | Shows                                                                                                                                                                                                                                                                                                                                                                        |
+| :----------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `search(question, n=5, kb=, where=, search_type=, rerank=)`                                | Ranked passages: a score bar relative to the top result, file and page, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
+| `chunk(rank)`                                                                              | The full text, metadata and IDs of result #rank from the last `search` or `ask`, and the `S3View().preview("s3://...")` call that opens its file                                                                                                                                                                                                                             |
+| `ask(question, kb=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens)                                                                                                                            |
+| `follow_up(question)`                                                                      | The next question in the same RetrieveAndGenerate session (or Converse conversation). If the session has expired, starts a new one and says so                                                                                                                                                                                                                               |
+| `models(match=None)`                                                                       | The text models you can use for `ask()` here: the ID to pass as `model=`, provider, on demand or through an inference profile, and $ per 1M tokens in and out                                                                                                                                                                                                                |
 
 #### Measure retrieval
 
-| Command | Shows |
-|:---|:---|
+| Command                                                                          | Shows                                                                                                                                                   |
+| :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `compare(question, kb=, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=)` | One row per passage and one column per setting with its rank there, how much each pair of settings overlaps, and what each found that the others missed |
-| `evaluate(cases, kb=, n=5, search_type=)` | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes |
+| `evaluate(cases, kb=, n=5, search_type=)`                                        | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes   |
 
 ### Two ways to generate answers
 
-| | `engine="kb"` (default) | `engine="converse"` |
-|:---|:---|:---|
-| **How** | Bedrock's managed RetrieveAndGenerate: Bedrock retrieves, prompts the model and returns the citations | Retrieves, then calls the model through Bedrock Converse with the passages numbered as sources. Any Bedrock model |
-| **Tokens and cost** | Estimated from characters, and labelled as estimates: RetrieveAndGenerate doesn't report token counts | Exact counts and cost |
-| **Your own prompt** | A custom `prompt=` must contain `$search_results$` | A `prompt=` template with `{sources}` and `{question}` (see `bedrock_kb.DEFAULT_PROMPT`) |
-| **Follow-ups** | `follow_up()` keeps Bedrock's session | `follow_up()` continues the conversation |
+|                     | `engine="kb"` (default)                                                                               | `engine="converse"`                                                                                               |
+| :------------------ | :---------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
+| **How**             | Bedrock's managed RetrieveAndGenerate: Bedrock retrieves, prompts the model and returns the citations | Retrieves, then calls the model through Bedrock Converse with the passages numbered as sources. Any Bedrock model |
+| **Tokens and cost** | Estimated from characters, and labelled as estimates: RetrieveAndGenerate doesn't report token counts | Exact counts and cost                                                                                             |
+| **Your own prompt** | A custom `prompt=` must contain `$search_results$`                                                    | A `prompt=` template with `{sources}` and `{question}` (see `bedrock_kb.DEFAULT_PROMPT`)                          |
+| **Follow-ups**      | `follow_up()` keeps Bedrock's session                                                                 | `follow_up()` continues the conversation                                                                          |
 
 With `engine="converse"`, the sources are sent as data, never as instructions, and the model is told to cite them as
 `[n]` and to say when they don't hold the answer.
@@ -814,16 +825,16 @@ example `refund-policy.pdf.metadata.json` holding `{"metadataAttributes": {"team
 works on `search`, `ask`, `compare` and `evaluate`, uses the same vocabulary as the DynamoDB analyzer, and every
 condition must match:
 
-| `where=` | Means |
-|:---|:---|
-| `{"team": "billing"}` | `team = 'billing'` |
-| `{"team": ["billing", "support"]}` | one of these values |
-| `{"year": (">=", 2024)}` | also `"="`, `"!="`, `">"`, `"<"`, `"<="` |
-| `{"year": ("between", 2020, 2024)}` | both ends included |
-| `{"region": ("in", ["eu", "uk"])}` | also `("not_in", [...])` |
-| `{"doc_id": ("begins_with", "POL-")}` | text starting with this |
-| `{"title": ("contains", "refund")}` | text containing this, or a list with an element containing it |
-| `{"tags": ("list_contains", "gdpr")}` | a list attribute holding exactly this element |
+| `where=`                              | Means                                                         |
+| :------------------------------------ | :------------------------------------------------------------ |
+| `{"team": "billing"}`                 | `team = 'billing'`                                            |
+| `{"team": ["billing", "support"]}`    | one of these values                                           |
+| `{"year": (">=", 2024)}`              | also `"="`, `"!="`, `">"`, `"<"`, `"<="`                      |
+| `{"year": ("between", 2020, 2024)}`   | both ends included                                            |
+| `{"region": ("in", ["eu", "uk"])}`    | also `("not_in", [...])`                                      |
+| `{"doc_id": ("begins_with", "POL-")}` | text starting with this                                       |
+| `{"title": ("contains", "refund")}`   | text containing this, or a list with an element containing it |
+| `{"tags": ("list_contains", "gdpr")}` | a list attribute holding exactly this element                 |
 
 Values are typed: `2024` and `"2024"` differ. For OR, pass a Bedrock `RetrievalFilter` instead, e.g.
 `where={"orAll": [{"equals": {"key": "team", "value": "a"}}, {"equals": {"key": "team", "value": "b"}}]}`; it is
@@ -901,18 +912,18 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
 
 Read-only, per command:
 
-| Permission | Used by |
-|:---|:---|
-| `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase` | `kbs`, `kb_info`, and finding a knowledge base by name |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced` |
-| `bedrock:ListKnowledgeBaseDocuments` | `documents` |
-| `bedrock:ListTagsForResource` | `kb_info` |
-| `bedrock:Retrieve` | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")` |
-| `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up` |
-| `bedrock:InvokeModel` | `ask(engine="converse")`, `core.generate` |
-| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | `models`, and turning `model="sonnet"` into an ID |
-| `s3:ListBucket` on the data source's bucket | `unsynced` |
+| Permission                                                                                 | Used by                                                            |
+| :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
+| `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`                                   | `kbs`, `kb_info`, and finding a knowledge base by name             |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`                        |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`                              |
+| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`                                                        |
+| `bedrock:ListTagsForResource`                                                              | `kb_info`                                                          |
+| `bedrock:Retrieve`                                                                         | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")` |
+| `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up`                                                 |
+| `bedrock:InvokeModel`                                                                      | `ask(engine="converse")`, `core.generate`                          |
+| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`                            | `models`, and turning `model="sonnet"` into an ID                  |
+| `s3:ListBucket` on the data source's bucket                                                | `unsynced`                                                         |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. Anything you can't
 read shows up as a note instead of an error. The
@@ -967,15 +978,15 @@ Grouped the way `ui.help()` lists them.
 
 #### This notebook
 
-| Command | Shows |
-|:---|:---|
-| `instance(name=None)` | The notebook you're in: instance type with its vCPUs, memory and GPUs, price per hour, how long it has run and what that cost, what a month of it costs if it's never stopped, and **whether anything stops it when idle** (a notebook instance's auto-stop lifecycle configuration, or the Studio domain's idle shutdown), with the commands that turn it on. Then the machine right now: CPU load, memory, each disk and whether it survives a stop, GPU memory and use, the Jupyter kernels and the memory they hold, the biggest processes, and the Python and package versions. Settings: role, network, lifecycle configuration, image or platform, storage volume, space and domain. Findings: no idle shutdown, a disk or memory nearly full (and the other kernels holding memory), an idle GPU (and the CPU type with the same vCPUs and memory, with the saving), an instance far bigger than what's in use, Amazon Linux 1. `name=` shows another notebook instance or Studio space (`"d-abc123/analysis"` when two domains have one), without its machine |
-| `disk(path=None, top=20, limit="200k")` | How full the disk is and what fills it: the biggest folders as a tree three levels deep, the biggest files and when they last changed, and **the caches and trash that are safe to clear** (Jupyter's trash, pip and conda caches, Hugging Face and PyTorch downloads, notebook checkpoints), each with the command that empties it. Findings: a nearly full disk (with the command that makes the volume bigger and what that costs a month), what can be cleared, big files untouched for 90 days (and what they'd cost in S3). The default folder is where your notebooks live: `~/SageMaker` on a notebook instance, `/home/sagemaker-user` in Studio |
+| Command                                 | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| :-------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance(name=None)`                   | The notebook you're in: instance type with its vCPUs, memory and GPUs, price per hour, how long it has run and what that cost, what a month of it costs if it's never stopped, and **whether anything stops it when idle** (a notebook instance's auto-stop lifecycle configuration, or the Studio domain's idle shutdown), with the commands that turn it on. Then the machine right now: CPU load, memory, each disk and whether it survives a stop, GPU memory and use, the Jupyter kernels and the memory they hold, the biggest processes, and the Python and package versions. Settings: role, network, lifecycle configuration, image or platform, storage volume, space and domain. Findings: no idle shutdown, a disk or memory nearly full (and the other kernels holding memory), an idle GPU (and the CPU type with the same vCPUs and memory, with the saving), an instance far bigger than what's in use, Amazon Linux 1. `name=` shows another notebook instance or Studio space (`"d-abc123/analysis"` when two domains have one), without its machine |
+| `disk(path=None, top=20, limit="200k")` | How full the disk is and what fills it: the biggest folders as a tree three levels deep, the biggest files and when they last changed, and **the caches and trash that are safe to clear** (Jupyter's trash, pip and conda caches, Hugging Face and PyTorch downloads, notebook checkpoints), each with the command that empties it. Findings: a nearly full disk (with the command that makes the volume bigger and what that costs a month), what can be cleared, big files untouched for 90 days (and what they'd cost in S3). The default folder is where your notebooks live: `~/SageMaker` on a notebook instance, `/home/sagemaker-user` in Studio                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 #### Your account
 
-| Command | Shows |
-|:---|:---|
+| Command                         | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| :------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `running(metrics=True, days=7)` | Everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor, Studio Classic), endpoints, and training and processing jobs, with the instance, price per hour, how long each has run and whether it stops when idle, and each endpoint's requests over the last `days` days from CloudWatch. Stopped notebook instances are listed too, because their volumes are still billed. Findings, each with the command that stops it: notebooks and apps running for over 12 hours with nothing to stop them, endpoints with no requests, and the storage that stopped notebook instances keep |
 
 ### Reference
@@ -1036,13 +1047,13 @@ The analysis functions are pure (no AWS calls), so they also work on responses y
 
 Read-only, per command:
 
-| Permission | Used by |
-|:---|:---|
-| `sagemaker:DescribeNotebookInstance`, `sagemaker:DescribeNotebookInstanceLifecycleConfig` | `instance` on a notebook instance, `running` |
-| `sagemaker:DescribeApp`, `sagemaker:DescribeSpace`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile` | `instance` in Studio; `running` reads the domains |
-| `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps` | `instance("space name")` |
-| `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running` |
-| `cloudwatch:GetMetricData` | `running`: endpoint requests |
+| Permission                                                                                                                                                                                                                                                                             | Used by                                           |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
+| `sagemaker:DescribeNotebookInstance`, `sagemaker:DescribeNotebookInstanceLifecycleConfig`                                                                                                                                                                                              | `instance` on a notebook instance, `running`      |
+| `sagemaker:DescribeApp`, `sagemaker:DescribeSpace`, `sagemaker:DescribeDomain`, `sagemaker:DescribeUserProfile`                                                                                                                                                                        | `instance` in Studio; `running` reads the domains |
+| `sagemaker:ListDomains`, `sagemaker:ListSpaces`, `sagemaker:ListApps`                                                                                                                                                                                                                  | `instance("space name")`                          |
+| `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running`                                         |
+| `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`: endpoint requests                      |
 
 `sts:GetCallerIdentity` (who you're signed in as) needs no permission, and `disk()` only reads local files. Anything
 you can't read shows up as a note instead of an error. The `AmazonSageMakerFullAccess` managed policy, which many
@@ -1058,25 +1069,38 @@ policy that covers every command.
 pip install -r requirements-dev.txt    # pinned versions
 python -m pytest                       # every test, no AWS account needed
 ruff check .                           # lint
+python -m build                        # the PyPI package, in dist/
+
+pip install -r requirements-docs.txt   # the guide site
+mkdocs serve                           # preview it at http://127.0.0.1:8000
 ```
 
 - **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
   Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
   tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder.
-- **Guides** in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
-  whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service
-  has its own guide ([`docs/s3.html`](docs/s3.html), [`docs/dynamodb.html`](docs/dynamodb.html),
-  [`docs/bedrock_kb.html`](docs/bedrock_kb.html), [`docs/sagemaker_env.html`](docs/sagemaker_env.html)); a new
-  analyzer gets a new guide and a card on the home page.
+- **Guides** in `docs/` are Markdown, built with [MkDocs](https://www.mkdocs.org/) and the
+  [Material](https://squidfunk.github.io/mkdocs-material/) theme ([`mkdocs.yml`](mkdocs.yml)) and published to GitHub
+  Pages by [the Docs workflow](.github/workflows/pages.yml) whenever they change on `main`; pull requests build them
+  with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
+  service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
+  [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/sagemaker_env.md`](docs/sagemaker_env.md)); a new analyzer
+  gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
   Bedrock, since moto has none.
+- **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
+  `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes
+  and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
+  `notebook` (IPython, ipywidgets, tqdm) and `all`. To release, bump `__version__` and publish a GitHub release
+  tagged `v<version>`: [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to
+  PyPI with trusted publishing (its comments have the one-time setup).
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
-  `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
-  `requirements-dev.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly pull requests to update them
-  and the GitHub Actions the workflow uses.
+  `main`, and also imports each analyzer on its own with only boto3 installed, and builds the package and imports it
+  the same way. The versions in
+  `requirements-dev.txt` and `requirements-docs.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly
+  pull requests to update them and the GitHub Actions the workflows use.
 
 ## License
 
