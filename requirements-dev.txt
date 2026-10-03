@@ -25,6 +25,8 @@ pypdfium2==5.13.0
 pillow==12.3.0
 # Optional for users (progress bars); installed here so the tqdm path is tested.
 tqdm==4.70.1
+# Optional for users (bedrock_chat's chat window); installed here so the window is tested.
+ipywidgets==8.1.9
 
 # Lint
 ruff==0.16.8
