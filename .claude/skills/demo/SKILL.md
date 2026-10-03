@@ -111,6 +111,17 @@ DescribeTable counts around them. Bedrock's figures use `seed_bedrock_kb()`. Aft
 and check that its caption and `alt` text in the guide still say what it shows (counts in them come from the
 scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
 
+The S3 explorer (`s3_explorer.py`) is a live ipywidgets app, not a report, so `shots.py` can't draw it.
+`explorer_shots.py` starts JupyterLab in a temporary folder, runs the explorer on the acme scene and screenshots it
+the same size, light and dark. It needs `pip install jupyterlab playwright` on top of the dev requirements:
+
+```bash
+.venv/bin/python .claude/skills/demo/explorer_shots.py              # explorer and explorer-docx (about a minute)
+```
+
+To click around the explorer yourself, start `jupyter lab` and seed the scene in the first cell the same way
+(`mock_aws().start()`, then `core = S3Analyzer(**shots.seed_s3_docs())`, then `S3Explorer(core=core)`).
+
 ## Real AWS
 
 Use `--live` (with optional `--region` / `--profile`) only when the user explicitly asks for it. It runs against

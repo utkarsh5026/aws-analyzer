@@ -1943,6 +1943,14 @@ def test_preview_details(core):
     assert core.preview(f"s3://{BUCKET}/curated/list.json").info["records"] == 2
 
 
+def test_preview_archived_file_says_how_to_restore_it(core, aws):
+    aws.put_object(Bucket=BUCKET, Key="cold/old events.csv", Body=CSV, StorageClass="GLACIER")
+    p = core.preview(f"s3://{BUCKET}/cold/old events.csv")
+    assert p.kind == "unavailable" and "can't be read until it's restored, which takes 3-5 hours" in p.note
+    assert f"aws s3api restore-object --bucket {BUCKET} --key 'cold/old events.csv' --restore-request Days=7" in p.note
+    assert "under way" in s3mod._restore_note(BUCKET, "k", "DEEP_ARCHIVE", 'ongoing-request="true"')
+
+
 def test_bucket_config(core, aws):
     aws.put_bucket_versioning(
         Bucket=BUCKET, VersioningConfiguration={"Status": "Enabled"}

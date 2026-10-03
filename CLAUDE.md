@@ -8,6 +8,8 @@ Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each servic
 in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `sagemaker_env.py` for the
 SageMaker notebook itself and what's running) that a user pastes into a notebook cell or uploads next to a notebook
 and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. There is no package, no `setup.py` / `pyproject.toml`, and no build step.
+The one exception to "one file" is `s3_explorer.py`, a **companion** to `s3.py`: a clickable file explorer (ipywidgets)
+that imports `s3.py` for its previews, formatting and AWS calls, so users put both files next to the notebook.
 
 ## Product goal: help the user decide what to do
 
@@ -66,6 +68,9 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
   deliberately duplicated in all four analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
   `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
+  The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
+  (lazily, inside `_s3_module()`, so it still imports alone), reuses its helpers instead of copying them, and is
+  left out of `drift.py`. Nothing imports a companion.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image",
@@ -157,6 +162,30 @@ AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|A
 AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker>/current/us-east-1/index.json`; `index.csv` is easier to
 grep), which is what AWS bills from. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 
+## The S3 explorer (`s3_explorer.py`)
+
+Same five sections: pure helpers (`parse_location`, which also takes S3 console links and object URLs,
+`breadcrumbs`, `sort_entries`, `filter_entries`, `folder_stats`), `S3Navigator` as the logic layer (one
+`list_objects_v2` level per page, back / forward / up history, a folder cache, listing errors in `Folder.error`,
+never prints), and `S3Explorer` as the UI. How the UI works:
+
+- It finds `s3.py` with `_s3_module()`: the module `core` came from, else `import s3`, else `__main__` (s3.py pasted
+  into a cell). Without it, a note; without ipywidgets, a text listing (`mode="text"` forces that).
+- The right pane is a private `S3View` whose `_show` is replaced by `_capture`: its reports (`preview`, `head`,
+  `document`, `download`, `link`, `summary`, `bucket_info`, `overview`) land in an `HTML` widget, with the `_Next`
+  block dropped and the file's path shortened to its name. Progress bars go into an `Output` above it. `x.ui` is a
+  normal `S3View` for the user's own cells.
+- Still no JavaScript: every click is an ipywidgets `Button`, styled by the `<style>` in a hidden `HTML` widget
+  (`.s3x` classes, overriding ipywidgets' own hover / focus shadows). A row is a full-width button under its size and
+  age labels (`pointer-events:none`), so the whole row is the click target. Rows are pooled and reused.
+- Widgets can't scroll, so `_renew()` puts the list or the report in a new box, which starts at the top.
+- A click within `_CLICK_GRACE` seconds after the rows changed is dropped: it was aimed at the old rows (a double
+  click on a folder would otherwise open whatever took its place).
+- The path box navigates on Enter only: it listens for the `submit` message the text box sends (`on_submit` is
+  deprecated), so leaving the box or clicking ✕ doesn't navigate.
+- Callbacks go through `_guard()`, which turns any exception into a note on the right; an exception in a widget
+  callback would otherwise go to Jupyter's log, and the click would seem to do nothing.
+
 ## Tests
 
 - `tests/conftest.py` puts `analyzers/` on `sys.path` so tests `import s3` / `import dynamodb` the way a notebook
@@ -180,6 +209,10 @@ grep), which is what AWS bills from. A model missing from `MODEL_PRICES` shows i
   and a fake root with sparse files, so the disk shows gigabytes without writing them.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper.
+- `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
+  clicks with `button.click()`, sets text boxes' `.value`, sends the path box's Enter with
+  `_handle_custom_msg({"event": "submit"}, [])`, sets `_CLICK_GRACE` to 0, and reads the right pane as blocks in
+  `x.shown`.
 
 ## Docs and dependencies
 
@@ -192,9 +225,11 @@ grep), which is what AWS bills from. A model missing from `MODEL_PRICES` shows i
   links (from when it was the S3 guide) to `s3.html`, so keep its own ids in the `own` list there. The screenshots
   (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by `.claude/skills/demo/shots.py` from the
   "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's fake Bedrock and SageMaker: `shots.py <name>` remakes
-  one figure and sets its `<img height=>`. Remake the affected figures when a report's look changes, and check
-  their captions and alt text still match, in the guides and in README, which shows six of them (`overview`,
-  `dynamodb-table-info`, `preview-parquet`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
+  one figure and sets its `<img height=>`. The explorer is a live widget, so its figures (`explorer`, `explorer-docx`)
+  come from `explorer_shots.py`, which runs it in a real JupyterLab with Playwright (`pip install jupyterlab
+  playwright`). Remake the affected figures when a report's look changes, and check
+  their captions and alt text still match, in the guides and in README, which shows seven of them (`overview`,
+  `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
   the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` are pinned and updated by Dependabot; the `python_version < "3.11"` lines are
   intentionally held back. `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed

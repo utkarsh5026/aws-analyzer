@@ -33,6 +33,9 @@ Quick start
     ui.download("s3://my-bucket/data/")             # a file or folder to the notebook's disk, with progress
     ui.download_zip("s3://my-bucket/data/")         # the same as one .zip, once size / disk / access checks pass
 
+    For clicking through folders and files instead, put s3_explorer.py next to this file:
+    from s3_explorer import S3Explorer; S3Explorer("s3://my-bucket/data/")
+
     s3 = ui.core                                    # same analyzer, raw data
     summary = s3.summarize("s3://my-bucket/data/")
     df = s3.read_df("s3://my-bucket/data/part-0.parquet", nrows=1000)
@@ -62,6 +65,7 @@ import mimetypes
 import os
 import posixpath
 import re
+import shlex
 import shutil
 import struct
 import sys
@@ -1351,6 +1355,16 @@ def _require(module: str, purpose: str, package: str | None = None) -> Any:
     except ImportError as exc:
         package = package or module.split(".")[0]
         raise ImportError(f"{purpose} needs `{package}` (pip install {package})") from exc
+
+
+def _restore_note(bucket: str, key: str, storage_class: str, restore: str = "") -> str:
+    """Why an archived object can't be read, and the command that restores it (shown, never run)."""
+    name, wait = key.rsplit("/", 1)[-1], "3-5 hours" if storage_class == "GLACIER" else "up to 12 hours"
+    if 'ongoing-request="true"' in restore:
+        return f"{name} is in {storage_class} and its restore is under way; it can be read when that finishes ({wait})."
+    return (f"{name} is in {storage_class}, so it can't be read until it's restored, which takes {wait} and costs a "
+            f"retrieval fee. To make it readable for 7 days: aws s3api restore-object --bucket {bucket} "
+            f"--key {shlex.quote(key)} --restore-request Days=7")
 
 
 def _error_code(exc: ClientError) -> str:
@@ -6332,10 +6346,7 @@ class S3Analyzer:
             storage_class in ARCHIVE_CLASSES
             and 'ongoing-request="false"' not in meta.get("Restore", "")
         ):
-            p.kind, p.note = (
-                "unavailable",
-                f"Object is in {storage_class}; restore it before reading.",
-            )
+            p.kind, p.note = "unavailable", _restore_note(bucket, key, storage_class, meta.get("Restore", ""))
             return p
         sniffed = False
         if p.size:
