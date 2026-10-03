@@ -196,10 +196,10 @@ installed, so you only need the second one, and only for the file types it lists
 | Package | Needed for |
 |:---|:---|
 | `boto3` | Every command (required) |
-| `pandas` | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`. Installs `numpy` for `.npy` / `.npz` |
-| `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview` and `read_df`, and `parquet_info` |
+| `pandas` | Tables in `preview` (CSV, JSON, Avro, Excel, NumPy), `read_df`, `objects_to_df`, `to_df()`. Installs `numpy` for `.npy` / `.npz` |
+| `pyarrow` | `.parquet`, `.orc`, `.feather`, `.arrow` in `preview`, `read_df` and `file_details`, and `parquet_info` |
 | `openpyxl` / `xlrd` | Excel `.xlsx` / `.xlsm` and old `.xls` |
-| `pypdf` | PDF text in `preview`, `document`, `read_pdf` |
+| `pypdf` | PDF text in `preview`, `document`, `read_pdf`, and page counts in `file_details` |
 | `pypdfium2` + `pillow` | PDF pages drawn as pictures, the way they print (scanned pages too), in `preview`, `document`, `render_pdf`. `pillow` also shrinks big pictures in Word files before showing them |
 | `zstandard` | `.zst` files before Python 3.14 |
 | `python-snappy` | Avro files compressed with snappy |
@@ -245,10 +245,11 @@ Grouped the way `ui.help()` lists them.
 
 | Command | Shows |
 |:---|:---|
-| `ls(uri)` | One level of folders and files, like `aws s3 ls` |
+| `ls(uri, details=False)` | One level of folders and files, like `aws s3 ls`. `details=True` adds what's inside each file: a PDF's pages, a table's rows and columns, a picture's size |
 | `tree(uri, depth=2, files=10)` | Folder tree with count, size and share at every level, and the files in each folder (the first `files` by name, then one "… N more files" row; `files=0` for folders only) |
 | `summary(uri)` | Dashboard: totals, estimated monthly cost, folder breakdown, file types, storage classes, size and age histograms, largest objects, and findings (small-file problem, archived objects, cold data in STANDARD and what moving it would save, files under 128 KB billed as 128 KB, empty files) |
 | `find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=)` | Search by glob, regex, extension, size, date or storage class, e.g. `find(uri, pattern="*.csv", min_size="10MB", modified_after="7d")` |
+| `file_details(uri, pattern=, extensions=, limit=200, max_read="1GB")` | What's inside each file, a table per kind (see [what it reports](#file-details)): a PDF's pages, title, author and whether it has text, a Word file's words, a deck's slides, each Excel sheet's size, a table's rows and column names, a picture's size, a video's length, an archive's files. Findings: scanned PDFs that need OCR, password-protected files, files that aren't what their name says, table files in one folder with different columns. Reads only the parts each format needs |
 | `largest(uri)` / `newest(uri)` / `oldest(uri)` | The top-N objects under a prefix: the biggest, the newest or the oldest |
 | `compare(uri_a, uri_b)` | Diff two prefixes: identical / different / only in A / only in B (to verify a copy or sync) |
 
@@ -300,6 +301,9 @@ df = s3.read_df("s3://my-bucket/reports/q1.xlsx", sheet_name="Summary")
 df = s3.read_df("s3://my-bucket/spark/part-00000", fmt="parquet")   # no extension: say what it is
 s3.parquet_info("s3://my-bucket/data/big.parquet")  # rows, row groups, schema (reads only the footer)
 s3.list_archive("s3://my-bucket/job/output/model.tar.gz").entries   # files inside, without extracting
+details = s3.file_details("s3://my-bucket/docs/", extensions="pdf")   # FileDetailsReport: .files, bytes_read
+details.to_df()                                     # one row per file: format, size, summary, pages, title, rows, ...
+s3.describe_objects(s3.find("s3://my-bucket/", min_size="1GB"))     # the same, for files you picked
 s3.read_avro("s3://my-bucket/events.avro", n=100), s3.read_npy(uri, nrows=10), s3.safetensors_info(uri)
 doc = s3.read_document("s3://my-bucket/docs/policy.pdf")   # also .docx / .pptx: doc.text, doc.parts, doc.title
 s3.read_pdf(uri, pages=[1, 2]), s3.read_docx(uri).headings, s3.read_pptx(uri).notes
@@ -331,7 +335,9 @@ for example rows loaded from an S3 Inventory report: `summarize_objects`, `build
 finder's steps (`files_to_hash` says which files need reading, `group_duplicates` groups them given the hashes you
 have, then `duplicate_folders` and `duplicate_findings`), `zip_checks` and `zip_findings` (on a `ZipPlan`), and the
 file parsers `parse_docx` (`pictures=True` for its pictures), `parse_pptx`, `parse_pdf`, `parse_avro`, and
-`render_pdf_pages`, which draws a PDF's pages from a local file or bytes.
+`render_pdf_pages`, which draws a PDF's pages from a local file or bytes. `describe_file("local.pdf")` (or a binary file
+object and its name) says what's inside a file the way `file_details` does, and `file_details_findings` works on a
+`FileDetailsReport`.
 
 </details>
 
@@ -365,6 +371,33 @@ Packages in the table are optional; without them `preview` says what to install.
 </details>
 
 <details>
+<summary><a name="file-details"></a><b>File details</b>: what <code>file_details</code> and <code>ls(details=True)</code> report for each kind of file</summary>
+
+Each file's format comes from its name and is checked against its first bytes, so a file with no extension is still
+described and one with the wrong extension is flagged ("report.pdf is text, not a PDF"). Counts marked `≈` are
+estimates from the start of the file, and `+` marks a lower bound.
+
+| Kind | Extensions | Reports | Reads |
+|:---|:---|:---|:---|
+| PDF | `.pdf` | pages, whether the first 3 pages have text (none = probably scanned), page size (A4, Letter, …), title, author, the app that made it, creation date, PDF version, whether it needs a password | the page tree and first 3 pages (needs `pypdf`) |
+| Word | `.docx` `.docm` `.dotx` | words, pages (as Word last saved them), headings, tables, pictures, title, author, last saved | the document's text |
+| PowerPoint | `.pptx` `.pptm` `.ppsx` | slides, words, slides with speaker notes, tables, pictures, title, author | the slides' text |
+| Excel | `.xlsx` `.xlsm` | each sheet's name and rows × columns, title, author | the size saved at the top of each sheet |
+| Parquet | `.parquet` | rows, column names, row groups, compression, the program that wrote it | the footer (needs `pyarrow`) |
+| ORC, Feather | `.orc` `.feather` `.arrow` | rows, column names, compression, stripes / record batches | the metadata (needs `pyarrow`) |
+| Avro | `.avro` | rows, column names, codec | block headers, in files up to 64 MB |
+| CSV, JSON lines | `.csv` `.tsv` `.psv` `.jsonl` `.ndjson` | column names, rows: exact up to 256 KB, then `≈` estimated, or `+` when compressed | the first 256 KB |
+| JSON | `.json` | records and their keys, or an object's keys | up to 16 MB |
+| Pictures | `.png` `.jpg` `.gif` `.bmp` `.webp`, TIFF | format, width × height | the first 64 KB |
+| Audio, video | `.wav` `.flac` `.mp4` `.mov` `.m4a` | length; sample rate and channels; width × height | the header / the MP4 `moov` box |
+| Archives | `.zip` `.tar` `.tar.gz` `.tgz` | files inside, unpacked size | the zip index / tar headers |
+| Models, arrays | `.safetensors` `.npy` `.npz` `.pt` `.pth` `.pkl` | tensors, parameters, dtypes / shape / arrays / files inside; pickles are never loaded | headers only |
+| Notebooks | `.ipynb` | cells, code cells, outputs, kernel | up to 50 MB |
+| Text | `.txt` `.log` `.md` and more | lines | the first 256 KB |
+
+</details>
+
+<details>
 <summary><b>Cost estimates</b>: storage only, at us-east-1 list prices, or yours</summary>
 
 Costs are storage only (no requests, retrievals or data transfer), at us-east-1 list prices for the first
@@ -393,7 +426,10 @@ ui = S3View(S3Analyzer(prices={"STANDARD": 0.025, "STANDARD_IA": 0.0138}))
 - `what_if` lists every key too; `deleted` and `versions` list every version.
 - `bucket_info` reads the bucket's size from CloudWatch without listing anything. Use it first on huge buckets.
 - `overview` makes about 15 read calls per bucket, 8 buckets at a time, and lists no keys.
-- `ls` only lists one level, so it's fast anywhere.
+- `file_details` looks inside the first 200 files (`limit=`), 8 at a time, in 256 KB ranged requests, reading only
+  what each format needs (a PDF's page tree, a parquet footer, a picture's header), at most 128 MB of one file, and
+  stops at `max_read` (1 GB by default). It says how much it read.
+- `ls` only lists one level, so it's fast anywhere. `ls(details=True)` also reads a little of each file listed.
 
 </details>
 
@@ -407,7 +443,7 @@ Read-only. Grant what you need:
 | `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | The list of buckets, and each bucket's region |
 | `s3:ListBucket`, `s3:ListBucketVersions` | Listing files, their old versions and delete markers |
 | `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts` | Incomplete multipart uploads |
-| `s3:GetObject` | Reading files, also for `duplicates` to read files and for `download` / `download_zip` |
+| `s3:GetObject` | Reading files: `preview`, `document`, `file_details`, `ls(details=True)`, `duplicates`, `download` / `download_zip` |
 | `s3:GetObjectTagging` | Object tags |
 | The `s3:GetBucket*` / `s3:GetLifecycleConfiguration` / `s3:GetReplicationConfiguration` / `s3:GetEncryptionConfiguration` / `s3:GetInventoryConfiguration` family | The settings in `bucket_info`, including `s3:GetBucketPolicy` for `policy` |
 | `s3:GetAccountPublicAccessBlock` | The account-level public access setting |
