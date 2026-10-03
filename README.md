@@ -74,7 +74,7 @@ report still renders.
 
 | Service | What it shows you | File and guide |
 |:---|:---|:---|
-| **Amazon S3** | • Every bucket's size, monthly cost and risks<br>• Find files and see what's in a folder<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
+| **Amazon S3** | • Every bucket's size, monthly cost and risks<br>• Click through folders like a file explorer, or search them<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files | [`s3.py`](analyzers/s3.py), [`s3_explorer.py`](analyzers/s3_explorer.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
 | **Amazon DynamoDB** | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html) |
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html) |
 | **Amazon SageMaker** | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html) |
@@ -227,6 +227,70 @@ ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")  # preview a
 > [!TIP]
 > Anywhere a location is expected you can pass `s3://bucket/prefix` or `bucket/prefix`. Sizes accept `1024`,
 > `"10MB"`, `"1.5GB"`; times accept a `datetime`, `"2024-05-01"`, or relative `"7d"`, `"12h"`.
+
+### Browse like a file explorer
+
+[`s3_explorer.py`](analyzers/s3_explorer.py) turns a cell into a small file explorer for S3. Folders and files are
+listed on the left. Click a folder to open it, or click a file to see what's inside it on the right, drawn by the
+same `preview` as above: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-dark.webp">
+  <img src="docs/images/explorer-light.webp" alt="S3Explorer in a notebook: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn and a filter box; on the left three parquet files with their sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with its row, column and row-group counts and first rows">
+</picture>
+
+<p align="center"><sub><code>S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet")</code>: the folder on the left, the file you clicked on the right.</sub></p>
+
+It builds on `s3.py`, so put **both files** next to your notebook, or paste `s3.py` into a cell and `s3_explorer.py`
+into the next one. Clicking needs `ipywidgets`, which SageMaker notebooks already have.
+
+```python
+from s3_explorer import S3Explorer
+
+S3Explorer()                                   # start from your buckets
+S3Explorer("s3://my-bucket/data/")             # or in a folder; S3 console links work too
+S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file shown
+```
+
+| To | Do this |
+|:---|:---|
+| Open a folder | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder |
+| See what's in a file | Click it. **Details** shows its metadata and tags, **Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour |
+| Go to a path | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter |
+| Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first |
+| Add up a folder | Open it and click **What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report) |
+
+Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
+lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the filter. Files in
+GLACIER or DEEP_ARCHIVE are marked ❄, and opening one shows the command that restores it. Like `s3.py`, it only
+reads: browsing needs `s3:ListAllMyBuckets` and `s3:ListBucket`, and opening files `s3:GetObject`.
+
+<details>
+<summary><b>Options, and using it from code</b></summary>
+
+```python
+from s3 import S3Analyzer
+from s3_explorer import S3Explorer, S3Navigator
+
+S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
+S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
+S3Explorer(height=720, page_size=200)                 # taller panes, more rows before "Show more"
+
+x = S3Explorer("s3://my-bucket/")
+x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, from code
+x.ui.summary(x.location)                              # any S3View report about where you are, in its own cell
+
+nav = S3Navigator()                                   # the same navigation as data, with no UI
+folder = nav.open("s3://my-bucket/data/")             # Folder: entries, more, error
+nav.more(), nav.back(), nav.up(), nav.lookup("2024-")
+```
+
+Outside Jupyter, without `ipywidgets`, or with `mode="text"`, each folder prints as a table and `open(...)` moves
+around. The pure functions work on their own: `parse_location` (s3:// paths, `bucket/key`, console links and object
+URLs), `breadcrumbs`, `parent_uri`, `sort_entries` (folders first, `part-2` before `part-10`), `filter_entries` and
+`folder_stats`.
+
+</details>
 
 ### Commands (`S3View`)
 
@@ -404,8 +468,8 @@ Read-only. Grant what you need:
 
 | Permission | For |
 |:---|:---|
-| `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | The list of buckets, and each bucket's region |
-| `s3:ListBucket`, `s3:ListBucketVersions` | Listing files, their old versions and delete markers |
+| `s3:ListAllMyBuckets`, `s3:GetBucketLocation` | The list of buckets (also the explorer's first page), and each bucket's region |
+| `s3:ListBucket`, `s3:ListBucketVersions` | Listing files (also in the explorer), their old versions and delete markers |
 | `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts` | Incomplete multipart uploads |
 | `s3:GetObject` | Reading files, also for `duplicates` to read files and for `download` / `download_zip` |
 | `s3:GetObjectTagging` | Object tags |

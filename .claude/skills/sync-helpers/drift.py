@@ -28,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 ANALYZERS = ROOT / "analyzers"
 
+# Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
+COMPANIONS = {"s3_explorer"}
 # The helpers CLAUDE.md lists as deliberately duplicated. Every analyzer should have all of them.
 EXPECTED = ["human_size", "human_money", "_require", "_in_notebook", "_esc", "_Title", "_Cards", "_Table", "_Note",
             "_Text", "_render_html", "_render_text", "_friendly_errors", "View._progress", "_progress_bar_class",
@@ -96,7 +98,7 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="list differing names without diffs")
     args = parser.parse_args()
 
-    files = sorted(ANALYZERS.glob("*.py"))
+    files = sorted(f for f in ANALYZERS.glob("*.py") if f.stem not in COMPANIONS)
     parsed: dict[str, tuple[dict[str, tuple[int, str]], dict[str, str]]] = {}
     for path in files:
         try:

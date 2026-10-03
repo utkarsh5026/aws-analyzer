@@ -138,6 +138,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
     <ol id="toc-list">
       <li><a href="#setup">Set up in SageMaker</a></li>
       <li><a href="#tour">Five-minute tour</a></li>
+      <li><a href="#explorer">Click through folders</a></li>
       <li><a href="#buckets">Your buckets</a></li>
       <li><a href="#browse">Browse and search</a></li>
       <li><a href="#summary">What's in a folder</a></li>
@@ -163,6 +164,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
         <ol>
           <li><a href="#setup">Set up in SageMaker</a></li>
           <li><a href="#tour">Five-minute tour</a></li>
+          <li><a href="#explorer">Click through folders</a></li>
           <li><a href="#buckets">Your buckets</a></li>
           <li><a href="#browse">Browse and search</a></li>
           <li><a href="#summary">What's in a folder</a></li>
@@ -209,6 +211,7 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
             </li>
             <li>Or paste the whole file into a notebook cell and run it.</li>
           </ul>
+          <p>To <a href="#explorer">click through folders</a> as well, put <a href="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3_explorer.py" download>s3_explorer.py</a> next to it the same way.</p>
         </li>
         <li>
           <strong>Import it and create the view.</strong> It uses the notebook's IAM execution role, so there's nothing to configure.
@@ -244,6 +247,41 @@ ui.preview("s3://acme-ml-data/curated/features/churn/train.parquet")
 df = ui.core.read_df("s3://acme-ml-data/curated/features/churn/train.parquet")   # a pandas DataFrame</code></pre></div>
       <p><strong>Reading a report.</strong> Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, with status cells such as <code>FAILED</code> in colour, and at the bottom a <strong>Next</strong> row of two or three commands with the arguments filled in from this report, such as <code>tree('s3://acme-ml-data/curated/')</code>. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. <code>ui.help()</code> lists every command by task; <code>ui.help("summary")</code> shows one in full.</p>
       <p>Anywhere a location is expected you can write <code>s3://bucket/prefix</code> or just <code>bucket/prefix</code>. Sizes accept <code>1024</code>, <code>"10MB"</code> or <code>"1.5GB"</code>. Times accept a <code>datetime</code>, <code>"2025-05-01"</code>, or an age such as <code>"7d"</code>, <code>"12h"</code> or <code>"2w"</code> (meaning that long ago).</p>
+
+      <!-- ============================================================ explorer -->
+      <h2 id="explorer">Click through folders</h2>
+      <p><code>s3_explorer.py</code> turns a cell into a small file explorer: folders and files on the left, and on the right whatever you click, drawn by the same <a href="#files"><code>preview</code></a> as the reports. It builds on <code>s3.py</code>, so put both files next to your notebook (or paste <code>s3.py</code> into a cell and <code>s3_explorer.py</code> into the next one). Clicking needs <code>ipywidgets</code>, which SageMaker notebooks already have.</p>
+      <div class="code"><pre><code class="lang-py">from s3_explorer import S3Explorer
+
+S3Explorer()                                           # start from your buckets
+S3Explorer("s3://acme-ml-data/curated/")               # or in a folder; S3 console links work too
+S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet")   # a file's folder, with the file shown</code></pre></div>
+      <figure>
+        <div class="shot"><picture><source srcset="images/explorer-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/explorer-light.webp" alt="S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn and a filter box; on the left three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows" width="984" height="577" loading="lazy"></picture></div>
+        <figcaption>The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Open a folder</strong> by clicking it. <strong>←</strong> <strong>→</strong> <strong>↑</strong> go back, forward and up, and each part of the path at the top opens that folder. <strong>✎</strong> lets you paste an <code>s3://</code> path or an S3 console link; press Enter to go there.</li>
+        <li><strong>See what's in a file</strong> by clicking it. <strong>Details</strong> shows its metadata and tags, <strong>Read all</strong> a whole PDF, Word or PowerPoint file, <strong>⬇ Download</strong> saves a copy next to your notebook, and <strong>🔗 Link</strong> makes a download link that works for an hour. <strong>✕</strong> goes back to the folder.</li>
+        <li><strong>Narrow a long folder</strong> by typing in <strong>Filter</strong> (<code>*.csv</code> patterns work too). Click <strong>Name</strong>, <strong>Size</strong> or <strong>Modified</strong> to sort; sizes and dates sort biggest and newest first.</li>
+        <li><strong>Add up a folder</strong> with <strong>What's in here</strong>, the <a href="#summary"><code>summary</code></a> report of everything below it. At a bucket's top level, <strong>Bucket settings</strong> shows <code>bucket_info</code>, and on the list of buckets, <strong>Every bucket</strong> shows <code>overview</code>.</li>
+      </ul>
+      <figure>
+        <div class="shot"><picture><source srcset="images/explorer-docx-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/explorer-docx-light.webp" alt="S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists" width="984" height="577" loading="lazy"></picture></div>
+        <figcaption>A Word file's first paragraphs; <strong>Read all</strong> shows the whole document, pictures in place.</figcaption>
+      </figure>
+      <p>A folder is listed 1,000 entries per request and shown 100 rows at a time, so even a folder of thousands of date partitions opens in a moment. In a bigger one, <strong>Load more</strong> lists the next 1,000, and <strong>Look up</strong> asks S3 for the names that start with what you typed in the filter. Files in GLACIER or DEEP_ARCHIVE are marked ❄, and opening one shows the <code>aws s3api restore-object</code> command that brings it back (the explorer never runs it). Folders you've opened are kept, so going back is instant; <strong>↻</strong> lists one again.</p>
+      <div class="code"><pre><code class="lang-py">S3Explorer("s3://acme-ml-data/", profile="dev")   # another AWS profile (or region=, or core=S3Analyzer(...))
+S3Explorer(height=720, page_size=200)            # taller panes, more rows before "Show more"
+
+x = S3Explorer("s3://acme-ml-data/")
+x.open("s3://acme-ml-data/raw/events/")          # the toolbar from code: open, back, forward, up, refresh
+x.ui.summary(x.location)                         # any report about where you are, in its own cell
+
+from s3_explorer import S3Navigator
+nav = S3Navigator()                              # the same navigation as data, with no UI
+[entry.name for entry in nav.open("s3://acme-ml-data/curated/").entries]</code></pre></div>
+      <p>Outside Jupyter or without <code>ipywidgets</code>, each folder prints as a table instead, and <code>open()</code> moves around. Browsing needs <code>s3:ListAllMyBuckets</code> and <code>s3:ListBucket</code>, and opening files <code>s3:GetObject</code>, all in the <a href="#permissions">policy below</a>.</p>
 
       <!-- ============================================================ buckets -->
       <h2 id="buckets">Your buckets</h2>
