@@ -26,6 +26,8 @@ service is given, run a short tour:
 - s3: `ui.overview(); ui.bucket_info("demo-lake"); ui.summary("s3://demo-lake/")`
 - dynamodb: `ui.tables(); ui.table_info("orders"); ui.schema("orders")`
 - bedrock_kb: `ui.kbs(); ui.kb_info("support-docs"); ui.search("How long do refunds take?", kb="support-docs")`
+- bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request()` (the same
+  fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
 - sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
 - other services: `ui.help()` and then the service's overview command
 
@@ -110,6 +112,17 @@ at production scale: moto holds the files a figure opens, and the scene adds the
 DescribeTable counts around them. Bedrock's figures use `seed_bedrock_kb()`. After remaking a figure, look at it,
 and check that its caption and `alt` text in the guide still say what it shows (counts in them come from the
 scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
+
+The chat window (`bedrock_chat.py`) is ipywidgets, which only draw in a browser connected to a kernel, so its figures
+(`chat-*`, in `docs/bedrock_chat.html`) come from `chat_shots.py`: it starts JupyterLab on a notebook that opens the
+window on the fake Bedrock, types and clicks through it with Playwright, and writes the WebP files and `<img height=>`
+the same way. It needs `pip install jupyterlab playwright` on top of the dev requirements, and Chromium (`$CHROME`, or
+Playwright's).
+
+```bash
+.venv/bin/python .claude/skills/demo/chat_shots.py                   # every chat figure, light and dark
+.venv/bin/python .claude/skills/demo/chat_shots.py chat-request      # just this one
+```
 
 ## Real AWS
 

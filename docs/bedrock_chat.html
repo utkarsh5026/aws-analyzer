@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bedrock Chat Guide</title>
+<meta name="description" content="How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, and see the request as JSON.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfa; --surface: #ffffff; --surface-2: #f3f4f2; --text: #1c1f1e; --muted: #5d6562;
+  --border: #e2e5e3; --accent: #0f766e; --accent-soft: #e3f2ef; --code-bg: #f3f5f4; --code-text: #1f2a28;
+  --tok-comment: #6b7a76; --tok-string: #9a4d0d; --tok-keyword: #6d28d9; --tok-number: #0f6ea8;
+  --warn-bg: #fff7e6; --warn-border: #e6a23c; --shadow: 0 1px 2px rgba(20, 30, 28, .06), 0 4px 16px rgba(20, 30, 28, .05);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+    --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+    --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+    --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111413; --surface: #171b1a; --surface-2: #1d2221; --text: #e6ebe9; --muted: #9aa5a1;
+  --border: #2a302e; --accent: #4fd1c1; --accent-soft: #15322e; --code-bg: #1b201f; --code-text: #dbe4e1;
+  --tok-comment: #7f8f8a; --tok-string: #f0b37a; --tok-keyword: #c4a7ff; --tok-number: #7cc4f5;
+  --warn-bg: #2a2214; --warn-border: #c9922e; --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+:not(pre) > code { background: var(--code-bg); padding: .1em .35em; border-radius: 5px; font-size: .88em; overflow-wrap: anywhere; }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; padding: 28px 16px 40px 24px; border-right: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 15px; color: var(--text); text-decoration: none; margin-bottom: 22px; }
+.brand svg { flex: none; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; }
+nav.toc li a { display: block; padding: 5px 10px; margin: 1px 0; border-radius: 7px; color: var(--muted); text-decoration: none; font-size: 14px; line-height: 1.4; }
+nav.toc li a:hover { color: var(--text); background: var(--surface-2); }
+nav.toc li a.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+nav.toc .repo { margin-top: 22px; font-size: 13px; padding: 0 10px; }
+details.mobile-toc { display: none; }
+
+main { padding: 40px 48px 96px; min-width: 0; }
+.content { max-width: 860px; }
+header.hero { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.eyebrow { color: var(--accent); font-weight: 650; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 6px; }
+h1 { font-size: 40px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 14px; }
+.lede { font-size: 19px; color: var(--muted); margin: 0 0 20px; max-width: 720px; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pills li { font-size: 13px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); }
+h2 { font-size: 27px; letter-spacing: -.01em; margin: 64px 0 10px; padding-top: 8px; }
+h3 { font-size: 19px; margin: 34px 0 8px; }
+h2 + p, h3 + p { margin-top: 4px; }
+p, ul, ol { margin: 12px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.code { position: relative; margin: 14px 0 18px; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13.6px; line-height: 1.6; }
+.code .label { position: absolute; top: 0; left: 14px; transform: translateY(-50%); background: var(--bg); color: var(--muted); font-size: 11px; padding: 0 6px; letter-spacing: .04em; text-transform: uppercase; }
+.copy { position: absolute; top: 8px; right: 8px; font: 12px/1 inherit; font-family: inherit; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.code:hover .copy, .copy:focus-visible { opacity: 1; }
+.copy.done { color: var(--accent); }
+@media (hover: none) { .copy { opacity: 1; } }
+.t-c { color: var(--tok-comment); font-style: italic; }
+.t-s { color: var(--tok-string); }
+.t-k { color: var(--tok-keyword); }
+.t-n { color: var(--tok-number); }
+
+figure { margin: 18px 0 26px; }
+figure .shot { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+figure img { display: block; width: 100%; height: auto; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; }
+
+.table-wrap { overflow-x: auto; margin: 14px 0 20px; border: 1px solid var(--border); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--surface); }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td code { white-space: nowrap; }
+/* Command reference: long signatures wrap between arguments, continuation lines indented under the name. */
+.table-wrap.ref td:first-child { width: 55%; padding-left: calc(13px + 1.5em); text-indent: -1.5em; }
+.table-wrap.ref td code { white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+
+.callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+.callout.warn { border-left-color: var(--warn-border); background: var(--warn-bg); }
+.callout p { margin: 4px 0; }
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps > li { counter-increment: step; position: relative; padding-left: 40px; margin: 18px 0; }
+.steps > li::before { content: counter(step); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 16px 0; }
+.card { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
+.card h4 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+details.faq { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 10px 0; }
+details.faq summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+details.faq > div { padding: 0 16px 8px; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+
+@media (max-width: 960px) {
+  .layout { display: block; }
+  nav.toc { display: none; }
+  details.mobile-toc { display: block; margin: 0 0 24px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  details.mobile-toc summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+  details.mobile-toc ol { margin: 0; padding: 0 14px 12px 34px; }
+  main { padding: 24px 16px 72px; }
+  h1 { font-size: 31px; }
+  .lede { font-size: 17px; }
+  h2 { font-size: 23px; margin-top: 52px; }
+}
+@media (max-width: 600px) {
+  .table-wrap.ref thead { display: none; }
+  .table-wrap.ref tr, .table-wrap.ref td { display: block; }
+  .table-wrap.ref td:first-child { width: auto; border-bottom: none; padding-bottom: 0; }
+  .table-wrap.ref td + td { padding-top: 2px; color: var(--muted); }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="toc" aria-label="Contents">
+    <a class="brand" href="#top">
+      <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="currentColor" style="color:var(--accent)"/><path d="M9 11h14M9 16h10M9 21h14" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      Bedrock chat guide
+    </a>
+    <ol id="toc-list">
+      <li><a href="#setup">Set up in SageMaker</a></li>
+      <li><a href="#window">The chat window</a></li>
+      <li><a href="#settings">Settings</a></li>
+      <li><a href="#json">The request as JSON</a></li>
+      <li><a href="#reports">Without the window</a></li>
+      <li><a href="#python">Use the data in Python</a></li>
+      <li><a href="#cost">Cost</a></li>
+      <li><a href="#permissions">Permissions</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+      <li><a href="#reference">Command reference</a></li>
+    </ol>
+    <p class="repo"><a href="index.html">← All guides</a><br><a href="bedrock_kb.html">Knowledge Bases guide →</a><br><a href="https://github.com/utkarsh5026/aws-analyzer">GitHub repository →</a></p>
+  </nav>
+
+  <main id="top">
+    <div class="content">
+      <details class="mobile-toc">
+        <summary>Contents</summary>
+        <ol>
+          <li><a href="#setup">Set up in SageMaker</a></li>
+          <li><a href="#window">The chat window</a></li>
+          <li><a href="#settings">Settings</a></li>
+          <li><a href="#json">The request as JSON</a></li>
+          <li><a href="#reports">Without the window</a></li>
+          <li><a href="#python">Use the data in Python</a></li>
+          <li><a href="#cost">Cost</a></li>
+          <li><a href="#permissions">Permissions</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#reference">Command reference</a></li>
+        </ol>
+      </details>
+
+      <header class="hero">
+        <p class="eyebrow">aws-analyzer · bedrock_chat.py</p>
+        <h1>Chat with a Bedrock knowledge base, and see exactly what's sent</h1>
+        <p class="lede">One Python file and one call, <code>chat()</code>, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit.</p>
+        <ul class="pills">
+          <li>One file, boto3 + ipywidgets</li>
+          <li>Every RetrieveAndGenerate field</li>
+          <li>Answers stream as they're written</li>
+          <li>Read-only: changes no knowledge base</li>
+        </ul>
+      </header>
+
+      <p class="muted">The examples use a knowledge base called <code>support-docs</code> holding support policies, some tagged with a <code>team</code> and a <code>year</code>. Use your own names. The screenshots are the real window in JupyterLab, run against a simulated Bedrock with synthetic documents, so the answers and times are illustrative. For checking a knowledge base's health, its syncs, and what a search retrieves, see the <a href="bedrock_kb.html">Knowledge Bases guide</a>.</p>
+
+      <!-- ============================================================ setup -->
+      <h2 id="setup">Set up in SageMaker</h2>
+      <ol class="steps">
+        <li>
+          <strong>Get <code>bedrock_chat.py</code> next to your notebook.</strong> Pick whichever works in your environment:
+          <ul>
+            <li><strong>Upload it.</strong> Download <a href="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_chat.py" download>bedrock_chat.py</a>, then drag it into JupyterLab's file browser, in the same folder as your notebook.</li>
+            <li><strong>Fetch it from a cell</strong>, if the notebook can reach the internet:
+              <div class="code"><pre><code class="lang-sh">!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_chat.py</code></pre></div>
+            </li>
+            <li><strong>Copy it from S3</strong>, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
+              <div class="code"><pre><code class="lang-sh">!aws s3 cp s3://acme-ml-data/tools/bedrock_chat.py .</code></pre></div>
+            </li>
+            <li>Or paste the whole file into a notebook cell and run it.</li>
+          </ul>
+        </li>
+        <li>
+          <strong>Open the window.</strong> It uses the notebook's IAM execution role and region, so there's nothing to configure.
+          <div class="code"><pre><code class="lang-py">from bedrock_chat import chat
+
+chat()                                         # pick the knowledge base and the model in the window
+chat("support-docs", model="sonnet")           # or start on these: a name, ID or ARN; a model ID or short name
+chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})</code></pre></div>
+        </li>
+        <li>
+          <strong>Optional:</strong> another region or AWS profile, or keep the view to use from other cells.
+          <div class="code"><pre><code class="lang-py">ui = chat("support-docs", region="us-west-2", profile="dev")
+ui.set(max_tokens=1024)      # the open window follows
+ui.transcript()              # the conversation as a report that stays in the saved notebook</code></pre></div>
+        </li>
+      </ol>
+      <div class="callout">
+        <p><strong>boto3 and ipywidgets.</strong> Both are preinstalled on SageMaker (Studio and notebook instances). Without ipywidgets, or outside Jupyter, <code>chat()</code> says so and every other command still works as a report: <code>ask()</code>, <code>settings()</code>, <code>request()</code> and the rest. Answers come from Bedrock itself, so no model SDK is needed.</p>
+      </div>
+
+      <!-- ============================================================ window -->
+      <h2 id="window">The chat window</h2>
+      <p>Type a question and press Enter. The answer appears as it's written, then settles into its final form: the text with each cited span shaded and numbered, who answered and how long it took (and how long until the first words), how many sources it cites, how much of it they back up, and an estimated cost.</p>
+      <figure>
+        <div class="shot"><picture><source srcset="images/chat-window-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; two answers about refunds, each with its cited spans shaded and numbered, its sources (one opened to the full passage with the question's words highlighted, its S3 location and its metadata) and a folded Request and response JSON; on the right, the Settings tab with Passages 5 and Search type HYBRID, each explained in a sentence, buttons to add a metadata filter, a reranker, temperature and more, and the chat() call that opens this setup again" width="984" height="733" loading="lazy"></picture></div>
+        <figcaption>Two questions about refunds. The second follows up on the first, in the same Bedrock session. Source [2] of the first answer is open.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Sources.</strong> Each answer lists the passages it cites. Click one to read it in full, with the question's words highlighted, its S3 location and its metadata.</li>
+        <li><strong>Request and response JSON</strong>, folded under each answer: exactly what that question sent and what came back, so you can compare answers asked with different settings.</li>
+        <li><strong>Findings</strong> appear under an answer when something's off, and say which setting to try: Bedrock's “unable to assist” reply (retrieve more passages, try HYBRID search, or loosen the filter), an answer that cites nothing, one mostly not backed by its sources, a guardrail that stepped in, or an answer cut off by <code>max_tokens</code>.</li>
+        <li><strong>Follow-ups</strong> keep the conversation: Bedrock remembers the earlier questions. <strong>New chat</strong> starts over, and so does picking another knowledge base. Another model keeps the conversation.</li>
+        <li>The line under the box counts the questions and the estimated cost so far. An error shows where the answer would have been, says what to do, and puts your question back in the box.</li>
+      </ul>
+
+      <!-- ============================================================ settings -->
+      <h2 id="settings">Settings</h2>
+      <p>The <strong>Settings</strong> tab lists everything sent with every question. Under each value is what it means, in a sentence, and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.</p>
+      <figure>
+        <div class="shot"><picture><source srcset="images/chat-settings-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/chat-settings-light.webp" alt="The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {&quot;team&quot;: &quot;billing&quot;} and explained as Only documents where team = &quot;billing&quot;, the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each row has a remove button and its path in the request" width="984" height="773" loading="lazy"></picture></div>
+        <figcaption>A filter, a reranker and a temperature added with one click each, every value explained in a sentence above its path in the request.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Change</strong> a value in place: a slider for temperature, a list for the search type, a box for numbers, text and JSON. A value that can't be sent (temperature 1.5, JSON with a typo) turns red and says why, and isn't sent until it's fixed.</li>
+        <li><strong>Remove</strong> one with <strong>✕</strong>.</li>
+        <li><strong>Add</strong> the common ones with one click (<strong>+ Temperature</strong>, <strong>+ Metadata filter</strong>, <strong>+ Reranker</strong>...), or any other field by typing its name or its path in <strong>Add a setting</strong>. The box suggests names as you type and explains the one you've typed. The fields come from your installed boto3's description of the API, so every field it can send is there, with its type and range.</li>
+      </ul>
+      <p>Warnings under the settings catch what Bedrock would refuse, or what won't do what it seems to: both <code>temperature</code> and <code>top_p</code> on a newer Claude model (it takes one), a prompt without <code>$output_format_instructions$</code> (answers lose their citations), a guardrail ID without a version, a reranker with too few passages to choose from. <strong>Open this setup again</strong> shows the <code>chat(...)</code> call with your knowledge base, model and settings, to paste into another notebook.</p>
+
+      <h3>Settings with short names</h3>
+      <p>Pass these to <code>chat()</code> or <code>set()</code> as keywords. Paths and the API's own names work too: <code>maxTokens</code>, <code>generationConfiguration.performanceConfig.latency</code>.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>What it does</th><th>Sent as (from <code>knowledgeBaseConfiguration</code>)</th></tr></thead>
+        <tbody>
+          <tr><td><code>n</code></td><td>Passages to retrieve, 1 to 100 (Bedrock's default is 5)</td><td><code>retrievalConfiguration.vectorSearchConfiguration.numberOfResults</code></td></tr>
+          <tr><td><code>search_type</code></td><td><code>"HYBRID"</code> (meaning and exact words) or <code>"SEMANTIC"</code></td><td><code>…vectorSearchConfiguration.overrideSearchType</code></td></tr>
+          <tr><td><code>filter</code> (or <code>where</code>)</td><td>Only documents whose metadata matches: <code>{"team": "billing"}</code>, <code>{"year": [">=", 2024]}</code>, or a Bedrock filter</td><td><code>…vectorSearchConfiguration.filter</code></td></tr>
+          <tr><td><code>reranker</code>, <code>rerank_n</code></td><td>Re-order the passages with <code>"cohere"</code> or <code>"amazon"</code> (or a model ID), and keep the best <code>rerank_n</code></td><td><code>…vectorSearchConfiguration.rerankingConfiguration</code></td></tr>
+          <tr><td><code>temperature</code>, <code>top_p</code></td><td>Randomness, 0 to 1. Newer Claude models take one of the two</td><td><code>generationConfiguration.inferenceConfig.textInferenceConfig</code></td></tr>
+          <tr><td><code>max_tokens</code>, <code>stop</code></td><td>The longest answer, in tokens; up to 4 stop sequences</td><td><code>…textInferenceConfig.maxTokens</code>, <code>stopSequences</code></td></tr>
+          <tr><td><code>prompt</code></td><td>Your own prompt template. Needs <code>$search_results$</code>; keep <code>$output_format_instructions$</code> for citations. Adding it starts from <code>bedrock_chat.DEFAULT_PROMPT</code></td><td><code>generationConfiguration.promptTemplate.textPromptTemplate</code></td></tr>
+          <tr><td><code>model_fields</code></td><td>The model's own settings, passed as they are: <code>{"top_k": 50}</code> for Claude</td><td><code>generationConfiguration.additionalModelRequestFields</code></td></tr>
+          <tr><td><code>guardrail_id</code>, <code>guardrail_version</code></td><td>A guardrail that screens the question and the answer</td><td><code>generationConfiguration.guardrailConfiguration</code></td></tr>
+          <tr><td><code>latency</code></td><td><code>"optimized"</code> for latency-optimized inference, where offered</td><td><code>generationConfiguration.performanceConfig.latency</code></td></tr>
+          <tr><td><code>query_decomposition</code></td><td><code>True</code>: split a complicated question into simpler searches</td><td><code>orchestrationConfiguration.queryTransformationConfiguration.type</code></td></tr>
+          <tr><td><code>orchestration_prompt</code></td><td>The prompt of the step that rewrites the question</td><td><code>orchestrationConfiguration.promptTemplate.textPromptTemplate</code></td></tr>
+          <tr><td><code>kms_key</code></td><td>A KMS key for the conversation Bedrock keeps</td><td><code>sessionConfiguration.kmsKeyArn</code> (from the request's root)</td></tr>
+        </tbody>
+      </table></div>
+      <p>Values are forgiving: <code>"0.2"</code> and <code>0.2</code>, <code>"hybrid"</code> and <code>"HYBRID"</code>, JSON or a Python dict for the JSON fields, one stop sequence per line. <code>ui.fields()</code> lists every field, including the ones without a short name (the reranker's metadata settings, the orchestration step's inference settings...).</p>
+
+      <!-- ============================================================ json -->
+      <h2 id="json">The request as JSON</h2>
+      <p>The <strong>Request JSON</strong> tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base and model from the pickers, the session that continues the conversation, required fields such as the reranker's <code>type</code>). Each object folds with a click.</p>
+      <figure>
+        <div class="shot"><picture><source srcset="images/chat-request-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/chat-request-light.webp" alt="The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from" width="984" height="773" loading="lazy"></picture></div>
+        <figcaption>The next request, continuing the conversation. Highlighted keys are your settings.</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Text</strong> shows the same JSON as plain text, and <strong>Python</strong> the same call with boto3, ready to paste into your own code. One click on either selects all of it.</li>
+        <li><strong>Edit JSON</strong> opens the request as text. Add, change or delete any field, then <strong>Apply</strong>: the settings, the knowledge base and the model follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes.</li>
+        <li><strong>Last response</strong> shows what Bedrock sent back, folded below the top levels, and the request that was sent.</li>
+      </ul>
+      <figure>
+        <div class="shot"><picture><source srcset="images/chat-edit-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/chat-edit-light.webp" alt="Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting" width="984" height="773" loading="lazy"></picture></div>
+        <figcaption>A field Bedrock doesn't take is refused before anything is sent, with the fields that are allowed there and where model-specific ones go.</figcaption>
+      </figure>
+
+      <!-- ============================================================ reports -->
+      <h2 id="reports">Without the window</h2>
+      <p>The object <code>chat()</code> returns is a <code>BedrockChatView</code>. Its commands render reports under the cell (HTML in Jupyter, plain text in a terminal), share the window's settings and conversation, and an open window follows them.</p>
+      <div class="code"><pre><code class="lang-py">from bedrock_chat import BedrockChatView
+
+ui = BedrockChatView(kb="support-docs", model="sonnet")
+ui.ask("How long do refunds take?")    # the answer with [1][2] citations, sources, findings, cost
+ui.ask("And for digital goods?")       # a follow-up in the same conversation
+ui.set(temperature=0.2, n=8)           # change settings; None removes one
+ui.unset("temperature")                # stop sending one
+ui.settings()                          # every setting in plain English, with warnings
+ui.fields("rerank")                    # every field you can send that mentions "rerank"
+ui.request()                           # the JSON the next question sends, and the Python call
+ui.last()                              # the last answer: passages in full, request and response
+ui.transcript()                        # the whole conversation
+ui.new_chat()                          # start over
+ui.app()                               # the window</code></pre></div>
+      <p>The window lives in the running notebook: it doesn't come back when a saved notebook is reopened. <code>ui.transcript()</code> writes the conversation as a report that does.</p>
+
+      <!-- ============================================================ python -->
+      <h2 id="python">Use the data in Python</h2>
+      <p><code>ui.answers</code> holds the conversation's answers, <code>ui.values</code> the settings, and <code>ui.core</code> the <code>BedrockChatAnalyzer</code>, which returns data instead of printing:</p>
+      <div class="code"><pre><code class="lang-py">a = ui.answers[-1]                     # Answer
+a.text, a.citations, a.sources, a.grounded_share
+a.request, a.response                  # exactly what was sent and what came back
+df = a.to_df()                         # one row per cited source
+
+core = ui.core
+params = core.request("support-docs", "refund window?", {"n": 8, "temperature": 0.2})   # the request, not sent
+a = core.ask("support-docs", "refund window?", {"n": 8}, model="sonnet")
+a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)              # a follow-up
+core.schema().fields["temperature"]   # Field: its path, type, range and what it does</code></pre></div>
+      <p>The analysis functions don't call AWS: <code>request_schema</code>, <code>normalize_settings</code>, <code>coerce_setting</code>, <code>build_request</code>, <code>settings_from_request</code>, <code>validate_request</code>, <code>python_call</code>, <code>parse_rag</code>, <code>collect_stream</code>, <code>as_filter</code>, <code>describe_filter</code>, <code>describe_setting</code>, <code>answer_cost</code>, and the findings, <code>settings_findings</code> and <code>answer_findings</code>.</p>
+
+      <!-- ============================================================ cost -->
+      <h2 id="cost">Cost</h2>
+      <p>Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (<code>MODEL_PRICES</code>, <code>GLOBAL_MODEL_PRICES</code> and <code>BEDROCK_PRICES</code>, the same tables as <code>bedrock_kb.py</code>); a model not in the table shows its cost as unknown. For exact token counts, use <code>bedrock_kb.py</code>'s <code>ask(engine="converse")</code>.</p>
+      <div class="code"><pre><code class="lang-py">from bedrock_chat import BedrockChatAnalyzer, BedrockChatView
+
+ui = BedrockChatView(BedrockChatAnalyzer(model_prices={"claude-sonnet-5": (2.00, 10.00)}))   # $ per 1M tokens
+ui.app()</code></pre></div>
+
+      <!-- ============================================================ permissions -->
+      <h2 id="permissions">Permissions</h2>
+      <p>Everything is read-only: RetrieveAndGenerate reads the knowledge base and generates text. A list the role can't read (knowledge bases, models) becomes a box to type into instead of a picker, with a note that says which permission is missing. This policy covers everything:</p>
+      <div class="code"><span class="label">IAM policy</span><pre><code class="lang-json">{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AskKnowledgeBases",
+      "Effect": "Allow",
+      "Action": ["bedrock:ListKnowledgeBases", "bedrock:Retrieve", "bedrock:RetrieveAndGenerate"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:ListFoundationModels", "bedrock:ListInferenceProfiles"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GenerateAnswers",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": ["arn:aws:bedrock:*::foundation-model/*", "arn:aws:bedrock:*:*:inference-profile/*"]
+    }
+  ]
+}</code></pre></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Permission</th><th>Used by</th></tr></thead>
+        <tbody>
+          <tr><td><code>bedrock:ListKnowledgeBases</code></td><td>The knowledge base picker, <code>kbs</code>, and finding a knowledge base by name</td></tr>
+          <tr><td><code>bedrock:RetrieveAndGenerate</code> and <code>bedrock:Retrieve</code> on the knowledge base, <code>bedrock:InvokeModel</code> on the model or inference profile</td><td>Asking, in the window or with <code>ask</code>; streamed answers use the same permission</td></tr>
+          <tr><td><code>bedrock:ListFoundationModels</code>, <code>bedrock:ListInferenceProfiles</code></td><td>The model picker, <code>models</code>, and turning <code>model="sonnet"</code> into an ID</td></tr>
+          <tr><td><code>kms:Decrypt</code>, <code>kms:GenerateDataKey</code> on the key</td><td>Only with the <code>kms_key</code> setting</td></tr>
+        </tbody>
+      </table></div>
+      <p>A model also has to be enabled for the account under <strong>Model access</strong> in the Bedrock console. A guardrail needs <code>bedrock:ApplyGuardrail</code> on it.</p>
+
+      <!-- ============================================================ troubleshooting -->
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <details class="faq"><summary>The cell shows text instead of the window, or “Error displaying widget”</summary><div>
+        <p>The window needs ipywidgets in the kernel and its extension in JupyterLab. On SageMaker both are there. Elsewhere, run <code>%pip install ipywidgets</code>, then reload the browser tab. A window from before the notebook was reopened can't come back (it lived in the old kernel): run <code>chat()</code> again, and use <code>ui.transcript()</code> to keep a conversation in the saved notebook.</p>
+      </div></details>
+      <details class="faq"><summary>“Both temperature and top_p are set …” or the model refuses temperature</summary><div>
+        <p>Newer Claude models take one of the two. Remove one with ✕ (or <code>ui.unset("top_p")</code>). If the model refuses temperature on its own, remove it too.</p>
+      </div></details>
+      <details class="faq"><summary>“This model needs an inference profile”</summary><div>
+        <p>Pick the model again in the picker: it lists models with the inference profile to call them through. With <code>model=</code>, pass the profile the note names, such as <code>"us.anthropic.claude-sonnet-5"</code>.</p>
+      </div></details>
+      <details class="faq"><summary>“This vector store only does SEMANTIC search”</summary><div>
+        <p>Hybrid search needs a store that keeps the text searchable, such as OpenSearch Serverless with a text field. Remove the search type.</p>
+      </div></details>
+      <details class="faq"><summary>The answer is “Sorry, I am unable to assist you with this request.”</summary><div>
+        <p>RetrieveAndGenerate's reply when the passages it retrieved don't hold the answer. The finding under the answer says what to try: more passages, HYBRID search, or a looser filter. <code>bedrock_kb.py</code>'s <code>search()</code> shows every passage a question retrieves, not only the cited ones.</p>
+      </div></details>
+      <details class="faq"><summary>Answers arrive all at once instead of word by word</summary><div>
+        <p>Either “Show answers as they're written” is off in Settings, the installed boto3 is too old to stream (<code>%pip install -U boto3</code>), or streaming was refused where asking without it works. The status line says which.</p>
+      </div></details>
+      <details class="faq"><summary>A setting I need isn't in the list</summary><div>
+        <p>The fields come from the installed boto3's description of the API, so a field AWS added recently needs a newer boto3: <code>%pip install -U boto3</code>, then restart the kernel. Model-specific settings (<code>top_k</code>, reasoning budgets) go in <code>model_fields</code>.</p>
+      </div></details>
+      <details class="faq"><summary>A follow-up says the conversation expired</summary><div>
+        <p>Bedrock ends sessions after a while. The chat starts a new one and says so; that answer doesn't know the earlier questions, so ask the full question if it needs them.</p>
+      </div></details>
+      <details class="faq"><summary>An error about a managed knowledge base</summary><div>
+        <p>Managed knowledge bases answer through a different API. Search one with <code>bedrock_kb.py</code>'s <code>search()</code>.</p>
+      </div></details>
+
+      <!-- ============================================================ reference -->
+      <h2 id="reference">Command reference</h2>
+      <p>Every <code>BedrockChatView</code> command. <code>ui.help()</code> prints the same list grouped by task, and <code>ui.help("set")</code> shows one command's full description.</p>
+      <div class="table-wrap ref"><table>
+        <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+        <tbody>
+          <tr><td><code>chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, **values)</code></td><td>Opens the window and returns the view behind it</td></tr>
+          <tr><td><code>app()</code></td><td>The chat window</td></tr>
+          <tr><td><code>ask(question)</code></td><td>An answer with [1][2] citations, sources, findings and cost, as a report, in the same conversation</td></tr>
+          <tr><td><code>new_chat()</code></td><td>Forgets the conversation; the settings stay</td></tr>
+          <tr><td><code>transcript()</code></td><td>The conversation so far, as a report that stays in the saved notebook</td></tr>
+          <tr><td><code>last()</code></td><td>The last answer in full: every cited passage, the request and the response, and the call in Python</td></tr>
+          <tr><td><code>settings()</code></td><td>What's sent with every question, in plain English, with warnings and the <code>chat(...)</code> call that opens the setup again</td></tr>
+          <tr><td><code>set(name=None, value=None, **values)</code></td><td>Changes settings: <code>set(temperature=0.2)</code>, or <code>set("a.field.path", value)</code></td></tr>
+          <tr><td><code>unset(*names)</code></td><td>Stops sending settings</td></tr>
+          <tr><td><code>fields(match=None)</code></td><td>Every field RetrieveAndGenerate takes: its name, type and range, what it does, and its path</td></tr>
+          <tr><td><code>request(question=None)</code></td><td>The JSON the next question sends, and the same call in Python</td></tr>
+          <tr><td><code>use(kb=None, model=None)</code></td><td>Switches the knowledge base or the model</td></tr>
+          <tr><td><code>kbs()</code></td><td>The knowledge bases in the region</td></tr>
+          <tr><td><code>models(match=None)</code></td><td>The models you can chat with, how each is called, and its price</td></tr>
+          <tr><td><code>help(command=None)</code></td><td>This list, grouped by task; <code>help("name")</code> shows one command in full</td></tr>
+        </tbody>
+      </table></div>
+
+      <footer>
+        <p>aws-analyzer is open source. Code, issues and the <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. Guides for other AWS services are on the <a href="index.html">home page</a>.</p>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+// Syntax colouring for the examples: comments, strings, numbers and keywords.
+(function () {
+  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); };
+  var rules = {
+    py: /(#[^\n]*)|([rbf]?"(?:[^"\\\n]|\\.)*"|[rbf]?'(?:[^'\\\n]|\\.)*')|\b(\d[\d_]*(?:\.\d+)?)\b|\b(from|import|as|for|in|with|if|not|and|or|print|True|False|None)\b/g,
+    sh: /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'[^'\n]*')|()()/g,
+    json: /()("(?:[^"\\\n]|\\.)*")|\b(\d+)\b|\b(true|false|null)\b/g
+  };
+  document.querySelectorAll("pre code").forEach(function (el) {
+    var lang = (el.className.match(/lang-(\w+)/) || [])[1], re = rules[lang];
+    if (!re) return;
+    var src = el.textContent, out = "", last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(src))) {
+      if (m[0] === "") { re.lastIndex++; continue; }
+      out += esc(src.slice(last, m.index));
+      var cls = m[1] ? "t-c" : m[2] ? "t-s" : m[3] ? "t-n" : "t-k";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    el.innerHTML = out + esc(src.slice(last));
+  });
+
+  // Copy buttons.
+  document.querySelectorAll(".code").forEach(function (box) {
+    var button = document.createElement("button");
+    button.className = "copy"; button.type = "button"; button.textContent = "Copy";
+    button.setAttribute("aria-label", "Copy code");
+    button.addEventListener("click", function () {
+      var text = box.querySelector("code").textContent;
+      var done = function () {
+        button.textContent = "Copied"; button.classList.add("done");
+        setTimeout(function () { button.textContent = "Copy"; button.classList.remove("done"); }, 1500);
+      };
+      if (navigator.clipboard) { navigator.clipboard.writeText(text).then(done, function () {}); }
+      else {
+        var area = document.createElement("textarea"); area.value = text; document.body.appendChild(area);
+        area.select(); try { document.execCommand("copy"); done(); } catch (e) {} area.remove();
+      }
+    });
+    box.appendChild(button);
+  });
+
+  // Highlight the section being read in the sidebar.
+  var links = {};
+  document.querySelectorAll("#toc-list a").forEach(function (a) { links[a.getAttribute("href").slice(1)] = a; });
+  if (!("IntersectionObserver" in window)) return;
+  var visible = {};
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { visible[e.target.id] = e.isIntersecting ? e.boundingClientRect.top : undefined; });
+    var ids = Object.keys(links).filter(function (id) { return visible[id] !== undefined; });
+    if (!ids.length) return;
+    Object.keys(links).forEach(function (id) { links[id].classList.remove("active"); });
+    links[ids[0]].classList.add("active");
+  }, { rootMargin: "0px 0px -60% 0px" });
+  Object.keys(links).forEach(function (id) {
+    var section = document.getElementById(id);
+    if (section) observer.observe(section);
+  });
+})();
+</script>
+</body>
+</html>

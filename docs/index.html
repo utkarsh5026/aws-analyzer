@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>aws-analyzer Guides</title>
-<meta name="description" content="Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables and Bedrock knowledge bases from a SageMaker notebook.">
+<meta name="description" content="Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables and Bedrock knowledge bases from a SageMaker notebook, and a chat window for asking a knowledge base.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 11h14M9 16h10M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
 <script>
 // This page used to be the S3 guide, so old links to its sections (e.g. /#costs) go to where they are now.
@@ -155,6 +155,18 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--border
           <li>Compare search settings and measure retrieval hit rate</li>
         </ul>
         <span class="go">Open the Knowledge Bases guide →</span>
+      </a>
+      <a class="service" href="bedrock_chat.html">
+        <span class="file">bedrock_chat.py</span>
+        <h3>Bedrock knowledge base chat</h3>
+        <p class="what">A chat window on a knowledge base, with every setting in reach.</p>
+        <ul>
+          <li>Pick the knowledge base and the model; answers stream in</li>
+          <li>Each answer's citations, sources, request and response</li>
+          <li>Add, change or remove any RetrieveAndGenerate setting</li>
+          <li>The request as highlighted JSON you can edit, or as Python</li>
+        </ul>
+        <span class="go">Open the chat guide →</span>
       </a>
       <a class="service" href="sagemaker_env.html">
         <span class="file">sagemaker_env.py</span>

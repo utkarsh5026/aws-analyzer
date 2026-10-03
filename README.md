@@ -8,7 +8,7 @@
 
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
 DynamoDB tables, Bedrock knowledge bases and the SageMaker notebook itself: what's there, what it costs, and what to
-do next.
+do next. And a chat window for asking a knowledge base, with every setting in reach.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![Python 3.10 to 3.14](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.14-3776ab?logo=python&logoColor=white)](.github/workflows/ci.yml)
@@ -18,7 +18,7 @@ do next.
 
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
-[SageMaker](#amazon-sagemaker) · [Development](#development)
+[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development)
 
 </div>
 
@@ -77,6 +77,7 @@ report still renders.
 | **Amazon S3** | • Every bucket's size, monthly cost and risks<br>• Find files and see what's in a folder<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
 | **Amazon DynamoDB** | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html) |
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html) |
+| **Bedrock knowledge base chat** | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html) |
 | **Amazon SageMaker** | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
@@ -136,8 +137,8 @@ Every file has the same two layers:
 
 | Layer | Class | What it does |
 |:---|:---|:---|
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
-| **UI** | `S3View`, `DynamoDBView`, `BedrockKBView`, `SageMakerView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints. |
+| **UI** | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView` | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 ### Reading a report
 
@@ -821,6 +822,159 @@ policy that covers every command.
 
 </details>
 
+## Bedrock knowledge base chat
+
+**A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
+questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field
+of RetrieveAndGenerate) while you watch the request as JSON.
+
+📄 [`analyzers/bedrock_chat.py`](analyzers/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; two answers about refunds with their cited spans shaded and numbered, their sources (one opened to the full passage) and their request and response JSON folded underneath; on the right, the Settings tab with Passages and Search type, each explained in a sentence, buttons to add a metadata filter, a reranker, temperature and more, and the chat() call that opens this setup again">
+</picture>
+
+<p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up, each answer with its citations and sources, and the settings every question sends.</sub></p>
+
+### Quick start
+
+```python
+from bedrock_chat import chat
+
+chat()                                     # pick the knowledge base and the model in the window
+chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
+ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
+```
+
+The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
+browser tab). Without it, or outside Jupyter, every command below still works as a report.
+
+- **The conversation.** Answers appear as they're written. Each one shades its cited spans and numbers them, lists
+  its sources (click one to read the passage, with its location and metadata), shows its time, grounded share and
+  estimated cost, and folds away the exact request and response. Findings under an answer say which setting to try
+  (Bedrock's "unable to assist" reply, no citations, a guardrail, cut off at `max_tokens`). Follow-ups keep Bedrock's
+  session; **New chat** starts over.
+- **Settings.** Everything sent with every question, each value explained in a sentence, with its path in the
+  request. Change it in place, remove it with ✕, add the common ones with one click, or add **any** field by its name
+  or path: the list comes from the installed boto3's description of the API, so nothing is missing. A value that
+  can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
+  newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
+- **Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
+  plain JSON, or as the boto3 call to paste into your code. **Edit JSON** takes a hand-edited request back into the
+  settings, after checking it the way boto3 does before sending. **Last response** shows what came back.
+
+### Commands (`BedrockChatView`)
+
+`chat()` returns the view behind the window. Its commands share the window's settings and conversation, and an open
+window follows them.
+
+#### Chat
+
+| Command | What it shows |
+|:---|:---|
+| `app()` | The chat window: knowledge base and model pickers, the conversation, and the Settings, Request JSON and Last response tabs |
+| `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
+| `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
+| `transcript()` | The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't) |
+| `last()` | The last answer in full: every cited passage, the exact request and response as JSON, and the same call in Python |
+
+#### Settings
+
+| Command | What it shows |
+|:---|:---|
+| `settings()` | Every setting sent with every question, what its value means, where it goes in the request, warnings, and the `chat(...)` call that opens this setup again |
+| `set(name=None, value=None, **values)` | Changes settings: `set(temperature=0.2, n=8)`, or `set("generationConfiguration.performanceConfig.latency", "optimized")` for any field. `None` removes one |
+| `unset(*names)` | Stops sending settings: `unset("temperature", "top_p")` |
+| `fields(match=None)` | Every field RetrieveAndGenerate takes in this boto3: the name `set()` takes, its type and range, what it does and its path. `fields("rerank")` keeps those that mention it |
+| `request(question=None)` | The exact JSON the next question sends, highlighted, with what Bedrock would refuse in it, and the same call in Python. Nothing is sent |
+
+#### Knowledge base and model
+
+| Command | What it shows |
+|:---|:---|
+| `use(kb=None, model=None)` | Switches the knowledge base (a new conversation) or the model (the same one) |
+| `kbs()` | The knowledge bases in the region: name, ID, status, description and when each changed |
+| `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
+
+### Settings with short names
+
+`chat()` and `set()` take these as keywords. The API's own names (`maxTokens`, `overrideSearchType`) and paths work
+too, and values are forgiving (`"0.2"`, `"hybrid"`, JSON text or a Python dict).
+
+| Name | What it does |
+|:---|:---|
+| `n` | Passages to retrieve, 1 to 100 (Bedrock's default is 5) |
+| `search_type` | `"HYBRID"` (meaning and exact words) or `"SEMANTIC"` |
+| `filter` (or `where`) | Only documents whose metadata matches: `{"team": "billing"}`, `{"year": (">=", 2024)}` (in JSON, `[">=", 2024]`), or a Bedrock `RetrievalFilter`. The same vocabulary as `bedrock_kb.py`'s [`where=`](#filters-where) |
+| `reranker`, `rerank_n` | Re-order the passages with `"cohere"` (Cohere Rerank 3.5) or `"amazon"` (Amazon Rerank 1.0), or a model ID, and keep the best `rerank_n` |
+| `temperature`, `top_p` | Randomness, 0 to 1. Newer Claude models take one of the two |
+| `max_tokens`, `stop` | The longest answer in tokens; up to 4 stop sequences |
+| `prompt` | Your own prompt template. It needs `$search_results$`; keep `$output_format_instructions$` or answers lose their citations. Adding it in the window starts from `bedrock_chat.DEFAULT_PROMPT` |
+| `model_fields` | The model's own settings, passed as they are: `{"top_k": 50}` for Claude |
+| `guardrail_id`, `guardrail_version` | A Bedrock guardrail that screens the question and the answer |
+| `latency` | `"optimized"` for latency-optimized inference, where the model offers it |
+| `query_decomposition` | `True`: Bedrock splits a complicated question into simpler searches |
+| `orchestration_prompt` | The prompt of the step that rewrites the question before searching |
+| `kms_key` | A KMS key that encrypts the conversation Bedrock keeps |
+
+Every other field goes by its path from `knowledgeBaseConfiguration`, e.g.
+`set("orchestrationConfiguration.inferenceConfig.textInferenceConfig.temperature", 0)`.
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>BedrockChatAnalyzer</code>): requests and answers as Python objects</summary>
+
+```python
+a = ui.answers[-1]                    # Answer: the conversation's answers, oldest first
+a.text, a.citations, a.sources, a.grounded_share
+a.request, a.response                 # exactly what was sent and what came back
+a.to_df()                             # one row per cited source
+ui.values                             # the settings: {'n': 8, 'temperature': 0.2, ...}
+
+core = ui.core                        # or BedrockChatAnalyzer(region="us-west-2", profile="dev")
+params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
+a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
+a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)  # a follow-up
+core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
+core.schema().fields["temperature"]   # Field: path, type, range, what it does
+```
+
+The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
+`settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`,
+`describe_filter`, `describe_setting`, `answer_cost`, and the findings: `settings_findings` and `answer_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost and limits</b>: how answers are priced</summary>
+
+- RetrieveAndGenerate doesn't report tokens, so they're estimated from characters (the question, the prompt and
+  the passages retrieved; only the cited ones come back, so their average size stands in for the rest) and labelled
+  as estimates. The estimate adds the question's embedding and, with a reranker, the reranking.
+- Prices are the same us-east-1 list prices as `bedrock_kb.py` (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES`,
+  `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
+  in the table shows its cost as unknown.
+- Bedrock takes questions of up to 1,000 characters; the chat says so before sending a longer one.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what needs which</summary>
+
+| Permission | Used by |
+|:---|:---|
+| `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
+| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why |
+| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
+
+A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read becomes a
+box to type into instead of a picker, with a note naming the missing permission. The
+[chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html#permissions) has a ready-made IAM policy.
+
+</details>
+
 ## Amazon SageMaker
 
 **The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
@@ -963,16 +1117,20 @@ ruff check .                           # lint
 - **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
   Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
   tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
-  The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder.
+  The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
+  window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
+  stream event against the service model.
 - **Guides** in `docs/` are plain HTML, published to GitHub Pages by [the Docs workflow](.github/workflows/pages.yml)
   whenever `docs/` changes on `main`. `docs/index.html` is the home page with a card per service, and each service
   has its own guide ([`docs/s3.html`](docs/s3.html), [`docs/dynamodb.html`](docs/dynamodb.html),
-  [`docs/bedrock_kb.html`](docs/bedrock_kb.html), [`docs/sagemaker_env.html`](docs/sagemaker_env.html)); a new
+  [`docs/bedrock_kb.html`](docs/bedrock_kb.html), [`docs/bedrock_chat.html`](docs/bedrock_chat.html),
+  [`docs/sagemaker_env.html`](docs/sagemaker_env.html)); a new
   analyzer gets a new guide and a card on the home page.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
-  Bedrock, since moto has none.
+  Bedrock, since moto has none. The chat window's are taken in a real JupyterLab by
+  `.claude/skills/demo/chat_shots.py` (it needs jupyterlab and playwright too).
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
   `main`, and also imports each analyzer on its own with only boto3 installed. The versions in
   `requirements-dev.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly pull requests to update them

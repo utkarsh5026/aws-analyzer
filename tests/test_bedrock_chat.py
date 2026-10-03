@@ -1,4 +1,5 @@
 import ast
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -927,6 +928,13 @@ def test_window_applies_edited_json(window):
     app.editor.value = "{not json"
     app._apply()
     assert "The request isn&#x27;t valid JSON" in app.edit_message.value
+    request = json.loads(json.dumps(app._params))
+    request["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"] = {
+        "inferenceConfig": {"textInferenceConfig": {"topK": 50}}}
+    app.editor.value = json.dumps(request)
+    app._apply()
+    assert "&quot;topK&quot;, must be one of" in app.edit_message.value
+    assert "the model_fields setting" in app.edit_message.value and window.values == {"n": 9, "search_type": "SEMANTIC"}
 
 
 def test_window_switches_model_and_knowledge_base(core, monkeypatch):

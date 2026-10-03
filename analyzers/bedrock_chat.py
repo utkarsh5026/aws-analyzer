@@ -3460,7 +3460,8 @@ class _ChatApp:
     def _note_row(self, key: str) -> None:
         f = self.schema.fields[key]
         named = f'<code>{_esc(key)}</code> · ' if key != f.where else ""
-        where = f'<span class="path">{named}{_esc(f.where)}</span>'
+        path = _esc(f.where).replace(".", ".<wbr>")  # long paths break at the dots
+        where = f'<span class="path">{named}{path}</span>'
         if key in self.broken:
             text, css = f"Not sent: {_esc(self.broken[key])}", "rp bad"
         elif key in self.pending:
@@ -4132,6 +4133,9 @@ class BedrockChatView:
             raise ValueError("The request is a JSON object: {\"input\": ..., \"retrieveAndGenerateConfiguration\": ...}")
         problems = validate_request(params, schema)
         if problems:
+            if any("Unknown parameter in" in p and "InferenceConfig" in p for p in problems):
+                problems.append("Settings a model takes beyond these (top_k for Claude, say) go in "
+                                "generationConfiguration.additionalModelRequestFields: the model_fields setting.")
             raise ValueError("Bedrock would refuse this request:\n" + "\n".join(f"• {p}" for p in problems))
         picked, settings = settings_from_request(params, schema)
         changes = []

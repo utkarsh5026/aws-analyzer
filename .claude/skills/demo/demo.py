@@ -30,7 +30,8 @@ Demo data (moto, us-east-1, everything synthetic):
             files changed after the last sync; help-center (WEB, semantic chunking, model parser, RETAIN).
             sales-playbooks (Pinecone, never synced), hr-policies (S3 Vectors, no chunking), legacy-faq
             (FAILED, Aurora). Models: Claude and Llama through us. profiles, Nova and Mistral on demand, and
-            embedding and rerank models that models() leaves out.
+            embedding and rerank models that models() leaves out. bedrock_chat uses the same fake Bedrock, which also
+            answers RetrieveAndGenerateStream a few words at a time.
   sagemaker_env  moto has no Studio, so the seeder hands the analyzer fake sagemaker / sts / cloudwatch
             clients (checked against botocore's service model) and a fake machine: this code "runs" in the
             JupyterLab space churn-analysis (ml.g5.2xlarge, 2 days, idle GPU, domain without idle shutdown) whose
