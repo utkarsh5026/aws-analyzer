@@ -10,6 +10,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Bump the == pins in requirements-dev.txt, but leave the >= floors in pyproject.toml alone:
+    # raising boto3>= there would make `pip install aws-analyzer` upgrade the boto3 a SageMaker
+    # image ships with.
+    versioning-strategy: increase-if-necessary
     # Only propose releases that have been out for a week, so a broken or compromised
     # release is usually yanked before it gets here. Security updates skip the wait.
     cooldown:

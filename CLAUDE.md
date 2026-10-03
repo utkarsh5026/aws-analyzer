@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
 in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `sagemaker_env.py` for the
 SageMaker notebook itself and what's running) that a user pastes into a notebook cell or uploads next to a notebook
-and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. There is no package, no `setup.py` / `pyproject.toml`, and no build step.
+and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. The same
+files are also on PyPI as `aws-analyzer` (`from aws_analyzer import S3View`; see "The PyPI package" below), but the
+build only copies them into the wheel unchanged, so they stay standalone and nothing in them depends on it.
 The one exception to "one file" is `s3_explorer.py`, a **companion** to `s3.py`: a clickable file explorer (ipywidgets)
 that imports `s3.py` for its previews, formatting and AWS calls, so users put both files next to the notebook.
 
@@ -51,13 +53,15 @@ python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
 python -m pytest -k "policy"                   # by name
 ruff check .                                   # lint (errors only, see ruff.toml)
+python -m build                                # the PyPI sdist and wheel, in dist/ (twine check --strict dist/*)
 pip install -r requirements-docs.txt           # the guide site: mkdocs, mkdocs-material
 mkdocs serve                                   # preview docs/ at http://127.0.0.1:8000
 mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
 ```
 
-CI (`.github/workflows/ci.yml`) also checks that each analyzer imports on its own with only boto3 installed.
-To reproduce that locally:
+CI (`.github/workflows/ci.yml`) also checks that each analyzer imports on its own with only boto3 installed, and
+its Package job builds the wheel, runs `twine check` and imports the installed package with only boto3
+(`.claude/skills/check/run.py` does both). To reproduce the first locally:
 
 ```bash
 for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
@@ -189,6 +193,28 @@ never prints), and `S3Explorer` as the UI. How the UI works:
 - Callbacks go through `_guard()`, which turns any exception into a note on the right; an exception in a widget
   callback would otherwise go to Jupyter's log, and the click would seem to do nothing.
 
+## The PyPI package
+
+- `pyproject.toml` (hatchling) force-includes each `analyzers/*.py` unchanged into the wheel as
+  `aws_analyzer/<name>.py`, next to `src/aws_analyzer/__init__.py`, which holds `__version__` and re-exports the
+  Analyzer / View / Explorer classes lazily through a module `__getattr__` (importing `aws_analyzer` loads no
+  analyzer). A new analyzer needs its `force-include` line (`tests/test_package.py` checks every file is listed) and
+  its classes in `__init__.py`'s `__all__`, `_EXPORTS`, `_MODULES` and `TYPE_CHECKING` imports.
+- The only code that knows about the package is `s3_explorer._s3_module()`, which looks for `s3` next to itself
+  (`{__package__}.s3`) before `import s3`.
+- The one dependency is `boto3>=1.35.72`, the first release whose service models have every AWS operation the
+  analyzers call (Bedrock's `ListKnowledgeBaseDocuments`). A call to a newer operation means raising it; otherwise
+  keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's
+  `versioning-strategy: increase-if-necessary` bumps the `==` pins in requirements files but leaves `>=` floors alone.
+- Optional packages are extras: `data` (pandas, pyarrow), `files` (the S3 file readers), `notebook` (IPython,
+  ipywidgets, tqdm), and `all`. A new optional package goes in one of them as well as in README's install lines.
+- PyPI shows README.md, through `hatch-fancy-pypi-readme`, which points its relative links and pictures at GitHub
+  and turns `> [!NOTE]` callouts into bold labels (PyPI renders neither). `twine check --strict` with
+  `readme-renderer[md]` checks that it renders.
+- Releasing: bump `__version__`, then publish a GitHub release tagged `v<version>`. `.github/workflows/release.yml`
+  builds, checks, imports the wheel with only boto3, refuses a tag that doesn't match `__version__`, and uploads
+  with PyPI trusted publishing from the `pypi` environment (no token stored).
+
 ## Tests
 
 - `tests/conftest.py` puts `analyzers/` on `sys.path` so tests `import s3` / `import dynamodb` the way a notebook
@@ -244,7 +270,8 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   their captions and alt text still match, in the guides and in README, which shows seven of them (`overview`,
   `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
   the `-dark` file in dark mode.
-- Versions in `requirements-dev.txt` and `requirements-docs.txt` are pinned and updated by Dependabot; the
+- Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
+  checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
   `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and
   themes Material needs). `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
   explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.

@@ -94,6 +94,12 @@ requirements-dev.txt`.
 CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check that the loop in
 `.github/workflows/ci.yml` still globs.
 
+The PyPI package needs the new file wired in: a `"analyzers/<service>.py" = "aws_analyzer/<service>.py"` line under
+`[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` (`tests/test_package.py` fails without it), and
+the Analyzer and View classes in `src/aws_analyzer/__init__.py` (`__all__`, `_EXPORTS`, `_MODULES` and the
+`TYPE_CHECKING` imports). If the service's API is newer than the `boto3>=` floor in `pyproject.toml`, raise the floor
+to the first boto3 release that has every operation the file calls, and put any new optional package in an extra.
+
 ## 5. Docs
 
 - `README.md`:

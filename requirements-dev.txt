@@ -28,5 +28,11 @@ tqdm==4.70.1
 # Optional for users (s3_explorer.py's clicks, tqdm's notebook bar); installed here so the explorer's widgets are tested.
 ipywidgets==8.1.9
 
+# Package (CI's Package job and the release workflow): build the sdist and wheel, and check them
+# the way PyPI will, README rendering included.
+build==1.6.1
+twine==7.0.0
+readme-renderer[md]==46.0
+
 # Lint
 ruff==0.16.8

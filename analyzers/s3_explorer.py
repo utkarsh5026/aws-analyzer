@@ -34,6 +34,7 @@ import dataclasses
 import fnmatch
 import functools
 import html
+import importlib
 import re
 import sys
 import time
@@ -50,12 +51,18 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 
 def _s3_module(core: Any = None) -> Any:
-    """The s3.py this explorer builds on: the module `core` came from, else `import s3`, else the notebook
-    itself when s3.py was pasted into a cell. Raises ImportError that says how to get it."""
+    """The s3.py this explorer builds on: the module `core` came from, else the s3 next to this file when both
+    were installed with pip (aws_analyzer.s3), else `import s3`, else the notebook itself when s3.py was pasted
+    into a cell. Raises ImportError that says how to get it."""
     if core is not None:
         module = sys.modules.get(type(core).__module__)
         if module is not None and hasattr(module, "S3View"):
             return module
+    if __package__:
+        try:
+            return importlib.import_module(f"{__package__}.s3")
+        except ImportError:
+            pass
     try:
         import s3
 
