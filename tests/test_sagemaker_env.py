@@ -1,5 +1,6 @@
 import base64
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -867,6 +868,13 @@ def test_ui_instance_outside_sagemaker_and_unknown_names(aws, tmp_path, capsys):
     assert "Traceback" not in out
 
 
+def test_ui_instance_on_unrecognised_sagemaker_resource(aws, tmp_path, capsys):
+    # metadata without a usable ARN: no notebook to describe and no region in the ARN, but the machine is read
+    core = fake_machine(SageMakerAnalyzer(region=REGION, root=str(write_root(tmp_path, {"ResourceArn": "not-an-arn"}))))
+    out = run(capsys, SageMakerView(core, mode="text").instance)
+    assert core.environment().kind == "other" and "us-east-1" in out and "-- This machine right now --" in out
+
+
 def test_ui_disk(tmp_path, capsys):
     root = write_root(tmp_path)
     write_tree(root / "home/ec2-user/SageMaker")
@@ -944,6 +952,17 @@ def test_render_html_and_badge():
     assert '<div class="smk">' in rendered and '<span class="badge">SageMaker</span>' in rendered
     assert ">aws sagemaker stop-notebook-instance --notebook-instance-name x</code>" in rendered
     assert 'class="card warn"' in rendered and '<pre class="code"' in rendered
+
+
+def test_ui_without_ipython_or_an_optional_package(tmp_path, capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, "IPython", None)
+    monkeypatch.setitem(sys.modules, "IPython.display", None)
+    ui = SageMakerView(SageMakerAnalyzer(region=REGION, root=str(tmp_path)), mode="html")
+    out = run(capsys, ui.help)
+    assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
+    assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
+    needs = smmod._friendly_errors(lambda self: smmod._require("no_such_pkg", "Drawing this"))
+    assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_ui_help_groups_every_command(tmp_path, capsys):

@@ -536,6 +536,8 @@ def _friendly_errors(method: Callable) -> Callable:
         except ClientError as exc:
             error = exc.response.get("Error", {})
             self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{method.__name__}]")
+        except ImportError as exc:  # a missing optional package: the message says what to pip install
+            self._fail(f"{str(exc).rstrip('.')}.")
         except (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError))) as exc:
             self._fail(f"{type(exc).__name__}: {exc}  [{method.__name__}]")
         return None

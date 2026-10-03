@@ -97,6 +97,7 @@
     "AROA",
     "autostop",
     "billables",
+    "boto",
     "burstable",
     "capsys",
     "Consolas",
@@ -106,8 +107,11 @@
     "deepseek",
     "delenv",
     "getaffinity",
+    "getipython",
     "getpid",
     "hasn",
+    "huggingface",
+    "Inferentia",
     "loadavg",
     "Menlo",
     "mininterval",
@@ -122,6 +126,7 @@
     "smmod",
     "Stubber",
     "tkthreadd",
+    "Trainium",
     "trashinfo",
     "vcpus"
   ]

@@ -2702,6 +2702,13 @@ def test_preview_pdf_without_its_packages(core, formats, monkeypatch):
     assert len(pages_only.document.pictures) == 2 and pages_only.data == "" and "(pip install pypdf)" in pages_only.note
 
 
+def test_preview_table_without_pandas(core, formats, monkeypatch):
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    psv = core.preview(uri_of("tables/t.psv"))  # the lines as they are, and what to install to see a table
+    assert psv.kind == "text" and psv.data == ["a|b", "1|x", "2|y"]
+    assert psv.note == "Couldn't read it as psv: Reading a table needs `pandas` (pip install pandas)"
+
+
 def test_read_document(core, formats):
     pdf = core.read_document(uri_of("docs/report.pdf"))
     assert (
@@ -3211,6 +3218,9 @@ def test_ui_documents_as_pictures(ui, capsys, formats, monkeypatch):
     missing = run(capsys, ui.document, uri_of("docs/scan.pdf"))
     assert "Seeing PDF pages as pictures needs `pypdfium2` (pip install pypdfium2)." in missing
     assert "-- Page 1 --\n(no text)" in missing
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    neither = run(capsys, ui.document, uri_of("docs/report.pdf"))
+    assert "[!] Reading PDF text needs `pypdf` (pip install pypdf).\n" in neither and "ImportError" not in neither
 
 
 def test_ui_duplicates(ui, capsys, aws, dupes):
@@ -3498,6 +3508,24 @@ def test_ui_html_mode(core, monkeypatch):
         and 'class="fill"' in html_out
         and "<table" in html_out
     )
+
+
+def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, "IPython", None)
+    monkeypatch.setitem(sys.modules, "IPython.display", None)
+    ui = S3View(core, mode="html")
+    out = run(capsys, ui.help)
+    assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
+    assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
+    clock = itertools.count(0, 1.0)
+    monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: None)  # no tqdm either: the plain line
+    with ui._progress("Reading", unit="B") as tick:
+        tick(MB, 4 * MB)
+        tick(2 * MB, 4 * MB)
+    assert "Reading... 2.0 MB of 4.0 MB (50%)" in capsys.readouterr().err
+    needs = s3mod._friendly_errors(lambda self: s3mod._require("no_such_pkg", "Drawing this"))
+    assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_html_escapes_untrusted_keys():
