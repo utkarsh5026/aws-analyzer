@@ -58,7 +58,7 @@ files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and sn
     "zstandard; python_version < '3.14'",
     "python-snappy",
 ]
-notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer's clicks, progress bars
+notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer and the chat window, progress bars
 all = ["aws-analyzer[data,files,notebook]"]
 
 [project.urls]
@@ -79,6 +79,7 @@ packages = ["src/aws_analyzer"]
 "analyzers/s3_explorer.py" = "aws_analyzer/s3_explorer.py"
 "analyzers/dynamodb.py" = "aws_analyzer/dynamodb.py"
 "analyzers/bedrock_kb.py" = "aws_analyzer/bedrock_kb.py"
+"analyzers/bedrock_chat.py" = "aws_analyzer/bedrock_chat.py"
 "analyzers/sagemaker_env.py" = "aws_analyzer/sagemaker_env.py"
 
 [tool.hatch.build.targets.sdist]

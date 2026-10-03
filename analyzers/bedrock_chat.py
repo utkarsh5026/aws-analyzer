@@ -65,11 +65,10 @@ import re
 import sys
 import textwrap
 import time
-import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable
 from urllib.parse import unquote
 
 import boto3
@@ -2595,14 +2594,14 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
         elif isinstance(block, _Next):
             if block.items:
-                items = "".join(
+                calls = "".join(
                     f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
                     + (f'<span class="nw">{_esc(why)}</span>' if why else "")
                     + "</span>"
                     for call, why in block.items
                 )
                 out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>'
+                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
                 )
         elif isinstance(block, _Table):
             if not block.rows:
@@ -2990,6 +2989,8 @@ def _friendly_errors(method: Callable) -> Callable:
             )
         except _Hint as exc:
             self._show([_Note(str(exc))])
+        except ImportError as exc:  # a missing optional package: the message says what to pip install
+            self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
         except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
             self._show(
                 [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
@@ -3065,9 +3066,7 @@ class _ChatApp:
         self.log.add_class("kbc-log")  # column-reverse keeps it scrolled to the newest message, without a script
         self.question = w.Text(placeholder="Ask a question, then press Enter", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
-        with warnings.catch_warnings():  # ipywidgets 8 deprecates on_submit, but Enter still sends 'submit'
-            warnings.simplefilter("ignore", DeprecationWarning)
-            self.question.on_submit(self._safely(self._send))
+        self.question.on_msg(self._on_enter(self._send))
         self.send_button = w.Button(description="Send", button_style="primary", tooltip="Ask (Enter does too)",
                                     layout=layout(width="80px", flex="0 0 auto"))
         self.send_button.on_click(self._safely(self._send))
@@ -3108,9 +3107,7 @@ class _ChatApp:
         if combo is not w.Text:
             self.add_name.options = tuple(self.schema.fields)
         self.add_name.observe(self._safely(self._typed), names="value")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            self.add_name.on_submit(self._safely(self._add_typed))
+        self.add_name.on_msg(self._on_enter(self._add_typed))
         self.add_button = w.Button(description="Add", layout=layout(width="64px", flex="0 0 auto"))
         self.add_button.on_click(self._safely(self._add_typed))
         self.add_help = w.HTML(layout=layout(width="100%"))
@@ -3256,6 +3253,12 @@ class _ChatApp:
                 return None
 
         return run
+
+    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
+        doesn't trigger it."""
+        safe = self._safely(handler)
+        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
 
     def _error_text(self, exc: BaseException) -> str:
         if isinstance(exc, ClientError):
@@ -3693,6 +3696,7 @@ class BedrockChatView:
     with the time), 'plain' (always that line) or 'off'.
     """
 
+    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "Chat": ("app", "ask", "new_chat", "transcript", "last"),
         "Settings": ("settings", "set", "unset", "fields", "request"),
@@ -3755,22 +3759,28 @@ class BedrockChatView:
 
     def _show(self, blocks: list[Any]) -> None:
         if self.use_html:
-            from IPython.display import HTML, display
-
-            display(HTML(_render_html(blocks, self.max_rows)))
-        else:
-            print(_render_text(blocks, self.max_rows))
+            try:
+                from IPython.display import HTML, display
+            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
+                self.use_html = False
+                note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
+                blocks = [*blocks, _Note(note, "warn")]
+            else:
+                display(HTML(_render_html(blocks, self.max_rows)))
+                return
+        print(_render_text(blocks, self.max_rows))
 
     @contextmanager
     def _progress(
         self, label: str = "Reading", unit: str = "items read"
-    ) -> Iterator[Callable[..., None]]:
+    ) -> Generator[Callable[..., None], None, None]:
         """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
         and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
         Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
         at a time: when a nested _progress starts showing, the outer one's bar goes away."""
+        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
         bar_class = [
-            _progress_bar_class(self.use_html and _in_notebook())
+            _progress_bar_class(notebook)
             if self.progress == "auto"
             else None
         ]
@@ -3802,7 +3812,7 @@ class BedrockChatView:
                 width[0] = 0
 
         def take_over() -> None:
-            owner = getattr(self, "_progress_owner", None)
+            owner = self._progress_owner
             if owner is not clear:
                 if owner is not None:
                     owner()
@@ -3830,7 +3840,7 @@ class BedrockChatView:
             shown[0] = now
             take_over()
             text = _progress_text(label, unit, count, total, now - started[0])
-            if self.use_html:
+            if notebook:
                 from IPython.display import HTML, display
 
                 if handle[0] is None:
@@ -3850,7 +3860,7 @@ class BedrockChatView:
             raise
         finally:
             clear()
-            if getattr(self, "_progress_owner", None) is clear:
+            if self._progress_owner is clear:
                 self._progress_owner = None
 
     def help(self, command: Any = None) -> None:

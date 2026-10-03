@@ -13,9 +13,12 @@ Quick start
     ui = S3View()
     ui.help()                                # every command, grouped by task
 
+    from aws_analyzer import chat            # a chat window on a Bedrock knowledge base
+    chat("support-docs", model="sonnet")
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
-Modules: s3, s3_explorer, dynamodb, bedrock_kb, sagemaker_env. Importing this package loads none of them; each
+Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env. Importing this package loads none of them; each
 loads the first time one of its names is used.
 """
 
@@ -28,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 # which the build copies in here (pyproject.toml), so in the repository itself these imports don't resolve.
 # pyright: reportMissingImports=false
 if TYPE_CHECKING:
+    from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
     from .s3 import S3Analyzer, S3View
@@ -46,6 +50,9 @@ __all__ = [
     "DynamoDBView",
     "BedrockKBAnalyzer",
     "BedrockKBView",
+    "BedrockChatAnalyzer",
+    "BedrockChatView",
+    "chat",
     "SageMakerAnalyzer",
     "SageMakerView",
 ]
@@ -58,10 +65,13 @@ _EXPORTS = {  # name -> the module it comes from
     "DynamoDBView": "dynamodb",
     "BedrockKBAnalyzer": "bedrock_kb",
     "BedrockKBView": "bedrock_kb",
+    "BedrockChatAnalyzer": "bedrock_chat",
+    "BedrockChatView": "bedrock_chat",
+    "chat": "bedrock_chat",
     "SageMakerAnalyzer": "sagemaker_env",
     "SageMakerView": "sagemaker_env",
 }
-_MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "sagemaker_env")
+_MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env")
 
 
 def __getattr__(name: str) -> Any:

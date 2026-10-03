@@ -165,7 +165,8 @@ How the View layer works:
   Settings are `{key: value}` (`view.values`); `build_request()` places them in the request and fills required
   one-value enums (`Schema.auto`), `settings_from_request()` reads an edited request back, and `validate_request()`
   runs botocore's `ParamValidator`. Every widget callback goes through `_ChatApp._safely`, which shows errors in
-  the window (a callback's exception would only reach the browser log), and View commands run from other cells
+  the window (a callback's exception would only reach the browser log); Enter in a text box is the box's `submit`
+  message (`_ChatApp._on_enter`, as in the explorer: `on_submit` is deprecated). View commands run from other cells
   update an open window through `view._changed()`. `_ipython_display_` shows the window once per cell, so a cell
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.

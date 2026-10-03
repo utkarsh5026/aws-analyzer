@@ -105,7 +105,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 
 ```python
 from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env
-# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, S3Explorer)
+# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, S3Explorer, chat)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -118,8 +118,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > command that needs one that isn't installed says which to install instead of failing.
 >
 > Installed with pip, every `from s3 import ...` in this README and the guides becomes
-> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `sagemaker_env` and `s3_explorer`). The
-> Analyzer and View classes also come straight from `aws_analyzer`.
+> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env` and
+> `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -951,7 +951,7 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 ### Quick start
 
 ```python
-from bedrock_chat import chat
+from bedrock_chat import chat              # installed with pip: from aws_analyzer import chat
 
 chat()                                     # pick the knowledge base and the model in the window
 chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name

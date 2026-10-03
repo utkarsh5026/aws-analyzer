@@ -51,7 +51,7 @@ sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
-          "sagemaker_env": "sagemaker_env.md"}
+          "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md"}  # bedrock_chat: chat_shots.py
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
 NOW = datetime.now(timezone.utc)

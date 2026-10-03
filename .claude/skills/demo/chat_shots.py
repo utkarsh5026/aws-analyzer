@@ -7,7 +7,8 @@ shots.py renders reports, which are plain HTML. The chat window is ipywidgets, w
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, adds settings,
 opens the Request JSON tab, edits the JSON. Each figure is the window, 984 CSS px wide at 1.5x like the other
-images, written to docs/images/<name>-{light,dark}.webp, and its <img height=> is set in docs/bedrock_chat.html.
+images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
+docs/bedrock_chat.md, by shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the
 one Playwright installs (playwright install chromium).
@@ -17,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import secrets
 import shutil
 import socket
@@ -30,9 +30,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-IMAGES = ROOT / "docs" / "images"
-GUIDE = ROOT / "docs" / "bedrock_chat.html"
-WIDTH, SCALE = 984, 1.5
+sys.path[:0] = [str(HERE)]
+
+import shots  # noqa: E402  (the image size, where images go, and set_height)
+
+WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("chat-window", "chat-settings", "chat-request", "chat-edit")
 
 NOTEBOOK_CODE = f"""import os, sys
@@ -58,18 +60,6 @@ def chrome() -> str | None:
     found = os.environ.get("CHROME") or next(iter(sorted(Path("/opt/pw-browsers").glob("chromium-*/chrome-linux/chrome"))),
                                              None)
     return str(found) if found else None
-
-
-def set_height(name: str, height: int) -> None:
-    if not GUIDE.exists():
-        print(f"  (no {GUIDE.name} yet: give its <img> for {name} height=\"{height}\")")
-        return
-    text = GUIDE.read_text(encoding="utf-8")
-    pattern = re.compile(rf'(<img src="images/{re.escape(name)}-light\.webp"[^>]*?height=")(\d+)(")')
-    if pattern.search(text):
-        GUIDE.write_text(pattern.sub(rf"\g<1>{height}\g<3>", text), encoding="utf-8")
-    else:
-        print(f"  (no <img> for {name} in {GUIDE.name}: add one with height=\"{height}\")")
 
 
 def api(base: str, token: str, path: str, method: str = "GET", body: dict | None = None):
@@ -190,18 +180,19 @@ def main() -> int:
                     time.sleep(1)
             with sync_playwright() as p:
                 browser = p.chromium.launch(executable_path=chrome())
+                heights: dict[str, set[int]] = {}
                 for theme in ("light", "dark"):
                     page = browser.new_page(viewport={"width": 1400, "height": 1200}, device_scale_factor=SCALE)
-                    shots = shoot_theme(page, base, token, theme, names, Path(tmp))
+                    taken = shoot_theme(page, base, token, theme, names, Path(tmp))
                     page.close()
-                    for name, png in shots.items():
+                    for name, png in taken.items():
                         image = Image.open(png).convert("RGB")
                         image.save(IMAGES / f"{name}-{theme}.webp", "WEBP", quality=90, method=6)
-                        if theme == "light":
-                            set_height(name, round(image.height / SCALE))
-                        print(f"  {name}-{theme}: {round(image.width / SCALE)} x {round(image.height / SCALE)}",
-                              file=sys.stderr)
+                        heights.setdefault(name, set()).add(round(image.height / SCALE))
                 browser.close()
+            for name, sizes in heights.items():
+                shots.set_height("bedrock_chat", name, max(sizes))
+                print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()
             server.wait(timeout=20)

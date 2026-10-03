@@ -864,7 +864,9 @@ def test_window_adds_any_field_by_name_or_path(window):
     app.add_button.click()
     assert "No setting" in app.status.value and "temperature" not in window.values
     app.add_name.value = "orchestrationConfiguration.performanceConfig.latency"
-    app.add_button.click()
+    app.add_name._handle_custom_msg({"event": "focus"}, [])  # anything but Enter does nothing
+    assert "orchestrationConfiguration.performanceConfig.latency" not in window.values
+    app.add_name._handle_custom_msg({"event": "submit"}, [])
     assert window.values["orchestrationConfiguration.performanceConfig.latency"] == "standard"
     assert app.add_name.value == ""
 
@@ -883,7 +885,7 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     assert "Answer 1" in app.response_view.value and "streamed" in app.response_view.value
     assert "sessionId&quot;" in app.request_view.value
     app.question.value = "And bank transfers?"
-    app._send()
+    app.question._handle_custom_msg({"event": "submit"}, [])  # what Enter sends
     assert clients["bedrock-agent-runtime"].called("retrieve_and_generate_stream")[1]["sessionId"] == "session-1"
     app.response_mode.value = "Request sent"
     assert "And bank transfers?" in app.response_view.value
