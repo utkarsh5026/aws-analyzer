@@ -1,0 +1,80 @@
+name: Release
+
+# Publishes aws-analyzer to PyPI when a GitHub release is published. Tag the release v<version>, with <version> the
+# __version__ in src/aws_analyzer/__init__.py; the build stops if they differ.
+#
+# One-time setup, before the first release:
+#   1. On PyPI, Account settings -> Publishing -> Add a new pending publisher (GitHub): project name aws-analyzer,
+#      owner utkarsh5026, repository aws-analyzer, workflow release.yml, environment pypi.
+#   2. Here, Settings -> Environments -> New environment "pypi" (add yourself as a required reviewer to approve
+#      each upload).
+# No PyPI token is stored anywhere: PyPI trusts this workflow's GitHub identity ("trusted publishing").
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install build and twine (versions pinned in requirements-dev.txt)
+        run: >-
+          python -m pip install
+          "$(grep -E '^build==' requirements-dev.txt)"
+          "$(grep -E '^twine==' requirements-dev.txt)"
+          "$(grep -E '^readme-renderer\[md\]==' requirements-dev.txt)"
+      - name: Build the sdist, and the wheel from it
+        run: python -m build
+      - name: Check the metadata, and that the README renders on PyPI
+        run: twine check --strict dist/*
+      - name: Install the wheel with only boto3, import every module, and match the version to the tag
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel"
+          "$RUNNER_TEMP/wheel/bin/pip" install "$(grep -E '^boto3==' requirements-dev.txt)" dist/*.whl
+          cd "$RUNNER_TEMP" && "$RUNNER_TEMP/wheel/bin/python" -c "$SMOKE"
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          SMOKE: |
+            import os
+            import aws_analyzer
+            from aws_analyzer import s3, s3_explorer
+            for name in aws_analyzer.__all__[1:]:
+                getattr(aws_analyzer, name)
+            assert s3_explorer._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
+            version, tag = aws_analyzer.__version__, os.environ["TAG"]
+            assert tag == f"v{version}", f"release tag {tag} doesn't match __version__ {version}; tag it v{version}"
+            print(f"aws-analyzer {version}: every module imports with only boto3")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/aws-analyzer/
+    permissions:
+      id-token: write # prove to PyPI that the upload comes from this workflow (job permissions replace the workflow's)
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

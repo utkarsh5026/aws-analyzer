@@ -1,7 +1,7 @@
 """Run what CI runs, locally, plus the project-rule checks CI doesn't have. Prints one line per step and the
 output of any step that failed.
 
-    python .claude/skills/check/run.py                  # lint, standalone imports, rules, tests, helper drift
+    python .claude/skills/check/run.py                  # lint, standalone imports, package, rules, tests, drift
     python .claude/skills/check/run.py --matrix         # also pytest on every other Python in CI's matrix (uv)
     python .claude/skills/check/run.py -- -k policy     # pass arguments through to pytest
 
@@ -9,6 +9,8 @@ Steps:
   ruff        ruff check . (the rules in ruff.toml)
   imports     each analyzer copied alone into an empty directory and imported with every package except
               boto3 / botocore blocked, like CI's "only boto3 installed" job
+  package     the wheel pyproject.toml builds, twine-checked, then imported with only boto3 (like CI's
+              Package job); skipped when build isn't installed
   rules       .claude/skills/check/rules.py: read-only AWS calls, lazy optional imports, View conventions,
               IAM permissions listed in README.md
   pytest      python -m pytest -q (moto; no AWS account needed)
@@ -62,6 +64,31 @@ def step(name: str, command: list[str], *, cwd: Path = ROOT, tail: int = 80) -> 
     return f"{'PASS' if ok else 'FAIL'}  {name:<8} {seconds:5.1f}s  {summary}".rstrip(), ok, shown, output
 
 
+def package_step(python: str) -> tuple[str, bool, str, str]:
+    """Like CI's Package job, without a fresh environment: build the wheel, twine check it, then import the
+    aws_analyzer package from the unpacked wheel with every package except boto3 blocked."""
+    started = time.monotonic()
+    with tempfile.TemporaryDirectory() as tmp:
+        dist, site = Path(tmp) / "dist", Path(tmp) / "site"
+        proc = subprocess.run([python, "-m", "build", "--wheel", "--outdir", str(dist)], cwd=ROOT,
+                              capture_output=True, text=True)
+        wheels = [str(path) for path in dist.glob("*.whl")]
+        if proc.returncode == 0 and subprocess.run([python, "-m", "twine", "--version"],
+                                                   capture_output=True).returncode == 0:
+            proc = subprocess.run([python, "-m", "twine", "check", "--strict", *wheels], capture_output=True, text=True)
+        if proc.returncode == 0:
+            shutil.unpack_archive(wheels[0], site, "zip")
+            code = (f"MODULE = 'aws_analyzer'\n{BOTO3_ONLY}\npackage = sys.modules['aws_analyzer']\n"
+                    "for name in package.__all__[1:]:\n    getattr(package, name)\n"
+                    "assert package.s3_explorer._s3_module() is package.s3\n")
+            proc = subprocess.run([python, "-c", code], cwd=site, capture_output=True, text=True)
+    output = (proc.stdout + proc.stderr).strip()
+    ok = proc.returncode == 0
+    summary = f"{Path(wheels[0]).name} imports with only boto3" if ok else ""
+    return f"{'PASS' if ok else 'FAIL'}  package  {time.monotonic() - started:5.1f}s  {summary}".rstrip(), ok, \
+        "" if ok else "\n".join(output.splitlines()[-80:]), output
+
+
 def last_line(output: str) -> str:
     lines = [line for line in output.strip().splitlines() if line.strip()]
     return lines[-1] if lines else ""
@@ -94,6 +121,12 @@ def main() -> int:
                 failures.append(f"{path.name}: {last_line(proc.stderr)}")
     results.append((f"{'FAIL' if failures else 'PASS'}  imports  each analyzer alone with only boto3",
                     not failures, "\n".join(failures), ""))
+
+    # package: the wheel pyproject.toml builds, checked by twine, unpacked and imported with only boto3.
+    if subprocess.run([python, "-m", "build", "--version"], capture_output=True).returncode:
+        results.append(("SKIP  package  build isn't installed: pip install -r requirements-dev.txt", True, "", ""))
+    else:
+        results.append(package_step(python))
 
     rules = step("rules", [python, str(HERE / "rules.py")])
     results.append(rules)

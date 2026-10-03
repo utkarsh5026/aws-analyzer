@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -952,6 +953,17 @@ def test_ui_html_mode(core, monkeypatch):
         and 'class="fill"' in html_out
         and 'class="tree"' in html_out
     )
+
+
+def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, "IPython", None)
+    monkeypatch.setitem(sys.modules, "IPython.display", None)
+    ui = DynamoDBView(core, mode="html")
+    out = run(capsys, ui.help)
+    assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
+    assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
+    needs = ddbmod._friendly_errors(lambda self: ddbmod._require("no_such_pkg", "Drawing this"))
+    assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_html_escapes_item_values():

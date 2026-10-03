@@ -1,0 +1,87 @@
+# The guide site: docs/*.md built with MkDocs and the Material theme, published to GitHub Pages by
+# .github/workflows/pages.yml. Preview it locally:
+#   pip install -r requirements-docs.txt
+#   mkdocs serve          # http://127.0.0.1:8000, rebuilds on save
+#   mkdocs build --strict # what CI runs: a broken link or anchor fails the build
+
+site_name: aws-analyzer
+site_description: >-
+  Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables,
+  Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook.
+site_url: https://utkarsh5026.github.io/aws-analyzer/
+repo_url: https://github.com/utkarsh5026/aws-analyzer
+repo_name: utkarsh5026/aws-analyzer
+edit_uri: edit/main/docs/
+copyright: >-
+  aws-analyzer is open source. Code, issues and the
+  <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on
+  <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>.
+
+# Pages stay at s3.html, dynamodb.html, ... as before, so links in the README and elsewhere keep working.
+use_directory_urls: false
+
+nav:
+  - Home: index.md
+  - Amazon S3: s3.md
+  - Amazon DynamoDB: dynamodb.md
+  - Bedrock Knowledge Bases: bedrock_kb.md
+  - Bedrock chat: bedrock_chat.md
+  - Amazon SageMaker: sagemaker_env.md
+
+theme:
+  name: material
+  logo: images/logo.svg
+  favicon: images/logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # Follow the system's light or dark mode until the reader picks one.
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  generator: false
+
+markdown_extensions:
+  - admonition            # !!! note "" callouts
+  - attr_list             # { #id }, { .lede }, image width / height
+  - md_in_html            # <div class="grid cards" markdown>
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.blocks.caption   # /// caption under a screenshot
+  - pymdownx.details      # ??? question "..." in Troubleshooting
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

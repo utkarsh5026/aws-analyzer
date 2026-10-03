@@ -94,6 +94,12 @@ requirements-dev.txt`.
 CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check that the loop in
 `.github/workflows/ci.yml` still globs.
 
+The PyPI package needs the new file wired in: a `"analyzers/<service>.py" = "aws_analyzer/<service>.py"` line under
+`[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` (`tests/test_package.py` fails without it), and
+the Analyzer and View classes in `src/aws_analyzer/__init__.py` (`__all__`, `_EXPORTS`, `_MODULES` and the
+`TYPE_CHECKING` imports). If the service's API is newer than the `boto3>=` floor in `pyproject.toml`, raise the floor
+to the first boto3 release that has every operation the file calls, and put any new optional package in an extra.
+
 ## 5. Docs
 
 - `README.md`:
@@ -103,10 +109,12 @@ CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check t
     a screenshot, quick start, the commands tables (one per `_GROUPS` group), and under "Reference" the folded
     "Getting the data", cost notes, and IAM permissions.
   - Update the Development paragraph if it names the guides.
-- `docs/<service>.html`: a new guide. Copy `docs/dynamodb.html`'s structure, CSS and theme handling, and cover
-  set up in SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
+- `docs/<service>.md`: a new guide. Copy `docs/dynamodb.md`'s structure (front matter, hero, headings with
+  explicit ids, figures, callouts, troubleshooting entries, the `ref` command table), and cover set up in
+  SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
-- `docs/index.html`: add a card for the new guide next to the existing ones.
+- `docs/index.md`: add a card for the new guide next to the existing ones, and add the guide to `nav` in
+  `mkdocs.yml`. Check it with `mkdocs build --strict` (`pip install -r requirements-docs.txt`).
 - `CLAUDE.md`: update the list of analyzers, the price tables, the moto extras (or the Stubber note, as for Bedrock)
   and anything service-specific a future session needs.
 

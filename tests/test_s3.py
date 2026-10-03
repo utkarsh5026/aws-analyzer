@@ -8,6 +8,7 @@ import pickle
 import sys
 import tarfile
 import types
+import wave
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
@@ -33,6 +34,8 @@ from s3 import (
     MB,
     TB,
     BucketConfig,
+    FileDetails,
+    FileDetailsReport,
     ObjectInfo,
     Picture,
     S3Analyzer,
@@ -43,10 +46,12 @@ from s3 import (
     bucket_findings,
     cloudwatch_cost,
     compare_objects,
+    describe_file,
     detect_format,
     duplicate_findings,
     duplicate_folders,
     explain_policy,
+    file_details_findings,
     file_extension,
     files_to_hash,
     find_duplicate_groups,
@@ -742,6 +747,82 @@ def test_bucket_findings_uses_account_block_public_access():
         for _, m in bucket_findings(cfg, {"A": True, "B": True})
     )
     assert any("this bucket or the account" in m for _, m in bucket_findings(cfg, {}))
+
+
+def details(key, fmt, size=1000, **facts):
+    return FileDetails(key=key, size=size, bucket=BUCKET, format=fmt, facts=facts)
+
+
+def test_file_details_findings():
+    files = [
+        details("docs/a.pdf", "pdf", pages=12, text=True),
+        details("docs/scan.pdf", "pdf", pages=3, text=False),
+        details("docs/locked.pdf", "pdf", pages=4, encrypted=True, locked=True),
+        details("docs/old.doc", "oldoffice"),
+        details("sales/p0.parquet", "parquet", rows=10, columns=["id", "amount"]),
+        details("sales/p1.parquet", "parquet", rows=10, columns=["id", "amount"]),
+        details("sales/p2.parquet", "parquet", rows=10, columns=["id", "amount", "discount"]),
+        details("img/a.png", "image", width=640, height=480),
+        details("img/b.png", "image", width=640, height=480),
+        details("img/c.png", "image", width=1024, height=768),
+        FileDetails(key="docs/broken.pdf", size=10, bucket=BUCKET, format="pdf", error="pypdf couldn't read it"),
+        FileDetails(key="docs/x.pdf", size=10, bucket=BUCKET, format="pdf",
+                    error="Counting PDF pages needs `pypdf` (pip install pypdf)"),
+        FileDetails(key="cold/c.csv", size=10, bucket=BUCKET, format="csv", skipped="archived",
+                    storage_class="GLACIER"),
+        FileDetails(key="late/z.csv", size=10, bucket=BUCKET, format="csv", skipped="max_read"),
+        FileDetails(key="e.txt", size=0, bucket=BUCKET, format="text", skipped="empty"),
+    ]
+    wrong = details("docs/report.pdf", "text", starts_with="<!DOCTYPE html>")
+    wrong.named = "pdf"
+    report = FileDetailsReport(uri=f"s3://{BUCKET}/", files=[*files, wrong], limit=16, truncated=True,
+                               max_read=GB, bytes_read=GB, read_capped=True)
+    found = file_details_findings(report)
+    text = "\n".join(message for _, message in found)
+    assert "Stopped at limit=16: only the first 16 files (in key order)" in text
+    assert "Stopped reading at max_read=1.0 GB: 1 file wasn't looked into (late/z.csv). Pass max_read='2GB'" in text
+    assert ("1 PDF has no text on the first pages, probably scanned: docs/scan.pdf. Its words can't be searched"
+            in text and f"document('s3://{BUCKET}/docs/scan.pdf') shows the pages as pictures" in text)
+    assert "needs a password to open: docs/locked.pdf" in text and "password='...'" in text
+    assert ("1 file isn't what the name says: docs/report.pdf is text, not a PDF (it starts '<!DOCTYPE html>')"
+            in text and f"preview('s3://{BUCKET}/docs/report.pdf')" in text)
+    assert "1 file wasn't looked into (docs/x.pdf): Counting PDF pages needs `pypdf` (pip install pypdf)." in text
+    assert "1 file couldn't be read, or not to the end: docs/broken.pdf (pypdf couldn't read it)" in text
+    assert f"aws s3api restore-object --bucket {BUCKET} --key cold/c.csv --restore-request Days=7" in text
+    assert "1 Office 97-2003 file (docs/old.doc): its text can't be read here" in text
+    assert ("The parquet files in sales/ don't all have the same columns: 1 of 3 differs from the rest "
+            "(sales/p2.parquet adds discount)" in text)
+    assert ("The 3 pictures come in 2 sizes, from 640 × 480 to 1,024 × 768; the most common is 640 × 480 (2 of them)"
+            in text)
+    assert "1 empty file (0 bytes): e.txt." in text
+    levels = {message.split(":")[0]: level for level, message in found}
+    assert levels["1 PDF has no text on the first pages, probably scanned"] == "warn"
+    assert levels["1 empty file (0 bytes)"] == "info"
+    assert file_details_findings(FileDetailsReport(uri="", files=[details("a.pdf", "pdf", pages=1, text=True)])) == []
+
+
+def test_file_details_summaries():
+    assert details("a.pdf", "pdf", pages=12, text=False, page_size="A4", title="Q3").summary == (
+        '12 pages · no text (scanned?) · A4 · "Q3"')
+    assert details("a.pdf", "pdf", pages=1, locked=True).summary == "1 page · needs a password"
+    assert details("t.csv", "csv", rows=12345, rows_estimate="estimate", columns=["a", "b"]).summary == (
+        "≈ 12,000 rows × 2 columns")
+    assert details("t.csv.gz", "csv", rows=900, rows_estimate="at least", columns=["a"]).summary == (
+        "900+ rows × 1 column")
+    assert details("p.png", "image", kind="PNG", width=1920, height=1080).summary == "PNG 1,920 × 1,080"
+    assert details("v.mp4", "video", kind="MP4", duration=3723.4, width=1280, height=720).summary == (
+        "MP4 video · 1:02:03 · 1,280 × 720")
+    assert details("a.wav", "audio", kind="WAV", duration=2, sample_rate=8000, channels=1).summary == (
+        "WAV audio · 0:02 · 8 kHz · mono")
+    assert details("m.safetensors", "safetensors", tensors=291, parameters=7_241_732_096,
+                   dtypes=["BF16"]).summary == "291 tensors · 7.2B parameters · BF16"
+    assert details("b.xlsx", "excel", sheets=[{"sheet": "Sales", "rows": 1200, "columns": 11}]).summary == (
+        "1 sheet: Sales 1,200 × 11")
+    assert FileDetails(key="c.csv", size=1, skipped="archived", storage_class="GLACIER").summary == (
+        "not read: in GLACIER, restore it first")
+    wrong = details("r.pdf", "text", lines=3)
+    wrong.named = "pdf"
+    assert wrong.summary == "text, not a PDF · 3 lines"
 
 
 # --------------------------------------------------------------------------- cost
@@ -1862,6 +1943,14 @@ def test_preview_details(core):
     assert core.preview(f"s3://{BUCKET}/curated/list.json").info["records"] == 2
 
 
+def test_preview_archived_file_says_how_to_restore_it(core, aws):
+    aws.put_object(Bucket=BUCKET, Key="cold/old events.csv", Body=CSV, StorageClass="GLACIER")
+    p = core.preview(f"s3://{BUCKET}/cold/old events.csv")
+    assert p.kind == "unavailable" and "can't be read until it's restored, which takes 3-5 hours" in p.note
+    assert f"aws s3api restore-object --bucket {BUCKET} --key 'cold/old events.csv' --restore-request Days=7" in p.note
+    assert "under way" in s3mod._restore_note(BUCKET, "k", "DEEP_ARCHIVE", 'ongoing-request="true"')
+
+
 def test_bucket_config(core, aws):
     aws.put_bucket_versioning(
         Bucket=BUCKET, VersioningConfiguration={"Status": "Enabled"}
@@ -2613,6 +2702,13 @@ def test_preview_pdf_without_its_packages(core, formats, monkeypatch):
     assert len(pages_only.document.pictures) == 2 and pages_only.data == "" and "(pip install pypdf)" in pages_only.note
 
 
+def test_preview_table_without_pandas(core, formats, monkeypatch):
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    psv = core.preview(uri_of("tables/t.psv"))  # the lines as they are, and what to install to see a table
+    assert psv.kind == "text" and psv.data == ["a|b", "1|x", "2|y"]
+    assert psv.note == "Couldn't read it as psv: Reading a table needs `pandas` (pip install pandas)"
+
+
 def test_read_document(core, formats):
     pdf = core.read_document(uri_of("docs/report.pdf"))
     assert (
@@ -2736,6 +2832,241 @@ def test_zstd(core, aws):
     aws.put_object(Bucket="zstd", Key="noext", Body=compress(b'{"a": 1}\n'))
     assert list(core.read_df("s3://zstd/t.csv.zst")["name"]) == ["a", "b", "c"]
     assert core.preview("s3://zstd/noext").compression == "zst"
+
+
+def wav_bytes(seconds=2, rate=8000, channels=1):
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(channels)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(bytes(2 * channels * rate * seconds))
+    return buffer.getvalue()
+
+
+def flac_bytes(rate=44100, channels=2, samples=44100 * 3):
+    """Just the STREAMINFO block a FLAC file starts with."""
+    bits = (rate << 44) | ((channels - 1) << 41) | (15 << 36) | samples
+    return b"fLaC" + bytes([0x80, 0, 0, 34]) + bytes(10) + bits.to_bytes(8, "big") + bytes(16)
+
+
+def box(kind, body):
+    return (8 + len(body)).to_bytes(4, "big") + kind + body
+
+
+def mp4_bytes(seconds=12.5, width=1280, height=720, media=b"", brand=b"isom"):
+    """ftyp, then the media data, then moov with the length (mvhd) and one video track's size (tkhd)."""
+    mvhd = box(b"mvhd", bytes(12) + (1000).to_bytes(4, "big") + int(seconds * 1000).to_bytes(4, "big") + bytes(80))
+    tkhd = box(b"tkhd", bytes(76) + (width << 16).to_bytes(4, "big") + (height << 16).to_bytes(4, "big"))
+    return box(b"ftyp", brand + bytes(4) + b"isom") + box(b"mdat", media) + box(b"moov", mvhd + box(b"trak", tkhd))
+
+
+@pytest.mark.parametrize(
+    "fmt, options, kind",
+    [
+        ("PNG", {}, "PNG"),
+        ("JPEG", {}, "JPEG"),
+        ("JPEG", {"exif": b"Exif\x00\x00" + bytes(60_000)}, "JPEG"),  # the size comes after a big EXIF block
+        ("GIF", {}, "GIF"),
+        ("BMP", {}, "BMP"),
+        ("WEBP", {"lossless": True}, "WebP"),
+        ("WEBP", {"quality": 80}, "WebP"),
+        ("TIFF", {}, "TIFF"),
+    ],
+)
+def test_describe_file_reads_picture_sizes(fmt, options, kind):
+    image = Image.new("RGB", (123, 45), (10, 200, 30))
+    d = describe_file(io.BytesIO(image_bytes_with(image, fmt, **options)), f"p.{fmt.lower()}")
+    assert (d.facts["kind"], d.facts["width"], d.facts["height"]) == (kind, 123, 45)
+
+
+def image_bytes_with(image, fmt, **options):
+    buffer = io.BytesIO()
+    image.save(buffer, fmt, **options)
+    return buffer.getvalue()
+
+
+def test_describe_file_reads_webp_with_alpha():
+    data = image_bytes_with(Image.new("RGBA", (300, 200), (1, 2, 3, 100)), "WEBP", quality=80)
+    assert data[12:16] == b"VP8X"
+    assert describe_file(io.BytesIO(data), "a.webp").summary == "WebP 300 × 200"
+    tiff = describe_file(io.BytesIO(image_bytes_with(Image.new("L", (7, 9)), "TIFF")), "scan.tif")
+    assert tiff.format == "image" and tiff.summary == "TIFF 7 × 9"  # .tif isn't a known extension: its bytes say
+
+
+def test_describe_file_reads_audio_and_video_lengths():
+    wav = describe_file(io.BytesIO(wav_bytes(seconds=2, rate=8000)), "a.wav")
+    assert wav.facts == {"kind": "WAV", "channels": 1, "sample_rate": 8000, "duration": 2.0}
+    flac = describe_file(io.BytesIO(flac_bytes()), "song.flac")
+    assert flac.summary == "FLAC audio · 0:03 · 44.1 kHz · stereo"
+    movie = describe_file(io.BytesIO(mp4_bytes(media=bytes(300 * KB))), "clip.mp4")
+    assert movie.summary == "MP4 video · 0:12 · 1,280 × 720"
+    mov = describe_file(io.BytesIO(mp4_bytes(seconds=3723, brand=b"qt  ")), "clip.mov")
+    assert mov.facts["kind"] == "MOV" and mov.facts["duration"] == 3723
+    cut = describe_file(io.BytesIO(box(b"ftyp", b"isom" + bytes(8)) + box(b"mdat", bytes(100))), "cut.mp4")
+    assert "no 'moov' box" in cut.error and "cut off" in cut.error
+    mp3 = describe_file(io.BytesIO(b"ID3" + bytes(100)), "a.mp3")
+    assert mp3.summary == "mp3 audio" and "isn't read from .mp3 files" in mp3.notes[0]
+
+
+def test_describe_file_reads_documents_and_tables(tmp_path):
+    pdf = describe_file(io.BytesIO(pdf_bytes("Hello", "", "", "x", title="Handbook")), "h.pdf")
+    assert pdf.format == "pdf" and pdf.error == ""
+    assert {k: pdf.facts[k] for k in ("pages", "text", "title", "author", "version")} == {
+        "pages": 4, "text": True, "title": "Handbook", "author": "Kirti", "version": "1.4"}
+    scan = describe_file(io.BytesIO(pdf_bytes("", "", "", "text on page 4 only")), "scan.pdf")
+    assert scan.facts["text"] is False  # only the first 3 pages are checked
+    word = describe_file(io.BytesIO(docx_bytes(PICTURE_BODY, media=PICTURE_MEDIA)), "w.docx")
+    assert {k: word.facts[k] for k in ("pictures", "pages", "title", "author", "tables")} == {
+        "pictures": 3, "pages": 3, "title": "Churn study", "author": "Kirti", "tables": 1}
+    deck = describe_file(io.BytesIO(pptx_bytes(DECK)), "d.pptx")
+    assert (deck.facts["slides"], deck.facts["notes"], deck.facts["title"]) == (3, 1, "Q3 review")
+    excel = io.BytesIO()
+    with pd.ExcelWriter(excel) as writer:  # pyright: ignore[reportArgumentType]
+        pd.DataFrame({"x": range(10), "y": range(10)}).to_excel(writer, sheet_name="Sales", index=False)
+        pd.DataFrame().to_excel(writer, sheet_name="Empty", index=False)
+    book = describe_file(io.BytesIO(excel.getvalue()), "b.xlsx")
+    assert book.facts["sheets"][0] == {"sheet": "Sales", "rows": 11, "columns": 2, "hidden": False}
+    path = tmp_path / "t.parquet"
+    pq.write_table(TABLE, path, row_group_size=20)
+    parquet = describe_file(path)  # a local path works too
+    assert parquet.key == str(path) and parquet.facts["rows"] == 50 and parquet.facts["row_groups"] == 3
+    assert parquet.facts["columns"] == ["id", "name"] and parquet.summary == "50 rows × 2 columns"
+    avro = describe_file(io.BytesIO(avro_bytes(1200)[0]), "t.avro")
+    assert avro.facts["rows"] == 1200 and avro.facts["codec"] == "deflate" and "id" in avro.facts["columns"]
+    data = json.dumps([{"a": 1, "b": 2}, {"a": 3, "c": 4}]).encode()
+    assert describe_file(io.BytesIO(data), "r.json").summary == "2 rows × 3 columns"
+    assert describe_file(io.BytesIO(b'{"x": 1, "y": [1]}'), "o.json").summary == "an object with 2 keys"
+    lines = describe_file(io.BytesIO(b'{"a": 1}\n{"a": 2}\n{"a": 3}\n'), "firehose.json")
+    assert lines.format == "jsonl" and lines.facts["rows"] == 3 and lines.facts["json_lines"] and not lines.notes
+    found = file_details_findings(FileDetailsReport(uri="", files=[lines]))
+    assert found == [("info", "1 .json file (firehose.json) holds JSON lines, one record per line, not one JSON "
+                              "document: pandas reads them with read_json(path, lines=True), and "
+                              "ui.core.read_df('firehose.json', fmt='jsonl') here.")]
+    notebook = {"cells": [{"cell_type": "code", "outputs": [{}]}, {"cell_type": "markdown"}],
+                "metadata": {"kernelspec": {"display_name": "Python 3"}}}
+    assert describe_file(io.BytesIO(json.dumps(notebook).encode()), "n.ipynb").summary == "2 cells · Python 3"
+    assert describe_file(io.BytesIO(tar_bytes({"a": b"1" * 10, "b": b"2"})), "m.tar.gz").summary == (
+        "2 files · 11 B unpacked")
+
+
+def test_describe_file_counts_or_estimates_rows():
+    small = describe_file(io.BytesIO(b'id,note\n1,"two\nlines"\n2,x\n'), "s.csv")
+    assert small.facts["rows"] == 2 and small.facts["columns"] == ["id", "note"] and "rows_estimate" not in small.facts
+    body = b"id,name,score\n" + b"".join(b"%06d,name-%06d,0.5\n" % (i, i) for i in range(40_000))
+    big = describe_file(io.BytesIO(body), "big.csv")
+    assert big.facts["rows_estimate"] == "estimate" and abs(big.facts["rows"] - 40_000) < 400
+    assert big.summary.startswith("≈ 40,000 rows × 3 columns")
+    packed = describe_file(io.BytesIO(gzip.compress(body)), "big.csv.gz")
+    assert packed.compression == "gz" and packed.facts["rows_estimate"] == "at least"
+    assert 5_000 < packed.facts["rows"] < 40_000 and packed.summary.startswith(f"{packed.facts['rows']:,}+ rows")
+    text = describe_file(io.BytesIO(b"a\nb\nc"), "notes.txt")
+    assert text.facts == {"lines": 3} and text.summary == "3 lines"
+    assert describe_file(io.BytesIO(b""), "e.csv").skipped == "empty"
+
+
+def test_describe_file_says_when_the_name_is_wrong():
+    page = describe_file(io.BytesIO(b"<!DOCTYPE html>\n<html>Access denied</html>"), "report.pdf")
+    assert (page.named, page.format, page.facts["starts_with"]) == ("pdf", "text", "<!DOCTYPE html>")
+    assert page.summary == "text, not a PDF · 2 lines"
+    parquet = describe_file(io.BytesIO(to_bytes(pq.write_table, TABLE)), "export.csv")
+    assert (parquet.named, parquet.format, parquet.facts["rows"]) == ("csv", "parquet", 50)
+    word = describe_file(io.BytesIO(docx_bytes()), "attachment-7")  # no extension: not a wrong name
+    assert word.format == "docx" and word.named is None
+    gz = describe_file(io.BytesIO(b"plain\n"), "log.txt.gz")
+    assert gz.compression is None and "isn't gz-compressed" in gz.notes[0] and gz.facts["lines"] == 1
+
+
+def test_describe_file_without_its_packages(monkeypatch):
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    monkeypatch.setitem(sys.modules, "pyarrow.parquet", None)
+    pdf = describe_file(io.BytesIO(pdf_bytes("Hello")), "a.pdf")
+    assert pdf.error == "Counting PDF pages needs `pypdf` (pip install pypdf)"
+    parquet = describe_file(io.BytesIO(to_bytes(pq.write_table, TABLE)), "t.parquet")
+    assert "pip install pyarrow" in parquet.error
+    broken = describe_file(io.BytesIO(b"PK\x03\x04 not really a zip"), "b.docx")
+    assert broken.error.startswith("BadZipFile")
+
+
+def test_describe_file_with_a_password():
+    pypdf_writer = pypdf.PdfWriter(clone_from=io.BytesIO(pdf_bytes("Secret", "Two")))
+    pypdf_writer.encrypt("pw", algorithm="RC4-128")
+    locked = to_bytes(lambda f: pypdf_writer.write(f))
+    d = describe_file(io.BytesIO(locked), "l.pdf")
+    assert d.facts["locked"] and d.summary == "needs a password"  # pypdf reads nothing more without it
+    opened = describe_file(io.BytesIO(locked), "l.pdf", password="pw")
+    assert "locked" not in opened.facts and opened.facts["text"] is True
+
+
+def test_file_details(core, formats):
+    report = core.file_details(uri_of(""))
+    by_key = {d.key: d for d in report.files}
+    assert len(report.files) == 30 and not report.truncated and report.requests == 30  # one 256 KB block each
+    assert by_key["docs/report.pdf"].summary == '2 pages · 2.8 × 2.8 in · "Handbook"'
+    assert by_key["docs/scan.pdf"].facts["text"] is False
+    assert by_key["spark/part-00000"].format == "parquet" and by_key["spark/part-00000"].facts["rows"] == 50
+    assert by_key["tables/book.xlsx"].facts["sheets"][1]["sheet"] == "second"
+    assert by_key["models/model.safetensors"].facts["parameters"] == 9
+    assert "pypdf couldn't read this PDF" in by_key["docs/broken.pdf"].error
+    assert report.bytes_read == sum(d.size for d in report.files) and report.bytes_read == sum(
+        d.bytes_read for d in report.files)
+    df = report.to_df()
+    assert list(df.columns[:6]) == ["key", "format", "size", "summary", "status", "problem"]
+    assert df.set_index("key").loc["docs/report.pdf", "pages"] == 2
+    pdfs = core.file_details(uri_of("docs/"), extensions="pdf", limit=2)
+    assert [d.key for d in pdfs.files] == ["docs/broken.pdf", "docs/report.pdf"] and pdfs.truncated
+    assert pdfs.uri == uri_of("docs/") and pdfs.filters == {"extensions": "pdf"}
+    one = core.file_details(uri_of("docs/study.docx"))
+    assert [d.key for d in one.files] == ["docs/study.docx"] and one.files[0].facts["words"] == 21
+
+
+def test_file_details_reads_only_what_it_needs(core, aws):
+    aws.create_bucket(Bucket="big")
+    body = b"id,name\n" + b"".join(b"%07d,row\n" % i for i in range(400_000))  # 4.4 MB
+    aws.put_object(Bucket="big", Key="t.csv", Body=body)
+    aws.put_object(Bucket="big", Key="clip.mp4", Body=mp4_bytes(media=bytes(3 * MB)))
+    aws.put_object(Bucket="big", Key="photo.png", Body=image_bytes_with(Image.new("RGB", (900, 600)), "PNG")
+                   + bytes(2 * MB))
+    report = core.file_details("s3://big/")
+    by_key = {d.key: d for d in report.files}
+    assert by_key["t.csv"].facts["rows_estimate"] == "estimate" and by_key["t.csv"].bytes_read == 256 * KB
+    clip = by_key["clip.mp4"]  # its first block, then the last one, where the moov box is
+    assert clip.facts["duration"] == 12.5 and 256 * KB < clip.bytes_read < 257 * KB
+    assert by_key["photo.png"].facts["width"] == 900 and by_key["photo.png"].bytes_read == 256 * KB
+    assert report.requests == 4 and report.bytes_read < MB
+
+
+def test_file_details_stops_at_max_read_and_skips_archives(core, aws, monkeypatch):
+    aws.create_bucket(Bucket="lots")
+    for i in range(6):
+        aws.put_object(Bucket="lots", Key=f"f{i}.csv", Body=b"a,b\n" + b"1,2\n" * 100_000)
+    aws.put_object(Bucket="lots", Key="z/cold.pdf", Body=pdf_bytes("x"), StorageClass="GLACIER")
+    report = core.file_details("s3://lots/", max_read="600KB", max_workers=1)
+    skipped = [d.key for d in report.files if d.skipped == "max_read"]
+    assert skipped == ["f3.csv", "f4.csv", "f5.csv"] and report.read_capped and report.bytes_read == 768 * KB
+    assert [d.skipped for d in report.files if d.key == "z/cold.pdf"] == ["archived"]
+    monkeypatch.setattr(s3mod, "DETAILS_FILE_MAX", 256 * KB)
+    aws.put_object(Bucket="lots", Key="big.tar", Body=tar_bytes({f"m{i}": bytes(300 * KB) for i in range(4)}, "w"))
+    tar = core.file_details("s3://lots/big.tar").files[0]
+    assert tar.facts["files"] == 1 and tar.facts["files_estimate"] == "at least"
+    assert tar.error == "stopped after reading 256.0 KB of it, the most read from one file"
+    assert tar.summary.startswith("1+ file")
+
+
+def test_file_details_when_reads_fail(core, formats, monkeypatch):
+    real = core.client.get_object
+
+    def get_object(**kwargs):
+        if kwargs["Key"].endswith(".pdf"):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+        return real(**kwargs)
+
+    monkeypatch.setattr(core.client, "get_object", get_object)
+    report = core.file_details(uri_of("docs/"))
+    errors = {d.key: d.error for d in report.files if d.error}
+    assert errors == {key: "AccessDenied (needs s3:GetObject)"
+                      for key in ("docs/broken.pdf", "docs/report.pdf", "docs/scan.pdf")}
+    assert {d.key: d.facts["words"] for d in report.files if d.format == "docx"}["docs/study.docx"] == 21
 
 
 # ----------------------------------------------------------------------------- UI
@@ -2887,6 +3218,9 @@ def test_ui_documents_as_pictures(ui, capsys, formats, monkeypatch):
     missing = run(capsys, ui.document, uri_of("docs/scan.pdf"))
     assert "Seeing PDF pages as pictures needs `pypdfium2` (pip install pypdfium2)." in missing
     assert "-- Page 1 --\n(no text)" in missing
+    monkeypatch.setitem(sys.modules, "pypdf", None)
+    neither = run(capsys, ui.document, uri_of("docs/report.pdf"))
+    assert "[!] Reading PDF text needs `pypdf` (pip install pypdf).\n" in neither and "ImportError" not in neither
 
 
 def test_ui_duplicates(ui, capsys, aws, dupes):
@@ -2939,6 +3273,42 @@ def test_ui_duplicates_without_read_permission(ui, capsys, dupes, monkeypatch):
         and "AccessDenied (needs s3:GetObject)" in out
         and "Duplicate groups: 0" in out
     )
+
+
+def test_ui_file_details(ui, capsys, formats):
+    out = run(capsys, ui.file_details, uri_of(""))
+    assert out.startswith("\nFile details in s3://formats/\n") and "30 files looked into" in out
+    assert "PDFs without text: 1 (!)" in out and "Not read: 2 (!)" in out and "Table rows: 654" in out
+    assert "[!] 1 PDF has no text on the first pages, probably scanned: docs/scan.pdf" in out
+    assert "-- PDFs · 2 --" in out and "none: scanned?" in out and "Handbook" in out
+    assert "-- Tables (≈ estimated from the first 256 KB, + at least) · 6 --" in out and "SNAPPY" in out
+    assert "-- Not read · 2 --" in out and "-- Other files · 1 --" in out and "Author" in out
+    assert "report = ui.core.file_details('s3://formats/')" in out
+    assert "document('s3://formats/docs/scan.pdf')" in out and "the scanned pages, as pictures" in out
+    one = run(capsys, ui.file_details, uri_of("docs/report.pdf"))
+    assert "File details of s3://formats/docs/report.pdf" in one and "\nreport.pdf " in one
+    assert "[ok] Nothing stood out" in one and "the PDF, page by page" in one
+    few = run(capsys, ui.file_details, uri_of(""), pattern="*.docx", limit=1)
+    assert "(the first 1 in key order) · pattern='*.docx'" in few and "Files: 1+" in few
+    assert "file_details('s3://formats/', pattern='*.docx', limit=5)" in few
+    assert "No files here that match" in run(capsys, ui.file_details, uri_of(""), extensions="xyz")
+
+
+def test_ui_ls_details(ui, capsys, formats, monkeypatch):
+    out = run(capsys, ui.ls, uri_of("docs/"), details=True)
+    assert "looked inside 8 files" in out and "What's inside" in out
+    assert '2 pages · 2.8 × 2.8 in · "Handbook"' in out and "3 slides · 18 words" in out
+    assert "[!] 1 PDF has no text on the first pages" in out
+    assert "file_details('s3://formats/docs/')" in out
+    assert "What's inside" not in run(capsys, ui.ls, uri_of("docs/"))  # only when asked: it reads the files
+
+    def denied(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "GetObject")
+
+    monkeypatch.setattr(ui.core.client, "get_object", denied)
+    out = run(capsys, ui.ls, uri_of("docs/"), details=True)
+    assert "Traceback" not in out and "couldn't read: AccessDenied (needs s3:GetObject)" in out
+    assert "8 files couldn't be read, or not to the end" in out
 
 
 def test_ui_download_and_ls_of_a_file(ui, capsys, tmp_path, monkeypatch):
@@ -3140,6 +3510,24 @@ def test_ui_html_mode(core, monkeypatch):
     )
 
 
+def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
+    monkeypatch.setitem(sys.modules, "IPython", None)
+    monkeypatch.setitem(sys.modules, "IPython.display", None)
+    ui = S3View(core, mode="html")
+    out = run(capsys, ui.help)
+    assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
+    assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
+    clock = itertools.count(0, 1.0)
+    monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: None)  # no tqdm either: the plain line
+    with ui._progress("Reading", unit="B") as tick:
+        tick(MB, 4 * MB)
+        tick(2 * MB, 4 * MB)
+    assert "Reading... 2.0 MB of 4.0 MB (50%)" in capsys.readouterr().err
+    needs = s3mod._friendly_errors(lambda self: s3mod._require("no_such_pkg", "Drawing this"))
+    assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
+
+
 def test_html_escapes_untrusted_keys():
     blocks = [
         s3mod._Title("<b>x</b>"),
@@ -3288,7 +3676,7 @@ def test_ui_help_groups_every_command(ui, capsys):
         "what_if(uri, *, move_after=None" in out
         and "what_if(uri, delete_after=365)" in out
     )
-    assert run(capsys, ui.help, ui.ls).startswith("\nls(uri, *, limit=500)")
+    assert run(capsys, ui.help, ui.ls).startswith("\nls(uri, *, limit=500, details=False)")
     assert "Did you mean 'summary'?" in run(capsys, ui.help, "sumary")
 
 

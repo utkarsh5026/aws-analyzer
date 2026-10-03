@@ -1,0 +1,100 @@
+/* The guides' look on top of Material for MkDocs: the teal of the logo and of the reports, screenshots in a
+   frame, and the few blocks the guides use (hero, setup steps, command reference). */
+
+:root, [data-md-color-scheme="default"] {
+  --md-primary-fg-color: #0f766e;
+  --md-primary-fg-color--light: #14958a;
+  --md-primary-fg-color--dark: #0b5952;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, .7);
+  --md-accent-fg-color: #0d9488;
+  --md-accent-fg-color--transparent: rgba(13, 148, 136, .1);
+  --md-accent-bg-color: #ffffff;
+  --md-typeset-a-color: #0f766e;
+  --aa-accent-soft: #e3f2ef;
+  --aa-shadow: 0 1px 2px rgba(20, 30, 28, .06), 0 4px 16px rgba(20, 30, 28, .05);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 165deg; /* a neutral, faintly green dark instead of Material's blue-grey */
+  --md-primary-fg-color: #0f766e;
+  --md-primary-fg-color--light: #14958a;
+  --md-primary-fg-color--dark: #0b5952;
+  --md-accent-fg-color: #4fd1c1;
+  --md-accent-fg-color--transparent: rgba(79, 209, 193, .1);
+  --md-typeset-a-color: #4fd1c1;
+  --aa-accent-soft: #15322e;
+  --aa-shadow: none;
+}
+
+/* ---- Hero: eyebrow, title, lede, pills */
+.md-typeset .eyebrow {
+  color: var(--md-typeset-a-color); font-weight: 650; font-size: .65rem; letter-spacing: .06em;
+  text-transform: uppercase; margin: 0 0 .3rem;
+}
+.md-typeset h1 { margin-bottom: .6em; }
+.md-typeset .lede { font-size: 1rem; line-height: 1.55; color: var(--md-default-fg-color--light); max-width: 36rem; }
+.md-typeset ul.pills { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.5rem; padding: 0; list-style: none; }
+.md-typeset ul.pills li {
+  margin: 0; font-size: .65rem; padding: .15rem .55rem; border-radius: 999px;
+  background: var(--md-code-bg-color); border: 1px solid var(--md-default-fg-color--lightest);
+  color: var(--md-default-fg-color--light);
+}
+.md-typeset .muted { color: var(--md-default-fg-color--light); }
+
+/* ---- Callouts in the accent colour */
+.md-typeset .admonition.note, .md-typeset details.note { border-color: var(--md-primary-fg-color); }
+[data-md-color-scheme="slate"] .md-typeset .admonition.note { border-color: var(--md-accent-fg-color); }
+
+/* ---- Troubleshooting questions: quiet, not Material's bright green */
+.md-typeset details.question { border-color: var(--md-default-fg-color--lightest); }
+.md-typeset .question > summary { background-color: var(--md-code-bg-color); }
+.md-typeset .question > summary::before { background-color: var(--md-typeset-a-color); }
+.md-typeset .question > summary::after { background-color: var(--md-default-fg-color--light); }
+
+/* ---- Screenshots: full width in a frame, caption underneath */
+.md-typeset figure { width: 100%; align-items: stretch; text-align: left; margin: 1em 0 1.6em; }
+.md-typeset figure > p { margin: 0; }
+.md-typeset figure img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--md-default-fg-color--lightest); border-radius: 12px; box-shadow: var(--aa-shadow);
+}
+.md-typeset figure img[src$="#only-light"], .md-typeset figure img[src$="#only-dark"] { display: block; }
+[data-md-color-scheme="default"] .md-typeset figure img[src$="#only-dark"],
+[data-md-color-scheme="slate"] .md-typeset figure img[src$="#only-light"] { display: none; }
+.md-typeset figcaption {
+  max-width: none; margin: .5em 0 0; font-style: normal; font-size: .68rem; color: var(--md-default-fg-color--light);
+}
+
+/* ---- Set-up steps: numbered circles */
+.md-typeset .steps > ol { counter-reset: step; list-style: none; margin-left: 0; padding: 0; }
+.md-typeset .steps > ol > li { counter-increment: step; position: relative; margin-left: 0; padding-left: 2.2rem; }
+.md-typeset .steps > ol > li::before {
+  content: counter(step); position: absolute; left: 0; top: .1rem; width: 1.4rem; height: 1.4rem; border-radius: 50%;
+  background: var(--aa-accent-soft); color: var(--md-typeset-a-color); font-weight: 700; font-size: .65rem;
+  display: grid; place-items: center;
+}
+
+/* ---- Tables span the page, like the reports */
+.md-typeset__table { display: block; }
+.md-typeset__table table:not([class]) { display: table; width: 100%; }
+
+/* ---- Command reference: long signatures wrap between arguments, continuation lines indented under the name */
+.md-typeset .ref td:first-child { width: 55%; padding-left: 2.5em; text-indent: -1.5em; }
+.md-typeset .ref td code { white-space: normal; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+@media (max-width: 600px) {
+  .md-typeset .ref thead { display: none; }
+  .md-typeset .ref tr, .md-typeset .ref td { display: block; }
+  .md-typeset .ref td:first-child { width: auto; border-bottom: none; padding-bottom: 0; }
+  .md-typeset .ref td + td { padding-top: 2px; color: var(--md-default-fg-color--light); }
+}
+
+/* ---- Home page: one card per service */
+.md-typeset .services > ul > li > p:first-child code {
+  font-size: .62rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px;
+  background: var(--aa-accent-soft); color: var(--md-typeset-a-color);
+}
+.md-typeset .services > ul > li > p:nth-child(2) { font-size: 1rem; margin: .4rem 0 0; }
+.md-typeset .services .what { color: var(--md-default-fg-color--light); margin-top: .1rem; }
+.md-typeset .services > ul > li > ul { font-size: .7rem; }
+.md-typeset .services > ul > li > p:last-child a { font-weight: 600; }

@@ -60,7 +60,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable
 from urllib.parse import unquote
 
 import boto3
@@ -3857,14 +3857,14 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
         elif isinstance(block, _Next):
             if block.items:
-                items = "".join(
+                calls = "".join(
                     f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
                     + (f'<span class="nw">{_esc(why)}</span>' if why else "")
                     + "</span>"
                     for call, why in block.items
                 )
                 out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{items}</div>'
+                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
                 )
         elif isinstance(block, _Table):
             if not block.rows:
@@ -4420,6 +4420,8 @@ def _friendly_errors(method: Callable) -> Callable:
             )
         except _Hint as exc:
             self._show([_Note(str(exc))])
+        except ImportError as exc:  # a missing optional package: the message says what to pip install
+            self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
         except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
             self._show(
                 [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
@@ -4440,6 +4442,7 @@ class BedrockKBView:
     rate and time left), 'plain' (always that line) or 'off'.
     """
 
+    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "Knowledge bases": ("kbs", "use", "kb_info"),
         "What's indexed": ("syncs", "documents", "unsynced"),
@@ -4478,22 +4481,28 @@ class BedrockKBView:
 
     def _show(self, blocks: list[Any]) -> None:
         if self.use_html:
-            from IPython.display import HTML, display
-
-            display(HTML(_render_html(blocks, self.max_rows)))
-        else:
-            print(_render_text(blocks, self.max_rows))
+            try:
+                from IPython.display import HTML, display
+            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
+                self.use_html = False
+                note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
+                blocks = [*blocks, _Note(note, "warn")]
+            else:
+                display(HTML(_render_html(blocks, self.max_rows)))
+                return
+        print(_render_text(blocks, self.max_rows))
 
     @contextmanager
     def _progress(
         self, label: str = "Reading", unit: str = "items read"
-    ) -> Iterator[Callable[..., None]]:
+    ) -> Generator[Callable[..., None], None, None]:
         """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
         and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
         Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
         at a time: when a nested _progress starts showing, the outer one's bar goes away."""
+        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
         bar_class = [
-            _progress_bar_class(self.use_html and _in_notebook())
+            _progress_bar_class(notebook)
             if self.progress == "auto"
             else None
         ]
@@ -4525,7 +4534,7 @@ class BedrockKBView:
                 width[0] = 0
 
         def take_over() -> None:
-            owner = getattr(self, "_progress_owner", None)
+            owner = self._progress_owner
             if owner is not clear:
                 if owner is not None:
                     owner()
@@ -4553,7 +4562,7 @@ class BedrockKBView:
             shown[0] = now
             take_over()
             text = _progress_text(label, unit, count, total, now - started[0])
-            if self.use_html:
+            if notebook:
                 from IPython.display import HTML, display
 
                 if handle[0] is None:
@@ -4573,7 +4582,7 @@ class BedrockKBView:
             raise
         finally:
             clear()
-            if getattr(self, "_progress_owner", None) is clear:
+            if self._progress_owner is clear:
                 self._progress_owner = None
 
     def help(self, command: Any = None) -> None:

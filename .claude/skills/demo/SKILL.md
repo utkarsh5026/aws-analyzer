@@ -98,8 +98,8 @@ docs screenshots are `docs/images/<command>-{light,dark}.webp` (Bedrock's are `b
 
 `shots.py`, next to `demo.py`, makes them: for every figure in the guides it runs the figure's command against
 a scene in moto, renders the notebook HTML, screenshots it in headless Chrome (984 CSS px wide at 1.5x, so
-1476 px), trims the empty space below, writes the light and dark WebP and sets the `<img height=>` in the
-guide. It needs Pillow (`pip install pillow`) and Chrome (`$CHROME`, or Playwright's headless shell).
+1476 px), trims the empty space below, writes the light and dark WebP and sets the `height=` of both images
+in the guide's Markdown. It needs Pillow (`pip install pillow`) and Chrome (`$CHROME`, or Playwright's headless shell).
 
 ```bash
 .venv/bin/python .claude/skills/demo/shots.py --list                 # every figure and the command behind it
@@ -113,10 +113,21 @@ DescribeTable counts around them. Bedrock's figures use `seed_bedrock_kb()`. Aft
 and check that its caption and `alt` text in the guide still say what it shows (counts in them come from the
 scene). A new figure goes in `FIGURES` in `shots.py` and in the guide as a `<figure>` like the others.
 
+The S3 explorer (`s3_explorer.py`) is a live ipywidgets app, not a report, so `shots.py` can't draw it.
+`explorer_shots.py` starts JupyterLab in a temporary folder, runs the explorer on the acme scene and screenshots it
+the same size, light and dark. It needs `pip install jupyterlab playwright` on top of the dev requirements:
+
+```bash
+.venv/bin/python .claude/skills/demo/explorer_shots.py              # explorer and explorer-docx (about a minute)
+```
+
+To click around the explorer yourself, start `jupyter lab` and seed the scene in the first cell the same way
+(`mock_aws().start()`, then `core = S3Analyzer(**shots.seed_s3_docs())`, then `S3Explorer(core=core)`).
+
 The chat window (`bedrock_chat.py`) is ipywidgets, which only draw in a browser connected to a kernel, so its figures
-(`chat-*`, in `docs/bedrock_chat.html`) come from `chat_shots.py`: it starts JupyterLab on a notebook that opens the
-window on the fake Bedrock, types and clicks through it with Playwright, and writes the WebP files and `<img height=>`
-the same way. It needs `pip install jupyterlab playwright` on top of the dev requirements, and Chromium (`$CHROME`, or
+(`chat-*`, in `docs/bedrock_chat.md`) come from `chat_shots.py`: it starts JupyterLab on a notebook that opens the
+window on the fake Bedrock, types and clicks through it with Playwright, and writes the WebP files and the figures'
+heights the same way. It needs `pip install jupyterlab playwright` on top of the dev requirements, and Chromium (`$CHROME`, or
 Playwright's).
 
 ```bash

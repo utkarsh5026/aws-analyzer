@@ -1,0 +1,10 @@
+# Builds the guide site in docs/ (mkdocs.yml). Not needed to use or test the analyzers.
+# Pinned like requirements-dev.txt; Dependabot proposes upgrades, and the Docs workflow
+# builds the site with --strict on each one.
+#   pip install -r requirements-docs.txt && mkdocs serve
+#
+# MkDocs 2.0 drops plugins and themes, so Material for MkDocs doesn't work with it;
+# Dependabot leaves mkdocs on 1.x (.github/dependabot.yml).
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+pymdown-extensions==12.1

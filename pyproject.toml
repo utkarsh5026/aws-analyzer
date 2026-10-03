@@ -1,0 +1,109 @@
+# The PyPI package: `pip install aws-analyzer`, then `from aws_analyzer import S3View`.
+#
+# The analyzers stay one standalone file each in analyzers/, so copying one next to a notebook keeps working. The
+# wheel ships those files unchanged as the modules of the aws_analyzer package (aws_analyzer/s3.py, ...), next to
+# src/aws_analyzer/__init__.py, which only re-exports the Analyzer and View classes. Nothing here is needed to run
+# the tests or to use a file on its own.
+#
+#   python -m build                     # dist/aws_analyzer-<version>.tar.gz and -py3-none-any.whl
+#   twine check --strict dist/*         # the metadata, and that the README renders on PyPI
+#
+# Releasing: bump __version__ in src/aws_analyzer/__init__.py, then publish a GitHub release tagged v<version>;
+# .github/workflows/release.yml builds, checks and uploads it.
+
+[build-system]
+requires = ["hatchling>=1.27", "hatch-fancy-pypi-readme>=24.1"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aws-analyzer"
+dynamic = ["version", "readme"]
+description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks, from a Jupyter notebook: what's there, what it costs, and what to do next."
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Utkarsh Priyadarshi" }]
+keywords = ["aws", "s3", "dynamodb", "bedrock", "knowledge-base", "sagemaker", "jupyter", "notebook", "cost"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Jupyter",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+# The only requirement, as for a single file. 1.35.72 is the first boto3 whose service models have every AWS call
+# the analyzers make (Bedrock's ListKnowledgeBaseDocuments); keep it low, so installing doesn't upgrade the boto3 a
+# SageMaker image ships with.
+dependencies = ["boto3>=1.35.72"]
+
+# Everything else is optional, as for the files: a command that needs a missing package says what to install.
+[project.optional-dependencies]
+data = ["pandas>=2", "pyarrow"]  # DataFrames, table previews, Parquet / ORC / Feather / Arrow
+files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and snappy Avro
+    "openpyxl",
+    "xlrd",
+    "pypdf",
+    "pypdfium2>=4",
+    "pillow",
+    "zstandard; python_version < '3.14'",
+    "python-snappy",
+]
+notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer's clicks, progress bars
+all = ["aws-analyzer[data,files,notebook]"]
+
+[project.urls]
+Homepage = "https://github.com/utkarsh5026/aws-analyzer"
+Documentation = "https://utkarsh5026.github.io/aws-analyzer/"
+Source = "https://github.com/utkarsh5026/aws-analyzer"
+Issues = "https://github.com/utkarsh5026/aws-analyzer/issues"
+
+[tool.hatch.version]
+path = "src/aws_analyzer/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aws_analyzer"]
+
+# Every analyzers/*.py goes in the wheel (tests/test_package.py checks none is missing).
+[tool.hatch.build.targets.wheel.force-include]
+"analyzers/s3.py" = "aws_analyzer/s3.py"
+"analyzers/s3_explorer.py" = "aws_analyzer/s3_explorer.py"
+"analyzers/dynamodb.py" = "aws_analyzer/dynamodb.py"
+"analyzers/bedrock_kb.py" = "aws_analyzer/bedrock_kb.py"
+"analyzers/sagemaker_env.py" = "aws_analyzer/sagemaker_env.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["/analyzers/*.py", "/src", "/tests", "/README.md", "/LICENSE", "/requirements-dev.txt"]
+
+# PyPI shows README.md as the project page, but resolves none of its relative links or pictures, so they're
+# pointed at GitHub, and GitHub's > [!NOTE] callouts become bold labels.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '(src|srcset)="(?!https?://)'
+replacement = '\1="https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\(#'
+replacement = '](https://github.com/utkarsh5026/aws-analyzer#'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|mailto:)'
+replacement = '](https://github.com/utkarsh5026/aws-analyzer/blob/main/'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\n>'
+replacement = '> **\1:**'
