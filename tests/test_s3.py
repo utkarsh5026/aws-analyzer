@@ -309,6 +309,19 @@ def test_build_folder_tree():
     assert tree.folders["a/"].size == 60 and tree.folders["a/"].count == 3
     assert tree.folders[""].size == 1
     assert (tree.total.count, tree.total.size) == (4, 61)
+    assert tree.files == {}
+
+
+def test_build_folder_tree_files():
+    objects = [obj(f"p/a/{i}.csv", 10) for i in range(5)] + [
+        obj("p/a/x/deep/1.csv", 7),
+        obj("p/top.txt", 1),
+    ]
+    tree = build_folder_tree(objects, "s3://b/p/", depth=2, files=3)
+    assert [o.key for o in tree.files["a/"]] == ["p/a/0.csv", "p/a/1.csv", "p/a/2.csv"]
+    assert (tree.direct["a/"].count, tree.direct["a/"].size) == (5, 50)
+    assert [o.key for o in tree.files[""]] == ["p/top.txt"]
+    assert "a/x/deep/" not in tree.files  # below depth: counted in a/x/, not listed
 
 
 def test_make_filter():
@@ -2754,6 +2767,12 @@ def test_ui_text_reports(ui, capsys, aws):
     assert "📁 raw/" in run(capsys, ui.ls, root)
     tree = run(capsys, ui.tree, f"{root}raw/", depth=2)
     assert "2024/" in tree and "    01/" in tree
+    assert "        events.csv" in tree and "events.csv.gz" in tree
+    tree = run(capsys, ui.tree, f"{root}raw/", depth=2, files=1)
+    assert "1 more file" in tree and "files=10)" in tree
+    tree = run(capsys, ui.tree, f"{root}raw/", depth=1)
+    assert "more in sub-folders" in tree and "events.csv" not in tree
+    assert "events.csv" not in run(capsys, ui.tree, f"{root}raw/", depth=2, files=0)
     assert "big/file.bin" in run(capsys, ui.find, root, min_size="1MB")
     assert "big/file.bin" in run(capsys, ui.largest, root, 1)
     assert "Reclaimable" in run(capsys, ui.duplicates, root)

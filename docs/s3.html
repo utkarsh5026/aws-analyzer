@@ -282,9 +282,9 @@ ui.bucket_info("s3://acme-ml-data/any/path")   # a full S3 path works too</code>
       <h3>Folders</h3>
       <div class="code"><pre><code class="lang-py">ui.ls("s3://acme-ml-data/")                        # one level, like `aws s3 ls` (fast anywhere)
 ui.ls("s3://acme-ml-data/training")                # 'training' is read as the folder 'training/'
-ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at every level</code></pre></div>
+ui.tree("s3://acme-ml-data/curated/", depth=3)     # size and object count at every level, with the files</code></pre></div>
       <figure>
-        <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total" width="984" height="327" loading="lazy"></picture></div>
+        <div class="shot"><picture><source srcset="images/tree-dark.webp" media="(prefers-color-scheme: dark)"><img src="images/tree-light.webp" alt="tree(): an indented folder tree with object counts, sizes and a bar for each folder's share of the total, with the files listed under each folder" width="984" height="813" loading="lazy"></picture></div>
         <figcaption><code>ui.tree("s3://acme-ml-data/curated/", depth=3)</code></figcaption>
       </figure>
 
@@ -798,7 +798,7 @@ boto3.client("s3").upload_file("revenue-by-store-2025-09-01.csv", "acme-ml-data"
           <tr><td><code>bucket_info(bucket, metrics=True)</code></td><td>One bucket's settings, policy, lifecycle rules, risks, and size and cost by storage type</td></tr>
           <tr><td><code>policy(bucket)</code></td><td>The bucket policy in plain English, its risks and the JSON</td></tr>
           <tr><td><code>ls(uri, limit=500)</code></td><td>One level of folders and files</td></tr>
-          <tr><td><code>tree(uri, depth=2)</code></td><td>Folder tree with count, size and share at every level</td></tr>
+          <tr><td><code>tree(uri, depth=2, files=10)</code></td><td>Folder tree with count, size and share at every level, and the files in each folder (<code>files=0</code> for folders only)</td></tr>
           <tr><td><code>summary(uri, top_n=10, folder_depth=1, limit=None)</code></td><td>Dashboard for a prefix, with cost and findings</td></tr>
           <tr><td><code>find(uri, pattern=, regex=, extensions=, min_size=, max_size=, modified_after=, modified_before=, storage_classes=, limit=1000)</code></td><td>Search</td></tr>
           <tr><td><code>largest(uri, n=20)</code> · <code>newest</code> · <code>oldest</code></td><td>Top-N objects</td></tr>
