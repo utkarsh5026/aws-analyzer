@@ -7,7 +7,7 @@
 shots.py renders reports as static HTML, which a widget isn't. This starts JupyterLab in a temporary folder, opens
 a notebook that seeds shots.py's acme scene in moto and moves an S3Explorer to the figure's place, screenshots the
 explorer 984 CSS px wide at 1.5x in headless Chromium (light, then dark theme), writes
-docs/images/<name>-{light,dark}.webp and sets the <img height=> in docs/s3.html, like shots.py.
+docs/images/<name>-{light,dark}.webp and sets the figure's height= in docs/s3.md, like shots.py.
 
 Needs what the dev requirements have plus JupyterLab and Playwright:
     pip install jupyterlab playwright        # Playwright finds Chromium in $PLAYWRIGHT_BROWSERS_PATH

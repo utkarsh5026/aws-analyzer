@@ -1,4 +1,4 @@
-"""Regenerate the guides' screenshots: every figure in docs/*.html, light and dark, as the tool renders it.
+"""Regenerate the guides' screenshots: every figure in docs/*.md, light and dark, as the tool renders it.
 
     .venv/bin/python .claude/skills/demo/shots.py                     # every figure
     .venv/bin/python .claude/skills/demo/shots.py summary what-if     # just these (image names, no -light/-dark)
@@ -7,7 +7,7 @@
 
 Each figure runs its command against a scene in moto, renders the notebook HTML of the reports, screenshots it
 984 CSS px wide at 1.5x (1476 px, like the rest of the images) in headless Chrome, trims the empty space below,
-and writes docs/images/<name>-{light,dark}.webp. Then it sets that <img>'s height= in the guide.
+and writes docs/images/<name>-{light,dark}.webp. Then it sets the figure's height= in the guide.
 
 Scenes:
   s3          acme-ml-data, the bucket the S3 guide is written around, plus acme-logs, a SageMaker bucket and
@@ -50,8 +50,8 @@ ROOT = HERE.parents[2]
 sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
-GUIDES = {"s3": "s3.html", "dynamodb": "dynamodb.html", "bedrock_kb": "bedrock_kb.html",
-          "sagemaker_env": "sagemaker_env.html"}
+GUIDES = {"s3": "s3.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
+          "sagemaker_env": "sagemaker_env.md"}
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
 NOW = datetime.now(timezone.utc)
@@ -882,11 +882,13 @@ def trim(png_path: Path, crop: int | None):
 def set_height(service: str, name: str, height: int) -> None:
     guide = ROOT / "docs" / GUIDES[service]
     text = guide.read_text(encoding="utf-8")
-    pattern = re.compile(rf'(<img src="images/{re.escape(name)}-light\.webp"[^>]*?height=")(\d+)(")')
+    # A figure is two Markdown images, the light one and the dark one, each with { width="984" height="..." }.
+    image = rf"\]\(images/{re.escape(name)}-(?:light|dark)\.webp#only-(?:light|dark)\)"
+    pattern = re.compile(rf'({image}\{{[^}}]*?height=")(\d+)(")')
     if pattern.search(text):
         guide.write_text(pattern.sub(rf"\g<1>{height}\g<3>", text), encoding="utf-8")
     else:
-        print(f"  (no <img> for {name} in {guide.name}: add one with height=\"{height}\")")
+        print(f"  (no figure for {name} in {guide.name}: add its light and dark images with height=\"{height}\")")
 
 
 def main() -> int:
