@@ -17,12 +17,14 @@ from s3_explorer import (
     S3Explorer,
     S3Navigator,
     breadcrumbs,
+    count_types,
     entry_icon,
     explain_list_error,
     filter_entries,
     folder_stats,
     folder_uri,
     parent_uri,
+    parse_filter,
     parse_location,
     sort_entries,
 )
@@ -100,6 +102,11 @@ def test_sort_entries():
     assert [e.name for e in sort_entries(buckets, "modified", True)] == ["new", "old"]
     with pytest.raises(ValueError):
         sort_entries(entries, "colour")
+    tree = [file("d/b/x.csv"), folder("d/b/"), file("d/a-2.csv"), folder("d/a/"), file("d/a/part-10.csv"),
+            file("d/a/part-2.csv")]
+    assert [e.key for e in sort_entries(tree, "path")] == [  # each folder, then what's in it
+        "d/a/", "d/a/part-2.csv", "d/a/part-10.csv", "d/a-2.csv", "d/b/", "d/b/x.csv"]
+    assert [e.key for e in sort_entries(tree, "path", True)][:2] == ["d/b/x.csv", "d/b/"]
 
 
 def test_filter_entries():
@@ -107,6 +114,38 @@ def test_filter_entries():
     assert [e.name for e in filter_entries(entries, "REPORT")] == ["Report-2024.csv", "reports"]
     assert [e.name for e in filter_entries(entries, "*.txt")] == ["notes.txt"]
     assert filter_entries(entries, "  ") == entries
+
+
+def test_parse_filter():
+    wanted = parse_filter("  Train, .CSV *.json ext:parquet part-0* .csv type:.YML")
+    assert wanted.words == ["train"] and wanted.patterns == ["part-0*"]
+    assert wanted.types == ["csv", "json", "parquet", "yaml"]  # each once; .yml is .yaml
+    assert parse_filter(".jpeg").types == ["jpg"] and parse_filter("*.csv.gz").types == ["csv.gz"]
+    assert parse_filter("report.pdf").words == ["report.pdf"]  # a name, not a type
+    assert parse_filter(".").words == ["."] and not parse_filter("") and not parse_filter(None)
+    assert parse_filter("a b").words == ["a", "b"]  # every word must be in the name
+
+
+def test_filter_entries_by_type_and_kind():
+    entries = [file("d/a.csv"), file("d/b.CSV.gz"), file("d/c.json"), file("d/p.jpeg"), file("d/part-0.snappy.parquet"),
+               file("d/model.tar.gz"), file("d/.env"), file("d/README"), folder("d/csv/"), Entry("bucket", "b")]
+    names = lambda text, kind="all": [e.name for e in filter_entries(entries, text, kind)]  # noqa: E731
+    assert names(".csv") == ["a.csv", "b.CSV.gz"]  # .csv also finds compressed csv; folders have no type
+    assert names(".csv .json") == ["a.csv", "b.CSV.gz", "c.json"]
+    assert names(".gz") == ["b.CSV.gz", "model.tar.gz"] and names(".tar.gz") == ["model.tar.gz"]
+    assert names(".jpg") == ["p.jpeg"] and names(".parquet") == ["part-0.snappy.parquet"] and names(".env") == [".env"]
+    assert names("b .csv") == ["b.CSV.gz"] and names("csv") == ["a.csv", "b.CSV.gz", "csv"]
+    assert names("", "folders") == ["csv", "b"] and names("", "folder") == ["csv", "b"]  # buckets count as folders
+    assert names("a", "files") == ["a.csv", "part-0.snappy.parquet", "model.tar.gz", "README"]
+    with pytest.raises(ValueError, match="kind must be"):
+        filter_entries(entries, "", "colour")
+
+
+def test_count_types():
+    entries = [file("a.csv", 10), file("b.csv.gz", 5), file("c.json", 100), file("d.jpeg", 1), file("e.jpg", 1),
+               file("README", 50), folder("x/")]
+    assert count_types(entries) == [("csv", 2, 15), ("jpg", 2, 2), ("json", 1, 100)]
+    assert count_types([]) == []
 
 
 def test_folder_stats():
@@ -219,6 +258,36 @@ def test_navigator_pages_and_lookup(core):
     assert not many.more and many.requests == 4
     assert sorted(e.name for e in many.entries) == [f"f{i:02d}.txt" for i in range(25)]  # nothing twice
     assert nav.lookup("") == 0 and nav.lookup("zzz") == 0
+
+
+def test_navigator_lists_everything_below(core, aws):
+    nav = S3Navigator(core)
+    nav.open("s3://lake/")
+    below = nav.below()
+    assert below.deep and not below.more and below.requests == 1 and nav.below() is below  # cached
+    keys = {e.key: e.kind for e in below.entries}
+    assert keys["raw/"] == "folder" and keys["raw/events/"] == "folder" and keys["curated/"] == "folder"
+    assert keys["raw/events/part-2.csv"] == "file" and keys["top.txt"] == "file"
+    assert sum(kind == "file" for kind in keys.values()) == 31  # the raw/ marker is a folder, not a file
+    raw = nav.below("s3://lake/raw/")
+    assert sorted(e.key for e in raw.entries) == [
+        "raw/events/", "raw/events/part-10.csv", "raw/events/part-2.csv", "raw/readme.md"]
+    assert nav.below("") is nav.folder("")  # on the list of buckets, it's the buckets
+
+    nav = S3Navigator(core, page_size=10, deep_limit=12)
+    nav.open("s3://lake/many/")
+    seen = []
+    many = nav.below(progress=seen.append)
+    assert len(many.entries) == 12 and many.more and many.requests == 2 and seen == [10, 12]
+    nav.more(below=True)
+    nav.more(below=True)
+    assert len(many.entries) == 25 and not many.more and many.requests == 5
+    aws.put_object(Bucket=LAKE, Key="many/new.txt", Body=b"x")
+    nav.refresh()
+    assert len(nav.below().entries) == 12 and nav.below() is not many  # listed again
+
+    ghost = S3Navigator(core).below("s3://ghost-bucket/")
+    assert ghost.error_code == "NoSuchBucket" and not ghost.entries
 
 
 def test_navigator_records_listing_errors(core, monkeypatch):
@@ -336,17 +405,148 @@ def test_explorer_sort_filter_and_show_more(explorer):
     x._more_btn.click()
     assert len(rows(x)) == 25 and x._more_btn.layout.display == "none"
     x._cols["size"].click()
-    assert rows(x)[0] == "📄  f24.txt" and x._cols["size"].description == "Size ▼" and len(rows(x)) == 10
+    assert rows(x)[0] == "📄  f24.txt" and x._cols["size"].description == "Size ↓" and len(rows(x)) == 10
+    assert "s3x-on" in x._cols["size"]._dom_classes and "s3x-on" not in x._cols["name"]._dom_classes
     x._cols["size"].click()
-    assert rows(x)[0] == "📄  f00.txt" and x._cols["size"].description == "Size ▲"
+    assert rows(x)[0] == "📄  f00.txt" and x._cols["size"].description == "Size ↑"
     x._cols["name"].click()
-    assert x._cols["name"].description == "Name ▲" and x._cols["size"].description == "Size"
+    assert x._cols["name"].description == "Name ↑" and x._cols["size"].description == "Size"
     x._filter.value = "f1"
     assert rows(x) == [f"📄  f1{i}.txt" for i in range(10)] and "10 match “f1”" in x._status.value
     x._filter.value = "nothing-like-this"
     assert rows(x) == [] and "Nothing here matches" in x._foot_note.value
     x.open("s3://lake/raw/")
     assert x._filter.value == "" and len(rows(x)) == 2  # a new folder starts unfiltered
+
+
+def kinds(x):
+    return [b.description for b in x._kind_btns.values()]
+
+
+def chips(x):
+    return [(b.description, "s3x-on" in b._dom_classes) for b in x._types.children]
+
+
+def chip(x, kind):
+    return next(b for b in x._types.children if f" .{kind} " in b.description)
+
+
+def test_explorer_shows_only_folders_or_files(explorer):
+    x = explorer("s3://lake/")
+    assert kinds(x) == ["All 4", "Folders 3", "Files 1"] and x._kind_btns["all"]._dom_classes == ("s3x-seg", "s3x-on")
+    x._kind_btns["folders"].click()
+    assert rows(x) == ["📁  curated", "📁  many", "📁  raw"] and "folders only" in x._status.value
+    row(x, "raw").button.click()  # it stays as you move around, like the sort
+    assert rows(x) == ["📁  events"] and kinds(x) == ["All 2", "Folders 1", "Files 1"]
+    row(x, "events").button.click()
+    assert rows(x) == [] and "No folders here." in x._foot_note.value
+    assert x._fix_btn.description == "Show the 2 files" and x._fix_btn.layout.display is None
+    x._fix_btn.click()
+    assert x._kind_btns["all"]._dom_classes == ("s3x-seg", "s3x-on") and len(rows(x)) == 2
+    x._kind_btns["files"].click()
+    x._filter.value = "part-1"
+    assert rows(x) == ["📊  part-10.csv"] and kinds(x) == ["All 1", "Folders 0", "Files 1"]
+    x.open("s3://lake/raw/readme.md")  # opening a file shows every kind, so the file is in the list
+    assert x._kind_btns["all"]._dom_classes == ("s3x-seg", "s3x-on") and "📄  readme.md" in rows(x)
+
+
+def test_explorer_searches_by_file_type(explorer, aws):
+    for name in ("a.csv", "b.csv.gz", "c.json", "d.parquet", "e.png", "f.pdf", "g.docx", "h.txt", "i.yaml"):
+        aws.put_object(Bucket=LAKE, Key=f"mixed/{name}", Body=b"x" * 3)
+    aws.put_object(Bucket=LAKE, Key="mixed/sub/z.csv", Body=b"z")
+    x = explorer("s3://lake/mixed/")
+    assert chips(x) == [("📊 .csv 2", False)] + [(f"{icon} .{kind} 1", False) for icon, kind in (  # most files first
+        ("📘", "docx"), ("📋", "json"), ("📊", "parquet"), ("📕", "pdf"), ("🖼️", "png"))] + [("+2 more", False)]
+    chip(x, "csv").click()
+    assert x._filter.value == ".csv" and rows(x) == ["📊  a.csv", "📊  b.csv.gz"] and chips(x)[0] == ("📊 .csv 2", True)
+    assert kinds(x) == ["All 2", "Folders 0", "Files 2"] and "2 match “.csv” (6 B)" in x._status.value
+    chip(x, "json").click()  # and .json
+    assert x._filter.value == ".csv .json" and len(rows(x)) == 3
+    chip(x, "csv").click()  # .csv off again
+    assert x._filter.value == ".json" and rows(x) == ["📋  c.json"]
+    x._more_types.click()
+    assert [d for d, _ in chips(x)][-3:] == ["📄 .txt 1", "📋 .yaml 1", "Fewer"]
+    x._more_types.click()
+    assert chips(x)[-1] == ("+2 more", False)
+    x._filter.value = "*.YAML"  # typing a type lights its chip too, even one past "+N more"
+    assert rows(x) == ["📋  i.yaml"] and ("📋 .yaml 1", True) in chips(x)
+    x._kind_btns["folders"].click()
+    assert x._types.layout.display == "none"  # folders have no type
+    x._kind_btns["all"].click()
+    x._clear_btn.click()
+    assert x._filter.value == "" and len(rows(x)) == 10 and x._clear_btn.layout.display == "none"
+
+    x.open("s3://lake/many/")  # one type: no chips, they'd change nothing
+    assert x._types.layout.display == "none" and x._filter.value == ""
+
+
+def test_explorer_includes_subfolders(explorer):
+    x = explorer("s3://lake/")
+    assert "s3x-on" not in x._deep_btn._dom_classes
+    x._deep_btn.click()
+    assert "s3x-on" in x._deep_btn._dom_classes and "Below this folder: " in x._status.value
+    assert "Files below" in text(x) and "File types below" in text(x)
+    x._filter.value = ".csv"
+    assert rows(x) == ["📊  old.csv.gz", "📊  part-2.csv", "📊  part-10.csv"]  # by path: curated/, then raw/events/
+    assert [r.where.value for r in x._pool[:3]] == ["curated", "raw/events", "raw/events"]
+    assert x._pool[0].box._dom_classes == ("s3x-r", "s3x-r2") and x._pool[0].where.layout.display is None
+    row(x, "part-2.csv").button.click()
+    assert x.selected == "s3://lake/raw/events/part-2.csv" and "Preview of part-2.csv" in text(x)
+    x.refresh()  # keeps the search and the subfolders
+    assert x._filter.value == ".csv" and x._deep and len(rows(x)) == 3 and x.selected.endswith("part-2.csv")
+    x._filter.value = "top"
+    assert rows(x) == ["📄  top.txt"] and x._pool[0].where.value == "in this folder"
+    x._filter.value = ""
+    x._cols["size"].click()  # the biggest files anywhere below, before the folders
+    assert rows(x)[:2] == ["📄  readme.md", "📄  f24.txt"] and rows(x)[-1] == "📁  raw"
+    x._cols["name"].click()
+    x._filter.value = ""
+    row(x, "events").button.click()  # opening a folder goes back to one level, with an empty search
+    assert x.location == "s3://lake/raw/events/" and not x._deep and x._pool[0].box._dom_classes == ("s3x-r",)
+    assert "File types here" in text(x)
+
+    x.open("s3://lake/raw/")
+    x._filter.value = ".csv"  # nothing at this level...
+    assert rows(x) == [] and "Nothing here matches “.csv”." in x._foot_note.value
+    assert x._fix_btn.description == "Search the subfolders too"
+    x._fix_btn.click()  # ...but below it
+    assert x._deep and rows(x) == ["📊  part-2.csv", "📊  part-10.csv"]
+    x._deep_btn.click()
+    assert not x._deep and rows(x) == []
+
+
+def test_explorer_includes_subfolders_a_page_at_a_time(explorer):
+    x = explorer("s3://lake/many/")
+    x.nav.page_size, x.nav.deep_limit = 10, 10
+    x._deep_btn.click()
+    assert len(rows(x)) == 10 and "10+ files" in x._status.value and x._load_btn.layout.display is None
+    assert "first 10 files below this folder" in text(x) and "lists the next 10" in text(x)
+    assert x._lookup_btn.layout.display == "none"
+    x._load_btn.click()
+    x._load_btn.click()
+    assert len(rows(x)) == 25 and x._load_btn.layout.display == "none" and x.nav.below().requests == 3
+
+
+def test_explorer_filter_from_code(explorer, core, capsys):
+    x = explorer("s3://lake/")
+    x.filter(".csv", subfolders=True)
+    assert x._deep and x._filter.value == ".csv" and len(rows(x)) == 3 and "Files below" in text(x)
+    x.filter(kind="folders")
+    assert not x._deep and x._filter.value == "" and rows(x) == ["📁  curated", "📁  many", "📁  raw"]
+    x.filter()
+    assert len(rows(x)) == 4
+    x.filter(kind="colour")
+    assert "kind='colour': use 'all', 'folders' or 'files'" in text(x)
+
+    t = S3Explorer("s3://lake/", core=core, mode="text", progress="off")
+    capsys.readouterr()
+    t.filter(".csv", subfolders=True)
+    out = capsys.readouterr().out
+    assert "-- Below this folder --" in out and "raw/events/part-2.csv" in out and "curated/old.csv.gz" in out
+    assert "Showing 3 of" in out and "“.csv”" in out and "top.txt" not in out
+    t.filter(kind="folders")
+    out = capsys.readouterr().out
+    assert "📁 raw/" in out and "top.txt" not in out and "folders only" in out
 
 
 def test_explorer_loads_big_folders_a_page_at_a_time(explorer):

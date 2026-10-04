@@ -11,7 +11,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `S3Explorer` finds files: type part of a name, or a file type such as `.csv`, in the search box over the list
+  (`.csv .json` finds either, `.csv` also finds `.csv.gz` and `.jpg` finds `.jpeg`), or click one of the chips under
+  it, one per file type in the folder with how many files have it. **Folders** and **Files** show only one kind, and
+  stay on as you open other folders. **Include subfolders** lists everything below the folder, 10,000 files at a
+  time, each under the folder it's in, so the search, the chips and the sort cover all of it: every Parquet file in a
+  dataset's partitions, or the biggest files anywhere below. When nothing matches, the note under the list offers the
+  fix (**Search the subfolders too**, **Show the 25 files**). `x.filter(".parquet", subfolders=True)` does the same
+  from code, and in the text view. For your own code, `S3Navigator.below()` lists everything below a folder, and
+  `parse_filter`, `filter_entries(kind=...)` and `count_types` do the matching and counting.
+
 ### Changed
+
+- `S3Explorer` has a new look: drawn icons instead of arrow characters, the back, forward, up and refresh buttons
+  grouped, softer rows, buttons and chips, the buttons above a report stay in view as it scrolls, and a spinner and
+  the outline of a report while one loads. Long bucket names get the room the size column used to take.
+- `S3Explorer`'s filter box is now the search box at the top of the list. `*.csv` there also finds `.csv.gz` files,
+  and words separated by spaces must each be in the name (`churn train`), not the whole phrase.
 
 - `S3View.preview()` (and the S3 explorer) shows a JSON file as a tree coloured like code instead of a wall of text.
   Click a line to fold or unfold an object, array or long string, and hover over a line for the Python that reaches

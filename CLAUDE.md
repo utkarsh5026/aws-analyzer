@@ -226,9 +226,10 @@ and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` l
 ## The S3 explorer (`s3_explorer.py`)
 
 Same five sections: pure helpers (`parse_location`, which also takes S3 console links and object URLs,
-`breadcrumbs`, `sort_entries`, `filter_entries`, `folder_stats`), `S3Navigator` as the logic layer (one
-`list_objects_v2` level per page, back / forward / up history, a folder cache, listing errors in `Folder.error`,
-never prints), and `S3Explorer` as the UI. How the UI works:
+`breadcrumbs`, `sort_entries`, `parse_filter`, `filter_entries`, `count_types`, `folder_stats`), `S3Navigator` as the
+logic layer (one `list_objects_v2` level per page, or everything below a folder with `below()`, back / forward / up
+history, a folder cache, listing errors in `Folder.error`, never prints), and `S3Explorer` as the UI. How the UI
+works:
 
 - It finds `s3.py` with `_s3_module()`: the module `core` came from, else `import s3`, else `__main__` (s3.py pasted
   into a cell). Without it, a note; without ipywidgets, a text listing (`mode="text"` forces that).
@@ -239,7 +240,16 @@ never prints), and `S3Explorer` as the UI. How the UI works:
 - Still no JavaScript: every click is an ipywidgets `Button`, styled by the `<style>` in a hidden `HTML` widget
   (`.s3x` classes, overriding ipywidgets' own hover / focus shadows). A row is a full-width button under its size and
   age labels (`pointer-events:none`), so the whole row is the click target. Rows are pooled and reused.
-- Widgets can't scroll, so `_renew()` puts the list or the report in a new box, which starts at the top.
+- Icons are drawn by the CSS: each `_ICON_PATHS` line drawing becomes a `.s3x-i-<name>` mask in the text's colour, and
+  the button keeps its glyph (← ✎ ⚙) as its text, hidden by the style.
+- Widgets can't scroll, so `_renew()` puts the list or the report in a new box, which starts at the top. The search
+  box and its buttons (`_finder`) sit above that box and stay put.
+- Searching: `_draw_filters` draws the search box (`_query`), All / Folders / Files (`_kind`, which stays as you move,
+  like the sort) and a chip per file type (`count_types`); `_shown_entries` matches with `filter_entries` /
+  `parse_filter`. A chip writes `.csv` into the search box (`_toggle_type`), so the box is the one record of a filter.
+  "Include subfolders" (`_deep`) swaps the list's source (`_source()`) for `S3Navigator.below()`, a listing without
+  the `/` delimiter, `deep_limit` files at a time, with the folders between derived from the keys; its rows show their
+  folder under the name. Opening another folder clears the search and the subfolders; ↻ keeps them.
 - A click within `_CLICK_GRACE` seconds after the rows changed is dropped: it was aimed at the old rows (a double
   click on a folder would otherwise open whatever took its place).
 - The path box navigates on Enter only: it listens for the `submit` message the text box sends (`on_submit` is

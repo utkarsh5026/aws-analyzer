@@ -46,9 +46,11 @@ import shots  # noqa: E402  (the scene, the image size and set_height)
 
 @dataclass
 class Step:
-    click: str  # the button: "row:<name>" (a file, folder or bucket), "crumb:<name>", "act:<label>" or "nav:<arrow>"
+    click: str  # the button: "row:<name>" (a file, folder or bucket), "crumb:<name>", "act:<label>", "nav:<arrow>"
+    # or "chip:<label>" (a file type's chip, or Include subfolders)
     ready: str  # text the right-hand pane shows once the click has done its work
     hold: float = 0.8  # in a tour, seconds the result stays on screen before the pointer moves on
+    where: str = ""  # a selector to find `ready` in instead, for a click that only redraws the list (".s3x-status")
 
 
 @dataclass
@@ -68,6 +70,8 @@ FIGURES = [
     Figure("explorer-docx", 'x = S3Explorer("s3://acme-ml-data/docs/model-card-churn-xgb.docx", core=core, height=500)',
            "Training data"),
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
+    Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'
+           'x.filter(".tar", subfolders=True)', "Files below"),
     Figure("explorer-tour", START, "Your buckets", tour=True, steps=(
         Step("row:acme-ml-data", "Click a folder to open it", 1.2),
         Step("row:curated", "Click a folder to open it", 0.5),
@@ -76,7 +80,11 @@ FIGURES = [
         Step("row:train.parquet", "First 20 rows", 3.0),
         Step("crumb:acme-ml-data", "Click a folder to open it", 0.6),
         Step("row:docs", "Click a folder to open it", 0.6),
-        Step("row:model-card-churn-xgb.docx", "Training data", 3.2),
+        Step("row:model-card-churn-xgb.docx", "Training data", 2.6),
+        Step("crumb:acme-ml-data", "Click a folder to open it", 0.6),
+        Step("row:training", "Click a folder to open it", 0.6),
+        Step("chip:Include subfolders", "Files below", 1.0),
+        Step("chip:.tar 13", "13 match", 3.4, where=".s3x-status"),
     )),
 ]
 SEED = f"""import os, sys
@@ -97,7 +105,8 @@ FONTS = """<?xml version="1.0"?>
   <alias binding="strong"><family>sans</family><prefer><family>Liberation Sans</family></prefer></alias>
 </fontconfig>
 """
-BUTTONS = {"row": "button.s3x-row", "crumb": "button.s3x-crumb", "act": "button.s3x-act", "nav": "button.s3x-nav"}
+BUTTONS = {"row": "button.s3x-row", "crumb": "button.s3x-crumb", "act": "button.s3x-act", "nav": "button.s3x-nav",
+           "chip": "button.s3x-chip"}
 # The tour's pointer and the ring a click leaves; the browser draws no pointer in screenshots.
 POINTER = """() => {
   const pointer = document.createElement('div');
@@ -178,7 +187,11 @@ def click(page, step: Step, at: tuple[float, float] | None = None) -> None:
         page.mouse.click(*at)
     else:
         button(page, step.click).click()
-    wait_ready(page, step.ready)
+    if step.where:
+        page.wait_for_function("([where, text]) => [...document.querySelectorAll(where)]"
+                               ".some(el => el.textContent.includes(text))", arg=[step.where, step.ready], timeout=60_000)
+    else:
+        wait_ready(page, step.ready)
     time.sleep(0.6)  # pictures and fonts in the new report
 
 
