@@ -13,10 +13,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- `chat()` window: the Settings side is less crowded. Its boxes, labels, descriptions and request paths use smaller
-  type, the setting cards and the Add a setting panel are more compact, and the tab bar is slimmer, so more settings
-  fit before you need to scroll. The Request JSON and Last response tabs use the same smaller type. Everything
-  works as before.
+- `chat()` window: the Settings tab shows what's sent and little else. Each setting is one line: its name, its value
+  (beside the name for numbers, lists and the slider), and what the value means; hover the name for what it does,
+  what it takes and where it goes in the request, which used to be printed under every value. **Add a setting** is
+  folded behind a **+ Add a setting** button, with the same one-click chips, search and Browse all inside, and ✕
+  folds it away again. **Open this setup again** is folded at the bottom. The side uses smaller type throughout, and
+  the Request JSON and Last response tabs do too.
 
 ## [0.4.0] - 2026-10-04
 
