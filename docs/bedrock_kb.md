@@ -200,11 +200,13 @@ ui.ask("How long do refunds take?", engine="converse")     # exact tokens and co
 ui.chunk(1)                                                # source [1] in full
 ```
 
-![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-light.webp#only-light){ width="984" height="405" loading=lazy }
-![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-dark.webp#only-dark){ width="984" height="405" loading=lazy }
+![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-light.webp#only-light){ width="984" height="403" loading=lazy }
+![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-dark.webp#only-dark){ width="984" height="403" loading=lazy }
 /// caption
 `ui.ask("How long do refunds take?")`: cited spans are shaded and link to their source. The last sentence cites nothing, so the answer is 77% grounded. Tokens are an estimate here, because RetrieveAndGenerate doesn't report them.
 ///
+
+An answer the model wrote in markdown is laid out as such: lists, **bold**, tables and code blocks, with the cited spans still shaded inside them. Nothing in it runs as HTML, and its links open only web pages and email addresses. In a terminal, the markdown is printed as written, with code and tables left unwrapped.
 
 ### Two ways to generate
 
@@ -220,8 +222,8 @@ ui.chunk(1)                                                # source [1] in full
 
 </div>
 
-![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-light.webp#only-light){ width="984" height="419" loading=lazy }
-![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-dark.webp#only-dark){ width="984" height="419" loading=lazy }
+![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-light.webp#only-light){ width="984" height="417" loading=lazy }
+![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-dark.webp#only-dark){ width="984" height="417" loading=lazy }
 /// caption
 `ui.ask("How long do refunds take?", engine="converse", model="sonnet")`: exact token counts, and the Cited column shows which of the passages the model used.
 ///
