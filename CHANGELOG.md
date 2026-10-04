@@ -20,6 +20,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   holds JSON (an SNS message, SageMaker hyperparameters) shows as the JSON inside it. Cards give the number of keys or
   items and how deep the file nests. A `.json` file bigger than the 512 KB preview window now shows its start as a
   tree (or a table of its first records) instead of raw text.
+  ([#24](https://github.com/utkarsh5026/aws-analyzer/pull/24))
 
 ## [0.3.0] - 2026-10-04
 
