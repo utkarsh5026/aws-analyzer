@@ -7188,6 +7188,8 @@ class _Table:
         int, ...
     ] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
     collapsed: bool = False  # a secondary view: folded under its title in HTML
+    path_cols: tuple[int, ...] = ()  # columns of keys / paths: the file name always shows, a long folder is shortened
+    sortable: bool = True  # in HTML a click on a column's header sorts by it (tree tables never sort)
 
 
 @dataclass
@@ -7272,11 +7274,12 @@ class _Flow:
     title: str = ""
 
 
+_SORT_COLUMNS = 12  # columns a header click can sort by: each needs two CSS rules
 _CSS = """<style>
 .s3a{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .s3a h3{margin:10px 0 2px;font-size:16px}
 .s3a h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
-.s3a h4{margin:14px 0 4px;font-size:13px}
+.s3a h4{margin:14px 0 4px;font-size:13px;font-weight:600}
 .s3a .sub{opacity:.65;font-size:12px;margin-bottom:6px}
 .s3a .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 .s3a .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
@@ -7287,15 +7290,78 @@ _CSS = """<style>
 .s3a .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .s3a .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
 .s3a .tw.scroll{max-height:640px;overflow:auto}
-.s3a table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.s3a table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
+.s3a table.t{border-collapse:collapse;width:auto;font-size:inherit;margin:0;table-layout:auto}
+.s3a table.t tr{padding:0;border:0}
+.s3a table.t tbody tr,.s3a table.t tbody tr:hover{background:transparent}
+.s3a table.t th{text-align:left;font-weight:600;padding:5px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
+.s3a table.t th{background-image:linear-gradient(rgba(127,127,127,.08),rgba(127,127,127,.08))}
+.s3a table.t th.n{text-align:right}
 .s3a .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.s3a .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
+.s3a .tw.scroll table.t th{background-color:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
 .s3a table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
 .s3a table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
 .s3a table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
 .s3a table.t td.s{white-space:nowrap}
 .s3a table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.s3a table.t td.p{white-space:normal}
+.s3a td.p .pl{display:block;white-space:nowrap}
+.s3a td.p .pd{display:inline-block;max-width:30em;overflow:hidden;text-overflow:ellipsis;direction:rtl;vertical-align:top;opacity:.6}
+.s3a td.p .pd::before,.s3a td.p .pd::after{content:"\\200E"}
+.s3a td.p .pn{white-space:normal;overflow-wrap:anywhere}
+.s3a td.p .pi{margin-right:5px}
+.s3a form.tbl{margin:0;counter-reset:rows}
+.s3a form.tbl tbody tr{counter-increment:rows}
+.s3a .tt{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:14px}
+.s3a form.tbl h4,.s3a .tt h4{margin:14px 0 4px}
+.s3a .tb{display:none;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:12px;margin:2px 0 4px}
+.s3a .tb .tl{opacity:.6}
+.s3a .flt{display:inline-flex;align-items:center;gap:5px;opacity:.9}
+.s3a .flt select{font:inherit;font-size:12px;color:inherit;background:transparent;cursor:pointer}
+.s3a .flt select{border:1px solid rgba(127,127,127,.45);border-radius:12px;padding:1px 6px}
+.s3a .flt option{background:var(--jp-layout-color1,var(--vscode-editor-background,Canvas))}
+.s3a .flt option{color:var(--jp-ui-font-color1,var(--vscode-editor-foreground,CanvasText))}
+.s3a .cols{position:relative}
+.s3a .cols>summary{list-style:none;cursor:pointer;border:1px solid rgba(127,127,127,.45);border-radius:12px;padding:0 8px}
+.s3a .cols>summary{opacity:.55;transition:opacity .15s}
+.s3a .tbl:hover .cols>summary,.s3a .cols[open]>summary,.s3a .cols:has(input:not(:checked))>summary{opacity:1}
+.s3a .cols>summary::-webkit-details-marker{display:none}
+.s3a .cols>summary::after{content:" \\25BE";opacity:.7}
+.s3a .cols>.menu{position:absolute;z-index:10;top:calc(100% + 4px);left:0;min-width:170px;max-height:320px;overflow:auto}
+.s3a .cols>.menu{display:flex;flex-direction:column;gap:2px;padding:6px 10px 8px;border:1px solid rgba(127,127,127,.35)}
+.s3a .cols>.menu{border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.2)}
+.s3a .cols>.menu{background:var(--jp-layout-color1,var(--vscode-editor-background,Canvas))}
+.s3a .cols label{display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;padding:1px 0}
+.s3a .cols input{margin:0}
+.s3a .cols button{align-self:flex-start;margin-top:4px}
+.s3a .tbl button[type=reset]{font:inherit;font-size:12px;color:#3b82f6;background:none;border:0;padding:0;cursor:pointer}
+.s3a .tbl button[type=reset]:hover{text-decoration:underline}
+.s3a .tf{display:none;align-items:center;gap:8px;font-size:12px;margin:-4px 0 8px}
+.s3a .tf .cnt{font-weight:600}
+.s3a .tf .cnt::before{content:counter(rows)}
+@supports selector(:has(*)){
+.s3a .tb{display:flex}
+.s3a .flt select:has(option:checked:not(.all)),.s3a .cols:has(input:not(:checked))>summary{border-color:#3b82f6}
+.s3a .flt select:has(option:checked:not(.all)),.s3a .cols:has(input:not(:checked))>summary{background:rgba(59,130,246,.12)}
+.s3a form.tbl:has(select option:checked:not(.all)) .tf{display:flex}
+}
+@supports (grid-template-columns:subgrid) and selector(:has(*)){
+.s3a form.tbl table.t{display:grid;grid-template-columns:var(--gc);width:fit-content;max-width:100%}
+.s3a form.tbl table.t>thead,.s3a form.tbl table.t>tbody{display:contents}
+.s3a form.tbl table.t tr{display:grid;grid-column:1/-1;grid-template-columns:subgrid}
+.s3a form.tbl table.t thead tr{order:-1}
+.s3a form.tbl .tw.scroll table.t thead tr{position:sticky;top:0;z-index:2}
+.s3a th.srt label{display:none;position:relative;cursor:pointer;user-select:none;-webkit-user-select:none}
+.s3a th.srt label.o1{display:inline-flex}
+.s3a th.srt:has(.o1 input:checked) label.o1,.s3a th.srt:has(.o2 input:checked) label.o1{display:none}
+.s3a th.srt:has(.o1 input:checked) label.o2,.s3a th.srt:has(.o2 input:checked) label.o3{display:inline-flex}
+.s3a th.srt label::after{content:"\\2195";position:absolute;left:100%;margin-left:2px;font-size:11px;font-weight:400;opacity:.28}
+.s3a th.srt.n label::after{left:auto;right:100%;margin:0 2px 0 0}
+.s3a th.srt:hover label::after{opacity:.6}
+.s3a th.srt:hover{color:#3b82f6}
+.s3a th.srt:has(.ra:checked),.s3a th.srt:has(.rd:checked){color:#3b82f6}
+.s3a th.srt:has(.ra:checked) label::after{content:"\\2191";opacity:1}
+.s3a th.srt:has(.rd:checked) label::after{content:"\\2193";opacity:1}
+{sort_rules}}
 .s3a table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .s3a table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
 .s3a .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
@@ -7311,7 +7377,23 @@ _CSS = """<style>
 .s3a .note.warn::before{content:"\\26A0\\FE0E"}
 .s3a .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
 .s3a .note.ok::before{content:"\\2713"}
-.s3a .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
+.s3a .ld{font-weight:600}
+.s3a .fd{margin:6px 0 10px}
+.s3a .fh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;margin:10px 0 4px}
+.s3a .fh .fl{font-weight:600;opacity:.75;margin-right:2px}
+.s3a .chip{display:inline-block;padding:0 8px;border-radius:9px;font-size:11px;font-weight:600;line-height:18px}
+.s3a .chip.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.5)}
+.s3a .chip.info{background:rgba(59,130,246,.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,.4)}
+.s3a .fi{display:grid;grid-template-columns:16px minmax(0,1fr);column-gap:7px;padding:6px 12px 6px 9px;margin:4px 0}
+.s3a .fi{border-left:3px solid #3b82f6;background:rgba(59,130,246,.06);border-radius:0 5px 5px 0}
+.s3a .fi.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
+.s3a .fi::before{content:"\\2139\\FE0E";grid-row:span 2;opacity:.7}
+.s3a .fi.warn::before{content:"\\26A0\\FE0E"}
+.s3a .fi .hd{font-weight:600}
+.s3a .fi .dt{grid-column:2;margin:2px 0 0;opacity:.9}
+.s3a .fi ul.dt{padding-left:16px}
+.s3a .fi ul.dt li{margin:1px 0}
+.s3a .m{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .s3a code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
 .s3a code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
 .s3a .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
@@ -7342,7 +7424,11 @@ _CSS = """<style>
 .s3a .flow figure{margin:10px 0}
 .s3a .flow img{display:block;height:auto;max-height:none}
 .s3a .flow .pm{margin:8px 0;padding:5px 10px;border:1px dashed rgba(127,127,127,.5);border-radius:4px;font-size:12px;opacity:.75}
-</style>"""
+</style>""".replace("{sort_rules}", "".join(
+    f".s3a form.tbl:has(.k{j} .ra:checked) tbody tr{{order:var(--a{j})}}\n"
+    f".s3a form.tbl:has(.k{j} .rd:checked) tbody tr{{order:var(--d{j})}}\n"
+    for j in range(_SORT_COLUMNS)
+))
 
 _BADGE = "S3"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
@@ -7365,12 +7451,16 @@ def _esc(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
 
-def _prose(value: Any) -> str:
-    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
-    The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
+def _prose(value: Any, money: bool = False) -> str:
+    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects
+    (and, with money=True, amounts like $12.40/month stressed). The text is split on the calls and every
+    piece escaped before it's wrapped, so nothing in it becomes markup."""
     pieces = _CALL_RE.split("" if value is None else str(value))
     return "".join(
-        f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece)
+        f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2
+        else "".join(f'<span class="m">{_esc(part)}</span>' if k % 2 else _esc(part)
+                     for k, part in enumerate(_MONEY_RE.split(piece))) if money
+        else _esc(piece)
         for i, piece in enumerate(pieces)
     )
 
@@ -7452,6 +7542,300 @@ def _hidden(count: int, table: _Table, default_max: int) -> str:
     )
 
 
+_SORT_UNITS = {"B": 1, "KB": KB, "MB": MB, "GB": GB, "TB": TB, "PB": TB * 1024}
+_SORT_NUMBER_RE = re.compile(r"^(-?)(<?)\$?([\d,]*\.?\d+)\+?(?: ?(B|KB|MB|GB|TB|PB|%))?(?: of [\d,]+)?$")
+_SORT_AGE_RE = re.compile(r"^(\d+)(y|mo|d|h|m) ago$")
+_SORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?(?: UTC)?$")
+_AGE_SECONDS = {"y": 365 * 86400, "mo": 30 * 86400, "d": 86400, "h": 3600, "m": 60}
+_SORT_WORDS = {  # a column's kind -> what its first and second header click show
+    "number": ("largest first", "smallest first"),
+    "age": ("oldest first", "newest first"),
+    "date": ("newest first", "oldest first"),
+    "text": ("A to Z", "Z to A"),
+}
+_FILTER_VALUES = 12  # a column gets a filter when it holds 2 to this many different values, some repeated
+_FILTER_COLUMNS = 3  # filters per table at most, the leftmost columns first
+# Hides the table controls until the stylesheet shows them, so a notebook opened without its styles (JupyterLab
+# strips <style> from an untrusted notebook) shows a plain table. Its sanitizer drops a bare `hidden`, not this.
+_HIDE = ' hidden="hidden"'
+
+
+def _sort_key(text: str) -> tuple[int, Any] | None:
+    """What a table cell sorts by: (0, number) for sizes, money, counts, percentages and ages ('2.1 GB' is
+    bytes, '<$0.01' half a cent, '3d ago' seconds), (1, text) for dates, (2, parts) for the rest in natural
+    order ('epoch-2' before 'epoch-10'). None for an empty cell, which sorts last both ways."""
+    text = text.split("\n", 1)[0].strip().removeprefix("📁 ")
+    if text in ("", "-", "—"):
+        return None
+    number = _SORT_NUMBER_RE.match(text)
+    if number:
+        sign, below, digits, unit = number.groups()
+        value = float(digits.replace(",", "")) * _SORT_UNITS.get(unit or "", 1) / (2 if below else 1)
+        return 0, -value if sign else value
+    age = _SORT_AGE_RE.match(text)
+    if age or text == "just now":
+        return 0, float(int(age.group(1)) * _AGE_SECONDS[age.group(2)]) if age else 0.0
+    if _SORT_DATE_RE.match(text):
+        return 1, text
+    parts = re.split(r"(\d+)", text.casefold())
+    return 2, tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in parts if part)
+
+
+def _sort_kind(values: list[str], keys: list[tuple[int, Any]]) -> str:
+    """'number', 'age', 'date' or 'text': what most of a column's cells hold, which decides its first sort."""
+    cls = Counter(key[0] for key in keys).most_common(1)[0][0]
+    if cls:
+        return "date" if cls == 1 else "text"
+    ages = sum(bool(_SORT_AGE_RE.match(v.strip())) or v.strip() == "just now" for v in values)
+    return "age" if ages * 2 > len(keys) else "number"
+
+
+def _ranks(keys: list[Any]) -> tuple[list[int], list[int]]:
+    """Each row's place when the column is sorted up and when it's sorted down. Rows that tie share a place,
+    so they keep their order; empty cells come last both ways."""
+    present = sorted(key for key in keys if key is not None)
+    first: dict[Any, int] = {}
+    for i, key in enumerate(present):
+        first.setdefault(key, i)
+    counts, last = Counter(present), len(keys)
+    up = [last if key is None else first[key] for key in keys]
+    down = [last if key is None else len(present) - first[key] - counts[key] for key in keys]
+    return up, down
+
+
+def _path_html(text: str) -> str:
+    """A key in a table cell: its folder dimmed and, when long, shortened from the left (the nearest folders
+    stay), then the file name in full. Each line of the cell is one key; a leading 📁 stays an icon."""
+    lines = []
+    for line in text.split("\n"):
+        icon, line = ("📁", line[2:]) if line.startswith("📁 ") else ("", line)
+        folder, _, name = line.rstrip("/").rpartition("/")
+        name += line[len(line.rstrip("/")):]
+        folder = f"{folder}/" if folder and not line.startswith(("…", "(")) else ""  # not '… and 3 more'
+        if not folder:
+            name = line
+        room = 86 - len(name)  # a long name leaves less room for its folder (30em, about 56 characters)
+        cap = f' style="max-width:{max(room, 12)}ch"' if room < 56 else ""
+        lines.append('<span class="pl">' + (f'<span class="pi">{icon}</span>' if icon else "")
+                     + (f'<span class="pd"{cap}>{_esc(folder)}</span>' if folder else "")
+                     + f'<span class="pn">{_esc(name)}</span></span>')
+    return "".join(lines)
+
+
+def _clip_path(text: str, width: int = 90) -> str:
+    """A key for a text table: when it's too long the start of its folder goes, never the file name."""
+    if len(text) <= width:
+        return text
+    tail = text[-(width - 1):]
+    cut = tail.find("/")
+    return "…" + (tail[cut:] if 0 <= cut < len(tail) - 1 else tail)
+
+
+_LEAD_END_RE = re.compile(r"[:;](?=\s)|\.(?=\s+[A-Z0-9\"'(<$])")
+_MONEY_RE = re.compile(r"(-?<?\$[\d,]+(?:\.\d+)?(?:/month|/mo\b| a month| per month)?)")
+
+
+def _split_lead(text: str, shortest: int = 8, longest: int = 160) -> tuple[str, str, str]:
+    """'Versioning is on: every deleted file is kept.' -> ('Versioning is on', ':', 'every deleted file is
+    kept.'): what a sentence says first, the mark after it and the rest (why it matters, what to do).
+    ('', '', text) when it has no lead that short. Commands in it are never split."""
+    masked = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text)
+    for match in _LEAD_END_RE.finditer(masked):
+        if match.start() < shortest:
+            continue
+        rest = text[match.end():].strip()
+        if match.start() > longest or not rest:
+            break
+        return text[: match.start()], text[match.start()], rest
+    return "", "", text
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """Split this tool's prose into sentences, never inside a command."""
+    masked = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text)
+    cuts = [m.end() for m in re.finditer(r"\.(?=\s+[A-Z0-9\"'(<$])", masked)]
+    return [text[a:b].strip() for a, b in zip([0] + cuts, cuts + [len(text)]) if text[a:b].strip()]
+
+
+def _capitalized(text: str) -> str:
+    """'every file is kept' -> 'Every file is kept', but 'invoices/a.pdf' or 'uploads(...)' stay as they are."""
+    first = text.split(" ", 1)[0]
+    return text[0].upper() + text[1:] if re.fullmatch(r"[a-z][a-z']*,?", first) else text
+
+
+def _lead(value: Any) -> str:
+    """_prose with the sentence's lead in bold and amounts of money stressed:
+    '<span class="ld">Versioning is on:</span> every deleted file is kept.' For notes and Warnings cells."""
+    text = "" if value is None else str(value)
+    head, mark, rest = _split_lead(text)
+    if not head:
+        return _prose(text, money=True)
+    return f'<span class="ld">{_prose(head + mark, money=True)}</span> {_prose(rest, money=True)}'
+
+
+def _finding_html(level: str, message: str) -> str:
+    """One finding as a headline (what's wrong) over its detail (why it matters, what it costs, what to do),
+    the detail's sentences as points when there are several."""
+    head, _, rest = _split_lead(message)
+    if not head:
+        head, rest = (message, "") if len(message) <= 200 else ("", message)
+    head = head.rstrip().removesuffix(".") if not head.endswith("..") else head
+    parts = _prose_sentences(_capitalized(rest)) if rest else []
+    if len(parts) > 1:
+        detail = '<ul class="dt">' + "".join(f"<li>{_prose(p, money=True)}</li>" for p in parts) + "</ul>"
+    else:
+        detail = f'<div class="dt">{_prose(parts[0], money=True)}</div>' if parts else ""
+    headline = f'<div class="hd">{_prose(head, money=True)}</div>' if head else ""
+    return f'<div class="fi {"warn" if level == "warn" else "info"}">{headline}{detail}</div>'
+
+
+def _findings_html(block: _Findings) -> str:
+    items = _ordered(block.items)
+    if not items:
+        return f'<div class="note ok">{_lead(block.empty)}</div>' if block.empty else ""
+    warns = sum(level == "warn" for level, _ in items)
+    chips = (f'<span class="chip warn">{_plural(warns, "warning")}</span>' if warns else "") + (
+        f'<span class="chip info">{_plural(len(items) - warns, "note")}</span>' if len(items) > warns else "")
+    head = f'<div class="fh"><span class="fl">Findings</span>{chips}</div>'
+    return f'<div class="fd">{head}{"".join(_finding_html(level, msg) for level, msg in items)}</div>'
+
+
+def _filters(block: _Table, columns: list[list[str]], numeric: list[bool]) -> list[tuple[int, list[tuple[str, int]]]]:
+    """The columns that get a filter: a few different values, some repeated (a storage class, a status, a
+    region), never numbers, dates, keys or sentences -> [(column, [(value, rows), ...] most rows first)]."""
+    found: list[tuple[int, list[tuple[str, int]]]] = []
+    for j, column in enumerate(columns):
+        skip = set(block.prose_cols) | set(block.code_cols) | set(block.path_cols) | ({0} if block.tree else set())
+        if len(found) == _FILTER_COLUMNS or len(column) < 6:
+            break
+        values = [value.strip() for value in column if value.strip()]
+        if j in skip or numeric[j] or any("\n" in value or ", " in value for value in values):
+            continue
+        counts = Counter(values)
+        keys = [key for key in map(_sort_key, counts) if key is not None]
+        if 2 <= len(counts) <= _FILTER_VALUES and len(counts) < len(values) and all(key[0] == 2 for key in keys):
+            found.append((j, counts.most_common()))
+    return found
+
+
+def _table_html(block: _Table, max_rows: int, rules: set[str]) -> str:
+    """A _Table as HTML. Over 30 rows it scrolls under a sticky header. With 3 rows or more, a click on a
+    header sorts by that column (largest, newest or A to Z first; again for the other way; a third click
+    for the original order); a column of a few repeated values gets a filter; with 3 columns or more, a
+    Columns menu ticks columns off. All plain HTML and CSS: radio buttons, selects and checkboxes in a form,
+    read by :has() rules (the per-table ones go into `rules`), so they keep working in a reopened notebook,
+    where scripts don't run. Without the stylesheet the controls stay hidden and the table is plain."""
+    if not block.rows:
+        return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + '<div class="more">(none)</div>'
+    rows, hidden = _visible_rows(block, max_rows)
+    width = len(block.headers)
+    columns = [["" if j >= len(row) or row[j] is None else str(row[j]) for row in rows] for j in range(width)]
+    numeric = [
+        sum(bool(_NUMERIC_RE.match(v)) for v in column if v) * 2 > sum(bool(v) for v in column) > 0
+        for column in columns
+    ]
+    sorts: dict[int, tuple[list[int], list[int], str]] = {}
+    if block.sortable and not block.tree and 0 not in block.code_cols and len(rows) >= 3:  # help() keeps its order
+        for j in range(min(width + (block.bars is not None), _SORT_COLUMNS)):
+            if j in block.prose_cols:
+                continue
+            values = columns[j] if j < width else []
+            keys = [_sort_key(v) for v in values] if j < width else [(0, float(b)) for b in block.bars[: len(rows)]]
+            present = [key for key in keys if key is not None]
+            if len(set(present)) > 1:
+                sorts[j] = (*_ranks(keys), _sort_kind(values, present))
+    filters = _filters(block, columns, numeric)
+    heads = list(block.headers) + ([block.bar_label] if block.bars is not None else [])
+    cells_th = []
+    for j, header in enumerate(heads):
+        css = ["n"] if j < width and numeric[j] else []
+        inner = _esc(header)
+        if j in sorts:
+            first, second = _SORT_WORDS[sorts[j][2]]
+            radios = ("ra", "rd") if sorts[j][2] == "text" else ("rd", "ra")
+            inner = "".join(
+                f'<label class="o{n}" title="{tip}"{_HIDE if n > 1 else ""}>'
+                f'<input type="radio" name="s" class="{radio}"{_HIDE}>{_esc(header)}</label>'
+                for n, radio, tip in ((1, radios[0], f"Sort: {first}"), (2, radios[1], f"Sort: {second}"),
+                                      (3, "rn", "Back to the original order"))
+            )
+            css = ["srt", f"k{j}", *css]
+        cells_th.append(f'<th class="{" ".join(css)}">{inner}</th>' if css else f"<th>{inner}</th>")
+    position = {j: {value: i for i, (value, _) in enumerate(values)} for j, values in filters}
+    body = []
+    for i, row in enumerate(rows):
+        cells = []
+        for j, cell in enumerate(row):
+            text = "" if cell is None else str(cell)
+            inner, attrs = _esc(text), ""
+            if isinstance(cell, _Tone) and cell.tone in _TONES and text:
+                inner = f'<span class="pill {cell.tone}">{inner}</span>'
+            if block.tree and j == 0:
+                css = "tree"
+            elif j in block.code_cols and text:
+                css, inner = "c", f"<code{_SELECT}>{inner}</code>"
+            elif j in block.prose_cols:
+                css, inner = "", _lead(text)
+            elif j in block.path_cols and text:
+                css, inner = "p", _path_html(text)
+                attrs = f' title="{_esc(text)}"' if "/" in text.rstrip("/") else ""
+            elif _NUMERIC_RE.match(text):
+                css = "n"
+            else:
+                css = "s" if len(text) <= 16 and "\n" not in text else ""
+            cells.append(f'<td class="{css}"{attrs}>{inner}</td>' if css else f"<td>{inner}</td>")
+        if block.bars is not None:
+            pct = max(0.0, min(1.0, block.bars[i])) * 100
+            cells.append(
+                f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
+                f"</span></span>{pct:.1f}%</td>"
+            )
+        marks = [f"f{j}v{position[j][columns[j][i].strip()]}" for j, _ in filters if columns[j][i].strip()]
+        order = ";".join(f"--a{j}:{up[i]};--d{j}:{down[i]}" for j, (up, down, _) in sorts.items())
+        body.append("<tr" + (f' class="{" ".join(marks)}"' if marks else "")
+                    + (f' style="{order}"' if order else "") + f">{''.join(cells)}</tr>")
+    choose = len(heads) >= 3  # a column chooser: tick off the columns you don't need
+    interactive = bool(sorts or filters or choose)
+    grid = f' style="--gc:repeat({len(heads)},auto)"' if interactive else ""
+    table = (
+        f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"{grid}><thead><tr>{"".join(cells_th)}'
+        f"</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+    )
+    tools = foot = more = ""
+    if choose:
+        rules.update(f".s3a form.tbl:has(.cv{j}:not(:checked)) tr>:nth-child({j + 1}){{display:none}}"
+                     for j in range(len(heads)))
+        tools = ('<details class="cols"><summary title="Choose the columns to show">Columns</summary><div class="menu">'
+                 + "".join(f'<label><input type="checkbox" class="cv{j}" checked>{_esc(header)}</label>'
+                           for j, header in enumerate(heads))
+                 + '<button type="reset" title="Every column, the original order and no filters">Reset table'
+                 "</button></div></details>")
+    if filters:
+        for j, values in filters:
+            rules.update(f".s3a form.tbl:has(.f{j} .v{i}:checked) tbody tr:not(.f{j}v{i}){{display:none}}"
+                         for i in range(len(values)))
+        tools += '<span class="tl">Filter</span>' + "".join(
+            f'<label class="flt">{_esc(heads[j])}<select class="f{j}"><option class="all" selected>All</option>'
+            + "".join(f'<option class="v{i}">{_esc(value)} ({count:,})</option>'
+                      for i, (value, count) in enumerate(values))
+            + "</select></label>"
+            for j, values in filters
+        )
+        foot = (f'<div class="tf"{_HIDE}><span><span class="cnt"></span> of {len(rows):,} rows match</span>'
+                '<button type="reset">Clear filters</button></div>')
+    tools = f'<div class="tb"{_HIDE}>{tools}</div>' if tools else ""
+    if hidden:
+        also = f"; sorting and filters use the {len(rows):,} shown" if sorts or filters else ""
+        more = f'<div class="more">{_esc(_hidden(hidden, block, max_rows) + also)}</div>'
+    if block.collapsed:
+        out = (f'<details class="sec"><summary>{_prose(block.title or "Details")} ({len(block.rows):,})</summary>'
+               f"{tools}{table}{foot}{more}</details>")
+    else:
+        title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+        out = (f'<div class="tt">{title}{tools}</div>' if title and tools else title + tools) + table + foot + more
+    return f'<form class="tbl" method="dialog" autocomplete="off">{out}</form>' if interactive else out
+
+
 def _data_img(data: bytes, mime: str, alt: str = "") -> str:
     """An <img> that holds the picture itself (a data: URL), so it stays in the saved notebook."""
     return f'<img src="data:{_esc(mime)};base64,{base64.b64encode(data).decode()}" alt="{_esc(alt)}">'
@@ -7506,7 +7890,7 @@ def _flow_text(items: list[tuple[str, Any]]) -> str:
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    out = [_CSS, '<div class="s3a">']
+    out, rules = [_CSS, '<div class="s3a">'], set()
     for block in blocks:
         if isinstance(block, _Title):
             out.append(
@@ -7522,18 +7906,9 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             )
             out.append(f'<div class="cards">{cards}</div>')
         elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
+            out.append(f'<div class="note {block.level}">{_lead(block.text)}</div>')
         elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                notes = "".join(
-                    f'<div class="note {level}">{_prose(message)}</div>'
-                    for level, message in items
-                )
-                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
-                out.append(f'<div class="fd">{head}{notes}</div>')
-            elif block.empty:
-                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
+            out.append(_findings_html(block))
         elif isinstance(block, _Next):
             if block.items:
                 calls = "".join(
@@ -7546,63 +7921,7 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                     f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
                 )
         elif isinstance(block, _Table):
-            if not block.rows:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append('<div class="more">(none)</div>')
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
-            head += (
-                f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
-            )
-            body = []
-            for i, row in enumerate(rows):
-                cells = []
-                for j, cell in enumerate(row):
-                    text = "" if cell is None else str(cell)
-                    inner = _esc(text)
-                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
-                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
-                    if block.tree and j == 0:
-                        css = "tree"
-                    elif j in block.code_cols and text:
-                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
-                    elif j in block.prose_cols:
-                        css, inner = "", _prose(text)
-                    elif _NUMERIC_RE.match(text):
-                        css = "n"
-                    else:
-                        css = "s" if len(text) <= 16 and "\n" not in text else ""
-                    cells.append(
-                        f'<td class="{css}">{inner}</td>'
-                        if css
-                        else f"<td>{inner}</td>"
-                    )
-                if block.bars is not None:
-                    pct = max(0.0, min(1.0, block.bars[i])) * 100
-                    cells.append(
-                        f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                        f"</span></span>{pct:.1f}%</td>"
-                    )
-                body.append(f"<tr>{''.join(cells)}</tr>")
-            table = (
-                f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
-                f"</thead><tbody>{''.join(body)}</tbody></table></div>"
-            )
-            if hidden:
-                table += (
-                    f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
-                )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")} '
-                    f"({len(block.rows):,})</summary>{table}</details>"
-                )
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(table)
+            out.append(_table_html(block, max_rows, rules))
         elif isinstance(block, _Text):
             css = " ".join(
                 filter(
@@ -7667,6 +7986,8 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 f'<{block.kind} controls preload="metadata"{size}><source src="{_esc(block.url)}" '
                 f'type="{_esc(block.mime)}"></{block.kind}>'
             )
+    if rules:
+        out.insert(1, "<style>" + "\n".join(sorted(rules)) + "</style>")
     out.append("</div>")
     return "".join(out)
 
@@ -7728,7 +8049,11 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 [block.bar_label] if block.bars is not None else []
             )
             cells = [
-                [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
+                [
+                    ", ".join(map(_clip_path, text.split("\n"))) if j in block.path_cols
+                    else _clip(text.replace("\n", ", "))
+                    for j, text in enumerate("" if c is None else str(c) for c in row)
+                ]
                 + ([_text_bar(block.bars[i])] if block.bars is not None else [])
                 for i, row in enumerate(rows)
             ]
@@ -7958,6 +8283,7 @@ def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Ta
             for o in objects
         ],
         title=title,
+        path_cols=(0,),
     )
 
 
@@ -8159,7 +8485,8 @@ def _listing_table(rows: list[dict[str, Any]], title: str) -> _Table:
 
     headers = list(rows[0])
     return _Table(
-        headers, [[cell(k, row.get(k)) for k in headers] for row in rows], title=title
+        headers, [[cell(k, row.get(k)) for k in headers] for row in rows], title=title,
+        path_cols=tuple(j for j, key in enumerate(headers) if key in ("name", "path", "file")),
     )
 
 
@@ -8364,7 +8691,7 @@ def _details_tables(files: list[FileDetails], base: str) -> list[_Table]:
             + ([note] if any(notes) else [])
             for d, row, note in zip(group, cells, notes)
         ]
-        tables.append(_Table(headers, rows, title=f"{title} · {len(group):,}"))
+        tables.append(_Table(headers, rows, title=f"{title} · {len(group):,}", path_cols=(0,)))
     unread = groups.get("Not read")
     if unread:
         tables.append(_Table(
@@ -8373,6 +8700,7 @@ def _details_tables(files: list[FileDetails], base: str) -> list[_Table]:
               d.summary.removeprefix("not read: ") if d.skipped else d.error]
              for d in unread],
             title=f"Not read · {len(unread):,}",
+            path_cols=(0,),
         ))
     return tables
 
@@ -9211,6 +9539,7 @@ class S3View:
                     + (["What's inside"] if report else []),
                     rows,
                     max_rows=0,
+                    path_cols=(0,),
                 )
             )
             bucket = parse_s3_uri(listing.uri)[0]
@@ -9755,6 +10084,7 @@ class S3View:
                 title="Folders with duplicated files",
                 bars=[_share(f.duplicated.count, f.files) for f in folders],
                 bar_label="% of the folder's files",
+                path_cols=(0,),
             )
         )
 
@@ -9793,6 +10123,7 @@ class S3View:
                     for g in report.groups
                 ],
                 title=f"Duplicate groups, biggest saving first (cost {self._price_basis()})",
+                path_cols=(5, 6),
             )
         )
         options = {
@@ -9876,6 +10207,7 @@ class S3View:
                         for a, b in r.different[:show]
                     ],
                     title=f"Different ({len(r.different):,})",
+                    path_cols=(0,),
                 )
             )
         if r.only_in_a:
@@ -9937,6 +10269,7 @@ class S3View:
                         for k, st in v.top_noncurrent
                     ],
                     title="Keys with the most noncurrent data",
+                    path_cols=(0,),
                 )
             )
         steps = (
@@ -10084,6 +10417,7 @@ class S3View:
                     for f in d.files
                 ],
                 title="Deleted files",
+                path_cols=(0,),
             )
         )
         if restorable:
@@ -10159,6 +10493,7 @@ class S3View:
                     ]
                     for u in uploads
                 ],
+                path_cols=(0,),
             )
         )
         self._show(blocks)
@@ -10679,6 +11014,7 @@ class S3View:
                         for k, why in sorted(d.skipped.items())
                     ],
                     title="Not downloaded",
+                    path_cols=(0,),
                 )
             )
         self._show(blocks)
@@ -10814,6 +11150,7 @@ class S3View:
                         for key, why in sorted(left_out.items())
                     ],
                     title="Left out",
+                    path_cols=(0,),
                 )
             )
         self._show(blocks)

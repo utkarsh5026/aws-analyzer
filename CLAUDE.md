@@ -75,6 +75,10 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
   deliberately duplicated in all five analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
   `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
+  For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
+  and findings are laid out as described under "How the View layer works" (asked for S3 first). Until that's
+  ported (`/sync-helpers`), `drift.py` lists `_CSS`, `_Table`, `_prose` and `_render_html` / `_render_text` for
+  `s3.py`; don't "fix" that drift by reverting `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`, so it still imports alone), reuses its helpers instead of copying them, and is
   left out of `drift.py`. Nothing imports a companion.
@@ -133,11 +137,23 @@ How the View layer works:
   - A table cell can be `_Tone(text, tone)`, a coloured pill in HTML and plain text elsewhere. `code_cols` shows
     columns of calls as code, and `prose_cols` passes columns of tool-written sentences (the Warnings tables)
     through `_prose`. Tables over 30 rows scroll under a sticky header.
+  - In `s3.py` (`_table_html`), a table of 3+ rows sorts by a click on a header (largest, newest or A to Z first,
+    then the other way, then the original order; `_sort_key` reads sizes, money, ages and dates), a column of a
+    few repeated values (storage class, region, status) gets a filter, and a table of 3+ columns gets a Columns
+    menu of checkboxes. They are radio buttons, selects and checkboxes in a `<form method="dialog">` that `:has()`
+    rules read: rows carry their sort place as `--a<j>` / `--d<j>` and are ordered with CSS grid `order` on a
+    subgrid. The controls carry `hidden="hidden"` (JupyterLab's sanitizer keeps it, not a bare `hidden`), so an
+    untrusted notebook, which loses its `<style>`, shows a plain table. `path_cols` marks columns of keys: the
+    folder dimmed and shortened from the left, the file name whole, the full key on hover (text mode drops the
+    start of the folder, never the name). `sortable=False` opts a table out; tree tables and help() never sort.
   - `_Table(collapsed=True)` / `_Text(collapsed=True)` fold a secondary view (tags, raw JSON) under its title, and
     `_Text(code=True)` marks a snippet to copy: one click selects all of it.
   - `_prose` renders every tool-written sentence (notes, findings, table titles, subtitles): it escapes the text
     and shows the calls in it (`documents(status='FAILED')`) and AWS CLI commands as code that one click selects.
-    Never use it on table cells that hold data.
+    Never use it on table cells that hold data. In `s3.py`, `_split_lead` finds what a sentence says first (up to
+    its first `:`, `;` or full stop, never inside a call): a finding shows it as a bold headline over the rest as
+    points (`_finding_html`), and notes and Warnings cells get it as a bold lead-in (`_lead`); amounts of money
+    in them are stressed. So write a finding as "what's wrong: why it matters. What to do (the call)."
 - Every public View method is decorated with `@_friendly_errors`, which turns `ClientError` / `BotoCoreError` /
   data-decoding errors into a warning note instead of a traceback.
 - `help()` lists public View methods by introspection, grouped by the View's `_GROUPS` (anything missing lands
