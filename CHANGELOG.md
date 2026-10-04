@@ -18,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   what it takes and where it goes in the request, which used to be printed under every value. **Add a setting** is
   folded behind a **+ Add a setting** button, with the same one-click chips, search and Browse all inside, and ✕
   folds it away again. **Open this setup again** is folded at the bottom. The side uses smaller type throughout, and
-  the Request JSON and Last response tabs do too.
+  the Request JSON and Last response tabs do too. ([#29](https://github.com/utkarsh5026/aws-analyzer/pull/29))
 
 ## [0.4.0] - 2026-10-04
 
