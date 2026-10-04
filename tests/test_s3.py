@@ -1774,6 +1774,33 @@ def test_download_zip(core, aws, tmp_path, monkeypatch):
         core.plan_zip(f"s3://{BUCKET}/raw/", max_size=None)
 
 
+def test_download_zip_of_a_list(core, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    picks = [f"s3://{BUCKET}/raw/2024/01/events.csv", f"s3://{BUCKET}/raw/2024/02/events.csv.gz"]
+    z = core.download_zip(picks)
+    assert z.written and z.plan.uri == f"s3://{BUCKET}/raw/2024/" and z.plan.picked == picks
+    assert z.plan.path == str(tmp_path / "2024-2-files.zip")  # named after the folder they share
+    with zipfile.ZipFile(z.plan.path) as archive:
+        assert sorted(archive.namelist()) == ["01/events.csv", "02/events.csv.gz"]  # laid out as they are
+        assert archive.read("01/events.csv") == CSV
+
+    listed = next(o for o in core.iter_objects(f"s3://{BUCKET}/docs/") if o.name == "readme.md")  # from a listing
+    mixed = core.plan_zip([f"s3://{BUCKET}/raw/2024/02/", f"s3://{BUCKET}/raw/2024/02/empty.txt",
+                           f"s3://{BUCKET}/raw/2024/01", listed, f"s3://{BUCKET}/archive/old.csv"])
+    assert mixed.uri == f"s3://{BUCKET}/" and mixed.path == str(tmp_path / "data-lake-5-items.zip")
+    assert mixed.picked[2] == f"s3://{BUCKET}/raw/2024/01/"  # given without its slash: it's a folder
+    assert sorted(name for _, name in mixed.files) == [  # the folder raw/2024/01 without its slash, empty.txt once
+        "docs/readme.md", "raw/2024/01/events-copy.csv", "raw/2024/01/events.csv", "raw/2024/02/empty.txt",
+        "raw/2024/02/events.csv.gz"]
+    assert mixed.left_out == {"archive/old.csv": "GLACIER"} and mixed.can_download
+    one = core.plan_zip([f"s3://{BUCKET}/docs/readme.md"])
+    assert one.path == str(tmp_path / "readme.md.zip") and [name for _, name in one.files] == ["readme.md"]
+    with pytest.raises(ValueError, match="one bucket"):
+        core.plan_zip([f"s3://{BUCKET}/docs/readme.md", "s3://other/x.csv"])
+    with pytest.raises(ValueError, match="Nothing to zip"):
+        core.plan_zip([])
+
+
 def test_download_zip_when_reads_fail(core, tmp_path, monkeypatch):
     real = core.client.get_object
 
@@ -3470,6 +3497,11 @@ def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
     assert "nothing to zip" in run(
         capsys, ui.download_zip, f"s3://{BUCKET}/nothing-here/"
     )
+    picks = [f"s3://{BUCKET}/raw/2024/01/events.csv", f"s3://{BUCKET}/raw/2024/02/", f"s3://{BUCKET}/docs/readme.md"]
+    listed = run(capsys, ui.download_zip, picks, "picked", dry_run=True)
+    assert "Zip of 2 files and 1 folder from s3://data-lake/" in listed
+    assert "Run the same download_zip() call without dry_run=True to make the zip." in listed
+    assert "Zip of 1 file from s3://data-lake/docs/" in run(capsys, ui.download_zip, picks[2:], dry_run=True)
     assert "ValueError" in run(
         capsys, ui.download_zip, f"s3://{BUCKET}/raw/", max_size="lots"
     )

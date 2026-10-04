@@ -22,6 +22,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   fix (**Search the subfolders too**, **Show the 25 files**). `x.filter(".parquet", subfolders=True)` does the same
   from code, and in the text view. For your own code, `S3Navigator.below()` lists everything below a folder, and
   `parse_filter`, `filter_entries(kind=...)` and `count_types` do the matching and counting.
+- `S3Explorer`: tick files to download them together. A checkbox shows when you point at a row (and on every row
+  once something is ticked); the one in the header ticks everything listed, such as every `.csv` a search found. The
+  bar under the list says how many are ticked and how big they are, and **⬇ Download selected** shows what goes in
+  the zip, checks it's within the limits, and suggests a name from the folder and the count (`churn-12-files.zip`),
+  which you can change. It never replaces a file already there. `x.picked` lists what's ticked.
+- `S3View.download_zip()` and `S3Analyzer.download_zip()` / `plan_zip()` take a list of files and folders from one
+  bucket too: `ui.download_zip(["s3://b/raw/a.csv", "s3://b/raw/2024/"])` zips them together, laid out as they are
+  under the folder they share, after the same checks, and names the zip after that folder (`raw-2-items.zip`).
 
 ### Changed
 

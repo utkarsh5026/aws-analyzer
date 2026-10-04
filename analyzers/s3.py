@@ -1954,7 +1954,7 @@ class FolderDownload:
 class ZipPlan:
     """What download_zip would put in a .zip, and whether this notebook can make it (see S3Analyzer.plan_zip)."""
 
-    uri: str
+    uri: str  # the file or folder zipped; for a list of them, the folder they share
     path: str  # the .zip file it would write
     max_size: int  # bytes of files allowed in one zip
     max_files: int
@@ -1974,6 +1974,9 @@ class ZipPlan:
         None  # what reading one file returned, e.g. 'AccessDenied'; None = it worked
     )
     probed: str | None = None  # the key read to check access (None = nothing to read)
+    picked: list[str] = field(
+        default_factory=list
+    )  # the files and folders download_zip was given as a list (s3:// paths; a folder's ends in '/')
 
     @property
     def size(self) -> int:
@@ -4548,6 +4551,18 @@ def _memory_available() -> int | None:
         return None
 
 
+def _zip_layout(bucket: str, keys: list[str]) -> tuple[str, str]:
+    """For zipping several keys together -> (the folder they share, the zip's name without .zip): 'churn-12-files'
+    from the folder and how many there are ('-items' when some are folders), or the one key's own name."""
+    base = base_prefix(
+        os.path.commonprefix([key if key.endswith("/") else base_prefix(key) for key in keys])
+    )
+    if len(keys) == 1:
+        return base, keys[0].rstrip("/").rsplit("/", 1)[-1] or bucket
+    files = all(not key.endswith("/") for key in keys)
+    return base, f"{base.rstrip('/').rsplit('/', 1)[-1] or bucket}-{len(keys)}-{'files' if files else 'items'}"
+
+
 def _zip_name(key: str, base: str, used: set[str]) -> str | None:
     """The name a file gets in the zip, relative to `base`; None if it would unzip outside the folder or clash."""
     name = relative_key(key, base)
@@ -7029,7 +7044,7 @@ class S3Analyzer:
 
     def plan_zip(
         self,
-        uri: str,
+        uri: str | Iterable[str | ObjectInfo],
         path: str | None = None,
         *,
         max_size: int | str = "100MB",
@@ -7038,27 +7053,49 @@ class S3Analyzer:
     ) -> ZipPlan:
         """Check whether a file or folder can be zipped here, without downloading it: what would go in, the size
         and file-count limits, free disk space and memory, and whether the files can be read (one 1-byte read).
-        `path` is the .zip to write (default: named after the folder, in the current directory)."""
-        bucket, key = parse_s3_uri(uri)
+        `path` is the .zip to write (default: named after the folder, in the current directory). `uri` can also be
+        a list of files and folders from one bucket (s3:// paths, or ObjectInfo from a listing): they go in one zip,
+        laid out as they are under the folder they share, which names it ('churn-12-files.zip')."""
         limit = parse_size(max_size)
         if limit is None:
             raise ValueError("max_size can't be None; pass a size such as '2GB'")
-        first = self.client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1).get(
-            "Contents", []
-        )
-        single = (
-            bool(key)
-            and not key.endswith("/")
-            and bool(first)
-            and first[0]["Key"] == key
-        )
-        if single:  # a file (it lists first among the keys it prefixes)
-            base, name = base_prefix(key), key.rsplit("/", 1)[-1]
+        if not isinstance(uri, str):
+            bucket, base, name, picked, listing = self._zip_picks(list(uri), progress)
+            plan_uri = s3_uri(bucket, base)
         else:
-            base = (
-                key if not key or key.endswith("/") else key + "/"
-            )  # 's3://b/data' means the folder data/
-            name = base.rstrip("/").rsplit("/", 1)[-1] or bucket
+            picked = []
+            bucket, key = parse_s3_uri(uri)
+            first = self.client.list_objects_v2(Bucket=bucket, Prefix=key, MaxKeys=1).get(
+                "Contents", []
+            )
+            single = (
+                bool(key)
+                and not key.endswith("/")
+                and bool(first)
+                and first[0]["Key"] == key
+            )
+            if single:  # a file (it lists first among the keys it prefixes)
+                base, name = base_prefix(key), key.rsplit("/", 1)[-1]
+            else:
+                base = (
+                    key if not key or key.endswith("/") else key + "/"
+                )  # 's3://b/data' means the folder data/
+                name = base.rstrip("/").rsplit("/", 1)[-1] or bucket
+            plan_uri = s3_uri(bucket, key if single else base)
+            if single:
+                item = first[0]
+                listing: Iterable[ObjectInfo] = [
+                    ObjectInfo(
+                        bucket,
+                        key,
+                        item["Size"],
+                        item["LastModified"],
+                        item.get("StorageClass", "STANDARD"),
+                        item.get("ETag", "").strip('"'),
+                    )
+                ]
+            else:
+                listing = self.iter_objects(plan_uri, progress=progress)
         if path is None:
             path = f"{name}.zip"
         elif os.path.isdir(path):
@@ -7066,29 +7103,20 @@ class S3Analyzer:
         elif not path.lower().endswith(".zip"):
             path += ".zip"
         plan = ZipPlan(
-            uri=s3_uri(bucket, key if single else base),
+            uri=plan_uri,
             path=os.path.abspath(path),
             max_size=limit,
             max_files=max_files,
+            picked=picked,
         )
-        if single:
-            item = first[0]
-            listing: Iterable[ObjectInfo] = [
-                ObjectInfo(
-                    bucket,
-                    key,
-                    item["Size"],
-                    item["LastModified"],
-                    item.get("StorageClass", "STANDARD"),
-                    item.get("ETag", "").strip('"'),
-                )
-            ]
-        else:
-            listing = self.iter_objects(plan.uri, progress=progress)
+        used_keys: set[str] = set()
         used: set[str] = set()
         for obj in listing:
             if obj.is_folder_marker or obj.key.endswith("/"):
                 continue
+            if obj.key in used_keys:  # a file picked on its own and inside a picked folder
+                continue
+            used_keys.add(obj.key)
             if len(plan.files) + len(plan.left_out) >= max_files:
                 plan.more = True
                 break
@@ -7118,9 +7146,67 @@ class S3Analyzer:
                 plan.read_error = _error_code(exc)
         return plan
 
+    def _zip_picks(
+        self, items: list[str | ObjectInfo], progress: Callable[[int], None] | None
+    ) -> tuple[str, str, str, list[str], Iterator[ObjectInfo]]:
+        """plan_zip for a list -> (bucket, the folder they share, the zip's name, the s3:// paths, every file in
+        them). A path without a '/' at the end is a file when there is one with that key, else a folder."""
+        if not items:
+            raise ValueError("Nothing to zip: pass at least one file or folder")
+        found = [
+            (item.bucket, item.key, item)
+            if isinstance(item, ObjectInfo)
+            else (*parse_s3_uri(item), None)
+            for item in items
+        ]
+        buckets = {bucket for bucket, _, _ in found}
+        if len(buckets) != 1 or "" in buckets:
+            raise ValueError(
+                f"The files to zip must all be in one bucket, not {', '.join(sorted(buckets)) or 'none'}: "
+                "make one zip per bucket"
+            )
+        bucket = found[0][0]
+        base, name = _zip_layout(bucket, [key for _, key, _ in found])
+        picked = [s3_uri(bucket, key) for _, key, _ in found]
+
+        def listing() -> Iterator[ObjectInfo]:
+            listed = 0
+            for at, (_, key, info) in enumerate(found):
+                if info is not None and not key.endswith("/"):
+                    listed += 1
+                    yield info
+                    continue
+                if key and not key.endswith("/"):
+                    first = self.client.list_objects_v2(
+                        Bucket=bucket, Prefix=key, MaxKeys=1
+                    ).get("Contents", [])
+                    if first and first[0]["Key"] == key:
+                        item = first[0]
+                        listed += 1
+                        yield ObjectInfo(
+                            bucket,
+                            key,
+                            item["Size"],
+                            item["LastModified"],
+                            item.get("StorageClass", "STANDARD"),
+                            item.get("ETag", "").strip('"'),
+                        )
+                        continue
+                    key += "/"
+                    picked[at] = s3_uri(bucket, key)  # it was a folder
+                done = listed
+                for obj in self.iter_objects(
+                    s3_uri(bucket, key),
+                    progress=(lambda n: progress(done + n)) if progress else None,
+                ):
+                    listed += 1
+                    yield obj
+
+        return bucket, base, name, picked, listing()
+
     def download_zip(
         self,
-        uri: str,
+        uri: str | Iterable[str | ObjectInfo],
         path: str | None = None,
         *,
         max_size: int | str = "100MB",
@@ -7133,7 +7219,8 @@ class S3Analyzer:
         """Zip a file or a folder (with its sub-folders) into one .zip on the notebook's disk, after plan_zip's
         checks pass: at most max_size of files (100 MB by default) and max_files files, room on the disk, and read
         access. Nothing is written when a check fails, or with dry_run=True. Already-compressed files (parquet,
-        gz, images, ...) are stored as they are, the rest compressed. progress gets (bytes zipped, bytes to zip)."""
+        gz, images, ...) are stored as they are, the rest compressed. progress gets (bytes zipped, bytes to zip).
+        `uri` can be a list of files and folders from one bucket too (see plan_zip)."""
         plan = self.plan_zip(
             uri, path, max_size=max_size, max_files=max_files, progress=list_progress
         )
@@ -11525,7 +11612,7 @@ class S3View:
     @_friendly_errors
     def download_zip(
         self,
-        uri: str,
+        uri: str | Iterable[str],
         path: str | None = None,
         *,
         max_size: int | str = "100MB",
@@ -11533,7 +11620,11 @@ class S3View:
         dry_run: bool = False,
     ) -> None:
         """Download a file or folder as one .zip, after checking this notebook can: size limit (100 MB by default),
-        file count, disk space, memory and read access. dry_run=True only runs the checks."""
+        file count, disk space, memory and read access. dry_run=True only runs the checks.
+
+        Pass a list to zip several files and folders from one bucket together, laid out as they are under the
+        folder they share: download_zip(['s3://b/raw/a.csv', 's3://b/raw/b.csv', 's3://b/raw/2024/']) makes
+        raw-3-items.zip."""
         with (
             self._progress("Listing", unit="files") as list_tick,
             self._progress("Zipping", unit="B") as tick,
@@ -11551,9 +11642,14 @@ class S3View:
         checks = zip_checks(plan)
         can = plan.can_download
         files = f"{len(plan.files):,}{'+' if plan.more else ''}"
+        what = plan.uri
+        if plan.picked:
+            folders = sum(picked.endswith("/") for picked in plan.picked)
+            parts = [_plural(len(plan.picked) - folders, "file")] if len(plan.picked) > folders else []
+            what = f"{' and '.join(parts + ([_plural(folders, 'folder')] if folders else []))} from {plan.uri}"
         blocks: list[Any] = [
             _Title(
-                f"Zip of {plan.uri}",
+                f"Zip of {what}",
                 f"{_plural(len(plan.files), 'file')} · "
                 f"{human_size(plan.size)} → {plan.path}",
             )
@@ -11588,11 +11684,15 @@ class S3View:
             args = "".join(
                 f", {k}={v!r}" for k, (v, default) in options.items() if v != default
             )
+            call = (
+                "the same download_zip() call without dry_run=True"
+                if plan.picked
+                else f"download_zip({plan.uri!r}{args})"
+            )
             blocks += [
                 _Cards(cards),
                 _Note(
-                    f"It can be downloaded: every check passed. Run "
-                    f"download_zip({plan.uri!r}{args}) to make the zip.",
+                    f"It can be downloaded: every check passed. Run {call} to make the zip.",
                     "ok",
                 ),
             ]

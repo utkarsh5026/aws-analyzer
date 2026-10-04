@@ -807,3 +807,107 @@ def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path
     assert f"Saved {tmp_path / 'zips' / 'raw.zip'} (" in text(x) and "choose Download" in text(x)
     assert "⚙" not in text(x)  # the limits only come up when they stop a zip
 
+
+
+# ----------------------------------------------------------------------------- selecting files to download as one zip
+
+
+def check(x, name):
+    row(x, name).check.click()
+
+
+def ticked(x):
+    return [r.entry.name for r in x._pool[: len(x._rows_box.children)] if "s3x-on" in r.check._dom_classes]
+
+
+def test_explorer_selects_files(explorer):
+    x = explorer("s3://lake/raw/events/")
+    assert x._picks_bar.layout.display == "none" and "s3x-picking" not in x._side._dom_classes
+    check(x, "part-2.csv")
+    assert x.picked == ["s3://lake/raw/events/part-2.csv"] and ticked(x) == ["part-2.csv"]
+    assert x._picks_bar.layout.display is None and "1 selected" in x._picks_note.value and "8 B" in x._picks_note.value
+    assert "s3x-picking" in x._side._dom_classes and "s3x-picked" in row(x, "part-2.csv").button._dom_classes
+    assert "s3x-i-minus" in x._check_all._dom_classes  # some of the list
+    x._check_all.click()
+    assert ticked(x) == ["part-2.csv", "part-10.csv"] and "2 selected" in x._picks_note.value
+    assert x._check_all._dom_classes == ("s3x-check", "s3x-ic", "s3x-i-check", "s3x-on")
+    x._check_all.click()  # everything was: unselect it
+    assert x.picked == [] and x._picks_bar.layout.display == "none"
+    check(x, "part-10.csv")
+    x.refresh()  # keeps the selection
+    assert x.picked == ["s3://lake/raw/events/part-10.csv"] and ticked(x) == ["part-10.csv"]
+    [b for b in x._picks_bar.children if getattr(b, "description", "") == "Clear"][0].click()
+    assert x.picked == [] and ticked(x) == []
+    check(x, "part-10.csv")
+    x.up()  # another folder: a new selection
+    assert x.picked == [] and x._picks_bar.layout.display == "none"
+
+    x.open("s3://lake/many/")
+    x._filter.value = "f1"
+    x._check_all.click()  # what the search shows, past "Show more" too
+    assert len(x.picked) == 10 and all("/f1" in uri for uri in x.picked)
+    x.open("")
+    assert "s3x-buckets" in x._side._dom_classes  # buckets can't be selected
+    row(x, LAKE).check.click()
+    assert x.picked == []
+
+
+def test_explorer_downloads_the_selection_as_one_zip(explorer, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    x = explorer("s3://lake/raw/events/")
+    check(x, "part-2.csv")
+    check(x, "part-10.csv")
+    [b for b in x._picks_bar.children if "Download selected" in getattr(b, "description", "")][0].click()
+    assert x._picks_panel.layout.display is None and x._picks_name.value == "events-2-files.zip"
+    out = text(x)
+    assert "Download 2 files as one .zip" in out and "from s3://lake/raw/events/" in out
+    assert "part-10.csv" in x._picks_list.value and "in the notebook's folder" in x._picks_where.value
+    check(x, "part-10.csv")  # the panel follows the selection, and the name it suggested
+    assert "Download 1 file as one .zip" in text(x) and x._picks_name.value == "part-2.csv.zip"
+    check(x, "part-10.csv")
+    x._picks_name.value = "my events"
+    x._picks_name._handle_custom_msg({"event": "submit"}, [])  # Enter downloads
+    with zipfile.ZipFile(tmp_path / "my events.zip") as made:
+        assert sorted(made.namelist()) == ["part-10.csv", "part-2.csv"]
+    assert "Zip of 2 files from s3://lake/raw/events/" in text(x) and x._picks_panel.layout.display == "none"
+    assert x.picked  # still selected
+
+    x._open_picks()
+    assert x._picks_name.value == "events-2-files.zip"
+    (tmp_path / "events-2-files.zip").write_bytes(b"mine")
+    x._open_picks()
+    assert x._picks_name.value == "events-2-files-2.zip"  # never a file that's already there
+    x._picks_name.value = "events-2-files.zip"
+    x._picks_go.click()
+    assert "already there" in x._picks_msg.value and (tmp_path / "events-2-files.zip").read_bytes() == b"mine"
+    [b for b in x._picks_panel.children[1].children if b.description == "Cancel"][0].click()
+    assert x._picks_panel.layout.display == "none" and "File types here" in text(x)
+    x._open_picks()
+    x._clear_picks()  # nothing left to download: the panel closes
+    assert x._picks_panel.layout.display == "none"
+
+
+def test_explorer_zips_selected_files_and_folders(explorer, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    x = explorer("s3://lake/raw/", zip_max_size="20B")
+    check(x, "events")
+    check(x, "readme.md")
+    x._open_picks()
+    out = text(x)
+    assert "Download 1 file and 1 folder as one .zip" in out and "with everything below it" in out
+    assert "over the 20 B limit" in out and x._picks_go.disabled  # readme.md alone is 31 B
+    x.zip_max_size = "1MB"
+    x._open_picks()
+    assert not x._picks_go.disabled and x._picks_name.value == "raw-2-items.zip"
+    x._picks_go.click()
+    with zipfile.ZipFile(tmp_path / "raw-2-items.zip") as made:
+        assert sorted(made.namelist()) == ["events/part-10.csv", "events/part-2.csv", "readme.md"]
+    assert "Zip of 1 file and 1 folder from s3://lake/raw/" in text(x)
+
+    x.zip_max_size = "40B"  # over once the folder is listed: the report says why, and what to do
+    x._open_picks()
+    x._picks_name.value = "again"
+    x._picks_go.click()
+    out = text(x)
+    assert "Can't zip this here yet" in out and "untick some files, or raise the limits with ⚙" in out
+    assert "click ⬇ Download selected again" in out and not (tmp_path / "again.zip").exists()

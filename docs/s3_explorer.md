@@ -193,6 +193,26 @@ x.zip_max_files = 50_000             # and up to 50,000 files
 x.zip_folder = "~/zips"              # made when the first zip is saved
 ```
 
+### Download some files { #select }
+
+To download a few files and not the whole folder, tick them and zip them together:
+
+<div class="steps" markdown>
+
+1. **Tick the files.** Point at a row and a checkbox shows on its left; click it. Once something is ticked, every row shows its checkbox. The one in the header ticks everything listed, so a search and one click selects, say, every `.csv` in a dataset's partitions (with [**Include subfolders**](#search)). You can tick folders too: they go in with everything below them.
+2. **Click ⬇ Download selected** in the bar under the list. The bar also says how many are ticked and how big they are; **Clear** unticks them.
+3. **Check the name and click ⬇ Download.** The right shows what goes in the zip and whether it's within the limits, and suggests a name from the folder and how many files there are, such as `churn-12-files.zip`. Change it if you like (Enter downloads too). The explorer never replaces a file: when that name is taken, it suggests `churn-12-files-2.zip`.
+
+</div>
+
+![S3Explorer in a folder of 30 compressed JSON event files, five of them ticked and tinted; the bar under the list says 5 selected and their size, with Clear and Download selected; on the right, Download 5 files as one .zip, with cards for the files, their size and the limit, a Save as box holding dt=2025-10-10-5-files.zip, Download and Cancel buttons, and a table of what goes in the zip](images/explorer-zip-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer in a folder of 30 compressed JSON event files, five of them ticked and tinted; the bar under the list says 5 selected and their size, with Clear and Download selected; on the right, Download 5 files as one .zip, with cards for the files, their size and the limit, a Save as box holding dt=2025-10-10-5-files.zip, Download and Cancel buttons, and a table of what goes in the zip](images/explorer-zip-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+/// caption
+Five files ticked, one `.zip` with a name that says what's in it.
+///
+
+The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it.
+
 ## Big folders { #big }
 
 The explorer lists one level at a time, never the whole bucket, so a folder opens in a moment even in a bucket of billions of files.
@@ -215,6 +235,7 @@ x.open("s3://acme-ml-data/raw/events/")   # the toolbar from code: open, back, f
 x.back(); x.forward(); x.up(); x.refresh()
 x.filter(".parquet", subfolders=True)      # the search box and its buttons: every Parquet file below this folder
 x.filter(kind="folders")                   # only the folders here; x.filter() shows everything again
+x.picked                                   # what's ticked in the list, as s3:// paths
 x.location                                 # the folder you're in, such as 's3://acme-ml-data/raw/' ('' on your buckets)
 x.selected                                 # the file shown on the right, or ''
 x.ui.summary(x.location)                   # any S3View report about where you are, in its own cell
@@ -320,7 +341,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ??? question "The zip wasn't made"
 
-    The report says which check failed. If the folder is over a limit, **⚙** raises it. If the disk is full, free some space (the [SageMaker guide's `disk()`](sagemaker_env.md#disk) shows what fills it) or zip a smaller folder.
+    The report says which check failed. If the folder or the files you ticked are over a limit, **⚙** raises it (or untick some files). If the disk is full, free some space (the [SageMaker guide's `disk()`](sagemaker_env.md#disk) shows what fills it) or zip a smaller folder.
 
 ## Reference { #reference }
 
@@ -350,6 +371,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `selected` | The file shown on the right, or `""` |
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
 | `nav` | The `S3Navigator` behind the list |
-| `zip_max_size`, `zip_max_files`, `zip_folder` | The **⬇ Download .zip** limits and where zips go, which **⚙** edits |
+| `picked` | The files and folders ticked in the list, as `s3://` paths: `x.ui.download_zip(x.picked)` |
+| `zip_max_size`, `zip_max_files`, `zip_folder` | The **⬇ Download .zip** and **⬇ Download selected** limits, and where zips go, which **⚙** edits |
 
 </div>

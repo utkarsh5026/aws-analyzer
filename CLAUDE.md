@@ -250,6 +250,12 @@ works:
   "Include subfolders" (`_deep`) swaps the list's source (`_source()`) for `S3Navigator.below()`, a listing without
   the `/` delimiter, `deep_limit` files at a time, with the folders between derived from the keys; its rows show their
   folder under the name. Opening another folder clears the search and the subfolders; ↻ keeps them.
+- Selecting: each row has a checkbox (`_Row.check`, hidden by the style until the row is pointed at or `_picked` has
+  something, `s3x-picking`), and the header's ticks everything in `_visible`. `_picked` (uri -> Entry) feeds the bar
+  under the list (`_draw_picks`) and the panel on the right (`_open_picks`), which shows what goes in and a name from
+  s3's `_zip_layout`, made unique on disk. `_save_picks` passes files as `ObjectInfo` (no request to find them) and
+  folders as uris to `download_zip`, which takes a list; it refuses a name that's taken rather than replace a file.
+  Opening another folder clears the selection.
 - A click within `_CLICK_GRACE` seconds after the rows changed is dropped: it was aimed at the old rows (a double
   click on a folder would otherwise open whatever took its place).
 - The path box navigates on Enter only: it listens for the `submit` message the text box sends (`on_submit` is

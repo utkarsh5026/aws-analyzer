@@ -7,7 +7,8 @@ back / forward / up buttons and a clickable path you can also type into, and the
 or date. Over the list, a search box finds files by name or type ('.csv', '.csv .json'), All / Folders / Files
 show only one kind, a chip per file type filters with one click, and "Include subfolders" searches everything below
 the folder. "Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full size), and
-"Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes.
+"Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes. Tick files (a
+checkbox shows when you point at a row) and "Download selected" zips just those, under a name you can change.
 
 This file builds on s3.py (the previews, the formatting and the AWS calls all come from it): upload both files
 next to your notebook, or paste s3.py into a cell and then this file into the next one. Clicking needs
@@ -715,6 +716,8 @@ _ICON_PATHS = {
     "search": "<circle cx='11' cy='11' r='6.5'/><path d='M20 20l-4.2-4.2'/>",
     "chevron": "<path d='M9 6l6 6-6 6'/>",
     "below": "<path d='M6 4v9a3 3 0 0 0 3 3h10M15 12l4 4-4 4'/>",
+    "check": "<path stroke-width='3.2' d='M5 12.5l4.5 4.5L19 7.5'/>",
+    "minus": "<path stroke-width='3.2' d='M6.5 12h11'/>",
 }
 
 
@@ -794,7 +797,7 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 .s3x button.s3x-deep{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
 .s3x button.s3x-deep::before{width:13px;height:13px}
 .s3x .s3x-list>*{margin:0}
-.s3x .s3x-head{position:sticky;top:0;z-index:2;padding:0 12px;border-bottom:1px solid var(--s3x-line);
+.s3x .s3x-head{position:sticky;top:0;z-index:4;padding:0 12px;border-bottom:1px solid var(--s3x-line);
  background:var(--s3x-bg)}
 .s3x .s3x-head>*{margin:0}
 .s3x button.s3x-col{height:30px;line-height:30px;padding:0 8px;text-align:left;font-size:11px;font-weight:600;
@@ -802,21 +805,35 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 .s3x button.s3x-col:hover{opacity:.85}
 .s3x button.s3x-col.s3x-on{opacity:.9}
 .s3x button.s3x-col.s3x-num{text-align:right}
+.s3x button.s3x-namecol{padding-left:28px}
 .s3x .s3x-rows{padding:6px}
 .s3x .s3x-rows>*{margin:0}
 .s3x .s3x-r{position:relative;height:32px;align-items:center;justify-content:flex-end;flex:0 0 auto}
 .s3x .s3x-r>*{margin:0}
-.s3x button.s3x-row{position:absolute;top:0;left:0;width:100%;height:32px;text-align:left;padding:0 164px 0 10px;
+.s3x button.s3x-row{position:absolute;top:0;left:0;width:100%;height:32px;text-align:left;padding:0 164px 0 34px;
  border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .s3x button.s3x-row:hover{background:var(--s3x-hover)}
+.s3x button.s3x-row.s3x-picked{background:rgba(59,130,246,.07)}
 .s3x button.s3x-row.s3x-on{background:var(--s3x-tint);font-weight:600;box-shadow:inset 0 0 0 1px var(--s3x-tint-line)}
+.s3x button.s3x-check{position:absolute;z-index:2;top:50%;left:9px;display:inline-flex;align-items:center;
+ justify-content:center;width:16px;min-width:16px;height:16px;margin:-8px 0 0;padding:0;font-size:0;border-radius:5px;
+ border:1.5px solid rgba(127,127,127,.55);background:var(--s3x-bg);color:#fff;opacity:0}
+.s3x button.s3x-check::before{width:11px;height:11px;opacity:0}
+.s3x .s3x-r:hover button.s3x-check,.s3x .s3x-picking button.s3x-check,.s3x .s3x-list:hover .s3x-head button.s3x-check{
+ opacity:1}
+.s3x button.s3x-check:hover{border-color:var(--s3x-accent)}
+.s3x button.s3x-check.s3x-on{opacity:1;background:var(--s3x-accent);border-color:var(--s3x-accent)}
+.s3x button.s3x-check.s3x-on::before{opacity:1}
+.s3x .s3x-head button.s3x-check{left:15px}
+.s3x .s3x-r2 button.s3x-check{top:15px}
 .s3x .s3x-r .widget-label{position:relative;z-index:1;pointer-events:none;text-align:right;opacity:.58;
  font-size:12px;font-variant-numeric:tabular-nums;padding-right:8px}
-.s3x .s3x-nosize button.s3x-row{padding-right:88px}
-.s3x .s3x-nosize .s3x-size{display:none}
+.s3x .s3x-buckets button.s3x-row{padding:0 88px 0 10px}
+.s3x .s3x-buckets .s3x-size,.s3x .s3x-buckets button.s3x-check{display:none}
+.s3x .s3x-buckets button.s3x-namecol{padding-left:8px}
 .s3x .s3x-r2,.s3x .s3x-r2 button.s3x-row{height:46px}
 .s3x .s3x-r2 button.s3x-row{padding-bottom:16px}
-.s3x .s3x-r .widget-label.s3x-where{position:absolute;display:block;left:37px;right:164px;bottom:6px;height:16px;
+.s3x .s3x-r .widget-label.s3x-where{position:absolute;display:block;left:61px;right:164px;bottom:6px;height:16px;
  line-height:16px;padding:0;text-align:left;font-size:11.5px;opacity:.5;direction:rtl;overflow:hidden;text-overflow:ellipsis;
  white-space:nowrap}
 .s3x .s3x-where::before,.s3x .s3x-where::after{content:"\\200E"}
@@ -825,6 +842,18 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 .s3x button.s3x-link{width:auto;height:28px;padding:0 10px;border-radius:8px;color:var(--s3x-accent-fg);font-weight:500}
 .s3x button.s3x-link:hover{background:var(--s3x-tint)}
 .s3x .s3x-empty{padding:22px 8px 4px;text-align:center;opacity:.62;font-size:12.5px}
+.s3x .s3x-picks{align-items:center;gap:6px;padding:8px 10px 8px 14px;border-top:1px solid var(--s3x-line);
+ background:var(--s3x-bg);box-shadow:0 -8px 18px -14px rgba(0,0,0,.3)}
+.s3x .s3x-picks>*{margin:0}
+.s3x .s3x-picks .widget-html-content{display:flex;flex-direction:column;line-height:1.3;min-width:0}
+.s3x .s3x-picks-n{font-weight:600}
+.s3x .s3x-picks-s{font-size:11.5px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s3x button.s3x-primary{width:auto;height:30px;padding:0 14px;border-radius:8px;background:var(--s3x-accent);
+ color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.s3x button.s3x-primary:hover:enabled{background:#2f6fde}
+.s3x button.s3x-primary:disabled{opacity:.4;cursor:default;box-shadow:none}
+.s3x button.s3x-quiet{width:auto;height:30px;padding:0 10px;border-radius:8px;opacity:.72}
+.s3x button.s3x-quiet:hover:enabled{opacity:1;background:var(--s3x-hover)}
 .s3x .s3x-right{padding:0 18px 14px}
 .s3x .s3x-right>*{margin:0;min-width:0}
 .s3x .s3x-right .widget-html-content{min-width:0}
@@ -876,23 +905,29 @@ _CLICK_GRACE = 0.35  # seconds after the rows change during which a click is ign
 _BACKGROUND = ("preview", "head")  # quick reports (no progress bar) that load on worker threads in a notebook
 _WORKERS = 4  # background reports loading at once, so a click doesn't wait for files clicked before it
 _TYPE_CHIPS = 6  # file types shown as chips over the list before "+N more"
+_CHECK = ("s3x-check", "s3x-ic", "s3x-i-check")  # a row's checkbox; it gets s3x-on when ticked
 
 
 class _Row:
-    """One reusable row of the list: a full-width button (the name) under two labels (size, modified), and under the
-    name, when the list holds everything below a folder, the folder the entry is in."""
+    """One reusable row of the list: a full-width button (the name) under a checkbox and two labels (size, modified),
+    and under the name, when the list holds everything below a folder, the folder the entry is in."""
 
-    def __init__(self, widgets: Any, on_click: Callable[[_Row], None]):
+    def __init__(self, widgets: Any, on_click: Callable[[_Row], None], on_check: Callable[[_Row], None]):
         self.entry: Entry | None = None
         self.button = widgets.Button(layout=widgets.Layout(width="100%"))
         self.button.add_class("s3x-row")
         self.button.on_click(lambda _: on_click(self))
+        self.check = widgets.Button(description="✓", tooltip="Select it, to download several files in one .zip")
+        for name in _CHECK:
+            self.check.add_class(name)
+        self.check.on_click(lambda _: on_check(self))
         self.where = widgets.Label(layout=widgets.Layout(display="none"))
         self.where.add_class("s3x-where")
         self.size = widgets.Label(layout=widgets.Layout(width="76px", flex="0 0 auto"))
         self.size.add_class("s3x-size")
         self.age = widgets.Label(layout=widgets.Layout(width="76px", flex="0 0 auto"))
-        self.box = widgets.HBox([self.button, self.where, self.size, self.age], layout=widgets.Layout(width="100%"))
+        self.box = widgets.HBox([self.button, self.check, self.where, self.size, self.age],
+                                layout=widgets.Layout(width="100%"))
         self.box.add_class("s3x-r")
 
 
@@ -904,6 +939,8 @@ class S3Explorer:
     Above the list, the search box narrows it by name or file type ('.csv', '.csv .json', 'part-0*'), All / Folders /
     Files show only one kind, a chip for each file type here shows only those files, and "Include subfolders"
     lists everything below the folder, not only its first level, to search all of it (x.filter() does the same).
+    Tick files (a checkbox shows when you point at a row) and "Download selected", in the bar under the list,
+    downloads them as one .zip; x.picked lists what's ticked.
 
     uri: where to start ('s3://bucket/prefix/', 'bucket/prefix', a file's path, a console link); leave it
     out to start from your buckets.
@@ -947,6 +984,8 @@ class S3Explorer:
         self._kind = "all"  # All / Folders / Files: what the list shows (it stays as you move around, like the sort)
         self._deep = False  # "Include subfolders": the list holds everything below the folder (S3Navigator.below)
         self._all_types = False  # every file type has a chip, not only the most common
+        self._picked: dict[str, Entry] = {}  # what's ticked in the list, by uri, to download as one .zip
+        self._picks_auto = ""  # the zip name the explorer suggested, until it's typed over
         self._job = 0  # counts changes of the right pane; a background report made for an older one isn't shown
         self._workers: ThreadPoolExecutor | None = None  # the threads background reports load on
         self._task: Any = None  # the last background report's asyncio task (tests wait for it)
@@ -992,6 +1031,12 @@ class S3Explorer:
     def location(self) -> str:
         """The folder you're in ('s3://bucket/prefix/'), or '' for the list of buckets."""
         return self.nav.location if self.s3 is not None else ""
+
+    @property
+    def picked(self) -> list[str]:
+        """The files and folders ticked in the list (s3:// paths), in the order they were ticked: x.ui.download_zip(
+        x.picked) zips them from code."""
+        return list(self._picked)
 
     @_friendly_errors
     def open(self, uri: str = "") -> None:
@@ -1140,7 +1185,8 @@ class S3Explorer:
         waiting = {"preview": f"Opening {name}…", "head": f"Reading the details of {name}…",
                    "document": f"Reading {name}…", "download": f"Downloading {name}…",
                    "summary": "Reading every file below this folder…",
-                   "zip": "Listing every file below this folder, then zipping them…"}
+                   "zip": "Listing every file below this folder, then zipping them…",
+                   "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
         self._wait(waiting.get(action, "Working…"))
         loop = self._loop() if isinstance(method, str) and action in _BACKGROUND else None
         if loop is not None:
@@ -1207,7 +1253,7 @@ class S3Explorer:
         self._content.value = (f'<div class="s3x-wait"><div class="s3x-wait-t"><span class="s3x-spin"></span>'
                                f'{html.escape(text)}</div><div class="s3x-sk s3x-t"></div><div class="s3x-sk-cards">'
                                + '<div class="s3x-sk"></div>' * 4 + f"</div>{lines}</div>")
-        self._settings.layout.display = "none"
+        self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(False)
         self._renew("right")
 
@@ -1227,7 +1273,7 @@ class S3Explorer:
                 type(self._pane)._show(self._pane, blocks)
             return
         self._content.value = "".join(self.s3._render_html(blocks, self._pane.max_rows) for blocks in reports)
-        self._settings.layout.display = "none"
+        self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(keep)
         self._renew("right")
 
@@ -1242,6 +1288,7 @@ class S3Explorer:
         self.selected, self._limit, self._action = "", self.page_size, ""
         if not same:
             self._query, self._deep, self._all_types = "", False, False
+            self._picked.clear()  # another folder: start a new selection
         if self.nav.focus and not same:
             self._kind = "all"  # so the file it opens is in the list
         if self._deep:
@@ -1263,6 +1310,7 @@ class S3Explorer:
         else:
             self._show_folder(folder)
         self._draw_status(folder)
+        self._draw_picks()
 
     def _select(self, uri: str) -> None:
         """Show a file on the right."""
@@ -1437,14 +1485,15 @@ class S3Explorer:
         self._finder = w.VBox([search, self._kinds, self._types], layout=w.Layout(width="100%", flex="0 0 auto"))
         self._finder.add_class("s3x-find")
 
+        self._check_all = button("✓", " ".join(_CHECK), "Select everything listed", self._on_check_all)
         self._cols = {
-            "name": button("Name", "s3x-col", "Sort by name", lambda: self._on_sort("name"), flex="1 1 auto",
-                           width="auto"),
+            "name": button("Name", "s3x-col s3x-namecol", "Sort by name", lambda: self._on_sort("name"),
+                           flex="1 1 auto", width="auto"),
             "size": button("Size", "s3x-col s3x-num", "Sort by size", lambda: self._on_sort("size"), width="76px"),
             "modified": button("Modified", "s3x-col s3x-num", "Sort by date", lambda: self._on_sort("modified"),
                                width="76px"),
         }
-        head = w.HBox(list(self._cols.values()), layout=w.Layout(width="100%", flex="0 0 auto"))
+        head = w.HBox([self._check_all, *self._cols.values()], layout=w.Layout(width="100%", flex="0 0 auto"))
         head.add_class("s3x-head")
         self._rows_box = w.VBox(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._rows_box.add_class("s3x-rows")
@@ -1467,6 +1516,14 @@ class S3Explorer:
         self._pager = w.HBox(layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
         self._pager.add_class("s3x-pager")
         self._settings = self._build_settings(button)
+        self._picks_panel = self._build_picks(button)
+        self._picks_note = w.HTML(layout=w.Layout(flex="1 1 auto", min_width="0"))
+        self._picks_bar = w.HBox([self._picks_note,
+                                  button("Clear", "s3x-quiet", "Unselect everything", self._clear_picks),
+                                  button("⬇ Download selected", "s3x-primary", "Download what's selected as one "
+                                         ".zip: see what goes in and name it first", self._open_picks)],
+                                 layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        self._picks_bar.add_class("s3x-picks")
         self._side = w.VBox([self._finder], layout=w.Layout(width="42%", min_width="300px", flex="0 0 auto"))
         self._side.add_class("s3x-side")
         self._body = w.HBox(layout=w.Layout(width="100%", height=f"{self.height}px"))
@@ -1477,6 +1534,28 @@ class S3Explorer:
         self._app = w.VBox([style, bar, self._body, self._status], layout=w.Layout(width="100%"))
         self._app.add_class("s3x")
         self._act_buttons: dict[str, Any] = {}
+
+    def _build_picks(self, button: Callable[..., Any]) -> Any:
+        """The panel ⬇ Download .zip in the selection bar opens on the right, under what's selected: the zip's name
+        (Enter downloads too), Download and Cancel, and the list of what goes in."""
+        w = self._widgets
+        self._picks_name = w.Text(layout=w.Layout(width="280px"))
+        self._picks_name.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._save_picks))
+        self._picks_where = w.HTML()
+        name = w.HBox([w.Label("Save as", layout=w.Layout(width="64px")), self._picks_name, self._picks_where],
+                      layout=w.Layout(width="100%"))
+        self._picks_go = button("⬇ Download", "s3x-primary", "Make the zip, after checking the size, disk space and "
+                                "read access", self._save_picks)
+        cancel = button("Cancel", "s3x-act", "Close this and keep the selection", self._close_picks)
+        actions = w.HBox([self._picks_go, cancel], layout=w.Layout(width="100%"))
+        for row in (name, actions):
+            row.add_class("s3x-setting")
+        self._picks_msg = w.HTML()
+        self._picks_list = w.HTML(layout=w.Layout(width="100%"))
+        panel = w.VBox([name, actions, self._picks_msg, self._picks_list],
+                       layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        panel.add_class("s3x-settings")
+        return panel
 
     def _build_settings(self, button: Callable[..., Any]) -> Any:
         """The ⚙ Settings panel, shown on the right under its title: a text box per setting, Save and Close.
@@ -1513,9 +1592,10 @@ class S3Explorer:
             self._left = w.VBox([self._head, self._rows_box, self._foot],
                                 layout=w.Layout(width="100%", flex="1 1 auto", min_height="0", overflow="auto"))
             self._left.add_class("s3x-list")
-            self._side.children = (self._finder, self._left)
+            self._side.children = (self._finder, self._left, self._picks_bar)
         if "right" in sides:
-            self._right = w.VBox([self._actions, self._progress, self._content, self._settings, self._pager],
+            self._right = w.VBox([self._actions, self._progress, self._content, self._settings, self._picks_panel,
+                                  self._pager],
                                  layout=w.Layout(flex="1 1 auto", width="auto", min_width="0", overflow="auto"))
             self._right.add_class("s3x-right")  # min_width 0: wide tables scroll
         self._body.children = (self._side, self._right)
@@ -1573,7 +1653,7 @@ class S3Explorer:
         self._up_btn.disabled = not self.nav.location
         bucket = parse_location(self.nav.location)[0]
         self._cols["size"].layout.display = None if bucket else "none"  # buckets have no size: their names get the room
-        self._rows_box._dom_classes = ("s3x-rows",) if bucket else ("s3x-rows", "s3x-nosize")
+        self._draw_side()
         self._draw_header()
 
     def _draw_header(self) -> None:
@@ -1582,7 +1662,15 @@ class S3Explorer:
         for column, b in self._cols.items():
             on = column == self._sort
             b.description = labels[column] + ((" ↓" if self._descending else " ↑") if on else "")
-            b._dom_classes = ("s3x-col",) + (("s3x-num",) if column != "name" else ()) + (("s3x-on",) if on else ())
+            b._dom_classes = ("s3x-col", "s3x-namecol" if column == "name" else "s3x-num") + (
+                ("s3x-on",) if on else ())
+
+    def _draw_side(self) -> None:
+        """The list's state, for the style: on the list of buckets (no sizes, nothing to select), and while
+        something is selected (every row shows its checkbox)."""
+        bucket = parse_location(self.nav.location)[0]
+        self._side._dom_classes = ("s3x-side",) + (() if bucket else ("s3x-buckets",)) + (
+            ("s3x-picking",) if self._picked else ())
 
     def _draw_filters(self, folder: Folder) -> None:
         """Above the list: the search box, All / Folders / Files with how many of each match it, Include subfolders,
@@ -1645,7 +1733,7 @@ class S3Explorer:
         self._visible = entries
         shown = entries[: self._limit]
         while len(self._pool) < len(shown):
-            self._pool.append(_Row(w, self._on_row))
+            self._pool.append(_Row(w, self._on_row, self._on_check))
         base = parse_location(folder.uri)[1] if folder.deep else None
         for row, entry in zip(self._pool, shown):
             self._fill(row, entry, base)
@@ -1655,6 +1743,7 @@ class S3Explorer:
             self._rows_at = time.monotonic()
         self._rows_key = key
         self._draw_foot(folder, entries, len(shown))
+        self._draw_check_all()
 
     def _fill(self, row: _Row, entry: Entry, base: str | None = None) -> None:
         """Show an entry in a row. In a list of everything below a folder (`base`, its prefix), the folder the entry
@@ -1675,7 +1764,8 @@ class S3Explorer:
         with row.button.hold_sync():
             row.button.description = f"{entry_icon(entry, s3)}  {name}{'  ❄' if entry.archived else ''}"
             row.button.tooltip = tip
-            row.button._dom_classes = ("s3x-row", "s3x-on") if entry.uri == self.selected else ("s3x-row",)
+            row.button._dom_classes = self._row_classes(entry)
+        row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())
         row.size.value, row.age.value = size, age
         if base is not None:
             where = _parent_prefix(entry.key[:-1] if entry.kind == "folder" else entry.key)[len(base):]
@@ -1683,12 +1773,18 @@ class S3Explorer:
         row.where.layout.display = None if base is not None else "none"
         row.box._dom_classes = ("s3x-r", "s3x-r2") if base is not None else ("s3x-r",)
 
+    def _row_classes(self, entry: Entry) -> tuple[str, ...]:
+        """A row's button: lit for the file shown on the right, tinted when it's selected."""
+        return ("s3x-row",) + (("s3x-on",) if entry.uri == self.selected else ()) + (
+            ("s3x-picked",) if entry.uri in self._picked else ())
+
     def _mark_rows(self) -> None:
         if self._widgets is None:
             return
         for row in self._pool[: len(self._rows_box.children)]:
-            on = row.entry is not None and row.entry.uri == self.selected
-            row.button._dom_classes = ("s3x-row", "s3x-on") if on else ("s3x-row",)
+            if row.entry is not None:
+                row.button._dom_classes = self._row_classes(row.entry)
+                row.check._dom_classes = _CHECK + (("s3x-on",) if row.entry.uri in self._picked else ())
 
     def _draw_foot(self, folder: Folder, entries: list[Entry], shown: int) -> None:
         """Under the list: Show more, Load more from S3 and Look up, or why the list is empty and what to do."""
@@ -1852,23 +1948,190 @@ class S3Explorer:
             size = str(self.zip_max_size)
         return f"{size} and {self.zip_max_files:,} files"
 
-    def _zip(self, uri: str) -> None:
-        """⬇ Download .zip, for a folder: s3's download_zip with the limits from ⚙ Settings. It checks the size, file
-        count, disk space, memory and read access first, and writes nothing when one fails."""
-        bucket, prefix = parse_location(uri)
-        name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
-        folder = os.path.expanduser(self.zip_folder.strip() or ".")
-        if folder != ".":
+    def _zip(self, target: str | list[Any], path: str = "") -> None:
+        """⬇ Download .zip, for a folder (`target` is its uri) or what's selected (a list, and the path it goes to):
+        s3's download_zip with the limits from ⚙ Settings. It checks the size, file count, disk space, memory and
+        read access first, and writes nothing when one fails."""
+        if not path:
+            bucket, prefix = parse_location(target)
+            name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
+            path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), name)
+        folder = os.path.dirname(path)
+        if folder and folder != ".":
             os.makedirs(folder, exist_ok=True)
-        self._pane.download_zip(uri, name if folder == "." else os.path.join(folder, name),
+        self._pane.download_zip(target, os.path.normpath(path),
                                 max_size=self.zip_max_size, max_files=self.zip_max_files)
         report = self._captured[-1] if self._captured else []
         refused = any(card[:2] == ("Can download", "no") for block in report if isinstance(block, self.s3._Cards)
                       for card in block.items)
         if refused:  # after the line that says why
             at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Note)), len(report))
-            report.insert(at, self.s3._Note(f"If it's over a limit, ⚙ at the top right raises them (now "
-                                            f"{self._zip_limit()}); then click ⬇ Download .zip again."))
+            fix = ("⚙ at the top right raises them" if isinstance(target, str) else
+                   "untick some files, or raise the limits with ⚙ at the top right")
+            again = "⬇ Download .zip" if isinstance(target, str) else "⬇ Download selected"
+            report.insert(at, self.s3._Note(f"If it's over a limit, {fix} (now {self._zip_limit()}); then click "
+                                            f"{again} again."))
+
+    # ------------------------------------------------------------------ selecting files to download as one .zip
+
+    def _on_check(self, row: _Row) -> None:
+        """A row's checkbox: select it, or unselect it."""
+        entry = row.entry
+        if entry is None or entry.kind == "bucket":
+            return
+        if self._picked.pop(entry.uri, None) is None:
+            self._picked[entry.uri] = entry
+        row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())
+        row.button._dom_classes = self._row_classes(entry)
+        self._draw_picks()
+
+    def _on_check_all(self) -> None:
+        """The header's checkbox: select everything the list shows (with a search, what matches it, past "Show
+        more" too), or unselect it when it's all selected already."""
+        shown = [e for e in self._visible if e.kind != "bucket"]
+        if shown and all(e.uri in self._picked for e in shown):
+            for entry in shown:
+                self._picked.pop(entry.uri, None)
+        else:
+            self._picked.update((e.uri, e) for e in shown)
+        self._mark_rows()
+        self._draw_picks()
+
+    def _clear_picks(self) -> None:
+        self._picked.clear()
+        self._mark_rows()
+        self._draw_picks()
+
+    def _draw_check_all(self) -> None:
+        """The header's checkbox: empty, ticked when everything listed is selected, or a dash for some of it."""
+        if self._widgets is None:
+            return
+        shown = [e for e in self._visible if e.kind != "bucket"]
+        on = sum(e.uri in self._picked for e in shown)
+        if shown and on == len(shown):
+            self._check_all._dom_classes, tip = _CHECK + ("s3x-on",), "Unselect everything listed"
+        elif on:
+            self._check_all._dom_classes = ("s3x-check", "s3x-ic", "s3x-i-minus", "s3x-on")
+            tip = f"Select all {len(shown):,} listed"
+        else:
+            self._check_all._dom_classes, tip = _CHECK, f"Select all {len(shown):,} listed"
+        self._check_all.tooltip = tip
+        self._check_all.layout.display = None if shown else "none"
+        self._draw_side()
+
+    def _picks_summary(self) -> tuple[list[Entry], int, int]:
+        """(the selected files, how many folders are selected, the files' bytes)."""
+        files = [e for e in self._picked.values() if not e.is_folder]
+        return files, len(self._picked) - len(files), sum(e.size or 0 for e in files)
+
+    def _draw_picks(self) -> None:
+        """After the selection changed: the bar under the list (how many, how big, Clear and ⬇ Download .zip), the
+        header's checkbox, and the panel on the right if it's open."""
+        if self._widgets is None:
+            return
+        files, folders, size = self._picks_summary()
+        if self._picked:
+            more = f" + {_plural(folders, 'folder')}" if folders else ""
+            self._picks_note.value = (f'<span class="s3x-picks-n">{len(self._picked):,} selected</span>'
+                                      f'<span class="s3x-picks-s">{self.s3.human_size(size)}{more}</span>')
+        self._picks_bar.layout.display = None if self._picked else "none"
+        self._draw_check_all()
+        if self._picks_panel.layout.display != "none":
+            if self._picked:
+                self._open_picks(keep_name=True)
+            else:
+                self._close_picks()
+
+    def _picks_layout(self) -> tuple[str, str, str]:
+        """(bucket, the folder the selected entries share, the zip's name without .zip), as download_zip names it."""
+        bucket = parse_location(self.nav.location)[0]
+        base, name = self.s3._zip_layout(bucket, [e.key for e in self._picked.values()])
+        return bucket, base, name
+
+    def _picks_default(self) -> str:
+        """The zip's name: download_zip's ('churn-12-files.zip'), with -2, -3, ... when that file is already there."""
+        name = self._picks_layout()[2]
+        folder = os.path.expanduser(self.zip_folder.strip() or ".")
+        number, candidate = 1, f"{name}.zip"
+        while os.path.exists(os.path.join(folder, candidate)):
+            number += 1
+            candidate = f"{name}-{number}.zip"
+        return candidate
+
+    def _open_picks(self, keep_name: bool = False) -> None:
+        """⬇ Download .zip in the selection bar: on the right, what goes in the zip and how big it is, its name,
+        and the button that makes it. Nothing is downloaded until that's clicked."""
+        s3 = self.s3
+        files, folders, size = self._picks_summary()
+        bucket, base, _ = self._picks_layout()
+        try:
+            limit = s3.parse_size(self.zip_max_size)
+        except (TypeError, ValueError):
+            limit = None
+        over = limit is not None and size > limit
+        parts = [_plural(len(files), "file")] if files else []
+        parts += [_plural(folders, "folder")] if folders else []
+        plus = "+" if folders else ""
+        cards: list[tuple[str, ...]] = [("Files", f"{len(files):,}{plus}"),
+                                        ("Size", s3.human_size(size) + plus, *(("warn",) if over else ()))]
+        cards += [("Limit", s3.human_size(limit))] if limit is not None else []
+        blocks: list[Any] = [s3._Title(f"Download {' and '.join(parts)} as one .zip", f"from s3://{bucket}/{base}"),
+                             s3._Cards(cards)]
+        if over:
+            blocks.append(s3._Note(f"That's over the {s3.human_size(limit)} limit for one zip, so it won't be made: "
+                                   "untick some files, or raise the limit with ⚙ at the top right.", "warn"))
+        if folders:
+            blocks.append(s3._Note(f"The {'folder goes' if folders == 1 else 'folders go'} in with everything below "
+                                   f"{'it' if folders == 1 else 'them'}, which is listed and counted when you click "
+                                   "Download; the size here is the selected files'."))
+        archived = sum(e.archived for e in files)
+        if archived:
+            blocks.append(s3._Note(f"{_plural(archived, 'selected file')} {'is' if archived == 1 else 'are'} in "
+                                   "GLACIER or DEEP_ARCHIVE (❄), so the zip leaves "
+                                   f"{'it' if archived == 1 else 'them'} out until restored.", "warn"))
+        self._action = "picks"
+        self._mark_actions()
+        self._set_pane([blocks])
+        rows = [[e.key[len(base):] or e.key, "" if e.is_folder else s3.human_size(e.size),
+                 s3.human_age(e.modified) if e.modified else ""]
+                for e in sorted(self._picked.values(), key=lambda e: _natural(e.key))]
+        self._picks_list.value = s3._render_html(
+            [s3._Table(["Name", "Size", "Modified"], rows, title="What goes in the zip", path_cols=(0,), max_rows=0)],
+            0)
+        if not keep_name or self._picks_name.value == self._picks_auto:
+            self._picks_name.value = self._picks_auto = self._picks_default()
+        where = self.zip_folder.strip() or "."
+        where = "the notebook's folder" if where == "." else html.escape(where)
+        self._picks_where.value = f'<span class="s3x-hint">in {where}</span>'
+        self._picks_msg.value = ""
+        self._picks_go.disabled = over  # the note above says what to do instead
+        self._picks_panel.layout.display = None
+
+    def _close_picks(self) -> None:
+        """Back to the file or folder that was shown; the selection stays."""
+        self._picks_panel.layout.display = "none"
+        if self.selected:
+            self._select(self.selected)
+        else:
+            self._show_folder(self._source())
+
+    def _save_picks(self) -> None:
+        """Download in the panel: zip what's selected under the name typed, unless a file of that name is there."""
+        s3 = self.s3
+        name = self._picks_name.value.strip()
+        if not name:
+            self._picks_msg.value = s3._render_html([s3._Note("Type a name for the zip.", "warn")], 0)
+            return
+        if not name.lower().endswith(".zip"):
+            name += ".zip"
+        path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), os.path.expanduser(name))
+        if os.path.exists(path):
+            self._picks_msg.value = s3._render_html([s3._Note(
+                f"{name} is already there, and the explorer doesn't replace files: type another name.", "warn")], 0)
+            return
+        picks = [s3.ObjectInfo(e.bucket, e.key, e.size or 0, e.modified, e.storage_class or "STANDARD", e.etag)
+                 if not e.is_folder and e.modified else e.uri for e in self._picked.values()]
+        self._report("picks", self._zip, picks, path, cache=False)
 
     def _toggle_settings(self) -> None:
         if self._settings.layout.display == "none":
