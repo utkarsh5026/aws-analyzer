@@ -25,6 +25,7 @@ nav:
   - Amazon S3: s3.md
   - Amazon DynamoDB: dynamodb.md
   - Bedrock Knowledge Bases: bedrock_kb.md
+  - Bedrock chat: bedrock_chat.md
   - Amazon SageMaker: sagemaker_env.md
 
 theme:

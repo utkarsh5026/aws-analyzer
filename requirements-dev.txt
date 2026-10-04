@@ -25,7 +25,8 @@ pypdfium2==5.13.0
 pillow==12.3.0
 # Optional for users (progress bars); installed here so the tqdm path is tested.
 tqdm==4.70.1
-# Optional for users (s3_explorer.py's clicks, tqdm's notebook bar); installed here so the explorer's widgets are tested.
+# Optional for users (s3_explorer.py's clicks, bedrock_chat.py's window, tqdm's notebook bar); installed here so
+# both windows' widgets are tested.
 ipywidgets==8.1.9
 
 # Package (CI's Package job and the release workflow): build the sdist and wheel, and check them
@@ -35,4 +36,4 @@ twine==7.0.0
 readme-renderer[md]==46.0
 
 # Lint
-ruff==0.16.8
+ruff==0.16.9
