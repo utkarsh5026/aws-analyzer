@@ -992,7 +992,7 @@ def test_render_findings_tones_and_next():
     rendered = ddbmod._render_html(blocks, 50)
     assert (
         'class="card warn"' in rendered
-        and '<span class="badge">DynamoDB</span>'
+        and '<span class="badge">🗄️ DynamoDB</span>'
         in ddbmod._render_html([ddbmod._Title("Table t")], 50)
     )
     assert (
@@ -1012,7 +1012,7 @@ def test_ui_help_groups_every_command(ui, capsys):
         name for names in DynamoDBView._GROUPS.values() for name in names
     }
     assert (
-        "-- Look at items --" in out
+        "-- 👀 Look at items --" in out
         and "get(table, *key, as_json=False)" in out
         and "'str'" not in out
     )

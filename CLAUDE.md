@@ -151,8 +151,10 @@ How the View layer works:
     menu of checkboxes. They are radio buttons, selects and checkboxes in a `<form method="dialog">` that `:has()`
     rules read: rows carry their sort place as `--a<j>` / `--d<j>` and are ordered with CSS grid `order` on a
     subgrid. The controls carry `hidden="hidden"` (JupyterLab's sanitizer keeps it, not a bare `hidden`), so an
-    untrusted notebook, which loses its `<style>`, shows a plain table. `path_cols` marks columns of keys: the
-    folder dimmed and shortened from the left, the file name whole, the full key on hover (text mode drops the
+    untrusted notebook, which loses its `<style>`, shows a plain table. `path_cols` marks columns of keys: an icon
+    for the file's type (`_file_icon` from `_ICONS`, which the explorer's list uses too; drawn only, so the cell
+    still sorts and copies as the key), the folder dimmed and shortened from the left, the file name whole, the
+    full key on hover (text mode draws no icons, only the 📁 that `ls` writes in a folder's cell, and drops the
     start of the folder, never the name). `sortable=False` opts a table out; tree tables and help() never sort.
   - `_Table(collapsed=True)` / `_Text(collapsed=True)` fold a secondary view (tags, raw JSON) under its title, and
     `_Text(code=True)` marks a snippet to copy: one click selects all of it.

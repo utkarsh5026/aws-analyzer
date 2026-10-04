@@ -72,6 +72,7 @@ import sys
 import tarfile
 import threading
 import time
+import unicodedata
 import zipfile
 import zlib
 from xml.etree import ElementTree
@@ -7410,7 +7411,7 @@ _CSS = """<style>
 .s3a td.p .pd{display:inline-block;max-width:30em;overflow:hidden;text-overflow:ellipsis;direction:rtl;vertical-align:top;opacity:.6}
 .s3a td.p .pd::before,.s3a td.p .pd::after{content:"\\200E"}
 .s3a td.p .pn{white-space:normal;overflow-wrap:anywhere}
-.s3a td.p .pi{margin-right:5px}
+.s3a td.p .pi{margin-right:5px;user-select:none;-webkit-user-select:none}
 .s3a form.tbl{margin:0;counter-reset:rows}
 .s3a form.tbl tbody tr{counter-increment:rows}
 .s3a .tt{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:14px}
@@ -7574,7 +7575,7 @@ _CSS = """<style>
     for j in range(_SORT_COLUMNS)
 ))
 
-_BADGE = "S3"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
+_BADGE = "🪣 S3"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 # A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
 # or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
@@ -7747,12 +7748,45 @@ def _ranks(keys: list[Any]) -> tuple[list[int], list[int]]:
     return up, down
 
 
+_ICONS = {  # extension -> the icon in front of a file's name, in key columns and in s3_explorer's list
+    **dict.fromkeys(("csv", "tsv", "tab", "psv", "parquet", "pq", "orc", "feather", "arrow", "ipc", "avro"), "📊"),
+    **dict.fromkeys(("xlsx", "xlsm", "xls"), "📗"),
+    **dict.fromkeys(("json", "jsonl", "ndjson", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf"), "📋"),
+    **dict.fromkeys(("png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "svg"), "🖼️"),
+    **dict.fromkeys(("wav", "mp3", "flac", "ogg", "m4a", "aac"), "🎵"),
+    **dict.fromkeys(("mp4", "webm", "mov", "m4v", "avi", "mkv"), "🎬"),
+    **dict.fromkeys(("zip", "tar", "tgz", "7z", "rar", "gz", "bz2", "xz", "zst"), "📦"),
+    **dict.fromkeys(("safetensors", "pt", "pth", "ckpt", "onnx", "h5", "keras", "pkl", "pickle", "joblib",
+                     "gguf", "bin"), "🧠"),
+    **dict.fromkeys(("npy", "npz"), "🔢"),
+    **dict.fromkeys(("docx", "docm", "doc", "dotx", "rtf"), "📘"),
+    **dict.fromkeys(("pptx", "pptm", "ppt", "ppsx"), "📙"),
+    "pdf": "📕",
+    "ipynb": "📓",
+}
+
+
+def _file_icon(key: str) -> str:
+    """📁 for a folder, else the file's icon by its extension: 📊 tables, 📕 PDF, 🖼️ pictures, 🧠 models, ...,
+    📄 for anything else. 'data.csv.gz' is a table and 'logs.tar.gz' an archive."""
+    if key.endswith("/"):
+        return "📁"
+    ext = file_extension(key)
+    if ext.startswith("("):  # '(none)'
+        return "📄"
+    return _ICONS.get(ext.split(".")[0], _ICONS.get(ext.rsplit(".", 1)[-1], "📄"))
+
+
 def _path_html(text: str) -> str:
-    """A key in a table cell: its folder dimmed and, when long, shortened from the left (the nearest folders
-    stay), then the file name in full. Each line of the cell is one key; a leading 📁 stays an icon."""
+    """A key in a table cell: its icon (📁 for a folder, 📊 for a table, ... by _file_icon), its folder dimmed and,
+    when long, shortened from the left (the nearest folders stay), then the file name in full. Each line of the
+    cell is one key. The icon is only drawn: the cell's text, which sorts and copies, is the key alone."""
     lines = []
     for line in text.split("\n"):
-        icon, line = ("📁", line[2:]) if line.startswith("📁 ") else ("", line)
+        if line.startswith("📁 "):
+            icon, line = "📁", line[2:]
+        else:
+            icon = "" if line in ("", "-") or line.startswith(("…", "(")) else _file_icon(line)
         folder, _, name = line.rstrip("/").rpartition("/")
         name += line[len(line.rstrip("/")):]
         folder = f"{folder}/" if folder and not line.startswith(("…", "(")) else ""  # not '… and 3 more'
@@ -8429,6 +8463,25 @@ def _clip(text: str, width: int = 90) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
+def _width(text: str) -> int:
+    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
+    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
+    width, wide = 0, False
+    for ch in text:
+        if ch == "\ufe0f":
+            width, wide = width + (not wide), True
+        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
+            wide = unicodedata.east_asian_width(ch) in ("W", "F")
+            width += 2 if wide else 1
+    return width
+
+
+def _pad(text: str, width: int, right: bool = False) -> str:
+    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
+    fill = " " * max(0, width - _width(text))
+    return fill + text if right else text + fill
+
+
 def _render_text(blocks: list[Any], max_rows: int) -> str:
     out: list[str] = []
     for block in blocks:
@@ -8485,13 +8538,13 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 for i, row in enumerate(rows)
             ]
             widths = [
-                max([len(h)] + [len(r[j]) for r in cells])
+                max([_width(h)] + [_width(r[j]) for r in cells])
                 for j, h in enumerate(headers)
             ]
 
             def line_of(values: list[str], widths: list[int] = widths) -> str:
                 return "  ".join(
-                    v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
                     for v, w in zip(values, widths)
                 ).rstrip()
 
@@ -9216,8 +9269,8 @@ class S3View:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
-        "Buckets": ("buckets", "overview", "bucket_info", "policy"),
-        "Explore a folder": (
+        "🪣 Buckets": ("buckets", "overview", "bucket_info", "policy"),
+        "📂 Explore a folder": (
             "ls",
             "tree",
             "summary",
@@ -9228,9 +9281,9 @@ class S3View:
             "oldest",
             "compare",
         ),
-        "Cut cost": ("duplicates", "what_if", "uploads"),
-        "Versions and deleted files": ("versions", "history", "deleted"),
-        "Open a file": (
+        "💰 Cut cost": ("duplicates", "what_if", "uploads"),
+        "🕘 Versions and deleted files": ("versions", "history", "deleted"),
+        "📄 Open a file": (
             "head",
             "preview",
             "document",
@@ -9238,7 +9291,7 @@ class S3View:
             "download_zip",
             "link",
         ),
-        "Help": ("help",),
+        "❓ Help": ("help",),
     }
     _START = (
         ("overview()", "every bucket: size, cost and warnings"),
