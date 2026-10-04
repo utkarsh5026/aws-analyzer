@@ -130,8 +130,10 @@ How the View layer works:
   radio button that its picture's `<label>` checks, and a checked one makes the page a fixed overlay whose ‹ › ✕
   are labels for the neighbouring pages' radios and the report's "none" radio, so a click shows the page full size
   and steps through every drawn page in the report; JupyterLab confines fixed elements to the notebook panel, so
-  it fills the notebook, not the window) and `_Flow` (a Word
-  document laid out: headings, lists, tables and its pictures in place), and in Bedrock `_Passage` (a retrieved
+  it fills the notebook, not the window), `_Flow` (a Word
+  document laid out: headings, lists, tables and its pictures in place) and `_JsonTree` (a JSON file as nested
+  `<details>` with coloured tokens, capped and opened breadth-first; not `bedrock_chat`'s `_Json`, which shows a
+  request with its settings marked), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.

@@ -1384,6 +1384,95 @@ def _looks_binary(data: bytes) -> bool:
         )  # a multi-byte char cut at the end is still text
 
 
+_JSON_TOKEN_RE = re.compile(
+    r'\s*(?:([{}\[\]:,])|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null|NaN|-?Infinity))'
+)
+_JSON_CUT_RE = re.compile(r'\s*(?:"|-?[\d.eE+-]*$|-?[tfnNI][a-z]*$)')  # what a cut can leave: a string, number, word
+
+
+def _json_prefix(text: str) -> tuple[Any, int] | None:
+    """The start of a JSON document that was cut off (the first bytes of a file too big to read whole): the objects
+    and arrays read so far, closed where the text stops, and how many of them were still open there (0: the text
+    holds the whole document). None when the text isn't the start of a JSON object or array."""
+    stack: list[Any] = []  # the open objects and arrays, outermost first
+    keys: list[Any] = []  # each open object's key waiting for its value (None for arrays, or before the key)
+    root: Any = None
+    text = text.lstrip("\ufeff")
+    pos, end = 0, len(text)
+    while stack or root is None:
+        match = _JSON_TOKEN_RE.match(text, pos)
+        if not match or (match.group(3) and match.end() == end):  # a number at the very end may be cut short
+            break
+        pos = match.end()
+        punct, string, number, word = match.groups()
+        if punct in (",", ":"):
+            continue
+        if punct in ("}", "]"):
+            if not stack or (punct == "}") != isinstance(stack[-1], dict):
+                return None
+            stack.pop()
+            keys.pop()
+            continue
+        if punct:
+            value: Any = {} if punct == "{" else []
+        elif string is not None and "\\" not in string:
+            value = string[1:-1]  # most strings have no escapes: much quicker than json.loads
+        else:
+            try:
+                value = json.loads(string or number or word)
+            except ValueError:
+                return None
+        if string is not None and stack and isinstance(stack[-1], dict) and keys[-1] is None:
+            keys[-1] = value
+            continue
+        if not stack:
+            if not isinstance(value, (dict, list)):
+                return None  # a lone string or number isn't worth a tree
+            root = value
+        elif isinstance(stack[-1], dict):
+            if keys[-1] is None:
+                return None  # a value where a key belongs
+            stack[-1][keys[-1]] = value
+            keys[-1] = None
+        else:
+            stack[-1].append(value)
+        if punct:
+            stack.append(value)
+            keys.append(None)
+    if root is None or (stack and not _JSON_CUT_RE.match(text, pos)):
+        return None  # not JSON, or broken before the cut
+    return root, len(stack)
+
+
+def _json_lines_start(data: bytes) -> bool:
+    """Whether data starts like JSON lines (one record per line): a whole JSON value on its first line, then more."""
+    first, newline, _ = data.lstrip().partition(b"\n")
+    if not newline:
+        return False
+    try:
+        json.loads(first)
+    except ValueError:
+        return False
+    return True
+
+
+def _json_shape(value: Any, cut: int = 0) -> dict[str, Any]:
+    """Preview.info for a JSON value: its keys (an object) or items (an array), and how deep it nests. A document
+    that was cut off (cut > 0) has at least that many, and its depth isn't known."""
+    if not isinstance(value, (dict, list)):
+        return {}
+    count = f"{len(value):,}+" if cut else len(value)
+    shape: dict[str, Any] = {"keys" if isinstance(value, dict) else "items": count}
+    if not cut:
+        depth, level = 0, [value]
+        while level:
+            depth += 1
+            level = [child for node in level for child in (node.values() if isinstance(node, dict) else node)
+                     if isinstance(child, (dict, list)) and child]
+        shape["depth"] = depth
+    return shape
+
+
 # =============================================================================
 # 2. Data models (what S3Analyzer returns)
 # =============================================================================
@@ -1997,7 +2086,8 @@ class Document:
 
 @dataclass
 class Preview:
-    """First look at an object. kind: 'table' (DataFrame), 'json', 'text' (list of lines),
+    """First look at an object. kind: 'table' (DataFrame), 'json' (the parsed value; info['cut'] when it's
+    only the start of a bigger file: how many objects and arrays were cut off), 'text' (list of lines),
     'listing' (list of dicts: archive members, notebook cells, tensors, arrays), 'image' (bytes),
     'document' (text; the parsed Document in .document, with a PDF's first pages drawn and a Word file's
     pictures), 'media' (presigned URL for audio / video / PDF), 'binary' (bytes) or 'unavailable'."""
@@ -6755,16 +6845,14 @@ class S3Analyzer:
                 except ValueError:
                     pass  # maybe JSON lines with a .json name - tried below
                 else:
-                    if (
-                        isinstance(parsed, list)
-                        and parsed
-                        and all(isinstance(r, dict) for r in parsed)
-                    ):
-                        pd = _require("pandas", "Table preview")
-                        p.kind, p.data = "table", pd.json_normalize(parsed[:n])
-                        p.info["records"] = len(parsed)
-                    else:
-                        p.kind, p.data = "json", parsed
+                    self._show_json(p, parsed, n=n)
+                    return
+            elif not _json_lines_start(data):  # one big document, not a record per line: show its start
+                start = _json_prefix(data.decode("utf-8", errors="replace"))
+                if start is not None:
+                    self._show_json(p, *start, n=n)
+                    p.note = (f"The file is bigger than the {human_size(max_bytes)} preview window, so this is "
+                              f"its start; {_call('download', p.uri)} gets all of it.")
                     return
             try:  # Firehose / Spark often write JSON lines into '.json' files
                 p.kind, p.data = (
@@ -6790,6 +6878,20 @@ class S3Analyzer:
         p.kind = "text"
         p.truncated = p.truncated or len(lines) > n
         p.data = lines[:n]
+
+    def _show_json(self, p: Preview, value: Any, cut: int = 0, *, n: int = 20) -> None:
+        """A list of records as a table, anything else as JSON. `cut`: the objects and arrays along the end of a
+        document that was cut off (_json_prefix), so a record cut in half isn't a row."""
+        records = value[:-1] if isinstance(value, list) and cut > 1 else value
+        if isinstance(records, list) and records and all(isinstance(r, dict) for r in records):
+            pd = _require("pandas", "Table preview")
+            p.kind, p.data = "table", pd.json_normalize(records[:n])
+            p.info["records"] = f"{len(records):,}+" if cut else len(records)
+            return
+        p.kind, p.data = "json", value
+        p.info.update(_json_shape(value, cut))
+        if cut:
+            p.info["cut"] = cut
 
     def presigned_url(self, uri: str, *, expires: int = 3600) -> str:
         """Temporary HTTPS link to download the object without AWS credentials."""
@@ -7439,6 +7541,33 @@ _CSS = """<style>
 .s3a .flow figure{margin:10px 0}
 .s3a .flow img{display:block;height:auto;max-height:none}
 .s3a .flow .pm{margin:8px 0;padding:5px 10px;border:1px dashed rgba(127,127,127,.5);border-radius:4px;font-size:12px;opacity:.75}
+.s3a .jt{max-height:640px;overflow:auto;margin:2px 0 8px;padding:6px 10px 6px 24px;border:1px solid rgba(127,127,127,.3)}
+.s3a .jt{border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.6}
+.s3a .jt .jr,.s3a .jt summary{white-space:pre-wrap;overflow-wrap:anywhere;border-radius:3px}
+.s3a .jt .jr:hover,.s3a .jt summary:hover{background:rgba(127,127,127,.1)}
+.s3a .jt summary{display:block;position:relative;list-style:none;cursor:pointer}
+.s3a .jt summary::-webkit-details-marker{display:none}
+.s3a .jt summary::before{content:"\\25B8";position:absolute;left:-16px;width:14px;text-align:center;opacity:.45}
+.s3a .jt details[open]>summary::before{content:"\\25BE"}
+.s3a .jt summary:hover::before{opacity:1;color:#3b82f6}
+.s3a .jt details[open]>summary>.jf{display:none}
+.s3a .jt .jc{margin-left:4px;padding-left:16px;border-left:1px solid rgba(127,127,127,.2)}
+.s3a .jt .jc:hover{border-left-color:rgba(127,127,127,.45)}
+.s3a .jk{color:var(--jp-mirror-editor-property-color,var(--vscode-debugTokenExpression-name,light-dark(#0451a5,#9cdcfe)))}
+.s3a .js{color:var(--jp-mirror-editor-string-color,var(--vscode-debugTokenExpression-string,light-dark(#a31515,#ce9178)))}
+.s3a .jd{color:var(--jp-mirror-editor-number-color,var(--vscode-debugTokenExpression-number,light-dark(#098658,#b5cea8)))}
+.s3a .jb{color:var(--jp-mirror-editor-atom-color,var(--vscode-debugTokenExpression-boolean,light-dark(#0000ff,#569cd6)))}
+.s3a .jp{opacity:.65}
+.s3a .jz::before,.s3a .ji::before,.s3a .jm,.s3a .jx{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:11px}
+.s3a .jz::before{content:attr(data-n);margin-left:10px;opacity:.5;white-space:nowrap}
+.s3a .ji::before{content:attr(data-i);display:inline-block;min-width:22px;margin-right:6px;opacity:.45}
+.s3a .jm{opacity:.6;font-style:italic;padding:1px 0}
+.s3a .jw{white-space:pre-wrap;max-width:110ch}
+.s3a .jw>span:hover{background:rgba(127,127,127,.15);border-radius:3px}
+.s3a .jx{display:inline-block;margin-right:6px;padding:0 6px;border-radius:8px;line-height:16px;vertical-align:1px}
+.s3a .jx{background:rgba(59,130,246,.12);box-shadow:inset 0 0 0 1px rgba(59,130,246,.4)}
+.s3a .jv{margin:2px 0 6px 20px;padding:6px 10px;border-left:2px solid rgba(127,127,127,.35);white-space:pre-wrap;overflow-wrap:anywhere}
+.s3a .jv{max-height:320px;overflow:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px}
 </style>""".replace("{sort_rules}", "".join(
     f".s3a form.tbl:has(.k{j} .ra:checked) tbody tr{{order:var(--a{j})}}\n"
     f".s3a form.tbl:has(.k{j} .rd:checked) tbody tr{{order:var(--d{j})}}\n"
@@ -7951,6 +8080,237 @@ def _flow_text(items: list[tuple[str, Any]]) -> str:
     return "".join(out)
 
 
+_JSON_KEYS = 100  # keys of one object a JSON tree shows (more when n is bigger)
+_JSON_ROWS = 2_000  # lines one JSON tree shows at most, so the notebook stays small
+_JSON_OPEN = 80  # lines a JSON tree shows unfolded at first: the shallow levels open first, big parts stay folded
+_JSON_DEPTH = 100  # objects and arrays nested deeper than this stay folded, with nothing inside
+_JSON_INLINE = 80  # an array of plain values this short shows on one line: [3, 224, 224]
+_JSON_STRING = 120  # a longer string folds to its start; a click shows all of it
+_JSON_FULL = 20_000  # characters of one string shown at most
+
+
+@dataclass
+class _JNode:
+    """One line of a _JsonTree: a value, or an object / array whose children are the lines under it."""
+
+    path: str  # how Python reaches it in the loaded file: data['Records'][0]
+    key: str | None = None  # its key in an object, as JSON ('"name"')
+    index: int | None = None  # its place in an array
+    kind: str = "value"  # 'value' | 'object' | 'array' | 'string' (a long one, folded to its start)
+    tokens: list[tuple[str, str]] = field(default_factory=list)  # a value as (css class, text) pieces
+    children: list[_JNode] = field(default_factory=list)
+    total: int = 0  # an object's keys, an array's items, a long string's characters
+    more: int = 0  # children not shown
+    cut: bool = False  # the file goes on past it: it was cut off at the end of the preview
+    parsed: bool = False  # a string holding JSON, shown as the JSON it holds
+    packed: bool = False  # an array of plain values (an embedding, labels): its items wrap like words
+    text: str = ""  # a long string's text, up to _JSON_FULL characters
+    open: bool = False  # starts unfolded
+
+
+def _json_tokens(value: Any) -> list[tuple[str, str]]:
+    """A plain value (or an empty object or array) as coloured pieces of JSON."""
+    if isinstance(value, str):
+        return [("js", json.dumps(value, ensure_ascii=False))]
+    if isinstance(value, bool) or value is None:
+        return [("jb", json.dumps(value))]
+    if isinstance(value, (int, float)):
+        return [("jd", json.dumps(value))]
+    if isinstance(value, (dict, list)):
+        return [("jp", "{}" if isinstance(value, dict) else "[]")]
+    return [("js", json.dumps(str(value), ensure_ascii=False))]  # not from a JSON file (a date): its text
+
+
+def _json_inline(values: list) -> list[tuple[str, str]] | None:
+    """A short array of plain values as one line ([3, 224, 224]); None when it's long or holds objects."""
+    if len(values) > _JSON_INLINE // 3 or any(isinstance(v, (dict, list)) and v for v in values):
+        return None
+    pieces = [("jp", "[")]
+    for i, value in enumerate(values):
+        pieces += ([("jp", ", ")] if i else []) + _json_tokens(value)
+    pieces.append(("jp", "]"))
+    return pieces if sum(len(text) for _, text in pieces) <= _JSON_INLINE else None
+
+
+def _json_inside(text: str) -> Any:
+    """The JSON object or array a string holds (an SNS message, an SQS body, a Step Functions input), else None."""
+    text = text.strip()
+    if len(text) < 3 or text[0] + text[-1] not in ("{}", "[]"):
+        return None
+    try:
+        return json.loads(text) or None
+    except (ValueError, RecursionError):
+        return None
+
+
+def _json_more(node: _JNode) -> str:
+    """'… 980 more items', or '… 980+ more items' in an array that was cut off (the file has more)."""
+    more = _plural(node.more, "more key" if node.kind == "object" else "more item")
+    return "… " + (more.replace(" ", "+ ", 1) if node.cut else more)
+
+
+class _JsonTree:
+    """A render block: a JSON value as a tree you can fold, coloured like code. It holds the value's lines, each
+    array capped at `items`, each object at _JSON_KEYS (or `items` when that's bigger) and the whole tree at
+    _JSON_ROWS. A string that holds a JSON object or array shows
+    as the JSON it holds. `cut` is how many of the objects and arrays along the end were cut off (the start of a
+    file too big to read whole). The shallow levels start unfolded, as many as fit in _JSON_OPEN lines."""
+
+    def __init__(self, value: Any, items: int = 20, cut: int = 0, title: str = ""):
+        self.items, self.rows, self.cut, self.title = max(items, 1), 0, cut > 0, title
+        self.capped: set[str] = set()  # 'item' / 'key': an array / object had more than it shows
+        self.full = False  # the tree stopped at _JSON_ROWS lines
+        self.root = self._node(value, "data", cut, 0)
+        self._unfold()
+
+    def _node(self, value: Any, path: str, cut: int, depth: int, key: str | None = None,
+              index: int | None = None) -> _JNode:
+        self.rows += 1
+        node = _JNode(path, key, index)
+        if isinstance(value, str):
+            inner = _json_inside(value)
+            if inner is None:
+                return self._string(node, value)
+            value, node.path, node.parsed = inner, f"json.loads({path})", True
+        if not isinstance(value, (dict, list)) or not value:
+            node.tokens = _json_tokens(value)
+            return node
+        line = _json_inline(value) if isinstance(value, list) and not cut else None
+        if line:
+            node.tokens = line
+            return node
+        node.kind, node.total, node.cut = "object" if isinstance(value, dict) else "array", len(value), cut > 0
+        most = max(self.items, _JSON_KEYS) if node.kind == "object" else self.items
+        entries = value.items() if isinstance(value, dict) else enumerate(value)
+        for i, (name, child) in enumerate(entries):
+            if i >= most or self.rows >= _JSON_ROWS or depth >= _JSON_DEPTH:
+                node.more = len(value) - i
+                self.full = self.full or self.rows >= _JSON_ROWS
+                if i >= most:
+                    self.capped.add("key" if node.kind == "object" else "item")
+                break
+            inner_cut = cut - 1 if cut and i == len(value) - 1 else 0
+            if node.kind == "object":
+                node.children.append(self._node(child, f"{node.path}[{name!r}]", inner_cut, depth + 1,
+                                                key=json.dumps(name, ensure_ascii=False)))
+            else:
+                node.children.append(self._node(child, f"{node.path}[{i}]", inner_cut, depth + 1, index=i))
+        node.packed = node.kind == "array" and all(c.kind == "value" and not c.parsed for c in node.children)
+        return node
+
+    def _string(self, node: _JNode, value: str) -> _JNode:
+        """A string; a long one folds to its start, and unfolds to its text as it reads (line breaks, not \\n)."""
+        if len(value) <= _JSON_STRING:
+            node.tokens = _json_tokens(value)
+            return node
+        node.kind, node.total, node.text = "string", len(value), value[:_JSON_FULL]
+        node.tokens = [("js", json.dumps(value[:80].rstrip(), ensure_ascii=False)[:-1] + '…"')]  # its start
+        return node
+
+    def _unfold(self) -> None:
+        """Unfolds the shallow levels first: each object or array whose lines still fit in _JSON_OPEN. In an array
+        of more than three, only the first item can unfold, as a sample: the rest stay one line each."""
+        shown, level = 1, [self.root]
+        while level:
+            below: list[_JNode] = []
+            for node in level:
+                if node.kind not in ("object", "array"):
+                    continue
+                rows = (len(node.children) // 8 if node.packed else len(node.children)) + 1 + (node.more > 0)
+                if node is not self.root and shown + rows > _JSON_OPEN:
+                    continue
+                node.open, shown = True, shown + rows
+                below += node.children[:1] if node.kind == "array" and node.total > 3 else node.children
+            level = below
+
+
+_JSON_END = "… the file goes on past what the preview read"
+
+
+def _json_tree_html(tree: _JsonTree) -> str:
+    """A _JsonTree as nested <details>: a click on an object's or array's line folds or unfolds it. The browser
+    does that itself, so it needs no script and still works in a saved notebook. Counts and array indexes are CSS
+    content (attr()), so a copied selection is plain JSON; each line's tooltip is its path in Python."""
+    out: list[str] = []
+
+    def walk(node: _JNode, last: bool) -> None:
+        comma = "" if last else '<span class="jp">,</span>'
+        tip = f' title="{_esc(node.path)}"'
+        lead = (f'<span class="jk">{_esc(node.key)}</span><span class="jp">: </span>' if node.key is not None
+                else f'<span class="ji" data-i="{node.index}"></span>' if node.index is not None else "")
+        lead += '<span class="jx">JSON in a string</span>' if node.parsed else ""
+        value = "".join(f'<span class="{css}">{_esc(text)}</span>' for css, text in node.tokens)
+        opened = " open" if node.open else ""
+        if node.kind == "value":
+            out.append(f'<div class="jr"{tip}>{lead}{value}{comma}</div>')
+        elif node.kind == "string":
+            clipped = "…" if node.total > len(node.text) else ""
+            out.append(f'<details class="jo"{opened}><summary{tip}>{lead}<span class="jf">{value}{comma}</span>'
+                       f'<span class="jz" data-n="{_plural(node.total, "character")}"></span></summary>'
+                       f'<div class="jv">{_esc(node.text)}{clipped}</div></details>')
+        else:
+            start, end = "{}" if node.kind == "object" else "[]"
+            count = _plural(node.total, "key" if node.kind == "object" else "item")
+            count = count.replace(" ", "+ ", 1) if node.cut else count
+            out.append(f'<details class="jo"{opened}><summary{tip}>{lead}<span class="jp">{start}</span>'
+                       f'<span class="jf"><span class="jp">…{end}</span>{comma}</span>'
+                       f'<span class="jz" data-n="{count}"></span></summary><div class="jc">')
+            if node.packed:
+                out.append('<div class="jw">' + "".join(
+                    f'<span title="{_esc(child.path)}">'
+                    + "".join(f'<span class="{css}">{_esc(text)}</span>' for css, text in child.tokens)
+                    + ("" if i == len(node.children) - 1 and not node.more else '<span class="jp">, </span>')
+                    + "</span>" for i, child in enumerate(node.children)) + "</div>")
+            else:
+                for i, child in enumerate(node.children):
+                    walk(child, i == len(node.children) - 1 and not node.more)
+            if node.more:
+                out.append(f'<div class="jm">{_json_more(node)}</div>')
+            out.append("</div>" + ("" if node.cut else f'<div class="jr"><span class="jp">{end}</span>{comma}</div>')
+                       + "</details>")
+
+    walk(tree.root, True)
+    if tree.cut:
+        out.append(f'<div class="jm">{_esc(_JSON_END)}</div>')
+    return f'<div class="jt">{"".join(out)}</div>'
+
+
+def _json_tree_text(tree: _JsonTree) -> str:
+    """A _JsonTree as indented JSON, all of it unfolded."""
+    lines: list[str] = []
+
+    def walk(node: _JNode, depth: int, last: bool) -> None:
+        pad, comma = "  " * depth, "" if last else ","
+        lead = (f"{node.key}: " if node.key is not None else "") + ("(JSON in a string) " if node.parsed else "")
+        value = "".join(text for _, text in node.tokens)
+        if node.kind == "value":
+            lines.append(f"{pad}{lead}{value}{comma}")
+        elif node.kind == "string":
+            lines.append(f"{pad}{lead}{value}{comma}  ({_plural(node.total, 'character')})")
+        else:
+            start, end = "{}" if node.kind == "object" else "[]"
+            lines.append(f"{pad}{lead}{start}")
+            if node.packed:  # items wrap like words, at 100 characters
+                line = ""
+                for i, child in enumerate(node.children):
+                    item = "".join(text for _, text in child.tokens)
+                    item += "" if i == len(node.children) - 1 and not node.more else ","
+                    if line and len(pad) + 2 + len(line) + 1 + len(item) > 100:
+                        lines.append(f"{pad}  {line}")
+                        line = ""
+                    line += (" " if line else "") + item
+                lines.append(f"{pad}  {line}")
+            for i, child in enumerate([] if node.packed else node.children):
+                walk(child, depth + 1, i == len(node.children) - 1 and not node.more)
+            if node.more:
+                lines.append(f"{pad}  {_json_more(node)}")
+            if not node.cut:
+                lines.append(f"{pad}{end}{comma}")
+
+    walk(tree.root, 0, True)
+    return "\n".join(lines + ([_JSON_END] if tree.cut else []))
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out, rules = [_CSS, '<div class="s3a">'], set()
     zoom: _Zoom | None = None  # the full-size view the report's PDF pages share
@@ -8036,6 +8396,9 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out.append(f"<h4>{_prose(block.title)}</h4>")
             out.append(f'<div class="flow">{_flow_html(block.items)}</div>')
+        elif isinstance(block, _JsonTree):
+            hint = '<span class="hint">click a line to fold or unfold it, hover over one for its path in Python</span>'
+            out.append(f"<h4>{_prose(block.title)}{hint}</h4>{_json_tree_html(block)}")
         elif isinstance(block, _Link):
             out.append(
                 f'<a href="{_esc(block.url)}" target="_blank" rel="noopener">{_esc(block.label)}</a>'
@@ -8158,6 +8521,10 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out += ["", f"-- {block.title} --"]
             out.append(_flow_text(block.items))
+        elif isinstance(block, _JsonTree):
+            if block.title:
+                out += ["", f"-- {block.title} --"]
+            out.append(_json_tree_text(block))
         elif isinstance(block, _Link):
             out += [block.label, block.url]
         elif isinstance(block, _Media):
@@ -8381,6 +8748,9 @@ _FORMAT_LABELS = {
 _INFO_CARDS = {  # Preview.info key -> card label, in display order
     "rows": "Rows",
     "records": "Records",
+    "keys": "Keys",
+    "items": "Items",
+    "depth": "Nesting",
     "columns": "Columns",
     "row_groups": "Row groups",
     "stripes": "Stripes",
@@ -8436,6 +8806,8 @@ _PANDAS_READERS = {  # format -> how pandas opens a downloaded file of it
 def _card_value(key: str, value: Any) -> str:
     if key == "columns":
         return f"{len(value):,}"
+    if key == "depth":
+        return _plural(value, "level")
     if key.endswith("size") and isinstance(value, int):
         return human_size(value)
     if isinstance(value, int) and not isinstance(value, bool):
@@ -10770,9 +11142,12 @@ class S3View:
     def preview(self, uri: str, n: int = 20) -> None:
         """Peek inside a file: tables (csv, tsv, psv, json, jsonl, parquet, orc, feather, avro, excel, npy)
         with their schema, archive contents (zip, tar, tar.gz, model.tar.gz, npz, .pt), safetensors tensors,
-        notebook cells, pretty JSON, text, images, audio / video players, a PDF's first pages as they look
-        (scans too), a Word file with its pictures in place, or a hex dump.
-        Downloads only what it needs; files without an extension are recognised by their content."""
+        notebook cells, JSON as a tree you fold with a click, text, images, audio / video players, a PDF's first
+        pages as they look (scans too), a Word file with its pictures in place, or a hex dump.
+        Downloads only what it needs; files without an extension are recognised by their content.
+
+        n is the number of rows, lines or paragraphs shown, and the items shown of each JSON array. In the JSON
+        tree, hover over a line for the Python that reaches it in data = ui.core.read_json(uri)."""
         p = self.core.preview(uri, n=n)
         doc, items, capped = p.document, [], 0
         detail = " · ".join(
@@ -10813,8 +11188,16 @@ class S3View:
                 blocks.append(_Text(_clip(p.data, 20_000) or "(no text)", title=title, wrap=True,
                                     collapsed=bool(drawn)))
         elif p.kind == "json":
-            text = json.dumps(p.data, indent=2, default=str, ensure_ascii=False)
-            blocks.append(_Text(_clip(text, 20_000)))
+            tree = _JsonTree(p.data, items=n, cut=p.info.get("cut", 0), title="Contents")
+            blocks.append(tree)
+            limits = {"item": f"long arrays show their first {n:,} items",
+                      "key": f"big objects show their first {max(n, _JSON_KEYS):,} keys"}
+            if tree.capped:
+                said = " and ".join(text for what, text in limits.items() if what in tree.capped)
+                blocks.append(_Note(f"{said[0].upper()}{said[1:]}; pass n= for more."))
+            if tree.full:
+                blocks.append(_Note(f"The tree stops at {_JSON_ROWS:,} lines so the notebook stays small; "
+                                    f"{_call('download', p.uri)} gets the whole file."))
         elif p.kind == "text":
             blocks.append(
                 _Text("\n".join(p.data or []), title=f"First {len(p.data or [])} lines")
@@ -10873,6 +11256,8 @@ class S3View:
                     "pdf": "every page, scans drawn" if p.kind == "document" and not p.data.strip()
                     else "the full text, page by page"}
             steps.append((_call("document", p.uri), what[p.format]))
+        if p.kind == "json":
+            steps.append((f"data = {_call('ui.core.read_json', p.uri)}", "the whole file as Python dicts and lists"))
         drawn = len(doc.pictures) if doc is not None and doc.kind == "pdf" else 0
         if drawn and (p.info.get("pages") or 0) > drawn:
             more = list(range(drawn + 1, min(drawn + _PREVIEW_PAGES, p.info["pages"]) + 1))

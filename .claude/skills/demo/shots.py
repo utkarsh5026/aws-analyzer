@@ -78,6 +78,7 @@ FIGURES = [
     Figure("preview-parquet", "s3", f'ui.preview("{LAKE}/curated/features/churn/train.parquet", n=8)'),
     Figure("preview-model", "s3", f'ui.preview("{LAKE}/training/churn-xgb-2025-09-01-1030/output/model.tar.gz")'),
     Figure("preview-safetensors", "s3", f'ui.preview("{LAKE}/models/tiny-llm/model.safetensors")'),
+    Figure("preview-json", "s3", f'ui.preview("{LAKE}/models/tiny-llm/config.json")'),
     Figure("preview-docx", "s3", f'ui.preview("{LAKE}/docs/model-card-churn-xgb.docx")'),
     Figure("preview-pptx", "s3", f'ui.preview("{LAKE}/docs/q3-ml-platform-review.pptx")'),
     Figure("document-pdf", "s3", f'ui.document("{LAKE}/docs/data-retention-policy.pdf")'),
@@ -527,8 +528,20 @@ def seed_s3_docs() -> dict:
         (NOW - job_time).days)
     header, size = _safetensors_header()
     put("models/tiny-llm/model.safetensors", header, 60)
-    put("models/tiny-llm/config.json", json.dumps({"hidden_size": 512, "num_hidden_layers": 4,
-                                                   "vocab_size": 32000}).encode(), 60)
+    put("models/tiny-llm/config.json", json.dumps({
+        "architectures": ["LlamaForCausalLM"], "model_type": "llama", "hidden_size": 512, "num_hidden_layers": 4,
+        "num_attention_heads": 8, "vocab_size": 32000, "eos_token_id": [2, 32001], "rope_scaling": None,
+        "tie_word_embeddings": False, "torch_dtype": "bfloat16",
+        "quantization_config": {"quant_method": "awq", "bits": 4, "group_size": 128,
+                                "modules_to_not_convert": ["lm_head"]},
+        "sagemaker": {"training_job": "tiny-llm-sft-2025-08-28-0915",  # SageMaker keeps hyperparameters as text
+                      "hyperparameters": json.dumps({"epochs": 3, "learning_rate": 2e-05, "batch_size": 16})},
+        "chat_template": "{% if messages[0]['role'] == 'system' %}{{ messages[0]['content'] }}\n{% endif %}"
+                         "{% for message in messages %}<|{{ message['role'] }}|>\n{{ message['content'] }}</s>\n"
+                         "{% endfor %}<|assistant|>\n",
+        "datasets": [{"uri": f"s3://acme-ml-data/curated/support-chats/part-{i:04d}.jsonl", "rows": rows}
+                     for i, rows in enumerate([48210, 47995, 48102, 31877, 12040, 9513])],
+    }, indent=2).encode(), 60)
     put("notebooks/churn-data-checks.ipynb", json.dumps({"nbformat": 4, "metadata": {"kernelspec": {"name": "python3"}},
                                                          "cells": []}).encode(), 12)
     put("docs/model-card-churn-xgb.docx", _docx([
