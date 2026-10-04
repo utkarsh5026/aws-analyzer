@@ -97,8 +97,8 @@ Items come back as plain Python, not DynamoDB JSON: numbers are `int` or `float`
 ui.tables()
 ```
 
-![tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age](images/dynamodb-tables-light.webp#only-light){ width="984" height="718" loading=lazy }
-![tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age](images/dynamodb-tables-dark.webp#only-dark){ width="984" height="718" loading=lazy }
+![tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age](images/dynamodb-tables-light.webp#only-light){ width="984" height="714" loading=lazy }
+![tables(): four tables with status, item count, size, key attributes and types, billing mode, index count, estimated monthly cost and age](images/dynamodb-tables-dark.webp#only-dark){ width="984" height="714" loading=lazy }
 /// caption
 `ui.tables()`: item counts and sizes are DynamoDB's own estimates, which it refreshes about every 6 hours.
 ///
@@ -113,8 +113,8 @@ ui.table_info("acme-app", hours=24 * 7)       # a week of usage
 ui.table_info("acme-app", metrics=False)      # skip CloudWatch
 ```
 
-![table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage](images/dynamodb-table-info-light.webp#only-light){ width="984" height="890" loading=lazy }
-![table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage](images/dynamodb-table-info-dark.webp#only-dark){ width="984" height="890" loading=lazy }
+![table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage](images/dynamodb-table-info-light.webp#only-light){ width="984" height="886" loading=lazy }
+![table_info(): cards for status, items, size, keys, billing, cost, stream, TTL, backups and encryption, a warning that point-in-time recovery is off, a table of the table and its two indexes with the query call for each, the monthly cost, and 24 hours of CloudWatch usage](images/dynamodb-table-info-dark.webp#only-dark){ width="984" height="886" loading=lazy }
 /// caption
 `ui.table_info("acme-app")`: for an on-demand table the monthly cost includes reads and writes at the last 24 hours' rate.
 ///
@@ -147,8 +147,8 @@ ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), descending
 ui.query("acme-app", "failed", index="by-status")                     # on a global index
 ```
 
-![query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings](images/dynamodb-query-light.webp#only-light){ width="984" height="419" loading=lazy }
-![query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings](images/dynamodb-query-dark.webp#only-dark){ width="984" height="419" loading=lazy }
+![query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings](images/dynamodb-query-light.webp#only-light){ width="984" height="418" loading=lazy }
+![query(): eight orders of one customer in sort-key order with status, creation time, total, currency and coupon, where two coupons are empty strings](images/dynamodb-query-dark.webp#only-dark){ width="984" height="418" loading=lazy }
 /// caption
 `ui.query("acme-app", "CUSTOMER#1042", sort=("begins_with", "ORDER#"), n=8, attributes=["status", "created_at", "total", "currency", "coupon"])`
 ///
@@ -163,8 +163,8 @@ ui.get("acme-app", {"pk": "CUSTOMER#1042", "sk": "PROFILE"})
 ui.get("acme-app", "CUSTOMER#1042", "PROFILE", as_json=True)   # add a JSON copy
 ```
 
-![get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price](images/dynamodb-get-light.webp#only-light){ width="984" height="796" loading=lazy }
-![get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price](images/dynamodb-get-dark.webp#only-dark){ width="984" height="796" loading=lazy }
+![get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price](images/dynamodb-get-light.webp#only-light){ width="984" height="795" loading=lazy }
+![get(): one order with its size and read and write cost, and a tree of its attributes and types where the list of line items is expanded into three maps of sku, quantity and price](images/dynamodb-get-dark.webp#only-dark){ width="984" height="795" loading=lazy }
 /// caption
 `ui.get("acme-app", "CUSTOMER#1042", "ORDER#2026-08-14#7731")`
 ///
@@ -204,8 +204,8 @@ ui.scan("acme-app", 10, where={"status": "failed", "total": (">", 300)},
         attributes=["status", "created_at", "total", "failure_reason"])
 ```
 
-![scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300](images/dynamodb-scan-filter-light.webp#only-light){ width="984" height="541" loading=lazy }
-![scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300](images/dynamodb-scan-filter-dark.webp#only-dark){ width="984" height="541" loading=lazy }
+![scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300](images/dynamodb-scan-filter-light.webp#only-light){ width="984" height="540" loading=lazy }
+![scan() with a filter: 10 items returned after reading 1,619, the read units used, a note that filters run after the read so every item read is billed, and the ten failed orders over 300](images/dynamodb-scan-filter-dark.webp#only-dark){ width="984" height="540" loading=lazy }
 /// caption
 A filter runs after DynamoDB reads the items, so you pay for everything read, not just what matches.
 ///
@@ -228,8 +228,8 @@ ui.schema("acme-app", where={"sk": ("begins_with", "ORDER#")})   # just the orde
 ui.schema("acme-app", n=5000, max_depth=3)                        # more items, deeper maps
 ```
 
-![schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items](images/dynamodb-schema-light.webp#only-light){ width="984" height="2178" loading=lazy }
-![schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items](images/dynamodb-schema-dark.webp#only-dark){ width="984" height="2178" loading=lazy }
+![schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items](images/dynamodb-schema-light.webp#only-light){ width="984" height="2177" loading=lazy }
+![schema(): 1,000 items profiled, a warning that address.zip holds both strings and numbers, a note about empty coupon strings, a table of 23 attributes with type, distinct values, examples, range and how many items have each, key patterns for the partition and sort keys, item sizes and the largest items](images/dynamodb-schema-dark.webp#only-dark){ width="984" height="2177" loading=lazy }
 /// caption
 `ui.schema("acme-app")`: an old import stored some US zip codes as numbers, so a filter on `address.zip` silently misses them.
 ///
@@ -244,8 +244,8 @@ ui.value_counts("acme-app", "address.country")          # dots reach into maps
 ui.value_counts("acme-app", "pk", limit=None)           # items per partition key, whole table
 ```
 
-![value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes](images/dynamodb-value-counts-light.webp#only-light){ width="984" height="417" loading=lazy }
-![value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes](images/dynamodb-value-counts-dark.webp#only-dark){ width="984" height="417" loading=lazy }
+![value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes](images/dynamodb-value-counts-light.webp#only-light){ width="984" height="416" loading=lazy }
+![value_counts(): items read, distinct values, items without the attribute, read units and cost, and a bar table of order statuses with their item counts and sizes](images/dynamodb-value-counts-dark.webp#only-dark){ width="984" height="416" loading=lazy }
 /// caption
 `ui.value_counts("acme-app", "status")`: “(not set)” is customers and tickets, which have no status.
 ///

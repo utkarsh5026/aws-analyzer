@@ -55,6 +55,7 @@ import re
 import sys
 import textwrap
 import time
+import unicodedata
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -302,6 +303,25 @@ def _as_count(value: Any, name: str) -> int | None:
 
 def _clip(text: str, width: int = 90) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _width(text: str) -> int:
+    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
+    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
+    width, wide = 0, False
+    for ch in text:
+        if ch == "\ufe0f":
+            width, wide = width + (not wide), True
+        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
+            wide = unicodedata.east_asian_width(ch) in ("W", "F")
+            width += 2 if wide else 1
+    return width
+
+
+def _pad(text: str, width: int, right: bool = False) -> str:
+    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
+    fill = " " * max(0, width - _width(text))
+    return fill + text if right else text + fill
 
 
 _KB_ID_RE = re.compile(r"^[0-9A-Z]{10}$")
@@ -3747,7 +3767,7 @@ _CSS = """<style>
 .kba .ans .none{font-style:italic;opacity:.6}
 </style>"""
 
-_BADGE = "Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
+_BADGE = "📚 Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 # A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
 # or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
@@ -4633,13 +4653,13 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 for i, row in enumerate(rows)
             ]
             widths = [
-                max([len(h)] + [len(r[j]) for r in cells])
+                max([_width(h)] + [_width(r[j]) for r in cells])
                 for j, h in enumerate(headers)
             ]
 
             def line_of(values: list[str], widths: list[int] = widths) -> str:
                 return "  ".join(
-                    v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
                     for v, w in zip(values, widths)
                 ).rstrip()
 
@@ -4996,11 +5016,11 @@ class BedrockKBView:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
-        "Knowledge bases": ("kbs", "use", "kb_info"),
-        "What's indexed": ("syncs", "documents", "unsynced"),
-        "Search and answer": ("search", "chunk", "ask", "follow_up", "models"),
-        "Measure retrieval": ("compare", "evaluate"),
-        "Help": ("help",),
+        "📚 Knowledge bases": ("kbs", "use", "kb_info"),
+        "📥 What's indexed": ("syncs", "documents", "unsynced"),
+        "🔎 Search and answer": ("search", "chunk", "ask", "follow_up", "models"),
+        "📏 Measure retrieval": ("compare", "evaluate"),
+        "❓ Help": ("help",),
     }
     _START = (
         ("kbs()", "every knowledge base: status, last sync, cost and warnings"),

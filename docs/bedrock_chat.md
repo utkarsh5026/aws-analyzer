@@ -91,7 +91,7 @@ Two questions about refunds, in the same Bedrock session. The second asks for a 
 
 ## Settings { #settings }
 
-The **Settings** tab lists everything sent with every question, one card each. Under each value is what it means, in a sentence, and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.
+The **⚙️ Settings** tab lists everything sent with every question, one card each. Under each value is what it means, in a sentence, and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.
 
 ![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each card has a remove button and its path in the request](images/chat-settings-light.webp#only-light){ width="984" height="848" loading=lazy }
 ![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each card has a remove button and its path in the request](images/chat-settings-dark.webp#only-dark){ width="984" height="848" loading=lazy }
@@ -135,7 +135,7 @@ Values are forgiving: `"0.2"` and `0.2`, `"hybrid"` and `"HYBRID"`, JSON or a Py
 
 ## The request as JSON { #json }
 
-The **Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base and model from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
+The **🧾 Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base and model from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
 
 ![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="848" loading=lazy }
 ![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="848" loading=lazy }
@@ -152,7 +152,7 @@ The next request, continuing the conversation. Highlighted keys are your setting
 /// caption
 **Python**: the same request as a boto3 call, highlighted, to paste into your own code.
 ///
-- **Last response** shows what Bedrock sent back, folded below the top levels, and the request that was sent.
+- **📨 Last response** shows what Bedrock sent back, folded below the top levels, and the request that was sent.
 
 ![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-light.webp#only-light){ width="984" height="848" loading=lazy }
 ![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-dark.webp#only-dark){ width="984" height="848" loading=lazy }

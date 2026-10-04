@@ -57,6 +57,7 @@ import stat
 import subprocess
 import sys
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -375,6 +376,25 @@ def _as_count(value: Any, name: str) -> int | None:
 
 def _clip(text: str, width: int = 90) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _width(text: str) -> int:
+    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
+    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
+    width, wide = 0, False
+    for ch in text:
+        if ch == "\ufe0f":
+            width, wide = width + (not wide), True
+        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
+            wide = unicodedata.east_asian_width(ch) in ("W", "F")
+            width += 2 if wide else 1
+    return width
+
+
+def _pad(text: str, width: int, right: bool = False) -> str:
+    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
+    fill = " " * max(0, width - _width(text))
+    return fill + text if right else text + fill
 
 
 def human_runtime(seconds: float | None) -> str:
@@ -3039,7 +3059,7 @@ _CSS = """<style>
 .smk .next .nw{font-size:12px;opacity:.65;margin-left:6px}
 </style>"""
 
-_BADGE = "SageMaker"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
+_BADGE = "🧪 SageMaker"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 # A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
 # or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
@@ -3331,13 +3351,13 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 for i, row in enumerate(rows)
             ]
             widths = [
-                max([len(h)] + [len(r[j]) for r in cells])
+                max([_width(h)] + [_width(r[j]) for r in cells])
                 for j, h in enumerate(headers)
             ]
 
             def line_of(values: list[str], widths: list[int] = widths) -> str:
                 return "  ".join(
-                    v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
                     for v, w in zip(values, widths)
                 ).rstrip()
 
@@ -3459,6 +3479,22 @@ def _idle_label(state: str, minutes: int | None) -> str:
     return {"off": "off", "n/a": "not needed (free)"}.get(state, "?")
 
 
+_KIND_ICONS = {  # Billable.kind -> the icon in front of it in running(), so the kinds stand apart in a long table
+    "notebook instance": "📓",
+    "Studio app": "🧪",
+    "endpoint": "🚀",
+    "training job": "🏋️",
+    "processing job": "⚙️",
+}
+
+
+def _kind_label(b: Billable) -> str:
+    """'📓 notebook instance', '🧪 JupyterLab app', '🚀 endpoint': what it is, with its icon."""
+    label = f"{app_label(b.app_type)} app" if b.kind == "Studio app" else b.kind
+    icon = _KIND_ICONS.get(b.kind)
+    return f"{icon} {label}" if icon else label
+
+
 def _where(b: Billable) -> str:
     """'space analysis · d-abc123' for a Studio app."""
     owner = (
@@ -3524,9 +3560,9 @@ class SageMakerView:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
-        "This notebook": ("instance", "disk"),
-        "Your account": ("running",),
-        "Help": ("help",),
+        "💻 This notebook": ("instance", "disk"),
+        "☁️ Your account": ("running",),
+        "❓ Help": ("help",),
     }
     _START = (
         ("instance()", "this notebook: its type, cost, idle shutdown, memory and disk"),
@@ -4390,10 +4426,8 @@ class SageMakerView:
                 else:
                     idle = "when done"
                 row: list[Any] = [
-                    f"{app_label(b.app_type)} app"
-                    if b.kind == "Studio app"
-                    else b.kind,
-                    b.name + ("  (this notebook)" if b.this else ""),
+                    _kind_label(b),
+                    b.name + ("  📍\u00a0this\u00a0notebook" if b.this else ""),  # the marker never wraps
                     _Tone(
                         b.status,
                         "" if b.status in ("InService", "Training") else "warn",

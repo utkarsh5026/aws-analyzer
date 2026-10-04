@@ -913,7 +913,9 @@ def test_ui_running(stubs, tmp_path, capsys):
         "Stopped notebooks' storage: $28.00/month",
         "Notebook instance old-experiment (ml.m5.2xlarge) has been running for 6d 0h",
         "Endpoint churn-v1 (ml.m5.large) got no requests in the last 7 days",
-        "churn-analysis  (this notebook)",
+        "🧪 JupyterLab app",
+        "churn-analysis  📍\u00a0this\u00a0notebook",
+        "🚀 endpoint",
         "ml.g5.2xlarge × 2 (spot)",
         "space churn-analysis · d-abc123def456",
         "-- Stopped notebook instances (their volumes are still billed) --",
@@ -949,9 +951,18 @@ def test_render_html_and_badge():
               smmod._Findings([("warn", "stop it: aws sagemaker stop-notebook-instance --notebook-instance-name x")]),
               smmod._Text("aws sagemaker update-domain --domain-id d", title="Turn on idle shutdown", code=True)]
     rendered = smmod._render_html(blocks, 50)
-    assert '<div class="smk">' in rendered and '<span class="badge">SageMaker</span>' in rendered
+    assert '<div class="smk">' in rendered and '<span class="badge">🧪 SageMaker</span>' in rendered
     assert ">aws sagemaker stop-notebook-instance --notebook-instance-name x</code>" in rendered
     assert 'class="card warn"' in rendered and '<pre class="code"' in rendered
+
+
+def test_text_tables_line_up_around_emoji():
+    assert [smmod._width(s) for s in ("abc", "📓 a", "🏋️ a", "日本", "é")] == [3, 4, 4, 4, 1]
+    assert smmod._pad("📓 a", 6) == "📓 a  " and smmod._pad("12", 4, right=True) == "  12"
+    table = smmod._Table(["Kind", "Name"], [["📓 notebook instance", "a"], ["🏋️ training job", "b"], ["endpoint", "c"]])
+    lines = [line for line in smmod._render_text([table], 50).splitlines()[-5:] if not line.startswith("-")]
+    assert len(lines) == 4  # the header and three rows
+    assert len({smmod._width(line[: line.rindex(" ") + 1]) for line in lines}) == 1  # 'Name' and each name line up
 
 
 def test_ui_without_ipython_or_an_optional_package(tmp_path, capsys, monkeypatch):
@@ -971,7 +982,7 @@ def test_ui_help_groups_every_command(tmp_path, capsys):
     commands = {name for name in vars(SageMakerView)
                 if not name.startswith("_") and callable(getattr(SageMakerView, name))}
     assert commands == {name for names in SageMakerView._GROUPS.values() for name in names}
-    assert "Start here:" in out and "-- This notebook --" in out and "instance(name=None)" in out
+    assert "Start here:" in out and "-- 💻 This notebook --" in out and "instance(name=None)" in out
     assert "Did you mean 'disk'" in run(capsys, ui.help, "dsk")
     assert "Its machine can only be read from inside it" in run(capsys, ui.help, "instance")
 

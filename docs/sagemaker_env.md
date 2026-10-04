@@ -94,8 +94,8 @@ ui.instance("old-experiment")    # another notebook instance, or a Studio space,
 ui.instance()
 ```
 
-![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-light.webp#only-light){ width="984" height="1528" loading=lazy }
-![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-dark.webp#only-dark){ width="984" height="1528" loading=lazy }
+![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-light.webp#only-light){ width="984" height="1526" loading=lazy }
+![instance(): cards for the ml.g5.2xlarge's price, 2 days 5 hours running, about $80 so far, idle shutdown off, the disk 88% full and an idle GPU; warnings that the domain doesn't shut idle apps down, that the disk is nearly full and that the GPU is idle with the CPU type that would cost $1.06 an hour less; the command that turns on idle shutdown; and a table of the machine's CPU, memory, disk, GPU and kernels](images/sagemaker-instance-dark.webp#only-dark){ width="984" height="1526" loading=lazy }
 /// caption
 `ui.instance()` in the `churn-analysis` space: the GPU has done nothing for this session, and nothing will stop the app tonight.
 ///
@@ -174,8 +174,8 @@ ui.disk("~/SageMaker/data")             # one folder
 ui.disk("/", limit=None)                # the whole system disk, however many files
 ```
 
-![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-light.webp#only-light){ width="984" height="1501" loading=lazy }
-![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-dark.webp#only-dark){ width="984" height="1501" loading=lazy }
+![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-light.webp#only-light){ width="984" height="1497" loading=lazy }
+![disk(): cards for a 50 GB disk 88% used with 6.3 GB safe to clear; warnings that the disk is nearly full, with the command that makes the space's volume 100 GB, and that 6.3 GB is caches and trash; a note about two year-old parquet files; a tree of the biggest folders; the largest files; and a table of the Jupyter trash, Hugging Face cache, pip cache and notebook checkpoints with the command that clears each](images/sagemaker-disk-dark.webp#only-dark){ width="984" height="1497" loading=lazy }
 /// caption
 `ui.disk()`: 3.8 GB of it is a file deleted in JupyterLab weeks ago, still sitting in the trash.
 ///
@@ -186,7 +186,7 @@ When the disk is nearly full, the finding also gives the command that makes the 
 
 ## Everything that's running { #running }
 
-`running()` lists everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor and Studio Classic kernels), endpoints, and training and processing jobs in progress. For each one it shows the instance, the price per hour, how long it has been running and whether it stops when idle. For endpoints, it adds how many requests they served over the last 7 days, from CloudWatch. Stopped notebook instances get a table of their own, because their storage is still billed.
+`running()` lists everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor and Studio Classic kernels), endpoints, and training and processing jobs in progress. Each row starts with an icon for its kind (📓 notebook instance, 🧪 Studio app, 🚀 endpoint, 🏋️ training job, ⚙️ processing job), and 📍 marks the notebook you're in. For each one it shows the instance, the price per hour, how long it has been running and whether it stops when idle. For endpoints, it adds how many requests they served over the last 7 days, from CloudWatch. Stopped notebook instances get a table of their own, because their storage is still billed.
 
 ```python
 ui.running()
@@ -194,8 +194,8 @@ ui.running(days=30)          # endpoint traffic over 30 days
 ui.running(metrics=False)    # skip CloudWatch
 ```
 
-![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-light.webp#only-light){ width="984" height="1009" loading=lazy }
-![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-dark.webp#only-dark){ width="984" height="1009" loading=lazy }
+![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-light.webp#only-light){ width="984" height="1004" loading=lazy }
+![running(): eight things running for $5.88 an hour; warnings about a notebook instance running for 9 days with no auto-stop, a Code Editor app running for 5 days in a domain without idle shutdown, and an endpoint with no requests in 7 days, each with the command that stops it; a table of what's running with instance, price, time running, idle shutdown and requests; and the stopped notebook instances with their storage cost](images/sagemaker-running-dark.webp#only-dark){ width="984" height="1004" loading=lazy }
 /// caption
 `ui.running()`: a forgotten notebook, a forgotten app and an unused endpoint add up to about $590 a month.
 ///

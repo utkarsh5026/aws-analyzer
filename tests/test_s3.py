@@ -3722,9 +3722,9 @@ def test_render_tones_pills_scroll_folds_and_next():
     )
     assert (
         '<span class="nl">Next</span>' in rendered
-        and '<span class="badge">S3</span>' not in rendered
+        and '<span class="badge">🪣 S3</span>' not in rendered
     )
-    assert '<span class="badge">S3</span>' in s3mod._render_html(
+    assert '<span class="badge">🪣 S3</span>' in s3mod._render_html(
         [s3mod._Title("Summary")], 50
     )
     text = s3mod._render_text(blocks, 50)
@@ -3781,9 +3781,16 @@ def test_html_tables_sort_filter_and_pick_columns():
     assert '<input type="checkbox" class="cv2" checked>Storage class</label>' in html_out
     assert ".s3a form.tbl:has(.cv2:not(:checked)) tr>:nth-child(3){display:none}" in rules
     assert '<div class="tb" hidden="hidden">' in html_out and ' hidden>' not in html_out
-    # a key: its folder dimmed, the name whole, the full key on hover
-    assert ('<td class="p" title="logs/app/2026/part-0.json"><span class="pl"><span class="pd">logs/app/2026/</span>'
-            '<span class="pn">part-0.json</span></span></td>') in html_out
+    # a key: its type's icon, its folder dimmed, the name whole, the full key on hover
+    assert ('<td class="p" title="logs/app/2026/part-0.json"><span class="pl"><span class="pi">📋</span>'
+            '<span class="pd">logs/app/2026/</span><span class="pn">part-0.json</span></span></td>') in html_out
+    icons = {key: s3mod._file_icon(key) for key in (
+        "a.csv.gz", "b.snappy.parquet", "model.tar.gz", "r.pdf", "w.docx", "m.safetensors", "p.png", "README", "x.weird",
+        "raw/")}
+    assert icons == {"a.csv.gz": "📊", "b.snappy.parquet": "📊", "model.tar.gz": "📦", "r.pdf": "📕", "w.docx": "📘",
+                     "m.safetensors": "🧠", "p.png": "🖼️", "README": "📄", "x.weird": "📄", "raw/": "📁"}
+    assert '<span class="pi">📁</span><span class="pn">raw/</span>' in s3mod._path_html("raw/")
+    assert s3mod._path_html("-") == '<span class="pl"><span class="pn">-</span></span>'  # a missing key gets none
     long_name = "x/" + "n" * 70 + ".parquet"
     assert 'class="pd" style="max-width:12ch"' in s3mod._path_html(long_name)  # a long name leaves the folder less room
     assert s3mod._path_html("📁 raw/") == '<span class="pl"><span class="pi">📁</span><span class="pn">raw/</span></span>'
@@ -3839,7 +3846,7 @@ def test_ui_help_groups_every_command(ui, capsys):
     }  # a new command needs a group
     assert (
         "Start here:" in out
-        and "-- Explore a folder --" in out
+        and "-- 📂 Explore a folder --" in out
         and "-- Other --" not in out
     )
     assert (

@@ -97,8 +97,8 @@ Commands take `kb=`: a name in any case, the 10-character ID, or the ARN. Withou
 ui.kbs()
 ```
 
-![kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed](images/bedrock-kbs-light.webp#only-light){ width="984" height="885" loading=lazy }
-![kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed](images/bedrock-kbs-dark.webp#only-dark){ width="984" height="885" loading=lazy }
+![kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed](images/bedrock-kbs-light.webp#only-light){ width="984" height="879" loading=lazy }
+![kbs(): four knowledge bases with status, type, vector store, embedding model, data sources, documents, last sync and estimated idle cost, then one warning each: a data source that doesn't chunk, a failed knowledge base and its failed sync, a data source never synced, and a sync that left 2 documents unindexed](images/bedrock-kbs-dark.webp#only-dark){ width="984" height="879" loading=lazy }
 /// caption
 `ui.kbs()`: every knowledge base here has something to look at. The idle cost is estimated for OpenSearch Serverless only; the other vector stores show “-”.
 ///
@@ -117,8 +117,8 @@ ui.kb_info("support-docs")
 ui.kb_info()                                 # the default knowledge base
 ```
 
-![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-light.webp#only-light){ width="984" height="1116" loading=lazy }
-![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-dark.webp#only-dark){ width="984" height="1116" loading=lazy }
+![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-light.webp#only-light){ width="984" height="1114" loading=lazy }
+![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-dark.webp#only-dark){ width="984" height="1114" loading=lazy }
 /// caption
 `ui.kb_info("support-docs")`: the findings come first, each with what to do next. Below them, each data source's chunking, parsing and deletion policy in plain English.
 ///
@@ -144,20 +144,20 @@ ui.unsynced()                                # S3 files added or changed since t
 aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456 --region us-east-1
 ```
 
-![syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source](images/bedrock-syncs-light.webp#only-light){ width="984" height="647" loading=lazy }
-![syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source](images/bedrock-syncs-dark.webp#only-dark){ width="984" height="647" loading=lazy }
+![syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source](images/bedrock-syncs-light.webp#only-light){ width="984" height="645" loading=lazy }
+![syncs(): six syncs with when each started, how long it took, its status and document counts; one failed because the knowledge base's role wasn't allowed s3:GetObject, and one couldn't parse 2 documents; then the start-ingestion-job command and boto3 call for each data source](images/bedrock-syncs-dark.webp#only-dark){ width="984" height="645" loading=lazy }
 /// caption
 `ui.syncs("support-docs")`: why a sync failed, in the same row, and the command that starts the next one. You run it; the tool never does.
 ///
 
-![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-light.webp#only-light){ width="984" height="476" loading=lazy }
-![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-dark.webp#only-dark){ width="984" height="476" loading=lazy }
+![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-light.webp#only-light){ width="984" height="473" loading=lazy }
+![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-dark.webp#only-dark){ width="984" height="473" loading=lazy }
 /// caption
 `ui.documents("support-docs")`: without `status=` it lists only the documents that aren't indexed, with Bedrock's reason for each.
 ///
 
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="480" loading=lazy }
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="480" loading=lazy }
+![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="479" loading=lazy }
+![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="479" loading=lazy }
 /// caption
 `ui.unsynced("support-docs")`: two files changed after the last sync, so searches and answers don't see those changes yet.
 ///
@@ -174,8 +174,8 @@ ui.search("refund window", rerank=True)                   # re-order with a rera
 ui.chunk(2)                                               # result #2 in full, with its metadata and IDs
 ```
 
-![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-light.webp#only-light){ width="984" height="677" loading=lazy }
-![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-dark.webp#only-dark){ width="984" height="677" loading=lazy }
+![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-light.webp#only-light){ width="984" height="675" loading=lazy }
+![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-dark.webp#only-dark){ width="984" height="675" loading=lazy }
 /// caption
 `ui.search("How long do refunds take?")`: two passages from the refund policy, then three weaker ones. The words from the question are highlighted.
 ///
@@ -251,8 +251,8 @@ ui.models("claude")
 ui = BedrockKBView(BedrockKBAnalyzer(default_model="sonnet"))   # a different default
 ```
 
-![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-light.webp#only-light){ width="984" height="477" loading=lazy }
-![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-dark.webp#only-dark){ width="984" height="477" loading=lazy }
+![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-light.webp#only-light){ width="984" height="475" loading=lazy }
+![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-dark.webp#only-dark){ width="984" height="475" loading=lazy }
 /// caption
 `ui.models()`: the ID to pass as `model=`, how each model is called, and what it costs per million tokens.
 ///
@@ -297,8 +297,8 @@ ui.compare("refund window for EU orders")                       # SEMANTIC and H
 ui.compare("error E1234", n=10, search_types=("SEMANTIC", "HYBRID"))
 ```
 
-![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-light.webp#only-light){ width="984" height="722" loading=lazy }
-![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-dark.webp#only-dark){ width="984" height="722" loading=lazy }
+![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-light.webp#only-light){ width="984" height="719" loading=lazy }
+![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-dark.webp#only-dark){ width="984" height="719" loading=lazy }
 /// caption
 `ui.compare("what does error E1234 mean?", n=(2, 5))`: both search types find the same passages, but only HYBRID puts the one with the exact error code first.
 ///
@@ -318,8 +318,8 @@ ui.evaluate(cases, n=10, search_type="HYBRID")          # did that help?
 ui.evaluate(df)                                        # or a DataFrame with question and expected columns
 ```
 
-![evaluate(): six questions, hit rate 83% and MRR 0.72; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source third, and a table of each question, its expected source, its rank and what came up first](images/bedrock-evaluate-light.webp#only-light){ width="984" height="571" loading=lazy }
-![evaluate(): six questions, hit rate 83% and MRR 0.72; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source third, and a table of each question, its expected source, its rank and what came up first](images/bedrock-evaluate-dark.webp#only-dark){ width="984" height="571" loading=lazy }
+![evaluate(): six questions, hit rate 83% and MRR 0.72; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source third, and a table of each question, its expected source, its rank and what came up first](images/bedrock-evaluate-light.webp#only-light){ width="984" height="569" loading=lazy }
+![evaluate(): six questions, hit rate 83% and MRR 0.72; a warning that When do holiday orders ship? missed holiday-shipping, a note that one question found its source third, and a table of each question, its expected source, its rank and what came up first](images/bedrock-evaluate-dark.webp#only-dark){ width="984" height="569" loading=lazy }
 /// caption
 `ui.evaluate(cases)`: the miss is `holiday-shipping.md`, which was added after the last sync. The `unsynced()` screenshot above shows it.
 ///

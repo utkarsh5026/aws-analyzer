@@ -750,7 +750,7 @@ def test_ui_help_groups_every_command(ui, capsys):
     commands = {name for name in vars(BedrockChatView) if not name.startswith("_")
                 and callable(getattr(BedrockChatView, name))}
     assert commands == {name for names in BedrockChatView._GROUPS.values() for name in names}
-    assert "Start here:" in out and "-- Settings --" in out and "set(name=None, value=None, **values)" in out
+    assert "Start here:" in out and "-- ⚙️ Settings --" in out and "set(name=None, value=None, **values)" in out
     assert "None removes a setting; an open window follows." in run(capsys, ui.help, "set")
 
 
@@ -993,8 +993,9 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     app.send_button.click()
     a = window.answers[-1]
     assert a.streamed and app.question.value == "" and not app.busy
-    assert "How long do refunds take?" in texts(app)[1]
+    assert "How long do refunds take?" in texts(app)[1] and chatmod._YOU in texts(app)[1]  # your mark beside it
     assert "Refunds take 5-7 business days" in texts(app)[2] and "<sup>[1]</sup>" in texts(app)[2]
+    assert '<div class="sh">📎 Sources' in texts(app)[2]
     assert "Request and response JSON" in texts(app)[2] and "refund-policy.pdf · p.3" in texts(app)[2]
     assert app.log.children[0] is app.bubbles[-1]  # newest first: the box runs bottom-up
     assert "1 question in this conversation" in app.status.value and "session session-…" in app.status.value

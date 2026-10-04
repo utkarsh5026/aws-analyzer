@@ -105,7 +105,7 @@ The folder on the left, the file you clicked on the right. One click on the path
 
 Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
 
-Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **What's in here** [adds up everything below](#folders).
+Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **📊 What's in here** [adds up everything below](#folders).
 
 ## Look inside a file { #files }
 
@@ -113,9 +113,9 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 
 | Button | What it does |
 |---|---|
-| **Preview** | What's inside the file (the [`preview`](s3.md#files) report) |
-| **Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
-| **Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
+| **👁️ Preview** | What's inside the file (the [`preview`](s3.md#files) report) |
+| **🏷️ Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
+| **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
 | **⬇ Download** | Saves a copy in the notebook's folder (the [`download`](s3.md#download) report) |
 | **🔗 Link** | A download link that works for an hour, for someone without AWS access (the `link` report) |
 | **✕** | Closes the file and shows the folder again |
@@ -125,14 +125,14 @@ Clicking through files doesn't wait. In a notebook, previews and details load in
 ![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-light.webp#only-light){ width="984" height="577" loading=lazy }
 ![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-dark.webp#only-dark){ width="984" height="577" loading=lazy }
 /// caption
-A Word file's first paragraphs; **Read all** shows the whole document, pictures in place.
+A Word file's first paragraphs; **📖 Read all** shows the whole document, pictures in place.
 ///
 
 ### Read a PDF page by page { #pdf }
 
-**Read all** on a PDF shows its pages as they look, 20 at a time, with each page's text folded underneath. Buttons under the last page show the 20 before and after. Click a page to see it as big as the notebook: **‹** **›** step to the pages before and after, and **✕** (or a click on the page) goes back.
+**📖 Read all** on a PDF shows its pages as they look, 20 at a time, with each page's text folded underneath. Buttons under the last page show the 20 before and after. Click a page to see it as big as the notebook: **‹** **›** step to the pages before and after, and **✕** (or a click on the page) goes back.
 
-Drawing the pages needs `pypdf`, `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, **Read all** says what to install. Word and PowerPoint files need nothing extra.
+Drawing the pages needs `pypdf`, `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, **📖 Read all** says what to install. Word and PowerPoint files need nothing extra.
 
 ### Files in Glacier { #archived }
 
@@ -151,15 +151,15 @@ The buttons above the right pane change with where you are:
 
 | Where | Button | What it shows |
 |---|---|---|
-| In a folder | **What's in here** | Every file below this folder, not only this level: sizes, file types, the biggest files and folders, the monthly cost, and findings (the [`summary`](s3.md#summary) report). It lists everything below, so a big folder takes a while; a progress bar shows how far it's got |
+| In a folder | **📊 What's in here** | Every file below this folder, not only this level: sizes, file types, the biggest files and folders, the monthly cost, and findings (the [`summary`](s3.md#summary) report). It lists everything below, so a big folder takes a while; a progress bar shows how far it's got |
 | In a folder | **⬇ Download .zip** | Everything below this folder as one `.zip` ([see below](#zip)) |
-| At a bucket's top level | **Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
-| On your buckets | **Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
+| At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
+| On your buckets | **🪣 Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
 
 ![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="577" loading=lazy }
 ![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="577" loading=lazy }
 /// caption
-`S3Explorer()` starts from your buckets; **Every bucket** compares their size, cost and security settings.
+`S3Explorer()` starts from your buckets; **🪣 Every bucket** compares their size, cost and security settings.
 ///
 
 ### Download a folder as a .zip { #zip }
@@ -183,7 +183,7 @@ The explorer lists one level at a time, never the whole bucket, so a folder open
 - **Look up** finds a name in a folder too big to list: type the start of it in **Filter** (`2025-09-` for a date partition), and it asks S3 for the names that start with it. The filter on its own only searches what's listed.
 - Folders you've opened are kept, so going back is instant. **↻** lists the folder again, to pick up files added or removed since.
 
-Only **What's in here** and **⬇ Download .zip** read everything below a folder.
+Only **📊 What's in here** and **⬇ Download .zip** read everything below a folder.
 
 ## From code { #code }
 
@@ -256,12 +256,12 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | Permission | Used by |
 |---|---|
 | `s3:ListAllMyBuckets` | The list of buckets you start from. Without it, open a bucket by its path |
-| `s3:ListBucket` | Listing folders, **Look up**, **What's in here** and **⬇ Download .zip** |
-| `s3:GetObject` | Opening files: **Preview**, **Details**, **Read all**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
-| `s3:GetObjectTagging` | The tags in **Details**; without it, the rest of **Details** still shows |
+| `s3:ListBucket` | Listing folders, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
+| `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
+| `s3:GetObjectTagging` | The tags in **🏷️ Details**; without it, the rest of **🏷️ Details** still shows |
 | `kms:Decrypt` on the key | Files encrypted with SSE-KMS |
 
-**Bucket settings** and **Every bucket** also read each bucket's settings, and its size from CloudWatch; the [S3 guide's policy](s3.md#permissions) covers them and every other S3 report. To scope the policy down, give `s3:ListBucket` and `s3:GetObject` your buckets' ARNs, such as `arn:aws:s3:::acme-ml-data` and `arn:aws:s3:::acme-ml-data/*`, in a statement of their own: `s3:ListAllMyBuckets` only works with `"Resource": "*"`.
+**🛡️ Bucket settings** and **🪣 Every bucket** also read each bucket's settings, and its size from CloudWatch; the [S3 guide's policy](s3.md#permissions) covers them and every other S3 report. To scope the policy down, give `s3:ListBucket` and `s3:GetObject` your buckets' ARNs, such as `arn:aws:s3:::acme-ml-data` and `arn:aws:s3:::acme-ml-data/*`, in a statement of their own: `s3:ListAllMyBuckets` only works with `"Resource": "*"`.
 
 ## Troubleshooting { #troubleshooting }
 

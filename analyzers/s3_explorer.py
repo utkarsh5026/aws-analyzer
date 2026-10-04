@@ -86,22 +86,6 @@ def _s3_module(core: Any = None) -> Any:
 
 _SCHEMES = ("s3://", "s3a://", "s3n://")
 _COMPRESSION = {"gz", "gzip", "bz2", "xz", "zst", "zstd", "snappy", "lz4", "z"}
-_ICONS = {  # extension -> the icon in front of a file's name
-    **dict.fromkeys(("csv", "tsv", "tab", "psv", "parquet", "pq", "orc", "feather", "arrow", "ipc", "avro"), "📊"),
-    **dict.fromkeys(("xlsx", "xlsm", "xls"), "📗"),
-    **dict.fromkeys(("json", "jsonl", "ndjson", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf"), "📋"),
-    **dict.fromkeys(("png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "svg"), "🖼️"),
-    **dict.fromkeys(("wav", "mp3", "flac", "ogg", "m4a", "aac"), "🎵"),
-    **dict.fromkeys(("mp4", "webm", "mov", "m4v", "avi", "mkv"), "🎬"),
-    **dict.fromkeys(("zip", "tar", "tgz", "7z", "rar", "gz", "bz2", "xz", "zst"), "📦"),
-    **dict.fromkeys(("safetensors", "pt", "pth", "ckpt", "onnx", "h5", "keras", "pkl", "pickle", "joblib",
-                     "gguf", "bin"), "🧠"),
-    **dict.fromkeys(("npy", "npz"), "🔢"),
-    **dict.fromkeys(("docx", "docm", "doc", "dotx", "rtf"), "📘"),
-    **dict.fromkeys(("pptx", "pptm", "ppt", "ppsx"), "📙"),
-    "pdf": "📕",
-    "ipynb": "📓",
-}
 _ARCHIVED = {"GLACIER", "DEEP_ARCHIVE"}  # storage classes that need a restore before a file can be read
 _DIGITS = re.compile(r"(\d+)")
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -262,14 +246,14 @@ def breadcrumbs(uri: str) -> list[tuple[str, str]]:
     return crumbs
 
 
-def entry_icon(entry: Entry) -> str:
-    """🪣 bucket, 📁 folder, or a file's icon by its type (📊 tables, 📕 PDF, 🖼️ images, 🧠 models, ...)."""
+def entry_icon(entry: Entry, s3: Any = None) -> str:
+    """🪣 bucket, 📁 folder, or a file's icon by its type (📊 tables, 📕 PDF, 🖼️ images, 🧠 models, ...), the same
+    icons s3.py's reports put in front of keys (its _file_icon; pass the s3 module when you have it)."""
     if entry.kind == "bucket":
         return "🪣"
     if entry.kind == "folder":
         return "📁"
-    ext = _extension(entry.name)
-    return _ICONS.get(ext.split(".")[0], _ICONS.get(ext.rsplit(".", 1)[-1], "📄")) if ext else "📄"
+    return (s3 or _s3_module())._file_icon(entry.name)
 
 
 def sort_entries(entries: list[Entry], by: str = "name", descending: bool = False) -> list[Entry]:
@@ -1035,7 +1019,7 @@ class S3Explorer:
                                        "for the files at this level; the “What's in here” button above adds up "
                                        "everything below."))
         if listing:
-            rows = [[f"{entry_icon(e)} {e.name}{'/' if e.kind == 'folder' else ''}{' ❄' if e.archived else ''}",
+            rows = [[f"{entry_icon(e, s3)} {e.name}{'/' if e.kind == 'folder' else ''}{' ❄' if e.archived else ''}",
                      "" if e.is_folder else s3.human_size(e.size), s3.human_age(e.modified) if e.modified else ""]
                     for e in sort_entries(folder.entries, self._sort, self._descending)]
             blocks.append(s3._Table(["Name", "Size", "Modified" if bucket else "Created"], rows,
@@ -1251,7 +1235,7 @@ class S3Explorer:
             size, age = "", s3.human_age(entry.modified) if entry.modified else ""
         name = entry.name or "(no name)"
         with row.button.hold_sync():
-            row.button.description = f"{entry_icon(entry)}  {name}{'  ❄' if entry.archived else ''}"
+            row.button.description = f"{entry_icon(entry, s3)}  {name}{'  ❄' if entry.archived else ''}"
             row.button.tooltip = tip
             row.button._dom_classes = ("s3x-row", "s3x-on") if entry.uri == self.selected else ("s3x-row",)
         row.size.value, row.age.value = size, age
@@ -1293,24 +1277,24 @@ class S3Explorer:
         bucket, prefix = parse_location(self.nav.location)
         if self.selected:
             name = Entry("file", *parse_location(self.selected)).name
-            actions = [("preview", "Preview", "What's inside the file"),
-                       ("head", "Details", "Size, dates, storage class, metadata and tags")]
+            actions = [("preview", "👁️ Preview", "What's inside the file"),
+                       ("head", "🏷️ Details", "Size, dates, storage class, metadata and tags")]
             kind = _extension(name).split(".")[0]
             if kind in _DOCUMENTS:
-                actions.append(("document", "Read all", "Every page as it looks, 20 at a time (click a page to see it "
+                actions.append(("document", "📖 Read all", "Every page as it looks, 20 at a time (click a page to see it "
                                 "full size)" if kind == "pdf" else "The whole document, page by page"))
             actions += [("download", "⬇ Download", "Save a copy in this notebook's folder"),
                         ("link", "🔗 Link", "A download link that works for an hour, without AWS access"),
                         ("close", "✕", "Close the file and show this folder")]
         elif bucket:
-            actions = [("summary", "What's in here", "Every file below this folder: sizes, types, cost and "
+            actions = [("summary", "📊 What's in here", "Every file below this folder: sizes, types, cost and "
                         "findings (reads the whole listing, so big folders take a while)")]
             if not prefix:
-                actions.append(("bucket_info", "Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
+                actions.append(("bucket_info", "🛡️ Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
             actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip on the notebook's disk, "
                             f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
         else:
-            actions = [("overview", "Every bucket", "Each bucket's size, cost and security warnings")]
+            actions = [("overview", "🪣 Every bucket", "Each bucket's size, cost and security warnings")]
         old = self._actions.children
         self._act_buttons = {}
         for action, label, tip in actions:

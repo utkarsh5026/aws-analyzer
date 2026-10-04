@@ -68,6 +68,7 @@ import sys
 import textwrap
 import time
 import tokenize
+import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -285,6 +286,25 @@ def _as_int(value: Any, name: str, *, hint: str = "") -> int:
 
 def _clip(text: str, width: int = 90) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _width(text: str) -> int:
+    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
+    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
+    width, wide = 0, False
+    for ch in text:
+        if ch == "\ufe0f":
+            width, wide = width + (not wide), True
+        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
+            wide = unicodedata.east_asian_width(ch) in ("W", "F")
+            width += 2 if wide else 1
+    return width
+
+
+def _pad(text: str, width: int, right: bool = False) -> str:
+    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
+    fill = " " * max(0, width - _width(text))
+    return fill + text if right else text + fill
 
 
 _KB_ID_RE = re.compile(r"^[0-9A-Z]{10}$")
@@ -2396,6 +2416,9 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .json .jc{margin-left:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:11px;font-style:italic;opacity:.55;white-space:nowrap}
 .kbc .msg{max-width:min(820px,92%);padding:10px 14px;border-radius:18px;margin:4px 0;box-sizing:border-box}
 .kbc .msg.you{margin-left:auto;width:fit-content;background:var(--kc-solid);color:#fff;border-bottom-right-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.5;box-shadow:0 1px 2px rgba(15,23,42,.12)}
+.kbc .ask{display:flex;justify-content:flex-end;align-items:flex-end;gap:8px}
+.kbc .ask .msg.you{margin-left:0}
+.kbc .av.me{width:26px;height:26px;border-radius:9px;font-size:14px;margin:0 0 4px;background:var(--kc-tint-2)}
 .kbc .msg.bot{margin-right:auto;background:var(--kc-surface);border:1px solid var(--kc-line);border-bottom-left-radius:6px;box-shadow:var(--kc-shadow)}
 .kbc .msg.err{border-color:rgba(239,68,68,.55);background:rgba(239,68,68,.07)}
 .kbc .msg.sys{margin:8px auto;width:fit-content;max-width:90%;text-align:center;font-size:12px;opacity:.75;padding:4px 12px;border-radius:999px;background:var(--kc-tint-2);border:0;box-shadow:none}
@@ -2532,7 +2555,7 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
 </style>"""
 
-_BADGE = "Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
+_BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 
 
@@ -2777,10 +2800,11 @@ def _sources_html(a: Answer) -> str:
         items.append(f'<details class="src"><summary><span class="sx">{i}</span><span class="sf">{_esc(where)}</span>'
                      f'<span class="sn">{_esc(best_snippet(p.text, terms, 120))}</span></summary>{body}</details>')
     count = f" · {len(items)}" if len(items) > 1 else ""
-    return f'<div class="srcs"><div class="sh">Sources{count}</div>{"".join(items)}</div>' if items else ""
+    return f'<div class="srcs"><div class="sh">📎 Sources{count}</div>{"".join(items)}</div>' if items else ""
 
 
 _AVATAR = '<span class="av">\u2726</span>'  # the mark before the model's name on each answer
+_YOU = '<span class="av me" title="You">🧑</span>'  # and the one beside each of your questions
 
 
 def _meta_html(meta: str) -> str:
@@ -2814,7 +2838,7 @@ def _writing_html(model: str, text: str) -> str:
 
 
 def _question_html(question: str) -> str:
-    return f'<div class="msg you">{_esc(question)}</div>'
+    return f'<div class="ask"><div class="msg you">{_esc(question)}</div>{_YOU}</div>'
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
@@ -3577,13 +3601,13 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 for i, row in enumerate(rows)
             ]
             widths = [
-                max([len(h)] + [len(r[j]) for r in cells])
+                max([_width(h)] + [_width(r[j]) for r in cells])
                 for j, h in enumerate(headers)
             ]
 
             def line_of(values: list[str], widths: list[int] = widths) -> str:
                 return "  ".join(
-                    v.rjust(w) if _NUMERIC_RE.match(v) else v.ljust(w)
+                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
                     for v, w in zip(values, widths)
                 ).rstrip()
 
@@ -3973,7 +3997,7 @@ class _ChatApp:
 
         tabs = w.Tab(children=[settings_tab, request_tab, response_tab],
                      layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
-        for i, title in enumerate(("Settings", "Request JSON", "Last response")):
+        for i, title in enumerate(("⚙️ Settings", "🧾 Request JSON", "📨 Last response")):
             tabs.set_title(i, title)
         tabs.add_class("kbc-side")
         return tabs
@@ -4654,10 +4678,10 @@ class BedrockChatView:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
-        "Chat": ("app", "ask", "new_chat", "transcript", "last"),
-        "Settings": ("settings", "set", "unset", "fields", "request"),
-        "Knowledge base and model": ("use", "kbs", "models"),
-        "Help": ("help",),
+        "💬 Chat": ("app", "ask", "new_chat", "transcript", "last"),
+        "⚙️ Settings": ("settings", "set", "unset", "fields", "request"),
+        "📚 Knowledge base and model": ("use", "kbs", "models"),
+        "❓ Help": ("help",),
     }
     _START = (
         ("app()", "the chat window: pick a model, change settings, see the JSON"),

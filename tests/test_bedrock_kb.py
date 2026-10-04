@@ -2848,5 +2848,5 @@ def test_ui_help_groups_every_command(ui, capsys):
     assert commands == {
         name for names in BedrockKBView._GROUPS.values() for name in names
     }
-    assert "Start here:" in out and "-- Search and answer --" in out
+    assert "Start here:" in out and "-- 🔎 Search and answer --" in out
     assert "engine='converse' gives exact tokens" in run(capsys, ui.help, "ask")

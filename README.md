@@ -275,11 +275,11 @@ S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file 
 | To                   | Do this                                                                                                                                                                                                               |
 | :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Open a folder        | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder                                                                                                           |
-| See what's in a file | Click it. **Details** shows its metadata and tags, **Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour. Clicking through files doesn't wait: each click shows its file as soon as it's read, and files you clicked past are skipped |
-| Read a PDF           | Click **Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
+| See what's in a file | Click it. **🏷️ Details** shows its metadata and tags, **📖 Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour. Clicking through files doesn't wait: each click shows its file as soon as it's read, and files you clicked past are skipped |
+| Read a PDF           | Click **📖 Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
 | Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
 | Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first                                                                       |
-| Add up a folder      | Open it and click **What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
+| Add up a folder      | Open it and click **📊 What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
 | Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder zips go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
 
 Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
@@ -977,16 +977,16 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
   Findings under an answer say which setting to try (Bedrock's "unable to assist" reply, no citations, a guardrail,
   cut off at `max_tokens`). Follow-ups keep Bedrock's session; **New chat** starts over.
-- **Settings.** Everything sent with every question, each value explained in a sentence, with its path in the
+- **⚙️ Settings.** Everything sent with every question, each value explained in a sentence, with its path in the
   request. Change it in place, remove it with ✕, add the common ones with one click, or search **every** field by
   name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
   the list comes from the installed boto3's description of the API, so nothing is missing. A value that
   can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
   newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
-- **Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
+- **🧾 Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
   JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
   back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
-  while you were editing without saying so. **Last response** shows what came back.
+  while you were editing without saying so. **📨 Last response** shows what came back.
 
 ### Commands (`BedrockChatView`)
 
