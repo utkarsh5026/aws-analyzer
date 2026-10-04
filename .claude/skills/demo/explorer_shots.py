@@ -8,10 +8,10 @@ shots.py renders reports as static HTML, which a widget isn't. This starts Jupyt
 a notebook that seeds shots.py's acme scene in moto and moves an S3Explorer to the figure's place, clicking its
 buttons the way you would when the figure needs that. It screenshots the explorer 984 CSS px wide at 1.5x in
 headless Chromium (light, then dark theme), writes docs/images/<name>-{light,dark}.webp and sets the figure's
-height= in docs/s3.md, like shots.py.
+height= in docs/s3_explorer.md, like shots.py.
 
-The tour (explorer-tour, shown in README.md) is an animated WebP instead: a drawn pointer moves to each button
-and clicks it, with a frame for every step of the way and a pause on each result.
+The tour (explorer-tour, at the top of the guide and in README.md) is an animated WebP instead: a drawn pointer
+moves to each button and clicks it, with a frame for every step of the way and a pause on each result.
 
 Chromium draws the widgets' buttons and labels in the system UI font, which differs from machine to machine, so
 the browser gets a fontconfig that maps it to Liberation Sans, the font the reports' Helvetica already gets on
@@ -289,8 +289,7 @@ def main() -> int:
                             image = Image.open(png).convert("RGB")
                             image.save(out, "WEBP", quality=90, method=6)
                         heights.add(round(image.height / shots.SCALE))
-                    if not figure.tour:  # the tour is in README.md, which sets no height
-                        shots.set_height("s3", figure.name, max(heights))
+                    shots.set_height("s3_explorer", figure.name, max(heights))
                     print(f"  {figure.name}: {shots.WIDTH} x {max(heights)}", file=sys.stderr)
                 browser.close()
         finally:

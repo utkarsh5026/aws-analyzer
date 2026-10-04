@@ -325,7 +325,7 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
   README links and old links still work. `index.md` is the home page with one card per service (Material grid
   cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`). A new
+  `sagemaker_env.md`), and so does the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to). A new
   analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
   README. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
   `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
@@ -340,8 +340,8 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
   fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
   The explorer is a live widget, so its figures (`explorer`, `explorer-docx`, `explorer-buckets`, and `explorer-tour`,
-  an animated WebP of a pointer clicking through it) come from `explorer_shots.py`, which runs it in a real JupyterLab
-  with Playwright (`pip install jupyterlab playwright`). The chat window's figures
+  an animated WebP of a pointer clicking through it, all in `s3_explorer.md`) come from `explorer_shots.py`, which
+  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which

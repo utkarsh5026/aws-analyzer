@@ -76,7 +76,8 @@ report still renders.
 
 | Service                            | What it shows you                                                                                                                                                                                                                                       | File and guide                                                                                                                            |
 | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Click through folders like a file explorer, or search them<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                               | [`s3.py`](analyzers/s3.py), [`s3_explorer.py`](analyzers/s3_explorer.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html) |
+| **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
+| **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• PDFs page by page, Word files with their pictures<br>• A folder as one .zip, after checking it fits                                             | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
 | **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
@@ -250,6 +251,8 @@ ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")  # preview a
 [`s3_explorer.py`](analyzers/s3_explorer.py) turns a cell into a small file explorer for S3. Folders and files are
 listed on the left. Click a folder to open it, or click a file to see what's inside it on the right, drawn by the
 same `preview` as above: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
+
+📄 [`analyzers/s3_explorer.py`](analyzers/s3_explorer.py) · 📖 [Explorer guide](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-tour-dark.webp">
@@ -1255,8 +1258,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
   service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
-  [`docs/sagemaker_env.md`](docs/sagemaker_env.md)); a new analyzer
-  gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
+  [`docs/sagemaker_env.md`](docs/sagemaker_env.md)), and so does the S3 explorer
+  ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
