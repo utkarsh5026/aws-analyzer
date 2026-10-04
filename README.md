@@ -157,9 +157,13 @@ Every report has the same shape, so the answer is always in the same place:
 1. **Title and cards**: the few numbers that matter. A card turns amber (or red) when a finding below is about it,
    such as `Encryption: none` or `Point-in-time recovery: off`. In text mode those cards end in `(!)`.
 2. **Findings**: what's wrong or worth knowing, warnings first. Each says why it matters, what it costs when that can
-   be priced, and the next step. When every check passes, the report says so.
+   be priced, and the next step. When every check passes, the report says so. In S3 reports each finding leads with
+   a bold headline, then the why and the what-to-do as points.
 3. **Tables of detail.** Status cells such as `FAILED` or `PUBLIC` are coloured. Long tables scroll under a fixed
-   header, and secondary views (tags, the raw policy JSON) are folded: click to open them.
+   header, and secondary views (tags, the raw policy JSON) are folded: click to open them. In S3 reports, click a
+   column's header to sort by it (again for the other way), pick a value in a column's filter to see only those
+   rows (a storage class, a region), and untick the columns you don't need under **Columns**. Long keys keep the
+   file name in view: the folder is shortened from the left, and the whole key shows when you hover over it.
 4. **Next**: two or three commands worth running next, with the arguments filled in from this report, such as
    `get('orders', 'USER#0', 'ORDER#0000')` after a scan or `chunk(1)` after a search.
 

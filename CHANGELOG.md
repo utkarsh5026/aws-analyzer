@@ -11,6 +11,23 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `S3View` tables: click a column's header to sort by it (largest, newest or A to Z first, again for the other way, a
+  third time for the original order), pick a value in a column's **Filter** to see only those rows (a storage class,
+  a region, a bucket), and untick columns under **Columns** to hide the ones you don't need. It's plain HTML and CSS,
+  so it still works after the notebook is saved and reopened.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+
+### Changed
+
+- `S3View`: long keys in tables keep the file name in view. The folder is dimmed and shortened from the left, and the
+  whole key shows when you hover over it; in text mode the start of the folder goes, never the file name.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+- `S3View` findings lead with a bold headline, with why it matters and what to do underneath as points, and amounts
+  of money stand out. Notes start with their point in bold.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+
 ## [0.2.0] - 2026-10-04
 
 ### Added

@@ -3566,9 +3566,10 @@ def test_findings_panel_puts_warnings_first():
     assert text.index("[!] call") < text.index("[i] a note") < text.index("[i] another")
     rendered = s3mod._render_html([s3mod._Findings(found)], 50)
     assert (
-        "Findings · 1 warning · 2 notes" in rendered
+        '<span class="chip warn">1 warning</span><span class="chip info">2 notes</span>' in rendered
         and "&lt;b&gt;now&lt;/b&gt;" in rendered
     )
+    assert rendered.index('class="fi warn"') < rendered.index("a note") < rendered.index("another")
     assert (
         '<code title="Click to select, then copy">documents(status=&#x27;FAILED&#x27;)</code>'
         in rendered
@@ -3661,6 +3662,86 @@ def test_text_tables_say_how_to_see_hidden_rows():
     assert s3mod._render_text([s3mod._Table(["n"], rows, max_rows=4)], 3).endswith(
         "6 more rows not shown"
     )
+
+
+def test_sort_keys_read_human_units():
+    key = s3mod._sort_key
+    assert key("900.0 MB") < key("1.5 GB") < key("2.0 TB")
+    assert key("-$3.00") < key("<$0.01") < key("$0.02") < key("$1,234")
+    assert key("just now") < key("5m ago") < key("3d ago") < key("2mo ago") < key("1y ago")
+    assert key("12.5%") < key("80%") and key("40+") == key("40") and key("1 of 3") == key("1")
+    assert key("epoch-2.pt") < key("epoch-10.pt") and key("Alpha") < key("beta")
+    assert key("2024-05-01 10:00") < key("2025-01-01 09:00") and key("📁 b/") == key("b/")
+    assert key("") is None and key("-") is None
+    assert s3mod._ranks([(0, 2), (0, 1), None, (0, 2)]) == ([1, 0, 4, 1], [0, 2, 4, 0])  # ties share; empty last
+    assert s3mod._sort_kind(["3d ago", "1y ago"], [(0, 1.0), (0, 2.0)]) == "age"
+    assert s3mod._sort_kind(["1 KB", "2 KB"], [(0, 1.0), (0, 2.0)]) == "number"
+
+
+def test_html_tables_sort_filter_and_pick_columns():
+    rows = [[f"logs/app/2026/part-{i}.json", f"{i + 1}.0 MB", "GLACIER" if i % 3 else "STANDARD"] for i in range(8)]
+    rules: set[str] = set()
+    html_out = s3mod._table_html(
+        s3mod._Table(["Key", "Size", "Storage class"], rows, title="Files", path_cols=(0,)), 50, rules)
+    assert html_out.startswith('<form class="tbl" method="dialog" autocomplete="off">')
+    assert '<th class="srt k1 n"><label class="o1" title="Sort: largest first">' in html_out
+    assert '<label class="o2" title="Sort: smallest first" hidden="hidden">' in html_out
+    assert '<th class="srt k0"><label class="o1" title="Sort: A to Z">' in html_out
+    biggest = html_out.index("part-7.json")
+    assert html_out.rindex("--d1:0", 0, biggest) > html_out.rindex("<tr", 0, biggest)  # largest first: place 0
+    # storage class: a filter, most rows first, with the CSS rule that hides the other rows
+    assert '<select class="f2"><option class="all" selected>All</option><option class="v0">GLACIER (5)</option>' in (
+        html_out)
+    assert ".s3a form.tbl:has(.f2 .v0:checked) tbody tr:not(.f2v0){display:none}" in rules
+    assert 'class="f2v1"' in html_out and "rows match" in html_out
+    # columns menu, and the controls stay hidden where the stylesheet is stripped
+    assert '<input type="checkbox" class="cv2" checked>Storage class</label>' in html_out
+    assert ".s3a form.tbl:has(.cv2:not(:checked)) tr>:nth-child(3){display:none}" in rules
+    assert '<div class="tb" hidden="hidden">' in html_out and ' hidden>' not in html_out
+    # a key: its folder dimmed, the name whole, the full key on hover
+    assert ('<td class="p" title="logs/app/2026/part-0.json"><span class="pl"><span class="pd">logs/app/2026/</span>'
+            '<span class="pn">part-0.json</span></span></td>') in html_out
+    long_name = "x/" + "n" * 70 + ".parquet"
+    assert 'class="pd" style="max-width:12ch"' in s3mod._path_html(long_name)  # a long name leaves the folder less room
+    assert s3mod._path_html("📁 raw/") == '<span class="pl"><span class="pi">📁</span><span class="pn">raw/</span></span>'
+    assert '<span class="pd">Reports 2024/</span><span class="pn">q1 summary.pdf</span>' in s3mod._path_html(
+        "Reports 2024/q1 summary.pdf\n… and 3 more")
+    assert s3mod._path_html("… and 3 more") == '<span class="pl"><span class="pn">… and 3 more</span></span>'
+    # small tables, tree tables and lists of commands stay plain
+    assert "<form" not in s3mod._table_html(s3mod._Table(["Tag", "Value"], [["a", "1"], ["b", "2"]]), 50, set())
+    tree = s3mod._table_html(s3mod._Table(["Folder", "Objects"], [["a/", "1"], ["  b/", "2"], ["c/", "3"]], tree=True),
+                             50, set())
+    assert "srt" not in tree
+    rendered = s3mod._render_html([s3mod._Table(["Key", "Size", "Storage class"], rows)], 50)
+    assert rendered.index("<style>.s3a form.tbl:has(") < rendered.index("<form")  # its rules ship with it
+
+
+def test_text_tables_keep_file_names():
+    key = "raw/events/year=2026/month=09/day=01/hour=05/source=mobile-app/region=us-east-1/part-00001-c000.parquet"
+    out = s3mod._render_text([s3mod._Table(["Key", "Note"], [[key, "x" * 120]], path_cols=(0,))], 50)
+    assert "…/" in out and "part-00001-c000.parquet" in out and "raw/events" not in out
+    assert "x" * 89 + "…" in out  # other columns are still cut at the end
+    assert s3mod._clip_path("a/b.csv") == "a/b.csv"
+
+
+def test_findings_read_as_headline_and_points():
+    html_out = s3mod._finding_html(
+        "info", "586.2 GB hasn't changed in 90+ days. If it's rarely read, tiering could cut cost. "
+                "In STANDARD_IA it would cost about $6.15/month less (see what_if).")
+    assert html_out.startswith('<div class="fi info"><div class="hd">586.2 GB hasn&#x27;t changed in 90+ days</div>')
+    assert '<ul class="dt"><li>If it&#x27;s rarely read' in html_out and '<span class="m">$6.15/month</span>' in html_out
+    colon = s3mod._finding_html("warn", "The disk doesn't have room: the zip needs 2 GB and 1 GB is free.")
+    assert '<div class="hd">The disk doesn&#x27;t have room</div><div class="dt">The zip needs 2 GB' in colon
+    assert s3mod._split_lead("Check it: find('s3://b/a: b. C') lists them.") == (
+        "Check it", ":", "find('s3://b/a: b. C') lists them.")  # never inside a command
+    assert s3mod._split_lead("Something went wrong (RuntimeError: boom). Click it again.") == (
+        "Something went wrong (RuntimeError: boom)", ".", "Click it again.")  # nor inside brackets
+    assert s3mod._prose_sentences("A (e.g. Foo. Bar) b. C d.") == ["A (e.g. Foo. Bar) b.", "C d."]
+    assert s3mod._capitalized("invoices/a.pdf is scanned") == "invoices/a.pdf is scanned"
+    assert '<div class="hd">&lt;b&gt;x&lt;/b&gt; is bad</div>' in s3mod._finding_html("warn", "<b>x</b> is bad: really")
+    assert s3mod._lead("Showing the first 500 entries; pass limit= for more.") == (
+        '<span class="ld">Showing the first 500 entries;</span> pass limit= for more.')
+    assert s3mod._lead("No objects under this prefix.") == "No objects under this prefix."
 
 
 def test_ui_help_groups_every_command(ui, capsys):
