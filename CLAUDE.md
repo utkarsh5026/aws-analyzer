@@ -122,7 +122,11 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
 How the View layer works:
 
 - Methods build a list of render blocks (`_Title`, `_Cards`, `_Findings`, `_Table`, `_Note`, `_Text`, `_Next`, in
-  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages` (PDF pages drawn as pictures) and `_Flow` (a Word
+  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages` (PDF pages drawn as pictures; `_Zoom` gives each a hidden
+  radio button that its picture's `<label>` checks, and a checked one makes the page a fixed overlay whose ‹ › ✕
+  are labels for the neighbouring pages' radios and the report's "none" radio, so a click shows the page full size
+  and steps through every drawn page in the report; JupyterLab confines fixed elements to the notebook panel, so
+  it fills the notebook, not the window) and `_Flow` (a Word
   document laid out: headings, lists, tables and its pictures in place), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
@@ -211,6 +215,16 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   deprecated), so leaving the box or clicking ✕ doesn't navigate.
 - Callbacks go through `_guard()`, which turns any exception into a note on the right; an exception in a widget
   callback would otherwise go to Jupyter's log, and the click would seem to do nothing.
+- Quick reports (`_BACKGROUND`: preview, head) load on `_WORKERS` threads when the kernel's event loop is running
+  (`_loop()`), so a click returns at once and the next click isn't kept waiting. `_later` awaits the worker's future
+  on that loop and shows the report only if `_job` (bumped by every `_set_pane`) hasn't moved since; it's cached
+  either way, and a job already out of date when a worker picks it up is skipped. A worker uses its own
+  `S3View(progress="off")` and touches no widgets. Without a running loop (scripts, the tests) reports load inline;
+  tests drive the background path inside `asyncio.run`.
+- "Read all" on a PDF (`_read_pdf`) draws `_MAX_PICTURES` pages from `_first_page`, after counting the pages once per
+  file version (`_page_count`); `_draw_pager` puts the buttons for the pages before and after under the report.
+- "⬇ Download .zip" on a folder runs `download_zip` with `zip_max_size` / `zip_max_files` / `zip_folder`, which the
+  ⚙ settings panel edits (Text widgets shown under the report's title; Enter in a box saves, like the path box).
 
 ## The PyPI package
 
