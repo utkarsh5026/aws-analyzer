@@ -11,6 +11,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- `chat()` window: the Settings side is less crowded. Its boxes, labels, descriptions and request paths use smaller
+  type, the setting cards and the Add a setting panel are more compact, and the tab bar is slimmer, so more settings
+  fit before you need to scroll. The Request JSON and Last response tabs use the same smaller type. Everything
+  works as before.
+
 ## [0.4.0] - 2026-10-04
 
 ### Added
