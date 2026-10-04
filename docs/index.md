@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook, and a chat window for asking a knowledge base."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
 hide:
   - toc
 ---
@@ -30,11 +30,25 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     { .what }
 
     - Every bucket's size, monthly cost and risks
-    - Click through folders like a file explorer, or search them
+    - Folder trees, and search by name, size or date
     - Preview CSV, Parquet, JSON, Excel, PDF, Word and more
     - Cut storage costs and recover deleted files
 
     [Open the S3 guide →](s3.md)
+
+-   `s3_explorer.py`
+
+    **S3 file explorer**
+
+    Click through buckets and folders, and see inside each file.
+    { .what }
+
+    - Your buckets and folders, one click at a time
+    - What's inside a file, as soon as you click it
+    - PDFs page by page, Word files with their pictures
+    - A folder as one .zip, after checking it fits
+
+    [Open the explorer guide →](s3_explorer.md)
 
 -   `dynamodb.py`
 

@@ -50,8 +50,9 @@ ROOT = HERE.parents[2]
 sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
-GUIDES = {"s3": "s3.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
-          "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md"}  # bedrock_chat: chat_shots.py
+GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
+          "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md"}
+# s3_explorer's figures come from explorer_shots.py and bedrock_chat's from chat_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
 NOW = datetime.now(timezone.utc)

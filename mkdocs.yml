@@ -23,6 +23,7 @@ use_directory_urls: false
 nav:
   - Home: index.md
   - Amazon S3: s3.md
+  - S3 file explorer: s3_explorer.md
   - Amazon DynamoDB: dynamodb.md
   - Bedrock Knowledge Bases: bedrock_kb.md
   - Bedrock chat: bedrock_chat.md
