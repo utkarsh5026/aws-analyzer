@@ -1499,7 +1499,7 @@ class S3Explorer:
         if report and isinstance(report[0], self.s3._Title):
             at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Cards)), 1)
             span = f"Pages {first}–{last} of {count:,}; the buttons at the end show the others. " if count > last - first + 1 else ""
-            report.insert(at, self.s3._Note(f"{span}Click a page to see it full size, and click again to come back."))
+            report.insert(at, self.s3._Note(f"{span}Click a page to see it full size; ‹ › there step through the pages."))
 
     def _page_count(self, uri: str) -> int:
         """How many pages a PDF has (0 when it can't be read), once per file version."""

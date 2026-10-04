@@ -122,9 +122,11 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
 How the View layer works:
 
 - Methods build a list of render blocks (`_Title`, `_Cards`, `_Findings`, `_Table`, `_Note`, `_Text`, `_Next`, in
-  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages` (PDF pages drawn as pictures, each a `<details class="zoom">`
-  whose summary becomes a fixed overlay while open, so a click shows the page full size; JupyterLab confines
-  fixed elements to the notebook panel, so it fills the notebook, not the window) and `_Flow` (a Word
+  S3 also `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages` (PDF pages drawn as pictures; `_Zoom` gives each a hidden
+  radio button that its picture's `<label>` checks, and a checked one makes the page a fixed overlay whose ‹ › ✕
+  are labels for the neighbouring pages' radios and the report's "none" radio, so a click shows the page full size
+  and steps through every drawn page in the report; JupyterLab confines fixed elements to the notebook panel, so
+  it fills the notebook, not the window) and `_Flow` (a Word
   document laid out: headings, lists, tables and its pictures in place), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).

@@ -5,6 +5,7 @@ import io
 import itertools
 import json
 import pickle
+import re
 import sys
 import tarfile
 import types
@@ -1197,11 +1198,19 @@ def test_pages_and_flow_render_as_html():
     page = Picture(PNG, "image/png", "Page 1", page=1)
     flow = [("title", "<script>alert(1)</script>"), ("li", "one"), ("li", "two"), ("p", "text"),
             ("table", [["h1", "h2"], ["a", "b"]]), ("picture", page), ("missing", "Picture a.emf: EMF format")]
-    html = s3mod._render_html([s3mod._Pages([page, page], "Pages 1–2"), s3mod._Flow(flow)], 50)
-    assert html.count('src="data:image/png;base64,') == 3 and "<figcaption>Page 1</figcaption>" in html
-    # a page fills the screen when clicked (CSS only), keeping its place in the report meanwhile
-    assert html.count('<details class="zoom" style="aspect-ratio:40/30"><summary title="Click to see it full size">') == 2
-    assert '<span class="zh">Page 1 · click anywhere to go back</span>' in html and "details.zoom[open]>summary" in html
+    html = s3mod._render_html([s3mod._Pages([page, page], "Pages 1–2"), s3mod._Flow(flow), s3mod._Pages([page])], 50)
+    assert html.count('src="data:image/png;base64,') == 4 and "<figcaption>Page 1</figcaption>" in html
+    # a page fills the screen when clicked (CSS only), keeping its place in the report meanwhile, with ‹ › to the
+    # pages before and after it, across the report's _Pages blocks
+    group = re.search(r'name="(z[0-9a-f]{10})"', html).group(1)
+    assert html.count(f'<input type="radio" class="zr" name="{group}"') == 4  # "none", then one per page
+    assert html.count('<div class="zw" style="aspect-ratio:40/30">') == 3 and ".zr:checked+.zp{position:fixed" in html
+    assert f'<label class="zo" for="{group}-2" title="Click to see it full size">' in html
+    assert f'<label class="zn zprev" for="{group}-1"' in html and f'<label class="zn znext" for="{group}-3"' in html
+    assert f'for="{group}-0"' in html and f'for="{group}-4"' not in html  # no › after the last page
+    assert '<span class="zh">Page 1 · 3 of 3 · click the page or ✕ to go back</span>' in html
+    other = s3mod._render_html([s3mod._Pages([page])], 50)
+    assert group not in other and "zprev" not in other.split("</style>")[1] and " of " not in other.split("</style>")[1]
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "<script>" not in html
     assert "<ul><li>one</li><li>two</li></ul>" in html and '<div class="dh d0">' in html
     assert "<h1" not in html and "<th>h1</th>" in html and 'class="pm"' in html

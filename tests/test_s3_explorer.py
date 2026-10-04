@@ -510,12 +510,12 @@ def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
     aws.put_object(Bucket=LAKE, Key="docs/short.pdf", Body=pdf_bytes("One", "Two"))
     aws.put_object(Bucket=LAKE, Key="docs/broken.pdf", Body=b"%PDF-1.4 not really")
     x = explorer("s3://lake/docs/long.pdf")
-    assert x._content.value.count('<details class="zoom"') == 3  # the preview's pages: click one to see it full size
+    assert x._content.value.count('<div class="zw"') == 3  # the preview's pages: click one to see it full size
     assert "Every page as it looks" in x._act_buttons["document"].tooltip
 
     x._act_buttons["document"].click()
     drawn = [block.pictures[0].page for block in x.shown if isinstance(block, s3mod._Pages)]
-    assert drawn == list(range(1, 21)) and x._content.value.count('<details class="zoom"') == 20
+    assert drawn == list(range(1, 21)) and x._content.value.count('<div class="zw"') == 20
     assert "Pages 1–20 of 25; the buttons at the end show the others. Click a page to see it full size" in text(x)
     assert "Text of page 3" in text(x)  # each page's text, folded under it
     assert x._pager.layout.display is None and pager(x) == ["Pages 1–20 of 25", "Pages 21–25 ›"]
