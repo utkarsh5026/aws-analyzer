@@ -30,7 +30,8 @@ Demo data (moto, us-east-1, everything synthetic):
             files changed after the last sync; help-center (WEB, semantic chunking, model parser, RETAIN).
             sales-playbooks (Pinecone, never synced), hr-policies (S3 Vectors, no chunking), legacy-faq
             (FAILED, Aurora). Models: Claude and Llama through us. profiles, Nova and Mistral on demand, and
-            embedding and rerank models that models() leaves out.
+            embedding and rerank models that models() leaves out. bedrock_chat uses the same fake Bedrock, which also
+            answers RetrieveAndGenerateStream a few words at a time.
   sagemaker_env  moto has no Studio, so the seeder hands the analyzer fake sagemaker / sts / cloudwatch
             clients (checked against botocore's service model) and a fake machine: this code "runs" in the
             JupyterLab space churn-analysis (ml.g5.2xlarge, 2 days, idle GPU, domain without idle shutdown) whose
@@ -429,10 +430,25 @@ class _FakeAWS:
             raise NotImplementedError(f"the Bedrock demo doesn't answer {op.name}")
         time.sleep(self._latency.get(name, 0.0))
         resp = self._handlers[name](**params)
+        if op.has_event_stream_output:  # check each event as it's read, like botocore's EventStream parses them
+            shape = op.get_event_stream_output()
+            resp["stream"] = self._checked_events(op.name, resp["stream"], shape)
+            return resp
         report = ParamValidator().validate(resp, op.output_shape)
         if report.has_errors():
             raise AssertionError(f"demo {op.name} response doesn't match the service model:\n{report.generate_report()}")
         return resp
+
+    @staticmethod
+    def _checked_events(operation: str, events, shape):
+        from botocore.validate import ParamValidator
+
+        for event in events:
+            report = ParamValidator().validate(event, shape)
+            if report.has_errors():
+                raise AssertionError(f"demo {operation} event doesn't match the service model:\n"
+                                     f"{report.generate_report()}")
+            yield event
 
     def __getattr__(self, name: str):
         if name.startswith("_") or name not in self._ops:
@@ -614,13 +630,13 @@ def seed_bedrock_kb() -> dict:
             return []
         kind = config.get("overrideSearchType", "SEMANTIC")
         chunks = [c for c in CHUNKS if _matches(c[2], config.get("filter"))]
-        ranked = _rank(question, kind, chunks)[: config["numberOfResults"]]
+        ranked = _rank(question, kind, chunks)[: config.get("numberOfResults", 5)]  # Bedrock's default is 5
         rerank = config.get("rerankingConfiguration")
         if rerank:
             exact = set(_words(question))
             ranked = sorted(((round(0.2 + 0.8 * len(exact & set(_words(c[3]))) / max(len(exact), 1), 4), c)
                              for _, c in ranked), key=lambda s: -s[0])
-            ranked = ranked[: rerank["bedrockRerankingConfiguration"]["numberOfRerankedResults"]]
+            ranked = ranked[: rerank["bedrockRerankingConfiguration"].get("numberOfRerankedResults", len(ranked))]
         return ranked
 
     def retrieve(knowledgeBaseId, retrievalQuery, retrievalConfiguration, **_):
@@ -633,7 +649,7 @@ def seed_bedrock_kb() -> dict:
     def retrieve_and_generate(input, retrieveAndGenerateConfiguration, sessionId=None, **_):
         config = retrieveAndGenerateConfiguration["knowledgeBaseConfiguration"]
         found = search(config["knowledgeBaseId"], input["text"],
-                       config["retrievalConfiguration"]["vectorSearchConfiguration"])
+                       config.get("retrievalConfiguration", {}).get("vectorSearchConfiguration", {}))
         useful = [(s, c) for s, c in found if s >= max(0.55, found[0][0] - 0.1)][:3] if found else []
         if not useful:
             return {"output": {"text": "Sorry, I am unable to assist you with this request."},
@@ -648,6 +664,24 @@ def seed_bedrock_kb() -> dict:
                 "retrievedReferences": [{k: v for k, v in _reference(None, chunk, 0).items()}]})
         text += " Anything else is decided case by case by the support team."  # uncited, like real answers
         return {"output": {"text": text}, "citations": citations, "sessionId": sessionId or "demo-session-1"}
+
+    def retrieve_and_generate_stream(**params):
+        """The same answer, as RetrieveAndGenerateStream's events: the text a few words at a time, then each
+        citation once the text it covers has been written."""
+        import time
+
+        resp = retrieve_and_generate(**params)
+        text = resp["output"]["text"]
+
+        def events():
+            pieces = text.split(" ")
+            for i, word in enumerate(pieces):
+                time.sleep(0.03)
+                yield {"output": {"text": word + (" " if i < len(pieces) - 1 else "")}}
+            for cite in resp.get("citations", []):
+                yield {"citation": cite}
+
+        return {"sessionId": resp["sessionId"], "stream": events()}
 
     def converse(modelId, messages, system=None, inferenceConfig=None, **_):
         import re
@@ -711,8 +745,9 @@ def seed_bedrock_kb() -> dict:
         "list_tags_for_resource": lambda resourceArn: {"tags": {"team": "customer-support", "cost-center": "cx-42"}
                                                        if resourceArn == kb_arn[SUPPORT] else {}},
     })
-    runtime = _FakeAWS("bedrock-agent-runtime", {"retrieve": retrieve, "retrieve_and_generate": retrieve_and_generate},
-                       latency={"retrieve": 0.3, "retrieve_and_generate": 1.9})
+    runtime = _FakeAWS("bedrock-agent-runtime", {"retrieve": retrieve, "retrieve_and_generate": retrieve_and_generate,
+                                                 "retrieve_and_generate_stream": retrieve_and_generate_stream},
+                       latency={"retrieve": 0.3, "retrieve_and_generate": 1.9, "retrieve_and_generate_stream": 0.8})
     llm = _FakeAWS("bedrock-runtime", {"converse": converse}, latency={"converse": 2.1})
     bedrock = _FakeAWS("bedrock", {
         "list_foundation_models": lambda **_: {"modelSummaries": models},
@@ -914,7 +949,7 @@ def seed_sagemaker_env() -> dict:
     return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch}, "root": str(root)}
 
 
-SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb,
+SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env}
 
 

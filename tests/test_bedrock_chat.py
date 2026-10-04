@@ -1,0 +1,1017 @@
+import ast
+import json
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import boto3
+import pytest
+from botocore import xform_name
+from botocore.exceptions import ClientError
+from botocore.stub import Stubber
+from botocore.validate import ParamValidator
+
+import bedrock_chat as chatmod
+from bedrock_chat import (
+    DEFAULT_PROMPT,
+    DEFAULT_SETTINGS,
+    Answer,
+    BedrockChatAnalyzer,
+    BedrockChatView,
+    _diff,
+    _py_literal,
+    _question_text,
+    answer_cost,
+    answer_findings,
+    as_filter,
+    build_request,
+    coerce_setting,
+    collect_stream,
+    describe_filter,
+    describe_setting,
+    normalize_settings,
+    parse_rag,
+    python_call,
+    request_schema,
+    settings_findings,
+    settings_from_request,
+    validate_request,
+)
+
+KB_ID, KB2_ID = "KBID123456", "KBID654321"
+ACCOUNT = "123456789012"
+NOW = datetime.now(timezone.utc)
+SCHEMA = request_schema()
+F = SCHEMA.fields
+KB = ("retrieveAndGenerateConfiguration", "knowledgeBaseConfiguration")
+SONNET = "anthropic.claude-sonnet-5"
+SONNET_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.{SONNET}"
+OPUS_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.anthropic.claude-opus-5"
+
+
+def model(model_id, name, provider="Anthropic", on_demand=False):
+    return {"modelArn": f"arn:aws:bedrock:us-east-1::foundation-model/{model_id}", "modelId": model_id,
+            "modelName": name, "providerName": provider, "inputModalities": ["TEXT"], "outputModalities": ["TEXT"],
+            "inferenceTypesSupported": ["ON_DEMAND"] if on_demand else [], "modelLifecycle": {"status": "ACTIVE"}}
+
+
+CLAUDES = ["anthropic.claude-opus-5", SONNET]
+MODEL_LIST = [model(CLAUDES[0], "Claude Opus 5"), model(SONNET, "Claude Sonnet 5"),
+              model("amazon.nova-pro-v1:0", "Nova Pro", "Amazon", True)]
+PROFILES = [
+    {"inferenceProfileName": f"US {m}", "inferenceProfileId": f"us.{m}", "status": "ACTIVE", "type": "SYSTEM_DEFINED",
+     "inferenceProfileArn": f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.{m}",
+     "models": [{"modelArn": f"arn:aws:bedrock:us-east-1::foundation-model/{m}"}]}
+    for m in CLAUDES
+]
+
+
+def ref(text, key="policies/refund-policy.pdf", page=3, **metadata):
+    md = {"x-amz-bedrock-kb-source-uri": f"s3://docs/{key}", "x-amz-bedrock-kb-chunk-id": f"chunk-{key}-{page}",
+          "x-amz-bedrock-kb-data-source-id": "DSID123456", **metadata}
+    if page is not None:
+        md["x-amz-bedrock-kb-document-page-number"] = float(page)
+    return {"content": {"type": "TEXT", "text": text}, "location": {"type": "S3", "s3Location": {"uri": f"s3://docs/{key}"}},
+            "metadata": md}
+
+
+REFUND = ref("Refunds are issued within 5-7 business days of receiving the returned item.", team="billing")
+BANK = ref("Orders paid by bank transfer can take up to 10 business days.", page=4)
+ANSWER = "Refunds take 5-7 business days. Bank transfers can take up to 10 days. Ask support for anything else."
+
+
+def rag_resp(text=ANSWER, citations=(("Refunds take 5-7 business days.", [REFUND]),
+                                     ("Bank transfers can take up to 10 days.", [BANK])), session="session-1"):
+    """A RetrieveAndGenerate response; each citation is (the answer text it covers, [refs]). Spans end inclusively."""
+    cites = []
+    for piece, refs in citations:
+        start = text.index(piece)
+        cites.append({"generatedResponsePart": {"textResponsePart": {
+            "text": piece, "span": {"start": start, "end": start + len(piece) - 1}}}, "retrievedReferences": list(refs)})
+    resp = {"output": {"text": text}, "sessionId": session}
+    if cites:
+        resp["citations"] = cites
+    return resp
+
+
+def stream_events(resp, size=12):
+    text = resp["output"]["text"]
+    for i in range(0, len(text), size):
+        yield {"output": {"text": text[i:i + size]}}
+    for cite in resp.get("citations", []):
+        yield {"citation": cite}
+
+
+def client_error(code, message, operation="RetrieveAndGenerate"):
+    return ClientError({"Error": {"Code": code, "Message": message}}, operation)
+
+
+class Fake:
+    """A boto3 client stand-in answering from functions in any order (the window's flows don't keep Stubber's
+    order). Every request, response and stream event is checked against the service model, and calls are recorded.
+    Operations without a handler don't exist on it, like on an old boto3."""
+
+    def __init__(self, service, handlers):
+        model = boto3.client(service, region_name="us-east-1").meta.service_model
+        self.meta = SimpleNamespace(region_name="us-east-1", service_model=model)
+        self.ops = {xform_name(op): model.operation_model(op) for op in model.operation_names}
+        self.handlers, self.calls = dict(handlers), []
+
+    def _call(self, name, params):
+        op = self.ops[name]
+        report = ParamValidator().validate(params, op.input_shape)
+        assert not report.has_errors(), report.generate_report()
+        self.calls.append((name, params))
+        resp = self.handlers[name](**params)
+        if op.has_event_stream_output:
+            return {**resp, "stream": self._checked(resp["stream"], op.get_event_stream_output())}
+        report = ParamValidator().validate(resp, op.output_shape)
+        assert not report.has_errors(), report.generate_report()
+        return resp
+
+    @staticmethod
+    def _checked(events, shape):
+        for event in events:
+            report = ParamValidator().validate(event, shape)
+            assert not report.has_errors(), report.generate_report()
+            yield event
+
+    def __getattr__(self, name):
+        if name.startswith("_") or name not in self.handlers:
+            raise AttributeError(name)
+        return lambda **params: self._call(name, params)
+
+    def get_paginator(self, name):
+        return SimpleNamespace(paginate=lambda **params: iter([self._call(name, params)]))
+
+    def called(self, name):
+        return [params for op, params in self.calls if op == name]
+
+
+def kb_summary(kb_id=KB_ID, name="support-docs", status="ACTIVE"):
+    return {"knowledgeBaseId": kb_id, "name": name, "status": status, "description": f"{name} answers",
+            "updatedAt": NOW - timedelta(days=2)}
+
+
+def fakes(kbs=None, rag=None, stream=None):
+    """bedrock-agent (the knowledge base list), bedrock (models) and bedrock-agent-runtime fakes."""
+    kbs = [kb_summary()] if kbs is None else kbs
+    rag = rag or (lambda **params: rag_resp())
+
+    def streamed(**params):
+        resp = rag(**params)
+        return {"sessionId": resp["sessionId"], "stream": stream_events(resp)}
+
+    runtime = {"retrieve_and_generate": rag}
+    if stream is not False:
+        runtime["retrieve_and_generate_stream"] = stream or streamed
+    return {
+        "bedrock-agent": Fake("bedrock-agent", {"list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": kbs}}),
+        "bedrock": Fake("bedrock", {"list_foundation_models": lambda **_: {"modelSummaries": MODEL_LIST},
+                                    "list_inference_profiles": lambda **_: {"inferenceProfileSummaries": PROFILES}}),
+        "bedrock-agent-runtime": Fake("bedrock-agent-runtime", runtime),
+    }
+
+
+@pytest.fixture
+def clients():
+    return fakes()
+
+
+@pytest.fixture
+def core(clients):
+    return BedrockChatAnalyzer(clients=clients)
+
+
+def run(capsys, fn, *args, **kwargs):
+    fn(*args, **kwargs)
+    return capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------------- helpers
+
+
+def test_schema_reads_every_setting_from_the_service_model():
+    for key in ("n", "search_type", "filter", "reranker", "rerank_n", "temperature", "top_p", "max_tokens", "stop",
+                "prompt", "model_fields", "guardrail_id", "guardrail_version", "latency", "query_decomposition",
+                "orchestration_prompt", "kms_key"):
+        assert key in F, key
+    assert F["n"].path == (*KB, "retrievalConfiguration", "vectorSearchConfiguration", "numberOfResults")
+    assert (F["n"].kind, F["n"].low, F["n"].high, F["n"].group) == ("integer", 1, 100, "Retrieval")
+    assert (F["temperature"].kind, F["temperature"].low, F["temperature"].high) == ("float", 0, 1)
+    assert F["search_type"].choices == ("HYBRID", "SEMANTIC")
+    assert (F["prompt"].kind, F["prompt"].high) == ("long_text", 4000)
+    assert (F["filter"].kind, F["model_fields"].kind, F["model_fields"].container) == ("json", "json", "object")
+    assert (F["stop"].kind, F["stop"].high) == ("list", 4)
+    assert F["reranker"].kind == "text" and F["kms_key"].path == ("sessionConfiguration", "kmsKeyArn")
+    # Fields without a short name go by their path; the window's pickers, the question and the session aren't settings.
+    assert "orchestrationConfiguration.inferenceConfig.textInferenceConfig.temperature" in F
+    assert not any(f.path[-1] in ("knowledgeBaseId", "text") or "managedSearchConfiguration" in f.path
+                   or f.path[0] in ("input", "sessionId") for f in F.values())
+    assert [g for g in dict.fromkeys(f.group for f in F.values())] == ["Retrieval", "Generation", "Orchestration",
+                                                                       "Session"]
+    assert ((*KB, "retrievalConfiguration", "vectorSearchConfiguration", "rerankingConfiguration", "type"),
+            "BEDROCK_RERANKING_MODEL") in SCHEMA.auto
+    assert all("modelArn" not in f.where or f.key == "reranker" or "implicitFilter" in f.where for f in F.values())
+
+
+@pytest.mark.parametrize("name, key", [
+    ("temperature", "temperature"),
+    ("maxTokens", "max_tokens"),
+    ("MAX-TOKENS", "max_tokens"),
+    ("where", "filter"),
+    ("numberOfResults", "n"),
+    ("generationConfiguration.performanceConfig.latency", "latency"),
+    ("retrieveAndGenerateConfiguration.knowledgeBaseConfiguration.retrievalConfiguration.vectorSearchConfiguration"
+     ".numberOfResults", "n"),
+    ("selectionMode", "retrievalConfiguration.vectorSearchConfiguration.rerankingConfiguration"
+                      ".bedrockRerankingConfiguration.metadataConfiguration.selectionMode"),
+    ("orchestrationConfiguration.performanceConfig.latency", "orchestrationConfiguration.performanceConfig.latency"),
+])
+def test_find_takes_short_names_other_names_and_paths(name, key):
+    assert SCHEMA.find(name).key == key
+
+
+@pytest.mark.parametrize("name, message", [
+    ("temprature", "Did you mean 'temperature'"),
+    ("textInferenceConfig.temperature", "could be 'temperature' or"),
+    ("", "Name a setting"),
+    ("nothing_like_it", "fields() lists every one"),
+])
+def test_find_explains_what_it_cant_find(name, message):
+    with pytest.raises(ValueError, match=message.replace("(", r"\(").replace(")", r"\)")):
+        SCHEMA.find(name)
+
+
+@pytest.mark.parametrize("key, value, expected", [
+    ("n", "8", 8),
+    ("n", 8.0, 8),
+    ("temperature", "0.3", 0.3),
+    ("temperature", 1, 1.0),
+    ("search_type", "hybrid", "HYBRID"),
+    ("query_decomposition", True, "QUERY_DECOMPOSITION"),
+    ("stop", "END\nSTOP\n", ["END", "STOP"]),
+    ("stop", '["\\n\\nHuman:"]', ["\n\nHuman:"]),
+    ("stop", ("A",), ["A"]),
+    ("model_fields", "{'top_k': 50}", {"top_k": 50}),
+    ("model_fields", '{"top_k": 50}', {"top_k": 50}),
+    ("reranker", True, "cohere"),
+    ("reranker", "Amazon", "amazon"),
+    ("reranker", "arn:aws:bedrock:eu-west-1::foundation-model/cohere.rerank-v3-5:0", "cohere"),
+    ("reranker", "acme.rerank-v9", "acme.rerank-v9"),
+    ("kms_key", "  arn:aws:kms:us-east-1:1:key/x  ", "arn:aws:kms:us-east-1:1:key/x"),
+    ("prompt", DEFAULT_PROMPT, DEFAULT_PROMPT),
+    ("latency", "OPTIMIZED", "optimized"),
+])
+def test_coerce_setting_is_forgiving(key, value, expected):
+    assert coerce_setting(F[key], value) == expected
+
+
+@pytest.mark.parametrize("key, value, message", [
+    ("n", 0, "n can be 1 to 100; got 0"),
+    ("n", "lots", "n takes a number of items"),
+    ("n", True, "n takes a number"),
+    ("temperature", 1.5, "temperature can be 0 to 1; got 1.5"),
+    ("temperature", "warm", "temperature takes a number, like 0.2"),
+    ("search_type", "fuzzy", "search_type is 'HYBRID' or 'SEMANTIC'"),
+    ("stop", ["a", "b", "c", "d", "e"], "stop takes up to 4 items; got 5"),
+    ("stop", 5, "stop takes a list"),
+    ("model_fields", "[1, 2]", "model_fields takes a JSON object"),
+    ("model_fields", "{oops", "model_fields isn't valid JSON: Expecting property name"),
+    ("prompt", "Answer the question.", "needs \\$search_results\\$"),
+    ("prompt", "x" * 4001 + "$search_results$", "takes up to 4,000 characters"),
+    ("filter", {}, "filter needs at least one condition"),
+    ("filter", {"year": ("~", 1)}, "Can't read the condition"),
+    ("reranker", "", "reranker takes 'cohere', 'amazon'"),
+])
+def test_coerce_setting_says_what_a_field_takes(key, value, message):
+    with pytest.raises(ValueError, match=message):
+        coerce_setting(F[key], value)
+
+
+def test_filters_in_every_form():
+    bedrock = {"equals": {"key": "team", "value": "billing"}}
+    assert as_filter(bedrock) == bedrock
+    assert as_filter('{"team": "billing"}') == bedrock
+    assert as_filter({"team": ["billing", "support"]}) == {"in": {"key": "team", "value": ["billing", "support"]}}
+    assert as_filter('{"year": [">=", 2024], "region": ["in", ["eu", "uk"]]}') == {"andAll": [
+        {"greaterThanOrEquals": {"key": "year", "value": 2024}}, {"in": {"key": "region", "value": ["eu", "uk"]}}]}
+    assert as_filter({"year": ("between", 2020, 2024)})["andAll"][1] == {
+        "lessThanOrEquals": {"key": "year", "value": 2024}}
+    nested = {"orAll": [bedrock, {"andAll": [{"greaterThan": {"key": "year", "value": 2020}},
+                                             {"startsWith": {"key": "doc", "value": "POL-"}}]}]}
+    assert describe_filter(nested) == 'team = "billing" or (year > 2020 and doc starts with "POL-")'
+    assert describe_filter("nope") == "a filter"
+
+
+def test_build_request_puts_each_setting_in_place_and_fills_required_fields():
+    values = normalize_settings({"n": 20, "reranker": "cohere", "rerank_n": 4, "temperature": 0.2,
+                                 "where": {"team": "billing"}, "kms_key": "arn:aws:kms:us-east-1:1:key/k"}, SCHEMA)
+    params = build_request("How long?", KB_ID, SONNET_PROFILE, values, SCHEMA, session_id="s-1", region="eu-west-1")
+    vector = params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["retrievalConfiguration"][
+        "vectorSearchConfiguration"]
+    assert list(params) == ["input", "sessionId", "retrieveAndGenerateConfiguration", "sessionConfiguration"]
+    assert vector["numberOfResults"] == 20 and vector["filter"] == {"equals": {"key": "team", "value": "billing"}}
+    assert vector["rerankingConfiguration"] == {
+        "bedrockRerankingConfiguration": {
+            "modelConfiguration": {"modelArn": "arn:aws:bedrock:eu-west-1::foundation-model/cohere.rerank-v3-5:0"},
+            "numberOfRerankedResults": 4},
+        "type": "BEDROCK_RERANKING_MODEL"}
+    assert params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"] == {
+        "inferenceConfig": {"textInferenceConfig": {"temperature": 0.2}}}
+    assert validate_request(params, SCHEMA) == []
+    # The values are copies: editing the request doesn't change the settings.
+    vector["filter"]["equals"]["value"] = "x"
+    assert values["filter"]["equals"]["value"] == "billing"
+    assert "sessionId" not in build_request("q", KB_ID, SONNET_PROFILE, {}, SCHEMA)
+
+
+def test_settings_from_request_is_the_opposite_of_build_request():
+    values = normalize_settings({"n": 8, "search_type": "semantic", "stop": ["END"], "query_decomposition": True,
+                                 "reranker": "amazon", "orchestrationConfiguration.performanceConfig.latency":
+                                 "optimized"}, SCHEMA)
+    params = build_request("q?", KB_ID, SONNET_PROFILE, values, SCHEMA, session_id="s-9", region="us-east-1")
+    picked, back = settings_from_request(params, SCHEMA)
+    assert back == values
+    assert picked == {"question": "q?", "sessionId": "s-9", "knowledgeBaseId": KB_ID, "modelArn": SONNET_PROFILE}
+
+
+def test_settings_from_request_names_what_the_chat_cant_send():
+    params = build_request("q", KB_ID, SONNET_PROFILE, {}, SCHEMA)
+    params["retrieveAndGenerateConfiguration"]["type"] = "EXTERNAL_SOURCES"
+    params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"] = {
+        "inferenceConfig": {"textInferenceConfig": {"temperature": 3}}}
+    params["userContext"] = {"userId": "u-1"}
+    params["extra"] = 1
+    with pytest.raises(ValueError) as err:
+        settings_from_request(params, SCHEMA)
+    message = str(err.value)
+    assert message.startswith("This chat asks knowledge bases")
+    assert "temperature can be 0 to 1; got 3" in message and "the chat doesn't send extra" in message
+    with pytest.raises(ValueError, match="is a JSON object"):
+        settings_from_request([], SCHEMA)
+
+
+def test_validate_request_reports_what_bedrock_would_refuse():
+    params = build_request("q", KB_ID, SONNET_PROFILE, {"guardrail_id": "gr-1"}, SCHEMA)
+    params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"][
+        "inferenceConfig"] = {"textInferenceConfig": {"temprature": 0.2}}
+    problems = validate_request(params, SCHEMA)
+    assert any('Missing required parameter in generationConfiguration.guardrailConfiguration: "guardrailVersion"'
+               in p for p in problems)
+    assert any('Unknown parameter in generationConfiguration.inferenceConfig.textInferenceConfig: "temprature"' in p
+               for p in problems)
+    assert validate_request(params, chatmod.Schema({}, [], None)) == []
+
+
+def test_parse_rag_numbers_each_passage_once():
+    resp = rag_resp(citations=(("Refunds take 5-7 business days.", [REFUND, BANK]),
+                               ("Bank transfers can take up to 10 days.", [BANK])))
+    a = parse_rag(resp)
+    assert [c.sources for c in a.citations] == [[1, 2], [2]]
+    assert [p.source for p in a.sources] == ["refund-policy.pdf p.3", "refund-policy.pdf p.4"]
+    assert a.citations[0].text == "Refunds take 5-7 business days." and a.session_id == "session-1"
+    assert a.sources[0].metadata == {"team": "billing"}
+    assert 0.6 < a.grounded_share < 0.8 and a.cited == [1, 2]
+
+
+def test_collect_stream_builds_a_response_like_retrieve_and_generates():
+    resp = rag_resp()
+    old_style = {"citation": {"citation": resp["citations"][1]}}  # older events nest the parts under 'citation'
+    events = [{"output": {"text": "Refunds take 5-7 "}}, {"output": {"text": "business days."}},
+              {"citation": resp["citations"][0]}, {"output": {"text": ANSWER[len("Refunds take 5-7 business days."):]}},
+              old_style, {"guardrail": {"action": "INTERVENED"}}]
+    seen = []
+    built = collect_stream(events, seen.append)
+    assert seen == ["Refunds take 5-7 ", "Refunds take 5-7 business days.", ANSWER]
+    assert built == {"output": {"text": ANSWER}, "citations": resp["citations"], "guardrailAction": "INTERVENED"}
+    assert parse_rag(built).cited == [1, 2]
+    assert collect_stream([]) == {"output": {"text": ""}}
+
+
+@pytest.mark.parametrize("key, value, text", [
+    ("n", 8, "Retrieves the 8 passages that match best."),
+    ("n", 1, "Retrieves the 1 passage that match best."),
+    ("search_type", "SEMANTIC", "Matches meaning only."),
+    ("filter", {"equals": {"key": "team", "value": "billing"}}, 'Only documents where team = "billing".'),
+    ("reranker", "amazon", "Re-orders the passages with Amazon Rerank 1.0 before the model sees them."),
+    ("temperature", 0.9, "0.9: varied wording."),
+    ("max_tokens", 2048, "Answers stop at 2,048 tokens (about 1,536 words)."),
+    ("stop", ["END"], "The answer ends at 'END'."),
+    ("model_fields", {"top_k": 50}, "Passed to the model as they are: top_k=50."),
+    ("prompt", DEFAULT_PROMPT, f"Your own prompt ({len(DEFAULT_PROMPT):,} characters)."),
+    ("kms_key", None, "Not sent until you fill it in."),
+])
+def test_describe_setting_says_what_a_value_means(key, value, text):
+    assert describe_setting(F[key], value) == text
+
+
+def test_settings_findings():
+    assert settings_findings(DEFAULT_SETTINGS) == []
+    both = settings_findings({"temperature": 0.2, "top_p": 0.9}, "us.anthropic.claude-sonnet-5")
+    assert both[0][0] == "warn" and "unset('top_p')" in both[0][1]
+    assert settings_findings({"temperature": 0.2, "top_p": 0.9}, "amazon.nova-pro-v1:0")[0][0] == "info"
+    found = dict((m.split(" ")[1], level) for level, m in settings_findings(
+        {"prompt": "Use $search_results$", "reranker": "cohere", "n": 5, "guardrail_id": "gr", "query_decomposition":
+         "QUERY_DECOMPOSITION"}))
+    assert found == {"prompt": "warn", "reranker": "info", "guardrail": "warn", "decomposition": "info"}
+    assert not any("reranker" in m for _, m in settings_findings({"reranker": "cohere", "n": 20}))
+
+
+def answer(text=ANSWER, settings=None, **kwargs):
+    a = parse_rag(rag_resp(text) if text == ANSWER else {"output": {"text": text}})
+    a.question, a.model, a.settings = "How long?", "us.anthropic.claude-sonnet-5", settings or {"n": 5}
+    for name, value in kwargs.items():
+        setattr(a, name, value)
+    return a
+
+
+def test_answer_findings_say_which_setting_to_try():
+    assert answer_findings(answer()) == []
+    refusal = answer("Sorry, I am unable to assist you with this request.")
+    (level, message), = answer_findings(refusal)
+    assert level == "warn" and "set(n=10)" in message and "set(search_type='HYBRID')" in message
+    narrow = answer("Sorry, I am unable to assist you with this request.",
+                    {"n": 20, "search_type": "HYBRID", "filter": {"equals": {"key": "a", "value": 1}}})
+    assert "unset('filter')" in answer_findings(narrow)[0][1] and "set(n=10)" not in answer_findings(narrow)[0][1]
+    assert "An empty answer" in answer_findings(answer(""))[0][1]
+    uncited = answer("They take a week.", {"prompt": "Use $search_results$"})
+    assert "no $output_format_instructions$" in answer_findings(uncited)[0][1]
+    assert "cites no source" in answer_findings(answer("They take a week."))[0][1]
+    thin = answer()
+    thin.citations = thin.citations[:1]
+    thin.text += " " + "More words that no source backs up." * 3
+    assert "is backed by a citation" in answer_findings(thin)[0][1]
+    long = answer(settings={"max_tokens": 20}, output_tokens=19, guardrail_action="INTERVENED",
+                  notes=["The earlier conversation had expired."])
+    assert [level for level, _ in answer_findings(long)] == ["warn", "warn", "info"]
+    assert "set(max_tokens=1024)" in answer_findings(long)[1][1]
+
+
+def test_answer_cost_adds_the_reranker():
+    a = answer(input_tokens=1_000_000, output_tokens=0)
+    assert answer_cost(a) == pytest.approx(2.20 + 0.02 * estimate("How long?") / 1e6)
+    a.settings = {"reranker": "cohere"}
+    assert answer_cost(a) == pytest.approx(2.20 + 0.002 + 0.02 * estimate("How long?") / 1e6)
+    a.model = "acme.unknown-v1"
+    assert answer_cost(a) is None
+
+
+def estimate(text):
+    return chatmod.estimate_tokens(text)
+
+
+def test_python_call_is_python_that_makes_the_same_call():
+    values = normalize_settings({"filter": {"team": "billing"}, "temperature": 0.2, "stop": ["END"]}, SCHEMA)
+    params = build_request("How long do refunds take?", KB_ID, SONNET_PROFILE, values, SCHEMA)
+    code = python_call(params, "us-east-1")
+    compile(code, "<cell>", "exec")
+    assert "boto3.client('bedrock-agent-runtime', region_name='us-east-1')" in code
+    literal = code.split("retrieve_and_generate(**", 1)[1].rsplit(")\nprint", 1)[0]
+    assert ast.literal_eval(literal) == params
+    assert ast.literal_eval(_py_literal({"a": [1, {"b": None}] * 30})) == {"a": [1, {"b": None}] * 30}
+
+
+def test_diff_and_normalize_settings():
+    assert _diff({"n": 5, "temperature": 0.2, "top_p": 0.9}, {"n": 8, "temperature": 0.2, "stop": ["END"]}) == [
+        "n 5 → 8", 'stop = ["END"] (added)', "top_p removed"]
+    assert normalize_settings({"temperature": None, "topP": "0.5", "MAX_TOKENS": 100}, SCHEMA) == {
+        "top_p": 0.5, "max_tokens": 100}
+    with pytest.raises(ValueError) as err:
+        normalize_settings({"temprature": 1, "n": 0}, SCHEMA)
+    assert "Did you mean 'temperature'" in str(err.value) and "n can be 1 to 100" in str(err.value)
+
+
+def test_question_text_limits():
+    assert _question_text("  How long?  ") == "How long?"
+    with pytest.raises(ValueError, match="Pass a question"):
+        _question_text("   ")
+    with pytest.raises(ValueError, match="up to 1,000 characters, and this one has 1,001"):
+        _question_text("x" * 1001)
+
+
+def test_schema_needs_a_boto3_that_knows_retrieve_and_generate():
+    class Old:
+        def operation_model(self, name):
+            raise KeyError(name)
+
+    with pytest.raises(ValueError, match="doesn't know RetrieveAndGenerate: pip install -U boto3"):
+        request_schema(Old())
+
+
+# ----------------------------------------------------------------------------- AWS
+
+
+class Stubs:
+    """Real clients with a botocore Stubber on each: calls must be queued in order, and parameters are checked."""
+
+    def __init__(self):
+        names = ("bedrock-agent", "bedrock-agent-runtime", "bedrock")
+        self.clients = {name: boto3.client(name, region_name="us-east-1") for name in names}
+        self.stubs = {name: Stubber(client) for name, client in self.clients.items()}
+        for stub in self.stubs.values():
+            stub.activate()
+        self.agent, self.runtime, self.bedrock = (self.stubs[n] for n in names)
+
+    def analyzer(self):
+        return BedrockChatAnalyzer(clients=dict(self.clients))
+
+    def list_kbs(self):
+        self.agent.add_response("list_knowledge_bases", {"knowledgeBaseSummaries": [kb_summary()]}, {})
+
+    def models(self):
+        self.bedrock.add_response("list_foundation_models", {"modelSummaries": MODEL_LIST},
+                                  {"byOutputModality": "TEXT"})
+        self.bedrock.add_response("list_inference_profiles", {"inferenceProfileSummaries": PROFILES}, {})
+
+    def done(self):
+        for stub in self.stubs.values():
+            stub.assert_no_pending_responses()
+            stub.deactivate()
+
+
+@pytest.fixture
+def stubs():
+    s = Stubs()
+    yield s
+    s.done()
+
+
+def test_ask_sends_exactly_the_settings_and_reads_the_answer(stubs):
+    stubs.list_kbs()
+    stubs.models()
+    expected = {
+        "input": {"text": "How long do refunds take?"},
+        "retrieveAndGenerateConfiguration": {"type": "KNOWLEDGE_BASE", "knowledgeBaseConfiguration": {
+            "knowledgeBaseId": KB_ID, "modelArn": SONNET_PROFILE,
+            "retrievalConfiguration": {"vectorSearchConfiguration": {"numberOfResults": 8,
+                                                                     "overrideSearchType": "HYBRID"}},
+            "generationConfiguration": {"inferenceConfig": {"textInferenceConfig": {"maxTokens": 500}}}}},
+    }
+    stubs.runtime.add_response("retrieve_and_generate", rag_resp(), expected)
+    core = stubs.analyzer()
+    a = core.ask("Support-Docs", "How long do refunds take?", {"n": "8", "search_type": "hybrid", "maxTokens": 500},
+                 model="sonnet")
+    assert (a.kb_id, a.kb_name, a.model, a.session_id) == (KB_ID, "support-docs", "us.anthropic.claude-sonnet-5",
+                                                           "session-1")
+    assert a.request == expected and a.response["output"]["text"] == ANSWER and not a.streamed
+    assert a.settings == {"n": 8, "search_type": "HYBRID", "max_tokens": 500}
+    assert a.cited == [1, 2] and a.notes == []
+    # 8 passages of about the cited ones' size, the question and the default prompt: an estimate.
+    per = sum(estimate(p.text) for p in a.sources) // 2
+    assert a.input_tokens == estimate(a.question) + estimate(DEFAULT_PROMPT) + 8 * per
+    assert a.output_tokens == estimate(ANSWER)
+
+
+def test_ask_starts_a_new_session_when_bedrock_ended_the_old_one(stubs):
+    stubs.list_kbs()
+    stubs.models()
+    stubs.runtime.add_client_error("retrieve_and_generate", "ValidationException",
+                                   "Session with Id old-session is not valid. Please check and try again.")
+    stubs.runtime.add_response("retrieve_and_generate", rag_resp(session="new-session"))
+    a = stubs.analyzer().ask(KB_ID, "And then?", session_id="old-session")
+    assert a.session_id == "new-session" and "sessionId" not in a.request
+    assert "expired" in a.notes[0]
+
+
+def test_ask_raises_other_errors(stubs):
+    stubs.list_kbs()
+    stubs.models()
+    stubs.runtime.add_client_error("retrieve_and_generate", "ValidationException", "The model failed.")
+    with pytest.raises(ClientError, match="The model failed"):
+        stubs.analyzer().ask(KB_ID, "q", session_id="s-1")
+
+
+def test_ask_streams_the_answer_as_its_written(core, clients):
+    seen = []
+    a = core.ask(KB_ID, "How long?", {"n": 3}, stream=True, on_text=seen.append)
+    assert a.streamed and a.first_words is not None and a.text == ANSWER and a.cited == [1, 2]
+    assert len(seen) > 3 and seen[-1] == ANSWER and all(ANSWER.startswith(s) for s in seen)
+    assert a.response["sessionId"] == "session-1" and a.session_id == "session-1"
+    assert clients["bedrock-agent-runtime"].called("retrieve_and_generate") == []
+
+
+def test_streaming_refused_falls_back_and_stops_trying():
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized to perform: RetrieveAndGenerateStream",
+                           "RetrieveAndGenerateStream")
+
+    clients = fakes(stream=denied)
+    core = BedrockChatAnalyzer(clients=clients)
+    a = core.ask(KB_ID, "How long?", stream=True, on_text=lambda text: None)
+    assert not a.streamed and a.text == ANSWER and "Streaming was refused here" in a.notes[0]
+    b = core.ask(KB_ID, "And then?", stream=True, on_text=lambda text: None)
+    runtime = clients["bedrock-agent-runtime"]
+    assert b.notes == [] and len(runtime.called("retrieve_and_generate_stream")) == 1
+    assert len(runtime.called("retrieve_and_generate")) == 2
+
+
+def test_streaming_refused_like_everything_else_raises_and_keeps_streaming():
+    def denied(**_):
+        raise client_error("AccessDeniedException", "You don't have access to the model.")
+
+    core = BedrockChatAnalyzer(clients=fakes(rag=denied, stream=denied))
+    with pytest.raises(ClientError, match="access to the model"):
+        core.ask(KB_ID, "q", stream=True, on_text=print)
+    assert core.stream_problem is None
+
+
+def test_old_boto3_without_streaming_answers_all_at_once():
+    core = BedrockChatAnalyzer(clients=fakes(stream=False))
+    a = core.ask(KB_ID, "q", stream=True, on_text=print)
+    assert not a.streamed and "can't stream answers" in a.notes[0]
+    assert core.ask(KB_ID, "q", stream=True, on_text=print).notes == []
+
+
+def test_request_resolves_without_sending(core, clients):
+    params = core.request("support-docs", "How long?", {"temperature": 0.1}, model="opus", session_id="s-2")
+    knowledge = params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+    assert (knowledge["knowledgeBaseId"], knowledge["modelArn"], params["sessionId"]) == (KB_ID, OPUS_PROFILE, "s-2")
+    assert clients["bedrock-agent-runtime"].calls == []
+    with pytest.raises(ValueError, match="No knowledge base 'nope'"):
+        core.request("nope", "q")
+    with pytest.raises(ValueError, match="temperature can be 0 to 1"):
+        core.request(KB_ID, "q", {"temperature": 7})
+
+
+def test_knowledge_bases_are_listed_once(core, clients):
+    kbs = core.knowledge_bases()
+    assert [(kb.id, kb.name, kb.status) for kb in kbs] == [(KB_ID, "support-docs", "ACTIVE")]
+    core.knowledge_bases()
+    core.resolve("support-docs")
+    assert len(clients["bedrock-agent"].called("list_knowledge_bases")) == 1
+
+
+def test_missing_region_is_a_readable_error(monkeypatch):
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", "/dev/null")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    with pytest.raises(ValueError, match=r"No AWS region is set.*chat\(region='us-east-1'\)"):
+        BedrockChatAnalyzer().client
+
+
+# ----------------------------------------------------------------------------- UI (reports)
+
+
+@pytest.fixture
+def ui(core):
+    return BedrockChatView(core, kb="support-docs", mode="text", progress="off")
+
+
+def test_ui_help_groups_every_command(ui, capsys):
+    out = run(capsys, ui.help)
+    commands = {name for name in vars(BedrockChatView) if not name.startswith("_")
+                and callable(getattr(BedrockChatView, name))}
+    assert commands == {name for names in BedrockChatView._GROUPS.values() for name in names}
+    assert "Start here:" in out and "-- Settings --" in out and "set(name=None, value=None, **values)" in out
+    assert "None removes a setting; an open window follows." in run(capsys, ui.help, "set")
+
+
+def test_ui_ask_and_follow_up(ui, clients, capsys):
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    for text in ("support-docs: How long do refunds take?", "question 1 of this conversation", "Grounded: 69%",
+                 "Sources cited: 2", "Model: Claude Opus 5", "Refunds take 5-7 business days [1].",
+                 "refund-policy.pdf     3", "Tokens and cost are estimated", "last()"):
+        assert text in out, text
+    out = run(capsys, ui.ask, "And bank transfers?")
+    assert "question 2 of this conversation" in out
+    first, second = clients["bedrock-agent-runtime"].called("retrieve_and_generate")
+    assert "sessionId" not in first and second["sessionId"] == "session-1"
+    assert len(ui.answers) == 2 and ui.session_id == "session-1"
+
+
+def test_ui_last_transcript_and_new_chat(ui, capsys):
+    assert "No questions yet" in run(capsys, ui.last)
+    ui.ask("How long do refunds take?")
+    capsys.readouterr()
+    out = run(capsys, ui.last)
+    assert "-- Request sent --" in out and '"numberOfResults": 5' in out and "-- Response --" in out
+    assert "Refunds are issued within 5-7 business days of receiving the returned item." in out
+    assert "client.retrieve_and_generate(**{" in out
+    out = run(capsys, ui.transcript)
+    assert "Conversation with support-docs (1 question)" in out and "You: How long do refunds take?" in out
+    assert "Bedrock (Claude Opus 5 · " in out and "  [1] refund-policy.pdf p.3" in out
+    out = run(capsys, ui.new_chat)
+    assert "New conversation (1 earlier question forgotten)" in out
+    assert ui.answers == [] and ui.session_id is None and ui.values == DEFAULT_SETTINGS
+
+
+def test_ui_settings_set_and_unset(ui, capsys):
+    out = run(capsys, ui.set, temperature="0.2", top_p=0.9, where={"team": "billing"})
+    assert "Changed: filter = " in out and "temperature = 0.2 (added)" in out and "unset('top_p')" in out
+    out = run(capsys, ui.settings)
+    for text in ("Settings: 4 settings sent with every question", "Retrieves the 5 passages that match best.",
+                 'Only documents where team = "billing".', "generationConfiguration.inferenceConfig."
+                 "textInferenceConfig.topP", "Open this setup again",
+                 "chat('support-docs', n=5, filter={'equals': {'key': 'team', 'value': 'billing'}}, temperature=0.2, "
+                 "top_p=0.9)"):
+        assert text in out, text
+    out = run(capsys, ui.set, "generationConfiguration.performanceConfig.latency", "optimized")
+    assert "latency = 'optimized' (added)" in out
+    assert "Removed: top_p, latency." in run(capsys, ui.unset, "topP", "latency")
+    assert "Nothing changed: top_p was not set." in run(capsys, ui.unset, "top_p")
+    assert list(ui.values) == ["n", "filter", "temperature"]
+    ui.unset("n")
+    assert "settings={}" in ui._setup_call()
+
+
+@pytest.mark.parametrize("call, message", [
+    (lambda ui: ui.set(temprature=1, n=3), "Did you mean 'temperature'? "),
+    (lambda ui: ui.set("temperature"), "Pass a value too: set('temperature', ...)"),
+    (lambda ui: ui.set(), "Pass what to change"),
+    (lambda ui: ui.unset(), "Name the settings to stop sending"),
+    (lambda ui: ui.set(prompt="no placeholder"), "The prompt needs $search_results$"),
+])
+def test_ui_settings_errors_are_notes_and_change_nothing(ui, capsys, call, message):
+    before = dict(ui.values)
+    out = run(capsys, call, ui)
+    assert message in out and "Traceback" not in out
+    assert ui.values == before
+
+
+def test_ui_fields_and_request(ui, capsys):
+    out = run(capsys, ui.fields)
+    assert "-- Retrieval --" in out and "-- Orchestration --" in out and "HYBRID | SEMANTIC" in out
+    assert "whole number 1–100" in out and "text up to 4,000 characters" in out
+    out = run(capsys, ui.fields, "rerank")
+    assert "reranker" in out and "rerank_n" in out and "temperature" not in out
+    assert "No setting mentions 'zzz'" in run(capsys, ui.fields, "zzz")
+    ui.set(guardrail_id="gr-1")
+    out = run(capsys, ui.request, "How long?")
+    assert "The request for: How long?" in out and '"text": "How long?"' in out
+    assert "Bedrock would refuse this request: Missing required parameter" in out
+    assert "A guardrail needs both guardrail_id and guardrail_version" in out
+    assert "client.retrieve_and_generate(**{" in out
+
+
+def test_ui_use_kbs_and_models(core, capsys):
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales", "CREATING")])
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), mode="text", progress="off")
+    assert "Which knowledge base? There are 2 in us-east-1: sales, support-docs" in run(capsys, ui.ask, "q")
+    out = run(capsys, ui.kbs)
+    assert "Knowledge bases in us-east-1 (2)" in out and "CREATING" in out and "use('support-docs')" in out
+    out = run(capsys, ui.use, "sales", model="sonnet")
+    assert "Knowledge base: sales (KBID654321). Model: Claude Sonnet 5 (us.anthropic.claude-sonnet-5)." in out
+    out = run(capsys, ui.models)
+    assert "us.anthropic.claude-sonnet-5 (in use)" in out and "amazon.nova-pro-v1:0" in out
+    assert "Pass kb= or model=" in run(capsys, ui.use)
+    assert "Did you mean 'sales'" in run(capsys, ui.use, "sale")
+
+
+def test_ui_explains_aws_errors(capsys):
+    def denied(**_):
+        raise client_error("AccessDeniedException", "You don't have access to the model with the specified model ID.")
+
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=fakes(rag=denied)), kb=KB_ID, mode="text", progress="off")
+    out = run(capsys, ui.ask, "q")
+    assert "AccessDeniedException: You don't have access" in out and "Model access" in out and "[ask]" in out
+    assert ui.answers == []
+    hybrid = client_error("ValidationException", "HYBRID search type is not supported for this vector store")
+    assert "unset('search_type')" in ui._explain("ValidationException", str(hybrid.response["Error"]["Message"]))
+    both = "The model returned the following errors: temperature and top_p cannot both be specified for this model."
+    assert "unset('top_p')" in ui._explain("ValidationException", both)
+
+
+def test_ui_app_outside_jupyter_says_what_to_use(ui, capsys):
+    out = run(capsys, ui.app)
+    assert "The chat window needs Jupyter" in out and "ask('a question')" in out
+    ui._ipython_display_()
+    assert "BedrockChatView(kb='support-docs'" in capsys.readouterr().out
+
+
+def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, capsys):
+    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    view = chatmod.chat("support-docs", model="sonnet", temperature=0.3, bogus=1, settings={"n": 9})
+    assert view.values == {"n": 9, "temperature": 0.3} and view.model == "sonnet"
+    assert view._notes == ["Not used: No setting 'bogus'. fields() lists every one RetrieveAndGenerate takes in this "
+                           f"boto3 (botocore {SCHEMA.boto}); pip install -U boto3 adds fields AWS added since."]
+    assert "The chat window needs Jupyter" in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------------------- UI (the chat window)
+
+widgets = pytest.importorskip("ipywidgets")
+
+
+@pytest.fixture
+def window(core, monkeypatch):
+    """A view in HTML mode with its window built, as app() would show it in Jupyter."""
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 7)
+    view = BedrockChatView(core, kb="support-docs", mode="html", progress="off")
+    view._shown = []
+    view._display = view._shown.append
+    view.app()
+    assert view._shown == [view._app.root]
+    return view
+
+
+def texts(app):
+    return [bubble.value for bubble in app.bubbles]
+
+
+def test_window_opens_on_the_knowledge_base_and_model(window):
+    app = window._app
+    assert "kbc-app" in app.root._dom_classes
+    assert (app.kb_pick.value, app.model_pick.value) == (KB_ID, "us.anthropic.claude-opus-5")
+    assert ("Claude Opus 5 · Anthropic · $5.50 / $27.50 per 1M tokens", "us.anthropic.claude-opus-5") in (
+        app.model_pick.options)
+    assert [label for label, _ in app.model_pick.options][0].startswith("Nova Pro · Amazon")  # by provider
+    assert list(app.rows) == ["n"] and app.inputs["n"].value == 5
+    assert "Retrieves the 5 passages that match best." in app.row_notes["n"].value
+    assert [chip.description for chip in app.chip_box.children][:3] == ["+ Search type", "+ Metadata filter",
+                                                                         "+ Reranker"]
+    assert "Ask support-docs a question." in texts(app)[0]
+    assert '<span class="jm" title="set as n">' in app.request_view.value
+    assert "chat(&#x27;support-docs&#x27;, model=&#x27;us.anthropic.claude-opus-5&#x27;, n=5)" in app.setup.value
+    assert "Nothing yet" in app.response_view.value
+
+
+def test_window_adds_edits_and_removes_settings(window):
+    app = window._app
+    app.chips["temperature"].click()
+    assert window.values["temperature"] == 0.2 and "temperature" in app.rows
+    assert "Added Temperature. 0.2: steady, factual wording." in app.status.value
+    app.inputs["temperature"].value = 0.8
+    assert window.values["temperature"] == 0.8 and "0.8: varied wording." in app.row_notes["temperature"].value
+    app.inputs["n"].value = 12
+    assert window.values["n"] == 12 and 'numberOfResults&quot;</span>: </span><span class="jn">12' in (
+        app.request_view.value)
+    app.rows["temperature"].children[0].children[2].click()  # its ✕
+    assert "temperature" not in window.values and "temperature" not in app.rows
+    assert "+ Temperature" in [chip.description for chip in app.chip_box.children]
+
+
+def test_window_keeps_a_setting_out_until_it_can_be_sent(window):
+    app = window._app
+    app.chips["filter"].click()
+    assert "filter" in app.pending and "filter" not in window.values
+    assert "Not sent until you fill it in." in app.row_notes["filter"].value
+    app.inputs["filter"].value = '{"team": '
+    assert "filter" in app.broken and "Not sent: filter isn&#x27;t valid JSON" in app.row_notes["filter"].value
+    assert "filter isn&#x27;t sent" in app.findings.value
+    app.inputs["filter"].value = '{"team": "billing", "year": [">=", 2024]}'
+    assert window.values["filter"]["andAll"][1] == {"greaterThanOrEquals": {"key": "year", "value": 2024}}
+    assert "team = &quot;billing&quot; and year ≥ 2024" in app.row_notes["filter"].value
+    assert not app.broken and "greaterThanOrEquals&quot;" in app.request_view.value
+
+
+def test_window_adds_any_field_by_name_or_path(window):
+    app = window._app
+    app.add_name.value = "selectionMode"
+    assert "Selection mode" in app.add_help.value and "SELECTIVE | ALL" in app.add_help.value
+    app.add_name.value = "temprature"
+    assert "Did you mean" in app.add_help.value
+    app.add_button.click()
+    assert "No setting" in app.status.value and "temperature" not in window.values
+    app.add_name.value = "orchestrationConfiguration.performanceConfig.latency"
+    app.add_name._handle_custom_msg({"event": "focus"}, [])  # anything but Enter does nothing
+    assert "orchestrationConfiguration.performanceConfig.latency" not in window.values
+    app.add_name._handle_custom_msg({"event": "submit"}, [])
+    assert window.values["orchestrationConfiguration.performanceConfig.latency"] == "standard"
+    assert app.add_name.value == ""
+
+
+def test_window_sends_a_question_and_streams_the_answer(window, clients):
+    app = window._app
+    app.question.value = "How long do refunds take?"
+    app.send_button.click()
+    a = window.answers[-1]
+    assert a.streamed and app.question.value == "" and not app.busy
+    assert "How long do refunds take?" in texts(app)[1]
+    assert "Refunds take 5-7 business days" in texts(app)[2] and "<sup>[1]</sup>" in texts(app)[2]
+    assert "Request and response JSON" in texts(app)[2] and "refund-policy.pdf · p.3" in texts(app)[2]
+    assert app.log.children[0] is app.bubbles[-1]  # newest first: the box runs bottom-up
+    assert "1 question in this conversation" in app.status.value and "session session-…" in app.status.value
+    assert "Answer 1" in app.response_view.value and "streamed" in app.response_view.value
+    assert "sessionId&quot;" in app.request_view.value
+    app.question.value = "And bank transfers?"
+    app.question._handle_custom_msg({"event": "submit"}, [])  # what Enter sends
+    assert clients["bedrock-agent-runtime"].called("retrieve_and_generate_stream")[1]["sessionId"] == "session-1"
+    app.response_mode.value = "Request sent"
+    assert "And bank transfers?" in app.response_view.value
+
+
+def test_window_shows_errors_where_the_answer_would_be(core, monkeypatch):
+    def denied(**_):
+        raise client_error("AccessDeniedException", "You don't have access to the model with the specified model ID.")
+
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=fakes(rag=denied, stream=denied)), kb=KB_ID, mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    app.question.value = "How long?"
+    app._send()
+    assert "msg bot err" in texts(app)[-1] and "Model access" in texts(app)[-1]
+    assert app.question.value == "How long?" and view.answers == [] and not app.send_button.disabled
+    app.question.value = "x" * 1001
+    app._send()
+    assert "up to 1,000 characters" in app.status.value
+    app.question.value = " "
+    app._send()
+    assert "Type a question first" in app.status.value
+
+
+def test_window_applies_edited_json(window):
+    app = window._app
+    app.edit_button.click()
+    assert app.edit_box.layout.display == "" and '"numberOfResults": 5' in app.editor.value
+    app.editor.value = app.editor.value.replace('"numberOfResults": 5', '"numberOfResults": 5, "bogus": 1')
+    app._apply()
+    assert "Bedrock would refuse this request" in app.edit_message.value and "bogus" in app.edit_message.value
+    assert window.values == {"n": 5}
+    app.editor.value = app.editor.value.replace(', "bogus": 1', "").replace('"numberOfResults": 5', (
+        '"numberOfResults": 9, "overrideSearchType": "SEMANTIC"'))
+    app._apply()
+    assert window.values == {"n": 9, "search_type": "SEMANTIC"} and app.edit_box.layout.display == "none"
+    assert app.inputs["n"].value == 9 and app.inputs["search_type"].value == "SEMANTIC"
+    assert "Applied: n 5 → 9; search_type = &#x27;SEMANTIC&#x27; (added)." in app.status.value
+    app.edit_button.click()
+    app.editor.value = "{not json"
+    app._apply()
+    assert "The request isn&#x27;t valid JSON" in app.edit_message.value
+    request = json.loads(json.dumps(app._params))
+    request["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["generationConfiguration"] = {
+        "inferenceConfig": {"textInferenceConfig": {"topK": 50}}}
+    app.editor.value = json.dumps(request)
+    app._apply()
+    assert "&quot;topK&quot;, must be one of" in app.edit_message.value
+    assert "the model_fields setting" in app.edit_message.value and window.values == {"n": 9, "search_type": "SEMANTIC"}
+
+
+def test_window_switches_model_and_knowledge_base(core, monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")])
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    assert view.kb == KB2_ID  # the first active one, by name
+    app.question.value = "q"
+    app._send()
+    app.model_pick.value = "us.anthropic.claude-sonnet-5"
+    assert view.model == "us.anthropic.claude-sonnet-5" and view.answers  # a new model keeps the conversation
+    assert SONNET_PROFILE in app.request_view.value
+    app.kb_pick.value = KB_ID
+    assert view.kb == KB_ID and view.answers == [] and view.session_id is None
+    assert "Now asking support-docs: a new conversation." in texts(app)[-1]
+
+
+def test_window_follows_other_cells(window, capsys):
+    app = window._app
+    window.set(temperature=0.4, search_type="semantic")
+    assert app.inputs["temperature"].value == 0.4 and app.inputs["search_type"].value == "SEMANTIC"
+    window.unset("search_type")
+    assert "search_type" not in app.rows
+    window.ask("How long?")
+    assert "How long?" in texts(app)[-2] and "Refunds take" in texts(app)[-1]
+    window.new_chat()
+    assert "New conversation" in texts(app)[-1] and len(app.bubbles) == 2
+    window.use(model="sonnet")
+    assert app.model_pick.value == "us.anthropic.claude-sonnet-5"
+    capsys.readouterr()
+
+
+def test_window_shows_once_per_cell(window, monkeypatch):
+    window._ipython_display_()  # chat() in the cell's last line: already shown
+    assert len(window._shown) == 1
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 8)
+    window._ipython_display_()  # `ui` in a later cell shows it again
+    assert len(window._shown) == 2 and window._shown[1] is window._shown[0]
+
+
+def test_window_without_ipywidgets_says_what_to_install(core, monkeypatch, capsys):
+    monkeypatch.setitem(__import__("sys").modules, "ipywidgets", None)
+    view = BedrockChatView(core, kb=KB_ID, mode="html")
+    shown = []
+    view._show = shown.extend
+    view.app()
+    assert "The chat window needs `ipywidgets` (pip install ipywidgets)" in shown[0].text
+
+
+def test_window_lists_nothing_it_cant_read(core, monkeypatch):
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized to perform: bedrock:ListKnowledgeBases",
+                           "ListKnowledgeBases")
+
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes()
+    clients["bedrock-agent"].handlers["list_knowledge_bases"] = denied
+    clients["bedrock"].handlers["list_foundation_models"] = denied
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb=KB_ID, model="us.anthropic.claude-opus-5",
+                           mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    assert isinstance(app.kb_pick, widgets.Text) and isinstance(app.model_pick, widgets.Text)
+    assert "Couldn&#x27;t list the knowledge bases (AccessDeniedException; needs bedrock:ListKnowledgeBases)" in (
+        app.status.value)
+    app.question.value = "How long?"
+    app._send()
+    assert view.answers and "Refunds take" in texts(app)[-1]
+
+
+def test_answer_to_df():
+    pytest.importorskip("pandas")
+    df = Answer(**{**vars(answer())}).to_df()
+    assert list(df["n"]) == [1, 2] and df.loc[0, "source"] == "refund-policy.pdf" and df.loc[1, "page"] == 4

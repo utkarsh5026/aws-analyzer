@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook, and a chat window for asking a knowledge base."
 hide:
   - toc
 ---
@@ -63,6 +63,20 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     - Compare search settings and measure retrieval hit rate
 
     [Open the Knowledge Bases guide →](bedrock_kb.md)
+
+-   `bedrock_chat.py`
+
+    **Bedrock knowledge base chat**
+
+    A chat window on a knowledge base, with every setting in reach.
+    { .what }
+
+    - Pick the knowledge base and the model; answers stream in
+    - Each answer's citations, sources, request and response
+    - Add, change or remove any RetrieveAndGenerate setting
+    - The request as highlighted JSON you can edit, or as Python
+
+    [Open the chat guide →](bedrock_chat.md)
 
 -   `sagemaker_env.py`
 

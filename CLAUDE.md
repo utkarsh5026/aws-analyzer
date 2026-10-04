@@ -5,9 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
-in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `sagemaker_env.py` for the
-SageMaker notebook itself and what's running) that a user pastes into a notebook cell or uploads next to a notebook
-and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. The same
+in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `bedrock_chat.py` for a chat
+window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running) that a user pastes
+into a notebook cell or uploads next to a notebook and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. The same
 files are also on PyPI as `aws-analyzer` (`from aws_analyzer import S3View`; see "The PyPI package" below), but the
 build only copies them into the wheel unchanged, so they stay standalone and nothing in them depends on it.
 The one exception to "one file" is `s3_explorer.py`, a **companion** to `s3.py`: a clickable file explorer (ipywidgets)
@@ -73,7 +73,7 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, `_prose`, `_call`,
   `_signature`, the render blocks and `_render_html` / `_render_text` with their small helpers, `_friendly_errors`,
   `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
-  deliberately duplicated in all four analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
+  deliberately duplicated in all five analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
   `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`, so it still imports alone), reuses its helpers instead of copying them, and is
@@ -83,13 +83,14 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image",
   ..., "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
   notebook widget) is the exception that fails quietly: `_progress_bar_class` loads it with `importlib`, and without
-  it the progress line is plain text.
+  it the progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
   `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
-  `rules.py`. Keep it that way; README lists the read-only IAM permissions per service, so update that list
+  `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
+  the `bedrock:RetrieveAndGenerate` permission). Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
   operations go unchecked.
@@ -153,6 +154,22 @@ How the View layer works:
   `self.kb`, the default knowledge base that `use()` sets.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions.
+- `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but standalone (not a companion): it
+  copies its helpers like the other analyzers. `chat()` (module level) builds a `BedrockChatView` and calls
+  `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
+  `column-reverse` box so it stays scrolled to the newest, and the Settings / Request JSON / Last response tabs).
+  Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
+  conversation as an ordinary report that does. Its settings come from botocore's service model:
+  `request_schema()` walks RetrieveAndGenerate's input shape into `Field`s (path, kind, range, docs), with the short
+  names, plain-English docs and starting values in `_KNOWN`, so a field AWS adds appears with a newer boto3.
+  Settings are `{key: value}` (`view.values`); `build_request()` places them in the request and fills required
+  one-value enums (`Schema.auto`), `settings_from_request()` reads an edited request back, and `validate_request()`
+  runs botocore's `ParamValidator`. Every widget callback goes through `_ChatApp._safely`, which shows errors in
+  the window (a callback's exception would only reach the browser log); Enter in a text box is the box's `submit`
+  message (`_ChatApp._on_enter`, as in the explorer: `on_submit` is deprecated). View commands run from other cells
+  update an open window through `view._changed()`. `_ipython_display_` shows the window once per cell, so a cell
+  ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
+  `rules.py`, which is why it's `reranker`.
 - `sagemaker_env` also reads the machine it runs on: SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
   processes and which are Jupyter kernels), the disks and `nvidia-smi`. `SageMakerAnalyzer(root=...)` points all of
@@ -168,6 +185,8 @@ its vCPUs, memory and GPUs; us-east-1 list prices with the date they were read) 
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
 AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker>/current/us-east-1/index.json`; `index.csv` is easier to
 grep), which is what AWS bills from. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
+`bedrock_chat.py` carries its own copies of `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL`
+and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ).
 
 ## The S3 explorer (`s3_explorer.py`)
 
@@ -236,6 +255,11 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   (`SageMakerAnalyzer(clients={"sagemaker": ..., "sts": ..., "cloudwatch": ...})`, `max_workers = 1`), and
   `write_root()` / `fake_machine()` build the fake machine. demo.py's `seed_sagemaker_env()` returns fake clients
   and a fake root with sparse files, so the disk shows gigabytes without writing them.
+- `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
+  (answers in any order, checks every request, response and stream event against the service model, and has no
+  method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
+  replace `view._display`, and click and type through the widgets in Python (ipywidgets is in
+  `requirements-dev.txt` for this).
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
@@ -251,7 +275,8 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
   README links and old links still work. `index.md` is the home page with one card per service (Material grid
-  cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `sagemaker_env.md`). A new
+  cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
+  `sagemaker_env.md`). A new
   analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
   README. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
   `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
@@ -266,10 +291,12 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
   fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
   The explorer is a live widget, so its figures (`explorer`, `explorer-docx`) come from `explorer_shots.py`, which
-  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). Remake the affected figures when a report's look changes, and check
-  their captions and alt text still match, in the guides and in README, which shows seven of them (`overview`,
-  `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`, `bedrock-ask`, `sagemaker-instance`) as `<picture>`s that switch to
-  the `-dark` file in dark mode.
+  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
+  (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
+  Bedrock, types and clicks through it, and sets the heights with `shots.set_height`. Remake the affected figures when
+  a report's look changes, and check their captions and alt text still match, in the guides and in README, which
+  shows eight of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`,
+  `bedrock-ask`, `chat-window`, `sagemaker-instance`) as `<picture>`s that switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
   `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and

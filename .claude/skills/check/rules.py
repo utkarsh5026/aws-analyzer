@@ -65,6 +65,7 @@ IAM_ACTION = {
     "s3control:GetPublicAccessBlock": "s3:GetAccountPublicAccessBlock",
     "dynamodb:ExecuteStatement": "dynamodb:PartiQLSelect",
     "bedrock-runtime:Converse": "bedrock:InvokeModel",
+    "bedrock-agent-runtime:RetrieveAndGenerateStream": "bedrock:RetrieveAndGenerate",  # one permission for both
     "sts:GetCallerIdentity": None,  # needs no permission
 }
 # boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:).

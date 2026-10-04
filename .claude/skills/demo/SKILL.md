@@ -26,6 +26,8 @@ service is given, run a short tour:
 - s3: `ui.overview(); ui.bucket_info("demo-lake"); ui.summary("s3://demo-lake/")`
 - dynamodb: `ui.tables(); ui.table_info("orders"); ui.schema("orders")`
 - bedrock_kb: `ui.kbs(); ui.kb_info("support-docs"); ui.search("How long do refunds take?", kb="support-docs")`
+- bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request()` (the same
+  fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
 - sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
 - other services: `ui.help()` and then the service's overview command
 
@@ -121,6 +123,17 @@ the same size, light and dark. It needs `pip install jupyterlab playwright` on t
 
 To click around the explorer yourself, start `jupyter lab` and seed the scene in the first cell the same way
 (`mock_aws().start()`, then `core = S3Analyzer(**shots.seed_s3_docs())`, then `S3Explorer(core=core)`).
+
+The chat window (`bedrock_chat.py`) is ipywidgets, which only draw in a browser connected to a kernel, so its figures
+(`chat-*`, in `docs/bedrock_chat.md`) come from `chat_shots.py`: it starts JupyterLab on a notebook that opens the
+window on the fake Bedrock, types and clicks through it with Playwright, and writes the WebP files and the figures'
+heights the same way. It needs `pip install jupyterlab playwright` on top of the dev requirements, and Chromium (`$CHROME`, or
+Playwright's).
+
+```bash
+.venv/bin/python .claude/skills/demo/chat_shots.py                   # every chat figure, light and dark
+.venv/bin/python .claude/skills/demo/chat_shots.py chat-request      # just this one
+```
 
 ## Real AWS
 
