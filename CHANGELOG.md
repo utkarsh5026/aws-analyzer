@@ -24,23 +24,29 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - Every report's title chip starts with an icon for its service (🪣 S3, 🗄️ DynamoDB, 📚 Bedrock KB, 💬 Bedrock chat,
   🧪 SageMaker), so in a notebook that mixes them you can tell at a glance where each report came from. `help()`
   gives each group of commands an icon too (💰 Cut cost, 🔎 Search and answer, 💻 This notebook, ...).
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 - `S3View`'s tables of keys (`ls`, `find`, `largest`, `duplicates`, `compare`, `versions`, `deleted`, `uploads`,
   ...) show each file's type as an icon in front of its key, the same icons the S3 explorer uses: 📊 tables,
   📕 PDFs, 🖼️ pictures, 🧠 models, 📁 folders. It's only drawn in the notebook: the cell still sorts and copies as
   the key, and text output is unchanged.
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 - `S3Explorer`: every button above the right pane has an icon, as ⬇ Download and 🔗 Link already did: 👁️ Preview,
   🏷️ Details, 📖 Read all, 📊 What's in here, 🛡️ Bucket settings and 🪣 Every bucket.
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 - `SageMakerView.running()` starts each row with an icon for what's billing (📓 notebook instance, 🧪 Studio app,
   🚀 endpoint, 🏋️ training job, ⚙️ processing job), and marks the notebook you're in with 📍 instead of
   "(this notebook)".
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 - `chat()`: the window's tabs are ⚙️ Settings, 🧾 Request JSON and 📨 Last response, each answer's cited passages
   sit under 📎 Sources, and your own questions get a 🧑 beside them, as the model's answers have their ✦.
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 
 ### Fixed
 
 - Text output (outside Jupyter, or `mode="text"`) keeps its tables' columns lined up when a cell holds an emoji or
   wide characters such as Chinese or Japanese text, in every analyzer. They used to push the rest of their row one
   column right per character.
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 
 ## [0.3.0] - 2026-10-04
 
