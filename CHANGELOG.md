@@ -11,6 +11,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-04
+
 ### Added
 
 - `S3Explorer` finds files: type part of a name, or a file type such as `.csv`, in the search box over the list
@@ -22,23 +24,44 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   fix (**Search the subfolders too**, **Show the 25 files**). `x.filter(".parquet", subfolders=True)` does the same
   from code, and in the text view. For your own code, `S3Navigator.below()` lists everything below a folder, and
   `parse_filter`, `filter_entries(kind=...)` and `count_types` do the matching and counting.
+  ([#27](https://github.com/utkarsh5026/aws-analyzer/pull/27))
 - `S3Explorer`: tick files to download them together. A checkbox shows when you point at a row (and on every row
   once something is ticked); the one in the header ticks everything listed, such as every `.csv` a search found. The
   bar under the list says how many are ticked and how big they are, and **⬇ Download selected** shows what goes in
   the zip, checks it's within the limits, and suggests a name from the folder and the count (`churn-12-files.zip`),
   which you can change. It never replaces a file already there. `x.picked` lists what's ticked.
+  ([#27](https://github.com/utkarsh5026/aws-analyzer/pull/27))
 - `S3View.download_zip()` and `S3Analyzer.download_zip()` / `plan_zip()` take a list of files and folders from one
   bucket too: `ui.download_zip(["s3://b/raw/a.csv", "s3://b/raw/2024/"])` zips them together, laid out as they are
   under the folder they share, after the same checks, and names the zip after that folder (`raw-2-items.zip`).
+  ([#27](https://github.com/utkarsh5026/aws-analyzer/pull/27))
+- `chat()` window, and `ask()` / `transcript()` in `BedrockChatView` and `BedrockKBView`: answers written in markdown
+  are laid out, with headings, bullet and numbered lists, bold and italic, tables, code blocks and links, and each
+  cited span still shaded and numbered. Nothing in an answer runs as HTML, and its links open only web pages and email
+  addresses. In a terminal the markdown is printed as written, with code blocks and tables left unwrapped.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: **Add a setting** searches every RetrieveAndGenerate field by its name, its path or what it does
+  (`rerank`, `latency`, `encrypts`), lists the matches with what each one takes and does, and adds one with **+ Add**
+  (Enter adds the best match). A misspelt name lists the closest ones, and **Browse all** lists every field by group.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: the **Python** view of the request, and **Open this setup again**, are highlighted like code, and
+  so is "The same call in Python" in `request()` and `last()`. The **JSON** view is in colour too.
+  `python_call(params, region, width=)` breaks lines at `width`, counting each key.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- A guide to the S3 explorer, [S3 file explorer](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html):
+  putting it next to a notebook, browsing, previewing, downloading a folder as a `.zip`, using it from code or
+  without widgets, and the permissions it needs.
+  ([#25](https://github.com/utkarsh5026/aws-analyzer/pull/25))
 
 ### Changed
 
 - `S3Explorer` has a new look: drawn icons instead of arrow characters, the back, forward, up and refresh buttons
   grouped, softer rows, buttons and chips, the buttons above a report stay in view as it scrolls, and a spinner and
   the outline of a report while one loads. Long bucket names get the room the size column used to take.
+  ([#27](https://github.com/utkarsh5026/aws-analyzer/pull/27))
 - `S3Explorer`'s filter box is now the search box at the top of the list. `*.csv` there also finds `.csv.gz` files,
   and words separated by spaces must each be in the name (`churn train`), not the whole phrase.
-
+  ([#27](https://github.com/utkarsh5026/aws-analyzer/pull/27))
 - `S3View.preview()` (and the S3 explorer) shows a JSON file as a tree coloured like code instead of a wall of text.
   Click a line to fold or unfold an object, array or long string, and hover over a line for the Python that reaches
   it (`data['Records'][0]`). It starts with as much open as fits on a screen, with the first of a long list of
@@ -66,45 +89,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `chat()`: the window's tabs are ⚙️ Settings, 🧾 Request JSON and 📨 Last response, each answer's cited passages
   sit under 📎 Sources, and your own questions get a 🧑 beside them, as the model's answers have their ✦.
   ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
-
-### Fixed
-
-- Text output (outside Jupyter, or `mode="text"`) keeps its tables' columns lined up when a cell holds an emoji or
-  wide characters such as Chinese or Japanese text, in every analyzer. They used to push the rest of their row one
-  column right per character.
-  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
-
-## [0.3.0] - 2026-10-04
-
-### Added
-
-- `S3View` tables: click a column's header to sort by it (largest, newest or A to Z first, again for the other way, a
-  third time for the original order), pick a value in a column's **Filter** to see only those rows (a storage class,
-  a region, a bucket), and untick columns under **Columns** to hide the ones you don't need. It's plain HTML and CSS,
-  so it still works after the notebook is saved and reopened.
-  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
-- `chat()` window, and `ask()` / `transcript()` in `BedrockChatView` and `BedrockKBView`: answers written in markdown
-  are laid out, with headings, bullet and numbered lists, bold and italic, tables, code blocks and links, and each
-  cited span still shaded and numbered. Nothing in an answer runs as HTML, and its links open only web pages and email
-  addresses. In a terminal the markdown is printed as written, with code blocks and tables left unwrapped.
-  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
-- `chat()` window: **Add a setting** searches every RetrieveAndGenerate field by its name, its path or what it does
-  (`rerank`, `latency`, `encrypts`), lists the matches with what each one takes and does, and adds one with **+ Add**
-  (Enter adds the best match). A misspelt name lists the closest ones, and **Browse all** lists every field by group.
-  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
-- `chat()` window: the **Python** view of the request, and **Open this setup again**, are highlighted like code, and
-  so is "The same call in Python" in `request()` and `last()`. The **JSON** view is in colour too.
-  `python_call(params, region, width=)` breaks lines at `width`, counting each key.
-  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
-
-### Changed
-
-- `S3View`: long keys in tables keep the file name in view. The folder is dimmed and shortened from the left, and the
-  whole key shows when you hover over it; in text mode the start of the folder goes, never the file name.
-  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
-- `S3View` findings lead with a bold headline, with why it matters and what to do underneath as points, and amounts
-  of money stand out. Notes start with their point in bold.
-  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
 - `chat()` window: a new look, with rounded corners throughout. The conversation reads like a chat (your questions on
   the right, each answer as a card with the model's name over its time and cost, sources as numbered rows), the box
   you type in sits in one rounded bar with **Send**, each setting is a card, and the tabs and view buttons are
@@ -114,6 +98,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Fixed
 
+- Text output (outside Jupyter, or `mode="text"`) keeps its tables' columns lined up when a cell holds an emoji or
+  wide characters such as Chinese or Japanese text, in every analyzer. They used to push the rest of their row one
+  column right per character.
+  ([#26](https://github.com/utkarsh5026/aws-analyzer/pull/26))
 - `chat()` window, **Request JSON**: with **Edit JSON** open, changing a setting in the Settings tab (or from another
   cell) and then pressing **Apply** silently undid that change. Now an editor you haven't touched takes the new
   request, and one you have keeps your edits and says what Apply would undo, with **Start over** to load the request
@@ -128,6 +116,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `chat()` window: the JSON text and Python views wrapped long lines in the middle of a word; they now scroll sideways,
   and the Python breaks its lines to fit the tab.
   ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+
+## [0.3.0] - 2026-10-04
+
+### Added
+
+- `S3View` tables: click a column's header to sort by it (largest, newest or A to Z first, again for the other way, a
+  third time for the original order), pick a value in a column's **Filter** to see only those rows (a storage class,
+  a region, a bucket), and untick columns under **Columns** to hide the ones you don't need. It's plain HTML and CSS,
+  so it still works after the notebook is saved and reopened.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+
+### Changed
+
+- `S3View`: long keys in tables keep the file name in view. The folder is dimmed and shortened from the left, and the
+  whole key shows when you hover over it; in text mode the start of the folder goes, never the file name.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+- `S3View` findings lead with a bold headline, with why it matters and what to do underneath as points, and amounts
+  of money stand out. Notes start with their point in bold.
+  ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
 
 ## [0.2.0] - 2026-10-04
 
@@ -182,7 +189,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/utkarsh5026/aws-analyzer/releases/tag/v0.1.0
