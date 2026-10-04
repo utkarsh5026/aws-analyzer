@@ -20,10 +20,10 @@ One call, `S3Explorer()`, turns a notebook cell into a file explorer for S3. You
 Every example uses a bucket called `acme-ml-data`; use your own bucket names. The screenshots are the real explorer in JupyterLab, run against a demo bucket with synthetic data. For reports you run from code (costs, search, duplicates, lifecycle rules, deleted files), see the [S3 guide](s3.md).
 { .muted }
 
-![S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points](images/explorer-tour-light.webp#only-light){ width="984" height="576" loading=lazy }
-![S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points](images/explorer-tour-dark.webp#only-dark){ width="984" height="576" loading=lazy }
+![S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points; last it opens training, turns on Include subfolders and clicks the .tar chip, and the list shows each model.tar.gz below with the training run it came from](images/explorer-tour-light.webp#only-light){ width="984" height="586" loading=lazy }
+![S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points; last it opens training, turns on Include subfolders and clicks the .tar chip, and the list shows each model.tar.gz below with the training run it came from](images/explorer-tour-dark.webp#only-dark){ width="984" height="586" loading=lazy }
 /// caption
-`S3Explorer()`: from your buckets to a Parquet file's first rows and a Word document, one click at a time.
+`S3Explorer()`: from your buckets to a Parquet file's first rows, a Word document, and every model file below a folder, one click at a time.
 ///
 
 ## Set up in SageMaker { #setup }
@@ -89,23 +89,42 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
 
 ## Find your way around { #browse }
 
-The toolbar is at the top, the folder you're in on the left, and on the right whatever you clicked. The bar at the bottom counts what's listed and shows where you are.
+The toolbar is at the top, the folder you're in on the left under a search box, and on the right whatever you clicked. The bar at the bottom counts what's listed and shows where you are.
 
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, a filter box and a settings button; on the left three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="577" loading=lazy }
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, a filter box and a settings button; on the left three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="577" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="587" loading=lazy }
 /// caption
 The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.
 ///
 
 - **Open a folder** by clicking it. **←** **→** go back and forward, **↑** goes up a level, and each part of the path at the top opens that folder; **All buckets**, its first part, goes back to your buckets.
 - **Go to a path** with **✎**: paste an `s3://` path, `bucket/folder`, an S3 console link or an object URL, and press Enter. A path to a file opens its folder with the file shown. **✕** closes the box without going anywhere.
-- **Narrow a long folder** by typing in **Filter**: it keeps the names that contain what you type, in any case, or that match a pattern such as `*.csv` or `part-0*`.
+- **Find files** with the search box over the list: a name, a file type such as `.csv`, or only the folders. [More below](#search).
 - **Sort** by clicking **Name**, **Size** or **Modified**, and again for the other way. Sizes and dates sort biggest and newest first, folders stay on top, and names sort the way people count: `part-2` before `part-10`.
 - **The bar at the bottom** counts the folders and files listed and adds up their size. On the right it shows the path of the folder you're in, or of the file you clicked; one click selects it, ready to copy.
 
 Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
 
-Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **📊 What's in here** [adds up everything below](#folders).
+Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **Include subfolders** [counts everything below](#search), and **📊 What's in here** [adds it all up](#folders).
+
+## Find files { #search }
+
+Above the list are a search box and the buttons that narrow it. They work on what's listed, so typing doesn't ask S3 for anything, and they combine: the `.csv` files whose names have `2025` in them, below this folder.
+
+![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+/// caption
+`.tar` with **Include subfolders**: every model artifact below `training/`, each under the run it came from.
+///
+
+- **Search by name** by typing part of it, in any case. Several words must all be in the name (`churn train`), and `*` `?` make a pattern for the whole name (`part-0*`).
+- **Search by file type** by typing it with its dot: `.csv`, `.parquet`, or `.csv .json` for either. A type also finds its compressed files (`.csv` finds `data.csv.gz`) and its other spelling (`.jpg` finds `.jpeg`); `*.csv` works too. Folders have no type, so they drop out.
+- **Click a type** instead: under the search box is a chip for each file type here, with how many files have it, the most common first (**+N more** shows the rest). A click writes `.csv` into the search box, so you can see and change what it did; click another to add it, or the same one again to take it out.
+- **Show only folders, or only files** with **All**, **Folders** and **Files**. Each says how many of its kind match the search. It stays on as you open other folders, like the sort, so **Folders** walks down a tree of folders without the files.
+- **Include subfolders** lists everything below the folder, not only its first level, with the folder each file is in under its name. Then the search, the chips and the sort cover all of it: every `.parquet` file in a dataset's partitions, the biggest or newest files anywhere below (sort by **Size** or **Modified**), or a folder by name. It lists 10,000 files at a time (**Load more from S3** lists the next), one S3 request per 1,000, and the right shows what they add up to.
+- **✕** in the search box clears it. Opening another folder starts with an empty search and only its first level.
+
+When nothing matches, the note under the list says why and offers the fix: **Search the subfolders too** when it's only at this level, or **Show the 25 files** when **Folders** hides them. With a search, the bar at the bottom also adds up how many match and how big they are.
 
 ## Look inside a file { #files }
 
@@ -122,8 +141,8 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 
 Clicking through files doesn't wait. In a notebook, previews and details load in the background: each click shows its file as soon as it's read, and files you clicked past are skipped instead of holding you up. Reports you've opened are kept, so going back to a file shows it at once; **↻** reads the folder and its files again.
 
-![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-light.webp#only-light){ width="984" height="577" loading=lazy }
-![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-dark.webp#only-dark){ width="984" height="577" loading=lazy }
+![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-dark.webp#only-dark){ width="984" height="587" loading=lazy }
 /// caption
 A Word file's first paragraphs; **📖 Read all** shows the whole document, pictures in place.
 ///
@@ -156,8 +175,8 @@ The buttons above the right pane change with where you are:
 | At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
 | On your buckets | **🪣 Every bucket** | Each bucket's size, monthly cost and security warnings, side by side (the [`overview`](s3.md#buckets) report) |
 
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="577" loading=lazy }
-![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="577" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer on the list of buckets: four buckets on the left with how long ago each was created; on the right the Every bucket report, with cards for buckets, objects, total size, estimated monthly cost and buckets with warnings, and a table of each bucket's region, objects, size, cost, versioning and encryption](images/explorer-buckets-dark.webp#only-dark){ width="984" height="587" loading=lazy }
 /// caption
 `S3Explorer()` starts from your buckets; **🪣 Every bucket** compares their size, cost and security settings.
 ///
@@ -174,16 +193,37 @@ x.zip_max_files = 50_000             # and up to 50,000 files
 x.zip_folder = "~/zips"              # made when the first zip is saved
 ```
 
+### Download some files { #select }
+
+To download a few files and not the whole folder, tick them and zip them together:
+
+<div class="steps" markdown>
+
+1. **Tick the files.** Point at a row and a checkbox shows on its left; click it. Once something is ticked, every row shows its checkbox. The one in the header ticks everything listed, so a search and one click selects, say, every `.csv` in a dataset's partitions (with [**Include subfolders**](#search)). You can tick folders too: they go in with everything below them.
+2. **Click ⬇ Download selected** in the bar under the list. The bar also says how many are ticked and how big they are; **Clear** unticks them.
+3. **Check the name and click ⬇ Download.** The right shows what goes in the zip and whether it's within the limits, and suggests a name from the folder and how many files there are, such as `churn-12-files.zip`. Change it if you like (Enter downloads too). The explorer never replaces a file: when that name is taken, it suggests `churn-12-files-2.zip`.
+
+</div>
+
+![S3Explorer in a folder of 30 compressed JSON event files, five of them ticked and tinted; the bar under the list says 5 selected and their size, with Clear and Download selected; on the right, Download 5 files as one .zip, with cards for the files, their size and the limit, a Save as box holding dt=2025-10-10-5-files.zip, Download and Cancel buttons, and a table of what goes in the zip](images/explorer-zip-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer in a folder of 30 compressed JSON event files, five of them ticked and tinted; the bar under the list says 5 selected and their size, with Clear and Download selected; on the right, Download 5 files as one .zip, with cards for the files, their size and the limit, a Save as box holding dt=2025-10-10-5-files.zip, Download and Cancel buttons, and a table of what goes in the zip](images/explorer-zip-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+/// caption
+Five files ticked, one `.zip` with a name that says what's in it.
+///
+
+The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it.
+
 ## Big folders { #big }
 
 The explorer lists one level at a time, never the whole bucket, so a folder opens in a moment even in a bucket of billions of files.
 
 - A folder is listed 1,000 entries per request and shown 100 rows at a time. **Show more**, at the end of the list, shows the next rows.
 - In a folder of more than 1,000 entries, **Load more from S3** lists the next 1,000. Until then, the counts on the right and at the bottom end in **+**: they cover what's listed so far.
-- **Look up** finds a name in a folder too big to list: type the start of it in **Filter** (`2025-09-` for a date partition), and it asks S3 for the names that start with it. The filter on its own only searches what's listed.
+- **Look up** finds a name in a folder too big to list: type the start of it in the search box (`2025-09-` for a date partition), and it asks S3 for the names that start with it. The search on its own only searches what's listed.
+- **Include subfolders** lists 10,000 files below the folder at a time; **Load more from S3** lists the next 10,000.
 - Folders you've opened are kept, so going back is instant. **↻** lists the folder again, to pick up files added or removed since.
 
-Only **📊 What's in here** and **⬇ Download .zip** read everything below a folder.
+Only **📊 What's in here** and **⬇ Download .zip** read everything below a folder; **Include subfolders** stops at 10,000 files until you ask for more.
 
 ## From code { #code }
 
@@ -193,6 +233,9 @@ The explorer is an object you can drive from other cells. Keep it in a variable:
 x = S3Explorer("s3://acme-ml-data/")
 x.open("s3://acme-ml-data/raw/events/")   # the toolbar from code: open, back, forward, up, refresh
 x.back(); x.forward(); x.up(); x.refresh()
+x.filter(".parquet", subfolders=True)      # the search box and its buttons: every Parquet file below this folder
+x.filter(kind="folders")                   # only the folders here; x.filter() shows everything again
+x.picked                                   # what's ticked in the list, as s3:// paths
 x.location                                 # the folder you're in, such as 's3://acme-ml-data/raw/' ('' on your buckets)
 x.selected                                 # the file shown on the right, or ''
 x.ui.summary(x.location)                   # any S3View report about where you are, in its own cell
@@ -202,7 +245,7 @@ x.ui.summary(x.location)                   # any S3View report about where you a
 
 ### Without the window { #text }
 
-Outside Jupyter, without `ipywidgets`, or with `S3Explorer(mode="text")`, the explorer prints each folder as a table: what it holds, the file types, and its folders and files with their sizes and ages. `open()`, `back()`, `forward()` and `up()` print the next one, and opening a file prints its preview.
+Outside Jupyter, without `ipywidgets`, or with `S3Explorer(mode="text")`, the explorer prints each folder as a table: what it holds, the file types, and its folders and files with their sizes and ages. `open()`, `back()`, `forward()` and `up()` print the next one, `filter()` prints what matches, and opening a file prints its preview.
 
 ### The navigation as data { #python }
 
@@ -216,13 +259,15 @@ folder = nav.open("s3://acme-ml-data/curated/")      # Folder: entries, more, er
 [(e.name, e.kind, e.size) for e in folder.entries]   # Entry: kind ('bucket', 'folder', 'file'), key, size, modified, storage_class
 nav.more()                                           # the next 1,000 entries, when folder.more is True
 nav.lookup("2025-09-")                               # adds the names that start with it; returns how many were new
+below = nav.below()                                  # everything below: every file and the folders between (10,000 at a time)
+nav.more(below=True)                                 # the next 10,000, when below.more is True
 nav.back(); nav.forward(); nav.up(); nav.refresh()
 ```
 
 The functions behind it don't call AWS, so they work on anything:
 
 ```python
-from s3_explorer import parse_location, breadcrumbs, folder_stats
+from s3_explorer import parse_location, breadcrumbs, filter_entries, folder_stats
 
 parse_location("https://us-east-1.console.aws.amazon.com/s3/buckets/acme-ml-data?prefix=curated/features/")
 # ('acme-ml-data', 'curated/features/')
@@ -231,9 +276,10 @@ parse_location("https://acme-ml-data.s3.us-east-1.amazonaws.com/reports/q3.pdf")
 breadcrumbs("s3://acme-ml-data/curated/")
 # [('All buckets', ''), ('acme-ml-data', 's3://acme-ml-data/'), ('curated', 's3://acme-ml-data/curated/')]
 folder_stats(folder.entries)                         # FolderStats: counts, size, newest and oldest file, types by size
+filter_entries(below.entries, "churn .parquet", kind="files")   # what the search box and Files show
 ```
 
-The others are `parent_uri`, `folder_uri`, `sort_entries` (folders first, `part-2` before `part-10`), `filter_entries`, `entry_icon` and `explain_list_error`.
+The others are `parent_uri`, `folder_uri`, `sort_entries` (folders first, `part-2` before `part-10`; `"path"` for a tree), `parse_filter` (what a search asks for: its words, patterns and file types), `count_types` (the type chips: files and bytes per type), `entry_icon` and `explain_list_error`.
 
 ## Permissions { #permissions }
 
@@ -256,7 +302,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | Permission | Used by |
 |---|---|
 | `s3:ListAllMyBuckets` | The list of buckets you start from. Without it, open a bucket by its path |
-| `s3:ListBucket` | Listing folders, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
+| `s3:ListBucket` | Listing folders, **Include subfolders**, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
 | `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
 | `s3:GetObjectTagging` | The tags in **🏷️ Details**; without it, the rest of **🏷️ Details** still shows |
 | `kms:Decrypt` on the key | Files encrypted with SSE-KMS |
@@ -279,7 +325,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ??? question "A file I know is there isn't in the list"
 
-    A folder of more than 1,000 entries is listed a page at a time, and the filter only searches what's listed. Type the start of the name in **Filter** and click **Look up**, or click **Load more from S3** at the end of the list. If the file was added after the folder was opened, press **↻**. Names in S3 are case-sensitive.
+    A folder of more than 1,000 entries is listed a page at a time, and the search only covers what's listed. Type the start of the name in the search box and click **Look up**, or click **Load more from S3** at the end of the list. If the file is in a subfolder, turn on **Include subfolders**; if **Folders** or **Files** is lit, click **All**. If the file was added after the folder was opened, press **↻**. Names in S3 are case-sensitive.
 
 ??? question "A file marked ❄ won't open"
 
@@ -295,7 +341,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ??? question "The zip wasn't made"
 
-    The report says which check failed. If the folder is over a limit, **⚙** raises it. If the disk is full, free some space (the [SageMaker guide's `disk()`](sagemaker_env.md#disk) shows what fills it) or zip a smaller folder.
+    The report says which check failed. If the folder or the files you ticked are over a limit, **⚙** raises it (or untick some files). If the disk is full, free some space (the [SageMaker guide's `disk()`](sagemaker_env.md#disk) shows what fills it) or zip a smaller folder.
 
 ## Reference { #reference }
 
@@ -320,10 +366,12 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `back()`, `forward()` | **←** and **→** |
 | `up()` | **↑**: the folder above |
 | `refresh()` | **↻**: lists this folder again |
+| `filter(text="", kind="all", subfolders=False)` | The search box and its buttons: names or file types (`".csv .json"`), `kind="folders"` or `"files"`, and everything below with `subfolders=True`. `filter()` shows everything again |
 | `location` | The folder you're in, or `""` on your buckets |
 | `selected` | The file shown on the right, or `""` |
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
 | `nav` | The `S3Navigator` behind the list |
-| `zip_max_size`, `zip_max_files`, `zip_folder` | The **⬇ Download .zip** limits and where zips go, which **⚙** edits |
+| `picked` | The files and folders ticked in the list, as `s3://` paths: `x.ui.download_zip(x.picked)` |
+| `zip_max_size`, `zip_max_files`, `zip_folder` | The **⬇ Download .zip** and **⬇ Download selected** limits, and where zips go, which **⚙** edits |
 
 </div>

@@ -11,7 +11,33 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `S3Explorer` finds files: type part of a name, or a file type such as `.csv`, in the search box over the list
+  (`.csv .json` finds either, `.csv` also finds `.csv.gz` and `.jpg` finds `.jpeg`), or click one of the chips under
+  it, one per file type in the folder with how many files have it. **Folders** and **Files** show only one kind, and
+  stay on as you open other folders. **Include subfolders** lists everything below the folder, 10,000 files at a
+  time, each under the folder it's in, so the search, the chips and the sort cover all of it: every Parquet file in a
+  dataset's partitions, or the biggest files anywhere below. When nothing matches, the note under the list offers the
+  fix (**Search the subfolders too**, **Show the 25 files**). `x.filter(".parquet", subfolders=True)` does the same
+  from code, and in the text view. For your own code, `S3Navigator.below()` lists everything below a folder, and
+  `parse_filter`, `filter_entries(kind=...)` and `count_types` do the matching and counting.
+- `S3Explorer`: tick files to download them together. A checkbox shows when you point at a row (and on every row
+  once something is ticked); the one in the header ticks everything listed, such as every `.csv` a search found. The
+  bar under the list says how many are ticked and how big they are, and **⬇ Download selected** shows what goes in
+  the zip, checks it's within the limits, and suggests a name from the folder and the count (`churn-12-files.zip`),
+  which you can change. It never replaces a file already there. `x.picked` lists what's ticked.
+- `S3View.download_zip()` and `S3Analyzer.download_zip()` / `plan_zip()` take a list of files and folders from one
+  bucket too: `ui.download_zip(["s3://b/raw/a.csv", "s3://b/raw/2024/"])` zips them together, laid out as they are
+  under the folder they share, after the same checks, and names the zip after that folder (`raw-2-items.zip`).
+
 ### Changed
+
+- `S3Explorer` has a new look: drawn icons instead of arrow characters, the back, forward, up and refresh buttons
+  grouped, softer rows, buttons and chips, the buttons above a report stay in view as it scrolls, and a spinner and
+  the outline of a report while one loads. Long bucket names get the room the size column used to take.
+- `S3Explorer`'s filter box is now the search box at the top of the list. `*.csv` there also finds `.csv.gz` files,
+  and words separated by spaces must each be in the name (`churn train`), not the whole phrase.
 
 - `S3View.preview()` (and the S3 explorer) shows a JSON file as a tree coloured like code instead of a wall of text.
   Click a line to fold or unfold an object, array or long string, and hover over a line for the Python that reaches

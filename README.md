@@ -77,7 +77,7 @@ report still renders.
 | Service                            | What it shows you                                                                                                                                                                                                                                       | File and guide                                                                                                                            |
 | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
-| **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• PDFs page by page, Word files with their pictures<br>• A folder as one .zip, after checking it fits                                             | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
+| **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
 | **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
@@ -256,10 +256,10 @@ same `preview` as above: a table's first rows, a PDF's pages, a Word file with i
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-tour-dark.webp">
-  <img src="docs/images/explorer-tour-light.webp" alt="S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points">
+  <img src="docs/images/explorer-tour-light.webp" alt="S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points; last it opens training, turns on Include subfolders and clicks the .tar chip, and the list shows each model.tar.gz below with the training run it came from">
 </picture>
 
-<p align="center"><sub><code>S3Explorer()</code>: from your buckets to a Parquet file's first rows and a Word document, one click at a time.</sub></p>
+<p align="center"><sub><code>S3Explorer()</code>: from your buckets to a Parquet file's first rows, a Word document, and every model file below a folder, one click at a time.</sub></p>
 
 It builds on `s3.py`, so put **both files** next to your notebook, or paste `s3.py` into a cell and `s3_explorer.py`
 into the next one. Clicking needs `ipywidgets`, which SageMaker notebooks already have.
@@ -278,14 +278,16 @@ S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file 
 | See what's in a file | Click it. **🏷️ Details** shows its metadata and tags, **📖 Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour. Clicking through files doesn't wait: each click shows its file as soon as it's read, and files you clicked past are skipped |
 | Read a PDF           | Click **📖 Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
 | Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
-| Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first                                                                       |
+| Find files           | Type part of a name, or a file type such as `.csv` (`.csv .json` for either; it also finds `.csv.gz`), in the search box over the list, or click a type's chip under it. **Folders** and **Files** show only one kind, and **Include subfolders** searches everything below the folder, not only its first level. Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first |
 | Add up a folder      | Open it and click **📊 What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
 | Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder zips go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
+| Download some files  | Tick them (a checkbox shows when you point at a row, and the one in the header ticks everything listed, such as every `.csv` the search found), then click **⬇ Download selected** in the bar under the list. The right shows what goes in and suggests a name, such as `churn-12-files.zip`, which you can change; **⬇ Download** makes it, after the same checks |
 
 Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
-lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the filter. Files in
-GLACIER or DEEP_ARCHIVE are marked ❄, and opening one shows the command that restores it. Like `s3.py`, it only
-reads: browsing needs `s3:ListAllMyBuckets` and `s3:ListBucket`, and opening files `s3:GetObject`.
+lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the search box.
+**Include subfolders** lists 10,000 files below the folder at a time. Files in GLACIER or DEEP_ARCHIVE are marked ❄,
+and opening one shows the command that restores it. Like `s3.py`, it only reads: browsing needs
+`s3:ListAllMyBuckets` and `s3:ListBucket`, and opening files `s3:GetObject`.
 
 <details>
 <summary><b>Options, and using it from code</b></summary>
@@ -301,17 +303,21 @@ S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (
 
 x = S3Explorer("s3://my-bucket/")
 x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, from code
+x.filter(".parquet", subfolders=True)                 # the search box: every Parquet file below this folder
+x.filter(kind="folders")                              # only the folders here; x.filter() shows everything again
+x.ui.download_zip(x.picked)                           # what's ticked in the list, as one .zip
 x.ui.summary(x.location)                              # any S3View report about where you are, in its own cell
 
 nav = S3Navigator()                                   # the same navigation as data, with no UI
 folder = nav.open("s3://my-bucket/data/")             # Folder: entries, more, error
 nav.more(), nav.back(), nav.up(), nav.lookup("2024-")
+nav.below()                                           # everything below the folder, 10,000 files at a time
 ```
 
 Outside Jupyter, without `ipywidgets`, or with `mode="text"`, each folder prints as a table and `open(...)` moves
 around. The pure functions work on their own: `parse_location` (s3:// paths, `bucket/key`, console links and object
 URLs), `breadcrumbs`, `parent_uri`, `sort_entries` (folders first, `part-2` before `part-10`), `filter_entries` and
-`folder_stats`.
+`parse_filter` (what a search like `"churn .csv .json"` asks for), `count_types` and `folder_stats`.
 
 </details>
 
@@ -364,7 +370,7 @@ Grouped the way `ui.help()` lists them.
 | `preview(uri, n=20)`                                                              | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, JSON as a tree you fold with a click (coloured like code), text, images, an audio / video player, a PDF's first pages as they look (scans too; click a page to see it full size), a Word file with its pictures in place, or a hex dump. Only downloads what it needs. |
 | `document(uri, pages=None, pictures=None)`                                        | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page, and a click on a drawn page shows it as big as the notebook. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages                                                                                                                                 |
 | `download(uri, path=None)`                                                        | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it                                                                                                                                                                         |
-| `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
+| `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder (or a list of them from one bucket, laid out under the folder they share) as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
 | `link(uri)`                                                                       | Clickable presigned download link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 ### Reference

@@ -3,9 +3,12 @@ s3_explorer.py - browse S3 like a file explorer, inside a SageMaker / Jupyter no
 
 Folders and files are listed on the left. Click a folder to open it, or a file to see what's inside it on the
 right: a table's first rows, a PDF's pages, a Word file with its pictures, an image, and so on. The toolbar has
-back / forward / up buttons, a clickable path you can also type into, a filter box, and the column headers sort
-by name, size or date. "Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full
-size), and "Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes.
+back / forward / up buttons and a clickable path you can also type into, and the column headers sort by name, size
+or date. Over the list, a search box finds files by name or type ('.csv', '.csv .json'), All / Folders / Files
+show only one kind, a chip per file type filters with one click, and "Include subfolders" searches everything below
+the folder. "Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full size), and
+"Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes. Tick files (a
+checkbox shows when you point at a row) and "Download selected" zips just those, under a name you can change.
 
 This file builds on s3.py (the previews, the formatting and the AWS calls all come from it): upload both files
 next to your notebook, or paste s3.py into a cell and then this file into the next one. Clicking needs
@@ -23,6 +26,7 @@ Quick start
 
     x = S3Explorer("s3://my-bucket/")
     x.open("s3://my-bucket/raw/")                   # drive it from code: open, back, forward, up, refresh
+    x.filter(".parquet", subfolders=True)           # every Parquet file below this folder; x.filter() clears it
     x.ui.summary(x.location)                        # any S3View report about where you are, in its own cell
 
     nav = S3Navigator()                             # the same navigation as data, with no UI
@@ -46,7 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -89,6 +93,9 @@ _COMPRESSION = {"gz", "gzip", "bz2", "xz", "zst", "zstd", "snappy", "lz4", "z"}
 _ARCHIVED = {"GLACIER", "DEEP_ARCHIVE"}  # storage classes that need a restore before a file can be read
 _DIGITS = re.compile(r"(\d+)")
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_SAME_TYPE = {"jpeg": "jpg", "yml": "yaml", "tif": "tiff", "htm": "html"}  # two spellings of one file type
+_TYPE_WORD = re.compile(r"^(?:\*?\.|(?:ext|type):\.?)(\w[\w+-]*(?:\.[\w+-]+)*)$")  # '.csv', '*.csv', 'ext:csv'
+_KINDS = {"all": "all", "folders": "folders", "folder": "folders", "files": "files", "file": "files"}
 
 
 def _natural(name: str) -> list[Any]:
@@ -104,6 +111,26 @@ def _extension(name: str) -> str:
     if parts[-1] in _COMPRESSION and len(parts) > 2 and parts[-2].isalpha() and len(parts[-2]) <= 8:
         return f"{parts[-2]}.{parts[-1]}"
     return parts[-1]
+
+
+def _file_type(name: str) -> str:
+    """The type a file is counted under: 'a.csv.gz' -> 'csv', 'x.JPEG' -> 'jpg', 'logs.tar.gz' -> 'tar', 'README' -> ''."""
+    found = _extension(name).split(".")[0]
+    return _SAME_TYPE.get(found, found)
+
+
+def _types_of(name: str) -> set[str]:
+    """Every type a file name answers to in a search: 'a.csv.gz' -> {'csv', 'gz', 'csv.gz'}, 'x.jpeg' -> {'jpg'}."""
+    parts = name.lower().split(".")
+    found = {_SAME_TYPE.get(t, t) for t in (".".join(parts[i:]) for i in range(1, len(parts)) if all(parts[i:]))}
+    return found | {_file_type(name)} - {""}
+
+
+def _type_word(word: str) -> str:
+    """The file type a word of a filter asks for: '.csv', '*.csv' or 'ext:csv' -> 'csv', '.jpeg' -> 'jpg'; '' when the
+    word isn't one."""
+    match = _TYPE_WORD.match(word.lower())
+    return _SAME_TYPE.get(match.group(1), match.group(1)) if match else ""
 
 
 def _parent_prefix(key: str) -> str:
@@ -161,7 +188,8 @@ class Entry:
 
 @dataclass
 class Folder:
-    """One level of a bucket, or every bucket when `uri` is ''. Entries come in S3's order, a page at a time."""
+    """One level of a bucket, or every bucket when `uri` is ''. Entries come in S3's order, a page at a time.
+    A deep folder (S3Navigator.below) holds everything below `uri` instead: every file, and the folders between."""
 
     uri: str
     entries: list[Entry] = field(default_factory=list)
@@ -170,6 +198,32 @@ class Folder:
     requests: int = 0  # list requests made for this folder so far
     error: str = ""  # why it couldn't be listed ('AccessDenied: ...'); entries is empty then
     error_code: str = ""
+    deep: bool = False  # everything below uri, not only its first level
+
+
+@dataclass
+class Filter:
+    """What a filter box's text asks for (see parse_filter): words a name must contain, patterns it must match, and
+    file types it must have one of."""
+
+    words: list[str] = field(default_factory=list)
+    patterns: list[str] = field(default_factory=list)  # with * ? or [, matched against the whole name
+    types: list[str] = field(default_factory=list)  # 'csv', 'csv.gz', ...
+
+    def __bool__(self) -> bool:
+        return bool(self.words or self.patterns or self.types)
+
+    def named(self, entry: Entry) -> bool:
+        """The name has every word in it and matches every pattern (any case)."""
+        name = entry.name.lower()
+        return all(word in name for word in self.words) and all(fnmatch.fnmatchcase(name, p) for p in self.patterns)
+
+    def typed(self, entry: Entry) -> bool:
+        """It's a file of one of the types (anything is, when no type was asked for; a folder never is)."""
+        return not self.types or (not entry.is_folder and not _types_of(entry.name).isdisjoint(self.types))
+
+    def matches(self, entry: Entry) -> bool:
+        return self.named(entry) and self.typed(entry)
 
 
 @dataclass
@@ -258,9 +312,14 @@ def entry_icon(entry: Entry, s3: Any = None) -> str:
 
 def sort_entries(entries: list[Entry], by: str = "name", descending: bool = False) -> list[Entry]:
     """Folders (or buckets) first, then files, each sorted `by` 'name' (natural order: part-2 before part-10),
-    'size' or 'modified'. Folders have no size, so a size sort keeps them by name."""
-    if by not in ("name", "size", "modified"):
-        raise ValueError("by must be 'name', 'size' or 'modified'")
+    'size' or 'modified'. Folders have no size, so a size sort keeps them by name. 'path' sorts by the whole key
+    instead, folders and files together, so everything below a folder reads like a tree: each folder, then what's
+    in it."""
+    if by not in ("name", "size", "modified", "path"):
+        raise ValueError("by must be 'name', 'size', 'modified' or 'path'")
+    if by == "path":  # folder by folder, so 'a/' and what's in it come before 'a-2.csv'
+        return sorted(entries, key=lambda e: [_natural(part) for part in e.key.rstrip("/").split("/")],
+                      reverse=descending)
 
     def key(entry: Entry) -> tuple:
         if by == "size":
@@ -277,14 +336,45 @@ def sort_entries(entries: list[Entry], by: str = "name", descending: bool = Fals
     return folders + files
 
 
-def filter_entries(entries: list[Entry], text: str | None) -> list[Entry]:
-    """Entries whose name contains `text` (any case), or matches it as a pattern when it has * ? or [."""
-    text = (text or "").strip().lower()
-    if not text:
-        return list(entries)
-    if any(ch in text for ch in "*?["):
-        return [e for e in entries if fnmatch.fnmatchcase(e.name.lower(), text)]
-    return [e for e in entries if text in e.name.lower()]
+def parse_filter(text: str | None) -> Filter:
+    """What a filter box's text asks for. Spaces (or commas) separate words, and a name must contain every word, in
+    any case. A word that starts with '.' or '*.' is a file type ('.csv', '*.parquet', or 'ext:csv'), and a file
+    must be one of the types asked for: '.csv .json' finds both, '.csv' also finds .csv.gz files and '.jpg' .jpeg
+    ones. Any other word with * ? or [ is a pattern for the whole name ('part-0*')."""
+    found = Filter()
+    for word in re.split(r"[\s,]+", (text or "").strip().lower()):
+        kind = _type_word(word)
+        if kind:
+            if kind not in found.types:
+                found.types.append(kind)
+        elif any(ch in word for ch in "*?["):
+            found.patterns.append(word)
+        elif word:
+            found.words.append(word)
+    return found
+
+
+def filter_entries(entries: list[Entry], text: str | None = None, kind: str = "all") -> list[Entry]:
+    """The entries that match a filter: names with the words of `text` in them, file types such as '.csv' or
+    '.csv .json', patterns such as 'part-0*' (see parse_filter), and only folders or files: kind is 'all',
+    'folders' (buckets count as folders) or 'files'."""
+    if kind not in _KINDS:
+        raise ValueError("kind must be 'all', 'folders' or 'files'")
+    kind, wanted = _KINDS[kind], parse_filter(text)
+    return [e for e in entries if wanted.matches(e) and (kind == "all" or e.is_folder == (kind == "folders"))]
+
+
+def count_types(entries: list[Entry]) -> list[tuple[str, int, int]]:
+    """(type, files, bytes) for the files among `entries`, most files first: a filter's choices. Types are what
+    '.csv' in a filter finds: .csv.gz files count as csv and .jpeg as jpg. Files without an extension aren't counted."""
+    found: dict[str, list[int]] = {}
+    for entry in entries:
+        kind = "" if entry.is_folder else _file_type(entry.name)
+        if kind:
+            counts = found.setdefault(kind, [0, 0])
+            counts[0] += 1
+            counts[1] += entry.size or 0
+    return sorted(((kind, n, size) for kind, (n, size) in found.items()), key=lambda t: (-t[1], -t[2], t[0]))
 
 
 def folder_stats(entries: list[Entry], top: int = 8) -> FolderStats:
@@ -339,7 +429,7 @@ class S3Navigator:
     raising, so a folder you can't read is a note, not a crash. Never prints.
 
     core: an S3Analyzer (or an S3View, whose analyzer is used); without one, an S3Analyzer is made from
-    session / region / profile / client."""
+    session / region / profile / client. deep_limit: how many files below() lists at a time."""
 
     def __init__(
         self,
@@ -351,18 +441,21 @@ class S3Navigator:
         client: Any = None,
         page_size: int = 1000,
         cache_size: int = 64,
+        deep_limit: int = 10_000,
     ):
         self.s3 = _s3_module(core)
         core = getattr(core, "core", core)  # an S3View carries its analyzer as .core
         self.core = core or self.s3.S3Analyzer(session, region=region, profile=profile, client=client)
         self.page_size = max(1, min(int(page_size), 1000))
         self.cache_size = cache_size
+        self.deep_limit = max(1, int(deep_limit))
         self.location = ""  # the folder you're in: 's3://bucket/prefix/', or '' for every bucket
         self.focus = ""  # after open(file uri): that file, for the UI to show
         self.notice = ""  # after open(): something worth saying about where you landed
         self._back: list[str] = []
         self._forward: list[str] = []
         self._cache: dict[str, Folder] = {}
+        self._below: dict[str, Folder] = {}  # below()'s listings, by folder
         self._started = False
 
     # ------------------------------------------------------------------ moving around
@@ -408,6 +501,7 @@ class S3Navigator:
     def refresh(self) -> Folder:
         """List the current folder again (other folders stay cached)."""
         self._cache.pop(self.location, None)
+        self._below.pop(self.location, None)
         self.notice = ""
         return self.folder()
 
@@ -431,12 +525,35 @@ class S3Navigator:
             self._cache[uri] = folder
         return self._cache[uri]
 
-    def more(self) -> Folder:
-        """The next page of a folder with more entries than one listing returns."""
+    def more(self, below: bool = False, progress: Callable[[int], None] | None = None) -> Folder:
+        """The next page of a folder with more entries than one listing returns; below=True: the next deep_limit
+        files of below()'s listing."""
+        if below and parse_location(self.location)[0]:
+            fresh = self.location not in self._below
+            folder = self.below(progress=progress)
+            if folder.more and not fresh:
+                self._load_below(folder, progress)
+            return folder
         folder = self.folder()
         if folder.more:
             self._load(folder)
         return folder
+
+    def below(self, uri: str | None = None, progress: Callable[[int], None] | None = None) -> Folder:
+        """Everything below the current folder (or `uri`), not only its first level: every file, and each folder
+        between it and them, the first deep_limit (10,000) files; more(below=True) lists the next ones. It's one S3
+        request per 1,000 files. Cached like folder(); on the list of buckets it's the buckets.
+        progress(files) is called after each request."""
+        uri = self.location if uri is None else uri
+        if not parse_location(uri)[0]:
+            return self.folder(uri)
+        if uri not in self._below:
+            folder = Folder(uri, deep=True)
+            self._load_below(folder, progress)
+            while len(self._below) >= max(1, self.cache_size // 8):  # these can be big: keep a few
+                self._below.pop(next(iter(self._below)))
+            self._below[uri] = folder
+        return self._below[uri]
 
     def lookup(self, text: str) -> int:
         """Find entries whose names start with `text` in S3, for a folder too big to load: they're added to
@@ -470,12 +587,57 @@ class S3Navigator:
             folder.entries += [entry for entry in entries if entry.key not in known]
             folder.more = folder.token is not None
             folder.requests += 1
-        except ClientError as exc:
+        except (ClientError, BotoCoreError) as exc:
+            self._failed(folder, exc)
+
+    @staticmethod
+    def _failed(folder: Folder, exc: ClientError | BotoCoreError) -> None:
+        """Note why a folder couldn't be listed, in place of raising."""
+        if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             folder.error_code = str(error.get("Code", "Error"))
             folder.error = f"{folder.error_code}: {error.get('Message', exc)}"
-        except BotoCoreError as exc:
+        else:
             folder.error_code, folder.error = type(exc).__name__, f"{type(exc).__name__}: {exc}"
+
+    def _load_below(self, folder: Folder, progress: Callable[[int], None] | None = None) -> None:
+        """List the next deep_limit keys below a folder, without S3's '/' delimiter: each file, and each folder on
+        the way to it (S3 has no folders of its own; a folder's marker object becomes the folder)."""
+        bucket, prefix = parse_location(folder.uri)
+        known = {entry.key for entry in folder.entries}
+        files = sum(not entry.is_folder for entry in folder.entries)
+        listed = 0
+        try:
+            while listed < self.deep_limit:
+                request: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix,
+                                           "MaxKeys": min(self.page_size, self.deep_limit - listed)}
+                if folder.token:
+                    request["ContinuationToken"] = folder.token
+                page = self.core.client.list_objects_v2(**request)
+                folder.requests += 1
+                for o in page.get("Contents", []):
+                    key, listed = o["Key"], listed + 1
+                    rest = key[len(prefix):]
+                    at = rest.find("/")
+                    while at >= 0:
+                        sub = prefix + rest[: at + 1]
+                        if sub not in known:
+                            known.add(sub)
+                            folder.entries.append(Entry("folder", bucket, sub))
+                        at = rest.find("/", at + 1)
+                    if rest and not key.endswith("/") and key not in known:
+                        known.add(key)
+                        files += 1
+                        folder.entries.append(Entry("file", bucket, key, o.get("Size", 0), o.get("LastModified"),
+                                                    o.get("StorageClass", "STANDARD"), o.get("ETag", "").strip('"')))
+                folder.token = page.get("NextContinuationToken") if page.get("IsTruncated") else None
+                folder.more = folder.token is not None
+                if progress is not None:
+                    progress(files)
+                if not folder.more:
+                    break
+        except (ClientError, BotoCoreError) as exc:
+            self._failed(folder, exc)
 
     def _page(self, bucket: str, prefix: str, token: str | None = None) -> tuple[list[Entry], str | None]:
         """One ListObjectsV2 page of the level under `prefix` -> (entries, token for the next page or None)."""
@@ -541,108 +703,244 @@ def _friendly_errors(method: Callable) -> Callable:
     return wrapper
 
 
+# The toolbar's icons (24 x 24, drawn with lines), shown as masks in the text's colour so they follow the theme.
+_ICON_PATHS = {
+    "back": "<path d='M19 12H5M11 18l-6-6 6-6'/>",
+    "forward": "<path d='M5 12h14M13 6l6 6-6 6'/>",
+    "up": "<path d='M12 19V5M6 11l6-6 6 6'/>",
+    "refresh": "<path d='M20 12a8 8 0 1 1-2.34-5.66L20 8.5M20 4v4.5h-4.5'/>",
+    "edit": "<path d='M15.5 4.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4zM13.5 6.5l3 3'/>",
+    "settings": "<path d='M9.1 5.9L9 2.9h6l-.1 3 1 .5 2.5-1.5 3 5.1-2.6 1.4v1.2l2.6 1.4-3 5.1-2.5-1.5-1 .5.1 3H9l.1-3-1-.5"
+                "-2.5 1.5-3-5.1 2.6-1.4v-1.2L2.6 10l3-5.1 2.5 1.5z'/><circle cx='12' cy='12' r='2.8'/>",
+    "close": "<path d='M6 6l12 12M18 6L6 18'/>",
+    "search": "<circle cx='11' cy='11' r='6.5'/><path d='M20 20l-4.2-4.2'/>",
+    "chevron": "<path d='M9 6l6 6-6 6'/>",
+    "below": "<path d='M6 4v9a3 3 0 0 0 3 3h10M15 12l4 4-4 4'/>",
+    "check": "<path stroke-width='3.2' d='M5 12.5l4.5 4.5L19 7.5'/>",
+    "minus": "<path stroke-width='3.2' d='M6.5 12h11'/>",
+}
+
+
+def _icon_rules() -> str:
+    """A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw."""
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
+           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+    return "\n".join(f'.s3x .s3x-i-{name}{{--s3x-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
+                     for name, paths in _ICON_PATHS.items())
+
+
 _CSS = """<style>
-.s3x{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;
- border:1px solid rgba(127,127,127,.3);border-radius:8px;overflow:hidden;margin:4px 0;
- background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
+.s3x{--s3x-accent:#3b82f6;--s3x-accent-fg:#1d64d8;--s3x-tint:rgba(59,130,246,.12);--s3x-tint-line:rgba(59,130,246,.45);
+ --s3x-line:rgba(127,127,127,.22);--s3x-fill:rgba(127,127,127,.08);--s3x-hover:rgba(127,127,127,.13);
+ --s3x-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--s3x-raised:var(--s3x-bg);
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;
+ border:1px solid var(--s3x-line);border-radius:12px;overflow:hidden;margin:6px 0;background:var(--s3x-bg);
+ box-shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px -18px rgba(0,0,0,.25)}
+body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4ff;--s3x-tint:rgba(96,165,250,.16);
+ --s3x-tint-line:rgba(96,165,250,.5);--s3x-raised:rgba(255,255,255,.11)}
 .s3x .widget-html-content{line-height:1.45}
 .s3x .jupyter-button,.s3x .widget-label,.s3x input{font-size:13px}
-.s3x button.jupyter-button{color:inherit;box-shadow:none;outline:none}
+.s3x button.jupyter-button{color:inherit;background:transparent;box-shadow:none;outline:none;margin:0;font-family:inherit;
+ transition:background-color .12s ease,color .12s ease,opacity .12s ease,border-color .12s ease,box-shadow .12s ease}
 .s3x button.jupyter-button:hover:enabled,.s3x button.jupyter-button:focus:enabled,.s3x button.jupyter-button:active,
 .s3x button.jupyter-button.mod-active{box-shadow:none;outline:none}
-.s3x button.jupyter-button:focus-visible:enabled{outline:2px solid rgba(59,130,246,.6);outline-offset:-2px}
-.s3x button.jupyter-button:active:enabled{background-color:rgba(127,127,127,.22)}
-.s3x .s3x-bar{align-items:center;gap:2px;padding:6px 8px;border-bottom:1px solid rgba(127,127,127,.25);
- background:rgba(127,127,127,.06)}
-.s3x .s3x-bar>*{margin:0}
-.s3x button.s3x-nav{width:30px;min-width:30px;padding:0;background:transparent;border-radius:6px;font-size:15px}
-.s3x button.s3x-nav:hover:enabled{background:rgba(127,127,127,.16)}
-.s3x button.s3x-nav:disabled{opacity:.3;cursor:default}
-.s3x .s3x-crumbs{flex:1 1 auto;min-width:0;overflow:hidden;align-items:center;flex-wrap:nowrap;margin:0 6px}
+.s3x button.jupyter-button:focus-visible:enabled{outline:2px solid var(--s3x-tint-line);outline-offset:-2px}
+.s3x button.jupyter-button:active:enabled{background-color:var(--s3x-hover)}
+.s3x .s3x-ic::before{content:"";display:block;flex:0 0 auto;width:16px;height:16px;background:currentColor;
+ -webkit-mask:var(--s3x-icon) center/contain no-repeat;mask:var(--s3x-icon) center/contain no-repeat}
+.s3x .s3x-bar{align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--s3x-line)}
+.s3x .s3x-bar>*,.s3x .s3x-navs>*{margin:0}
+.s3x .s3x-navs{flex:0 0 auto;gap:2px;padding:2px;border-radius:10px;background:var(--s3x-fill)}
+.s3x button.s3x-nav{display:inline-flex;align-items:center;justify-content:center;width:30px;min-width:30px;height:28px;
+ padding:0;border-radius:8px;font-size:0;line-height:0;opacity:.8}
+.s3x button.s3x-nav:hover:enabled{background:var(--s3x-hover);opacity:1}
+.s3x button.s3x-nav:disabled{opacity:.25;cursor:default}
+.s3x .s3x-crumbs{flex:1 1 auto;min-width:0;overflow:hidden;align-items:center;flex-wrap:nowrap}
 .s3x .s3x-crumbs>*{margin:0;flex:0 1 auto;min-width:0}
-.s3x button.s3x-crumb{width:auto;max-width:240px;padding:0 6px;background:transparent;border-radius:5px}
-.s3x button.s3x-crumb:hover{background:rgba(127,127,127,.16)}
-.s3x button.s3x-crumb.s3x-here{font-weight:600}
-.s3x .s3x-sep{width:auto;min-width:0;padding:0 1px;opacity:.4;flex:0 0 auto}
-.s3x .s3x-path input{border-radius:6px}
-.s3x .s3x-filter input{border-radius:14px;padding-left:10px}
-.s3x .s3x-left{border-right:1px solid rgba(127,127,127,.25)}
-.s3x .s3x-left>*{margin:0}
-.s3x .s3x-head{position:sticky;top:0;z-index:2;padding:0 6px;border-bottom:1px solid rgba(127,127,127,.3);
- background:var(--jp-layout-color0,var(--vscode-editor-background,#fff))}
+.s3x button.s3x-crumb{width:auto;max-width:240px;height:28px;padding:0 8px;border-radius:7px;opacity:.62;font-weight:500}
+.s3x button.s3x-crumb:hover{background:var(--s3x-hover);opacity:1}
+.s3x button.s3x-crumb.s3x-here{opacity:1;font-weight:650}
+.s3x .s3x-sep{display:flex;align-items:center;justify-content:center;width:14px;min-width:14px;flex:0 0 auto;font-size:0;
+ opacity:.35}
+.s3x .s3x-sep::before{width:12px;height:12px}
+.s3x .s3x-search input,.s3x .s3x-path input,.s3x .s3x-setting input{height:32px;padding:0 10px;border-radius:8px;
+ border:1px solid transparent;background:var(--s3x-fill);color:inherit;box-shadow:none}
+.s3x .s3x-search input:focus,.s3x .s3x-path input:focus,.s3x .s3x-setting input:focus{outline:none;
+ border-color:var(--s3x-accent);background:var(--s3x-bg);box-shadow:0 0 0 3px var(--s3x-tint)}
+.s3x .s3x-path input{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.s3x .s3x-side{border-right:1px solid var(--s3x-line)}
+.s3x .s3x-side>*{margin:0}
+.s3x .s3x-find{gap:8px;padding:10px 10px 10px;border-bottom:1px solid var(--s3x-line)}
+.s3x .s3x-find>*,.s3x .s3x-searchrow>*{margin:0}
+.s3x .s3x-searchrow{position:relative;align-items:center}
+.s3x .s3x-search{position:relative}
+.s3x .s3x-search::before{content:"";position:absolute;z-index:1;left:11px;top:50%;width:15px;height:15px;margin-top:-7.5px;
+ background:currentColor;opacity:.45;pointer-events:none;-webkit-mask:var(--s3x-icon) center/contain no-repeat;
+ mask:var(--s3x-icon) center/contain no-repeat}
+.s3x .s3x-search input{padding:0 34px}
+.s3x button.s3x-clear{position:absolute;z-index:1;right:4px;top:50%;margin-top:-12px;width:24px;min-width:24px;height:24px;
+ border-radius:6px}
+.s3x button.s3x-clear::before{width:12px;height:12px}
+.s3x .s3x-kinds{align-items:center;gap:8px;flex-wrap:wrap}
+.s3x .s3x-kinds>*,.s3x .s3x-segs>*,.s3x .s3x-types>*{margin:0}
+.s3x .s3x-segs{flex:0 0 auto;gap:2px;padding:2px;border-radius:9px;background:var(--s3x-fill)}
+.s3x button.s3x-seg{width:auto;height:26px;padding:0 10px;border-radius:7px;font-size:12px;font-weight:500;opacity:.68}
+.s3x button.s3x-seg:hover{opacity:1}
+.s3x button.s3x-seg.s3x-on{opacity:1;background:var(--s3x-raised);
+ box-shadow:0 1px 2px rgba(0,0,0,.12),0 0 0 1px rgba(127,127,127,.14)}
+.s3x .s3x-types{flex-wrap:wrap;gap:6px}
+.s3x button.s3x-chip{width:auto;height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--s3x-line);font-size:12px}
+.s3x button.s3x-chip:hover{background:var(--s3x-hover)}
+.s3x button.s3x-chip.s3x-on{background:var(--s3x-tint);border-color:var(--s3x-tint-line);color:var(--s3x-accent-fg);
+ font-weight:600}
+.s3x button.s3x-more{border-style:dashed;opacity:.75}
+.s3x button.s3x-deep{display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+.s3x button.s3x-deep::before{width:13px;height:13px}
+.s3x .s3x-list>*{margin:0}
+.s3x .s3x-head{position:sticky;top:0;z-index:4;padding:0 12px;border-bottom:1px solid var(--s3x-line);
+ background:var(--s3x-bg)}
 .s3x .s3x-head>*{margin:0}
-.s3x button.s3x-col{background:transparent;text-align:left;padding:0 8px;font-size:11px;font-weight:600;
- letter-spacing:.03em;text-transform:uppercase;opacity:.65;height:26px;line-height:26px}
-.s3x button.s3x-col:hover{opacity:1}
+.s3x button.s3x-col{height:30px;line-height:30px;padding:0 8px;text-align:left;font-size:11px;font-weight:600;
+ letter-spacing:.06em;text-transform:uppercase;opacity:.48}
+.s3x button.s3x-col:hover{opacity:.85}
+.s3x button.s3x-col.s3x-on{opacity:.9}
 .s3x button.s3x-col.s3x-num{text-align:right}
-.s3x .s3x-rows{padding:4px 6px}
+.s3x button.s3x-namecol{padding-left:28px}
+.s3x .s3x-rows{padding:6px}
 .s3x .s3x-rows>*{margin:0}
-.s3x .s3x-r{position:relative;height:28px;align-items:center;justify-content:flex-end;flex:0 0 auto}
+.s3x .s3x-r{position:relative;height:32px;align-items:center;justify-content:flex-end;flex:0 0 auto}
 .s3x .s3x-r>*{margin:0}
-.s3x button.s3x-row{position:absolute;top:0;left:0;width:100%;height:28px;text-align:left;padding:0 160px 0 8px;
- background:transparent;border-radius:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.s3x button.s3x-row:hover{background:rgba(127,127,127,.13)}
-.s3x button.s3x-row.s3x-on{background:rgba(59,130,246,.18);font-weight:600}
-.s3x .s3x-r .widget-label{position:relative;z-index:1;pointer-events:none;text-align:right;opacity:.65;
+.s3x button.s3x-row{position:absolute;top:0;left:0;width:100%;height:32px;text-align:left;padding:0 164px 0 34px;
+ border-radius:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.s3x button.s3x-row:hover{background:var(--s3x-hover)}
+.s3x button.s3x-row.s3x-picked{background:rgba(59,130,246,.07)}
+.s3x button.s3x-row.s3x-on{background:var(--s3x-tint);font-weight:600;box-shadow:inset 0 0 0 1px var(--s3x-tint-line)}
+.s3x button.s3x-check{position:absolute;z-index:2;top:50%;left:9px;display:inline-flex;align-items:center;
+ justify-content:center;width:16px;min-width:16px;height:16px;margin:-8px 0 0;padding:0;font-size:0;border-radius:5px;
+ border:1.5px solid rgba(127,127,127,.55);background:var(--s3x-bg);color:#fff;opacity:0}
+.s3x button.s3x-check::before{width:11px;height:11px;opacity:0}
+.s3x .s3x-r:hover button.s3x-check,.s3x .s3x-picking button.s3x-check,.s3x .s3x-list:hover .s3x-head button.s3x-check{
+ opacity:1}
+.s3x button.s3x-check:hover{border-color:var(--s3x-accent)}
+.s3x button.s3x-check.s3x-on{opacity:1;background:var(--s3x-accent);border-color:var(--s3x-accent)}
+.s3x button.s3x-check.s3x-on::before{opacity:1}
+.s3x .s3x-head button.s3x-check{left:15px}
+.s3x .s3x-r2 button.s3x-check{top:15px}
+.s3x .s3x-r .widget-label{position:relative;z-index:1;pointer-events:none;text-align:right;opacity:.58;
  font-size:12px;font-variant-numeric:tabular-nums;padding-right:8px}
-.s3x .s3x-foot{flex-wrap:wrap;gap:4px;padding:2px 10px 10px;align-items:center}
+.s3x .s3x-buckets button.s3x-row{padding:0 88px 0 10px}
+.s3x .s3x-buckets .s3x-size,.s3x .s3x-buckets button.s3x-check{display:none}
+.s3x .s3x-buckets button.s3x-namecol{padding-left:8px}
+.s3x .s3x-r2,.s3x .s3x-r2 button.s3x-row{height:46px}
+.s3x .s3x-r2 button.s3x-row{padding-bottom:16px}
+.s3x .s3x-r .widget-label.s3x-where{position:absolute;display:block;left:61px;right:164px;bottom:6px;height:16px;
+ line-height:16px;padding:0;text-align:left;font-size:11.5px;opacity:.5;direction:rtl;overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap}
+.s3x .s3x-where::before,.s3x .s3x-where::after{content:"\\200E"}
+.s3x .s3x-foot{flex-wrap:wrap;justify-content:center;gap:6px;padding:4px 12px 14px;align-items:center}
 .s3x .s3x-foot>*{margin:0}
-.s3x button.s3x-link{width:auto;background:transparent;color:#3b82f6;padding:0 6px;border-radius:5px}
-.s3x button.s3x-link:hover{background:rgba(59,130,246,.10)}
-.s3x .s3x-empty{opacity:.65;padding:6px 4px}
-.s3x .s3x-right{padding:0 16px 12px}
+.s3x button.s3x-link{width:auto;height:28px;padding:0 10px;border-radius:8px;color:var(--s3x-accent-fg);font-weight:500}
+.s3x button.s3x-link:hover{background:var(--s3x-tint)}
+.s3x .s3x-empty{padding:22px 8px 4px;text-align:center;opacity:.62;font-size:12.5px}
+.s3x .s3x-picks{align-items:center;gap:6px;padding:8px 10px 8px 14px;border-top:1px solid var(--s3x-line);
+ background:var(--s3x-bg);box-shadow:0 -8px 18px -14px rgba(0,0,0,.3)}
+.s3x .s3x-picks>*{margin:0}
+.s3x .s3x-picks .widget-html-content{display:flex;flex-direction:column;line-height:1.3;min-width:0}
+.s3x .s3x-picks-n{font-weight:600}
+.s3x .s3x-picks-s{font-size:11.5px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s3x button.s3x-primary{width:auto;height:30px;padding:0 14px;border-radius:8px;background:var(--s3x-accent);
+ color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.s3x button.s3x-primary:hover:enabled{background:#2f6fde}
+.s3x button.s3x-primary:disabled{opacity:.4;cursor:default;box-shadow:none}
+.s3x button.s3x-quiet{width:auto;height:30px;padding:0 10px;border-radius:8px;opacity:.72}
+.s3x button.s3x-quiet:hover:enabled{opacity:1;background:var(--s3x-hover)}
+.s3x .s3x-right{padding:0 18px 14px}
 .s3x .s3x-right>*{margin:0;min-width:0}
 .s3x .s3x-right .widget-html-content{min-width:0}
-.s3x .s3x-actions{flex-wrap:wrap;gap:6px;padding:10px 0 8px;border-bottom:1px dashed rgba(127,127,127,.3)}
+.s3x .s3x-actions{position:sticky;top:0;z-index:3;flex-wrap:wrap;gap:6px;padding:10px 0;background:var(--s3x-bg);
+ border-bottom:1px solid var(--s3x-line)}
 .s3x .s3x-actions>*{margin:0}
-.s3x button.s3x-act{width:auto;height:26px;line-height:26px;padding:0 12px;border-radius:13px;
- background:rgba(127,127,127,.12)}
-.s3x button.s3x-act:hover{background:rgba(127,127,127,.2)}
-.s3x button.s3x-act.s3x-on{background:rgba(59,130,246,.18);box-shadow:inset 0 0 0 1px rgba(59,130,246,.55)}
-.s3x button.s3x-close{margin-left:auto;background:transparent}
-.s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding:10px 0 4px;
- border-top:1px dashed rgba(127,127,127,.3)}
+.s3x button.s3x-act{width:auto;height:28px;padding:0 12px;border-radius:8px;border:1px solid var(--s3x-line);
+ font-weight:500}
+.s3x button.s3x-act:hover{background:var(--s3x-hover)}
+.s3x button.s3x-act.s3x-on{background:var(--s3x-tint);border-color:var(--s3x-tint-line);color:var(--s3x-accent-fg)}
+.s3x button.s3x-close{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:28px;
+ min-width:28px;padding:0;border-color:transparent;font-size:0;opacity:.7}
+.s3x button.s3x-close:hover{opacity:1}
+.s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;padding:10px 0 4px;
+ border-top:1px solid var(--s3x-line)}
 .s3x .s3x-pager>*{margin:0}
-.s3x .s3x-pager .widget-label{opacity:.65;margin-right:6px}
-.s3x .s3x-settings{gap:8px;padding:4px 0 8px}
+.s3x .s3x-pager .widget-label{opacity:.6;margin-right:6px}
+.s3x .s3x-settings{gap:10px;padding:6px 0 8px}
 .s3x .s3x-settings>*{margin:0}
 .s3x .s3x-setting{gap:10px;align-items:center;flex-wrap:wrap}
 .s3x .s3x-setting>*{margin:0}
-.s3x .s3x-setting .widget-label{font-size:12px}
-.s3x .s3x-hint{opacity:.65;font-size:12px}
-.s3x .s3x-status{padding:3px 10px;border-top:1px solid rgba(127,127,127,.25);background:rgba(127,127,127,.06);
- font-size:12px}
+.s3x .s3x-setting .widget-label{font-size:12px;font-weight:500}
+.s3x .s3x-hint{opacity:.6;font-size:12px}
+.s3x .s3x-status{padding:0 12px;border-top:1px solid var(--s3x-line);background:var(--s3x-fill);font-size:12px}
 .s3x .s3x-status>.widget-html-content{display:flex;gap:12px;justify-content:space-between;align-items:center;
- line-height:22px;min-width:0}
-.s3x .s3x-status .s3x-at{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.s3x .s3x-status code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;padding:0 4px;
- border-radius:4px;background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
-</style>"""
+ line-height:30px;min-width:0}
+.s3x .s3x-status .s3x-at{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;opacity:.78}
+.s3x .s3x-status code{display:inline-block;max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;line-height:18px;padding:0 7px;
+ border-radius:6px;border:1px solid var(--s3x-line);background:var(--s3x-bg);user-select:all;-webkit-user-select:all;
+ cursor:text}
+@keyframes s3x-spin{to{transform:rotate(360deg)}}
+@keyframes s3x-glow{from{background-position:100% 0}to{background-position:0 0}}
+.s3x .s3x-busy::before,.s3x .s3x-spin{content:"";display:inline-block;flex:0 0 auto;width:10px;height:10px;
+ margin-right:8px;vertical-align:-2px;border:2px solid rgba(127,127,127,.28);border-top-color:var(--s3x-accent);
+ border-radius:50%;animation:s3x-spin .75s linear infinite}
+.s3x .s3x-wait{padding:16px 0}
+.s3x .s3x-wait-t{display:flex;align-items:center;opacity:.75;margin-bottom:16px}
+.s3x .s3x-sk{height:12px;margin:10px 0;border-radius:6px;background-size:300% 100%;
+ background-image:linear-gradient(90deg,var(--s3x-fill) 30%,var(--s3x-hover) 50%,var(--s3x-fill) 70%);
+ animation:s3x-glow 1.3s ease-in-out infinite}
+.s3x .s3x-sk.s3x-t{height:18px;width:45%;margin-bottom:16px}
+.s3x .s3x-sk-cards{display:flex;gap:8px;margin:0 0 18px}
+.s3x .s3x-sk-cards .s3x-sk{flex:1;height:50px;margin:0;border-radius:8px}
+@media (prefers-reduced-motion:reduce){.s3x *,.s3x *::before{transition:none!important;animation-duration:2.5s!important}}
+""" + _icon_rules() + "\n</style>"
 _DOCUMENTS = ("pdf", "docx", "docm", "dotx", "pptx", "pptm", "potx", "ppsx")  # files "Read all" opens
 _CLICK_GRACE = 0.35  # seconds after the rows change during which a click is ignored (it was aimed at the old rows)
 _BACKGROUND = ("preview", "head")  # quick reports (no progress bar) that load on worker threads in a notebook
 _WORKERS = 4  # background reports loading at once, so a click doesn't wait for files clicked before it
+_TYPE_CHIPS = 6  # file types shown as chips over the list before "+N more"
+_CHECK = ("s3x-check", "s3x-ic", "s3x-i-check")  # a row's checkbox; it gets s3x-on when ticked
 
 
 class _Row:
-    """One reusable row of the list: a full-width button (the name) under two labels (size, modified)."""
+    """One reusable row of the list: a full-width button (the name) under a checkbox and two labels (size, modified),
+    and under the name, when the list holds everything below a folder, the folder the entry is in."""
 
-    def __init__(self, widgets: Any, on_click: Callable[[_Row], None]):
+    def __init__(self, widgets: Any, on_click: Callable[[_Row], None], on_check: Callable[[_Row], None]):
         self.entry: Entry | None = None
         self.button = widgets.Button(layout=widgets.Layout(width="100%"))
         self.button.add_class("s3x-row")
         self.button.on_click(lambda _: on_click(self))
+        self.check = widgets.Button(description="✓", tooltip="Select it, to download several files in one .zip")
+        for name in _CHECK:
+            self.check.add_class(name)
+        self.check.on_click(lambda _: on_check(self))
+        self.where = widgets.Label(layout=widgets.Layout(display="none"))
+        self.where.add_class("s3x-where")
         self.size = widgets.Label(layout=widgets.Layout(width="76px", flex="0 0 auto"))
+        self.size.add_class("s3x-size")
         self.age = widgets.Label(layout=widgets.Layout(width="76px", flex="0 0 auto"))
-        self.box = widgets.HBox([self.button, self.size, self.age], layout=widgets.Layout(width="100%"))
+        self.box = widgets.HBox([self.button, self.check, self.where, self.size, self.age],
+                                layout=widgets.Layout(width="100%"))
         self.box.add_class("s3x-r")
 
 
 class S3Explorer:
     """Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
     click on the right. Click a folder to open it; ← → ↑ go back, forward and up; click the path to jump
-    anywhere (paste an s3:// path or an S3 console link); type in the filter box to narrow the list; click a
-    column header to sort.
+    anywhere (paste an s3:// path or an S3 console link); click a column header to sort.
+
+    Above the list, the search box narrows it by name or file type ('.csv', '.csv .json', 'part-0*'), All / Folders /
+    Files show only one kind, a chip for each file type here shows only those files, and "Include subfolders"
+    lists everything below the folder, not only its first level, to search all of it (x.filter() does the same).
+    Tick files (a checkbox shows when you point at a row) and "Download selected", in the bar under the list,
+    downloads them as one .zip; x.picked lists what's ticked.
 
     uri: where to start ('s3://bucket/prefix/', 'bucket/prefix', a file's path, a console link); leave it
     out to start from your buckets.
@@ -682,6 +980,12 @@ class S3Explorer:
         self._shown_at: Any = object()
         self._widgets: Any = None
         self._quiet = False  # set while the code (not the user) clears the filter
+        self._query = ""  # the search box's text
+        self._kind = "all"  # All / Folders / Files: what the list shows (it stays as you move around, like the sort)
+        self._deep = False  # "Include subfolders": the list holds everything below the folder (S3Navigator.below)
+        self._all_types = False  # every file type has a chip, not only the most common
+        self._picked: dict[str, Entry] = {}  # what's ticked in the list, by uri, to download as one .zip
+        self._picks_auto = ""  # the zip name the explorer suggested, until it's typed over
         self._job = 0  # counts changes of the right pane; a background report made for an older one isn't shown
         self._workers: ThreadPoolExecutor | None = None  # the threads background reports load on
         self._task: Any = None  # the last background report's asyncio task (tests wait for it)
@@ -728,6 +1032,12 @@ class S3Explorer:
         """The folder you're in ('s3://bucket/prefix/'), or '' for the list of buckets."""
         return self.nav.location if self.s3 is not None else ""
 
+    @property
+    def picked(self) -> list[str]:
+        """The files and folders ticked in the list (s3:// paths), in the order they were ticked: x.ui.download_zip(
+        x.picked) zips them from code."""
+        return list(self._picked)
+
     @_friendly_errors
     def open(self, uri: str = "") -> None:
         """Go to a folder, or show a file (its folder opens with the file on the right). Takes s3:// paths,
@@ -754,7 +1064,26 @@ class S3Explorer:
         """List this folder again, to pick up files added or removed since it was opened (the ↻ button)."""
         keep = self.selected
         self._cache.clear()
-        self._navigate(self.nav.refresh, keep=keep)
+        self._navigate(self.nav.refresh, keep=keep, same=True)
+
+    @_friendly_errors
+    def filter(self, text: str = "", kind: str = "all", subfolders: bool = False) -> None:
+        """Show only part of the list, as the search box and the buttons above it do: names with `text` in them,
+        file types such as '.csv' or '.csv .json' (.csv also finds .csv.gz), patterns such as 'part-0*'; only
+        kind='folders' or 'files'; and with subfolders=True everything below this folder, not only its first
+        level (the first 10,000 files). filter() shows everything again.
+
+        x.filter(".parquet", subfolders=True)    # every Parquet file below this folder
+        x.filter(kind="folders")                 # only the folders here"""
+        if kind not in _KINDS:
+            raise ValueError(f"kind={kind!r}: use 'all', 'folders' or 'files'")
+        self._kind, self._all_types = _KINDS[kind], False
+        if bool(subfolders) != self._deep:
+            self._deep = bool(subfolders)
+            self._busy("Listing everything below this folder…")
+        self._set_query(text or "", renew=True)
+        if self._widgets is not None and not self.selected:
+            self._show_folder(self._source())
 
     # ------------------------------------------------------------------ plumbing
 
@@ -818,7 +1147,17 @@ class S3Explorer:
 
     def _entry(self) -> Entry | None:
         """The file shown on the right, as listed."""
-        return next((e for e in self.nav.folder().entries if e.uri == self.selected), None) if self.selected else None
+        return next((e for e in self._source().entries if e.uri == self.selected), None) if self.selected else None
+
+    def _source(self) -> Folder:
+        """What the list is drawn from: this folder's first level, or with "Include subfolders" everything below it
+        (listed the first time it's needed, with the count so far in the status bar)."""
+        if self._deep and parse_location(self.nav.location)[0]:
+            return self.nav.below(progress=self._listing)
+        return self.nav.folder()
+
+    def _listing(self, files: int) -> None:
+        self._busy(f"Listing everything below this folder… {_plural(files, 'file')} so far")
 
     def _report(self, action: str, method: Callable | str, *args: Any, cache: bool = True, variant: Any = None,
                 **kwargs: Any) -> None:
@@ -846,8 +1185,9 @@ class S3Explorer:
         waiting = {"preview": f"Opening {name}…", "head": f"Reading the details of {name}…",
                    "document": f"Reading {name}…", "download": f"Downloading {name}…",
                    "summary": "Reading every file below this folder…",
-                   "zip": "Listing every file below this folder, then zipping them…"}
-        self._set_pane([[self.s3._Note(waiting.get(action, "Working…"))]], keep=False)
+                   "zip": "Listing every file below this folder, then zipping them…",
+                   "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
+        self._wait(waiting.get(action, "Working…"))
         loop = self._loop() if isinstance(method, str) and action in _BACKGROUND else None
         if loop is not None:
             self._task = loop.create_task(self._later(self._job, key, cache, method, self.selected, args, kwargs))
@@ -906,6 +1246,22 @@ class S3Explorer:
         getattr(view, method)(*args, **kwargs)
         return reports
 
+    def _wait(self, text: str) -> None:
+        """The right pane while a report loads: a spinner, what it's doing, and the outline of a report."""
+        self._job += 1
+        lines = "".join(f'<div class="s3x-sk" style="width:{width}%"></div>' for width in (92, 84, 88, 64, 76))
+        self._content.value = (f'<div class="s3x-wait"><div class="s3x-wait-t"><span class="s3x-spin"></span>'
+                               f'{html.escape(text)}</div><div class="s3x-sk s3x-t"></div><div class="s3x-sk-cards">'
+                               + '<div class="s3x-sk"></div>' * 4 + f"</div>{lines}</div>")
+        self._settings.layout.display = self._picks_panel.layout.display = "none"
+        self._draw_pager(False)
+        self._renew("right")
+
+    def _busy(self, text: str) -> None:
+        """The status bar while S3 is listing: a spinner and what it's doing."""
+        if self._widgets is not None:
+            self._status.value = f'<span class="s3x-at s3x-busy">{html.escape(text)}</span>'
+
     def _set_pane(self, reports: list[list[Any]], keep: bool = True) -> None:
         """Show reports on the right; the text explorer (no ipywidgets) shows them as the S3View would. keep=False
         is a note shown while a report loads."""
@@ -917,23 +1273,33 @@ class S3Explorer:
                 type(self._pane)._show(self._pane, blocks)
             return
         self._content.value = "".join(self.s3._render_html(blocks, self._pane.max_rows) for blocks in reports)
-        self._settings.layout.display = "none"
+        self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(keep)
         self._renew("right")
 
     # ------------------------------------------------------------------ navigation
 
-    def _navigate(self, move: Callable[[], Folder], keep: str = "") -> None:
-        """Move (open / back / up / ...), then redraw the list, the path and the right pane."""
-        if self._widgets is not None:
-            self._status.value = '<span class="s3x-at">Listing…</span>'
-        folder = move()
+    def _navigate(self, move: Callable[[], Folder], keep: str = "", same: bool = False) -> None:
+        """Move (open / back / up / ...), then redraw the list, the path and the right pane. Another folder starts
+        with an empty search box and only its first level listed (same=True, for ↻, keeps them); All / Folders /
+        Files stays, like the sort."""
+        self._busy("Listing…")
+        move()
         self.selected, self._limit, self._action = "", self.page_size, ""
+        if not same:
+            self._query, self._deep, self._all_types = "", False, False
+            self._picked.clear()  # another folder: start a new selection
+        if self.nav.focus and not same:
+            self._kind = "all"  # so the file it opens is in the list
+        if self._deep:
+            self._busy("Listing everything below this folder…")
+        folder = self._source()
         if self._widgets is not None:
             self._quiet = True
-            self._filter.value = ""
+            self._filter.value = self._query
             self._quiet = False
             self._draw_crumbs()
+            self._draw_filters(folder)
             self._draw_rows(folder)
             self._renew("left")
         focus = self.nav.focus or keep
@@ -944,6 +1310,7 @@ class S3Explorer:
         else:
             self._show_folder(folder)
         self._draw_status(folder)
+        self._draw_picks()
 
     def _select(self, uri: str) -> None:
         """Show a file on the right."""
@@ -956,10 +1323,10 @@ class S3Explorer:
                 index = next((i for i, e in enumerate(self._visible) if e.uri == uri), -1)
                 if index >= 0:
                     self._limit = index + 1 + self.page_size // 2
-                    self._draw_rows(self.nav.folder())
+                    self._draw_rows(self._source())
             self._mark_rows()
             self._draw_actions()
-            self._draw_status(self.nav.folder())
+            self._draw_status(self._source())
         self._report("preview", "preview", uri)
 
     def _show_folder(self, folder: Folder) -> None:
@@ -992,16 +1359,22 @@ class S3Explorer:
                                    "No buckets in this account. Type a bucket's path above to open one you "
                                    "can read in another account."))
         else:
-            cards = [("Folders", f"{stats.folders:,}{plus}")] if stats.folders else []
+            below = " below" if folder.deep else ""
+            cards = [(f"Folders{below}", f"{stats.folders:,}{plus}")] if stats.folders else []
             if stats.files:
-                cards += [("Files", f"{stats.files:,}{plus}"), ("Size of these files", s3.human_size(stats.size) + plus)]
+                cards += [(f"Files{below}", f"{stats.files:,}{plus}"),
+                          ("Size of these files", s3.human_size(stats.size) + plus)]
             if stats.newest:
                 cards.append(("Newest file", s3.human_age(stats.newest)))
             if stats.archived:
                 cards.append(("Archived", f"{stats.archived:,}", "warn"))
             if cards:
                 blocks.append(s3._Cards(cards))
-            if folder.more:
+            if folder.more and folder.deep:
+                blocks.append(s3._Note(f"These numbers cover the first {stats.files:,} files below this folder; "
+                                       f"“Load more from S3” at the end of the list lists the next "
+                                       f"{self.nav.deep_limit:,}."))
+            elif folder.more:
                 blocks.append(s3._Note(f"These numbers cover the first {len(folder.entries):,} entries S3 returned; "
                                        "“Load more” at the end of the list fetches the rest."))
             if stats.archived:
@@ -1013,20 +1386,45 @@ class S3Explorer:
             if stats.types:
                 blocks.append(s3._Table(["Type", "Files", "Size"],
                                         [[ext, f"{n:,}", s3.human_size(size)] for ext, n, size in stats.types],
-                                        title="File types here", max_rows=0))
+                                        title=f"File types {'below' if folder.deep else 'here'}", max_rows=0))
             if folder.entries and not listing:
-                blocks.append(s3._Note("Click a folder to open it, or a file to see what's inside. The sizes are "
-                                       "for the files at this level; the “What's in here” button above adds up "
-                                       "everything below."))
+                blocks.append(s3._Note(
+                    "Everything below this folder is on the left, each under the folder it's in. Click a file to see "
+                    "what's inside, or a folder to open it; the “What's in here” button above adds up every file, "
+                    "with its cost." if folder.deep else
+                    "Click a folder to open it, or a file to see what's inside. The sizes are for the files at this "
+                    "level: “Include subfolders” over the list adds everything below, and the “What's in here” "
+                    "button above adds it all up."))
         if listing:
-            rows = [[f"{entry_icon(e, s3)} {e.name}{'/' if e.kind == 'folder' else ''}{' ❄' if e.archived else ''}",
+            shown = self._shown_entries(folder)
+            rows = [[f"{entry_icon(e, s3)} {e.key[len(prefix):] if folder.deep else e.name}"
+                     f"{'/' if e.kind == 'folder' and not folder.deep else ''}{' ❄' if e.archived else ''}",
                      "" if e.is_folder else s3.human_size(e.size), s3.human_age(e.modified) if e.modified else ""]
-                    for e in sort_entries(folder.entries, self._sort, self._descending)]
+                    for e in shown]
             blocks.append(s3._Table(["Name", "Size", "Modified" if bucket else "Created"], rows,
-                                    title="In this folder" if bucket else "Buckets"))
-            blocks.append(s3._Note("This is the text view: x.open('s3://…') moves around; in a Jupyter notebook "
-                                   "with ipywidgets every row is clickable."))
+                                    title=("Below this folder" if folder.deep else "In this folder") if bucket
+                                    else "Buckets"))
+            searched = [f"“{self._query.strip()}”"] if self._query.strip() else []
+            searched += [f"{self._kind} only"] if bucket and self._kind != "all" else []
+            if searched:
+                blocks.append(s3._Note(f"Showing {len(shown):,} of {len(folder.entries):,}: {', '.join(searched)}. "
+                                       "x.filter() shows them all."))
+            blocks.append(s3._Note("This is the text view: x.open('s3://…') moves around and x.filter('.csv') "
+                                   "searches; in a Jupyter notebook with ipywidgets every row is clickable."))
         return blocks
+
+    def _shown_entries(self, folder: Folder) -> list[Entry]:
+        """The list's entries: the folder's, narrowed by the search box and All / Folders / Files, in the order of the
+        column clicked. With "Include subfolders", Name sorts by path, so each folder comes before what's in it, and
+        Size and Modified put the files first: the biggest or newest anywhere below."""
+        kind = self._kind if parse_location(folder.uri)[0] else "all"
+        entries = filter_entries(folder.entries, self._query, kind)
+        if folder.deep and self._sort == "name":
+            return sort_entries(entries, "path", self._descending)
+        entries = sort_entries(entries, self._sort, self._descending)
+        if folder.deep:
+            entries = [e for e in entries if not e.is_folder] + [e for e in entries if e.is_folder]
+        return entries
 
     # ------------------------------------------------------------------ widgets
 
@@ -1035,15 +1433,19 @@ class S3Explorer:
 
         def button(text: str, css: str, tip: str, on_click: Callable[[], None], **layout: Any) -> Any:
             b = w.Button(description=text, tooltip=tip, layout=w.Layout(**layout))
-            b.add_class(css)
+            for name in css.split():
+                b.add_class(name)
             b.on_click(lambda _: self._guard(on_click))
             return b
 
         style = w.HTML(_CSS, layout=w.Layout(display="none"))
-        self._back_btn = button("←", "s3x-nav", "Back", self.back)
-        self._fwd_btn = button("→", "s3x-nav", "Forward", self.forward)
-        self._up_btn = button("↑", "s3x-nav", "Up one level", self.up)
-        refresh = button("↻", "s3x-nav", "List this folder again", self.refresh)
+        # The icon buttons keep their glyph as the description: hidden by the style, which draws the icon instead.
+        self._back_btn = button("←", "s3x-nav s3x-ic s3x-i-back", "Back", self.back)
+        self._fwd_btn = button("→", "s3x-nav s3x-ic s3x-i-forward", "Forward", self.forward)
+        self._up_btn = button("↑", "s3x-nav s3x-ic s3x-i-up", "Up one level", self.up)
+        refresh = button("↻", "s3x-nav s3x-ic s3x-i-refresh", "List this folder again", self.refresh)
+        navs = w.HBox([self._back_btn, self._fwd_btn, self._up_btn, refresh], layout=w.Layout(width="auto"))
+        navs.add_class("s3x-navs")
         self._crumbs = w.HBox()
         self._crumbs.add_class("s3x-crumbs")
         self._path = w.Text(placeholder="s3://bucket/folder/ or an S3 console link, then Enter",
@@ -1051,36 +1453,58 @@ class S3Explorer:
         self._path.add_class("s3x-path")
         # Go on Enter only (the box sends "submit"), not when it loses focus: clicking ✕ then cancels.
         self._path.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._on_path))
-        self._edit_btn = button("✎", "s3x-nav", "Type or paste a path", self._toggle_path)
-        self._filter = w.Text(placeholder="🔍  Filter", continuous_update=True,
-                              layout=w.Layout(width="190px", flex="0 0 auto"))
-        self._filter.add_class("s3x-filter")
-        self._filter.observe(lambda _: self._quiet or self._guard(self._on_filter), "value")
-        self._gear = button("⚙", "s3x-nav", "Settings: the biggest folder to zip, and where zips go",
-                            self._toggle_settings)
-        bar = w.HBox([self._back_btn, self._fwd_btn, self._up_btn, refresh, self._crumbs, self._path,
-                      self._edit_btn, self._filter, self._gear], layout=w.Layout(width="100%"))
+        self._edit_btn = button("✎", "s3x-nav s3x-ic s3x-i-edit", "Type or paste a path", self._toggle_path)
+        self._gear = button("⚙", "s3x-nav s3x-ic s3x-i-settings", "Settings: the biggest folder to zip, and where "
+                            "zips go", self._toggle_settings)
+        bar = w.HBox([navs, self._crumbs, self._path, self._edit_btn, self._gear], layout=w.Layout(width="100%"))
         bar.add_class("s3x-bar")
 
+        self._filter = w.Text(continuous_update=True, layout=w.Layout(width="100%"))
+        self._filter.add_class("s3x-search")
+        self._filter.add_class("s3x-i-search")
+        self._filter.observe(lambda _: self._quiet or self._guard(self._on_filter), "value")
+        self._clear_btn = button("✕", "s3x-nav s3x-clear s3x-ic s3x-i-close", "Clear the search",
+                                 lambda: self._set_query(""))
+        search = w.HBox([self._filter, self._clear_btn], layout=w.Layout(width="100%"))
+        search.add_class("s3x-searchrow")
+        self._kind_btns = {
+            kind: button(label, "s3x-seg", tip, lambda kind=kind: self._on_kind(kind))
+            for kind, label, tip in (("all", "All", "Folders and files"), ("folders", "Folders", "Only the folders"),
+                                     ("files", "Files", "Only the files"))
+        }
+        segs = w.HBox(list(self._kind_btns.values()), layout=w.Layout(width="auto"))
+        segs.add_class("s3x-segs")
+        self._deep_btn = button("Include subfolders", "s3x-chip s3x-deep s3x-ic s3x-i-below", "", self._on_deep)
+        self._kinds = w.HBox([segs, self._deep_btn], layout=w.Layout(width="100%"))
+        self._kinds.add_class("s3x-kinds")
+        self._types = w.HBox(layout=w.Layout(width="100%"))
+        self._types.add_class("s3x-types")
+        self._chips: list[Any] = []  # a button per file type, reused as the types change
+        self._chip_types: list[str] = []  # the type each chip stands for now
+        self._more_types = button("", "s3x-chip s3x-more", "", self._on_more_types)
+        self._finder = w.VBox([search, self._kinds, self._types], layout=w.Layout(width="100%", flex="0 0 auto"))
+        self._finder.add_class("s3x-find")
+
+        self._check_all = button("✓", " ".join(_CHECK), "Select everything listed", self._on_check_all)
         self._cols = {
-            "name": button("Name", "s3x-col", "Sort by name", lambda: self._on_sort("name"), flex="1 1 auto",
-                           width="auto"),
-            "size": button("Size", "s3x-col", "Sort by size", lambda: self._on_sort("size"), width="76px"),
-            "modified": button("Modified", "s3x-col", "Sort by date", lambda: self._on_sort("modified"),
+            "name": button("Name", "s3x-col s3x-namecol", "Sort by name", lambda: self._on_sort("name"),
+                           flex="1 1 auto", width="auto"),
+            "size": button("Size", "s3x-col s3x-num", "Sort by size", lambda: self._on_sort("size"), width="76px"),
+            "modified": button("Modified", "s3x-col s3x-num", "Sort by date", lambda: self._on_sort("modified"),
                                width="76px"),
         }
-        for column in ("size", "modified"):
-            self._cols[column].add_class("s3x-num")
-        head = w.HBox(list(self._cols.values()), layout=w.Layout(width="100%", flex="0 0 auto"))
+        head = w.HBox([self._check_all, *self._cols.values()], layout=w.Layout(width="100%", flex="0 0 auto"))
         head.add_class("s3x-head")
         self._rows_box = w.VBox(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._rows_box.add_class("s3x-rows")
         self._pool: list[_Row] = []
         self._more_btn = button("Show more", "s3x-link", "Show the next rows", self._on_more)
         self._load_btn = button("Load more from S3", "s3x-link", "List the next page of this folder", self._on_load)
-        self._lookup_btn = button("", "s3x-link", "Ask S3 for names starting with the filter text", self._on_lookup)
-        self._foot_note = w.HTML()
-        self._foot = w.HBox([self._foot_note, self._more_btn, self._load_btn, self._lookup_btn],
+        self._lookup_btn = button("", "s3x-link", "Ask S3 for names starting with the search text", self._on_lookup)
+        self._fix_btn = button("", "s3x-link", "", lambda: self._fix())  # what the note above it suggests
+        self._fix: Callable[[], None] = lambda: None
+        self._foot_note = w.HTML(layout=w.Layout(width="100%"))
+        self._foot = w.HBox([self._foot_note, self._fix_btn, self._more_btn, self._load_btn, self._lookup_btn],
                             layout=w.Layout(width="100%", flex="0 0 auto"))
         self._foot.add_class("s3x-foot")
         self._head = head
@@ -1092,6 +1516,16 @@ class S3Explorer:
         self._pager = w.HBox(layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
         self._pager.add_class("s3x-pager")
         self._settings = self._build_settings(button)
+        self._picks_panel = self._build_picks(button)
+        self._picks_note = w.HTML(layout=w.Layout(flex="1 1 auto", min_width="0"))
+        self._picks_bar = w.HBox([self._picks_note,
+                                  button("Clear", "s3x-quiet", "Unselect everything", self._clear_picks),
+                                  button("⬇ Download selected", "s3x-primary", "Download what's selected as one "
+                                         ".zip: see what goes in and name it first", self._open_picks)],
+                                 layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        self._picks_bar.add_class("s3x-picks")
+        self._side = w.VBox([self._finder], layout=w.Layout(width="42%", min_width="300px", flex="0 0 auto"))
+        self._side.add_class("s3x-side")
         self._body = w.HBox(layout=w.Layout(width="100%", height=f"{self.height}px"))
         self._left = self._right = None
         self._renew("left", "right")
@@ -1100,6 +1534,28 @@ class S3Explorer:
         self._app = w.VBox([style, bar, self._body, self._status], layout=w.Layout(width="100%"))
         self._app.add_class("s3x")
         self._act_buttons: dict[str, Any] = {}
+
+    def _build_picks(self, button: Callable[..., Any]) -> Any:
+        """The panel ⬇ Download .zip in the selection bar opens on the right, under what's selected: the zip's name
+        (Enter downloads too), Download and Cancel, and the list of what goes in."""
+        w = self._widgets
+        self._picks_name = w.Text(layout=w.Layout(width="280px"))
+        self._picks_name.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._save_picks))
+        self._picks_where = w.HTML()
+        name = w.HBox([w.Label("Save as", layout=w.Layout(width="64px")), self._picks_name, self._picks_where],
+                      layout=w.Layout(width="100%"))
+        self._picks_go = button("⬇ Download", "s3x-primary", "Make the zip, after checking the size, disk space and "
+                                "read access", self._save_picks)
+        cancel = button("Cancel", "s3x-act", "Close this and keep the selection", self._close_picks)
+        actions = w.HBox([self._picks_go, cancel], layout=w.Layout(width="100%"))
+        for row in (name, actions):
+            row.add_class("s3x-setting")
+        self._picks_msg = w.HTML()
+        self._picks_list = w.HTML(layout=w.Layout(width="100%"))
+        panel = w.VBox([name, actions, self._picks_msg, self._picks_list],
+                       layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        panel.add_class("s3x-settings")
+        return panel
 
     def _build_settings(self, button: Callable[..., Any]) -> Any:
         """The ⚙ Settings panel, shown on the right under its title: a text box per setting, Save and Close.
@@ -1132,15 +1588,17 @@ class S3Explorer:
         """Put the list ('left') or the report ('right') in a new box. Widgets can't scroll without JavaScript, but a
         new box starts at the top, so a folder you open shows its first rows and a new report shows its title."""
         w, old = self._widgets, [self._left, self._right]
-        if "left" in sides:
+        if "left" in sides:  # under the search box and its buttons, which stay where they are
             self._left = w.VBox([self._head, self._rows_box, self._foot],
-                                layout=w.Layout(width="42%", min_width="280px", overflow="auto", flex="0 0 auto"))
-            self._left.add_class("s3x-left")
+                                layout=w.Layout(width="100%", flex="1 1 auto", min_height="0", overflow="auto"))
+            self._left.add_class("s3x-list")
+            self._side.children = (self._finder, self._left, self._picks_bar)
         if "right" in sides:
-            self._right = w.VBox([self._actions, self._progress, self._content, self._settings, self._pager],
+            self._right = w.VBox([self._actions, self._progress, self._content, self._settings, self._picks_panel,
+                                  self._pager],
                                  layout=w.Layout(flex="1 1 auto", width="auto", min_width="0", overflow="auto"))
             self._right.add_class("s3x-right")  # min_width 0: wide tables scroll
-        self._body.children = (self._left, self._right)
+        self._body.children = (self._side, self._right)
         for box in old:
             if box is not None and box not in (self._left, self._right):
                 box.close()  # closes the box only; the widgets in it live on in the new one
@@ -1159,7 +1617,7 @@ class S3Explorer:
             self._fail(f"Something went wrong ({type(exc).__name__}: {exc}). Press ↻ to try again.")
         finally:
             if "…" in self._status.value:  # "Listing…" that never finished
-                folder = self.nav._cache.get(self.nav.location)
+                folder = (self.nav._below if self._deep else self.nav._cache).get(self.nav.location)
                 if folder is not None:
                     self._draw_status(folder)
                 else:
@@ -1181,11 +1639,12 @@ class S3Explorer:
             if last:
                 b.add_class("s3x-here")
             b.on_click(lambda _, uri=uri, last=last: self._guard(
-                lambda: self._show_folder(self.nav.folder()) if last else self.open(uri)))
+                lambda: self._show_folder(self._source()) if last else self.open(uri)))
             children.append(b)
             if not last:
-                children.append(w.Label("›", layout=w.Layout(width="auto")))
-                children[-1].add_class("s3x-sep")
+                children.append(w.Label("›"))
+                for name in ("s3x-sep", "s3x-ic", "s3x-i-chevron"):
+                    children[-1].add_class(name)
         self._crumbs.children = children
         for widget in old:
             widget.close()
@@ -1193,34 +1652,102 @@ class S3Explorer:
         self._fwd_btn.disabled = not self.nav.can_forward
         self._up_btn.disabled = not self.nav.location
         bucket = parse_location(self.nav.location)[0]
-        self._cols["size"].layout.visibility = "visible" if bucket else "hidden"
+        self._cols["size"].layout.display = None if bucket else "none"  # buckets have no size: their names get the room
+        self._draw_side()
         self._draw_header()
 
     def _draw_header(self) -> None:
         bucket = parse_location(self.nav.location)[0]
         labels = {"name": "Name", "size": "Size", "modified": "Modified" if bucket else "Created"}
         for column, b in self._cols.items():
-            arrow = (" ▼" if self._descending else " ▲") if column == self._sort else ""
-            b.description = labels[column] + arrow
+            on = column == self._sort
+            b.description = labels[column] + ((" ↓" if self._descending else " ↑") if on else "")
+            b._dom_classes = ("s3x-col", "s3x-namecol" if column == "name" else "s3x-num") + (
+                ("s3x-on",) if on else ())
+
+    def _draw_side(self) -> None:
+        """The list's state, for the style: on the list of buckets (no sizes, nothing to select), and while
+        something is selected (every row shows its checkbox)."""
+        bucket = parse_location(self.nav.location)[0]
+        self._side._dom_classes = ("s3x-side",) + (() if bucket else ("s3x-buckets",)) + (
+            ("s3x-picking",) if self._picked else ())
+
+    def _draw_filters(self, folder: Folder) -> None:
+        """Above the list: the search box, All / Folders / Files with how many of each match it, Include subfolders,
+        and a chip for each file type here (the most common first), lit when the search asks for that type."""
+        w, s3 = self._widgets, self.s3
+        bucket = parse_location(self.nav.location)[0]
+        self._filter.placeholder = "Search: a name, .csv, *.parquet, part-0*" if bucket else "Search your buckets"
+        self._clear_btn.layout.display = None if self._query.strip() else "none"
+        self._kinds.layout.display = self._types.layout.display = None if bucket else "none"
+        if not bucket:
+            return
+        wanted, plus = parse_filter(self._query), "+" if folder.more else ""
+        named = [e for e in folder.entries if wanted.named(e)]
+        matching = [e for e in named if wanted.typed(e)]
+        folders = sum(e.is_folder for e in matching)
+        for kind, label, count in (("all", "All", len(matching)), ("folders", "Folders", folders),
+                                   ("files", "Files", len(matching) - folders)):
+            b = self._kind_btns[kind]
+            b.description = f"{label} {count:,}{plus}"
+            b._dom_classes = ("s3x-seg", "s3x-on") if kind == self._kind else ("s3x-seg",)
+        self._deep_btn._dom_classes = ("s3x-chip", "s3x-deep", "s3x-ic", "s3x-i-below") + (
+            ("s3x-on",) if self._deep else ())
+        self._deep_btn.tooltip = (
+            "Showing everything below this folder; click to show only its own folders and files" if self._deep else
+            f"List everything below this folder (the first {self.nav.deep_limit:,} files), not only its first level, "
+            "to search all of it")
+
+        types = count_types(named)
+        shown = types
+        if not self._all_types and len(types) > _TYPE_CHIPS + 1:
+            shown = [t for i, t in enumerate(types) if i < _TYPE_CHIPS or t[0] in wanted.types]
+        while len(self._chips) < len(shown):
+            chip = w.Button(layout=w.Layout(width="auto"))
+            chip.on_click(lambda _, i=len(self._chips): self._guard(lambda: self._toggle_type(self._chip_types[i])))
+            self._chips.append(chip)
+        self._chip_types = [kind for kind, _, _ in shown]
+        for chip, (kind, files, size) in zip(self._chips, shown):
+            on = kind in wanted.types
+            with chip.hold_sync():
+                chip.description = f"{s3._file_icon('x.' + kind)} .{kind} {files:,}"
+                chip.tooltip = (f"{_plural(files, f'.{kind} file')}, {s3.human_size(size)}"
+                                f"{' so far' if folder.more else ''}: " + (
+                                    "click to show every type again" if on else
+                                    "click to show only these (click another type to add it)"))
+                chip._dom_classes = ("s3x-chip", "s3x-on") if on else ("s3x-chip",)
+        children = self._chips[: len(shown)]
+        hidden = len(types) - len(shown)
+        if hidden or (self._all_types and len(types) > _TYPE_CHIPS + 1):
+            self._more_types.description = f"+{hidden} more" if hidden else "Fewer"
+            self._more_types.tooltip = "Show every file type here" if hidden else "Show only the most common types"
+            children.append(self._more_types)
+        self._types.children = tuple(children)
+        if self._kind == "folders" or (len(types) < 2 and not wanted.types):  # one type: its chip would change nothing
+            self._types.layout.display = "none"
 
     def _draw_rows(self, folder: Folder) -> None:
         """Fill the list from the folder, filtered and sorted, reusing row widgets so redraws are quick."""
         w = self._widgets
-        entries = sort_entries(filter_entries(folder.entries, self._filter.value), self._sort, self._descending)
+        entries = self._shown_entries(folder)
         self._visible = entries
         shown = entries[: self._limit]
         while len(self._pool) < len(shown):
-            self._pool.append(_Row(w, self._on_row))
+            self._pool.append(_Row(w, self._on_row, self._on_check))
+        base = parse_location(folder.uri)[1] if folder.deep else None
         for row, entry in zip(self._pool, shown):
-            self._fill(row, entry)
+            self._fill(row, entry, base)
         self._rows_box.children = tuple(row.box for row in self._pool[: len(shown)])
         key = (folder.uri, tuple(e.uri for e in shown))
         if key[1] and key != self._rows_key[:2]:
             self._rows_at = time.monotonic()
         self._rows_key = key
         self._draw_foot(folder, entries, len(shown))
+        self._draw_check_all()
 
-    def _fill(self, row: _Row, entry: Entry) -> None:
+    def _fill(self, row: _Row, entry: Entry, base: str | None = None) -> None:
+        """Show an entry in a row. In a list of everything below a folder (`base`, its prefix), the folder the entry
+        is in goes under its name."""
         row.entry = entry
         s3 = self.s3
         if entry.kind == "file":
@@ -1237,35 +1764,65 @@ class S3Explorer:
         with row.button.hold_sync():
             row.button.description = f"{entry_icon(entry, s3)}  {name}{'  ❄' if entry.archived else ''}"
             row.button.tooltip = tip
-            row.button._dom_classes = ("s3x-row", "s3x-on") if entry.uri == self.selected else ("s3x-row",)
+            row.button._dom_classes = self._row_classes(entry)
+        row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())
         row.size.value, row.age.value = size, age
+        if base is not None:
+            where = _parent_prefix(entry.key[:-1] if entry.kind == "folder" else entry.key)[len(base):]
+            row.where.value = where.rstrip("/") or "in this folder"
+        row.where.layout.display = None if base is not None else "none"
+        row.box._dom_classes = ("s3x-r", "s3x-r2") if base is not None else ("s3x-r",)
+
+    def _row_classes(self, entry: Entry) -> tuple[str, ...]:
+        """A row's button: lit for the file shown on the right, tinted when it's selected."""
+        return ("s3x-row",) + (("s3x-on",) if entry.uri == self.selected else ()) + (
+            ("s3x-picked",) if entry.uri in self._picked else ())
 
     def _mark_rows(self) -> None:
         if self._widgets is None:
             return
         for row in self._pool[: len(self._rows_box.children)]:
-            on = row.entry is not None and row.entry.uri == self.selected
-            row.button._dom_classes = ("s3x-row", "s3x-on") if on else ("s3x-row",)
+            if row.entry is not None:
+                row.button._dom_classes = self._row_classes(row.entry)
+                row.check._dom_classes = _CHECK + (("s3x-on",) if row.entry.uri in self._picked else ())
 
     def _draw_foot(self, folder: Folder, entries: list[Entry], shown: int) -> None:
-        text = self._filter.value.strip()
+        """Under the list: Show more, Load more from S3 and Look up, or why the list is empty and what to do."""
+        text, esc = self._query.strip(), html.escape
+        bucket = parse_location(folder.uri)[0]
         hidden = len(entries) - shown
         self._more_btn.description = (f"Show {self.page_size:,} more (of {hidden:,})" if hidden > self.page_size
                                       else f"Show the last {hidden:,}")
         self._more_btn.layout.display = None if hidden > 0 else "none"
-        self._load_btn.description = f"Load more from S3 (the first {len(folder.entries):,} are listed)"
+        if folder.deep:
+            listed = sum(not e.is_folder for e in folder.entries)
+            self._load_btn.description = f"Load more from S3 (the first {listed:,} files below are listed)"
+        else:
+            self._load_btn.description = f"Load more from S3 (the first {len(folder.entries):,} are listed)"
         self._load_btn.layout.display = None if folder.more and not hidden else "none"
+        wanted = parse_filter(text)
+        lookup = folder.more and not folder.deep and len(wanted.words) == 1 and not wanted.patterns and not wanted.types
         self._lookup_btn.description = f"Look up names starting with “{text}” in S3"
-        lookup = folder.more and text and not any(c in text for c in "*?[")
         self._lookup_btn.layout.display = None if lookup else "none"
-        note = ""
+        note, fix = "", None
+        among = f" among the first {len(folder.entries):,} entries" if folder.more else ""
         if folder.error:
             note = "Couldn't list this folder; the note on the right says why."
         elif not folder.entries:
-            note = "Empty." if parse_location(folder.uri)[0] else "No buckets."
+            note = ("Nothing below this folder." if folder.deep else "This folder is empty.") if bucket else "No buckets."
         elif not entries:
-            note = f"Nothing here matches “{html.escape(text)}”" + (
-                f" among the first {len(folder.entries):,} entries." if folder.more else ".")
+            others = filter_entries(folder.entries, text)  # of either kind
+            if bucket and self._kind != "all" and others:
+                note = f"No {self._kind} {f'match “{esc(text)}”' if text else 'here'}{among}."
+                other = "file" if self._kind == "folders" else "folder"
+                fix = (f"Show the {_plural(len(others), other)}", lambda: self._on_kind("all"))
+            else:
+                note = f"Nothing here matches “{esc(text)}”{among}."
+                if bucket and not folder.deep:
+                    fix = ("Search the subfolders too", self._on_deep)
+        self._fix = fix[1] if fix else (lambda: None)
+        self._fix_btn.description = fix[0] if fix else ""
+        self._fix_btn.layout.display = None if fix else "none"
         self._foot_note.value = f'<div class="s3x-empty">{note}</div>' if note else ""
         self._foot_note.layout.display = None if note else "none"
 
@@ -1301,7 +1858,8 @@ class S3Explorer:
             b = w.Button(description=label, tooltip=tip, layout=w.Layout(width="auto"))
             b.add_class("s3x-act")
             if action == "close":
-                b.add_class("s3x-close")
+                for name in ("s3x-close", "s3x-ic", "s3x-i-close"):
+                    b.add_class(name)
             b.on_click(lambda _, action=action: self._guard(lambda: self._on_action(action)))
             self._act_buttons[action] = b
         self._actions.children = tuple(self._act_buttons.values())
@@ -1316,12 +1874,14 @@ class S3Explorer:
                 b._dom_classes = ("s3x-act", "s3x-on") if action == self._action else ("s3x-act",)
 
     def _draw_status(self, folder: Folder) -> None:
+        """The bar at the bottom: what's listed (and how much of it matches the search), and where you are."""
         if self._widgets is None:
             return
         s3, esc = self.s3, html.escape
+        bucket = parse_location(folder.uri)[0]
         if folder.error:
             left = "Couldn't list this folder"
-        elif not parse_location(folder.uri)[0]:
+        elif not bucket:
             left = _plural(len(folder.entries), "bucket")
         else:
             stats = folder_stats(folder.entries)
@@ -1330,10 +1890,12 @@ class S3Explorer:
             if stats.files:
                 parts += [f"{stats.files:,}{plus} file{'' if stats.files == 1 and not plus else 's'}",
                           s3.human_size(stats.size) + (" so far" if plus else "")]
-            left = " · ".join(parts) or "Empty"
-        text = self._filter.value.strip()
-        if text and not folder.error:
-            left += f" · {len(self._visible):,} match “{esc(text)}”"
+            left = ("Below this folder: " if folder.deep and parts else "") + (" · ".join(parts) or "Empty")
+        text = self._query.strip()
+        if not folder.error and (text or (bucket and self._kind != "all")):
+            left += f" · {len(self._visible):,} match “{esc(text)}”" if text else f" · {self._kind} only"
+            size = sum(e.size or 0 for e in self._visible if not e.is_folder)
+            left += f" ({s3.human_size(size)})" if size else ""
         here = self.selected or folder.uri
         right = f'<code title="Click to select, then copy">{esc(here)}</code>' if here else ""
         self._status.value = f'<span class="s3x-at">{left}</span>{right}'
@@ -1354,7 +1916,7 @@ class S3Explorer:
     def _on_action(self, action: str) -> None:
         uri = self.selected or self.nav.location
         if action == "close":
-            self._show_folder(self.nav.folder())
+            self._show_folder(self._source())
         elif action == "preview":
             self._report("preview", "preview", uri)
         elif action == "head":
@@ -1386,23 +1948,190 @@ class S3Explorer:
             size = str(self.zip_max_size)
         return f"{size} and {self.zip_max_files:,} files"
 
-    def _zip(self, uri: str) -> None:
-        """⬇ Download .zip, for a folder: s3's download_zip with the limits from ⚙ Settings. It checks the size, file
-        count, disk space, memory and read access first, and writes nothing when one fails."""
-        bucket, prefix = parse_location(uri)
-        name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
-        folder = os.path.expanduser(self.zip_folder.strip() or ".")
-        if folder != ".":
+    def _zip(self, target: str | list[Any], path: str = "") -> None:
+        """⬇ Download .zip, for a folder (`target` is its uri) or what's selected (a list, and the path it goes to):
+        s3's download_zip with the limits from ⚙ Settings. It checks the size, file count, disk space, memory and
+        read access first, and writes nothing when one fails."""
+        if not path:
+            bucket, prefix = parse_location(target)
+            name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
+            path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), name)
+        folder = os.path.dirname(path)
+        if folder and folder != ".":
             os.makedirs(folder, exist_ok=True)
-        self._pane.download_zip(uri, name if folder == "." else os.path.join(folder, name),
+        self._pane.download_zip(target, os.path.normpath(path),
                                 max_size=self.zip_max_size, max_files=self.zip_max_files)
         report = self._captured[-1] if self._captured else []
         refused = any(card[:2] == ("Can download", "no") for block in report if isinstance(block, self.s3._Cards)
                       for card in block.items)
         if refused:  # after the line that says why
             at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Note)), len(report))
-            report.insert(at, self.s3._Note(f"If it's over a limit, ⚙ at the top right raises them (now "
-                                            f"{self._zip_limit()}); then click ⬇ Download .zip again."))
+            fix = ("⚙ at the top right raises them" if isinstance(target, str) else
+                   "untick some files, or raise the limits with ⚙ at the top right")
+            again = "⬇ Download .zip" if isinstance(target, str) else "⬇ Download selected"
+            report.insert(at, self.s3._Note(f"If it's over a limit, {fix} (now {self._zip_limit()}); then click "
+                                            f"{again} again."))
+
+    # ------------------------------------------------------------------ selecting files to download as one .zip
+
+    def _on_check(self, row: _Row) -> None:
+        """A row's checkbox: select it, or unselect it."""
+        entry = row.entry
+        if entry is None or entry.kind == "bucket":
+            return
+        if self._picked.pop(entry.uri, None) is None:
+            self._picked[entry.uri] = entry
+        row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())
+        row.button._dom_classes = self._row_classes(entry)
+        self._draw_picks()
+
+    def _on_check_all(self) -> None:
+        """The header's checkbox: select everything the list shows (with a search, what matches it, past "Show
+        more" too), or unselect it when it's all selected already."""
+        shown = [e for e in self._visible if e.kind != "bucket"]
+        if shown and all(e.uri in self._picked for e in shown):
+            for entry in shown:
+                self._picked.pop(entry.uri, None)
+        else:
+            self._picked.update((e.uri, e) for e in shown)
+        self._mark_rows()
+        self._draw_picks()
+
+    def _clear_picks(self) -> None:
+        self._picked.clear()
+        self._mark_rows()
+        self._draw_picks()
+
+    def _draw_check_all(self) -> None:
+        """The header's checkbox: empty, ticked when everything listed is selected, or a dash for some of it."""
+        if self._widgets is None:
+            return
+        shown = [e for e in self._visible if e.kind != "bucket"]
+        on = sum(e.uri in self._picked for e in shown)
+        if shown and on == len(shown):
+            self._check_all._dom_classes, tip = _CHECK + ("s3x-on",), "Unselect everything listed"
+        elif on:
+            self._check_all._dom_classes = ("s3x-check", "s3x-ic", "s3x-i-minus", "s3x-on")
+            tip = f"Select all {len(shown):,} listed"
+        else:
+            self._check_all._dom_classes, tip = _CHECK, f"Select all {len(shown):,} listed"
+        self._check_all.tooltip = tip
+        self._check_all.layout.display = None if shown else "none"
+        self._draw_side()
+
+    def _picks_summary(self) -> tuple[list[Entry], int, int]:
+        """(the selected files, how many folders are selected, the files' bytes)."""
+        files = [e for e in self._picked.values() if not e.is_folder]
+        return files, len(self._picked) - len(files), sum(e.size or 0 for e in files)
+
+    def _draw_picks(self) -> None:
+        """After the selection changed: the bar under the list (how many, how big, Clear and ⬇ Download .zip), the
+        header's checkbox, and the panel on the right if it's open."""
+        if self._widgets is None:
+            return
+        files, folders, size = self._picks_summary()
+        if self._picked:
+            more = f" + {_plural(folders, 'folder')}" if folders else ""
+            self._picks_note.value = (f'<span class="s3x-picks-n">{len(self._picked):,} selected</span>'
+                                      f'<span class="s3x-picks-s">{self.s3.human_size(size)}{more}</span>')
+        self._picks_bar.layout.display = None if self._picked else "none"
+        self._draw_check_all()
+        if self._picks_panel.layout.display != "none":
+            if self._picked:
+                self._open_picks(keep_name=True)
+            else:
+                self._close_picks()
+
+    def _picks_layout(self) -> tuple[str, str, str]:
+        """(bucket, the folder the selected entries share, the zip's name without .zip), as download_zip names it."""
+        bucket = parse_location(self.nav.location)[0]
+        base, name = self.s3._zip_layout(bucket, [e.key for e in self._picked.values()])
+        return bucket, base, name
+
+    def _picks_default(self) -> str:
+        """The zip's name: download_zip's ('churn-12-files.zip'), with -2, -3, ... when that file is already there."""
+        name = self._picks_layout()[2]
+        folder = os.path.expanduser(self.zip_folder.strip() or ".")
+        number, candidate = 1, f"{name}.zip"
+        while os.path.exists(os.path.join(folder, candidate)):
+            number += 1
+            candidate = f"{name}-{number}.zip"
+        return candidate
+
+    def _open_picks(self, keep_name: bool = False) -> None:
+        """⬇ Download .zip in the selection bar: on the right, what goes in the zip and how big it is, its name,
+        and the button that makes it. Nothing is downloaded until that's clicked."""
+        s3 = self.s3
+        files, folders, size = self._picks_summary()
+        bucket, base, _ = self._picks_layout()
+        try:
+            limit = s3.parse_size(self.zip_max_size)
+        except (TypeError, ValueError):
+            limit = None
+        over = limit is not None and size > limit
+        parts = [_plural(len(files), "file")] if files else []
+        parts += [_plural(folders, "folder")] if folders else []
+        plus = "+" if folders else ""
+        cards: list[tuple[str, ...]] = [("Files", f"{len(files):,}{plus}"),
+                                        ("Size", s3.human_size(size) + plus, *(("warn",) if over else ()))]
+        cards += [("Limit", s3.human_size(limit))] if limit is not None else []
+        blocks: list[Any] = [s3._Title(f"Download {' and '.join(parts)} as one .zip", f"from s3://{bucket}/{base}"),
+                             s3._Cards(cards)]
+        if over:
+            blocks.append(s3._Note(f"That's over the {s3.human_size(limit)} limit for one zip, so it won't be made: "
+                                   "untick some files, or raise the limit with ⚙ at the top right.", "warn"))
+        if folders:
+            blocks.append(s3._Note(f"The {'folder goes' if folders == 1 else 'folders go'} in with everything below "
+                                   f"{'it' if folders == 1 else 'them'}, which is listed and counted when you click "
+                                   "Download; the size here is the selected files'."))
+        archived = sum(e.archived for e in files)
+        if archived:
+            blocks.append(s3._Note(f"{_plural(archived, 'selected file')} {'is' if archived == 1 else 'are'} in "
+                                   "GLACIER or DEEP_ARCHIVE (❄), so the zip leaves "
+                                   f"{'it' if archived == 1 else 'them'} out until restored.", "warn"))
+        self._action = "picks"
+        self._mark_actions()
+        self._set_pane([blocks])
+        rows = [[e.key[len(base):] or e.key, "" if e.is_folder else s3.human_size(e.size),
+                 s3.human_age(e.modified) if e.modified else ""]
+                for e in sorted(self._picked.values(), key=lambda e: _natural(e.key))]
+        self._picks_list.value = s3._render_html(
+            [s3._Table(["Name", "Size", "Modified"], rows, title="What goes in the zip", path_cols=(0,), max_rows=0)],
+            0)
+        if not keep_name or self._picks_name.value == self._picks_auto:
+            self._picks_name.value = self._picks_auto = self._picks_default()
+        where = self.zip_folder.strip() or "."
+        where = "the notebook's folder" if where == "." else html.escape(where)
+        self._picks_where.value = f'<span class="s3x-hint">in {where}</span>'
+        self._picks_msg.value = ""
+        self._picks_go.disabled = over  # the note above says what to do instead
+        self._picks_panel.layout.display = None
+
+    def _close_picks(self) -> None:
+        """Back to the file or folder that was shown; the selection stays."""
+        self._picks_panel.layout.display = "none"
+        if self.selected:
+            self._select(self.selected)
+        else:
+            self._show_folder(self._source())
+
+    def _save_picks(self) -> None:
+        """Download in the panel: zip what's selected under the name typed, unless a file of that name is there."""
+        s3 = self.s3
+        name = self._picks_name.value.strip()
+        if not name:
+            self._picks_msg.value = s3._render_html([s3._Note("Type a name for the zip.", "warn")], 0)
+            return
+        if not name.lower().endswith(".zip"):
+            name += ".zip"
+        path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), os.path.expanduser(name))
+        if os.path.exists(path):
+            self._picks_msg.value = s3._render_html([s3._Note(
+                f"{name} is already there, and the explorer doesn't replace files: type another name.", "warn")], 0)
+            return
+        picks = [s3.ObjectInfo(e.bucket, e.key, e.size or 0, e.modified, e.storage_class or "STANDARD", e.etag)
+                 if not e.is_folder and e.modified else e.uri for e in self._picked.values()]
+        self._report("picks", self._zip, picks, path, cache=False)
 
     def _toggle_settings(self) -> None:
         if self._settings.layout.display == "none":
@@ -1435,7 +2164,7 @@ class S3Explorer:
         if self.selected:
             self._select(self.selected)
         else:
-            self._show_folder(self.nav.folder())
+            self._show_folder(self._source())
 
     def _save_settings(self) -> None:
         s3 = self.s3
@@ -1524,11 +2253,57 @@ class S3Explorer:
             widget.close()
 
     def _on_filter(self) -> None:
+        self._query = self._filter.value
+        self._refilter()
+
+    def _set_query(self, text: str, renew: bool = False) -> None:
+        """Put text in the search box (without it calling _on_filter too) and redraw the list for it."""
+        self._query = text
+        if self._widgets is not None:
+            self._quiet = True
+            self._filter.value = text
+            self._quiet = False
+        self._refilter(renew)
+
+    def _refilter(self, renew: bool = False) -> None:
+        """Redraw the list after the search, All / Folders / Files or Include subfolders changed (the text explorer
+        prints it). renew: start the list at the top."""
         self._limit = self.page_size
-        folder = self.nav.folder()
+        folder = self._source()
+        if self._widgets is None:
+            self._set_pane([self._folder_blocks(folder, listing=True)])
+            return
+        self._draw_filters(folder)
         self._draw_rows(folder)
-        self._mark_rows()
+        if renew:
+            self._renew("left")
         self._draw_status(folder)
+
+    def _on_kind(self, kind: str) -> None:
+        self._kind = kind
+        self._refilter(renew=True)
+
+    def _on_deep(self) -> None:
+        """Include subfolders: list everything below this folder (once; it's kept), or only its first level again."""
+        self._deep, self._all_types = not self._deep, False
+        if self._deep:
+            self._busy("Listing everything below this folder…")
+        self._refilter(renew=True)
+        if not self.selected:
+            self._show_folder(self._source())
+
+    def _toggle_type(self, kind: str) -> None:
+        """A file type's chip: add '.csv' to the search, or take it out again. The search box stays the one place a
+        filter is written down, so what a chip did can be read, changed or typed next time."""
+        words = [word for word in re.split(r"[\s,]+", self._query.strip()) if word]
+        kept = [word for word in words if _type_word(word) != kind]
+        if len(kept) == len(words):
+            kept.append(f".{kind}")
+        self._set_query(" ".join(kept))
+
+    def _on_more_types(self) -> None:
+        self._all_types = not self._all_types
+        self._draw_filters(self._source())
 
     def _on_sort(self, by: str) -> None:
         if by == self._sort:
@@ -1537,27 +2312,29 @@ class S3Explorer:
             self._sort, self._descending = by, by != "name"  # biggest / newest first
         self._limit = self.page_size
         self._draw_header()
-        self._draw_rows(self.nav.folder())
+        self._draw_rows(self._source())
         self._renew("left")
 
     def _on_more(self) -> None:
         self._limit += self.page_size
-        self._draw_rows(self.nav.folder())
+        self._draw_rows(self._source())
 
     def _on_load(self) -> None:
-        self._status.value = '<span class="s3x-at">Listing…</span>'
-        folder = self.nav.more()
+        self._busy("Listing the next files below this folder…" if self._deep else "Listing…")
+        folder = self.nav.more(below=self._deep, progress=self._listing)
         self._limit += self.page_size
+        self._draw_filters(folder)
         self._draw_rows(folder)
         self._draw_status(folder)
         if not self.selected:
             self._show_folder(folder)
 
     def _on_lookup(self) -> None:
-        text = self._filter.value.strip()
-        self._status.value = '<span class="s3x-at">Looking up…</span>'
+        text = self._query.strip()
+        self._busy("Looking up…")
         added = self.nav.lookup(text)
         folder = self.nav.folder()
+        self._draw_filters(folder)
         self._draw_rows(folder)
         self._draw_status(folder)
         if not added:
@@ -1573,6 +2350,7 @@ class S3Explorer:
         self._crumbs.layout.display = None if editing else "none"
         self._edit_btn.description = "✎" if editing else "✕"
         self._edit_btn.tooltip = "Type or paste a path" if editing else "Cancel"
+        self._edit_btn._dom_classes = ("s3x-nav", "s3x-ic", "s3x-i-edit" if editing else "s3x-i-close")
 
     def _on_path(self) -> None:
         value = self._path.value.strip()
