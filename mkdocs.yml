@@ -27,6 +27,7 @@ nav:
   - Bedrock Knowledge Bases: bedrock_kb.md
   - Bedrock chat: bedrock_chat.md
   - Amazon SageMaker: sagemaker_env.md
+  - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 
 theme:
   name: material

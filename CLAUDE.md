@@ -244,9 +244,12 @@ never prints), and `S3Explorer` as the UI. How the UI works:
 - PyPI shows README.md, through `hatch-fancy-pypi-readme`, which points its relative links and pictures at GitHub
   and turns `> [!NOTE]` callouts into bold labels (PyPI renders neither). `twine check --strict` with
   `readme-renderer[md]` checks that it renders.
-- Releasing: bump `__version__`, then publish a GitHub release tagged `v<version>`. `.github/workflows/release.yml`
-  builds, checks, imports the wheel with only boto3, refuses a tag that doesn't match `__version__`, and uploads
-  with PyPI trusted publishing from the `pypi` environment (no token stored).
+- Releasing: `/release` (`.claude/skills/release`). `release.py bump` moves `CHANGELOG.md`'s `## [Unreleased]`
+  entries under the new version and sets `__version__` to match (`tests/test_package.py` checks the changelog has
+  an entry for `__version__`); that goes through a release pull request, and then a GitHub release tagged
+  `v<version>` on its merge commit, with `release.py notes` as the notes. `.github/workflows/release.yml` builds,
+  checks, imports the wheel with only boto3, refuses a tag that doesn't match `__version__`, and uploads with PyPI
+  trusted publishing from the `pypi` environment (no token stored). A version can be uploaded only once.
 
 ## Tests
 
@@ -285,6 +288,11 @@ never prints), and `S3Explorer` as the UI. How the UI works:
 
 - `README.md` is the user documentation: per service, a quick start, a command table, the pure functions, cost
   notes and IAM permissions. Update it together with the analyzer.
+- `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): every change a user would notice adds a
+  bullet under `## [Unreleased]`, in Added / Changed / Fixed / Removed, written for someone upgrading (starts with
+  the command, says what they can do now, ends with the pull request link; `**Breaking**:` first when a notebook
+  would have to change). Tests, CI, refactors and docs edits get none. `CONTRIBUTING.md`, `SECURITY.md` and the
+  issue and pull request templates in `.github/` are for outside contributors; keep them in line with these rules.
 - `docs/` is the guide site: Markdown built by MkDocs with the Material theme (`mkdocs.yml`, versions pinned in
   `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so

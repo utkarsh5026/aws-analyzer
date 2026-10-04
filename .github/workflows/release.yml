@@ -1,7 +1,8 @@
 name: Release
 
 # Publishes aws-analyzer to PyPI when a GitHub release is published. Tag the release v<version>, with <version> the
-# __version__ in src/aws_analyzer/__init__.py; the build stops if they differ.
+# __version__ in src/aws_analyzer/__init__.py; the build stops if they differ. /release in Claude Code (or the steps
+# in CONTRIBUTING.md) bumps the version with its CHANGELOG.md entry and publishes the release.
 #
 # One-time setup, before the first release:
 #   1. On PyPI, Account settings -> Publishing -> Add a new pending publisher (GitHub): project name aws-analyzer,

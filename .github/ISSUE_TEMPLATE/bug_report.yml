@@ -1,0 +1,65 @@
+name: Bug report
+description: A command showed something wrong, failed, or showed a traceback
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for reporting. Please remove bucket names, account IDs and data you'd rather not share. For a security
+        problem, use [private reporting](https://github.com/utkarsh5026/aws-analyzer/security/advisories/new)
+        instead of an issue.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part
+      options:
+        - S3 (s3.py, S3View)
+        - S3 explorer (s3_explorer.py, S3Explorer)
+        - DynamoDB (dynamodb.py, DynamoDBView)
+        - Bedrock Knowledge Bases (bedrock_kb.py, BedrockKBView)
+        - Bedrock chat (bedrock_chat.py, chat())
+        - SageMaker (sagemaker_env.py, SageMakerView)
+        - Installing the package
+        - The guides or README
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The call, and how you built the View if it matters.
+      placeholder: ui.preview("s3://my-bucket/data/events.parquet")
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The report's text, a screenshot of it, or the note or traceback it showed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: >-
+        The output of `import aws_analyzer, boto3, sys; print(aws_analyzer.__version__, boto3.__version__, sys.version)`.
+        If you copied an analyzer file instead of installing the package, say which file and when you copied it.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where it ran
+      options:
+        - SageMaker notebook instance
+        - SageMaker Studio (JupyterLab or Code Editor)
+        - JupyterLab or Jupyter Notebook on my computer
+        - VS Code notebook
+        - Plain Python (text output)
+        - Somewhere else
