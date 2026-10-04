@@ -1199,6 +1199,9 @@ def test_pages_and_flow_render_as_html():
             ("table", [["h1", "h2"], ["a", "b"]]), ("picture", page), ("missing", "Picture a.emf: EMF format")]
     html = s3mod._render_html([s3mod._Pages([page, page], "Pages 1–2"), s3mod._Flow(flow)], 50)
     assert html.count('src="data:image/png;base64,') == 3 and "<figcaption>Page 1</figcaption>" in html
+    # a page fills the screen when clicked (CSS only), keeping its place in the report meanwhile
+    assert html.count('<details class="zoom" style="aspect-ratio:40/30"><summary title="Click to see it full size">') == 2
+    assert '<span class="zh">Page 1 · click anywhere to go back</span>' in html and "details.zoom[open]>summary" in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "<script>" not in html
     assert "<ul><li>one</li><li>two</li></ul>" in html and '<div class="dh d0">' in html
     assert "<h1" not in html and "<th>h1</th>" in html and 'class="pm"' in html

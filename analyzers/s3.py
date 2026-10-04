@@ -7331,6 +7331,13 @@ _CSS = """<style>
 .s3a .pages.one figure{flex-basis:640px}
 .s3a .pages img{display:block;width:100%;height:auto;max-height:none;border:0;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .s3a .pages figcaption{font-size:11px;opacity:.65;text-align:center;margin-top:4px}
+.s3a details.zoom>summary{display:block;list-style:none;cursor:zoom-in}
+.s3a details.zoom>summary::-webkit-details-marker{display:none}
+.s3a details.zoom:not([open])>summary:hover img{box-shadow:0 0 0 2px rgba(59,130,246,.7),0 1px 4px rgba(0,0,0,.3)}
+.s3a details.zoom .zh{display:none}
+.s3a details.zoom[open]>summary{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;background:rgba(17,17,17,.9);cursor:zoom-out}
+.s3a details.zoom[open] img{flex:1 1 auto;min-height:0;width:100%;height:100%;object-fit:contain;background:transparent;box-shadow:none}
+.s3a details.zoom[open] .zh{display:block;flex:0 0 auto;color:#eee;font-size:12px}
 .s3a .flow{max-width:760px;margin:6px 0 10px;padding:14px 22px;border:1px solid rgba(127,127,127,.3);border-radius:6px}
 .s3a .flow{font-size:14px;line-height:1.55}
 .s3a .flow p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -7455,6 +7462,17 @@ def _hidden(count: int, table: _Table, default_max: int) -> str:
 def _data_img(data: bytes, mime: str, alt: str = "") -> str:
     """An <img> that holds the picture itself (a data: URL), so it stays in the saved notebook."""
     return f'<img src="data:{_esc(mime)};base64,{base64.b64encode(data).decode()}" alt="{_esc(alt)}">'
+
+
+def _zoomable(picture: Picture) -> str:
+    """A PDF page that fills the screen when clicked and goes back on the next click, with CSS only (so it still
+    works in a saved notebook): a <details> whose summary holds the picture and turns into a fixed overlay while
+    open. aspect-ratio keeps the page's place in the report meanwhile, so the pages behind the overlay don't move."""
+    info = _image_info(picture.data) or {}
+    ratio = f' style="aspect-ratio:{info["width"]}/{info["height"]}"' if info.get("width") and info.get("height") else ""
+    return (f'<details class="zoom"{ratio}><summary title="Click to see it full size">'
+            f"{_data_img(picture.data, picture.mime, picture.label)}"
+            f'<span class="zh">{_esc(picture.label)} · click anywhere to go back</span></summary></details>')
 
 
 def _flow_html(items: list[tuple[str, Any]]) -> str:
@@ -7643,7 +7661,7 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 out.append(f"<h4>{_prose(block.title)}</h4>")
             captioned = len(block.pictures) > 1
             figures = "".join(
-                f"<figure>{_data_img(pic.data, pic.mime, pic.label)}"
+                f"<figure>{_zoomable(pic)}"
                 + (f"<figcaption>{_esc(pic.label)}</figcaption>" if captioned else "")
                 + "</figure>"
                 for pic in block.pictures
@@ -10501,7 +10519,8 @@ class S3View:
         text, such as scans, are drawn as pictures; pictures=True draws every page, pictures=False none.
 
         A PDF's text needs pypdf, and drawing its pages needs pypdfium2 and pillow. One report shows at most
-        20 pages or pictures, so the notebook stays small; pass pages= for other pages."""
+        20 pages or pictures, so the notebook stays small; pass pages= for other pages. Click a drawn page to see
+        it as big as the notebook, and click again to go back."""
         with self._progress("Drawing pages", unit="pages") as tick:
             doc = self.core.read_document(uri, pages=pages, password=password, pictures=pictures,
                                           max_pictures=_MAX_PICTURES, progress=tick)

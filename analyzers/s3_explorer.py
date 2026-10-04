@@ -4,12 +4,13 @@ s3_explorer.py - browse S3 like a file explorer, inside a SageMaker / Jupyter no
 Folders and files are listed on the left. Click a folder to open it, or a file to see what's inside it on the
 right: a table's first rows, a PDF's pages, a Word file with its pictures, an image, and so on. The toolbar has
 back / forward / up buttons, a clickable path you can also type into, a filter box, and the column headers sort
-by name, size or date.
+by name, size or date. "Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full
+size), and "Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes.
 
 This file builds on s3.py (the previews, the formatting and the AWS calls all come from it): upload both files
 next to your notebook, or paste s3.py into a cell and then this file into the next one. Clicking needs
 ipywidgets, which SageMaker notebooks already have. Without it you get a plain listing and a note on what to
-install. Like s3.py, it only reads from AWS; "Download" saves a copy on the notebook's disk.
+install. Like s3.py, it only reads from AWS; "Download" and "Download .zip" save a copy on the notebook's disk.
 
 Quick start
 -----------
@@ -18,6 +19,7 @@ Quick start
     S3Explorer("s3://my-bucket/data/")              # start in a folder (S3 console links work too)
     S3Explorer("s3://my-bucket/data/report.pdf")    # open the folder with that file shown
     S3Explorer("s3://my-bucket/", profile="dev")    # another AWS profile (or core=S3Analyzer(...))
+    S3Explorer(zip_max_size="2GB")                  # zip folders up to 2 GB (100 MB unless ⚙ changes it)
 
     x = S3Explorer("s3://my-bucket/")
     x.open("s3://my-bucket/raw/")                   # drive it from code: open, back, forward, up, refresh
@@ -30,14 +32,17 @@ Quick start
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import fnmatch
 import functools
 import html
 import importlib
+import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -611,6 +616,16 @@ _CSS = """<style>
 .s3x button.s3x-act:hover{background:rgba(127,127,127,.2)}
 .s3x button.s3x-act.s3x-on{background:rgba(59,130,246,.18);box-shadow:inset 0 0 0 1px rgba(59,130,246,.55)}
 .s3x button.s3x-close{margin-left:auto;background:transparent}
+.s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding:10px 0 4px;
+ border-top:1px dashed rgba(127,127,127,.3)}
+.s3x .s3x-pager>*{margin:0}
+.s3x .s3x-pager .widget-label{opacity:.65;margin-right:6px}
+.s3x .s3x-settings{gap:8px;padding:4px 0 8px}
+.s3x .s3x-settings>*{margin:0}
+.s3x .s3x-setting{gap:10px;align-items:center;flex-wrap:wrap}
+.s3x .s3x-setting>*{margin:0}
+.s3x .s3x-setting .widget-label{font-size:12px}
+.s3x .s3x-hint{opacity:.65;font-size:12px}
 .s3x .s3x-status{padding:3px 10px;border-top:1px solid rgba(127,127,127,.25);background:rgba(127,127,127,.06);
  font-size:12px}
 .s3x .s3x-status>.widget-html-content{display:flex;gap:12px;justify-content:space-between;align-items:center;
@@ -621,6 +636,8 @@ _CSS = """<style>
 </style>"""
 _DOCUMENTS = ("pdf", "docx", "docm", "dotx", "pptx", "pptm", "potx", "ppsx")  # files "Read all" opens
 _CLICK_GRACE = 0.35  # seconds after the rows change during which a click is ignored (it was aimed at the old rows)
+_BACKGROUND = ("preview", "head")  # quick reports (no progress bar) that load on worker threads in a notebook
+_WORKERS = 4  # background reports loading at once, so a click doesn't wait for files clicked before it
 
 
 class _Row:
@@ -647,6 +664,8 @@ class S3Explorer:
     out to start from your buckets.
     core: an S3Analyzer or S3View to use (else one is made from profile / region).
     height: the height of the two panes in pixels. page_size: rows shown before "Show more".
+    zip_max_size: the biggest folder "Download .zip" packs ('100MB', '2GB'); ⚙ Settings changes it, and the most
+    files in a zip (zip_max_files, 10,000) and where zips go (zip_folder, the notebook's folder).
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
@@ -661,6 +680,7 @@ class S3Explorer:
         region: str | None = None,
         height: int = 560,
         page_size: int = 100,
+        zip_max_size: int | str = "100MB",
         mode: str = "auto",
         progress: str = "auto",
     ):
@@ -668,6 +688,9 @@ class S3Explorer:
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         self.height = height
         self.page_size = max(10, int(page_size))
+        self.zip_max_size = zip_max_size  # "Download .zip" zips a folder up to this size (⚙ Settings changes it)
+        self.zip_max_files = 10_000  # and up to this many files
+        self.zip_folder = "."  # where the .zip goes: the notebook's folder
         self.selected = ""  # the uri of the file shown on the right ('' = the folder's overview)
         self.shown: list[list[Any]] = []  # the blocks of the last report on the right, for tests and curious users
         self._action = ""
@@ -675,6 +698,11 @@ class S3Explorer:
         self._shown_at: Any = object()
         self._widgets: Any = None
         self._quiet = False  # set while the code (not the user) clears the filter
+        self._job = 0  # counts changes of the right pane; a background report made for an older one isn't shown
+        self._workers: ThreadPoolExecutor | None = None  # the threads background reports load on
+        self._task: Any = None  # the last background report's asyncio task (tests wait for it)
+        self._first_page = 1  # where "Read all" starts in a PDF; the pager under the report moves it
+        self._page_counts: dict[tuple[str, str], int] = {}  # (uri, etag) -> a PDF's pages (0: couldn't count)
         try:
             self.s3 = _s3_module(core)
         except ImportError as exc:
@@ -788,52 +816,116 @@ class S3Explorer:
         self._set_pane([[self.s3._Note(text, "warn")]])
 
     def _capture(self, blocks: list[Any]) -> None:
-        """The pane's S3View renders here: drop its Next block (its calls name commands of a view you don't
-        have here) and say the file's name instead of its whole path (the status bar shows that)."""
+        """The pane's S3View renders here (see _trim)."""
+        self._captured.append(self._trim(blocks, self.selected))
+
+    def _trim(self, blocks: list[Any], selected: str) -> list[Any]:
+        """A report for the right pane: without its Next block (its calls name commands of a view you don't have
+        here), and with the file's name instead of its whole path (the status bar shows that)."""
         kept = []
         for block in blocks:
             if isinstance(block, self.s3._Next):
                 continue
-            if isinstance(block, self.s3._Title) and self.selected and self.selected in block.text:
-                block = dataclasses.replace(block, text=block.text.replace(self.selected, Entry(
-                    "file", *parse_location(self.selected)).name))
+            if isinstance(block, self.s3._Title) and selected and selected in block.text:
+                block = dataclasses.replace(block, text=block.text.replace(selected, Entry(
+                    "file", *parse_location(selected)).name))
             kept.append(block)
-        self._captured.append(kept)
+        return kept
 
-    def _report(self, action: str, method: Callable, *args: Any, cache: bool = True, **kwargs: Any) -> None:
-        """Run one of the pane's S3View commands and show its report on the right, with its progress bar
-        above it while it runs. Previews and details are cached per file version."""
-        entry = next((e for e in self.nav.folder().entries if e.uri == self.selected), None)
-        key = (action, self.selected or self.location, entry.etag if entry else "")
+    def _entry(self) -> Entry | None:
+        """The file shown on the right, as listed."""
+        return next((e for e in self.nav.folder().entries if e.uri == self.selected), None) if self.selected else None
+
+    def _report(self, action: str, method: Callable | str, *args: Any, cache: bool = True, variant: Any = None,
+                **kwargs: Any) -> None:
+        """Run one of the pane's S3View commands (by name), or a method of the explorer, and show its report on the
+        right, with its progress bar above it while it runs. Reports are cached per file version (and `variant`,
+        such as the first page shown).
+
+        In a notebook, the quick reports (_BACKGROUND) load on worker threads instead: the click returns at once,
+        so the next click is handled straight away instead of waiting for this file to finish loading, and a report
+        that a newer click made out of date is cached but not shown."""
+        entry = self._entry()
+        key = (action, self.selected or self.location, entry.etag if entry else "", variant)
         self._action = action
         self._mark_actions()
         if cache and key in self._cache:
             self._set_pane(self._cache[key])
             return
+        run = getattr(self._pane, method) if isinstance(method, str) else method
         self._captured: list[list[Any]] = []
         if self._widgets is None:
-            method(*args, **kwargs)
+            run(*args, **kwargs)
             self._set_pane(self._captured)
             return
         name = Entry("file", *parse_location(self.selected)).name if self.selected else ""
         waiting = {"preview": f"Opening {name}…", "head": f"Reading the details of {name}…",
-                   "download": f"Downloading {name}…", "summary": "Reading every file below this folder…"}
+                   "document": f"Reading {name}…", "download": f"Downloading {name}…",
+                   "summary": "Reading every file below this folder…",
+                   "zip": "Listing every file below this folder, then zipping them…"}
         self._set_pane([[self.s3._Note(waiting.get(action, "Working…"))]], keep=False)
+        loop = self._loop() if isinstance(method, str) and action in _BACKGROUND else None
+        if loop is not None:
+            self._task = loop.create_task(self._later(self._job, key, cache, method, self.selected, args, kwargs))
+            return
         try:
             with self._progress:
-                method(*args, **kwargs)
+                run(*args, **kwargs)
         finally:
             if self._execution() is not None:  # outside a kernel, clear_output() prints terminal escape codes
                 self._progress.clear_output()
-        if cache and self._captured and self._captured[0] and isinstance(self._captured[0][0], self.s3._Title):
-            # a report, not an error note: errors aren't kept, so trying again asks AWS again
-            while len(self._cache) >= 24:
-                self._cache.pop(next(iter(self._cache)))
-            self._cache[key] = self._captured
+        self._keep(key, self._captured, cache)
         self._set_pane(self._captured)
 
+    def _keep(self, key: tuple, reports: list[list[Any]], cache: bool) -> None:
+        """Cache a report, but not an error note: trying again then asks AWS again."""
+        if cache and reports and reports[0] and isinstance(reports[0][0], self.s3._Title):
+            while len(self._cache) >= 24:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = reports
+
+    @staticmethod
+    def _loop() -> asyncio.AbstractEventLoop | None:
+        """The kernel's event loop, which runs clicks and cells in a notebook; None elsewhere (a script, the
+        tests), where reports load right away as the click waits."""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+    async def _later(self, job: int, key: tuple, cache: bool, method: str, selected: str, args: tuple,
+                     kwargs: dict) -> None:
+        """Wait, on the kernel's event loop, for a report loading on a worker thread, then show it unless the
+        right pane has changed since (another file was clicked); it's cached either way."""
+        try:
+            if self._workers is None:
+                self._workers = ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="s3-explorer")
+            reports = await asyncio.wrap_future(self._workers.submit(self._load, job, method, selected, args, kwargs))
+            if reports is None:
+                return
+            self._keep(key, reports, cache)
+            if job == self._job:
+                self._set_pane(reports)
+        except Exception as exc:  # a bug: still say so where the user is looking, and not in the kernel's log
+            if job == self._job:
+                self._fail(f"Something went wrong ({type(exc).__name__}: {exc}). Click the file again to try again.")
+
+    def _load(self, job: int, method: str, selected: str, args: tuple, kwargs: dict) -> list[list[Any]] | None:
+        """On a worker thread: a report from an S3View of its own, which touches no widgets (no progress bar, and
+        its reports are kept here). None when another click came before it started: it would only be thrown away."""
+        if job != self._job:
+            return None
+        reports: list[list[Any]] = []
+        view = self.s3.S3View(self.core, progress="off")
+        view.use_html = self._pane.use_html
+        view._show = lambda blocks: reports.append(self._trim(blocks, selected))
+        getattr(view, method)(*args, **kwargs)
+        return reports
+
     def _set_pane(self, reports: list[list[Any]], keep: bool = True) -> None:
-        """Show reports on the right; the text explorer (no ipywidgets) shows them as the S3View would."""
+        """Show reports on the right; the text explorer (no ipywidgets) shows them as the S3View would. keep=False
+        is a note shown while a report loads."""
+        self._job += 1
         if keep:
             self.shown = [block for blocks in reports for block in blocks]
         if self._widgets is None:
@@ -841,6 +933,8 @@ class S3Explorer:
                 type(self._pane)._show(self._pane, blocks)
             return
         self._content.value = "".join(self.s3._render_html(blocks, self._pane.max_rows) for blocks in reports)
+        self._settings.layout.display = "none"
+        self._draw_pager(keep)
         self._renew("right")
 
     # ------------------------------------------------------------------ navigation
@@ -882,7 +976,7 @@ class S3Explorer:
             self._mark_rows()
             self._draw_actions()
             self._draw_status(self.nav.folder())
-        self._report("preview", self._pane.preview, uri)
+        self._report("preview", "preview", uri)
 
     def _show_folder(self, folder: Folder) -> None:
         self.selected = ""
@@ -978,8 +1072,10 @@ class S3Explorer:
                               layout=w.Layout(width="190px", flex="0 0 auto"))
         self._filter.add_class("s3x-filter")
         self._filter.observe(lambda _: self._quiet or self._guard(self._on_filter), "value")
+        self._gear = button("⚙", "s3x-nav", "Settings: the biggest folder to zip, and where zips go",
+                            self._toggle_settings)
         bar = w.HBox([self._back_btn, self._fwd_btn, self._up_btn, refresh, self._crumbs, self._path,
-                      self._edit_btn, self._filter], layout=w.Layout(width="100%"))
+                      self._edit_btn, self._filter, self._gear], layout=w.Layout(width="100%"))
         bar.add_class("s3x-bar")
 
         self._cols = {
@@ -1009,6 +1105,9 @@ class S3Explorer:
         self._actions.add_class("s3x-actions")
         self._progress = w.Output(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._content = w.HTML(layout=w.Layout(width="100%", flex="0 0 auto"))
+        self._pager = w.HBox(layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        self._pager.add_class("s3x-pager")
+        self._settings = self._build_settings(button)
         self._body = w.HBox(layout=w.Layout(width="100%", height=f"{self.height}px"))
         self._left = self._right = None
         self._renew("left", "right")
@@ -1017,6 +1116,33 @@ class S3Explorer:
         self._app = w.VBox([style, bar, self._body, self._status], layout=w.Layout(width="100%"))
         self._app.add_class("s3x")
         self._act_buttons: dict[str, Any] = {}
+
+    def _build_settings(self, button: Callable[..., Any]) -> Any:
+        """The ⚙ Settings panel, shown on the right under its title: a text box per setting, Save and Close.
+        Enter in a box saves too."""
+        w = self._widgets
+        self._set_size = w.Text(placeholder="100MB", layout=w.Layout(width="140px"))
+        self._set_files = w.Text(placeholder="10,000", layout=w.Layout(width="140px"))
+        self._set_folder = w.Text(placeholder=".", layout=w.Layout(width="200px"))
+        rows = []
+        for label, box, hint in (
+            ("Biggest zip", self._set_size, "500MB, 2GB, …: a bigger folder isn't zipped"),
+            ("Most files", self._set_files, "files in one zip"),
+            ("Save zips in", self._set_folder, ". is the notebook's folder"),
+        ):
+            box.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._save_settings))
+            hint_label = w.HTML(f'<span class="s3x-hint">{html.escape(hint)}</span>')
+            row = w.HBox([w.Label(label, layout=w.Layout(width="96px")), box, hint_label], layout=w.Layout(width="100%"))
+            row.add_class("s3x-setting")
+            rows.append(row)
+        save = button("Save", "s3x-act", "Use these settings", self._save_settings, width="auto")
+        cancel = button("Close", "s3x-act", "Close the settings", self._close_settings, width="auto")
+        actions = w.HBox([save, cancel], layout=w.Layout(width="100%"))
+        actions.add_class("s3x-setting")
+        self._set_note = w.HTML()
+        panel = w.VBox([*rows, actions, self._set_note], layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
+        panel.add_class("s3x-settings")
+        return panel
 
     def _renew(self, *sides: str) -> None:
         """Put the list ('left') or the report ('right') in a new box. Widgets can't scroll without JavaScript, but a
@@ -1027,9 +1153,9 @@ class S3Explorer:
                                 layout=w.Layout(width="42%", min_width="280px", overflow="auto", flex="0 0 auto"))
             self._left.add_class("s3x-left")
         if "right" in sides:
-            self._right = w.VBox([self._actions, self._progress, self._content],  # min_width 0: wide tables scroll
+            self._right = w.VBox([self._actions, self._progress, self._content, self._settings, self._pager],
                                  layout=w.Layout(flex="1 1 auto", width="auto", min_width="0", overflow="auto"))
-            self._right.add_class("s3x-right")
+            self._right.add_class("s3x-right")  # min_width 0: wide tables scroll
         self._body.children = (self._left, self._right)
         for box in old:
             if box is not None and box not in (self._left, self._right):
@@ -1169,8 +1295,10 @@ class S3Explorer:
             name = Entry("file", *parse_location(self.selected)).name
             actions = [("preview", "Preview", "What's inside the file"),
                        ("head", "Details", "Size, dates, storage class, metadata and tags")]
-            if _extension(name).split(".")[0] in _DOCUMENTS:
-                actions.append(("document", "Read all", "The whole document, page by page"))
+            kind = _extension(name).split(".")[0]
+            if kind in _DOCUMENTS:
+                actions.append(("document", "Read all", "Every page as it looks, 20 at a time (click a page to see it "
+                                "full size)" if kind == "pdf" else "The whole document, page by page"))
             actions += [("download", "⬇ Download", "Save a copy in this notebook's folder"),
                         ("link", "🔗 Link", "A download link that works for an hour, without AWS access"),
                         ("close", "✕", "Close the file and show this folder")]
@@ -1179,6 +1307,8 @@ class S3Explorer:
                         "findings (reads the whole listing, so big folders take a while)")]
             if not prefix:
                 actions.append(("bucket_info", "Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
+            actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip on the notebook's disk, "
+                            f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
         else:
             actions = [("overview", "Every bucket", "Each bucket's size, cost and security warnings")]
         old = self._actions.children
@@ -1242,21 +1372,172 @@ class S3Explorer:
         if action == "close":
             self._show_folder(self.nav.folder())
         elif action == "preview":
-            self._report("preview", self._pane.preview, uri)
+            self._report("preview", "preview", uri)
         elif action == "head":
-            self._report("head", self._pane.head, uri)
+            self._report("head", "head", uri)
+        elif action == "document" and _extension(Entry("file", *parse_location(uri)).name).split(".")[0] == "pdf":
+            self._show_pages(1)
         elif action == "document":
-            self._report("document", self._pane.document, uri)
+            self._report("document", "document", uri)
         elif action == "download":
-            self._report("download", self._pane.download, uri, cache=False)
+            self._report("download", "download", uri, cache=False)
         elif action == "link":
-            self._report("link", self._pane.link, uri, cache=False)
+            self._report("link", "link", uri, cache=False)
         elif action == "summary":
-            self._report("summary", self._pane.summary, uri)
+            self._report("summary", "summary", uri)
         elif action == "bucket_info":
-            self._report("bucket_info", self._pane.bucket_info, parse_location(uri)[0])
+            self._report("bucket_info", "bucket_info", parse_location(uri)[0])
         elif action == "overview":
-            self._report("overview", self._pane.overview)
+            self._report("overview", "overview")
+        elif action == "zip":
+            self._report("zip", self._zip, uri, cache=False)
+
+    # ------------------------------------------------------------------ a folder as a .zip, and ⚙ Settings
+
+    def _zip_limit(self) -> str:
+        """The zip limits in words: '100.0 MB and 10,000 files'."""
+        try:
+            size = self.s3.human_size(self.s3.parse_size(self.zip_max_size))
+        except (TypeError, ValueError):
+            size = str(self.zip_max_size)
+        return f"{size} and {self.zip_max_files:,} files"
+
+    def _zip(self, uri: str) -> None:
+        """⬇ Download .zip, for a folder: s3's download_zip with the limits from ⚙ Settings. It checks the size, file
+        count, disk space, memory and read access first, and writes nothing when one fails."""
+        bucket, prefix = parse_location(uri)
+        name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
+        folder = os.path.expanduser(self.zip_folder.strip() or ".")
+        if folder != ".":
+            os.makedirs(folder, exist_ok=True)
+        self._pane.download_zip(uri, name if folder == "." else os.path.join(folder, name),
+                                max_size=self.zip_max_size, max_files=self.zip_max_files)
+        report = self._captured[-1] if self._captured else []
+        refused = any(card[:2] == ("Can download", "no") for block in report if isinstance(block, self.s3._Cards)
+                      for card in block.items)
+        if refused:  # after the line that says why
+            at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Note)), len(report))
+            report.insert(at, self.s3._Note(f"If it's over a limit, ⚙ at the top right raises them (now "
+                                            f"{self._zip_limit()}); then click ⬇ Download .zip again."))
+
+    def _toggle_settings(self) -> None:
+        if self._settings.layout.display == "none":
+            self._open_settings()
+        else:
+            self._close_settings()
+
+    def _open_settings(self) -> None:
+        """⚙: the settings on the right, in place of the report."""
+        s3 = self.s3
+        self._action = "settings"
+        self._mark_actions()
+        try:
+            self._set_size.value = s3.human_size(s3.parse_size(self.zip_max_size)).replace(".0 ", " ")
+        except (TypeError, ValueError):
+            self._set_size.value = str(self.zip_max_size)
+        self._set_files.value = f"{self.zip_max_files:,}"
+        self._set_folder.value = self.zip_folder
+        self._set_note.value = ""
+        self._set_pane([[s3._Title("Settings", "for this explorer, until the kernel restarts"),
+                         s3._Note("“⬇ Download .zip” on a folder packs everything below it into one .zip on the "
+                                  "notebook's disk, if it's within these limits. It also checks the disk space, memory "
+                                  "and read access, and writes nothing when a check fails. To start with another "
+                                  "limit, use S3Explorer(zip_max_size='2GB').")]], keep=False)
+        self._settings.layout.display = None
+
+    def _close_settings(self) -> None:
+        """Back to the file or folder that was shown."""
+        self._settings.layout.display = "none"
+        if self.selected:
+            self._select(self.selected)
+        else:
+            self._show_folder(self.nav.folder())
+
+    def _save_settings(self) -> None:
+        s3 = self.s3
+
+        def say(text: str, level: str) -> None:
+            self._set_note.value = s3._render_html([s3._Note(text, level)], 0)
+
+        size_text = self._set_size.value.strip() or "100MB"
+        try:
+            size = s3.parse_size(size_text)
+        except ValueError:
+            size = None
+        if not size or size <= 0:
+            return say(f"“{size_text}” isn't a size; try 500MB or 2GB.", "warn")
+        files_text = self._set_files.value.replace(",", "").replace("_", "").strip() or "10000"
+        if not files_text.isdigit() or int(files_text) < 1:
+            return say(f"“{self._set_files.value}” isn't a number of files; try 10,000.", "warn")
+        folder = self._set_folder.value.strip() or "."
+        if os.path.exists(os.path.expanduser(folder)) and not os.path.isdir(os.path.expanduser(folder)):
+            return say(f"{folder} is a file, not a folder.", "warn")
+        self.zip_max_size, self.zip_max_files, self.zip_folder = size, int(files_text), folder
+        self._set_size.value = s3.human_size(size).replace(".0 ", " ")
+        self._set_files.value = f"{self.zip_max_files:,}"
+        where = "the notebook's folder" if folder == "." else folder + (
+            "" if os.path.isdir(os.path.expanduser(folder)) else " (made when the first zip is saved)")
+        say(f"Saved: “⬇ Download .zip” now packs folders up to {self._zip_limit()}, into {where}.", "ok")
+
+    # ------------------------------------------------------------------ a PDF, page by page
+
+    def _show_pages(self, first: int) -> None:
+        """Read all, for a PDF: its pages as they look, from `first` on (the pager under the report moves on)."""
+        self._first_page = first
+        self._report("document", self._read_pdf, self.selected, variant=first)
+
+    def _read_pdf(self, uri: str) -> None:
+        """The pages of a PDF drawn as they print, one report's worth (s3's _MAX_PICTURES, 20) from _first_page on,
+        each with its text folded underneath."""
+        count = self._page_count(uri)
+        if not count:  # a broken or locked PDF, or no pypdf: document() says what's wrong
+            self._pane.document(uri, pictures=True)
+            return
+        first, last = self._page_span(count)
+        self._pane.document(uri, pages=range(first, last + 1), pictures=True)
+        report = self._captured[-1] if self._captured else []
+        if report and isinstance(report[0], self.s3._Title):
+            at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Cards)), 1)
+            span = f"Pages {first}–{last} of {count:,}; the buttons at the end show the others. " if count > last - first + 1 else ""
+            report.insert(at, self.s3._Note(f"{span}Click a page to see it full size, and click again to come back."))
+
+    def _page_count(self, uri: str) -> int:
+        """How many pages a PDF has (0 when it can't be read), once per file version."""
+        entry = self._entry()
+        key = (uri, entry.etag if entry else "")
+        if key not in self._page_counts:
+            try:
+                self._page_counts[key] = self.core.read_pdf(uri, pages=[1]).page_count or 0
+            except (ClientError, BotoCoreError, *self.s3._READ_ERRORS):
+                self._page_counts[key] = 0
+        return self._page_counts[key]
+
+    def _page_span(self, count: int) -> tuple[int, int]:
+        """The first and last page "Read all" shows now."""
+        first = max(1, min(self._first_page, count))
+        return first, min(first + self.s3._MAX_PICTURES - 1, count)
+
+    def _draw_pager(self, show: bool = True) -> None:
+        """The buttons under a PDF's pages that show the pages before and after them."""
+        w, entry = self._widgets, self._entry()
+        count = self._page_counts.get((self.selected, entry.etag if entry else ""), 0)
+        per = self.s3._MAX_PICTURES
+        if not (show and self._action == "document" and count > per):
+            self._pager.layout.display = "none"
+            return
+        first, last = self._page_span(count)
+        old, children = self._pager.children, [w.Label(f"Pages {first}–{last} of {count:,}")]
+        for start, label, tip in ((max(1, first - per), f"‹ Pages {max(1, first - per)}–{first - 1}", "The pages before"),
+                                  (last + 1, f"Pages {last + 1}–{min(last + per, count)} ›", "The pages after")):
+            if 1 <= start <= count and start != first:
+                b = w.Button(description=label, tooltip=tip, layout=w.Layout(width="auto"))
+                b.add_class("s3x-act")
+                b.on_click(lambda _, start=start: self._guard(lambda: self._show_pages(start)))
+                children.append(b)
+        self._pager.children = children
+        self._pager.layout.display = None
+        for widget in old:
+            widget.close()
 
     def _on_filter(self) -> None:
         self._limit = self.page_size
