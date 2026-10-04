@@ -122,6 +122,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     answered(2)
     page.locator(".kbc-app details.src summary").last.click()
     shot("chat-window")
+    page.locator(".kbc-app button.kbc-add").click()  # opens Add a setting
     for label in ("+ Temperature", "+ Metadata filter", "+ Reranker"):
         page.locator(f".kbc-app button:has-text('{label}')").first.click()
         time.sleep(0.4)
@@ -133,8 +134,10 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
                                timeout=10_000)
     except PlaywrightTimeout:
         pass
-    scroll_to("document.querySelector(\".kbc-app textarea[placeholder*='team']\").closest('.kbc-row')")
+    page.locator(".kbc-app .kbc-card .kbc-x").first.click()  # folds it away again
+    scroll_to("document.querySelector('.kbc-app .kbc-row')")
     shot("chat-settings")
+    page.locator(".kbc-app button.kbc-add").click()
     search = page.locator(".kbc-app input[placeholder^='Search:']")
     search.fill("rerank")
     page.wait_for_selector(".kbc-app .kbc-pick", timeout=10_000)

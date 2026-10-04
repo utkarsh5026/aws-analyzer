@@ -2465,26 +2465,27 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .st.ok{opacity:.85}
 .kbc .st.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
 .kbc .st.ok::before{content:"\\2713";margin-right:6px;color:#10b981}
-.kbc .gh{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;opacity:.5;margin:12px 2px 4px;line-height:1.4}
-.kbc .ph{font-weight:650;font-size:13px;margin:2px 0 0;line-height:1.4}
+.kbc .gh{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.5;margin:10px 2px 4px;line-height:1.4}
+.kbc .ph{font-weight:650;font-size:12px;margin:2px 0 0;line-height:1.4}
 .kbc .ph .hint{margin-left:6px}
-.kbc .pd{font-size:12px;opacity:.6;margin:1px 0 4px;line-height:1.4}
-.kbc .rh{display:flex;align-items:baseline;gap:8px;min-width:0;padding-top:2px;line-height:1.3;cursor:help}
-.kbc .rh b{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kbc .rk{font-size:10.5px;opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kbc .rp{font-size:11.5px;line-height:1.4;opacity:.75;margin:5px 0 0;overflow-wrap:anywhere}
-.kbc .rp code{font-size:10.5px}
-.kbc .rw{font-size:10.5px;line-height:1.4;opacity:.5;margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.kbc .pd{font-size:11px;opacity:.6;margin:1px 0 4px;line-height:1.45}
+.kbc .rh{display:flex;align-items:baseline;gap:7px;min-width:0;line-height:1.3;cursor:help}
+.kbc .rh b{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .rk{font-size:10px;opacity:.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .rp{font-size:11px;line-height:1.4;opacity:.7;margin:4px 0 0;overflow-wrap:anywhere}
+.kbc .rp code{font-size:10px}
 .kbc .rp.bad{opacity:1;color:#dc2626}
 .kbc .rp.pending{opacity:.9;color:#d97706}
 .kbc .fc{min-width:0;line-height:1.35}
-.kbc .fc .fl{display:flex;align-items:baseline;gap:8px;min-width:0}
-.kbc .fc .fl b{font-weight:600;font-size:12.5px;white-space:nowrap}
-.kbc .fc .fd{font-size:11.5px;opacity:.68;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.kbc .fc .fw{font-size:10.5px;opacity:.45;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.kbc .setup{margin-top:4px;font-size:12px;line-height:1.4}
+.kbc .fc .fl{display:flex;align-items:baseline;gap:7px;min-width:0}
+.kbc .fc .fl b{font-weight:600;font-size:12px;white-space:nowrap}
+.kbc .fc .fd{font-size:11px;opacity:.65;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.kbc .fc .fw{font-size:10px;opacity:.4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.kbc details.setup{margin-top:6px;font-size:11px;line-height:1.4}
+.kbc details.setup>summary{cursor:pointer;width:fit-content;font-weight:600;font-size:12px;padding:2px 8px 2px 4px;border-radius:7px}
+.kbc details.setup>summary:hover{background:var(--kc-tint-2)}
 .kbc pre{word-break:normal}
-.kbc .setup pre{margin:4px 0 0}
+.kbc details.setup pre{margin:6px 0 0}
 .kbc .hd{display:flex;align-items:center;gap:12px;min-width:0}
 .kbc .hd .av{width:36px;height:36px;border-radius:12px;font-size:18px;margin:0;box-shadow:0 2px 8px var(--kc-ring)}
 .kbc .hd h3{margin:0;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2503,6 +2504,8 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .widget-text input:focus,.kbc-app.kbc-app .widget-textarea textarea:focus,.kbc-app.kbc-app .widget-dropdown>select:focus,.kbc-app.kbc-app .jupyter-widget-text input:focus,.kbc-app.kbc-app .jupyter-widget-textarea textarea:focus,.kbc-app.kbc-app .jupyter-widget-dropdown>select:focus{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
 .kbc-app.kbc-app .widget-text,.kbc-app.kbc-app .widget-dropdown,.kbc-app.kbc-app .widget-textarea{margin:2px 0}
 .kbc-app.kbc-app .kbc-mono textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5}
+.kbc-app.kbc-app .kbc-side{--jp-widgets-font-size:12px;--jp-widgets-inline-height:26px}
+.kbc-app.kbc-app .kbc-side .kbc-mono textarea,.kbc-app.kbc-app .kbc-side .kbc .json,.kbc-app.kbc-app .kbc-side .kbc pre{font-size:11.5px}
 .kbc-app.kbc-app .jupyter-button{border-radius:10px;border:1px solid var(--kc-line);background:var(--kc-tint);color:inherit;font-weight:500;box-shadow:none;outline:none;transition:background-color .15s,border-color .15s,box-shadow .15s,transform .05s}
 .kbc-app.kbc-app .jupyter-button:hover:enabled{background:var(--kc-tint-2);border-color:var(--kc-line-2);box-shadow:none}
 .kbc-app.kbc-app .jupyter-button:focus-visible{box-shadow:0 0 0 3px var(--kc-soft);outline:none}
@@ -2513,42 +2516,46 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-ghost{background:transparent;border-color:transparent}
 .kbc-app.kbc-app .kbc-ghost:hover:enabled{background:var(--kc-tint-2)}
 .kbc-app.kbc-app .kbc-new-chat{border-radius:999px;padding:0 14px}
-.kbc-app.kbc-app .kbc-chip{height:26px;line-height:24px;font-size:12px;padding:0 11px;margin:0 6px 6px 0;border-radius:999px;background:var(--kc-surface);border:1px dashed var(--kc-line-2)}
+.kbc-app.kbc-app .kbc-chip{height:24px;line-height:22px;font-size:11.5px;padding:0 10px;margin:0 5px 5px 0;border-radius:999px;background:var(--kc-surface);border:1px dashed var(--kc-line-2)}
 .kbc-app.kbc-app .kbc-chip:hover:enabled{border-style:solid;border-color:var(--kc-accent);color:var(--kc-accent);background:var(--kc-soft)}
-.kbc-app.kbc-app .kbc-x{padding:0;min-width:26px;height:26px;line-height:24px;border-radius:999px;background:transparent;border-color:transparent;opacity:.55}
+.kbc-app.kbc-app .kbc-x{padding:0;min-width:22px;height:22px;line-height:20px;font-size:11px;border-radius:999px;background:transparent;border-color:transparent;opacity:.55}
 .kbc-app.kbc-app .kbc-x:hover:enabled{opacity:1;background:rgba(239,68,68,.12);color:#dc2626}
-.kbc-app.kbc-app .kbc-small{height:26px;line-height:24px;font-size:12px;padding:0 12px;border-radius:999px}
+.kbc-app.kbc-app .kbc-small{height:24px;line-height:22px;font-size:11.5px;padding:0 11px;border-radius:999px}
 .kbc-app.kbc-app .kbc-log{border:1px solid var(--kc-line);border-radius:18px;padding:12px 14px;background:var(--kc-tint)}
 .kbc-app.kbc-app .kbc-composer{margin-top:10px;padding:5px 5px 5px 8px;border:1px solid var(--kc-line-2);border-radius:999px;background:var(--kc-surface);box-shadow:var(--kc-shadow);align-items:center;transition:border-color .15s,box-shadow .15s}
 .kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
 .kbc-app.kbc-app .kbc-composer .widget-text input,.kbc-app.kbc-app .kbc-composer .jupyter-widget-text input{border:0;box-shadow:none;background:transparent;font-size:14px;padding:4px 8px}
 .kbc-app.kbc-app .kbc-composer .jupyter-button{border-radius:999px;height:34px;line-height:34px;padding:0 18px}
-.kbc-app.kbc-app .kbc-row{border:1px solid var(--kc-line);border-radius:14px;padding:9px 10px 10px 13px;margin:0 0 8px;background:var(--kc-surface);transition:border-color .2s,box-shadow .2s}
-.kbc-app.kbc-app .kbc-row:hover{border-color:var(--kc-line-2)}
-.kbc-app.kbc-app .kbc-row.kbc-fresh{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
-.kbc-app.kbc-app .kbc-row.kbc-broken{border-color:rgba(220,38,38,.6)}
-.kbc-app.kbc-app .kbc-row.kbc-pending{border-style:dashed;border-color:rgba(217,119,6,.7)}
+.kbc-app.kbc-app .kbc-row{border:1px solid transparent;border-top-color:var(--kc-line);border-radius:0;padding:6px 2px 7px 6px;margin:0;background:transparent;transition:background-color .2s,border-color .2s,box-shadow .2s}
+.kbc-app.kbc-app .kbc-row:hover{background:var(--kc-tint)}
+.kbc-app.kbc-app .kbc-row .rp{margin-top:1px}
+.kbc-app.kbc-app .kbc-row.kbc-fresh{border-color:var(--kc-accent);border-radius:10px;box-shadow:0 0 0 2px var(--kc-soft)}
+.kbc-app.kbc-app .kbc-row.kbc-broken{border-color:rgba(220,38,38,.6);border-radius:10px}
+.kbc-app.kbc-app .kbc-row.kbc-pending{border-style:dashed;border-color:rgba(217,119,6,.7);border-radius:10px}
+.kbc-app.kbc-app .kbc-add{height:30px;border:1px dashed var(--kc-line-2);border-radius:10px;background:transparent;font-size:12px;opacity:.8}
+.kbc-app.kbc-app .kbc-add:hover:enabled{opacity:1;border-style:solid;border-color:var(--kc-accent);color:var(--kc-accent);background:var(--kc-soft)}
+.kbc-app.kbc-app .kbc-foot{margin-top:14px;padding:10px 0 0 2px;border-top:1px solid var(--kc-line)}
 .kbc-app.kbc-app .kbc-search{margin-top:4px}
-.kbc-app.kbc-app .kbc-pick{align-items:center;gap:10px;padding:7px 8px 7px 11px;border-radius:12px;border:1px solid transparent;margin:0 0 2px}
+.kbc-app.kbc-app .kbc-pick{align-items:center;gap:10px;padding:6px 8px 6px 10px;border-radius:10px;border:1px solid transparent;margin:0 0 2px}
 .kbc-app.kbc-app .kbc-pick:hover{background:var(--kc-tint);border-color:var(--kc-line)}
 .kbc-app.kbc-app .kbc-pick .jupyter-button{flex:0 0 auto}
 .kbc-app.kbc-app .kbc-results{margin:4px 0 2px}
-.kbc-app.kbc-app .kbc-card{border:1px solid var(--kc-line);border-radius:14px;padding:10px 12px;margin:10px 0 0;background:var(--kc-tint)}
+.kbc-app.kbc-app .kbc-card{border:1px solid var(--kc-line);border-radius:12px;padding:9px 11px;margin:8px 0 0;background:var(--kc-tint)}
 .kbc-app.kbc-app .widget-checkbox input[type=checkbox],.kbc-app.kbc-app .jupyter-widget-checkbox input[type=checkbox]{accent-color:var(--kc-accent);width:15px;height:15px}
 .kbc-app.kbc-app .widget-toggle-buttons,.kbc-app.kbc-app .jupyter-widget-toggle-buttons{display:inline-flex;padding:3px;border-radius:12px;background:var(--kc-tint-2);gap:2px;flex:0 0 auto}
-.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button,.kbc-app.kbc-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{margin:0;height:26px;line-height:26px;border:0;border-radius:9px;background:transparent;opacity:.72;font-size:12px;box-shadow:none;transform:none}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button,.kbc-app.kbc-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{margin:0;height:24px;line-height:24px;border:0;border-radius:9px;background:transparent;opacity:.72;font-size:11.5px;box-shadow:none;transform:none}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active,.kbc-app.kbc-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button.mod-active{background:var(--kc-surface);opacity:1;font-weight:600;box-shadow:0 1px 3px rgba(15,23,42,.15)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:hover:enabled{opacity:1;background:var(--kc-tint)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active:hover:enabled{background:var(--kc-surface)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:disabled{opacity:.4}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar,.kbc-app.kbc-app .kbc-side>.p-TabBar{padding:4px;border-radius:14px;background:var(--kc-tint-2);min-height:0;border:0;overflow:visible;margin:0 0 10px}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:3px;border:0;align-items:stretch}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 0;min-width:0;min-height:30px;line-height:30px;margin:0;padding:0 10px;border:0;border-radius:10px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 0;min-width:0;min-height:28px;line-height:28px;margin:0;padding:0 8px;border:0;border-radius:10px;font-size:12px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab:hover:not(.lm-mod-current),.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab:hover:not(.p-mod-current){background:var(--kc-tint);opacity:.95}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:30px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:28px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
 .kbc-app.kbc-app .kbc-side .lm-TabBar-tabLabel,.kbc-app.kbc-app .kbc-side .p-TabBar-tabLabel{text-align:center}
-.kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:18px;padding:12px 6px 12px 14px;background:var(--kc-surface);overflow:hidden}
+.kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:16px;padding:10px 4px 10px 12px;background:var(--kc-surface);overflow:hidden}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px;overflow:hidden auto;padding-right:8px}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box>*,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box>*{flex-shrink:0}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
@@ -3831,6 +3838,7 @@ def _wrap(inner: str) -> str:
 
 _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max_tokens", "prompt", "query_decomposition")
 _SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
+_BESIDE = ("integer", "float", "boolean", "choice")  # kinds whose box sits beside the setting's name
 _PYTHON_WIDTH = 64  # where the Request JSON tab's Python breaks lines, so it fits the tab
 
 
@@ -3938,22 +3946,38 @@ class _ChatApp:
         search = w.HBox([self.add_name, self.browse_button],
                         layout=layout(width="100%", align_items="center"))
         search.add_class("kbc-search")
-        adding = w.VBox([
-            w.HTML(_wrap('<div class="ph">Add a setting</div><div class="pd">One click adds a common one. Or search '
-                         f"all {len(self.schema.fields)} fields the API takes, by name or by what they do, and press "
-                         "Enter to add the best match.</div>")),
+        # Add a setting stays folded under one button until it's wanted, so the tab shows what's sent, not
+        # everything that could be
+        self.add_button = w.Button(description="+ Add a setting", tooltip="A common setting in one click, or search "
+                                   f"all {len(self.schema.fields)} fields the API takes",
+                                   layout=layout(width="100%", margin="8px 0 0 0"))
+        self.add_button.add_class("kbc-add")
+        self.add_button.on_click(self._safely(lambda _button: self._show_adding(True)))
+        self.close_adding = w.Button(description="✕", tooltip="Close Add a setting",
+                                     layout=layout(width="22px", flex="0 0 auto"))
+        self.close_adding.add_class("kbc-x")
+        self.close_adding.on_click(self._safely(lambda _button: self._show_adding(False)))
+        self.adding = w.VBox([
+            w.HBox([w.HTML(_wrap('<div class="ph">Add a setting</div>'), layout=layout(flex="1 1 auto")),
+                    self.close_adding],
+                   layout=layout(width="100%", align_items="center")),
+            w.HTML(_wrap('<div class="pd">One click adds a common one. Or search all '
+                         f"{len(self.schema.fields)} fields by name or by what they do; Enter adds the best match."
+                         "</div>")),
             self.chip_box, search, self.add_help, self.results,
-        ], layout=layout(width="100%"))
-        adding.add_class("kbc-card")
+        ], layout=layout(width="100%", display="none"))
+        self.adding.add_class("kbc-card")
         self.stream_box = w.Checkbox(value=self.view.stream, description="Show answers as they're written",
-                                     indent=False, layout=layout(width="auto", margin="12px 0 0 0"))
+                                     indent=False, layout=layout(width="auto"))
         self.stream_box.observe(self._safely(self._stream_changed), names="value")
-        self.setup = w.HTML(layout=layout(width="100%", margin="8px 0 0 0"))
+        self.setup = w.HTML(layout=layout(width="100%"))
+        window_options = w.VBox([self.stream_box, self.setup], layout=layout(width="100%"))
+        window_options.add_class("kbc-foot")
         settings_tab = w.VBox([
             self.findings,
             w.HTML(_wrap('<div class="ph">Sent with every question<span class="hint">hover a name for what it '
                          "does</span></div>")),
-            self.rows_box, adding, self.stream_box, self.setup,
+            self.rows_box, self.add_button, self.adding, window_options,
         ], layout=layout(width="100%"))
 
         # Request JSON
@@ -4250,7 +4274,8 @@ class _ChatApp:
 
     def _input(self, f: Field, value: Any) -> Any:
         w, layout = self.w, self.w.Layout
-        full = layout(width="100%", min_width="0")
+        full = layout(width="56%", flex="0 0 auto", min_width="0") if f.kind in _BESIDE else layout(
+            width="100%", min_width="0")
         if f.kind == "integer":
             low = int(f.low) if f.low is not None else -(2**31)
             high = int(f.high) if f.high is not None else 2**31 - 1
@@ -4291,34 +4316,42 @@ class _ChatApp:
         return str(value)
 
     def _row(self, key: str) -> Any:
-        """A setting's card: its name and what it takes, ✕, the box holding its value, and what the value means."""
+        """A setting's line: its name, the box holding its value (beside the name when it's short, under it
+        otherwise), ✕, and what the value means. Hovering the name says what the setting does, what it takes and
+        where it goes in the request."""
         w, layout = self.w, self.w.Layout
         f = self.schema.fields[key]
-        head = w.HTML(_wrap(f'<div class="rh" title="{_esc(f.doc)}"><b>{_esc(f.label)}</b><span class="rk">'
-                            f"{_esc(_kind_text(f))}</span></div>"), layout=layout(flex="1 1 auto", min_width="0"))
-        remove = w.Button(description="✕", tooltip=f"Stop sending {key}", layout=layout(width="26px", flex="0 0 auto"))
+        tip = f"{f.doc}\n\nTakes: {_kind_text(f)}\nSent as: {'.'.join(f.path)}"
+        if key != ".".join(f.path):
+            tip += f"\nIn code: {key}"
+        kind = "" if f.kind in _BESIDE else f'<span class="rk">{_esc(_kind_text(f))}</span>'
+        head = w.HTML(_wrap(f'<div class="rh" title="{_esc(tip)}"><b>{_esc(f.label)}</b>{kind}</div>'),
+                      layout=layout(flex="1 1 auto", min_width="0"))
+        remove = w.Button(description="✕", tooltip=f"Stop sending {key}", layout=layout(width="22px", flex="0 0 auto"))
         remove.add_class("kbc-x")
         remove.on_click(self._safely(lambda _button, key=key: self._remove(key)))
         value_box = self._input(f, self.view.values.get(key))
         value_box.observe(self._safely(lambda change, key=key: self._edited(key, change["new"])), names="value")
         note = w.HTML(layout=layout(width="100%"))
-        row = w.VBox([w.HBox([head, remove], layout=layout(width="100%", align_items="center", margin="0 0 4px 0")),
-                      value_box, note], layout=layout(width="100%"))
+        line = layout(width="100%", align_items="center")
+        if f.kind in _BESIDE:
+            parts = [w.HBox([head, value_box, remove], layout=line), note]
+        else:
+            parts = [w.HBox([head, remove], layout=line), value_box, note]
+        row = w.VBox(parts, layout=layout(width="100%"))
         row.add_class("kbc-row")
         self.inputs[key], self.row_notes[key], self.removes[key] = value_box, note, remove
         return row
 
     def _note_row(self, key: str) -> None:
         f = self.schema.fields[key]
-        named = f"{key} · " if key != f.where else ""
-        where = f'<div class="rw" title="{_esc(".".join(f.path))}">{_esc(named + f.where)}</div>'
         if key in self.broken:
             text, css = f"Not sent: {_esc(self.broken[key])}", "rp bad"
         elif key in self.pending:
             text, css = "Not sent until you fill it in.", "rp pending"
         else:
             text, css = _esc(describe_setting(f, self.view.values.get(key))), "rp"
-        self._set(self.row_notes[key], _wrap(f'<div class="{css}">{text}</div>{where}'))
+        self._set(self.row_notes[key], _wrap(f'<div class="{css}">{text}</div>'))
         box = self.inputs[key]
         if f.kind == "boolean":
             self._quietly(box, description="on" if box.value else "off")
@@ -4357,8 +4390,8 @@ class _ChatApp:
                 children.append(self.headers[group])
             children.append(self.rows[key])
         if not keys:
-            children = [self.w.HTML(_wrap('<div class="more" style="margin:6px 0 10px">Nothing is set, so Bedrock '
-                                          "uses its defaults. Add a setting below.</div>"))]
+            children = [self.w.HTML(_wrap('<div class="more" style="margin:6px 0 2px">Nothing is set, so Bedrock '
+                                          "uses its defaults.</div>"))]
         self.rows_box.children = children
         self._sync_chips()
         self._show_matches()
@@ -4439,6 +4472,19 @@ class _ChatApp:
         self._set_status(f"Added {f.label}. {what} Change it in place; ✕ removes it.", "ok")
 
     # ------------------------------------------------- finding a setting to add
+
+    def _show_adding(self, show: bool) -> None:
+        """Opens Add a setting in place of its button (with the cursor in the search box), or folds it away again,
+        forgetting the search."""
+        self.adding.layout.display = "" if show else "none"
+        self.add_button.layout.display = "none" if show else ""
+        if show:
+            if hasattr(self.add_name, "focus"):  # ipywidgets 8
+                self.add_name.focus()
+            return
+        self.browsing = False
+        self._quietly(self.add_name, value="")
+        self._show_matches()
 
     @staticmethod
     def _mentions(f: Field, text: str) -> bool:
@@ -4552,9 +4598,9 @@ class _ChatApp:
         found += settings_findings(view.values, view.model or "")
         notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(found))
         self._set(self.findings, _wrap(f'<div style="margin:0 0 10px">{notes}</div>') if notes else "")
-        self._set(self.setup, _wrap(f'<div class="setup"><div class="ph">Open this setup again<span class="hint">click '
-                                    f'it to select all, then copy</span></div><pre class="code hl"{_SELECT}>'
-                                    f"{_python_html(view._setup_call())}</pre></div>"))
+        self._set(self.setup, _wrap(f'<details class="setup"><summary>Open this setup again<span class="hint">the '
+                                    f"chat(...) call, to paste into another notebook</span></summary><pre "
+                                    f'class="code hl"{_SELECT}>{_python_html(view._setup_call())}</pre></details>'))
         self._params = params
         self._render_request()
         if self.editing:

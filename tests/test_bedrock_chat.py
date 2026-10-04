@@ -905,6 +905,11 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
     assert [label for label, _ in app.model_pick.options][0].startswith("Nova Pro · Amazon")  # by provider
     assert list(app.rows) == ["n"] and app.inputs["n"].value == 5
     assert "Retrieves the 5 passages that match best." in app.row_notes["n"].value
+    name = app.rows["n"].children[0]
+    assert app.inputs["n"] in name.children  # a number sits beside its name
+    tip = name.children[0].value  # hovering the name says what it does, and where it goes
+    assert "How many passages Bedrock retrieves" in tip and "vectorSearchConfiguration.numberOfResults" in tip
+    assert app.adding.layout.display == "none"  # Add a setting waits behind its button
     assert [chip.description for chip in app.chip_box.children][:3] == ["+ Search type", "+ Metadata filter",
                                                                          "+ Reranker"]
     assert "Ask support-docs a question." in texts(app)[0]
@@ -937,6 +942,7 @@ def test_window_keeps_a_setting_out_until_it_can_be_sent(window):
     app = window._app
     app.chips["filter"].click()
     assert "filter" in app.pending and "filter" not in window.values
+    assert app.inputs["filter"] in app.rows["filter"].children  # JSON gets a box under the name
     assert "Not sent until you fill it in." in app.row_notes["filter"].value
     assert "kbc-pending" in app.rows["filter"]._dom_classes
     app.inputs["filter"].value = '{"team": '
@@ -947,6 +953,20 @@ def test_window_keeps_a_setting_out_until_it_can_be_sent(window):
     assert window.values["filter"]["andAll"][1] == {"greaterThanOrEquals": {"key": "year", "value": 2024}}
     assert "team = &quot;billing&quot; and year ≥ 2024" in app.row_notes["filter"].value
     assert not app.broken and "greaterThanOrEquals&quot;" in app.request_view.value
+
+
+def test_window_opens_and_folds_add_a_setting(window):
+    app = window._app
+    app.add_button.click()
+    assert app.adding.layout.display == "" and app.add_button.layout.display == "none"
+    app.add_name.value = "rerank"
+    app.browse_button.click()
+    assert app.results.children and app.browsing
+    app.chips["temperature"].click()
+    assert "temperature" in app.rows and app.adding.layout.display == ""  # it stays open, to add another
+    app.close_adding.click()
+    assert app.adding.layout.display == "none" and app.add_button.layout.display == ""
+    assert app.add_name.value == "" and app.results.children == () and not app.browsing  # the search is forgotten
 
 
 def test_window_finds_any_field_by_name_path_or_what_it_does(window):

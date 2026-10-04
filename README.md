@@ -960,7 +960,7 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type as cards, each explained in a sentence, one-click buttons to add a metadata filter, a reranker, temperature and more, and a box to search every setting">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
 </picture>
 
 <p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
@@ -983,8 +983,9 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
   Findings under an answer say which setting to try (Bedrock's "unable to assist" reply, no citations, a guardrail,
   cut off at `max_tokens`). Follow-ups keep Bedrock's session; **New chat** starts over.
-- **⚙️ Settings.** Everything sent with every question, each value explained in a sentence, with its path in the
-  request. Change it in place, remove it with ✕, add the common ones with one click, or search **every** field by
+- **⚙️ Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
+  name for what it does and its path in the request). Change it in place, remove it with ✕, or open **+ Add a
+  setting** to add the common ones with one click, search **every** field by
   name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
   the list comes from the installed boto3's description of the API, so nothing is missing. A value that
   can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
