@@ -247,11 +247,11 @@ listed on the left. Click a folder to open it, or click a file to see what's ins
 same `preview` as above: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-dark.webp">
-  <img src="docs/images/explorer-light.webp" alt="S3Explorer in a notebook: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn and a filter box; on the left three parquet files with their sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with its row, column and row-group counts and first rows">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-tour-dark.webp">
+  <img src="docs/images/explorer-tour-light.webp" alt="S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points">
 </picture>
 
-<p align="center"><sub><code>S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet")</code>: the folder on the left, the file you clicked on the right.</sub></p>
+<p align="center"><sub><code>S3Explorer()</code>: from your buckets to a Parquet file's first rows and a Word document, one click at a time.</sub></p>
 
 It builds on `s3.py`, so put **both files** next to your notebook, or paste `s3.py` into a cell and `s3_explorer.py`
 into the next one. Clicking needs `ipywidgets`, which SageMaker notebooks already have.

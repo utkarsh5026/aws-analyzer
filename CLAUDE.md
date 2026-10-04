@@ -290,12 +290,13 @@ never prints), and `S3Explorer` as the UI. How the UI works:
   The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
   fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
-  The explorer is a live widget, so its figures (`explorer`, `explorer-docx`) come from `explorer_shots.py`, which
-  runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
+  The explorer is a live widget, so its figures (`explorer`, `explorer-docx`, `explorer-buckets`, and `explorer-tour`,
+  an animated WebP of a pointer clicking through it) come from `explorer_shots.py`, which runs it in a real JupyterLab
+  with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows eight of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer`, `dynamodb-scan-filter`,
+  shows eight of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
   `bedrock-ask`, `chat-window`, `sagemaker-instance`) as `<picture>`s that switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the

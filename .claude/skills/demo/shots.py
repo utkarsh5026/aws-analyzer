@@ -593,6 +593,7 @@ def seed_s3_docs() -> dict:
     s3.put_bucket_lifecycle_configuration(Bucket="acme-logs", LifecycleConfiguration={"Rules": [
         {"ID": "expire-after-a-year", "Status": "Enabled", "Filter": {"Prefix": ""}, "Expiration": {"Days": 365},
          "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}}]})
+    _backdate_buckets({lake: 820, "acme-logs": 1150, f"sagemaker-{REGION}-{ACCOUNT}": 540, "acme-eu-exports": 230})
 
     tb = 1024 * GB
     cloudwatch = S3Metrics(
@@ -606,6 +607,18 @@ def seed_s3_docs() -> dict:
     listed = {lake: _lake_listing(rng)}
     sizes = {(lake, "models/tiny-llm/model.safetensors"): size}
     return {"session": S3Session(listed, sizes, cloudwatch), "client": S3Overlay(s3, listed, sizes)}
+
+
+def _backdate_buckets(ages: dict[str, float]) -> None:
+    """moto stamps buckets with the time they're made; the explorer's list of buckets shows how old each one is."""
+    from moto.core.models import DEFAULT_ACCOUNT_ID
+    from moto.s3.models import s3_backends
+
+    import demo
+
+    buckets = s3_backends[DEFAULT_ACCOUNT_ID]["aws"].buckets
+    for name, days in ages.items():
+        buckets[name].creation_date = demo.NOW - timedelta(days=days)
 
 
 def _backdate_markers(bucket: str, rng: random.Random) -> None:
