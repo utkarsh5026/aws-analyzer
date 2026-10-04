@@ -1,4 +1,7 @@
+import asyncio
 import sys
+import threading
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -291,7 +294,7 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     x._act_buttons["link"].click()
     assert "Download part-2.csv (valid 60 min)" in text(x)
     x._act_buttons["close"].click()
-    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary"]
+    assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip"]
 
 
 def test_explorer_toolbar_and_breadcrumbs(explorer):
@@ -469,3 +472,138 @@ def test_s3_module_is_found_where_s3_py_is(monkeypatch):
     for name in ("S3Analyzer", "S3View", "_render_html"):  # ...but it was pasted into a cell
         monkeypatch.setattr(main, name, getattr(s3mod, name), raising=False)
     assert sx._s3_module() is main
+
+
+# ----------------------------------------------------------------------------- PDFs, background loading, zips
+
+
+def pdf_bytes(*pages):
+    """A PDF with one page per text, xref offsets and all."""
+    count = len(pages)
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(count)),
+                                                             count),
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    for i, text in enumerate(pages):
+        stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode()
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents %d 0 R "
+                       b"/Resources << /Font << /F1 3 0 R >> >> >>" % (5 + 2 * i))
+        objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+def pager(x):
+    return [child.description if hasattr(child, "description") and child.description else child.value
+            for child in x._pager.children]
+
+
+def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
+    aws.put_object(Bucket=LAKE, Key="docs/long.pdf", Body=pdf_bytes(*(f"Page {n} text" for n in range(1, 26))))
+    aws.put_object(Bucket=LAKE, Key="docs/short.pdf", Body=pdf_bytes("One", "Two"))
+    aws.put_object(Bucket=LAKE, Key="docs/broken.pdf", Body=b"%PDF-1.4 not really")
+    x = explorer("s3://lake/docs/long.pdf")
+    assert x._content.value.count('<div class="zw"') == 3  # the preview's pages: click one to see it full size
+    assert "Every page as it looks" in x._act_buttons["document"].tooltip
+
+    x._act_buttons["document"].click()
+    drawn = [block.pictures[0].page for block in x.shown if isinstance(block, s3mod._Pages)]
+    assert drawn == list(range(1, 21)) and x._content.value.count('<div class="zw"') == 20
+    assert "Pages 1–20 of 25; the buttons at the end show the others. Click a page to see it full size" in text(x)
+    assert "Text of page 3" in text(x)  # each page's text, folded under it
+    assert x._pager.layout.display is None and pager(x) == ["Pages 1–20 of 25", "Pages 21–25 ›"]
+    x._pager.children[1].click()
+    assert [block.pictures[0].page for block in x.shown if isinstance(block, s3mod._Pages)] == [21, 22, 23, 24, 25]
+    assert pager(x) == ["Pages 21–25 of 25", "‹ Pages 1–20"]
+    x._pager.children[1].click()
+    assert pager(x)[0] == "Pages 1–20 of 25"
+    x._act_buttons["preview"].click()
+    assert x._pager.layout.display == "none"
+
+    row(x, "short.pdf").button.click()
+    x._act_buttons["document"].click()
+    assert len([block for block in x.shown if isinstance(block, s3mod._Pages)]) == 2
+    assert x._pager.layout.display == "none" and "Pages 1–2" not in text(x) and "Click a page" in text(x)
+
+    row(x, "broken.pdf").button.click()
+    x._act_buttons["document"].click()  # it can't be counted: document() says why
+    assert "pypdf couldn't read this PDF" in text(x)
+
+
+def test_explorer_loads_previews_in_the_background(explorer, core, monkeypatch):
+    """In a notebook (a running event loop), a click returns at once; a file clicked since wins."""
+    monkeypatch.setattr(sx, "_WORKERS", 1)
+    gate, real, asked = threading.Event(), core.preview, []
+
+    def slow(uri, *args, **kwargs):
+        asked.append(uri.rsplit("/", 1)[-1])
+        if uri.endswith("readme.md"):
+            gate.wait(10)
+        return real(uri, *args, **kwargs)
+
+    monkeypatch.setattr(core, "preview", slow)
+
+    async def main():
+        x = explorer("s3://lake/raw/events/")
+        x.open("s3://lake/raw/readme.md")
+        first = x._task
+        assert x.selected == "s3://lake/raw/readme.md" and "Opening readme.md…" in x._content.value
+        while not asked:  # it has started on the worker thread (one clicked past before that is skipped)
+            await asyncio.sleep(0.01)
+        x.open("s3://lake/raw/events/part-10.csv")  # waits behind readme.md, then is skipped
+        x.open("s3://lake/raw/events/part-2.csv")
+        assert x.selected.endswith("part-2.csv") and "Opening part-2.csv…" in x._content.value
+        gate.set()
+        await first
+        assert "Preview of readme.md" not in text(x)  # out of date: kept, not shown
+        await x._task
+        assert "Preview of part-2.csv" in text(x) and asked == ["readme.md", "part-2.csv"]
+        x.open("s3://lake/raw/readme.md")  # it was cached on the way
+        assert "Preview of readme.md" in text(x) and asked == ["readme.md", "part-2.csv"]
+
+        def broken(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(s3mod.S3View, "preview", broken)
+        x.refresh()
+        await x._task
+        assert "Something went wrong (RuntimeError: boom)" in x._content.value
+
+    asyncio.run(main())
+
+
+def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    x = explorer("s3://lake/raw/", zip_max_size="20B")
+    assert list(x._act_buttons) == ["summary", "zip"] and "no bigger than 20 B and 10,000 files" in x._act_buttons["zip"].tooltip
+    x._act_buttons["zip"].click()
+    out = text(x)
+    assert "Can't zip this here yet" in out and "⚙ at the top right raises them (now 20 B and 10,000 files)" in out
+    assert out.index("Can't zip this here yet") < out.index("⚙ at the top right")  # after the line that says why
+    assert not (tmp_path / "raw.zip").exists()
+
+    x._gear.click()
+    assert x._settings.layout.display is None and "Settings" in x._content.value and x._set_size.value == "20 B"
+    x._set_size.value = "lots"
+    x._set_size._handle_custom_msg({"event": "submit"}, [])  # Enter saves
+    assert "“lots” isn&#x27;t a size" in x._set_note.value and x.zip_max_size == "20B"
+    x._set_size.value, x._set_files.value, x._set_folder.value = "1MB", "5,000", "zips"
+    x._set_folder._handle_custom_msg({"event": "submit"}, [])
+    assert (x.zip_max_size, x.zip_max_files, x.zip_folder) == (1024 ** 2, 5000, "zips")
+    assert "up to 1.0 MB and 5,000 files, into zips (made when the first zip is saved)" in x._set_note.value
+    x._gear.click()  # closes the settings
+    assert x._settings.layout.display == "none" and "File types here" in text(x)
+
+    x._act_buttons["zip"].click()
+    with zipfile.ZipFile(tmp_path / "zips" / "raw.zip") as made:
+        assert sorted(made.namelist()) == ["events/part-10.csv", "events/part-2.csv", "readme.md"]
+    assert f"Saved {tmp_path / 'zips' / 'raw.zip'} (" in text(x) and "choose Download" in text(x)
+    assert "⚙" not in text(x)  # the limits only come up when they stop a zip
+

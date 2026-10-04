@@ -7413,6 +7413,21 @@ _CSS = """<style>
 .s3a .pages.one figure{flex-basis:640px}
 .s3a .pages img{display:block;width:100%;height:auto;max-height:none;border:0;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .s3a .pages figcaption{font-size:11px;opacity:.65;text-align:center;margin-top:4px}
+.s3a .zr{display:none}
+.s3a .zo{display:block;cursor:zoom-in}
+.s3a .zx,.s3a .zc,.s3a .zn,.s3a .zh{display:none}
+.s3a .zr:not(:checked)+.zp .zo:hover img{box-shadow:0 0 0 2px rgba(59,130,246,.7),0 1px 4px rgba(0,0,0,.3)}
+.s3a .zr:checked+.zp{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 68px;background:rgba(17,17,17,.9)}
+.s3a .zr:checked+.zp .zo{flex:1 1 auto;min-height:0;width:100%}
+.s3a .zr:checked+.zp img{width:100%;height:100%;object-fit:contain;background:transparent;box-shadow:none}
+.s3a .zr:checked+.zp .zx{display:block;position:absolute;inset:0;z-index:1;cursor:zoom-out}
+.s3a .zr:checked+.zp .zh{display:block;flex:0 0 auto;color:#eee;font-size:12px}
+.s3a .zr:checked+.zp .zn,.s3a .zr:checked+.zp .zc{display:flex;align-items:center;justify-content:center;position:absolute;z-index:2;width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.14);color:#fff;font-size:30px;line-height:1;cursor:pointer;user-select:none}
+.s3a .zr:checked+.zp .zn:hover,.s3a .zr:checked+.zp .zc:hover{background:rgba(255,255,255,.3)}
+.s3a .zr:checked+.zp .zn{top:50%;transform:translateY(-50%)}
+.s3a .zr:checked+.zp .zprev{left:12px}
+.s3a .zr:checked+.zp .znext{right:12px}
+.s3a .zr:checked+.zp .zc{top:12px;right:12px;width:36px;height:36px;font-size:18px}
 .s3a .flow{max-width:760px;margin:6px 0 10px;padding:14px 22px;border:1px solid rgba(127,127,127,.3);border-radius:6px}
 .s3a .flow{font-size:14px;line-height:1.55}
 .s3a .flow p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -7635,11 +7650,20 @@ _LEAD_END_RE = re.compile(r"[:;](?=\s)|\.(?=\s+[A-Z0-9\"'(<$])")
 _MONEY_RE = re.compile(r"(-?<?\$[\d,]+(?:\.\d+)?(?:/month|/mo\b| a month| per month)?)")
 
 
+def _masked(text: str) -> str:
+    """The text with its commands and anything in brackets blanked out (same length), so a sentence is never
+    split inside them: 'Something went wrong (RuntimeError: boom)' has no lead."""
+    masked, before = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text), None
+    while masked != before:  # innermost brackets first
+        before, masked = masked, re.sub(r"[(\[][^()\[\]]*[)\]]", lambda m: "x" * len(m.group(0)), masked)
+    return masked
+
+
 def _split_lead(text: str, shortest: int = 8, longest: int = 160) -> tuple[str, str, str]:
     """'Versioning is on: every deleted file is kept.' -> ('Versioning is on', ':', 'every deleted file is
     kept.'): what a sentence says first, the mark after it and the rest (why it matters, what to do).
-    ('', '', text) when it has no lead that short. Commands in it are never split."""
-    masked = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text)
+    ('', '', text) when it has no lead that short. Commands and brackets in it are never split."""
+    masked = _masked(text)
     for match in _LEAD_END_RE.finditer(masked):
         if match.start() < shortest:
             continue
@@ -7651,8 +7675,8 @@ def _split_lead(text: str, shortest: int = 8, longest: int = 160) -> tuple[str, 
 
 
 def _prose_sentences(text: str) -> list[str]:
-    """Split this tool's prose into sentences, never inside a command."""
-    masked = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text)
+    """Split this tool's prose into sentences, never inside a command or brackets."""
+    masked = _masked(text)
     cuts = [m.end() for m in re.finditer(r"\.(?=\s+[A-Z0-9\"'(<$])", masked)]
     return [text[a:b].strip() for a, b in zip([0] + cuts, cuts + [len(text)]) if text[a:b].strip()]
 
@@ -7841,6 +7865,44 @@ def _data_img(data: bytes, mime: str, alt: str = "") -> str:
     return f'<img src="data:{_esc(mime)};base64,{base64.b64encode(data).decode()}" alt="{_esc(alt)}">'
 
 
+class _Zoom:
+    """The full-size view of a report's PDF pages, with CSS only (so it still works in a saved notebook). Each page
+    has a hidden radio button, and its picture is a <label> that checks it; a checked radio turns the page into a
+    fixed overlay. In the overlay, ‹ and › are labels for the radios of the pages before and after it (across all
+    the report's _Pages blocks), and ✕ or a click on the page checks the group's "none" radio, which closes it.
+    A random group name keeps two reports in one notebook apart."""
+
+    def __init__(self, blocks: list[Any]):
+        self.group = "z" + os.urandom(5).hex()
+        self.total = sum(len(block.pictures) for block in blocks if isinstance(block, _Pages))
+        self.count = 0
+        self.started = False
+
+    def start(self) -> str:
+        """The "none" radio (checked: no page open), once per report."""
+        if self.started:
+            return ""
+        self.started = True
+        return f'<input type="radio" class="zr" name="{self.group}" id="{self.group}-0">'
+
+    def page(self, picture: Picture) -> str:
+        """One page: its picture, which opens it full size, and the overlay's buttons. aspect-ratio keeps the page's
+        place in the report while it's open, so the pages behind the overlay don't move."""
+        self.count += 1
+        n, group = self.count, self.group
+        info = _image_info(picture.data) or {}
+        ratio = f' style="aspect-ratio:{info["width"]}/{info["height"]}"' if info.get("width") and info.get("height") else ""
+        prev = f'<label class="zn zprev" for="{group}-{n - 1}" title="Previous page">‹</label>' if n > 1 else ""
+        after = f'<label class="zn znext" for="{group}-{n + 1}" title="Next page">›</label>' if n < self.total else ""
+        where = f" · {n} of {self.total}" if self.total > 1 else ""
+        return (f'<div class="zw"{ratio}><input type="radio" class="zr" name="{group}" id="{group}-{n}">'
+                f'<div class="zp"><label class="zo" for="{group}-{n}" title="Click to see it full size">'
+                f"{_data_img(picture.data, picture.mime, picture.label)}</label>"
+                f'<label class="zx" for="{group}-0" title="Back to the report"></label>'
+                f'<label class="zc" for="{group}-0" title="Back to the report">✕</label>{prev}{after}'
+                f'<span class="zh">{_esc(picture.label)}{where} · click the page or ✕ to go back</span></div></div>')
+
+
 def _flow_html(items: list[tuple[str, Any]]) -> str:
     """A Word document's _Flow items as HTML. Every piece of its text is escaped; headings are styled divs,
     not <h1>.. tags, so they don't land in the notebook's table of contents."""
@@ -7891,6 +7953,7 @@ def _flow_text(items: list[tuple[str, Any]]) -> str:
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out, rules = [_CSS, '<div class="s3a">'], set()
+    zoom: _Zoom | None = None  # the full-size view the report's PDF pages share
     for block in blocks:
         if isinstance(block, _Title):
             out.append(
@@ -7961,13 +8024,14 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out.append(f"<h4>{_prose(block.title)}</h4>")
             captioned = len(block.pictures) > 1
+            zoom = zoom or _Zoom(blocks)
             figures = "".join(
-                f"<figure>{_data_img(pic.data, pic.mime, pic.label)}"
+                f"<figure>{zoom.page(pic)}"
                 + (f"<figcaption>{_esc(pic.label)}</figcaption>" if captioned else "")
                 + "</figure>"
                 for pic in block.pictures
             )
-            out.append(f'<div class="pages{"" if captioned else " one"}">{figures}</div>')
+            out.append(f'<div class="pages{"" if captioned else " one"}">{zoom.start()}{figures}</div>')
         elif isinstance(block, _Flow):
             if block.title:
                 out.append(f"<h4>{_prose(block.title)}</h4>")
@@ -10836,7 +10900,8 @@ class S3View:
         text, such as scans, are drawn as pictures; pictures=True draws every page, pictures=False none.
 
         A PDF's text needs pypdf, and drawing its pages needs pypdfium2 and pillow. One report shows at most
-        20 pages or pictures, so the notebook stays small; pass pages= for other pages."""
+        20 pages or pictures, so the notebook stays small; pass pages= for other pages. Click a drawn page to see
+        it as big as the notebook, with ‹ › to step through the pages and ✕ to go back."""
         with self._progress("Drawing pages", unit="pages") as tick:
             doc = self.core.read_document(uri, pages=pages, password=password, pictures=pictures,
                                           max_pictures=_MAX_PICTURES, progress=tick)

@@ -8,8 +8,10 @@
 #   python -m build                     # dist/aws_analyzer-<version>.tar.gz and -py3-none-any.whl
 #   twine check --strict dist/*         # the metadata, and that the README renders on PyPI
 #
-# Releasing: bump __version__ in src/aws_analyzer/__init__.py, then publish a GitHub release tagged v<version>;
-# .github/workflows/release.yml builds, checks and uploads it.
+# Releasing: /release in Claude Code (.claude/skills/release). By hand: move CHANGELOG.md's Unreleased entries
+# under the new version and set __version__ in src/aws_analyzer/__init__.py to match (release.py bump does both),
+# merge that, then publish a GitHub release tagged v<version>; .github/workflows/release.yml builds, checks and
+# uploads it.
 
 [build-system]
 requires = ["hatchling>=1.27", "hatch-fancy-pypi-readme>=24.1"]
@@ -66,6 +68,7 @@ Homepage = "https://github.com/utkarsh5026/aws-analyzer"
 Documentation = "https://utkarsh5026.github.io/aws-analyzer/"
 Source = "https://github.com/utkarsh5026/aws-analyzer"
 Issues = "https://github.com/utkarsh5026/aws-analyzer/issues"
+Changelog = "https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/aws_analyzer/__init__.py"
@@ -83,7 +86,7 @@ packages = ["src/aws_analyzer"]
 "analyzers/sagemaker_env.py" = "aws_analyzer/sagemaker_env.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["/analyzers/*.py", "/src", "/tests", "/README.md", "/LICENSE", "/requirements-dev.txt"]
+include = ["/analyzers/*.py", "/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/requirements-dev.txt"]
 
 # PyPI shows README.md as the project page, but resolves none of its relative links or pictures, so they're
 # pointed at GitHub, and GitHub's > [!NOTE] callouts become bold labels.

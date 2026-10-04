@@ -47,6 +47,18 @@ def test_package_exports_each_analyzer_and_view(package):
         package.nope
 
 
+def test_changelog_has_an_entry_for_this_version(package):
+    # A release (see .claude/skills/release) moves CHANGELOG.md's Unreleased entries under the version it bumps to.
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(r"^## \[Unreleased\]$", changelog, re.M)
+    version = re.escape(package.__version__)
+    assert re.search(rf"^## \[{version}\] - \d{{4}}-\d{{2}}-\d{{2}}$", changelog, re.M), (
+        f"CHANGELOG.md has no '## [{package.__version__}] - <date>' entry; run release.py bump instead of editing "
+        "__version__ by hand"
+    )
+    assert re.search(rf"^\[{version}\]: https://\S+$", changelog, re.M)
+
+
 def test_explorer_builds_on_the_s3_installed_with_it(package):
     # A top-level `import s3` works here too (conftest puts analyzers/ on sys.path); the package's own wins.
     assert package.s3_explorer._s3_module() is package.s3

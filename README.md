@@ -19,7 +19,8 @@ do next. And a chat window for asking a knowledge base, with every setting in re
 
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
-[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development)
+[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development) ·
+[Changelog](CHANGELOG.md)
 
 </div>
 
@@ -271,10 +272,12 @@ S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file 
 | To                   | Do this                                                                                                                                                                                                               |
 | :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Open a folder        | Click it. **←** **→** **↑** go back, forward and up, and each part of the path at the top opens that folder                                                                                                           |
-| See what's in a file | Click it. **Details** shows its metadata and tags, **Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour |
+| See what's in a file | Click it. **Details** shows its metadata and tags, **Read all** a whole PDF, Word or PowerPoint file, **⬇ Download** saves a copy next to your notebook, and **🔗 Link** makes a download link that works for an hour. Clicking through files doesn't wait: each click shows its file as soon as it's read, and files you clicked past are skipped |
+| Read a PDF           | Click **Read all**: every page as it looks, 20 at a time, with buttons at the end for the next pages and each page's text folded underneath. Click a page to see it as big as the notebook; **‹** **›** step to the pages before and after, and **✕** goes back |
 | Go to a path         | Click **✎**, paste an `s3://` path or an S3 console link, and press Enter                                                                                                                                             |
 | Narrow a long folder | Type in **Filter** (`*.csv` patterns work too). Click **Name**, **Size** or **Modified** to sort; sizes and dates sort biggest and newest first                                                                       |
 | Add up a folder      | Open it and click **What's in here**: every file below it, with sizes, types, cost and findings (the `summary` report)                                                                                                |
+| Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder zips go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
 
 Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
 lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the filter. Files in
@@ -291,6 +294,7 @@ from s3_explorer import S3Explorer, S3Navigator
 S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
 S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
 S3Explorer(height=720, page_size=200)                 # taller panes, more rows before "Show more"
+S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (x.zip_max_files, x.zip_folder too)
 
 x = S3Explorer("s3://my-bucket/")
 x.open("s3://my-bucket/raw/"); x.back(); x.up(); x.refresh()   # the toolbar, from code
@@ -354,8 +358,8 @@ Grouped the way `ui.help()` lists them.
 | Command                                                                           | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | :-------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `head(uri)`                                                                       | All object metadata, user metadata and tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `preview(uri, n=20)`                                                              | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, a PDF's first pages as they look (scans too), a Word file with its pictures in place, or a hex dump. Only downloads what it needs.                                                                                                                                                                                    |
-| `document(uri, pages=None, pictures=None)`                                        | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages                                                                                                                                                                                              |
+| `preview(uri, n=20)`                                                              | Looks inside a file (see [file types](#file-types)): tables as a DataFrame with their schema, the files in an archive, tensors, notebook cells, pretty JSON, text, images, an audio / video player, a PDF's first pages as they look (scans too; click a page to see it full size), a Word file with its pictures in place, or a hex dump. Only downloads what it needs.                                                                                                                                                   |
+| `document(uri, pages=None, pictures=None)`                                        | A PDF, Word `.docx` or PowerPoint `.pptx` as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF or deck page by page or slide by slide. PDF pages with no text (scans) are drawn as pictures; `pictures=True` draws every page, and a click on a drawn page shows it as big as the notebook. PDFs need `pypdf`, and `pypdfium2` + `pillow` to draw pages                                                                                                                                 |
 | `download(uri, path=None)`                                                        | Downloads a file, or a whole folder with its sub-folders, with a progress bar, and says where it went. Files already there with the same size and time are skipped, so running it again resumes. GLACIER files are listed as needing a restore, and it refuses when the disk hasn't room. For a table file it shows the pandas call that opens it                                                                                                                                                                         |
 | `download_zip(uri, path=None, max_size="100MB", max_files=10_000, dry_run=False)` | A file or folder as one `.zip` on the notebook's disk, but first a check of whether this notebook can make it: the files fit the size limit (100 MB by default) and file count, the disk has room, memory, and the role can read them (one 1-byte read). If a check fails nothing is downloaded, and the report says what to change (e.g. the `max_size=` that would fit). `dry_run=True` only runs the checks. GLACIER files are left out and listed; parquet, gz and images are stored as they are, the rest compressed |
 | `link(uri)`                                                                       | Clickable presigned download link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1223,6 +1227,10 @@ policy that covers every command.
 
 ## Development
 
+Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules the code
+follows, and [SECURITY.md](SECURITY.md) how to report a vulnerability privately. What changed in each release is in
+[CHANGELOG.md](CHANGELOG.md).
+
 ```bash
 pip install -r requirements-dev.txt    # pinned versions
 python -m pytest                       # every test, no AWS account needed
@@ -1255,9 +1263,11 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
   `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes
   and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
-  `notebook` (IPython, ipywidgets, tqdm) and `all`. To release, bump `__version__` and publish a GitHub release
-  tagged `v<version>`: [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to
-  PyPI with trusted publishing (its comments have the one-time setup).
+  `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
+  [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
+  both, see [CONTRIBUTING.md](CONTRIBUTING.md#releases)), and publishes a GitHub release tagged `v<version>`:
+  [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to PyPI with trusted
+  publishing (its comments have the one-time setup).
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
   `main`, and also imports each analyzer on its own with only boto3 installed, and builds the package and imports it
   the same way. The versions in
