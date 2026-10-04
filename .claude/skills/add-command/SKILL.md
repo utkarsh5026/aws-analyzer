@@ -98,6 +98,8 @@ Add tests to `tests/test_<service>.py`, each in the section with the matching `#
   - add a paragraph in the section where the command fits
   - add the IAM permission under "Permissions"
   - Keep the page's existing Markdown conventions and tone, and check it with `mkdocs build --strict`.
+- In `CHANGELOG.md`, add a bullet under `## [Unreleased]` → `### Added` (or `### Changed` for a reworked
+  command): the command, and what the user can find out or do with it.
 - If the command deserves a screenshot, say so and point to `/demo --html` (see the demo skill). Don't
   replace the images.
 - Update CLAUDE.md only if the command changes the architecture: a new block type, a new convention, or a new

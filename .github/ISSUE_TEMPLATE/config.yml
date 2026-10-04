@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Guides
+    url: https://utkarsh5026.github.io/aws-analyzer/
+    about: Setting up in SageMaker, every command, ready-made IAM policies and troubleshooting.
+  - name: Report a security vulnerability
+    url: https://github.com/utkarsh5026/aws-analyzer/security/advisories/new
+    about: Privately, so it can be fixed before it's public.

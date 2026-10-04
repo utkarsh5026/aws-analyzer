@@ -19,7 +19,8 @@ do next. And a chat window for asking a knowledge base, with every setting in re
 
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
-[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development)
+[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development) ·
+[Changelog](CHANGELOG.md)
 
 </div>
 
@@ -1222,6 +1223,10 @@ policy that covers every command.
 
 ## Development
 
+Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules the code
+follows, and [SECURITY.md](SECURITY.md) how to report a vulnerability privately. What changed in each release is in
+[CHANGELOG.md](CHANGELOG.md).
+
 ```bash
 pip install -r requirements-dev.txt    # pinned versions
 python -m pytest                       # every test, no AWS account needed
@@ -1254,9 +1259,11 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
   `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes
   and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
-  `notebook` (IPython, ipywidgets, tqdm) and `all`. To release, bump `__version__` and publish a GitHub release
-  tagged `v<version>`: [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to
-  PyPI with trusted publishing (its comments have the one-time setup).
+  `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
+  [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
+  both, see [CONTRIBUTING.md](CONTRIBUTING.md#releases)), and publishes a GitHub release tagged `v<version>`:
+  [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to PyPI with trusted
+  publishing (its comments have the one-time setup).
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
   `main`, and also imports each analyzer on its own with only boto3 installed, and builds the package and imports it
   the same way. The versions in

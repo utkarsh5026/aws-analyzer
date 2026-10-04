@@ -1,0 +1,41 @@
+name: Idea for a report or command
+description: Something you'd like to find out or decide from a notebook
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        The reports are built to help you decide what to do next, so the decision you're facing matters more than
+        the exact output you picture.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part
+      options:
+        - S3 (s3.py, S3View)
+        - S3 explorer (s3_explorer.py, S3Explorer)
+        - DynamoDB (dynamodb.py, DynamoDBView)
+        - Bedrock Knowledge Bases (bedrock_kb.py, BedrockKBView)
+        - Bedrock chat (bedrock_chat.py, chat())
+        - SageMaker (sagemaker_env.py, SageMakerView)
+        - A new AWS service
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: What are you trying to find out or decide?
+      placeholder: Which of our DynamoDB tables would be cheaper on on-demand billing.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you find out today?
+      description: The console pages, CLI commands or scripts you use now, and what's slow or missing about them.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: A command, what its report would show, or the finding it would raise. Optional.

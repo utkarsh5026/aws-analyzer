@@ -115,6 +115,8 @@ to the first boto3 release that has every operation the file calls, and put any 
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
 - `docs/index.md`: add a card for the new guide next to the existing ones, and add the guide to `nav` in
   `mkdocs.yml`. Check it with `mkdocs build --strict` (`pip install -r requirements-docs.txt`).
+- `CHANGELOG.md`: a bullet under `## [Unreleased]` → `### Added` naming the service, its file and View, and its
+  first commands.
 - `CLAUDE.md`: update the list of analyzers, the price tables, the moto extras (or the Stubber note, as for Bedrock)
   and anything service-specific a future session needs.
 
