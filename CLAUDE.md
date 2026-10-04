@@ -191,7 +191,10 @@ How the View layer works:
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
   conversation as an ordinary report that does. Its settings come from botocore's service model:
   `request_schema()` walks RetrieveAndGenerate's input shape into `Field`s (path, kind, range, docs), with the short
-  names, plain-English docs and starting values in `_KNOWN`, so a field AWS adds appears with a newer boto3.
+  names, plain-English docs and starting values in `_KNOWN`, so a field AWS adds appears with a newer boto3. The
+  Settings tab keeps to what's sent: one line per setting (`_row`: a short value's box beside its name, `_BESIDE`,
+  and where it goes in the name's tooltip), Add a setting folded behind its button (`_show_adding`), and the setup
+  call in a `<details>`.
   Settings are `{key: value}` (`view.values`); `build_request()` places them in the request and fills required
   one-value enums (`Schema.auto`), `settings_from_request()` reads an edited request back, and `validate_request()`
   runs botocore's `ParamValidator`. **Add a setting** lists `Schema.search(text)` (names, then paths, then

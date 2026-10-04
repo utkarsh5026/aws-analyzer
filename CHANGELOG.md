@@ -13,6 +13,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- `chat()` window: the Settings tab shows what's sent and little else. Each setting is one line: its name, its value
+  (beside the name for numbers, lists and the slider), and what the value means; hover the name for what it does,
+  what it takes and where it goes in the request, which used to be printed under every value. **Add a setting** is
+  folded behind a **+ Add a setting** button, with the same one-click chips, search and Browse all inside, and ✕
+  folds it away again. **Open this setup again** is folded at the bottom. The side uses smaller type throughout, and
+  the Request JSON and Last response tabs do too. ([#29](https://github.com/utkarsh5026/aws-analyzer/pull/29))
 - `S3Explorer` searches the whole folder, not only the first 1,000 entries S3 returns. A big folder shows its first
   page at once and lists the rest in the background, up to 10,000 entries, while you click, sort and search; each
   page updates the list, the counts, the type chips and your search, and the bar at the bottom says **Listing…**. So
@@ -20,10 +26,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   **Load more from S3** lists the next 10,000 (`x.nav.list_limit` changes how many), and **Look up** asks S3 for a
   name you type the start of; `x.filter("name")` from code does that by itself, and the text view says how to list
   more. Opening a file by its path finds it however far down its folder it is. For your own code,
-  `S3Navigator.list_rest()` lists the rest of a folder.
+  `S3Navigator.list_rest()` lists the rest of a folder. ([#30](https://github.com/utkarsh5026/aws-analyzer/pull/30))
 - `S3Explorer`'s list shows 100 rows a page with « ‹ › » under it, which say which rows these are
   (`2,401–2,500 of 3,000`), in place of **Show more**, which added 100 rows a click and slowed the list down. Typing
   in the search box is quicker in big folders too: the list is sorted once, and each key only filters it.
+  ([#30](https://github.com/utkarsh5026/aws-analyzer/pull/30))
 
 ## [0.4.0] - 2026-10-04
 
