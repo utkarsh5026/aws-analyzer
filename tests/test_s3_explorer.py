@@ -260,6 +260,29 @@ def test_navigator_pages_and_lookup(core):
     assert nav.lookup("") == 0 and nav.lookup("zzz") == 0
 
 
+def test_navigator_lists_the_rest_of_a_folder(core):
+    nav = S3Navigator(core, page_size=10, list_limit=20)
+    many = nav.open("s3://lake/many/")
+    assert many.listed == 10 and many.more
+    seen = []
+    assert nav.list_rest(progress=seen.append) is many  # up to list_limit
+    assert len(many.entries) == 20 and many.listed == 20 and many.more and seen == [20] and many.requests == 2
+    nav.list_rest(limit=100)
+    assert len(many.entries) == 25 and not many.more and many.requests == 3
+    assert nav.list_rest() is many and many.requests == 3  # nothing left to list
+    raw = nav.list_rest("s3://lake/raw/")  # another folder: its first page is all there is
+    assert len(raw.entries) == 2 and raw.requests == 1
+
+
+def test_navigator_forgets_old_folders_past_a_size(core, monkeypatch):
+    monkeypatch.setattr(sx, "_CACHED_ENTRIES", 20)
+    nav = S3Navigator(core)
+    many = nav.open("s3://lake/many/")
+    nav.open("s3://lake/raw/")  # 25 entries kept is over 20: the oldest folder goes
+    again = nav.back()
+    assert again is not many and len(again.entries) == 25 and nav.open("s3://lake/raw/").requests == 1
+
+
 def test_navigator_lists_everything_below(core, aws):
     nav = S3Navigator(core)
     nav.open("s3://lake/")
@@ -397,14 +420,26 @@ def test_explorer_path_box(explorer):
     assert "One file per day." in text(x)
 
 
-def test_explorer_sort_filter_and_show_more(explorer):
+def pages(x):
+    """The bar under the list: its text, and which of « ‹ › » can be clicked."""
+    return x._range.value, [name for name, b in x._page_btns.items() if not b.disabled]
+
+
+def test_explorer_sort_filter_and_pages(explorer):
     x = explorer("s3://lake/many/", page_size=10)
-    assert len(rows(x)) == 10 and x._more_btn.layout.display is None
-    assert x._more_btn.description == "Show 10 more (of 15)"
-    x._more_btn.click()
-    x._more_btn.click()
-    assert len(rows(x)) == 25 and x._more_btn.layout.display == "none"
-    x._cols["size"].click()
+    assert len(rows(x)) == 10 and x._pages.layout.display is None and "Show" not in x._foot_note.value
+    assert pages(x) == ('<span title="Page 1 of 3"><b>1–10</b> of 25</span>', ["next", "last"])
+    x._page_btns["next"].click()
+    assert rows(x)[0] == "📄  f10.txt" and pages(x)[1] == ["first", "previous", "next", "last"]
+    x._page_btns["last"].click()
+    assert rows(x) == [f"📄  f2{i}.txt" for i in range(5)] and "<b>21–25</b> of 25" in pages(x)[0]
+    assert pages(x)[1] == ["first", "previous"] and len(x._rows_box.children) == 5  # never more rows than a page
+    x._page_btns["previous"].click()
+    assert rows(x)[0] == "📄  f10.txt"
+    x._page_btns["first"].click()
+    assert rows(x)[0] == "📄  f00.txt"
+    x._page_btns["last"].click()
+    x._cols["size"].click()  # a new order starts on its first page
     assert rows(x)[0] == "📄  f24.txt" and x._cols["size"].description == "Size ↓" and len(rows(x)) == 10
     assert "s3x-on" in x._cols["size"]._dom_classes and "s3x-on" not in x._cols["name"]._dom_classes
     x._cols["size"].click()
@@ -413,6 +448,10 @@ def test_explorer_sort_filter_and_show_more(explorer):
     assert x._cols["name"].description == "Name ↑" and x._cols["size"].description == "Size"
     x._filter.value = "f1"
     assert rows(x) == [f"📄  f1{i}.txt" for i in range(10)] and "10 match “f1”" in x._status.value
+    assert x._pages.layout.display == "none"  # one page: no bar
+    order = x._order[2]
+    x._filter.value = "f"
+    assert x._order[2] is order  # typing filters the sorted list it has; it doesn't sort again
     x._filter.value = "nothing-like-this"
     assert rows(x) == [] and "Nothing here matches" in x._foot_note.value
     x.open("s3://lake/raw/")
@@ -549,20 +588,144 @@ def test_explorer_filter_from_code(explorer, core, capsys):
     assert "📁 raw/" in out and "top.txt" not in out and "folders only" in out
 
 
-def test_explorer_loads_big_folders_a_page_at_a_time(explorer):
+def test_explorer_searches_all_of_a_big_folder(explorer):
+    """The search covers the whole folder, not only the first page S3 returned (here 10 entries a page)."""
     x = explorer("s3://lake/many/")
     x.nav.page_size = 10
+    x.refresh()  # the rest is listed too, up to list_limit
+    assert x.nav.folder().requests == 3 and "25 files · 300 B<" in x._status.value and "Files: 25 " in text(x)
+    x._filter.value = "f2"  # the 21st to 25th entries
+    assert rows(x) == [f"📄  f2{i}.txt" for i in range(5)] and x._lookup_btn.layout.display == "none"
+
+
+def test_explorer_stops_listing_at_list_limit(explorer):
+    x = explorer("s3://lake/many/", page_size=10)
+    x.nav.page_size = x.nav.list_limit = 10
     x.refresh()
     assert len(rows(x)) == 10 and x._load_btn.layout.display is None and "10+ files · 45 B so far" in x._status.value
-    assert "first 10 entries S3 returned" in text(x)
+    assert x._load_btn.tooltip == "List the next 10" and "of 10+" not in x._range.value  # one page: no bar
+    assert "has more than 10 entries, and these numbers cover the first 10" in text(x) and "click “Look up”" in text(x)
+    x._filter.value = "f0"
+    assert len(rows(x)) == 10 and "These are the matches among the first 10 entries; this folder has more." in (
+        x._foot_note.value)
     x._filter.value = "f2"
+    assert rows(x) == [] and "Nothing here matches “f2” among the first 10 entries." in x._foot_note.value
     assert x._lookup_btn.layout.display is None and x._lookup_btn.description.endswith("“f2” in S3")
     x._lookup_btn.click()
     assert rows(x) == [f"📄  f2{i}.txt" for i in range(5)]
+    x._filter.value = "raw/f2"
+    assert x._lookup_btn.layout.display == "none" and x.nav.lookup("raw/f2") == 0  # not names in this folder
     x._filter.value = ""
+    x.refresh()  # without the names looked up
+    x._load_btn.click()  # the next 10
+    assert len(x.nav.folder().entries) == 20 and x._load_btn.layout.display == "none"  # until the last page
+    assert "<b>1–10</b> of 20+" in x._range.value
+    x._page_btns["last"].click()
+    assert x._load_btn.layout.display is None
     x._load_btn.click()
-    x._load_btn.click()
-    assert len(rows(x)) == 25 and x._load_btn.layout.display == "none" and "25 files · 300 B<" in x._status.value
+    assert len(x.nav.folder().entries) == 25 and x._load_btn.layout.display == "none"
+    assert "25 files · 300 B<" in x._status.value and "has more than" not in text(x)
+
+
+def test_explorer_text_view_searches_past_list_limit(core, capsys):
+    t = S3Explorer("s3://lake/", core=core, mode="text", progress="off")
+    t.nav.page_size = t.nav.list_limit = 10
+    t.open("s3://lake/many/")
+    out = capsys.readouterr().out
+    assert "has more than 10 entries" in out and "set x.nav.list_limit = 20 and run x.refresh()" in out
+    assert "Load more" not in out  # no buttons here
+    t.filter("f2")  # S3 is asked for the names that start with it, as Look up does
+    out = capsys.readouterr().out
+    assert "f22.txt" in out and "Showing 5 of 15" in out
+
+
+def test_explorer_opens_a_file_past_what_is_listed(explorer):
+    x = explorer("s3://lake/")
+    x.nav.page_size = x.nav.list_limit = 10
+    x.open("s3://lake/many/f22.txt")  # past the 10 entries listed: S3 is asked for it
+    assert x.selected == "s3://lake/many/f22.txt" and "📄  f22.txt" in rows(x) and "Preview of f22.txt" in text(x)
+
+
+def test_explorer_lists_the_rest_in_the_background(explorer, core, monkeypatch):
+    """In a notebook, a big folder shows its first page at once and lists the rest on a worker thread; the list,
+    the counts and the search catch up as each page comes in."""
+    gate, real = threading.Event(), S3Navigator._request
+
+    def slow(nav, folder, token, keys):
+        if token:  # the first page comes at once, the others wait
+            gate.wait(10)
+        return real(nav, folder, token, keys)
+
+    monkeypatch.setattr(S3Navigator, "_request", slow)
+
+    async def main():
+        x = explorer("s3://lake/")
+        x.nav.page_size = 10
+        x.open("s3://lake/many/")
+        assert len(rows(x)) == 10 and x._lister is x.nav.folder() and "Listing… 10+ files" in x._status.value
+        assert "s3x-busy" in x._status.value and "Still listing this folder: these numbers cover the 10 entries" in text(x)
+        assert x._load_btn.layout.display == "none"  # it's coming
+        x._filter.value = "f2"  # searched as far as it's listed, and again as more comes in
+        assert rows(x) == [] and "Nothing here matches “f2” yet (10 entries listed so far). Still listing the rest…" in (
+            x._foot_note.value)
+        gate.set()
+        await x._list_task
+        assert rows(x) == [f"📄  f2{i}.txt" for i in range(5)] and x._lister is None
+        assert "Listing" not in x._status.value and "5 match “f2”" in x._status.value
+        assert "Files: 25 " in text(x) and "Still listing" not in text(x)  # the overview, redrawn
+
+        gate.clear()
+        x.refresh()  # listed again; moving elsewhere stops it, and coming back goes on from where it was
+        task, many = x._list_task, x.nav.folder()
+        x.open("s3://lake/raw/")
+        assert x._lister is None and len(many.entries) == 10
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        gate.set()
+        x.back()
+        await x._list_task
+        assert len(many.entries) == 25 and not many.more and "25 files" in x._status.value
+
+        x.nav.list_limit = 20  # a listing stops at list_limit; Load more from S3 lists the next ones
+        x.refresh()
+        await x._list_task
+        assert len(x.nav.folder().entries) == 20 and x._load_btn.layout.display is None
+        x._load_btn.click()
+        assert x._lister is x.nav.folder() and x._load_btn.layout.display == "none"
+        await x._list_task
+        assert len(x.nav.folder().entries) == 25 and x._load_btn.layout.display == "none"
+
+        def denied(*args, **kwargs):
+            raise ClientError({"Error": {"Code": "SlowDown", "Message": "Please reduce your request rate."}},
+                              "ListObjectsV2")
+
+        x.refresh()
+        monkeypatch.setattr(S3Navigator, "_request", denied)
+        await x._list_task  # it stops, says why, and Load more from S3 tries again
+        x._page_btns["last"].click()
+        assert "S3 stopped listing this folder (SlowDown: " in x._foot_note.value
+        assert x._load_btn.layout.display is None and "10+ files" in x._status.value
+        x.open("s3://lake/raw/")
+        assert "S3 stopped" not in x._foot_note.value
+
+    asyncio.run(main())
+
+
+def test_explorer_lists_subfolders_in_the_background(explorer, monkeypatch):
+    async def main():
+        x = explorer("s3://lake/")
+        x.nav.page_size = 10
+        x._deep_btn.click()
+        assert len(x.nav.below().entries) < 20 and x._lister is x.nav.below() and "Listing… Below this folder" in (
+            x._status.value)
+        await x._list_task
+        assert sum(not e.is_folder for e in x.nav.below().entries) == 31 and not x.nav.below().more
+        x._filter.value = ".csv"
+        assert rows(x) == ["📊  old.csv.gz", "📊  part-2.csv", "📊  part-10.csv"]
+        x._deep_btn.click()  # back to this level: nothing to list
+        assert x._lister is None and len(rows(x)) == 0
+
+    asyncio.run(main())
 
 
 def test_explorer_opens_a_file_path_with_the_file_shown(explorer):

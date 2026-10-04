@@ -283,9 +283,10 @@ S3Explorer("s3://my-bucket/data/report.pdf")   # a file's folder, with the file 
 | Download a folder    | Open it and click **⬇ Download .zip**: everything below it in one `.zip` next to your notebook (right-click it in the file browser to get it onto your computer), if it's within 100 MB and 10,000 files. **⚙** raises those limits and picks the folder zips go to. It checks the disk space and read access first, and writes nothing if a check fails (the `download_zip` report) |
 | Download some files  | Tick them (a checkbox shows when you point at a row, and the one in the header ticks everything listed, such as every `.csv` the search found), then click **⬇ Download selected** in the bar under the list. The right shows what goes in and suggests a name, such as `churn-12-files.zip`, which you can change; **⬇ Download** makes it, after the same checks |
 
-Each folder is listed 1,000 entries per request and shown 100 rows at a time. In a bigger folder, **Load more**
-lists the next 1,000, and **Look up** asks S3 for the names that start with what you typed in the search box.
-**Include subfolders** lists 10,000 files below the folder at a time. Files in GLACIER or DEEP_ARCHIVE are marked ❄,
+A big folder shows its first 1,000 entries at once and lists the rest in the background, up to 10,000, so the
+search, the sort and the counts cover the whole folder; the list shows 100 rows a page, with **«** **‹** **›** **»**
+under it. Past 10,000 entries, **Load more from S3** lists the next 10,000, and **Look up** asks S3 for the names that
+start with what you typed in the search box. **Include subfolders** lists 10,000 files below the folder at a time. Files in GLACIER or DEEP_ARCHIVE are marked ❄,
 and opening one shows the command that restores it. Like `s3.py`, it only reads: browsing needs
 `s3:ListAllMyBuckets` and `s3:ListBucket`, and opening files `s3:GetObject`.
 
@@ -298,7 +299,7 @@ from s3_explorer import S3Explorer, S3Navigator
 
 S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
 S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
-S3Explorer(height=720, page_size=200)                 # taller panes, more rows before "Show more"
+S3Explorer(height=720, page_size=200)                 # taller panes, 200 rows on each page of the list
 S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (x.zip_max_files, x.zip_folder too)
 
 x = S3Explorer("s3://my-bucket/")

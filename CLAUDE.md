@@ -227,9 +227,11 @@ and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` l
 
 Same five sections: pure helpers (`parse_location`, which also takes S3 console links and object URLs,
 `breadcrumbs`, `sort_entries`, `parse_filter`, `filter_entries`, `count_types`, `folder_stats`), `S3Navigator` as the
-logic layer (one `list_objects_v2` level per page, or everything below a folder with `below()`, back / forward / up
-history, a folder cache, listing errors in `Folder.error`, never prints), and `S3Explorer` as the UI. How the UI
-works:
+logic layer (one `list_objects_v2` level per page, `list_rest()` up to `list_limit` entries, or everything below a
+folder with `below()`, back / forward / up history, a folder cache capped by count and by `_CACHED_ENTRIES`, listing
+errors in `Folder.error`, never prints), and `S3Explorer` as the UI. Listing is split so it can run off the main
+thread: `_request()` makes one request and changes nothing, and `_add()` adds its page to the `Folder` (`_list()`
+does both, a page at a time). How the UI works:
 
 - It finds `s3.py` with `_s3_module()`: the module `core` came from, else `import s3`, else `__main__` (s3.py pasted
   into a cell). Without it, a note; without ipywidgets, a text listing (`mode="text"` forces that).
@@ -243,13 +245,26 @@ works:
 - Icons are drawn by the CSS: each `_ICON_PATHS` line drawing becomes a `.s3x-i-<name>` mask in the text's colour, and
   the button keeps its glyph (← ✎ ⚙) as its text, hidden by the style.
 - Widgets can't scroll, so `_renew()` puts the list or the report in a new box, which starts at the top. The search
-  box and its buttons (`_finder`) sit above that box and stay put.
+  box and its buttons (`_finder`) sit above that box and stay put, and so does the page bar under it (`_pages`): the
+  list shows `page_size` rows from `_offset`, and « ‹ › » (`_on_page`) move it. Never more rows than a page, since
+  each row is six widgets.
+- Big folders: the search, the counts and the sort cover the whole folder, so `_follow()` lists the rest of the one
+  the list shows, up to `nav.list_limit` entries (`deep_limit` files with Include subfolders). In a notebook
+  (`_background()`: widgets and a running loop) `_list_later` does it a page at a time, like `_later`: the request on a
+  worker thread (`_threads()`), and `_add` plus the redraw (`_listed`, which also refreshes the overview in place)
+  on the loop, so nothing changes under a click. `_lister` is the folder being listed; moving to another folder
+  stops it (`_stop_listing`), and coming back carries on from the folder's token. Without a loop (the text view,
+  scripts, the tests) `_list_more` lists right away. The tests drive the background path inside `asyncio.run`, with
+  `S3Navigator._request` held back by a `threading.Event`. `_ordered()` and `_stats()` keep the sorted entries and
+  the counts until more is listed, so a key in the search box only filters.
 - Searching: `_draw_filters` draws the search box (`_query`), All / Folders / Files (`_kind`, which stays as you move,
   like the sort) and a chip per file type (`count_types`); `_shown_entries` matches with `filter_entries` /
   `parse_filter`. A chip writes `.csv` into the search box (`_toggle_type`), so the box is the one record of a filter.
   "Include subfolders" (`_deep`) swaps the list's source (`_source()`) for `S3Navigator.below()`, a listing without
   the `/` delimiter, `deep_limit` files at a time, with the folders between derived from the keys; its rows show their
-  folder under the name. Opening another folder clears the search and the subfolders; ↻ keeps them.
+  folder under the name. Opening another folder clears the search and the subfolders; ↻ keeps them. Past what's
+  listed, "Look up" (`S3Navigator.lookup`) asks S3 for names starting with the search text, and opening a file's path
+  looks it up the same way when its folder is bigger than what's listed.
 - Selecting: each row has a checkbox (`_Row.check`, hidden by the style until the row is pointed at or `_picked` has
   something, `s3x-picking`), and the header's ticks everything in `_visible`. `_picked` (uri -> Entry) feeds the bar
   under the list (`_draw_picks`) and the panel on the right (`_open_picks`), which shows what goes in and a name from

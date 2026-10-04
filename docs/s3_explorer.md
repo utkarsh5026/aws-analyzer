@@ -75,7 +75,7 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
 
     S3Explorer("s3://acme-ml-data/", profile="dev")   # another AWS profile (or region=)
     S3Explorer(core=S3Analyzer(region="eu-west-1"))   # an S3Analyzer or S3View you already have
-    S3Explorer(height=720, page_size=200)            # taller panes, more rows before "Show more"
+    S3Explorer(height=720, page_size=200)            # taller panes, 200 rows on each page of the list
     S3Explorer(zip_max_size="2GB")                   # zip folders up to 2 GB (100 MB by default)
     ```
 
@@ -101,6 +101,7 @@ The folder on the left, the file you clicked on the right. One click on the path
 - **Go to a path** with **✎**: paste an `s3://` path, `bucket/folder`, an S3 console link or an object URL, and press Enter. A path to a file opens its folder with the file shown. **✕** closes the box without going anywhere.
 - **Find files** with the search box over the list: a name, a file type such as `.csv`, or only the folders. [More below](#search).
 - **Sort** by clicking **Name**, **Size** or **Modified**, and again for the other way. Sizes and dates sort biggest and newest first, folders stay on top, and names sort the way people count: `part-2` before `part-10`.
+- **Page through** a long list with **«** **‹** **›** **»** under it. The list shows 100 rows at a time, and the bar says which ones, of how many: `2,401–2,500 of 3,000`.
 - **The bar at the bottom** counts the folders and files listed and adds up their size. On the right it shows the path of the folder you're in, or of the file you clicked; one click selects it, ready to copy.
 
 Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
@@ -109,7 +110,7 @@ Until you click a file, the right shows what the folder holds, from the listing 
 
 ## Find files { #search }
 
-Above the list are a search box and the buttons that narrow it. They work on what's listed, so typing doesn't ask S3 for anything, and they combine: the `.csv` files whose names have `2025` in them, below this folder.
+Above the list are a search box and the buttons that narrow it. They cover the whole folder, not only the rows on screen or the first page S3 returns: a big folder is [listed in the background](#big) as soon as it opens. Typing doesn't ask S3 for anything, and they combine: the `.csv` files whose names have `2025` in them, below this folder.
 
 ![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-light.webp#only-light){ width="984" height="587" loading=lazy }
 ![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-dark.webp#only-dark){ width="984" height="587" loading=lazy }
@@ -217,13 +218,15 @@ The zip holds the files as they're laid out below the folder they share, so file
 
 The explorer lists one level at a time, never the whole bucket, so a folder opens in a moment even in a bucket of billions of files.
 
-- A folder is listed 1,000 entries per request and shown 100 rows at a time. **Show more**, at the end of the list, shows the next rows.
-- In a folder of more than 1,000 entries, **Load more from S3** lists the next 1,000. Until then, the counts on the right and at the bottom end in **+**: they cover what's listed so far.
-- **Look up** finds a name in a folder too big to list: type the start of it in the search box (`2025-09-` for a date partition), and it asks S3 for the names that start with it. The search on its own only searches what's listed.
-- **Include subfolders** lists 10,000 files below the folder at a time; **Load more from S3** lists the next 10,000.
+- S3 lists a folder 1,000 entries per request. The explorer shows the first 1,000 at once, then lists the rest in the background, up to 10,000 entries (about a second per few thousand). Meanwhile you can click, sort and search; each page that comes in updates the list, the counts, the type chips and your search, and the bar at the bottom says **Listing…** with a spinner. Opening another folder stops it, and coming back carries on from where it stopped.
+- So the search, the sort and the counts cover the whole folder: a file that's the 2,500th in S3's order is found by typing part of its name, and **Size** puts the biggest file in the folder on top, not the biggest of the first 1,000.
+- The list shows 100 rows a page (`page_size=`); **«** **‹** **›** **»** under it move between pages, and the bar says which rows these are, of how many.
+- A folder of more than 10,000 entries stops there: the counts end in **+**, and the right says so. **Load more from S3**, at the end of the list, lists the next 10,000. **Look up** finds a name past what's listed: type the start of it in the search box (`2025-09-` for a date partition), and it asks S3 for the names that start with it. To list more at once, set `x.nav.list_limit = 50_000` before opening the folder.
+- **Include subfolders** lists the files below the folder the same way, in the background, 10,000 at a time; **Load more from S3** lists the next 10,000.
+- Opening a file by its path (`S3Explorer("s3://…/img_02750.jpg")`) finds it however far down the folder it is.
 - Folders you've opened are kept, so going back is instant. **↻** lists the folder again, to pick up files added or removed since.
 
-Only **📊 What's in here** and **⬇ Download .zip** read everything below a folder; **Include subfolders** stops at 10,000 files until you ask for more.
+Listing is cheap: S3 charges $0.005 per 1,000 list requests (us-east-1 list price), so the 10 requests for 10,000 entries cost $0.00005. Only **📊 What's in here** and **⬇ Download .zip** read everything below a folder; the list stops at 10,000 entries until you ask for more.
 
 ## From code { #code }
 
@@ -258,6 +261,7 @@ nav = S3Navigator()                                  # or S3Navigator(S3Analyzer
 folder = nav.open("s3://acme-ml-data/curated/")      # Folder: entries, more, error
 [(e.name, e.kind, e.size) for e in folder.entries]   # Entry: kind ('bucket', 'folder', 'file'), key, size, modified, storage_class
 nav.more()                                           # the next 1,000 entries, when folder.more is True
+nav.list_rest()                                      # the rest of the folder, up to 10,000 entries (nav.list_limit)
 nav.lookup("2025-09-")                               # adds the names that start with it; returns how many were new
 below = nav.below()                                  # everything below: every file and the folders between (10,000 at a time)
 nav.more(below=True)                                 # the next 10,000, when below.more is True
@@ -325,7 +329,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ??? question "A file I know is there isn't in the list"
 
-    A folder of more than 1,000 entries is listed a page at a time, and the search only covers what's listed. Type the start of the name in the search box and click **Look up**, or click **Load more from S3** at the end of the list. If the file is in a subfolder, turn on **Include subfolders**; if **Folders** or **Files** is lit, click **All**. If the file was added after the folder was opened, press **↻**. Names in S3 are case-sensitive.
+    If the bar at the bottom says **Listing…**, the explorer is still listing the folder: the file shows up when its page comes in. A folder of more than 10,000 entries is listed 10,000 at a time, and the search covers what's listed: type the start of the name in the search box and click **Look up**, or click **Load more from S3** at the end of the list. If the file is in a subfolder, turn on **Include subfolders**; if **Folders** or **Files** is lit, click **All**. If the file was added after the folder was opened, press **↻**. Names in S3 are case-sensitive.
 
 ??? question "A file marked ❄ won't open"
 
@@ -355,7 +359,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `core` | An `S3Analyzer` or `S3View` to use; without one, one is made from `profile` and `region` |
 | `profile`, `region` | The AWS profile and region |
 | `height` | The height of the two panes, in pixels |
-| `page_size` | Rows shown before **Show more** |
+| `page_size` | Rows on each page of the list; **«** **‹** **›** **»** under it move between pages |
 | `zip_max_size` | The biggest folder **⬇ Download .zip** packs; **⚙** changes it |
 | `mode` | `"auto"`: the clickable explorer in Jupyter, a text listing elsewhere. `"widgets"` or `"text"` to choose |
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
@@ -366,7 +370,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `back()`, `forward()` | **←** and **→** |
 | `up()` | **↑**: the folder above |
 | `refresh()` | **↻**: lists this folder again |
-| `filter(text="", kind="all", subfolders=False)` | The search box and its buttons: names or file types (`".csv .json"`), `kind="folders"` or `"files"`, and everything below with `subfolders=True`. `filter()` shows everything again |
+| `filter(text="", kind="all", subfolders=False)` | The search box and its buttons: names or file types (`".csv .json"`), `kind="folders"` or `"files"`, and everything below with `subfolders=True`. It searches the whole folder, up to its first 10,000 entries, and in a bigger one also asks S3 for the names that start with `text`. `filter()` shows everything again |
 | `location` | The folder you're in, or `""` on your buckets |
 | `selected` | The file shown on the right, or `""` |
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
