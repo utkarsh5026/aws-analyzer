@@ -11,6 +11,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- `S3View.preview()` (and the S3 explorer) shows a JSON file as a tree coloured like code instead of a wall of text.
+  Click a line to fold or unfold an object, array or long string, and hover over a line for the Python that reaches
+  it (`data['Records'][0]`). It starts with as much open as fits on a screen, with the first of a long list of
+  records open as a sample. Short arrays sit on one line, and long ones (an embedding) wrap like words. A string that
+  holds JSON (an SNS message, SageMaker hyperparameters) shows as the JSON inside it. Cards give the number of keys or
+  items and how deep the file nests. A `.json` file bigger than the 512 KB preview window now shows its start as a
+  tree (or a table of its first records) instead of raw text.
+  ([#24](https://github.com/utkarsh5026/aws-analyzer/pull/24))
+
 ## [0.3.0] - 2026-10-04
 
 ### Added

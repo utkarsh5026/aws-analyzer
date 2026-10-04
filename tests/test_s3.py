@@ -1953,6 +1953,89 @@ def test_preview_details(core):
     parquet = core.preview(f"s3://{BUCKET}/curated/table/part-0.parquet", n=5)
     assert len(parquet.data) == 5 and parquet.info["rows"] == 100
     assert core.preview(f"s3://{BUCKET}/curated/list.json").info["records"] == 2
+    config = core.preview(f"s3://{BUCKET}/curated/config.json")
+    assert config.info == {"keys": 2, "depth": 3}
+
+
+def test_json_prefix_reads_the_start_of_a_cut_document():
+    assert s3mod._json_prefix('{"a": 1, "b": [1, 2, {"c": "x') == ({"a": 1, "b": [1, 2, {}]}, 3)
+    assert s3mod._json_prefix('[{"id": 1}, {"id": 2}, {"id": 3') == ([{"id": 1}, {"id": 2}, {}], 2)  # 3 may be 30
+    assert s3mod._json_prefix('{"a": tr') == ({}, 1)
+    assert s3mod._json_prefix('﻿{"k\\n": "v\\u00e9", "n": -1.5e3}') == ({"k\n": "vé", "n": -1500.0}, 0)
+    for broken in ("", "{'a': 1, ", '"a lone string', '{"a": [1}', "{1: 2", '{"a": 1} {'):
+        assert s3mod._json_prefix(broken) in (None, ({"a": 1}, 0)), broken
+    assert s3mod._json_prefix('{"a": 1} {') == ({"a": 1}, 0)  # a whole document, then something else
+    assert s3mod._json_lines_start(b'{"a": 1}\n{"a": 2}') and not s3mod._json_lines_start(b'{\n  "a": 1')
+    assert not s3mod._json_lines_start(b'{"a": 1}')
+    assert s3mod._json_shape({"a": {"b": [1, {"c": {}}]}}) == {"keys": 1, "depth": 4}
+    assert s3mod._json_shape([1, 2], cut=1) == {"items": "2+"} and s3mod._json_shape("x") == {}
+
+
+def test_json_tree_folds_caps_and_reads_json_in_strings():
+    value = {
+        "name": "cfg",
+        "shape": [3, 224, 224],
+        "embedding": [i / 10 for i in range(50)],
+        "rows": [{"id": i, "ok": None} for i in range(30)],
+        "message": json.dumps({"Records": [{"eventName": "Put"}]}),
+        "prompt": "line one\nline two " + "x" * 500,
+        "<b>": "<script>alert(1)</script>",
+    }
+    tree = s3mod._JsonTree(value, items=5)
+    lines = {child.key: child for child in tree.root.children}
+    assert "".join(text for _, text in lines['"shape"'].tokens) == "[3, 224, 224]"  # short: one line
+    embedding = lines['"embedding"']
+    assert embedding.packed and len(embedding.children) == 5 and embedding.more == 45
+    rows = lines['"rows"']  # a long array of records: the first unfolds as a sample, the rest stay folded
+    assert rows.open and rows.children[0].open and not rows.children[1].open and rows.more == 25
+    message = lines['"message"']
+    assert message.parsed and message.path == "json.loads(data['message'])"
+    assert message.children[0].path == "json.loads(data['message'])['Records']"
+    prompt = lines['"prompt"']
+    assert prompt.kind == "string" and prompt.total == 518 and not prompt.open
+    assert tree.capped == {"item"} and not tree.full and not tree.cut
+
+    text = s3mod._json_tree_text(tree)
+    assert '  "shape": [3, 224, 224],\n' in text and "    0.0, 0.1, 0.2, 0.3, 0.4,\n    … 45 more items\n" in text
+    assert '"message": (JSON in a string) {' in text and "(518 characters)" in text
+    assert '"rows": [\n    {\n      "id": 0,\n      "ok": null\n    },' in text
+    html = s3mod._render_html([tree], 50)
+    assert "<script>" not in html and "&lt;script&gt;" in html and "&lt;b&gt;" in html
+    assert '<details class="jo" open><summary title="data">' in html
+    assert '<summary title="data[&#x27;rows&#x27;][1]">' in html  # each line's path in Python, on hover
+    assert 'data-n="30 items"' in html and 'data-n="518 characters"' in html and "JSON in a string" in html
+    assert '<div class="jv">line one\nline two xxx' in html  # a long string unfolds to its text as it reads
+
+    many = s3mod._JsonTree({f"k{i}": i for i in range(150)})
+    assert len(many.root.children) == 100 and many.root.more == 50 and many.capped == {"key"}
+    huge = s3mod._JsonTree([[i] for i in range(3000)], items=3000)
+    assert huge.full and huge.root.more == 3000 - 1999
+    cut = s3mod._JsonTree({"a": [1, 2]}, cut=2)
+    assert s3mod._json_tree_text(cut).splitlines() == ["{", '  "a": [', "    1, 2", s3mod._JSON_END]
+    assert 'data-n="2+ items"' in s3mod._json_tree_html(cut)
+
+
+def test_preview_shows_the_start_of_a_json_file_too_big_to_read(core, aws, capsys):
+    uri = f"s3://{BUCKET}/big/annotations.json"
+    doc = {"info": {"version": 1}, "images": [{"id": i, "file": f"img{i:05d}.jpg"} for i in range(30000)]}
+    aws.put_object(Bucket=BUCKET, Key="big/annotations.json", Body=json.dumps(doc).encode())
+    p = core.preview(uri)
+    assert p.kind == "json" and p.truncated and p.info["cut"] >= 2 and p.info["keys"] == "2+"
+    assert p.data["info"] == {"version": 1} and 10000 < len(p.data["images"]) < 30000
+    assert "bigger than the 512.0 KB preview window" in p.note
+    out = run(capsys, S3View(core, mode="text").preview, uri)
+    assert "Keys: 2+" in out and "+ more items" in out and s3mod._JSON_END in out
+    assert "Long arrays show their first 20 items; pass n= for more." in out
+    assert f"data = ui.core.read_json('{uri}')" in out
+
+    records = [{"id": i, "file": f"img{i:05d}.jpg"} for i in range(30000)]
+    aws.put_object(Bucket=BUCKET, Key="big/records.json", Body=json.dumps(records).encode())
+    table = core.preview(f"s3://{BUCKET}/big/records.json", n=100000)
+    assert table.kind == "table" and table.info["records"] == f"{len(table.data):,}+"
+    assert table.data["file"].notna().all()  # the record cut in half isn't a row
+    lines = "\n".join(json.dumps(r) for r in records).encode()
+    aws.put_object(Bucket=BUCKET, Key="big/lines.json", Body=lines)
+    assert core.preview(f"s3://{BUCKET}/big/lines.json").format == "jsonl"  # JSON lines stay a table
 
 
 def test_preview_archived_file_says_how_to_restore_it(core, aws):
