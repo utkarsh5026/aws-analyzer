@@ -1,5 +1,7 @@
 import ast
+import html
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -17,8 +19,12 @@ from bedrock_chat import (
     Answer,
     BedrockChatAnalyzer,
     BedrockChatView,
+    Citation,
+    _answer_lines,
     _diff,
+    _markdown_html,
     _py_literal,
+    _python_html,
     _question_text,
     answer_cost,
     answer_findings,
@@ -469,6 +475,87 @@ def test_python_call_is_python_that_makes_the_same_call():
     literal = code.split("retrieve_and_generate(**", 1)[1].rsplit(")\nprint", 1)[0]
     assert ast.literal_eval(literal) == params
     assert ast.literal_eval(_py_literal({"a": [1, {"b": None}] * 30})) == {"a": [1, {"b": None}] * 30}
+    narrow = python_call(params, "us-east-1", width=60)
+    literal = narrow.split("retrieve_and_generate(**", 1)[1].rsplit(")\nprint", 1)[0]
+    assert ast.literal_eval(literal) == params
+    assert all(len(line) <= 60 for line in literal.splitlines() if "modelArn" not in line)  # keys count too
+
+
+def plain(markup):
+    """HTML -> the text it shows."""
+    return html.unescape(re.sub(r"<[^>]+>", "", markup))
+
+
+def test_python_is_highlighted_and_escaped():
+    code = "import boto3\nclient = boto3.client('x', region_name='<us>')  # hi\nprint({'k': 1, 'n': None})"
+    out = _python_html(code)
+    assert plain(out) == code
+    for part in ('<span class="pk">import</span>', '<span class="pf">client</span>', '<span class="pa">region_name</span>',
+                 '<span class="js">&#x27;&lt;us&gt;&#x27;</span>', '<span class="pc"># hi</span>',
+                 '<span class="jk">&#x27;k&#x27;</span>', '<span class="jn">1</span>', '<span class="jl">None</span>',
+                 '<span class="pf">print</span>'):
+        assert part in out
+    assert _python_html("x = (1, '<b>'") == "x = (1, &#x27;&lt;b&gt;&#x27;"  # doesn't tokenize: plain, still escaped
+    out = chatmod._json_text_html({"a": [1, True, None, 'x"<']})
+    assert json.loads(plain(out)) == {"a": [1, True, None, 'x"<']}
+    assert '<span class="jk">&quot;a&quot;</span>:' in out and '<span class="jl">true</span>' in out
+
+
+def test_markdown_answers_are_laid_out_and_escaped():
+    out = _markdown_html("# Steps\n\n1. Open **Refunds**\n2. Pick `order-42`\n   - nested\n\n| a | b |\n|---|--:|\n"
+                         "| x | 1 |\n\n```bash\naws s3 ls\n```\n> a *quote*\n\n<script>x</script> [ok](https://a.b) "
+                         "[bad](javascript:alert(1)) ~~old~~ https://aws.amazon.com/bedrock.")
+    assert "<h1>Steps</h1>" in out
+    assert "<ol><li>Open <strong>Refunds</strong></li><li>Pick <code>order-42</code><ul><li>nested</li></ul></li></ol>" in out
+    assert "<thead><tr><th>a</th><th class=\"r\">b</th></tr></thead><tbody><tr><td>x</td><td class=\"r\">1</td>" in out
+    assert '<span class="lang">bash</span>' in out and "<code>aws s3 ls</code></pre>" in out
+    assert "<blockquote><p>a <em>quote</em></p></blockquote>" in out and "<del>old</del>" in out
+    assert "&lt;script&gt;x&lt;/script&gt;" in out and "<script>" not in out  # raw HTML stays text
+    assert '<a href="https://a.b" target="_blank" rel="noopener noreferrer">ok</a>' in out
+    assert " bad " in out and "javascript" not in out  # only http(s) and mailto links open
+    assert '<a href="https://aws.amazon.com/bedrock" target="_blank" rel="noopener noreferrer">' in out
+    assert _markdown_html("line one\nline two") == "<p>line one<br>line two</p>"  # plain answers keep their breaks
+    assert _markdown_html("snake_case_name, 2 * 3 * 4, **not closed") == "<p>snake_case_name, 2 * 3 * 4, **not closed</p>"
+    assert _markdown_html("- a\n- b\n\n- c") == "<ul><li><p>a</p></li><li><p>b</p></li><li><p>c</p></li></ul>"
+    assert _markdown_html("![chart](https://x/y.png)") == ('<p><a href="https://x/y.png" target="_blank" '
+                                                          'rel="noopener noreferrer">chart</a></p>')  # never loaded
+
+
+def test_markdown_keeps_citations_in_place():
+    def cited(text, *parts):
+        spans = [(text.index(part), part, sources) for part, sources in parts]
+        return _markdown_html(text, [Citation(start, start + len(part), part, sources) for start, part, sources in spans])
+
+    text = "**Refunds** take *5-7 days*.\n\n- Bank: **10 days**\n- Card: 5 days\n\nOther."
+    out = cited(text, ("**Refunds** take *5-7 days*.", [1]), ("- Bank: **10 days**\n- Card: 5 days", [2, 3]))
+    assert out.startswith('<p><strong><span class="cite">Refunds</span></strong><span class="cite"> take </span>'
+                          '<em><span class="cite">5-7 days<sup>[1]</sup></span></em>')
+    assert '<li><span class="cite">Card: 5 days<sup>[2][3]</sup></span></li></ul><p>Other.</p>' in out
+    out = cited("See the [refund policy](https://x.com).", ("See the [refund policy](https://x.com)", [1]))
+    assert out.endswith('<span class="cite">refund policy</span></a><sup>[1]</sup>.</p>')  # after the markup
+    inline = _markdown_html("Use `x[1]` here [2].", [Citation(0, 9, "", [2])], inline=True)
+    assert "<code>x[1]</code>" in inline.replace('<span class="cite">', "").replace("</span>", "")  # code keeps its [1]
+    assert inline.endswith("here <sup>[2]</sup>.</p>")
+
+
+def test_answer_text_keeps_code_and_tables_whole():
+    text = "Steps:\n1. " + "word " * 25 + "\n\n```\n" + "x" * 120 + "\n```\n| a | " + "b" * 110 + " |"
+    lines = _answer_lines(text, 60, "  ")
+    assert lines[1].startswith("  1. word") and lines[2].startswith("     word")  # under the item's text
+    assert "  " + "x" * 120 in lines and lines[-1] == "  | a | " + "b" * 110 + " |"
+
+
+@pytest.mark.parametrize("text, first", [
+    ("rerank", "reranker"), ("temprature", "temperature"), ("search type", "search_type"),
+    ("encrypts the conversation", "kms_key"), ("latency", "latency"), ("guardrail", "guardrail_id"), ("topP", "top_p"),
+])
+def test_search_finds_settings_by_name_path_or_what_they_do(text, first):
+    assert SCHEMA.search(text)[0].key == first
+
+
+def test_search_limits_and_blanks():
+    assert SCHEMA.search("") == list(F.values()) and SCHEMA.search("xyzzy") == []
+    assert len(SCHEMA.search("rerank", 2)) == 2
 
 
 def test_diff_and_normalize_settings():
@@ -822,7 +909,9 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
                                                                          "+ Reranker"]
     assert "Ask support-docs a question." in texts(app)[0]
     assert '<span class="jm" title="set as n">' in app.request_view.value
-    assert "chat(&#x27;support-docs&#x27;, model=&#x27;us.anthropic.claude-opus-5&#x27;, n=5)" in app.setup.value
+    assert "chat('support-docs', model='us.anthropic.claude-opus-5', n=5)" in plain(app.setup.value)
+    assert '<span class="pf">chat</span>' in app.setup.value  # highlighted, like the Python view
+    assert app.results.children == ()  # nothing is listed under the search box until you search
     assert "Nothing yet" in app.response_view.value
 
 
@@ -831,12 +920,15 @@ def test_window_adds_edits_and_removes_settings(window):
     app.chips["temperature"].click()
     assert window.values["temperature"] == 0.2 and "temperature" in app.rows
     assert "Added Temperature. 0.2: steady, factual wording." in app.status.value
+    assert "kbc-fresh" in app.rows["temperature"]._dom_classes  # the new card is outlined until another is added
     app.inputs["temperature"].value = 0.8
     assert window.values["temperature"] == 0.8 and "0.8: varied wording." in app.row_notes["temperature"].value
     app.inputs["n"].value = 12
     assert window.values["n"] == 12 and 'numberOfResults&quot;</span>: </span><span class="jn">12' in (
         app.request_view.value)
-    app.rows["temperature"].children[0].children[2].click()  # its ✕
+    app.chips["top_p"].click()
+    assert "kbc-fresh" not in app.rows["temperature"]._dom_classes and "kbc-fresh" in app.rows["top_p"]._dom_classes
+    app.removes["temperature"].click()  # its ✕
     assert "temperature" not in window.values and "temperature" not in app.rows
     assert "+ Temperature" in [chip.description for chip in app.chip_box.children]
 
@@ -846,8 +938,10 @@ def test_window_keeps_a_setting_out_until_it_can_be_sent(window):
     app.chips["filter"].click()
     assert "filter" in app.pending and "filter" not in window.values
     assert "Not sent until you fill it in." in app.row_notes["filter"].value
+    assert "kbc-pending" in app.rows["filter"]._dom_classes
     app.inputs["filter"].value = '{"team": '
     assert "filter" in app.broken and "Not sent: filter isn&#x27;t valid JSON" in app.row_notes["filter"].value
+    assert "kbc-broken" in app.rows["filter"]._dom_classes and "kbc-pending" not in app.rows["filter"]._dom_classes
     assert "filter isn&#x27;t sent" in app.findings.value
     app.inputs["filter"].value = '{"team": "billing", "year": [">=", 2024]}'
     assert window.values["filter"]["andAll"][1] == {"greaterThanOrEquals": {"key": "year", "value": 2024}}
@@ -855,20 +949,42 @@ def test_window_keeps_a_setting_out_until_it_can_be_sent(window):
     assert not app.broken and "greaterThanOrEquals&quot;" in app.request_view.value
 
 
-def test_window_adds_any_field_by_name_or_path(window):
+def test_window_finds_any_field_by_name_path_or_what_it_does(window):
     app = window._app
+
+    def listed():
+        return [key for key, (row, _) in app.picks.items() if row in app.results.children]
+
+    app.add_name.value = "rerank"
+    assert listed()[:2] == ["reranker", "rerank_n"] and len(listed()) == len(SCHEMA.search("rerank"))
+    app.add_name.value = "model"
+    assert len(listed()) == chatmod._SHOWN_MATCHES and "more match" in app.results.children[-1].value
+    app.add_name.value = "rerank"
+    assert "re-orders the passages" in app.picks["reranker"][0].children[0].value
+    app.picks["rerank_n"][1].click()
+    assert window.values["rerank_n"] == 5 and app.picks["rerank_n"][1].description == "✓ Added"
+    assert app.picks["rerank_n"][1].disabled and app.add_name.value == "rerank"  # the list stays, to add another
     app.add_name.value = "selectionMode"
-    assert "Selection mode" in app.add_help.value and "SELECTIVE | ALL" in app.add_help.value
+    assert listed()[0].endswith("selectionMode") and "SELECTIVE | ALL" in app.picks[listed()[0]][0].children[0].value
     app.add_name.value = "temprature"
-    assert "Did you mean" in app.add_help.value
-    app.add_button.click()
-    assert "No setting" in app.status.value and "temperature" not in window.values
+    assert "Did you mean Temperature?" in app.add_help.value
+    app.add_name._handle_custom_msg({"event": "submit"}, [])  # Enter adds nothing on a near miss
+    assert "No setting &#x27;temprature&#x27;" in app.status.value and "temperature" not in window.values
     app.add_name.value = "orchestrationConfiguration.performanceConfig.latency"
     app.add_name._handle_custom_msg({"event": "focus"}, [])  # anything but Enter does nothing
     assert "orchestrationConfiguration.performanceConfig.latency" not in window.values
     app.add_name._handle_custom_msg({"event": "submit"}, [])
     assert window.values["orchestrationConfiguration.performanceConfig.latency"] == "standard"
-    assert app.add_name.value == ""
+    assert app.add_name.value == "" and app.results.children == ()
+    app.add_name.value = "encrypts the conversation"  # what it does
+    app.add_name._handle_custom_msg({"event": "submit"}, [])
+    assert "kms_key" in app.pending and "kms_key" in app.rows
+    app.browse_button.click()
+    assert len(listed()) == len(F) and app.browse_button.description == "Hide the list"
+    assert [h for h in app.results.children if isinstance(h, widgets.HTML)] == [
+        app.pick_headers[g] for g in ("Retrieval", "Generation", "Orchestration", "Session")]  # by group
+    app.browse_button.click()
+    assert app.results.children == () and app.browse_button.description == f"Browse all {len(F)}"
 
 
 def test_window_sends_a_question_and_streams_the_answer(window, clients):
@@ -910,6 +1026,30 @@ def test_window_shows_errors_where_the_answer_would_be(core, monkeypatch):
     app.question.value = " "
     app._send()
     assert "Type a question first" in app.status.value
+
+
+def test_window_request_views_and_an_editor_that_follows_the_settings(window):
+    app = window._app
+    tree = app.request_view.value
+    app._refresh()
+    assert app.request_view.value is tree  # the same HTML isn't sent again, so folded parts stay folded
+    app.request_mode.value = "JSON"
+    assert '<span class="jk">&quot;numberOfResults&quot;</span>: <span class="jn">5</span>' in app.request_view.value
+    app.request_mode.value = "Python"
+    assert '<span class="pf">retrieve_and_generate</span>' in app.request_view.value
+    assert "region_name=&#x27;us-east-1&#x27;" in plain(app.request_view.value).replace("'", "&#x27;")
+    app.edit_button.click()
+    assert app.request_mode.disabled and app.edit_button.disabled  # the editor is the view while it's open
+    app.chips["temperature"].click()  # the editor hasn't been touched: it follows
+    assert '"temperature": 0.2' in app.editor.value and "changed" not in app.edit_message.value
+    app.editor.value = app.editor.value.replace('"numberOfResults": 5', '"numberOfResults": 7')
+    app.chips["top_p"].click()  # it has: the edits stay, and it says what Apply would undo
+    assert '"numberOfResults": 7' in app.editor.value and '"topP"' not in app.editor.value
+    assert "The request changed since you started editing: top_p = 0.9 (added)." in app.edit_message.value
+    app.restart_button.click()
+    assert '"topP": 0.9' in app.editor.value and '"numberOfResults": 5' in app.editor.value
+    app._cancel_edit()
+    assert not app.request_mode.disabled and not app.edit_button.disabled and app.request_view.layout.display == ""
 
 
 def test_window_applies_edited_json(window):

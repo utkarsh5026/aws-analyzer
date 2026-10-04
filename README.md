@@ -951,10 +951,10 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; two answers about refunds with their cited spans shaded and numbered, their sources (one opened to the full passage) and their request and response JSON folded underneath; on the right, the Settings tab with Passages and Search type, each explained in a sentence, buttons to add a metadata filter, a reranker, temperature and more, and the chat() call that opens this setup again">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type as cards, each explained in a sentence, one-click buttons to add a metadata filter, a reranker, temperature and more, and a box to search every setting">
 </picture>
 
-<p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up, each answer with its citations and sources, and the settings every question sends.</sub></p>
+<p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
 
 ### Quick start
 
@@ -969,19 +969,21 @@ ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"te
 The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
 browser tab). Without it, or outside Jupyter, every command below still works as a report.
 
-- **The conversation.** Answers appear as they're written. Each one shades its cited spans and numbers them, lists
-  its sources (click one to read the passage, with its location and metadata), shows its time, grounded share and
-  estimated cost, and folds away the exact request and response. Findings under an answer say which setting to try
-  (Bedrock's "unable to assist" reply, no citations, a guardrail, cut off at `max_tokens`). Follow-ups keep Bedrock's
-  session; **New chat** starts over.
+- **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
+  one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
+  and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
+  Findings under an answer say which setting to try (Bedrock's "unable to assist" reply, no citations, a guardrail,
+  cut off at `max_tokens`). Follow-ups keep Bedrock's session; **New chat** starts over.
 - **Settings.** Everything sent with every question, each value explained in a sentence, with its path in the
-  request. Change it in place, remove it with ✕, add the common ones with one click, or add **any** field by its name
-  or path: the list comes from the installed boto3's description of the API, so nothing is missing. A value that
+  request. Change it in place, remove it with ✕, add the common ones with one click, or search **every** field by
+  name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
+  the list comes from the installed boto3's description of the API, so nothing is missing. A value that
   can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
   newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
 - **Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
-  plain JSON, or as the boto3 call to paste into your code. **Edit JSON** takes a hand-edited request back into the
-  settings, after checking it the way boto3 does before sending. **Last response** shows what came back.
+  JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
+  back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
+  while you were editing without saying so. **Last response** shows what came back.
 
 ### Commands (`BedrockChatView`)
 

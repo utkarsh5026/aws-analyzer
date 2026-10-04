@@ -134,7 +134,9 @@ How the View layer works:
   document laid out: headings, lists, tables and its pictures in place) and `_JsonTree` (a JSON file as nested
   `<details>` with coloured tokens, capped and opened breadth-first; not `bedrock_chat`'s `_Json`, which shows a
   request with its settings marked), and in Bedrock `_Passage` (a retrieved
-  passage with `<mark>` highlights) and `_Answer` (an answer with shaded cited spans and `[n]` superscripts)) and pass them to
+  passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
+  cited spans and `[n]` superscripts), and in `bedrock_chat` `_Code` (Python highlighted by `_python_html`, from
+  `tokenize`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.
 - The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
@@ -175,7 +177,11 @@ How the View layer works:
   `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`), and
   `self.kb`, the default knowledge base that `use()` sets.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
-  `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions.
+  `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
+  markdown: `_Markdown` (stdlib only, the same in `bedrock_kb` and `bedrock_chat`) parses blocks and inline markup
+  keeping each character's offset in the answer, because citations are offsets into the raw text. Raw HTML stays
+  text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
+  (`_answer_lines` leaves code and tables unwrapped).
 - `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but standalone (not a companion): it
   copies its helpers like the other analyzers. `chat()` (module level) builds a `BedrockChatView` and calls
   `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
@@ -186,7 +192,12 @@ How the View layer works:
   names, plain-English docs and starting values in `_KNOWN`, so a field AWS adds appears with a newer boto3.
   Settings are `{key: value}` (`view.values`); `build_request()` places them in the request and fills required
   one-value enums (`Schema.auto`), `settings_from_request()` reads an edited request back, and `validate_request()`
-  runs botocore's `ParamValidator`. Every widget callback goes through `_ChatApp._safely`, which shows errors in
+  runs botocore's `ParamValidator`. **Add a setting** lists `Schema.search(text)` (names, then paths, then
+  descriptions; a near miss falls back to difflib), or every field by group with Browse all. With Edit JSON open, the
+  view buttons are disabled, and `_follow_edit` refills an untouched editor when the request changes, or warns what
+  Apply would undo in an edited one. Each tab scrolls on its own (the box inside the tab's frame), and `_set` only
+  assigns an HTML widget a value that changed, so a re-render doesn't fold up what the user opened. Every widget
+  callback goes through `_ChatApp._safely`, which shows errors in
   the window (a callback's exception would only reach the browser log); Enter in a text box is the box's `submit`
   message (`_ChatApp._on_enter`, as in the explorer: `on_submit` is deprecated). View commands run from other cells
   update an open window through `view._changed()`. `_ipython_display_` shows the window once per cell, so a cell

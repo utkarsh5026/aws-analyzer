@@ -31,6 +31,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   a region, a bucket), and untick columns under **Columns** to hide the ones you don't need. It's plain HTML and CSS,
   so it still works after the notebook is saved and reopened.
   ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+- `chat()` window, and `ask()` / `transcript()` in `BedrockChatView` and `BedrockKBView`: answers written in markdown
+  are laid out, with headings, bullet and numbered lists, bold and italic, tables, code blocks and links, and each
+  cited span still shaded and numbered. Nothing in an answer runs as HTML, and its links open only web pages and email
+  addresses. In a terminal the markdown is printed as written, with code blocks and tables left unwrapped.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: **Add a setting** searches every RetrieveAndGenerate field by its name, its path or what it does
+  (`rerank`, `latency`, `encrypts`), lists the matches with what each one takes and does, and adds one with **+ Add**
+  (Enter adds the best match). A misspelt name lists the closest ones, and **Browse all** lists every field by group.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: the **Python** view of the request, and **Open this setup again**, are highlighted like code, and
+  so is "The same call in Python" in `request()` and `last()`. The **JSON** view is in colour too.
+  `python_call(params, region, width=)` breaks lines at `width`, counting each key.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
 
 ### Changed
 
@@ -40,6 +53,29 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `S3View` findings lead with a bold headline, with why it matters and what to do underneath as points, and amounts
   of money stand out. Notes start with their point in bold.
   ([#21](https://github.com/utkarsh5026/aws-analyzer/pull/21))
+- `chat()` window: a new look, with rounded corners throughout. The conversation reads like a chat (your questions on
+  the right, each answer as a card with the model's name over its time and cost, sources as numbered rows), the box
+  you type in sits in one rounded bar with **Send**, each setting is a card, and the tabs and view buttons are
+  segmented controls. It follows JupyterLab's light and dark themes. The request's **Text** view is now called
+  **JSON**.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+
+### Fixed
+
+- `chat()` window, **Request JSON**: with **Edit JSON** open, changing a setting in the Settings tab (or from another
+  cell) and then pressing **Apply** silently undid that change. Now an editor you haven't touched takes the new
+  request, and one you have keeps your edits and says what Apply would undo, with **Start over** to load the request
+  as it is now.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window, **Request JSON**: while **Edit JSON** was open, **Tree**, **Text** and **Python** did nothing when
+  clicked. They now wait, greyed out, until you Apply or Cancel.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: the three tabs shared one scroll position, so after scrolling down the settings, **Request JSON**
+  opened scrolled past its buttons. Each tab now scrolls on its own.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
+- `chat()` window: the JSON text and Python views wrapped long lines in the middle of a word; they now scroll sideways,
+  and the Python breaks its lines to fit the tab.
+  ([#23](https://github.com/utkarsh5026/aws-analyzer/pull/23))
 
 ## [0.2.0] - 2026-10-04
 

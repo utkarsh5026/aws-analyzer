@@ -1384,7 +1384,7 @@ def _looks_binary(data: bytes) -> bool:
         )  # a multi-byte char cut at the end is still text
 
 
-_JSON_TOKEN_RE = re.compile(
+_JSON_PREFIX_RE = re.compile(
     r'\s*(?:([{}\[\]:,])|("(?:[^"\\]|\\.)*")|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|(true|false|null|NaN|-?Infinity))'
 )
 _JSON_CUT_RE = re.compile(r'\s*(?:"|-?[\d.eE+-]*$|-?[tfnNI][a-z]*$)')  # what a cut can leave: a string, number, word
@@ -1400,7 +1400,7 @@ def _json_prefix(text: str) -> tuple[Any, int] | None:
     text = text.lstrip("\ufeff")
     pos, end = 0, len(text)
     while stack or root is None:
-        match = _JSON_TOKEN_RE.match(text, pos)
+        match = _JSON_PREFIX_RE.match(text, pos)
         if not match or (match.group(3) and match.end() == end):  # a number at the very end may be cut short
             break
         pos = match.end()
