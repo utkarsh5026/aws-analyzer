@@ -59,12 +59,15 @@ import functools
 import html
 import importlib
 import inspect
+import io
 import json
+import keyword
 import math
 import re
 import sys
 import textwrap
 import time
+import tokenize
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -681,6 +684,36 @@ class Schema:
             f"No setting {text!r}.{hint} fields() lists every one RetrieveAndGenerate takes in this boto3 "
             f"(botocore {self.boto}); pip install -U boto3 adds fields AWS added since."
         )
+
+    def search(self, text: Any, limit: int | None = None) -> list[Field]:
+        """The fields some words could mean, best first: every word must be in a field's name, label, other names,
+        path or description, and names count most. A misspelt name ('temprature') finds the closest ones; blank
+        text gives every field, in order."""
+        words = str(text or "").lower().split()
+        if not words:
+            return list(self.fields.values())[:limit]
+        scored = []
+        for order, f in enumerate(self.fields.values()):
+            names = [_norm(n) for n in (f.key, f.label, *f.names)]
+            path, doc, score = _norm(".".join(f.path)), f.doc.lower(), 0
+            for word in words:
+                wanted = _norm(word)
+                points = (100 if wanted in names else 60 if any(n.startswith(wanted) for n in names)
+                          else 40 if any(wanted in n for n in names) else 25 if wanted in path
+                          else 10 if word in doc else 0)
+                if not points:
+                    break
+                score += points
+            else:
+                scored.append((-score, order, f))
+        if scored:
+            return [f for _, _, f in sorted(scored)][:limit]
+        known: dict[str, list[Field]] = {}
+        for f in self.fields.values():
+            for name in dict.fromkeys(_norm(n) for n in (f.key, f.label, *f.names)):
+                known.setdefault(name, []).append(f)
+        close = difflib.get_close_matches(_norm(" ".join(words)), list(known), n=5, cutoff=0.6)
+        return list({f.key: f for c in close for f in known[c]}.values())[:limit]
 
 
 @dataclass
@@ -1711,26 +1744,30 @@ def answer_cost(
                                    question_tokens=estimate_tokens(a.question))
 
 
-def _py_literal(value: Any, indent: int = 0, width: int = 100) -> str:
-    """A JSON value as Python source, one key per line once it's too long for one line."""
+def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | None = None) -> str:
+    """A JSON value as Python source, one key per line once it's too long for one line. column is where the value
+    starts on its line (after its key), when that's further than indent."""
     flat = repr(value)
-    if not isinstance(value, (dict, list)) or not value or indent + len(flat) <= width:
+    start = indent if column is None else column
+    if not isinstance(value, (dict, list)) or not value or start + len(flat) + 1 <= width:
         return flat
     pad = " " * (indent + 4)
     if isinstance(value, dict):
-        lines = [f"{pad}{k!r}: {_py_literal(v, indent + 4, width)}," for k, v in value.items()]
+        lines = [f"{pad}{k!r}: {_py_literal(v, indent + 4, width, indent + 6 + len(repr(k)))},"
+                 for k, v in value.items()]
         return "{\n" + "\n".join(lines) + "\n" + " " * indent + "}"
     lines = [f"{pad}{_py_literal(v, indent + 4, width)}," for v in value]
     return "[\n" + "\n".join(lines) + "\n" + " " * indent + "]"
 
 
-def python_call(params: dict[str, Any], region: str = "") -> str:
-    """The same RetrieveAndGenerate call as Python, to paste into a cell or a script."""
+def python_call(params: dict[str, Any], region: str = "", width: int = 100) -> str:
+    """The same RetrieveAndGenerate call as Python, to paste into a cell or a script. width is where long lines
+    break."""
     where = f", region_name={region!r}" if region else ""
     return (
         "import boto3\n\n"
         f"client = boto3.client('bedrock-agent-runtime'{where})\n"
-        f"response = client.retrieve_and_generate(**{_py_literal(params)})\n"
+        f"response = client.retrieve_and_generate(**{_py_literal(params, width=width)})\n"
         "print(response['output']['text'])"
     )
 
@@ -2239,14 +2276,26 @@ class _Turn:
     findings: list[tuple[str, str]] = field(default_factory=list)
 
 
+@dataclass
+class _Code:
+    """Python to copy, highlighted in HTML (one click selects all of it), as it is in text."""
+
+    text: str
+    title: str = ""
+
+
 _CSS = """<style>
+.kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11)}
+.kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8;--kf:#0e7490;--ka:#c2410c;--kw:#be185d}
+body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
 .kbc{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .kbc h3{margin:10px 0 2px;font-size:16px}
-.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
+.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}
 .kbc h4{margin:14px 0 4px;font-size:13px}
 .kbc .sub{opacity:.65;font-size:12px;margin-bottom:6px}
 .kbc .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.kbc .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
+.kbc .card{border:1px solid var(--kc-line);border-radius:12px;padding:7px 13px;min-width:96px;background:var(--kc-tint)}
 .kbc .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
 .kbc .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
 .kbc .card.ok{border-color:rgba(16,185,129,.7)}
@@ -2265,26 +2314,27 @@ _CSS = """<style>
 .kbc table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kbc table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .kbc table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.kbc .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
+.kbc .track{display:inline-block;width:110px;height:8px;border-radius:4px;background:rgba(127,127,127,.18)}
 .kbc .track{vertical-align:middle;margin-right:6px}
-.kbc .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
-.kbc .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
+.kbc .fill{display:block;height:100%;border-radius:4px;background:var(--kc-accent)}
+.kbc .pill{display:inline-block;padding:0 8px;border-radius:999px;font-weight:600;font-size:12px}
 .kbc .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
 .kbc .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
 .kbc .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.kbc .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
+.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}
 .kbc .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
+.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}
 .kbc .note.warn::before{content:"\\26A0\\FE0E"}
-.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
+.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}
 .kbc .note.ok::before{content:"\\2713"}
 .kbc .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.kbc code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
-.kbc code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
+.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}
+.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}
 .kbc .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.kbc pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
+.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}
 .kbc pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
 .kbc pre.code{user-select:all;-webkit-user-select:all;cursor:text}
+.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}
 .kbc .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
 .kbc details.sec{margin:14px 0 4px}
 .kbc details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
@@ -2292,73 +2342,194 @@ _CSS = """<style>
 .kbc .next{border-top:1px dashed rgba(127,127,127,.35)}
 .kbc .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
 .kbc .next .nw{font-size:12px;opacity:.65;margin-left:6px}
-.kbc mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px;padding:0 1px}
-.kbc .ans{white-space:pre-wrap;font-size:14px;line-height:1.55;margin:8px 0 10px;max-width:900px}
-.kbc .ans .cite{background:rgba(59,130,246,.10);border-radius:2px}
-.kbc .ans sup{font-size:10px;opacity:.75;margin-left:1px}
-.kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8}
-body[data-jp-theme-light="false"] .kbc,body.vscode-dark .kbc,body.vscode-high-contrast .kbc,.kbc-dark .kbc{--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc{--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd}}
-.kbc .json{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;padding:8px 10px 8px 24px;border:1px solid rgba(127,127,127,.28);border-radius:8px;overflow:auto;max-height:560px;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 8px}
-.kbc .json details>summary{cursor:pointer;list-style:none;position:relative}
+.kbc mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
+.kbc .ans{font-size:14px;line-height:1.6;margin:8px 0 10px;max-width:900px;overflow-wrap:anywhere}
+.kbc .ans>:first-child{margin-top:0}
+.kbc .ans>:last-child{margin-bottom:0}
+.kbc .ans p{margin:0 0 .65em}
+.kbc .ans h1,.kbc .ans h2,.kbc .ans h3,.kbc .ans h4,.kbc .ans h5,.kbc .ans h6{margin:.95em 0 .4em;line-height:1.3;font-weight:650}
+.kbc .ans h1{font-size:1.32em}
+.kbc .ans h2{font-size:1.2em}
+.kbc .ans h3{font-size:1.08em}
+.kbc .ans h4,.kbc .ans h5,.kbc .ans h6{font-size:1em}
+.kbc .ans ul,.kbc .ans ol{margin:.25em 0 .65em;padding-left:1.45em}
+.kbc .ans li{margin:.18em 0}
+.kbc .ans li>p{margin:0 0 .35em}
+.kbc .ans li>ul,.kbc .ans li>ol{margin:.15em 0 .2em}
+.kbc .ans blockquote{margin:.4em 0 .75em;padding:.15em 0 .15em .9em;border-left:3px solid var(--kc-line-2);opacity:.88}
+.kbc .ans hr{border:0;border-top:1px solid var(--kc-line);margin:1em 0}
+.kbc .ans code{font-size:.86em;user-select:text;-webkit-user-select:text}
+.kbc .ans a{color:var(--kc-accent);text-decoration:none;border-bottom:1px solid var(--kc-ring)}
+.kbc .ans a:hover{border-bottom-color:currentColor}
+.kbc .ans .pre{position:relative;margin:.45em 0 .8em}
+.kbc .ans .pre pre{margin:0;padding:11px 14px;white-space:pre;overflow:auto;max-height:420px;font-size:12.5px;line-height:1.55;user-select:all;-webkit-user-select:all;cursor:text}
+.kbc .ans .pre code{background:none;padding:0;font-size:inherit;user-select:inherit;-webkit-user-select:inherit}
+.kbc .ans .pre .lang{position:absolute;top:6px;right:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.5}
+.kbc .ans .mdt{overflow-x:auto;margin:.45em 0 .8em;border:1px solid var(--kc-line);border-radius:10px}
+.kbc .ans table{border-collapse:collapse;font-size:13px;line-height:1.45;width:100%}
+.kbc .ans th,.kbc .ans td{border-bottom:1px solid var(--kc-line);padding:6px 11px;text-align:left;vertical-align:top}
+.kbc .ans th{background:var(--kc-tint);font-weight:600}
+.kbc .ans tbody tr:last-child td{border-bottom:0}
+.kbc .ans th.c,.kbc .ans td.c{text-align:center}
+.kbc .ans th.r,.kbc .ans td.r{text-align:right;font-variant-numeric:tabular-nums}
+.kbc .ans .cite{background:var(--kc-cite);border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.kbc .ans sup{font-size:10px;font-weight:650;color:var(--kc-accent);margin-left:1px;line-height:0}
+.kbc .ans .none{font-style:italic;opacity:.6}
+.kbc .json{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.55;padding:9px 12px 9px 26px;border:1px solid var(--kc-line);border-radius:12px;overflow:auto;max-height:560px;white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 8px;background:var(--kc-tint)}
+.kbc .json details>summary{cursor:pointer;list-style:none;position:relative;display:block}
 .kbc .json details>summary::-webkit-details-marker{display:none}
-.kbc .json details>summary::before{content:"\\25B8";position:absolute;left:-13px;top:0;opacity:.5;font-size:11px}
+.kbc .json details>summary::before{content:"\\25B8";position:absolute;left:-14px;top:0;opacity:.5;font-size:11px}
 .kbc .json details[open]>summary::before{content:"\\25BE"}
+.kbc .json details>summary:hover::before{opacity:1;color:var(--kc-accent)}
 .kbc .json details[open]>summary .jx{display:none}
 .kbc .json .ji{padding-left:18px;margin-left:1px;border-left:1px dotted rgba(127,127,127,.35)}
-.kbc .json .jk{color:var(--kk)}
-.kbc .json .js{color:var(--ks)}
-.kbc .json .jn{color:var(--kn)}
-.kbc .json .jl{color:var(--kl);font-weight:600}
+.kbc .jk{color:var(--kk)}
+.kbc .js{color:var(--ks)}
+.kbc .jn{color:var(--kn)}
+.kbc .jl{color:var(--kl);font-weight:600}
+.kbc .pk{color:var(--kw);font-weight:600}
+.kbc .pf{color:var(--kf)}
+.kbc .pa{color:var(--ka)}
+.kbc .pc{opacity:.55;font-style:italic}
 .kbc .json .jx{opacity:.55}
-.kbc .json .jm{background:rgba(250,204,21,.30);border-radius:3px;box-shadow:0 0 0 2px rgba(250,204,21,.30)}
+.kbc .json .jm{background:rgba(250,204,21,.30);border-radius:4px;box-shadow:0 0 0 2px rgba(250,204,21,.30)}
 .kbc .json .jc{margin-left:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:11px;font-style:italic;opacity:.55;white-space:nowrap}
-.kbc .msg{max-width:min(800px,94%);padding:8px 12px;border-radius:12px;margin:3px 0;box-sizing:border-box}
-.kbc .msg.you{margin-left:auto;width:fit-content;background:rgba(59,130,246,.14);border-bottom-right-radius:4px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px}
-.kbc .msg.bot{margin-right:auto;border:1px solid rgba(127,127,127,.28);border-bottom-left-radius:4px}
-.kbc .msg.err{border-color:rgba(239,68,68,.55);background:rgba(239,68,68,.06)}
-.kbc .msg.sys{margin:6px auto;text-align:center;font-size:12px;opacity:.65;padding:2px 8px;border:0}
-.kbc .msg .ans{margin:2px 0 4px;font-size:13.5px}
-.kbc .msg .note{margin:6px 0 2px;font-size:12px}
-.kbc .who{font-size:11px;opacity:.6;margin-bottom:2px}
-.kbc .wait{opacity:.75}
-.kbc .srcs{margin-top:8px;font-size:12px}
-.kbc .srcs .sh{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;opacity:.55;margin:0 0 2px}
-.kbc details.src>summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 0}
-.kbc details.src .sn{opacity:.6;margin-left:4px}
+.kbc .msg{max-width:min(820px,92%);padding:10px 14px;border-radius:18px;margin:4px 0;box-sizing:border-box}
+.kbc .msg.you{margin-left:auto;width:fit-content;background:var(--kc-solid);color:#fff;border-bottom-right-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.5;box-shadow:0 1px 2px rgba(15,23,42,.12)}
+.kbc .msg.bot{margin-right:auto;background:var(--kc-surface);border:1px solid var(--kc-line);border-bottom-left-radius:6px;box-shadow:var(--kc-shadow)}
+.kbc .msg.err{border-color:rgba(239,68,68,.55);background:rgba(239,68,68,.07)}
+.kbc .msg.sys{margin:8px auto;width:fit-content;max-width:90%;text-align:center;font-size:12px;opacity:.75;padding:4px 12px;border-radius:999px;background:var(--kc-tint-2);border:0;box-shadow:none}
+.kbc .msg .ans{margin:4px 0 2px;font-size:13.5px}
+.kbc .msg .note{margin:8px 0 2px;font-size:12px}
+.kbc .who{display:flex;align-items:center;font-size:11.5px;line-height:1.35;margin-bottom:6px}
+.kbc .who b{font-weight:650;font-size:12.5px}
+.kbc .who .wm{opacity:.6;font-size:11px}
+.kbc .who .av{width:26px;height:26px;border-radius:9px;font-size:13px;margin-right:9px}
+.kbc .av{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-right:7px;border-radius:7px;font-size:11px;color:#fff;background:linear-gradient(135deg,var(--kc-accent),var(--kc-accent-2));flex:0 0 auto}
+.kbc .wait{display:flex;align-items:center;opacity:.85;width:fit-content}
+.kbc .dots{display:inline-flex;gap:4px;margin-right:10px}
+.kbc .dots i{width:6px;height:6px;border-radius:50%;background:var(--kc-accent);opacity:.3;animation:kbc-dot 1.2s infinite ease-in-out}
+.kbc .dots i:nth-child(2){animation-delay:.15s}
+.kbc .dots i:nth-child(3){animation-delay:.3s}
+@keyframes kbc-dot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.kbc .srcs{margin-top:10px;padding-top:8px;border-top:1px solid var(--kc-line);font-size:12px}
+.kbc .srcs .sh{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.55;margin:0 0 4px}
+.kbc details.src{border-radius:9px;margin:2px 0}
+.kbc details.src>summary{cursor:pointer;display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;padding:3px 6px;border-radius:9px;list-style:none}
+.kbc details.src>summary::-webkit-details-marker{display:none}
+.kbc details.src>summary:hover{background:var(--kc-tint-2)}
+.kbc details.src[open]{background:var(--kc-tint)}
+.kbc details.src .sx{flex:0 0 auto;min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:650;color:var(--kc-accent);background:var(--kc-soft)}
+.kbc details.src .sf{flex:0 0 auto;font-weight:600}
+.kbc details.src .sn{opacity:.6;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .kbc details.src[open]>summary .sn{display:none}
-.kbc details.src .pt{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 4px 16px;padding:6px 10px;border-left:2px solid rgba(59,130,246,.45);background:rgba(127,127,127,.06);max-height:280px;overflow:auto}
-.kbc details.src .pm{margin:0 0 6px 16px;opacity:.6;overflow-wrap:anywhere}
+.kbc details.src .pt{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 8px 6px 31px;padding:8px 12px;border-left:3px solid var(--kc-ring);border-radius:3px 9px 9px 3px;background:var(--kc-surface);max-height:280px;overflow:auto;line-height:1.5}
+.kbc details.src .pm{margin:0 8px 6px 31px;opacity:.6;overflow-wrap:anywhere}
 .kbc details.raw{margin-top:8px;font-size:12px}
-.kbc details.raw>summary{cursor:pointer;opacity:.65}
+.kbc details.raw>summary{cursor:pointer;opacity:.65;width:fit-content;padding:2px 8px 2px 4px;border-radius:7px}
+.kbc details.raw>summary:hover{opacity:1;background:var(--kc-tint-2)}
 .kbc .jh{font-size:11px;font-weight:600;opacity:.6;margin:8px 0 0}
-.kbc .caret::after{content:"\\258D";opacity:.6;animation:kbc-blink 1s steps(1) infinite}
+.kbc .caret::after{content:"\\258D";opacity:.6;color:var(--kc-accent);animation:kbc-blink 1s steps(1) infinite}
 @keyframes kbc-blink{50%{opacity:0}}
-.kbc .spin{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px;border:2px solid rgba(127,127,127,.3);border-top-color:#3b82f6;border-radius:50%;animation:kbc-spin .8s linear infinite}
+.kbc .spin{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px;border:2px solid rgba(127,127,127,.3);border-top-color:var(--kc-accent);border-radius:50%;animation:kbc-spin .8s linear infinite}
 @keyframes kbc-spin{to{transform:rotate(360deg)}}
-.kbc .hello{padding:10px 14px;border:1px dashed rgba(127,127,127,.45);border-radius:10px;margin:4px 0;line-height:1.5}
+.kbc .hello{display:flex;gap:12px;padding:14px 16px;border:1px solid var(--kc-line);border-radius:16px;margin:4px 0;line-height:1.55;background:var(--kc-surface);box-shadow:var(--kc-shadow)}
+.kbc .hello .av{width:30px;height:30px;border-radius:10px;font-size:15px;margin:1px 0 0}
 .kbc .hello ul{margin:6px 0 0;padding-left:18px}
-.kbc .st{font-size:12px;opacity:.7;padding:4px 2px 0;line-height:1.4}
+.kbc .hello li{margin:2px 0}
+.kbc .st{font-size:12px;opacity:.7;padding:6px 6px 0;line-height:1.4}
 .kbc .st.warn{opacity:1;color:#d97706}
 .kbc .st.ok{opacity:.85}
-.kbc .gh{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;opacity:.5;margin:10px 0 2px;line-height:1.4}
-.kbc .ph{font-weight:600;margin:4px 0 0;line-height:1.4}
+.kbc .st.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
+.kbc .st.ok::before{content:"\\2713";margin-right:6px;color:#10b981}
+.kbc .gh{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;opacity:.5;margin:12px 2px 4px;line-height:1.4}
+.kbc .ph{font-weight:650;font-size:13px;margin:2px 0 0;line-height:1.4}
 .kbc .ph .hint{margin-left:6px}
-.kbc .rl{font-weight:600;font-size:12px;line-height:1.3;padding-top:6px;cursor:help;overflow-wrap:anywhere}
-.kbc .rp{font-size:11px;line-height:1.35;opacity:.62;margin:0 0 8px 124px;overflow-wrap:anywhere}
-.kbc .rp code{font-size:11px}
-.kbc .rp .path{opacity:.75}
+.kbc .pd{font-size:12px;opacity:.6;margin:1px 0 4px;line-height:1.4}
+.kbc .rh{display:flex;align-items:baseline;gap:8px;min-width:0;padding-top:2px;line-height:1.3;cursor:help}
+.kbc .rh b{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .rk{font-size:10.5px;opacity:.55;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .rp{font-size:11.5px;line-height:1.4;opacity:.75;margin:5px 0 0;overflow-wrap:anywhere}
+.kbc .rp code{font-size:10.5px}
+.kbc .rw{font-size:10.5px;line-height:1.4;opacity:.5;margin:2px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .kbc .rp.bad{opacity:1;color:#dc2626}
-.kbc .rp.pending{opacity:.8;color:#d97706}
-.kbc .setup{margin-top:10px;font-size:12px;line-height:1.4}
+.kbc .rp.pending{opacity:.9;color:#d97706}
+.kbc .fc{min-width:0;line-height:1.35}
+.kbc .fc .fl{display:flex;align-items:baseline;gap:8px;min-width:0}
+.kbc .fc .fl b{font-weight:600;font-size:12.5px;white-space:nowrap}
+.kbc .fc .fd{font-size:11.5px;opacity:.68;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.kbc .fc .fw{font-size:10.5px;opacity:.45;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.kbc .setup{margin-top:4px;font-size:12px;line-height:1.4}
 .kbc pre{word-break:normal}
-.kbc .setup pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0 0}
-.kbc-app .kbc-mono textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45}
-.kbc-app .kbc-log{border:1px solid rgba(127,127,127,.25);border-radius:10px;padding:8px 10px}
+.kbc .setup pre{margin:4px 0 0}
+.kbc .hd{display:flex;align-items:center;gap:12px;min-width:0}
+.kbc .hd .av{width:36px;height:36px;border-radius:12px;font-size:18px;margin:0;box-shadow:0 2px 8px var(--kc-ring)}
+.kbc .hd h3{margin:0;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .hd h3 .badge{margin:0 0 0 8px}
+.kbc .hd .sub{margin:2px 0 0}
+.kbc-app{box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
+.kbc-app *{box-sizing:border-box}
 .kbc-app .widget-html-content,.kbc-app .jupyter-widget-html-content{min-width:0}
-.kbc-app .kbc-chip{height:24px;line-height:22px;font-size:12px;padding:0 9px;margin:0 6px 6px 0;border-radius:12px}
-.kbc-app .kbc-x{padding:0;min-width:28px}
-.kbc-app .kbc-side .widget-tab-contents,.kbc-app .kbc-side .jupyter-widget-tab-contents{max-height:640px;overflow:auto}
+.kbc-app.kbc-app .kbc-head{padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--kc-line);gap:10px 14px}
+.kbc-app.kbc-app .kbc-pickers{gap:8px 18px}
+.kbc-app.kbc-app .kbc-pickers .widget-label{color:inherit;opacity:.65;font-size:12px;font-weight:500}
+.kbc-app.kbc-app .widget-text input,.kbc-app.kbc-app .widget-textarea textarea,.kbc-app.kbc-app .widget-dropdown>select,.kbc-app.kbc-app .jupyter-widget-text input,.kbc-app.kbc-app .jupyter-widget-textarea textarea,.kbc-app.kbc-app .jupyter-widget-dropdown>select{border:1px solid var(--kc-line-2);border-radius:10px;background-color:var(--kc-surface);color:inherit;transition:border-color .15s,box-shadow .15s}
+.kbc-app.kbc-app .widget-text input,.kbc-app.kbc-app .jupyter-widget-text input{padding:4px 11px}
+.kbc-app.kbc-app .widget-dropdown>select,.kbc-app.kbc-app .jupyter-widget-dropdown>select{padding:0 26px 0 11px;cursor:pointer}
+.kbc-app.kbc-app .widget-textarea textarea,.kbc-app.kbc-app .jupyter-widget-textarea textarea{padding:7px 11px;line-height:1.45;resize:vertical}
+.kbc-app.kbc-app .widget-text input:focus,.kbc-app.kbc-app .widget-textarea textarea:focus,.kbc-app.kbc-app .widget-dropdown>select:focus,.kbc-app.kbc-app .jupyter-widget-text input:focus,.kbc-app.kbc-app .jupyter-widget-textarea textarea:focus,.kbc-app.kbc-app .jupyter-widget-dropdown>select:focus{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
+.kbc-app.kbc-app .widget-text,.kbc-app.kbc-app .widget-dropdown,.kbc-app.kbc-app .widget-textarea{margin:2px 0}
+.kbc-app.kbc-app .kbc-mono textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5}
+.kbc-app.kbc-app .jupyter-button{border-radius:10px;border:1px solid var(--kc-line);background:var(--kc-tint);color:inherit;font-weight:500;box-shadow:none;outline:none;transition:background-color .15s,border-color .15s,box-shadow .15s,transform .05s}
+.kbc-app.kbc-app .jupyter-button:hover:enabled{background:var(--kc-tint-2);border-color:var(--kc-line-2);box-shadow:none}
+.kbc-app.kbc-app .jupyter-button:focus-visible{box-shadow:0 0 0 3px var(--kc-soft);outline:none}
+.kbc-app.kbc-app .jupyter-button:active:enabled{transform:translateY(1px)}
+.kbc-app.kbc-app .jupyter-button.mod-primary{background:var(--kc-solid);border-color:transparent;color:#fff;font-weight:600}
+.kbc-app.kbc-app .jupyter-button.mod-primary:hover:enabled{background:var(--kc-solid);filter:brightness(1.08);border-color:transparent}
+.kbc-app.kbc-app .jupyter-button:disabled{opacity:.45;cursor:default}
+.kbc-app.kbc-app .kbc-ghost{background:transparent;border-color:transparent}
+.kbc-app.kbc-app .kbc-ghost:hover:enabled{background:var(--kc-tint-2)}
+.kbc-app.kbc-app .kbc-new-chat{border-radius:999px;padding:0 14px}
+.kbc-app.kbc-app .kbc-chip{height:26px;line-height:24px;font-size:12px;padding:0 11px;margin:0 6px 6px 0;border-radius:999px;background:var(--kc-surface);border:1px dashed var(--kc-line-2)}
+.kbc-app.kbc-app .kbc-chip:hover:enabled{border-style:solid;border-color:var(--kc-accent);color:var(--kc-accent);background:var(--kc-soft)}
+.kbc-app.kbc-app .kbc-x{padding:0;min-width:26px;height:26px;line-height:24px;border-radius:999px;background:transparent;border-color:transparent;opacity:.55}
+.kbc-app.kbc-app .kbc-x:hover:enabled{opacity:1;background:rgba(239,68,68,.12);color:#dc2626}
+.kbc-app.kbc-app .kbc-small{height:26px;line-height:24px;font-size:12px;padding:0 12px;border-radius:999px}
+.kbc-app.kbc-app .kbc-log{border:1px solid var(--kc-line);border-radius:18px;padding:12px 14px;background:var(--kc-tint)}
+.kbc-app.kbc-app .kbc-composer{margin-top:10px;padding:5px 5px 5px 8px;border:1px solid var(--kc-line-2);border-radius:999px;background:var(--kc-surface);box-shadow:var(--kc-shadow);align-items:center;transition:border-color .15s,box-shadow .15s}
+.kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
+.kbc-app.kbc-app .kbc-composer .widget-text input,.kbc-app.kbc-app .kbc-composer .jupyter-widget-text input{border:0;box-shadow:none;background:transparent;font-size:14px;padding:4px 8px}
+.kbc-app.kbc-app .kbc-composer .jupyter-button{border-radius:999px;height:34px;line-height:34px;padding:0 18px}
+.kbc-app.kbc-app .kbc-row{border:1px solid var(--kc-line);border-radius:14px;padding:9px 10px 10px 13px;margin:0 0 8px;background:var(--kc-surface);transition:border-color .2s,box-shadow .2s}
+.kbc-app.kbc-app .kbc-row:hover{border-color:var(--kc-line-2)}
+.kbc-app.kbc-app .kbc-row.kbc-fresh{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
+.kbc-app.kbc-app .kbc-row.kbc-broken{border-color:rgba(220,38,38,.6)}
+.kbc-app.kbc-app .kbc-row.kbc-pending{border-style:dashed;border-color:rgba(217,119,6,.7)}
+.kbc-app.kbc-app .kbc-search{margin-top:4px}
+.kbc-app.kbc-app .kbc-pick{align-items:center;gap:10px;padding:7px 8px 7px 11px;border-radius:12px;border:1px solid transparent;margin:0 0 2px}
+.kbc-app.kbc-app .kbc-pick:hover{background:var(--kc-tint);border-color:var(--kc-line)}
+.kbc-app.kbc-app .kbc-pick .jupyter-button{flex:0 0 auto}
+.kbc-app.kbc-app .kbc-results{margin:4px 0 2px}
+.kbc-app.kbc-app .kbc-card{border:1px solid var(--kc-line);border-radius:14px;padding:10px 12px;margin:10px 0 0;background:var(--kc-tint)}
+.kbc-app.kbc-app .widget-checkbox input[type=checkbox],.kbc-app.kbc-app .jupyter-widget-checkbox input[type=checkbox]{accent-color:var(--kc-accent);width:15px;height:15px}
+.kbc-app.kbc-app .widget-toggle-buttons,.kbc-app.kbc-app .jupyter-widget-toggle-buttons{display:inline-flex;padding:3px;border-radius:12px;background:var(--kc-tint-2);gap:2px;flex:0 0 auto}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button,.kbc-app.kbc-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{margin:0;height:26px;line-height:26px;border:0;border-radius:9px;background:transparent;opacity:.72;font-size:12px;box-shadow:none;transform:none}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active,.kbc-app.kbc-app .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button.mod-active{background:var(--kc-surface);opacity:1;font-weight:600;box-shadow:0 1px 3px rgba(15,23,42,.15)}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:hover:enabled{opacity:1;background:var(--kc-tint)}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active:hover:enabled{background:var(--kc-surface)}
+.kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:disabled{opacity:.4}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar,.kbc-app.kbc-app .kbc-side>.p-TabBar{padding:4px;border-radius:14px;background:var(--kc-tint-2);min-height:0;border:0;overflow:visible;margin:0 0 10px}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:3px;border:0;align-items:stretch}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 0;min-width:0;min-height:30px;line-height:30px;margin:0;padding:0 10px;border:0;border-radius:10px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab:hover:not(.lm-mod-current),.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab:hover:not(.p-mod-current){background:var(--kc-tint);opacity:.95}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:30px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
+.kbc-app.kbc-app .kbc-side .lm-TabBar-tabLabel,.kbc-app.kbc-app .kbc-side .p-TabBar-tabLabel{text-align:center}
+.kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:18px;padding:12px 6px 12px 14px;background:var(--kc-surface);overflow:hidden}
+.kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px;overflow:hidden auto;padding-right:8px}
+.kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box>*,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box>*{flex-shrink:0}
+.kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
+.kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
 </style>"""
 
 _BADGE = "Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
@@ -2520,6 +2691,69 @@ def _json_html(
     return f'<div class="json">{node("", value, (), 0, False)}</div>'
 
 
+_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
+
+
+def _json_text_html(value: Any) -> str:
+    """JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped)."""
+    text = json.dumps(_plain_json(value), indent=2, ensure_ascii=False)
+    out, last = [], 0
+    for m in _JSON_TOKEN_RE.finditer(text):
+        out.append(_esc(text[last:m.start()]))
+        if m.group(1):
+            css = "jk" if m.group(2) else "js"
+            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
+        else:
+            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
+        last = m.end()
+    return "".join(out) + _esc(text[last:])
+
+
+_PY_LITERALS = frozenset({"True", "False", "None"})
+
+
+def _python_html(code: str) -> str:
+    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
+    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
+    try:
+        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
+                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
+    except (tokenize.TokenError, SyntaxError):
+        return _esc(code)
+    starts = [0]
+    for line in code.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
+    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
+    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
+    out, last = [], 0
+    for t in tokens:
+        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
+        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
+        if a < last or b <= a:
+            continue
+        css = ""
+        if t.type == tokenize.COMMENT:
+            css = "pc"
+        elif t.type == tokenize.STRING:
+            css = "jk" if after.get(id(t)) == ":" else "js"
+        elif t.type == tokenize.NUMBER:
+            css = "jn"
+        elif t.type == tokenize.NAME:
+            if t.string in _PY_LITERALS:
+                css = "jl"
+            elif keyword.iskeyword(t.string):
+                css = "pk"
+            elif after.get(id(t)) == "(":
+                css = "pf"
+            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
+                css = "pa"
+        out.append(_esc(code[last:a]))
+        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
+        last = b
+    return "".join(out) + _esc(code[last:])
+
+
 def _highlight(text: str, terms: Iterable[str]) -> str:
     """HTML for `text` with the question's words in <mark>. The text is split on the words and each piece escaped
     before it's wrapped, so markup inside a passage (knowledge base content is untrusted) stays text."""
@@ -2540,23 +2774,43 @@ def _sources_html(a: Answer) -> str:
         body = f'<div class="pt">{_highlight(p.text, terms)}</div>'
         body += f'<div class="pm">{_esc(p.uri)}</div>' if p.uri else ""
         body += f'<div class="pm">{_esc(meta)}</div>' if meta else ""
-        items.append(f'<details class="src"><summary><b>[{i}]</b> {_esc(where)}<span class="sn">'
-                     f'{_esc(best_snippet(p.text, terms, 120))}</span></summary>{body}</details>')
-    return f'<div class="srcs"><div class="sh">Sources</div>{"".join(items)}</div>' if items else ""
+        items.append(f'<details class="src"><summary><span class="sx">{i}</span><span class="sf">{_esc(where)}</span>'
+                     f'<span class="sn">{_esc(best_snippet(p.text, terms, 120))}</span></summary>{body}</details>')
+    count = f" · {len(items)}" if len(items) > 1 else ""
+    return f'<div class="srcs"><div class="sh">Sources{count}</div>{"".join(items)}</div>' if items else ""
+
+
+_AVATAR = '<span class="av">\u2726</span>'  # the mark before the model's name on each answer
+
+
+def _meta_html(meta: str) -> str:
+    """'Claude Sonnet 5 · 2.1s · ~$0.004' as the head of an answer: the model's name in bold over the rest."""
+    model, _, rest = meta.partition(" · ")
+    return f'{_AVATAR}<div><b>{_esc(model)}</b><div class="wm">{_esc(rest)}</div></div>'
 
 
 def _turn_html(a: Answer, meta: str, findings: list[tuple[str, str]], *, raw: bool = True) -> str:
-    """One answer as a chat message: who answered and how fast, the text with cited spans shaded, the findings, the
-    sources, and (raw=True) the request and response JSON folded at the bottom."""
+    """One answer as a chat message: who answered and how fast, the text (its markdown laid out) with cited spans
+    shaded, the findings, the sources, and (raw=True) the request and response JSON folded at the bottom."""
     notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(findings))
-    text = _answer_html(_Answer(a.text, a.citations)) if a.text.strip() else "<i>(no answer)</i>"
+    text = _answer_html(_Answer(a.text, a.citations)) if a.text.strip() else '<p class="none">(no answer)</p>'
     json_part = ""
     if raw:
         json_part = (f'<details class="raw"><summary>Request and response JSON</summary>'
                      f'<div class="jh">Request</div>{_json_html(a.request)}'
                      f'<div class="jh">Response</div>{_json_html(a.response, open_depth=3)}</details>')
-    return (f'<div class="msg bot"><div class="who">{_esc(meta)}</div><div class="ans">{text}</div>{notes}'
+    return (f'<div class="msg bot"><div class="who">{_meta_html(meta)}</div><div class="ans">{text}</div>{notes}'
             f"{_sources_html(a)}{json_part}</div>")
+
+
+def _writing_html(model: str, text: str) -> str:
+    """An answer while it streams in: its markdown so far, with a caret where the next words go."""
+    body, caret = _markdown_html(text), '<span class="caret"></span>'
+    closing = re.search(r"(?:</(?:p|li|h[1-6]|td|th|tr|tbody|table|div|blockquote|ul|ol|code|pre)>)+$", body)
+    at = closing.start() if closing else len(body)
+    body = body[:at] + caret + body[at:]
+    who = _meta_html(f"{model} · writing…")
+    return f'<div class="msg bot"><div class="who">{who}</div><div class="ans">{body}</div></div>'
 
 
 def _question_html(question: str) -> str:
@@ -2693,6 +2947,10 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 if block.title:
                     out.append(f"<h4>{_prose(block.title)}</h4>")
                 out.append(tree)
+        elif isinstance(block, _Code):
+            hint = '<span class="hint">click it to select all, then copy</span>'
+            out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
+            out.append(f'<pre class="code hl"{_SELECT}>{_python_html(block.text)}</pre>')
         elif isinstance(block, _Turn):
             out.append(_question_html(block.answer.question))
             out.append(_turn_html(block.answer, block.meta, block.findings))
@@ -2722,39 +2980,543 @@ def _with_markers(text: str, citations: list[Citation]) -> str:
     return "".join(out) + text[pos:]
 
 
-def _markers_html(text: str, inline: bool) -> str:
-    """Escaped text; with inline=True the [n] markers the model wrote become superscripts."""
-    if not inline:
-        return _esc(text)
-    return "".join(
-        f"<sup>[{_esc(piece)}]</sup>" if i % 2 else _esc(piece)
-        for i, piece in enumerate(_MARKER_RE.split(text))
-    )
+# Markdown: models often answer in it (lists, **bold**, headings, tables, code). It's laid out with the stdlib, and
+# every piece of text is escaped before it's wrapped: answers can quote untrusted knowledge base content, so raw HTML
+# in them stays text, links go only to http(s) and mailto, and pictures become links (nothing loads from elsewhere).
+_MD_FENCE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*([^`\s]*)[^`]*$")
+_MD_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+|$)")
+_MD_RULE_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
+_MD_ITEM_RE = re.compile(r"^([ \t]*)([-*+•]|\d{1,9}[.)])(?:[ \t]+|$)")
+_MD_QUOTE_RE = re.compile(r"^ {0,3}>[ \t]?")
+_MD_SETEXT_RE = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
+_MD_TABLE_RULE_RE = re.compile(r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
+_MD_URL_RE = re.compile(r"https?://[^\s<>\"'`]+", re.IGNORECASE)
+_MD_AUTOLINK_RE = re.compile(r"<((?:https?://|mailto:)[^\s<>]+)>", re.IGNORECASE)
+_MD_PUNCT = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+_MD_TAGS = {"em": ("<em>", "</em>"), "strong": ("<strong>", "</strong>"), "del": ("<del>", "</del>"),
+            "strongem": ("<strong><em>", "</em></strong>")}
+_MD_MAX_DEPTH = 8  # nesting (lists in quotes in lists...) beyond this is read as plain paragraphs
+
+_Line = tuple[int, str]  # (where the text starts in the answer, the text): offsets keep citations in place
+
+
+def _md_indent(line: str) -> int:
+    """Columns of leading whitespace, a tab counting to the next multiple of 4."""
+    n = 0
+    for ch in line:
+        if ch == " ":
+            n += 1
+        elif ch == "\t":
+            n += 4 - n % 4
+        else:
+            break
+    return n
+
+
+def _md_dedent(item: _Line, cols: int) -> _Line:
+    offset, line = item
+    i = n = 0
+    while i < len(line) and n < cols and line[i] in " \t":
+        n += 1 if line[i] == " " else 4 - n % 4
+        i += 1
+    return offset + i, line[i:]
+
+
+def _md_lstrip(item: _Line) -> _Line:
+    offset, line = item
+    rest = line.lstrip()
+    return offset + len(line) - len(rest), rest
+
+
+def _md_cells(item: _Line) -> list[_Line]:
+    """A table row's cells, on its unescaped pipes outside `code`, with a leading and trailing pipe dropped."""
+    offset, line = item
+    cells, start, k, tick = [], 0, 0, False
+    while k < len(line):
+        ch = line[k]
+        if ch == "\\":
+            k += 2
+            continue
+        if ch == "`":
+            tick = not tick
+        elif ch == "|" and not tick:
+            cells.append((offset + start, line[start:k]))
+            start = k + 1
+        k += 1
+    cells.append((offset + start, line[start:]))
+    if cells and not cells[0][1].strip() and line.lstrip().startswith("|"):
+        cells = cells[1:]
+    if cells and not cells[-1][1].strip() and line.rstrip().endswith("|"):
+        cells = cells[:-1]
+    return [(o + len(c) - len(c.lstrip()), c.strip()) for o, c in cells]
+
+
+def _md_table_start(lines: list[_Line], i: int) -> bool:
+    if i + 1 >= len(lines) or "|" not in lines[i][1] or not _MD_TABLE_RULE_RE.match(lines[i + 1][1]):
+        return False
+    rule = lines[i + 1][1]
+    return "-" in rule and ("|" in rule or "|" in lines[i][1]) and (
+        len(_md_cells(lines[i])) == len(_md_cells(lines[i + 1])))
+
+
+def _md_starts_block(lines: list[_Line], i: int) -> bool:
+    """Whether line i starts a block that ends a paragraph above it."""
+    line = lines[i][1]
+    return bool(_MD_FENCE_RE.match(line) or _MD_HEADING_RE.match(line) or _MD_RULE_RE.match(line)
+                or _MD_QUOTE_RE.match(line) or _MD_ITEM_RE.match(line) or _md_table_start(lines, i))
+
+
+def _md_blocks(lines: list[_Line], depth: int = 0) -> list[tuple[Any, ...]]:
+    """Markdown lines -> blocks: ('p', lines), ('h', level, lines), ('hr',), ('code', language, lines),
+    ('quote', blocks), ('list', ordered, start, items, loose) and ('table', aligns, header, rows)."""
+    blocks: list[tuple[Any, ...]] = []
+    i = 0
+    while i < len(lines):
+        offset, line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        fence = _MD_FENCE_RE.match(line)
+        if fence:
+            mark, body = fence.group(2), []
+            i += 1
+            while i < len(lines):
+                closing = lines[i][1].strip()
+                if closing.startswith(mark) and not closing.strip(mark[0]):
+                    i += 1
+                    break
+                body.append(_md_dedent(lines[i], len(fence.group(1))))
+                i += 1
+            blocks.append(("code", fence.group(3), body))
+            continue
+        heading = _MD_HEADING_RE.match(line)
+        if heading:
+            text = re.sub(r"(?:^|[ \t]+)#+[ \t]*$", "", line[heading.end():]).rstrip()
+            blocks.append(("h", len(heading.group(1)), [(offset + heading.end(), text)]))
+            i += 1
+            continue
+        if _MD_RULE_RE.match(line):
+            blocks.append(("hr",))
+            i += 1
+            continue
+        if _MD_QUOTE_RE.match(line) and depth < _MD_MAX_DEPTH:
+            inner = []
+            while i < len(lines) and lines[i][1].strip():
+                quoted = _MD_QUOTE_RE.match(lines[i][1])
+                if not quoted and _md_starts_block(lines, i):
+                    break
+                inner.append((lines[i][0] + quoted.end(), lines[i][1][quoted.end():]) if quoted
+                             else _md_lstrip(lines[i]))
+                i += 1
+            blocks.append(("quote", _md_blocks(inner, depth + 1)))
+            continue
+        if _MD_ITEM_RE.match(line) and depth < _MD_MAX_DEPTH:
+            block, i = _md_list(lines, i, depth)
+            blocks.append(block)
+            continue
+        if _md_table_start(lines, i):
+            aligns = ["c" if c.startswith(":") and c.endswith(":") else "r" if c.endswith(":") else
+                      "l" if c.startswith(":") else "" for _, c in _md_cells(lines[i + 1])]
+            header, rows = _md_cells(lines[i]), []
+            i += 2
+            while i < len(lines) and "|" in lines[i][1] and lines[i][1].strip():
+                cells = _md_cells(lines[i])[: len(header)]
+                rows.append(cells + [(lines[i][0], "")] * (len(header) - len(cells)))
+                i += 1
+            blocks.append(("table", aligns, header, rows))
+            continue
+        para = [_md_lstrip(lines[i])]
+        i += 1
+        level = 0
+        while i < len(lines) and lines[i][1].strip():
+            setext = _MD_SETEXT_RE.match(lines[i][1])
+            if setext:
+                level = 1 if setext.group(1)[0] == "=" else 2
+                i += 1
+                break
+            if _md_starts_block(lines, i):
+                break
+            para.append(_md_lstrip(lines[i]))
+            i += 1
+        blocks.append(("h", level, para) if level else ("p", para))
+    return blocks
+
+
+def _md_list(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], int]:
+    """The list starting at line i (its items' lines, nested ones dedented) and the line after it. Lenient where
+    models are: any bullet character continues a bullet list, and nested lists can be indented by 2, 3 or 4."""
+    first = _MD_ITEM_RE.match(lines[i][1])
+    assert first is not None
+    indent, ordered = _md_indent(first.group(1)), first.group(2)[0].isdigit()
+    start = int(first.group(2)[:-1]) if ordered else 1
+    items: list[list[tuple[Any, ...]]] = []
+    loose = False
+    while i < len(lines):
+        offset, line = lines[i]
+        item = _MD_ITEM_RE.match(line)
+        if (not item or _md_indent(item.group(1)) > indent or item.group(2)[0].isdigit() != ordered
+                or _MD_RULE_RE.match(line)):
+            break
+        content = len(item.group(0)) if item.group(0).strip() != item.group(0) else len(item.group(0)) + 1
+        body: list[_Line] = [(offset + item.end(), line[item.end():])]
+        i += 1
+        blank = False
+        while i < len(lines):
+            o, text = lines[i]
+            if not text.strip():
+                body.append((o, ""))
+                blank = True
+                i += 1
+                continue
+            cols = _md_indent(text)
+            if cols > indent and not _MD_RULE_RE.match(text):
+                body.append(_md_dedent(lines[i], min(cols, content)))
+                loose = loose or (blank and not _MD_ITEM_RE.match(body[-1][1]))
+                blank = False
+                i += 1
+                continue
+            if blank or _md_starts_block(lines, i):
+                break
+            body.append(_md_lstrip(lines[i]))  # a paragraph's next line, not indented
+            i += 1
+        while body and not body[-1][1].strip():
+            body.pop()
+        items.append(_md_blocks(body, depth + 1))
+        if blank and i < len(lines):
+            follows = _MD_ITEM_RE.match(lines[i][1])
+            if follows and _md_indent(follows.group(1)) <= indent and follows.group(2)[0].isdigit() == ordered:
+                loose = True
+            else:
+                break
+    return ("list", ordered, start, items, loose), i
+
+
+def _md_source(lines: list[_Line]) -> tuple[str, list[int]]:
+    """Lines joined with newlines, and where each character of that is in the answer."""
+    parts: list[str] = []
+    where: list[int] = []
+    for k, (offset, line) in enumerate(lines):
+        if k:
+            parts.append("\n")
+            where.append(lines[k - 1][0] + len(lines[k - 1][1]))
+        parts.append(line)
+        where.extend(range(offset, offset + len(line)))
+    return "".join(parts), where
+
+
+def _md_link_target(url: str) -> str:
+    """The URL a link may open: http(s) and mailto only, else '' (shown as text)."""
+    url = url.strip().strip("<>")
+    return url if url.lower().startswith(("http://", "https://", "mailto:")) else ""
+
+
+class _Markdown:
+    """Markdown -> HTML, with the cited spans of the answer shaded and the [n] markers placed after them.
+    Citations hold offsets into the raw text, so every character keeps where it came from (`where`)."""
+
+    def __init__(self, text: str, citations: Iterable[Citation] = (), inline: bool = False):
+        self.text, self.inline = text, inline
+        self.cited = bytearray(len(text))
+        marks: dict[int, list[int]] = {}
+        for c in citations:
+            start, end = max(0, c.start), min(len(text), c.end)
+            if not c.sources or end <= start:
+                continue
+            self.cited[start:end] = b"\x01" * (end - start)
+            if not inline:  # the marker goes after the span's last word, before its closing punctuation or markup
+                k = end
+                while k > start + 1 and text[k - 1] in " \t\r\n.!?:;,*_~`":
+                    k -= 1
+                marks.setdefault(k - 1, []).extend(c.sources)
+        self.marks = [(at, "".join(f"[{n}]" for n in dict.fromkeys(sources))) for at, sources in sorted(marks.items())]
+        self.next_mark = 0
+        self.no_closer: dict[tuple[str, int, int], int] = {}  # (delimiter, run, end) -> searched from here, none found
+
+    def html(self) -> str:
+        lines, at = [], 0
+        for line in self.text.split("\n"):
+            lines.append((at, line[:-1] if line.endswith("\r") else line))
+            at += len(line) + 1
+        out = self.blocks(_md_blocks(lines))
+        rest = self.marks_before(len(self.text) + 1)
+        return out + (f"<p>{rest}</p>" if rest else "")
+
+    # -------------------------------------------------------------- text and markers
+
+    def marks_before(self, offset: int) -> str:
+        """Markers placed before this offset not shown yet (their character was markup): shown now."""
+        out = []
+        while self.next_mark < len(self.marks) and self.marks[self.next_mark][0] < offset:
+            out.append(f"<sup>{self.marks[self.next_mark][1]}</sup>")
+            self.next_mark += 1
+        return "".join(out)
+
+    def plain(self, text: str, code: bool) -> str:
+        if not self.inline or code:
+            return _esc(text)
+        return "".join(f"<sup>[{_esc(piece)}]</sup>" if i % 2 else _esc(piece)
+                       for i, piece in enumerate(_MARKER_RE.split(text)))
+
+    def chars(self, s: str, where: list[int], i: int, j: int, code: bool = False) -> str:
+        """s[i:j] escaped, cited runs in <span class="cite">, each marker after the character it follows."""
+        out: list[str] = []
+        run: list[str] = []  # the HTML of the run so far: shaded throughout, or not at all
+        text: list[str] = []  # its characters not escaped yet
+        shaded = [False]
+
+        def add(markup: str = "") -> None:
+            if text:
+                run.append(self.plain("".join(text), code))
+                text.clear()
+            if markup:
+                run.append(markup)
+
+        def close() -> None:
+            add()
+            if run:
+                out.append(f'<span class="cite">{"".join(run)}</span>' if shaded[0] else "".join(run))
+                run.clear()
+
+        for k in range(i, j):
+            at = where[k]
+            pending = self.marks_before(at)
+            if pending:
+                add(pending)
+            cited = bool(at < len(self.cited) and self.cited[at])
+            if cited != shaded[0]:
+                close()
+                shaded[0] = cited
+            text.append(s[k])
+            if self.next_mark < len(self.marks) and self.marks[self.next_mark][0] == at:
+                add(f"<sup>{self.marks[self.next_mark][1]}</sup>")
+                self.next_mark += 1
+        close()
+        return "".join(out)
+
+    # ---------------------------------------------------------------------- blocks
+
+    def inline_html(self, lines: list[_Line]) -> str:
+        s, where = _md_source(lines)
+        out = self.nodes(s, where, self.parse(s, 0, len(s)))
+        return out + self.marks_before(where[-1] + 1 if where else 0)
+
+    def blocks(self, blocks: list[tuple[Any, ...]], tight: bool = False) -> str:
+        out = []
+        for block in blocks:
+            kind = block[0]
+            if kind == "p":
+                inner = self.inline_html(block[1])
+                out.append(inner if tight else f"<p>{inner}</p>")
+            elif kind == "h":
+                out.append(f"<h{block[1]}>{self.inline_html(block[2])}</h{block[1]}>")
+            elif kind == "hr":
+                out.append("<hr>")
+            elif kind == "code":
+                s, where = _md_source(block[2])
+                lang = f'<span class="lang">{_esc(block[1])}</span>' if block[1] else ""
+                body = self.chars(s, where, 0, len(s), code=True) + self.marks_before(where[-1] + 1 if where else 0)
+                out.append(f'<div class="pre">{lang}<pre{_SELECT}><code>{body}</code></pre></div>')
+            elif kind == "quote":
+                out.append(f"<blockquote>{self.blocks(block[1])}</blockquote>")
+            elif kind == "list":
+                _, ordered, start, items, loose = block
+                tag = "ol" if ordered else "ul"
+                first = f' start="{start}"' if ordered and start != 1 else ""
+                inner = "".join(f"<li>{self.blocks(item, tight=not loose)}</li>" for item in items)
+                out.append(f"<{tag}{first}>{inner}</{tag}>")
+            elif kind == "table":
+                _, aligns, header, rows = block
+
+                def cell(tag: str, j: int, item: _Line) -> str:
+                    align = f' class="{aligns[j]}"' if j < len(aligns) and aligns[j] else ""
+                    return f"<{tag}{align}>{self.inline_html([item])}</{tag}>"
+
+                head = "".join(cell("th", j, c) for j, c in enumerate(header))
+                body = "".join("<tr>" + "".join(cell("td", j, c) for j, c in enumerate(row)) + "</tr>" for row in rows)
+                out.append(f'<div class="mdt"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
+        return "".join(out)
+
+    # ---------------------------------------------------------------------- inline
+
+    def parse(self, s: str, i: int, j: int, depth: int = 0) -> list[tuple[Any, ...]]:
+        """Inline markdown in s[i:j] -> nodes: ('t', i, j) text, ('code', i, j), ('br',), (tag, children) for em /
+        strong / del, and ('a', href, children). Anything that doesn't close is text."""
+        nodes: list[tuple[Any, ...]] = []
+        text_from, k = i, i
+
+        def flush(upto: int) -> None:
+            if upto > text_from:
+                nodes.append(("t", text_from, upto))
+
+        while k < j:
+            ch = s[k]
+            found: tuple[tuple[Any, ...], int] | None = None
+            if ch == "\\" and k + 1 < j and s[k + 1] in _MD_PUNCT:
+                found = ("t", k + 1, k + 2), k + 2
+            elif ch == "\n":
+                found = ("br",), k + 1
+            elif ch == "`":
+                run = self.run(s, k, j, "`")
+                close = self.code_close(s, k + run, j, run)
+                if close < 0:
+                    k += run
+                    continue
+                a, b = k + run, close
+                if b - a >= 2 and s[a] == " " and s[b - 1] == " " and s[a:b].strip():
+                    a, b = a + 1, b - 1
+                found = ("code", a, b), close + run
+            elif ch in "*_~" and depth < _MD_MAX_DEPTH:
+                emphasis = self.emphasis(s, k, j)
+                if emphasis is None:
+                    k += self.run(s, k, j, ch)
+                    continue
+                tag, a, b, after = emphasis
+                found = (tag, self.parse(s, a, b, depth + 1)), after
+            elif ch == "[" or (ch == "!" and s.startswith("[", k + 1)):
+                link = self.link(s, k + (ch == "!"), j)
+                if link is not None:
+                    a, b, url, after = link
+                    children = self.parse(s, a, b, depth + 1) if b > a else [("t", k, after)]
+                    found = ("a", _md_link_target(url), children), after
+            elif ch == "<":
+                auto = _MD_AUTOLINK_RE.match(s, k, j)
+                if auto:
+                    found = ("a", _md_link_target(auto.group(1)), [("t", k + 1, auto.end() - 1)]), auto.end()
+            elif ch in "hH" and (k == 0 or not (s[k - 1].isalnum() or s[k - 1] in "/:@")):
+                url = _MD_URL_RE.match(s, k, j)
+                if url:
+                    end = url.end()
+                    while end > k and (s[end - 1] in ".,;:!?*_~" or (s[end - 1] == ")" and
+                                                                     s.count("(", k, end) < s.count(")", k, end))):
+                        end -= 1
+                    found = ("a", _md_link_target(s[k:end]), [("t", k, end)]), end
+            if found is None:
+                k += 1
+                continue
+            flush(k)
+            nodes.append(found[0])
+            k = text_from = found[1]
+        flush(j)
+        return nodes
+
+    @staticmethod
+    def run(s: str, k: int, j: int, ch: str) -> int:
+        n = k
+        while n < j and s[n] == ch:
+            n += 1
+        return n - k
+
+    def code_close(self, s: str, k: int, j: int, run: int) -> int:
+        """Where a code span of `run` backticks closes, or -1."""
+        while True:
+            k = s.find("`" * run, k, j)
+            if k < 0:
+                return -1
+            length = self.run(s, k, j, "`")
+            if length == run:
+                return k
+            k += length
+
+    def emphasis(self, s: str, k: int, j: int) -> tuple[str, int, int, int] | None:
+        """*em*, **strong**, ***both***, _em_, __strong__ or ~~del~~ opening at k: (tag, inner start, inner end,
+        after it), or None. An opener needs a non-space after it, a closer a non-space before it, and _ doesn't work
+        inside a word (snake_case_names stay as they are)."""
+        ch = s[k]
+        run = self.run(s, k, j, ch)
+        if run > 3 or (ch == "~" and run != 2):
+            return None
+        a = k + run
+        if a >= j or s[a].isspace() or (ch == "_" and k > 0 and s[k - 1].isalnum()):
+            return None
+        key = (ch, run, j)
+        if self.no_closer.get(key, j) <= a:
+            return None
+        n = a
+        while n < j:
+            c = s[n]
+            if c == "\\":
+                n += 2
+                continue
+            if c == "`":
+                ticks = self.run(s, n, j, "`")
+                close = self.code_close(s, n + ticks, j, ticks)
+                n = close + ticks if close >= 0 else n + ticks
+                continue
+            if c == ch:
+                length = self.run(s, n, j, ch)
+                fits = not s[n - 1].isspace() and (ch != "_" or n + length >= len(s) or not s[n + length].isalnum())
+                if fits and (length == run or (length == 3 and ch != "~")):
+                    close = n + length - run if length == 3 else n  # in ***, this closer is the last `run` of them
+                    tag = "del" if ch == "~" else {1: "em", 2: "strong", 3: "strongem"}[run]
+                    return tag, a, close, close + run
+                n += length
+                continue
+            n += 1
+        self.no_closer[key] = min(a, self.no_closer.get(key, a))
+        return None
+
+    @staticmethod
+    def link(s: str, k: int, j: int) -> tuple[int, int, str, int] | None:
+        """[text](url) opening at k: (text start, text end, url, after it), or None."""
+        if s.find("](", k, j) < 0:
+            return None
+        depth, n = 0, k
+        while n < j:
+            if s[n] == "\\":
+                n += 2
+                continue
+            if s[n] == "[":
+                depth += 1
+            elif s[n] == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            n += 1
+        if n >= j or not s.startswith("(", n + 1):
+            return None
+        parens, m = 0, n + 1
+        while m < j and s[m] != "\n":
+            if s[m] == "(":
+                parens += 1
+            elif s[m] == ")":
+                parens -= 1
+                if parens == 0:
+                    target = s[n + 2:m].strip().split()
+                    return k + 1, n, target[0] if target else "", m + 1
+            m += 1
+        return None
+
+    def nodes(self, s: str, where: list[int], nodes: list[tuple[Any, ...]]) -> str:
+        out = []
+        for node in nodes:
+            kind = node[0]
+            if kind == "t":
+                out.append(self.chars(s, where, node[1], node[2]))
+            elif kind == "br":
+                out.append("<br>")
+            elif kind == "code":
+                out.append(f"<code>{self.chars(s, where, node[1], node[2], code=True)}</code>")
+            elif kind == "a":
+                inner = self.nodes(s, where, node[2])
+                out.append(f'<a href="{_esc(node[1])}" target="_blank" rel="noopener noreferrer">{inner}</a>'
+                           if node[1] else inner)
+            else:
+                opening, closing = _MD_TAGS[kind]
+                out.append(opening + self.nodes(s, where, node[1]) + closing)
+        return "".join(out)
+
+
+def _markdown_html(text: str, citations: Iterable[Citation] = (), inline: bool = False) -> str:
+    """Markdown as HTML: paragraphs, headings, lists, quotes, code, tables, **bold**, *italic*, `code` and links.
+    With citations, the cited spans are shaded and [n] follows each one; inline=True when the text already holds the
+    [n] markers. A single line break stays a line break, so plain-text answers look as they were written."""
+    return _Markdown(text, citations, inline).html()
 
 
 def _answer_html(block: _Answer) -> str:
-    """The answer with cited spans shaded and [n] superscripts. Every piece of text is escaped: answers can quote
-    untrusted knowledge base content."""
-    text, out, pos = block.text, [], 0
-    for c in sorted((c for c in block.citations if c.sources), key=lambda c: c.start):
-        start, end = max(pos, c.start), min(len(text), c.end)
-        if end <= start:
-            continue
-        out.append(_markers_html(text[pos:start], block.inline))
-        if block.inline:
-            out.append(
-                f'<span class="cite">{_markers_html(text[start:end], True)}</span>'
-            )
-        else:
-            body, tail = _split_marks(text[start:end])
-            marks = "".join(f"[{n}]" for n in c.sources)
-            out.append(
-                f'<span class="cite">{_esc(body)}<sup>{marks}</sup>{_esc(tail.rstrip())}</span>'
-                f"{_esc(tail[len(tail.rstrip()) :])}"
-            )
-        pos = end
-    out.append(_markers_html(text[pos:], block.inline))
-    return "".join(out)
+    """The answer, laid out from its markdown, with cited spans shaded and [n] superscripts. Every piece of text is
+    escaped: answers can quote untrusted knowledge base content."""
+    return _markdown_html(block.text, block.citations, block.inline)
 
 
 def _text_bar(fraction: float, width: int = 20) -> str:
@@ -2830,7 +3592,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             ]
             if hidden:
                 out.append(_hidden(hidden, block, max_rows))
-        elif isinstance(block, _Text):
+        elif isinstance(block, (_Text, _Code)):
             if block.title:
                 out += ["", f"-- {block.title} --"]
             out.append(block.text)
@@ -2841,8 +3603,7 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
         elif isinstance(block, _Turn):
             a = block.answer
             out += ["", f"You: {a.question}", f"Bedrock ({block.meta}):"]
-            for paragraph in _with_markers(a.text, a.citations).split("\n"):
-                out += textwrap.wrap(paragraph, 100, initial_indent="  ", subsequent_indent="  ") or [""]
+            out += _answer_lines(_with_markers(a.text, a.citations), 100, "  ")
             out += [f"  [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
             out += ["  " + _MARKS.get(level, "[i] ") + message for level, message in _ordered(block.findings)]
         elif isinstance(block, _Answer):
@@ -2851,9 +3612,28 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
                 if block.inline
                 else _with_markers(block.text, block.citations)
             )
-            for paragraph in text.split("\n"):
-                out += textwrap.wrap(paragraph, 100) or [""]
+            out += _answer_lines(text, 100)
     return "\n".join(out)
+
+
+def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
+    """An answer as text lines: its markdown kept as written (it reads well as text), long lines wrapped, a list
+    item's continuation lined up under its text, and code blocks and table rows never wrapped."""
+    out: list[str] = []
+    fence = ""
+    for line in text.split("\n"):
+        opening = _MD_FENCE_RE.match(line)
+        if fence or opening or line.lstrip().startswith("|"):
+            out.append((indent + line).rstrip())
+            if fence and line.strip().startswith(fence) and not line.strip().strip(fence[0]):
+                fence = ""
+            elif not fence and opening:
+                fence = opening.group(2)
+            continue
+        item = _MD_ITEM_RE.match(line)
+        hang = " " * (len(item.group(0)) if item else _md_indent(line))
+        out += textwrap.wrap(line, width, initial_indent=indent, subsequent_indent=indent + hang) or [""]
+    return out
 
 
 def _in_notebook() -> bool:
@@ -3010,6 +3790,8 @@ def _kind_text(f: Field) -> str:
         return "number" + span
     if f.kind == "boolean":
         return "true / false"
+    if f.key == "reranker":
+        return "cohere | amazon | a model ID or ARN"
     if f.kind == "choice":
         return " | ".join(f.choices)
     if f.kind == "list":
@@ -3024,6 +3806,8 @@ def _wrap(inner: str) -> str:
 
 
 _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max_tokens", "prompt", "query_decomposition")
+_SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
+_PYTHON_WIDTH = 64  # where the Request JSON tab's Python breaks lines, so it fits the tab
 
 
 class _ChatApp:
@@ -3035,16 +3819,24 @@ class _ChatApp:
         self.view, self.w = view, widgets
         self.schema = view.core.schema()
         self.inputs: dict[str, Any] = {}  # setting key -> the widget holding its value
-        self.rows: dict[str, Any] = {}  # setting key -> its row
-        self.row_notes: dict[str, Any] = {}  # setting key -> the line under it (meaning, path, or what's wrong)
+        self.rows: dict[str, Any] = {}  # setting key -> its card
+        self.row_notes: dict[str, Any] = {}  # setting key -> the lines under it (meaning and path, or what's wrong)
+        self.removes: dict[str, Any] = {}  # setting key -> its ✕ button
         self.pending: set[str] = set()  # rows added but not filled in yet: not sent
         self.broken: dict[str, str] = {}  # setting key -> why what's in its box can't be sent
+        self.fresh: str | None = None  # the setting added last: its card stays outlined until another is added
         self.headers: dict[str, Any] = {}
         self.chips: dict[str, Any] = {}
+        self.picks: dict[str, tuple[Any, Any]] = {}  # setting key -> (its line in the list of settings, its button)
+        self.pick_headers: dict[str, Any] = {}
+        self.browsing = False  # the list shows every setting, not only the ones the search box matches
         self.bubbles: list[Any] = []
         self.quiet = False  # True while the code sets widget values, so their observers don't fire
         self.busy = False
+        self.editing = False  # Edit JSON is open
+        self.edit_base = ""  # the request the editor was filled with, to tell whether it's been changed since
         self.problems: list[str] = []  # why a picker couldn't list its choices
+        self._params: dict[str, Any] | None = None
         self.root = self._build()
 
     # ------------------------------------------------------------------ layout
@@ -3052,14 +3844,19 @@ class _ChatApp:
     def _build(self) -> Any:
         w, layout = self.w, self.w.Layout
         style = w.HTML(_CSS, layout=layout(display="none"))
-        self.title = w.HTML(layout=layout(flex="1 1 auto"))
-        self.new_button = w.Button(description="New chat", tooltip="Forget this conversation: the next question "
+        self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
+        self.new_button = w.Button(description="+ New chat", tooltip="Forget this conversation: the next question "
                                    "starts a new Bedrock session", layout=layout(width="auto", flex="0 0 auto"))
+        self.new_button.add_class("kbc-new-chat")
         self.new_button.on_click(self._safely(self._new_chat))
         self.kb_pick = self._kb_picker()
         self.model_pick = self._model_picker()
         top = w.HBox([self.title, self.new_button], layout=layout(width="100%", align_items="center"))
-        pickers = w.HBox([self.kb_pick, self.model_pick], layout=layout(width="100%", flex_flow="row wrap"))
+        pickers = w.HBox([self.kb_pick, self.model_pick], layout=layout(width="100%", flex_flow="row wrap",
+                                                                        margin="10px 0 0 0"))
+        pickers.add_class("kbc-pickers")
+        head = w.VBox([top, pickers], layout=layout(width="100%"))
+        head.add_class("kbc-head")
 
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto", height="540px",
                                         width="100%"))
@@ -3068,16 +3865,16 @@ class _ChatApp:
                                layout=layout(flex="1 1 auto", width="auto"))
         self.question.on_msg(self._on_enter(self._send))
         self.send_button = w.Button(description="Send", button_style="primary", tooltip="Ask (Enter does too)",
-                                    layout=layout(width="80px", flex="0 0 auto"))
+                                    layout=layout(width="auto", flex="0 0 auto"))
         self.send_button.on_click(self._safely(self._send))
         self.status = w.HTML(layout=layout(width="100%"))
-        composer = w.HBox([self.question, self.send_button], layout=layout(width="100%", margin="8px 0 0 0"))
+        composer = w.HBox([self.question, self.send_button], layout=layout(width="100%"))
+        composer.add_class("kbc-composer")
         chat = w.VBox([self.log, composer, self.status], layout=layout(flex="1 1 460px", min_width="320px",
-                                                                      margin="0 14px 8px 0"))
+                                                                      margin="0 16px 8px 0"))
         side = self._side()
-        body = w.HBox([chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start",
-                                                  margin="8px 0 0 0"))
-        root = w.VBox([style, top, pickers, body], layout=layout(width="100%"))
+        body = w.HBox([chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
+        root = w.VBox([style, head, body], layout=layout(width="100%"))
         root.add_class("kbc-app")
 
         self.bubbles = [w.HTML(_wrap(self._hello()), layout=layout(width="auto"))]
@@ -3098,65 +3895,84 @@ class _ChatApp:
 
     def _side(self) -> Any:
         w, layout = self.w, self.w.Layout
-        # Settings
+        # Settings: what's wrong first, then what's sent, then adding more
+        self.findings = w.HTML(layout=layout(width="100%"))
         self.rows_box = w.VBox(layout=layout(width="100%"))
-        self.chip_box = w.HBox(layout=layout(width="100%", flex_flow="row wrap"))
-        combo = getattr(w, "Combobox", None) or w.Text
-        self.add_name = combo(placeholder="any field: a name or a path", continuous_update=True,
-                              layout=layout(flex="1 1 auto", width="auto"))
-        if combo is not w.Text:
-            self.add_name.options = tuple(self.schema.fields)
+        self.chip_box = w.HBox(layout=layout(width="100%", flex_flow="row wrap", margin="6px 0 2px 0"))
+        self.add_name = w.Text(placeholder="Search: rerank, latency, guardrail…", continuous_update=True,
+                               layout=layout(flex="1 1 auto", width="auto"))
         self.add_name.observe(self._safely(self._typed), names="value")
         self.add_name.on_msg(self._on_enter(self._add_typed))
-        self.add_button = w.Button(description="Add", layout=layout(width="64px", flex="0 0 auto"))
-        self.add_button.on_click(self._safely(self._add_typed))
+        self.browse_button = w.Button(description=f"Browse all {len(self.schema.fields)}", tooltip="Every setting "
+                                      "RetrieveAndGenerate takes, by what it changes", layout=layout(
+                                          width="auto", flex="0 0 auto", margin="0 0 0 6px"))
+        self.browse_button.add_class("kbc-small")
+        self.browse_button.on_click(self._safely(self._browse))
         self.add_help = w.HTML(layout=layout(width="100%"))
-        self.findings = w.HTML(layout=layout(width="100%"))
+        self.results = w.VBox(layout=layout(width="100%"))
+        self.results.add_class("kbc-results")
+        search = w.HBox([self.add_name, self.browse_button],
+                        layout=layout(width="100%", align_items="center"))
+        search.add_class("kbc-search")
+        adding = w.VBox([
+            w.HTML(_wrap('<div class="ph">Add a setting</div><div class="pd">One click adds a common one. Or search '
+                         f"all {len(self.schema.fields)} fields the API takes, by name or by what they do, and press "
+                         "Enter to add the best match.</div>")),
+            self.chip_box, search, self.add_help, self.results,
+        ], layout=layout(width="100%"))
+        adding.add_class("kbc-card")
         self.stream_box = w.Checkbox(value=self.view.stream, description="Show answers as they're written",
-                                     indent=False, layout=layout(width="auto"))
+                                     indent=False, layout=layout(width="auto", margin="12px 0 0 0"))
         self.stream_box.observe(self._safely(self._stream_changed), names="value")
-        self.setup = w.HTML(layout=layout(width="100%"))
+        self.setup = w.HTML(layout=layout(width="100%", margin="8px 0 0 0"))
         settings_tab = w.VBox([
+            self.findings,
             w.HTML(_wrap('<div class="ph">Sent with every question<span class="hint">hover a name for what it '
-                         'does · ✕ stops sending it</span></div>')),
-            self.rows_box,
-            w.HTML(_wrap('<div class="ph">Add a setting</div>')),
-            self.chip_box,
-            w.HBox([self.add_name, self.add_button], layout=layout(width="100%")),
-            self.add_help, self.findings, self.stream_box, self.setup,
+                         "does</span></div>")),
+            self.rows_box, adding, self.stream_box, self.setup,
         ], layout=layout(width="100%"))
 
         # Request JSON
-        self.request_mode = w.ToggleButtons(options=["Tree", "Text", "Python"], value="Tree",
+        self.request_mode = w.ToggleButtons(options=["Tree", "JSON", "Python"], value="Tree",
                                             tooltips=["Highlighted, folding JSON", "Plain JSON: click it to select "
                                                       "all", "The same call with boto3"],
-                                            style={"button_width": "76px"})
+                                            style={"button_width": "74px"})
         self.request_mode.observe(self._safely(lambda _change: self._render_request()), names="value")
-        self.edit_button = w.Button(description="Edit JSON", tooltip="Change the request by hand: the settings "
-                                    "follow what you write", layout=layout(width="auto"))
+        self.edit_button = w.Button(description="✎ Edit JSON", tooltip="Change the request by hand: the settings "
+                                    "follow what you write", layout=layout(width="auto", flex="0 0 auto"))
+        self.edit_button.add_class("kbc-small")
         self.edit_button.on_click(self._safely(self._edit))
         self.request_view = w.HTML(layout=layout(width="100%"))
-        self.editor = w.Textarea(layout=layout(width="100%", height="420px"))
+        self.editor = w.Textarea(layout=layout(width="100%", height="360px"))
         self.editor.add_class("kbc-mono")
-        apply_button = w.Button(description="Apply", button_style="primary", layout=layout(width="auto"))
+        apply_button = w.Button(description="Apply", button_style="primary", tooltip="Make the settings what's "
+                                "written here", layout=layout(width="auto"))
         apply_button.on_click(self._safely(self._apply))
-        cancel_button = w.Button(description="Cancel", layout=layout(width="auto"))
+        self.restart_button = w.Button(description="Start over", tooltip="Put the request as it is now back in the "
+                                       "box", layout=layout(width="auto", margin="0 0 0 6px"))
+        self.restart_button.on_click(self._safely(self._restart_edit))
+        cancel_button = w.Button(description="Cancel", layout=layout(width="auto", margin="0 0 0 6px"))
+        cancel_button.add_class("kbc-ghost")
         cancel_button.on_click(self._safely(self._cancel_edit))
         self.edit_message = w.HTML(layout=layout(width="100%"))
-        self.edit_box = w.VBox([self.editor, w.HBox([apply_button, cancel_button]), self.edit_message],
+        self.edit_box = w.VBox([self.edit_message, self.editor, w.HBox([apply_button, self.restart_button,
+                                                                        cancel_button], layout=layout(
+                                                                            margin="8px 0 0 0"))],
                                layout=layout(display="none", width="100%"))
-        request_tab = w.VBox([w.HBox([self.request_mode, self.edit_button], layout=layout(flex_flow="row wrap")),
-                              self.request_view, self.edit_box], layout=layout(width="100%"))
+        toolbar = w.HBox([self.request_mode, self.edit_button], layout=layout(
+            width="100%", justify_content="space-between", align_items="center", flex_flow="row wrap",
+            margin="0 0 6px 0"))
+        request_tab = w.VBox([toolbar, self.request_view, self.edit_box], layout=layout(width="100%"))
 
         # Last response
         self.response_mode = w.ToggleButtons(options=["Response", "Request sent"], value="Response",
-                                             style={"button_width": "112px"})
+                                             style={"button_width": "104px"})
         self.response_mode.observe(self._safely(lambda _change: self._render_response()), names="value")
         self.response_view = w.HTML(layout=layout(width="100%"))
         response_tab = w.VBox([self.response_mode, self.response_view], layout=layout(width="100%"))
 
         tabs = w.Tab(children=[settings_tab, request_tab, response_tab],
-                     layout=layout(flex="1 1 400px", min_width="340px", max_width="560px"))
+                     layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
         for i, title in enumerate(("Settings", "Request JSON", "Last response")):
             tabs.set_title(i, title)
         tabs.add_class("kbc-side")
@@ -3184,14 +4000,14 @@ class _ChatApp:
             options = [(kb.name + ("" if kb.status == "ACTIVE" else f" ({kb.status.lower()})"), kb.id)
                        for kb in sorted(kbs, key=lambda k: k.name.lower())]
             picker = w.Dropdown(options=options, value=current, description="Knowledge base",
-                                style={"description_width": "initial"}, layout=w.Layout(width="340px"))
+                                style={"description_width": "initial"}, layout=w.Layout(width="320px"))
         else:
             if kbs == []:
                 self.problems.append(f"There are no knowledge bases in {view.core.region}. They're regional: "
                                      "chat(region='us-west-2') looks in another region.")
             picker = w.Text(value=view.kb or "", placeholder="knowledge base ID or name", description="Knowledge base",
                             continuous_update=False, style={"description_width": "initial"},
-                            layout=w.Layout(width="340px"))
+                            layout=w.Layout(width="320px"))
         picker.observe(self._safely(self._kb_changed), names="value")
         return picker
 
@@ -3231,14 +4047,14 @@ class _ChatApp:
         view = self.view
         name = view.core.kb_name(view.kb) if view.kb else "your knowledge base"
         return (
-            f'<div class="hello"><b>Ask {_esc(name)} a question.</b> Answers cite the passages they come from '
-            "<sup>[1]</sup>; click a source to read it, and open <i>Request and response JSON</i> under an answer to "
-            "see exactly what was sent and what came back.<ul>"
+            f'<div class="hello">{_AVATAR}<div><b>Ask {_esc(name)} a question.</b> Answers cite the passages they come '
+            "from <sup>[1]</sup>; click a source to read it, and open <i>Request and response JSON</i> under an answer "
+            "to see exactly what was sent and what came back.<ul>"
             "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
-            "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> takes any field the API has.</li>"
+            "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
             "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
             "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
-            "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div>"
+            "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div></div>"
         )
 
     # ---------------------------------------------------------------- plumbing
@@ -3288,6 +4104,13 @@ class _ChatApp:
         finally:
             self.quiet = False
 
+    @staticmethod
+    def _set(widget: Any, value: str) -> None:
+        """An HTML widget's new content, sent only when it changed: re-sending the same HTML would fold up every
+        part of a JSON tree the user had opened, and close an open source."""
+        if widget.value != value:
+            widget.value = value
+
     def sync(self) -> None:
         """Follows changes made from another cell (set(), use(), new_chat(), ask())."""
         if self.view.kb is not None and getattr(self.kb_pick, "value", None) != self.view.kb:
@@ -3320,13 +4143,13 @@ class _ChatApp:
             return
         view = self.view
         self.busy = True
-        self.send_button.disabled, self.send_button.description = True, "…"
+        self.send_button.disabled, self.send_button.description = True, "Asking…"
         self.question.value = ""
         self._add(_question_html(question))
         model = view._model_label(view.model or "")
         name = view.core.kb_name(view.kb) if view.kb else "the knowledge base"
-        waiting = (f'<div class="msg bot wait"><span class="spin"></span>Searching {_esc(name)} and asking '
-                   f"{_esc(model)}…</div>")
+        waiting = (f'<div class="msg bot wait"><span class="dots"><i></i><i></i><i></i></span>Searching '
+                   f"{_esc(name)} and asking {_esc(model)}…</div>")
         bot = self._add(waiting)
         self._show_log()
         if self.broken:
@@ -3339,14 +4162,13 @@ class _ChatApp:
             now = time.monotonic()
             if now - shown[0] >= 0.08:  # a few updates a second is smooth; more only floods the front end
                 shown[0] = now
-                bot.value = _wrap(f'<div class="msg bot"><div class="who">{_esc(model)} · writing…</div>'
-                                  f'<div class="ans">{_esc(text)}<span class="caret"></span></div></div>')
+                bot.value = _wrap(_writing_html(model, text))
 
         try:
             a = view._turn(question, on_text=on_text if view.stream else None)
         except Exception as exc:  # shown in the conversation, where the answer would have been
             bot.value = _wrap(f'<div class="msg bot err">{_prose(self._error_text(exc))}<div class="who" '
-                              'style="margin-top:4px">Your question is back in the box: change a setting, or the '
+                              'style="margin-top:6px">Your question is back in the box: change a setting, or the '
                               "question, and ask again.</div></div>")
             self.question.value = question
             self._set_status("")
@@ -3404,37 +4226,37 @@ class _ChatApp:
 
     def _input(self, f: Field, value: Any) -> Any:
         w, layout = self.w, self.w.Layout
-        grow = layout(flex="1 1 auto", width="auto", min_width="0")
+        full = layout(width="100%", min_width="0")
         if f.kind == "integer":
             low = int(f.low) if f.low is not None else -(2**31)
             high = int(f.high) if f.high is not None else 2**31 - 1
             start = value if value is not None else f.default if f.default is not None else max(low, 1)
-            return w.BoundedIntText(value=int(start), min=low, max=high, layout=grow)
+            return w.BoundedIntText(value=int(start), min=low, max=high, layout=full)
         if f.kind == "float":
             low = f.low if f.low is not None else -1e9
             high = f.high if f.high is not None else 1e9
             start = float(value if value is not None else f.default if f.default is not None else low)
             if high - low <= 2:
                 return w.FloatSlider(value=start, min=low, max=high, step=0.01, readout_format=".2f",
-                                     continuous_update=False, layout=grow)
-            return w.BoundedFloatText(value=start, min=low, max=high, layout=grow)
+                                     continuous_update=False, layout=full)
+            return w.BoundedFloatText(value=start, min=low, max=high, layout=full)
         if f.kind == "boolean":
-            return w.Checkbox(value=bool(value), indent=False, layout=grow)
+            return w.Checkbox(value=bool(value), description="on" if value else "off", indent=False, layout=full)
         if f.kind == "choice":
             return w.Dropdown(options=list(f.choices), value=value if value in f.choices else f.choices[0],
-                              layout=grow)
+                              layout=full)
         text = "" if value is None else self._as_text(f, value)
         if f.key == "reranker" and getattr(w, "Combobox", None):
             return w.Combobox(value=text, options=("cohere", "amazon"), placeholder=f.placeholder,
-                              continuous_update=False, layout=grow)
+                              continuous_update=False, layout=full)
         if f.kind in ("long_text", "json", "list"):
             lines = text.count("\n") + 1
             rows = min(14, max(lines, {"long_text": 8, "json": 4, "list": 3}[f.kind]))
-            box = w.Textarea(value=text, rows=rows, placeholder=f.placeholder, continuous_update=False, layout=grow)
+            box = w.Textarea(value=text, rows=rows, placeholder=f.placeholder, continuous_update=False, layout=full)
             if f.kind == "json":
                 box.add_class("kbc-mono")
             return box
-        return w.Text(value=text, placeholder=f.placeholder, continuous_update=False, layout=grow)
+        return w.Text(value=text, placeholder=f.placeholder, continuous_update=False, layout=full)
 
     @staticmethod
     def _as_text(f: Field, value: Any) -> str:
@@ -3445,45 +4267,60 @@ class _ChatApp:
         return str(value)
 
     def _row(self, key: str) -> Any:
+        """A setting's card: its name and what it takes, ✕, the box holding its value, and what the value means."""
         w, layout = self.w, self.w.Layout
         f = self.schema.fields[key]
-        label = w.HTML(_wrap(f'<div class="rl" title="{_esc(f.doc)}">{_esc(f.label)}</div>'),
-                       layout=layout(width="120px", min_width="120px", margin="0 4px 0 0"))
-        value_box = self._input(f, self.view.values.get(key))
-        value_box.observe(self._safely(lambda change, key=key: self._edited(key, change["new"])), names="value")
-        remove = w.Button(description="✕", tooltip=f"Stop sending {key}", layout=layout(width="30px", flex="0 0 auto"))
+        head = w.HTML(_wrap(f'<div class="rh" title="{_esc(f.doc)}"><b>{_esc(f.label)}</b><span class="rk">'
+                            f"{_esc(_kind_text(f))}</span></div>"), layout=layout(flex="1 1 auto", min_width="0"))
+        remove = w.Button(description="✕", tooltip=f"Stop sending {key}", layout=layout(width="26px", flex="0 0 auto"))
         remove.add_class("kbc-x")
         remove.on_click(self._safely(lambda _button, key=key: self._remove(key)))
+        value_box = self._input(f, self.view.values.get(key))
+        value_box.observe(self._safely(lambda change, key=key: self._edited(key, change["new"])), names="value")
         note = w.HTML(layout=layout(width="100%"))
-        self.inputs[key], self.row_notes[key] = value_box, note
-        self._note_row(key)
-        return w.VBox([w.HBox([label, value_box, remove], layout=layout(width="100%", align_items="flex-start")),
-                       note], layout=layout(width="100%"))
+        row = w.VBox([w.HBox([head, remove], layout=layout(width="100%", align_items="center", margin="0 0 4px 0")),
+                      value_box, note], layout=layout(width="100%"))
+        row.add_class("kbc-row")
+        self.inputs[key], self.row_notes[key], self.removes[key] = value_box, note, remove
+        return row
 
     def _note_row(self, key: str) -> None:
         f = self.schema.fields[key]
-        named = f'<code>{_esc(key)}</code> · ' if key != f.where else ""
-        path = _esc(f.where).replace(".", ".<wbr>")  # long paths break at the dots
-        where = f'<span class="path">{named}{path}</span>'
+        named = f"{key} · " if key != f.where else ""
+        where = f'<div class="rw" title="{_esc(".".join(f.path))}">{_esc(named + f.where)}</div>'
         if key in self.broken:
             text, css = f"Not sent: {_esc(self.broken[key])}", "rp bad"
         elif key in self.pending:
             text, css = "Not sent until you fill it in.", "rp pending"
         else:
             text, css = _esc(describe_setting(f, self.view.values.get(key))), "rp"
-        self.row_notes[key].value = _wrap(f'<div class="{css}">{text}<br>{where}</div>')
+        self._set(self.row_notes[key], _wrap(f'<div class="{css}">{text}</div>{where}'))
+        box = self.inputs[key]
+        if f.kind == "boolean":
+            self._quietly(box, description="on" if box.value else "off")
+        row = self.rows.get(key)
+        if row is not None:
+            for css_class, on in (("kbc-broken", key in self.broken), ("kbc-pending", key in self.pending),
+                                  ("kbc-fresh", key == self.fresh)):
+                if on and css_class not in row._dom_classes:
+                    row.add_class(css_class)
+                elif not on and css_class in row._dom_classes:
+                    row.remove_class(css_class)
 
     def _sync_rows(self) -> None:
-        """Rows for the settings that are set or being filled in, grouped, in the schema's order. Existing rows are
+        """Cards for the settings that are set or being filled in, grouped, in the schema's order. Existing cards are
         kept (with whatever their boxes hold), so a half-typed value isn't lost."""
         keys = [k for k in self.schema.fields if k in self.view.values or k in self.pending or k in self.broken]
         for key in keys:
             if key not in self.rows:
                 self.rows[key] = self._row(key)
+                self._note_row(key)
             elif key in self.view.values and key not in self.broken:
                 self._show_value(key, self.view.values[key])
+            else:
+                self._note_row(key)
         for key in [k for k in self.rows if k not in keys]:
-            for store in (self.rows, self.inputs, self.row_notes):
+            for store in (self.rows, self.inputs, self.row_notes, self.removes):
                 store.pop(key).close()
         children: list[Any] = []
         group = None
@@ -3496,10 +4333,11 @@ class _ChatApp:
                 children.append(self.headers[group])
             children.append(self.rows[key])
         if not keys:
-            children = [self.w.HTML(_wrap('<div class="more" style="margin:6px 0">Nothing is set, so Bedrock uses '
-                                          "its defaults. Add a setting below.</div>"))]
+            children = [self.w.HTML(_wrap('<div class="more" style="margin:6px 0 10px">Nothing is set, so Bedrock '
+                                          "uses its defaults. Add a setting below.</div>"))]
         self.rows_box.children = children
         self._sync_chips()
+        self._show_matches()
 
     def _show_value(self, key: str, value: Any) -> None:
         """Puts a setting's value in its box, unless the box already holds it (in the user's own formatting)."""
@@ -3541,6 +4379,7 @@ class _ChatApp:
                 value = coerce_setting(f, raw)
             except ValueError as exc:
                 self.view.values.pop(key, None)
+                self.pending.discard(key)
                 self.broken[key] = str(exc)
             else:
                 self.broken.pop(key, None)
@@ -3554,6 +4393,7 @@ class _ChatApp:
         self.view.values.pop(key, None)
         self.pending.discard(key)
         self.broken.pop(key, None)
+        self.fresh = None if self.fresh == key else self.fresh
         self._sync_rows()
         self._refresh()
         self._set_status(f"{self.schema.fields[key].label} isn't sent any more.", "ok")
@@ -3566,33 +4406,106 @@ class _ChatApp:
             else:
                 self.view.values[key] = coerce_setting(f, f.default)
                 self.view.values = {k: self.view.values[k] for k in self.schema.fields if k in self.view.values}
+        before, self.fresh = self.fresh, key
+        if before in self.rows:
+            self._note_row(before)
         self._sync_rows()
         self._refresh()
         what = describe_setting(f, self.view.values.get(key))
         self._set_status(f"Added {f.label}. {what} Change it in place; ✕ removes it.", "ok")
 
+    # ------------------------------------------------- finding a setting to add
+
+    @staticmethod
+    def _mentions(f: Field, text: str) -> bool:
+        """Whether every word of the search is in the field's names, path or description (not a near miss)."""
+        names = _norm(" ".join([f.key, f.label, *f.names, ".".join(f.path)]))
+        return all(_norm(word) in names or word in f.doc.lower() for word in text.lower().split())
+
+    def _pick(self, key: str) -> Any:
+        """A setting's line in the list under the search box: what it is and does, and a button that adds it."""
+        if key not in self.picks:
+            w, layout, f = self.w, self.w.Layout, self.schema.fields[key]
+            where = f.key if f.key == f.where else f"{f.key} · {f.where}"
+            info = w.HTML(_wrap(f'<div class="fc" title="{_esc(f.doc)}"><div class="fl"><b>{_esc(f.label)}</b>'
+                                f'<span class="rk">{_esc(_kind_text(f))}</span></div><div class="fd">{_esc(f.doc)}'
+                                f'</div><div class="fw">{_esc(where)}</div></div>'),
+                          layout=layout(flex="1 1 auto", min_width="0"))
+            button = w.Button(description="+ Add", tooltip=f"Send {f.label} with every question",
+                              layout=layout(width="auto", flex="0 0 auto"))
+            button.add_class("kbc-small")
+            button.on_click(self._safely(lambda _button, key=key: self._add_listed(key)))
+            row = w.HBox([info, button], layout=layout(width="100%", align_items="center"))
+            row.add_class("kbc-pick")
+            self.picks[key] = (row, button)
+        row, button = self.picks[key]
+        added = key in self.rows
+        if button.disabled != added:
+            button.description, button.disabled = ("✓ Added", True) if added else ("+ Add", False)
+        return row
+
+    def _show_matches(self) -> None:
+        """The list under the search box: the settings the search matches (the best few), or every setting by group
+        while Browse all is on. Nothing while the box is empty."""
+        text = str(self.add_name.value or "").strip()
+        self.browse_button.description = "Hide the list" if self.browsing else f"Browse all {len(self.schema.fields)}"
+        if not text and not self.browsing:
+            self.results.children = ()
+            self._set(self.add_help, "")
+            return
+        found = self.schema.search(text)
+        help_text = ""
+        if text and not found:
+            try:
+                self.schema.find(text)
+            except ValueError as exc:
+                help_text = str(exc)
+        elif text and not self._mentions(found[0], text):
+            labels = " or ".join(dict.fromkeys(f.label for f in found[:3]))
+            help_text = f"No setting matches {text!r}. Did you mean {labels}?"
+        shown = found if self.browsing else found[:_SHOWN_MATCHES]
+        children: list[Any] = []
+        group = None
+        for f in shown:
+            if self.browsing and not text and f.group != group:
+                group = f.group
+                if group not in self.pick_headers:
+                    self.pick_headers[group] = self.w.HTML(_wrap(f'<div class="gh">{_esc(group)}</div>'))
+                children.append(self.pick_headers[group])
+            children.append(self._pick(f.key))
+        if len(found) > len(shown):
+            more = len(found) - len(shown)
+            children.append(self.w.HTML(_wrap(f'<div class="more" style="margin:4px 0 0 10px">{more:,} more match: '
+                                              "type more of the name, or Browse all.</div>")))
+        self.results.children = children
+        self._set(self.add_help, _wrap(f'<div class="rp" style="margin:6px 2px 0">{_prose(help_text)}</div>')
+                  if help_text else "")
+
     def _typed(self, change: dict[str, Any]) -> None:
-        text = str(change["new"] or "").strip()
+        self._show_matches()
+
+    def _browse(self, *_: Any) -> None:
+        self.browsing = not self.browsing
+        self._show_matches()
+
+    def _add_listed(self, key: str) -> None:
+        self._add_setting(key)
+        self._show_matches()
+
+    def _add_typed(self, *_: Any) -> None:
+        """Enter in the search box, or Add: adds the setting the text names, else the best match."""
+        text = str(self.add_name.value or "").strip()
         if not text:
-            self.add_help.value = ""
+            self._set_status("Type a setting's name, or what it does, in the box; Browse all lists every one.")
             return
         try:
             f = self.schema.find(text)
         except ValueError as exc:
-            self.add_help.value = _wrap(f'<div class="rp" style="margin:2px 0 6px">{_prose(exc)}</div>')
-            return
-        self.add_help.value = _wrap(f'<div class="rp" style="margin:2px 0 6px"><b>{_esc(f.label)}</b> '
-                                    f"({_esc(_kind_text(f))}): {_esc(f.doc)}<br><span class=\"path\">"
-                                    f"{_esc(f.where)}</span></div>")
-
-    def _add_typed(self, *_: Any) -> None:
-        text = str(self.add_name.value or "").strip()
-        if not text:
-            self._set_status("Type a setting's name or path in the box, then Add. fields() lists them all.")
-            return
-        f = self.schema.find(text)
+            found = self.schema.search(text)
+            if not found or not self._mentions(found[0], text):
+                raise _Hint(str(exc)) from None
+            f = found[0]
         self._quietly(self.add_name, value="")
-        self.add_help.value = ""
         self._add_setting(f.key)
 
     # --------------------------------------------------------- the JSON views
@@ -3605,41 +4518,45 @@ class _ChatApp:
             region = view.core.region
         except ValueError:
             region = "no region"
-        self.title.value = _wrap(
-            f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(name)}</h3><div class="sub">'
-            f"{_esc(' · '.join(filter(None, [view.kb if view.kb != name else '', region, 'RetrieveAndGenerate'])))}"
-            "</div>"
-        )
+        sub = " · ".join(filter(None, [view.kb if view.kb != name else "", region, "RetrieveAndGenerate"]))
+        self._set(self.title, _wrap(f'<div class="hd">{_AVATAR}<div style="min-width:0"><h3>{_esc(name)}<span '
+                                    f'class="badge">{_esc(_BADGE)}</span></h3><div class="sub">{_esc(sub)}</div></div>'
+                                    "</div>"))
         params, problems = view._preview()
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
         found += [("warn", f"{key} isn't sent: {why}") for key, why in self.broken.items()]
         found += settings_findings(view.values, view.model or "")
         notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(found))
-        self.findings.value = _wrap(notes)
-        self.setup.value = _wrap(f'<div class="setup">Open this setup again:<pre class="code"{_SELECT}>'
-                                 f"{_esc(view._setup_call())}</pre></div>")
+        self._set(self.findings, _wrap(f'<div style="margin:0 0 10px">{notes}</div>') if notes else "")
+        self._set(self.setup, _wrap(f'<div class="setup"><div class="ph">Open this setup again<span class="hint">click '
+                                    f'it to select all, then copy</span></div><pre class="code hl"{_SELECT}>'
+                                    f"{_python_html(view._setup_call())}</pre></div>"))
         self._params = params
         self._render_request()
+        if self.editing:
+            self._follow_edit()
 
     def _render_request(self) -> None:
-        params, view = getattr(self, "_params", None), self.view
+        params, view = self._params, self.view
         if params is None:
             return
         mode = self.request_mode.value
         if mode == "Python":
-            body = f'<pre class="code"{_SELECT}>{_esc(python_call(params, view._region()))}</pre>'
-        elif mode == "Text":
-            body = f'<pre class="code"{_SELECT}>{_esc(json.dumps(params, indent=2, ensure_ascii=False))}</pre>'
+            body = f'<pre class="code hl"{_SELECT}>{_python_html(python_call(params, view._region(), _PYTHON_WIDTH))}</pre>'
+            hint = "The same call with boto3: click it to select all, then copy."
+        elif mode == "JSON":
+            body = f'<pre class="code hl"{_SELECT}>{_json_text_html(params)}</pre>'
+            hint = "As JSON text: click it to select all, then copy."
         else:
             body = _json_html(params, marks=view._marks(), notes=view._json_notes())
-        hint = ("The request your next question sends" + (", continuing this conversation" if view.session_id
-                                                          else "") + ". Highlighted: your settings.")
-        self.request_view.value = _wrap(f'<div class="more" style="margin:6px 0 2px">{_esc(hint)}</div>{body}')
+            hint = "Highlighted: your settings. Click ▸ to fold a part."
+        lead = "The request your next question sends" + (", continuing this conversation" if view.session_id else "")
+        self._set(self.request_view, _wrap(f'<div class="pd">{_esc(lead)}. {_esc(hint)}</div>{body}'))
 
     def _render_response(self) -> None:
         if not self.view.answers:
-            self.response_view.value = _wrap('<div class="more" style="margin:8px 0">Nothing yet: ask a question, and '
-                                             "what Bedrock sends back shows here as JSON.</div>")
+            self._set(self.response_view, _wrap('<div class="more" style="margin:10px 0">Nothing yet: ask a question, '
+                                                "and what Bedrock sends back shows here as JSON.</div>"))
             return
         a = self.view.answers[-1]
         how = "streamed: built from the stream's events" if a.streamed else "RetrieveAndGenerate"
@@ -3649,33 +4566,72 @@ class _ChatApp:
                                                 if k in self.schema.fields and k != "reranker"})
         else:
             body = _json_html(a.response, open_depth=3)
-        self.response_view.value = _wrap(f'<div class="more" style="margin:6px 0 2px">{_esc(meta)}</div>{body}')
+        self._set(self.response_view, _wrap(f'<div class="pd" style="margin-top:8px">{_esc(meta)}</div>{body}'))
+
+    def _request_text(self) -> str:
+        return json.dumps(self._params or {}, indent=2, ensure_ascii=False)
+
+    def _fill_editor(self, note: str = "") -> None:
+        self.edit_base = self._request_text()
+        self._quietly(self.editor, value=self.edit_base)
+        self._set(self.edit_message, _wrap(note or '<div class="pd">Change anything, add or delete fields, then Apply. '
+                                           "The knowledge base, the model and the settings follow what you write; the "
+                                           "question here is only a placeholder.</div>"))
 
     def _edit(self, *_: Any) -> None:
-        params = getattr(self, "_params", None) or {}
-        self._quietly(self.editor, value=json.dumps(params, indent=2, ensure_ascii=False))
-        self.edit_message.value = _wrap('<div class="more" style="margin:4px 0">Change anything, add or delete '
-                                        "fields, then Apply. The knowledge base, the model and the settings follow "
-                                        "what you write; the question here is only a placeholder.</div>")
+        """Opens the editor on the request as it is now. The view buttons wait until it's closed: the editor is
+        the view while it's open."""
+        self.editing = True
+        self._fill_editor()
         self.edit_box.layout.display = ""
         self.request_view.layout.display = "none"
-        self.edit_button.disabled = True
+        self.edit_button.disabled = self.request_mode.disabled = True
+
+    def _restart_edit(self, *_: Any) -> None:
+        self._fill_editor()
 
     def _cancel_edit(self, *_: Any) -> None:
+        self.editing = False
         self.edit_box.layout.display = "none"
         self.request_view.layout.display = ""
-        self.edit_button.disabled = False
+        self.edit_button.disabled = self.request_mode.disabled = False
+
+    def _follow_edit(self) -> None:
+        """The request changed while the editor is open (a setting, the model, an answer that started a session).
+        An untouched editor takes the new request; an edited one keeps the edits and says what Apply would undo."""
+        now = self._request_text()
+        if now == self.edit_base:
+            return
+        if self.editor.value == self.edit_base:
+            self._fill_editor()
+            return
+        changes = []
+        try:
+            picked, settings = settings_from_request(json.loads(self.edit_base), self.schema)
+            changes = _diff(settings, self.view.values)
+            for label, key, path in (("the knowledge base", "knowledgeBaseId", (*_KB_CONFIG, "knowledgeBaseId")),
+                                     ("the model", "modelArn", (*_KB_CONFIG, "modelArn")),
+                                     ("the conversation", "sessionId", ("sessionId",))):
+                if picked.get(key) != _get(self._params, path):
+                    changes.append(f"{label} changed")
+        except (ValueError, TypeError):
+            pass
+        what = f": {'; '.join(changes)}" if changes else ""
+        self._set(self.edit_message, _wrap(
+            f'<div class="note warn">The request changed since you started editing{_esc(what)}. Apply sends what\'s '
+            "written below and undoes that; Start over puts the request as it is now in the box.</div>"))
 
     def _apply(self, *_: Any) -> None:
         try:
             changes = self.view._apply_request(self.editor.value)
         except ValueError as exc:
-            self.edit_message.value = _wrap(f'<div class="note warn" style="white-space:pre-wrap">{_prose(exc)}</div>')
+            self._set(self.edit_message, _wrap(f'<div class="note warn" style="white-space:pre-wrap">{_prose(exc)}'
+                                               "</div>"))
             return
         self.pending.clear()
         self.broken.clear()
-        for key in list(self.rows):  # the values may be written differently now: build every row again
-            for store in (self.rows, self.inputs, self.row_notes):
+        for key in list(self.rows):  # the values may be written differently now: build every card again
+            for store in (self.rows, self.inputs, self.row_notes, self.removes):
                 store.pop(key).close()
         self._cancel_edit()
         self.sync()
@@ -4212,7 +5168,7 @@ class BedrockChatView:
             blocks += [
                 _Json(a.request, "Request sent", marks=marks, notes=self._json_notes()),
                 _Json(a.response, "Response", open_depth=3),
-                _Text(python_call(a.request, self._region()), "The same call in Python", code=True),
+                _Code(python_call(a.request, self._region()), "The same call in Python"),
             ]
         blocks.append(_Note("Tokens and cost are estimated from characters: RetrieveAndGenerate doesn't report tokens, "
                             "and returns only the passages the answer cites."))
@@ -4326,7 +5282,7 @@ class BedrockChatView:
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
         blocks.append(_Findings(found + settings_findings(self.values, self.model or ""),
                                 empty="Nothing here looks wrong, as far as the API's own checks go."))
-        blocks.append(_Text(self._setup_call(), "Open this setup again", code=True))
+        blocks.append(_Code(self._setup_call(), "Open this setup again"))
         blocks.append(_Next([
             (self._next_set(), "change a setting, or add any field"),
             (_call("unset", next(reversed(self.values), "temperature")), "stop sending one"),
@@ -4411,7 +5367,7 @@ class BedrockChatView:
                     ("Conversation", "continues this one" if self.session_id else "new")]),
             _Findings(found + settings_findings(self.values, self.model or "")),
             _Json(params, "Request", marks=self._marks(), notes=self._json_notes()),
-            _Text(python_call(params, self._region()), "The same call in Python", code=True),
+            _Code(python_call(params, self._region()), "The same call in Python"),
             _Next([("settings()", "the settings in plain English"), (self._next_set(), "change one")]),
         ])
 

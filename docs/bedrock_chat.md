@@ -74,14 +74,15 @@ The examples use a knowledge base called `support-docs` holding support policies
 
 ## The chat window { #window }
 
-Type a question and press Enter. The answer appears as it's written, then settles into its final form: the text with each cited span shaded and numbered, who answered and how long it took (and how long until the first words), how many sources it cites, how much of it they back up, and an estimated cost.
+Type a question and press Enter. The answer appears as it's written, then settles into its final form: the text with each cited span shaded and numbered, who answered and how long it took (and how long until the first words), how many sources it cites, how much of it they back up, and an estimated cost. Answers written in markdown are laid out as such: headings, bullet and numbered lists, **bold** and *italic*, tables, code blocks and links, with the cited spans still shaded inside them.
 
-![The chat window: support-docs and Claude Sonnet 5 picked at the top; two answers about refunds, each with its cited spans shaded and numbered, its sources (one opened to the full passage with the question's words highlighted, its S3 location and its metadata) and a folded Request and response JSON; on the right, the Settings tab with Passages 5 and Search type HYBRID, each explained in a sentence, buttons to add a metadata filter, a reranker, temperature and more, and the chat() call that opens this setup again](images/chat-window-light.webp#only-light){ width="984" height="733" loading=lazy }
-![The chat window: support-docs and Claude Sonnet 5 picked at the top; two answers about refunds, each with its cited spans shaded and numbered, its sources (one opened to the full passage with the question's words highlighted, its S3 location and its metadata) and a folded Request and response JSON; on the right, the Settings tab with Passages 5 and Search type HYBRID, each explained in a sentence, buttons to add a metadata filter, a reranker, temperature and more, and the chat() call that opens this setup again](images/chat-window-dark.webp#only-dark){ width="984" height="733" loading=lazy }
+![The chat window: support-docs and Claude Sonnet 5 picked at the top; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID as cards, each explained in a sentence, one-click buttons to add a metadata filter, a reranker, temperature and more, and a box to search every setting](images/chat-window-light.webp#only-light){ width="984" height="848" loading=lazy }
+![The chat window: support-docs and Claude Sonnet 5 picked at the top; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID as cards, each explained in a sentence, one-click buttons to add a metadata filter, a reranker, temperature and more, and a box to search every setting](images/chat-window-dark.webp#only-dark){ width="984" height="848" loading=lazy }
 /// caption
-Two questions about refunds. The second follows up on the first, in the same Bedrock session. Source \[2\] of the first answer is open.
+Two questions about refunds, in the same Bedrock session. The second asks for a list, and the answer's markdown is laid out: bullets, bold, and a citation after each cited span.
 ///
 
+- **Markdown.** Lists, tables and code in an answer show as lists, tables and code. Everything in it is shown as text, never run as HTML (answers can quote your documents), and links open only web pages and email addresses.
 - **Sources.** Each answer lists the passages it cites. Click one to read it in full, with the question's words highlighted, its S3 location and its metadata.
 - **Request and response JSON**, folded under each answer: exactly what that question sent and what came back, so you can compare answers asked with different settings.
 - **Findings** appear under an answer when something's off, and say which setting to try: Bedrock's “unable to assist” reply (retrieve more passages, try HYBRID search, or loosen the filter), an answer that cites nothing, one mostly not backed by its sources, a guardrail that stepped in, or an answer cut off by `max_tokens`.
@@ -90,17 +91,23 @@ Two questions about refunds. The second follows up on the first, in the same Bed
 
 ## Settings { #settings }
 
-The **Settings** tab lists everything sent with every question. Under each value is what it means, in a sentence, and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.
+The **Settings** tab lists everything sent with every question, one card each. Under each value is what it means, in a sentence, and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.
 
-![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each row has a remove button and its path in the request](images/chat-settings-light.webp#only-light){ width="984" height="773" loading=lazy }
-![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each row has a remove button and its path in the request](images/chat-settings-dark.webp#only-dark){ width="984" height="773" loading=lazy }
+![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each card has a remove button and its path in the request](images/chat-settings-light.webp#only-light){ width="984" height="848" loading=lazy }
+![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; each card has a remove button and its path in the request](images/chat-settings-dark.webp#only-dark){ width="984" height="848" loading=lazy }
 /// caption
 A filter, a reranker and a temperature added with one click each, every value explained in a sentence above its path in the request.
 ///
 
 - **Change** a value in place: a slider for temperature, a list for the search type, a box for numbers, text and JSON. A value that can't be sent (temperature 1.5, JSON with a typo) turns red and says why, and isn't sent until it's fixed.
 - **Remove** one with **✕**.
-- **Add** the common ones with one click (**+ Temperature**, **+ Metadata filter**, **+ Reranker**...), or any other field by typing its name or its path in **Add a setting**. The box suggests names as you type and explains the one you've typed. The fields come from your installed boto3's description of the API, so every field it can send is there, with its type and range.
+- **Add** the common ones with one click (**+ Temperature**, **+ Metadata filter**, **+ Reranker**...). For anything else, type in **Add a setting**'s search box: a name (`rerank`), a path (`performanceConfig.latency`) or what it does (`encrypts`). The matches are listed with what each one takes and does, and **+ Add** next to each; Enter adds the best one. A misspelt name (`temprature`) lists the closest ones. **Browse all** lists every field, grouped by what it changes. The fields come from your installed boto3's description of the API, so every field it can send is there, with its type and range. A card you've just added is outlined until you add another.
+
+![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-light.webp#only-light){ width="984" height="848" loading=lazy }
+![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-dark.webp#only-dark){ width="984" height="848" loading=lazy }
+/// caption
+Searching the settings: every field whose name, path or description mentions "rerank", with a button to add each.
+///
 
 Warnings under the settings catch what Bedrock would refuse, or what won't do what it seems to: both `temperature` and `top_p` on a newer Claude model (it takes one), a prompt without `$output_format_instructions$` (answers lose their citations), a guardrail ID without a version, a reranker with too few passages to choose from. **Open this setup again** shows the `chat(...)` call with your knowledge base, model and settings, to paste into another notebook.
 
@@ -130,18 +137,25 @@ Values are forgiving: `"0.2"` and `0.2`, `"hybrid"` and `"HYBRID"`, JSON or a Py
 
 The **Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base and model from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
 
-![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="773" loading=lazy }
-![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="773" loading=lazy }
+![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="848" loading=lazy }
+![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="848" loading=lazy }
 /// caption
 The next request, continuing the conversation. Highlighted keys are your settings.
 ///
 
-- **Text** shows the same JSON as plain text, and **Python** the same call with boto3, ready to paste into your own code. One click on either selects all of it.
-- **Edit JSON** opens the request as text. Add, change or delete any field, then **Apply**: the settings, the knowledge base and the model follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes.
+- **JSON** shows the same request as plain JSON text, and **Python** the same call with boto3, ready to paste into your own code, both in colour. One click on either selects all of it.
+- **Edit JSON** opens the request as text. Add, change or delete any field, then **Apply**: the settings, the knowledge base and the model follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes. While the editor is open, it's the view: **Tree**, **JSON** and **Python** wait until you Apply or Cancel.
+- If the request changes while you're editing (a setting changed in the Settings tab or from another cell, another model, an answer that started a session), an editor you haven't touched takes the new request. One you have keeps your edits and says what Apply would undo; **Start over** puts the request as it is now in the box.
+
+![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-light.webp#only-light){ width="984" height="802" loading=lazy }
+![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-dark.webp#only-dark){ width="984" height="802" loading=lazy }
+/// caption
+**Python**: the same request as a boto3 call, highlighted, to paste into your own code.
+///
 - **Last response** shows what Bedrock sent back, folded below the top levels, and the request that was sent.
 
-![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-light.webp#only-light){ width="984" height="773" loading=lazy }
-![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-dark.webp#only-dark){ width="984" height="773" loading=lazy }
+![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-light.webp#only-light){ width="984" height="848" loading=lazy }
+![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-dark.webp#only-dark){ width="984" height="848" loading=lazy }
 /// caption
 A field Bedrock doesn't take is refused before anything is sent, with the fields that are allowed there and where model-specific ones go.
 ///

@@ -52,6 +52,7 @@ import io
 import json
 import os
 import random
+import re
 import sys
 import tarfile
 from datetime import datetime, timedelta, timezone
@@ -648,21 +649,32 @@ def seed_bedrock_kb() -> dict:
 
     def retrieve_and_generate(input, retrieveAndGenerateConfiguration, sessionId=None, **_):
         config = retrieveAndGenerateConfiguration["knowledgeBaseConfiguration"]
-        found = search(config["knowledgeBaseId"], input["text"],
+        listing = any(word in input["text"].lower() for word in ("summar", "list", "steps"))
+        question = re.sub(r"(?i)\b(summari[sz]e|summary|as a list|list|steps|the rules for)\b", " ", input["text"])
+        found = search(config["knowledgeBaseId"], question,
                        config.get("retrievalConfiguration", {}).get("vectorSearchConfiguration", {}))
         useful = [(s, c) for s, c in found if s >= max(0.55, found[0][0] - 0.1)][:3] if found else []
         if not useful:
             return {"output": {"text": "Sorry, I am unable to assist you with this request."},
                     "sessionId": sessionId or "demo-session-1"}
-        text, citations = "", []
+        # Asked for a summary or a list, it answers in markdown, as models often do: a bold lead-in and a bullet per
+        # passage, each starting with its first word in bold.
+        text, citations = "**Here's what the policies say:**\n\n" if listing else "", []
         for _, chunk in useful:
             sentence = first_sentence(chunk[3])
-            start = len(text) + (1 if text else 0)
-            text += (" " if text else "") + sentence
+            if listing:
+                first, _, rest = sentence.partition(" ")
+                sentence = f"**{first}** {rest}"
+                text += "- " if text.endswith("\n") else "\n- "
+                start = len(text)
+                text += sentence
+            else:
+                start = len(text) + (1 if text else 0)
+                text += (" " if text else "") + sentence
             citations.append({"generatedResponsePart": {"textResponsePart": {
                 "text": sentence, "span": {"start": start, "end": start + len(sentence) - 1}}},
                 "retrievedReferences": [{k: v for k, v in _reference(None, chunk, 0).items()}]})
-        text += " Anything else is decided case by case by the support team."  # uncited, like real answers
+        text += ("\n\n" if listing else " ") + "Anything else is decided case by case by the support team."  # uncited
         return {"output": {"text": text}, "citations": citations, "sessionId": sessionId or "demo-session-1"}
 
     def retrieve_and_generate_stream(**params):

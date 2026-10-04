@@ -6,7 +6,7 @@
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, adds settings,
-opens the Request JSON tab, edits the JSON. Each figure is the window, 984 CSS px wide at 1.5x like the other
+searches for a setting, opens the Request JSON tab and its Python view, edits the JSON. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
 
@@ -35,7 +35,7 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-settings", "chat-request", "chat-edit")
+FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -106,11 +106,18 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
             f"document.querySelectorAll('.kbc-app .msg.bot').length >= {count} && "
             "!document.querySelector('.kbc-app .wait') && !document.querySelector('.kbc-app .caret')", timeout=30_000)
 
+    def scroll_to(element: str) -> None:
+        """Scrolls the open tab so the element (a JS expression) is at its top: each tab scrolls on its own, in the
+        box inside the tab's frame."""
+        page.evaluate(f"""() => {{ const el = {element};
+            const box = el.closest('.widget-tab-contents > .widget-box, .jupyter-widget-tab-contents > .jupyter-widget-box');
+            box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 4; }}""")
+
     box = page.locator(".kbc-app input[placeholder='Ask a question, then press Enter']")
-    box.fill("How long do refunds take?")
+    box.fill("Can digital goods be refunded?")
     box.press("Enter")
     answered(1)
-    box.fill("And what about digital goods?")
+    box.fill("Summarize how long refunds take, as a list")  # demo.py answers this one in markdown
     box.press("Enter")
     answered(2)
     page.locator(".kbc-app details.src summary").last.click()
@@ -120,16 +127,26 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         time.sleep(0.4)
     area = page.locator(".kbc-app textarea[placeholder*='team']").first
     area.fill('{"team": "billing"}')
-    area.press("Tab")
+    area.evaluate("el => el.blur()")  # sends the value, as leaving the box does
     try:
         page.wait_for_function("document.querySelector('.kbc-app').innerText.includes('Only documents where')",
                                timeout=10_000)
     except PlaywrightTimeout:
         pass
+    scroll_to("document.querySelector(\".kbc-app textarea[placeholder*='team']\").closest('.kbc-row')")
     shot("chat-settings")
+    search = page.locator(".kbc-app input[placeholder^='Search:']")
+    search.fill("rerank")
+    page.wait_for_selector(".kbc-app .kbc-pick", timeout=10_000)
+    scroll_to("document.querySelector('.kbc-app .kbc-card')")
+    shot("chat-add")
+    search.fill("")
     tab = ".kbc-app .lm-TabBar-tab:has-text('{0}'), .kbc-app .p-TabBar-tab:has-text('{0}')"
     page.locator(tab.format("Request JSON")).first.click()
     shot("chat-request")
+    page.locator(".kbc-app .widget-toggle-button:has-text('Python')").first.click()
+    shot("chat-python")
+    page.locator(".kbc-app .widget-toggle-button:has-text('Tree')").first.click()
     page.locator(".kbc-app button:has-text('Edit JSON')").click()
     editor = page.locator(".kbc-app .kbc-mono textarea").last
     for _ in range(50):  # the request arrives from the kernel a moment after the click
@@ -140,8 +157,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     editor.evaluate("el => { el.scrollTop = el.scrollHeight; }")
     page.locator(".kbc-app button:has-text('Apply')").click()
     page.wait_for_selector(".kbc-app .note.warn", timeout=10_000)
-    page.evaluate("document.querySelectorAll('.kbc-side .widget-tab-contents, .kbc-side .jupyter-widget-tab-contents')"
-                  ".forEach(el => { el.scrollTop = el.scrollHeight; })")
+    scroll_to("[...document.querySelectorAll('.kbc-app .note.warn')].find(el => el.offsetParent)")
     shot("chat-edit")
     return shots
 
