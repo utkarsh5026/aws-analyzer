@@ -29,6 +29,8 @@ service is given, run a short tour:
 - bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request()` (the same
   fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
 - sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
+- opensearch: `ui.overview(); ui.indexes("vectors-prod"); ui.index_info("vectors-prod/support-docs");
+  ui.search("how do I get my money back?", index="vectors-prod/support-docs")`
 - other services: `ui.help()` and then the service's overview command
 
 `--help` describes the demo data. Most useful:
@@ -66,6 +68,17 @@ service is given, run a short tour:
   - `running()`: notebook instances `old-experiment` (9 days, no auto-stop) and `team-reporting` (auto-stop), stopped
     `archive-2024` and `sandbox`, a Code Editor app in space `forecasting`, endpoints `churn-v1` (no traffic),
     `churn-v2` (busy) and a serverless one, and a spot training job.
+
+- **OpenSearch** (moto for the domains; fake Serverless, CloudWatch and Bedrock, and fake clusters from
+  `tests/fake_opensearch.py` behind each endpoint):
+  - `vectors-prod` holds `support-docs` (faiss, cosine, 1,024 dims, 1.8M documents reported, 1.5% without a vector,
+    a few repeated passages, graphs bigger than the nodes' k-NN memory), `product-search` (lucene), `legacy-faq`
+    (nmslib, inner product, unnormalized vectors) and `app-logs-2026.10` (no vectors).
+  - `search-legacy` is Elasticsearch 7.10 and open to the internet; `rag-dev` runs on one t3.medium.
+  - Serverless: `kb-support` (a Bedrock knowledge base's index), `kb-sandbox` (no standby replicas) and `app-logs`
+    (VPC only).
+  - The embedding model knows four topics (refunds, shipping, accounts, billing), so a question about one of them
+    finds its articles.
 
 ## Reading the output
 

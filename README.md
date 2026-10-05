@@ -7,8 +7,8 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
-DynamoDB tables, Bedrock knowledge bases and the SageMaker notebook itself: what's there, what it costs, and what to
-do next. And a chat window for asking a knowledge base, with every setting in reach.
+DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes and the SageMaker notebook itself: what's there,
+what it costs, and what to do next. And a chat window for asking a knowledge base, with every setting in reach.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -19,8 +19,8 @@ do next. And a chat window for asking a knowledge base, with every setting in re
 
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
-[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [Development](#development) ·
-[Changelog](CHANGELOG.md)
+[Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
+[Development](#development) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -82,6 +82,7 @@ report still renders.
 | **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
+| **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -106,8 +107,10 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 **2. Import it and look around.** It uses the notebook's IAM execution role, so there's nothing to configure:
 
 ```python
-from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env
-# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, S3Explorer, chat)
+from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
+                       # OpenSearchView from opensearch
+# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView,
+# S3Explorer, chat)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -120,8 +123,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > command that needs one that isn't installed says which to install instead of failing.
 >
 > Installed with pip, every `from s3 import ...` in this README and the guides becomes
-> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env` and
-> `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight from `aws_analyzer`.
+> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env`,
+> `opensearch` and `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -148,8 +151,8 @@ Every file has the same two layers:
 
 | Layer     | Class                                                                                             | What it does                                                                                                                  |
 | :-------- | :------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------- |
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
-| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView`                     | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer`, `OpenSearchAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
+| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView`, `OpenSearchView`                         | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 ### Reading a report
 
@@ -1238,6 +1241,166 @@ policy that covers every command.
 
 </details>
 
+## Amazon OpenSearch
+
+**Vector (k-NN) indexes in OpenSearch Service domains and Serverless collections.** Each vector field in plain
+English, whether its graphs fit in the memory the nodes have, documents without a vector, vectors that repeat or are
+all zeros, and the documents nearest a question.
+
+📄 [`analyzers/opensearch.py`](analyzers/opensearch.py) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/opensearch-index-info-dark.webp">
+  <img src="docs/images/opensearch-index-info-light.webp" alt="index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on">
+</picture>
+
+<p align="center"><sub><code>ui.index_info("vectors-prod/support-docs")</code>: 27,000 documents vector search can't find, and graphs that need 15.7 GB of memory where the nodes have 12 GB.</sub></p>
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install. No OpenSearch client library is
+needed either: requests to a domain or collection are signed with the notebook's role by botocore.
+
+```python
+from opensearch import OpenSearchView
+
+ui = OpenSearchView()                        # uses the notebook's execution role and region
+ui.help()                                    # every command, grouped by task
+
+ui.overview()                                # every domain and Serverless collection: size, cost, warnings
+ui.indexes("vectors-prod")                   # its indexes: vector fields, documents without vectors, memory
+ui.index_info("vectors-prod/support-docs")   # one vector index in plain English, and the query to copy
+ui.use("vectors-prod/support-docs")          # later commands use this index...
+ui.sample()                                  # ...a few documents, and how healthy their vectors are
+ui.search("how do I get my money back?")     # the documents nearest a question (embedded with Bedrock)
+ui.search(like="art-00156")                  # the documents nearest an existing one: no model needed
+ui.search(vector=model.encode("refunds"), where={"lang": "en"})   # your own vector, filtered
+```
+
+> [!NOTE]
+> An index is named like a path, `"domain/index"` or `"collection/index"`; a collection ID, an ARN or the endpoint
+> URL your code already uses work too, and so does any OpenSearch you run yourself (`indexes("https://host:9200")`,
+> with `OpenSearchAnalyzer(auth=("user", "password"))` for a user name and password). The notebook must be able to
+> reach the endpoint: a domain inside a VPC answers only there. Nothing in the file writes: it sends GET requests,
+> and POSTs only to `_search` and `_count`, refusing anything else before it's sent.
+
+### Commands (`OpenSearchView`)
+
+Grouped the way `ui.help()` lists them.
+
+#### Domains and collections
+
+| Command                              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| :----------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `overview(match=None, metrics=True)` | Every domain and Serverless collection in the region, from the AWS APIs alone: each domain's engine and version, data nodes, storage, whether it's in a VPC, **the memory its nodes have for vector graphs** and estimated monthly cost; each collection's type, standby replicas, network access and key; and **what Serverless bills even when idle** (its OCU minimum) next to what it used in the last 24 hours and the most it can scale to. Warnings: a domain open to the internet, among others |
+| `use(where)`                         | Sets the domain or collection (`"vectors-prod"`), or an index in it (`"vectors-prod/support-docs"`), that later commands use when you don't pass one                                                                                                                                                                                                                                                                                                                                              |
+
+#### Indexes
+
+| Command                              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `indexes(target=None, hidden=False)` | Every index with its documents, size and shards, and each vector field's dimensions, engine and similarity, how many documents have a vector, and **the memory its graphs need, against what the nodes have**; cluster health and what the k-NN plugin has in memory now. Findings: the domain's own (version, instances, storage, encryption), graphs that don't fit, a tripped k-NN circuit breaker or graphs dropped from memory, documents without a vector, a deprecated engine                                                                                                       |
+| `index_info(index=None)`             | One index in plain English: each vector field's engine, algorithm and settings (`m`, `ef_construction`, `ef_search`, compression), its similarity and **what a score means**, how many documents have a vector, the memory the graphs need and what on-disk mode or fp16 would need instead, the fields you can filter on (each with its `where=`), and the k-NN query as opensearch-py code. Findings: `index.knn` off, nmslib, documents without a vector, graphs that don't fit, no replicas, too many small shards or segments, many deleted documents, an index a Bedrock knowledge base writes |
+
+#### Vectors
+
+| Command                                                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                              |
+| :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sample(index=None, n=10, check=200, where=None)`                           | A few random documents with their text, source and fields (each vector as its dimensions and length), and a check of 200 documents' vectors: one size, unit length or not, **all-zero vectors and exact repeats**. `where={"embedding": ("missing",)}` shows documents with no vector                                                                                                               |
+| `search(query=None, index=None, vector=, like=, k=10, where=, field=, model=, embed=)` | The k nearest documents with their score and **the similarity it stands for** (cosine, inner product or distance), text, source and fields. The question is embedded with a Bedrock model (Titan Text Embeddings V2 for 256, 512 or 1,024 dimensions, or `model=`) or `embed=your_function`; `vector=` searches with your own vector and `like="doc-id"` with a document's own. Notes repeated texts and a query vector that doesn't look like the stored ones |
+
+### Filters (`where=`)
+
+`where=` works on `search` (during the search, with faiss and lucene) and `sample`. It takes a dict, and every
+condition must match:
+
+| `where=`                                              | Means                                                                                    |
+| :---------------------------------------------------- | :--------------------------------------------------------------------------------------- |
+| `{"lang": "en"}`                                      | `lang` is `en` (a text field is matched through its `.keyword` sub-field when it has one) |
+| `{"product": ["store", "app"]}`                       | one of these, also `("in", [...])`                                                       |
+| `{"year": (">=", 2024)}`                              | also `"="`, `"!="`, `">"`, `"<"`, `"<="`                                                 |
+| `{"updated": ("between", "2026-01-01", "2026-06-30")}` | both ends included                                                                       |
+| `{"metadata.source": ("prefix", "s3://acme/refunds")}` | starts with                                                                              |
+| `{"text": ("contains", "gift card")}`                 | the words, in a text field                                                               |
+| `{"embedding": ("missing",)}`                         | the field isn't set, also `("exists",)`                                                  |
+
+Query DSL passes through unchanged (`where={"bool": {...}}`). A field the index doesn't have is reported with the
+closest names, and `index_info()` lists the fields you can filter on.
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>OpenSearchAnalyzer</code>): mappings, vectors and search results as Python objects</summary>
+
+`ui.core` is the `OpenSearchAnalyzer`. Every UI command has a data method on it:
+
+```python
+aos = ui.core                                          # or OpenSearchAnalyzer(region="eu-west-1", profile="dev")
+
+ov = aos.overview()                                    # Overview: .domains, .collections, .ocus
+report = aos.indexes("vectors-prod")                   # StoreReport: .indexes, .vector_indexes, .health, .knn
+info = aos.index("vectors-prod", "support-docs")       # IndexInfo: .vectors, .fields, .with_vector, .settings
+info.vector().dimension, info.vector().space           # 1024, 'cosinesimil'
+
+s = aos.sample("vectors-prod", "support-docs", 500)    # Sample: .docs, .checks["embedding"], .to_df()
+r = aos.search("vectors-prod", "support-docs", vector=v, k=20, where={"lang": "en"})
+r.to_df()                                              # rank, id, score, similarity and the fields
+aos.embed("refund policy", model="cohere")             # Embedding: .vector, .tokens, .cost
+aos.request("vectors-prod", "support-docs/_search", {"query": {"match": {"text": "refund"}}})   # any read
+```
+
+The analysis functions are pure (no AWS calls), so they also work on mappings and vectors you already have:
+`parse_mapping`, `read_settings`, `vector_memory`, `index_vector_memory`, `knn_memory_limit`, `check_vectors`,
+`score_to_similarity`, `build_filter`, `knn_query`, `query_python`, `parse_location`, `domain_monthly_cost`,
+`serverless_minimum`, and the findings: `domain_findings`, `collection_findings`, `index_findings`, `store_findings`,
+`knn_findings`, `vector_findings`, `search_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost, memory and limits</b>: the prices used, and what's measured and what's estimated</summary>
+
+- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-05. `INSTANCE_TYPES`
+  holds the hourly price, vCPUs and memory of 189 OpenSearch Service instance types; a domain costs its data, master
+  and UltraWarm nodes plus each data node's EBS storage (`OPENSEARCH_PRICES`: gp3 $0.122 per GB-month, gp2 $0.135).
+  IOPS and throughput above gp3's baseline, UltraWarm storage and data transfer aren't included. For another region
+  or a discount, pass your own: `OpenSearchAnalyzer(prices={"r6g.large.search": 0.195, "gp3": 0.146})`.
+- Serverless bills $0.24 per OCU-hour, indexing and search alike, and at least 2 OCUs (1 without standby replicas)
+  for each group of collections that share an encryption key, a type and the standby setting. `overview()` uses the
+  OCUs CloudWatch saw in the last 24 hours when it can read them, and never less than that minimum. Storage is
+  $0.024 per GB-month on top.
+- Vector memory is OpenSearch's own sizing rule: HNSW needs 1.1 × (bytes per vector + 8 × `m`) per vector, for every
+  copy. The memory a domain has for graphs is half of what the Java heap leaves on each data node (the heap gets half
+  the RAM, up to 32 GiB): about 4 GB on an `r6g.large.search`. On a domain, the k-NN plugin's own numbers (graph
+  memory in use, a tripped circuit breaker, graphs dropped) come from `_plugins/_knn/stats`.
+- `search()` with a text embeds it with Bedrock: Titan Text Embeddings V2 is $0.02 per million tokens, so a question
+  costs far less than a cent; the report shows the tokens and cost. The reports read only what they show:
+  `indexes()` one count per vector field, `sample()` 200 documents, `search()` one search.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                                                                               | For                                                                                       |
+| :----------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------- |
+| `es:ListDomainNames`, `es:DescribeDomains`, `es:DescribeDomain`                                                          | The domains and their settings                                                            |
+| `es:ESHttpGet`, `es:ESHttpPost` on `arn:aws:es:<region>:<account>:domain/<name>/*`                                       | A domain's indexes. POST is only used for searches and counts                             |
+| `aoss:ListCollections`, `aoss:BatchGetCollection`, `aoss:ListSecurityPolicies`, `aoss:GetSecurityPolicy`, `aoss:GetAccountSettings` | The Serverless collections, their network access and the account's capacity limits |
+| `aoss:APIAccessAll`, and a data access policy with `aoss:DescribeIndex` and `aoss:ReadDocument` on `index/<collection>/*` | A collection's indexes                                                                    |
+| `cloudwatch:GetMetricData`                                                                                               | The OCUs Serverless used (`overview`)                                                     |
+| `bedrock:InvokeModel`                                                                                                    | `search` with a text, to embed it                                                         |
+
+A domain's access policy must allow the role too, and with fine-grained access control the role must be mapped to an
+OpenSearch role that can read, such as the built-in `readall_and_monitor`. `sts:GetCallerIdentity` (the account ID
+for CloudWatch) needs no permission. Anything you can't read shows up as a note instead of an error. The
+[OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html#permissions) has a ready-made IAM policy
+and data access policy.
+
+</details>
+
 ## Development
 
 Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules the code
@@ -1257,6 +1420,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
 - **Tests** run against [moto](https://github.com/getmoto/moto), so no AWS account is needed. moto covers little of
   Bedrock and none of SageMaker Studio, so the Bedrock Knowledge Bases tests and the SageMaker Studio and `running()`
   tests use botocore's `Stubber` on real clients instead, which also checks every request against the service model.
+  The OpenSearch tests use moto for domains, fake Serverless, CloudWatch and Bedrock clients checked the same way, and
+  [`tests/fake_opensearch.py`](tests/fake_opensearch.py), a small in-memory OpenSearch that answers the REST calls
+  (k-NN searches included) and fails the test if anything but a read is sent.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
   window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
   stream event against the service model.
@@ -1266,12 +1432,12 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
   service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
-  [`docs/sagemaker_env.md`](docs/sagemaker_env.md)), and so does the S3 explorer
-  ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
+  [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md)), and so does the S3
+  explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
-  Bedrock, since moto has none. The chat window's are taken in a real JupyterLab by
+  Bedrock, since moto has none, and OpenSearch's by simulated clusters. The chat window's are taken in a real JupyterLab by
   `.claude/skills/demo/chat_shots.py` (it needs jupyterlab and playwright too).
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
   `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes

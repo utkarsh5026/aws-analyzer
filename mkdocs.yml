@@ -7,7 +7,7 @@
 site_name: aws-analyzer
 site_description: >-
   Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables,
-  Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook.
+  Bedrock knowledge bases, SageMaker notebooks and OpenSearch vector indexes from a SageMaker notebook.
 site_url: https://utkarsh5026.github.io/aws-analyzer/
 repo_url: https://github.com/utkarsh5026/aws-analyzer
 repo_name: utkarsh5026/aws-analyzer
@@ -28,6 +28,7 @@ nav:
   - Bedrock Knowledge Bases: bedrock_kb.md
   - Bedrock chat: bedrock_chat.md
   - Amazon SageMaker: sagemaker_env.md
+  - Amazon OpenSearch: opensearch.md
   - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 
 theme:

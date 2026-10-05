@@ -68,8 +68,10 @@ IAM_ACTION = {
     "bedrock-agent-runtime:RetrieveAndGenerateStream": "bedrock:RetrieveAndGenerate",  # one permission for both
     "sts:GetCallerIdentity": None,  # needs no permission
 }
-# boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:).
-IAM_PREFIX = {"bedrock-agent": "bedrock", "bedrock-agent-runtime": "bedrock", "bedrock-runtime": "bedrock"}
+# boto3 service name -> IAM service prefix, where they differ (every Bedrock client is authorized as bedrock:,
+# OpenSearch Service as es: and OpenSearch Serverless as aoss:).
+IAM_PREFIX = {"bedrock-agent": "bedrock", "bedrock-agent-runtime": "bedrock", "bedrock-runtime": "bedrock",
+              "opensearch": "es", "opensearchserverless": "aoss"}
 
 
 def iam_action(candidate: str) -> str | None:
