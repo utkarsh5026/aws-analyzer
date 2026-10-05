@@ -2042,6 +2042,18 @@ def test_json_tree_folds_caps_and_reads_json_in_strings():
     assert 'data-n="2+ items"' in s3mod._json_tree_html(cut)
 
 
+def test_json_tree_unfolds_all_and_back():
+    tree = s3mod._JsonTree({"rows": [{"id": i, "tags": {"a": i}} for i in range(9)], "prompt": "x" * 500})
+    folded = {node.path for node in tree._nodes() if node.kind in ("object", "array") and not node.open}
+    assert tree.folded and "data['rows'][1]" in folded and "data['rows'][0]['tags']" not in folded
+    tree.unfold()
+    assert all(node.open for node in tree._nodes() if node.kind in ("object", "array"))
+    assert not tree.root.children[1].open  # a long string stays folded to its start
+    tree.unfold("start")
+    assert {node.path for node in tree._nodes() if node.kind in ("object", "array") and not node.open} == folded
+    assert not s3mod._JsonTree({"a": 1, "b": [1, 2]}).folded  # all of it shows: nothing to unfold
+
+
 def test_preview_shows_the_start_of_a_json_file_too_big_to_read(core, aws, capsys):
     uri = f"s3://{BUCKET}/big/annotations.json"
     doc = {"info": {"version": 1}, "images": [{"id": i, "file": f"img{i:05d}.jpg"} for i in range(30000)]}

@@ -908,6 +908,8 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 .s3x button.s3x-close{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:28px;
  min-width:28px;padding:0;border-color:transparent;font-size:0;opacity:.7}
 .s3x button.s3x-close:hover{opacity:1}
+.s3x button.s3x-expand{margin-left:auto}
+.s3x button.s3x-expand+button.s3x-close{margin-left:0}
 .s3x .s3x-pager{flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;padding:10px 0 4px;
  border-top:1px solid var(--s3x-line)}
 .s3x .s3x-pager>*{margin:0}
@@ -1037,6 +1039,8 @@ class S3Explorer:
         self._task: Any = None  # the last background report's asyncio task (tests wait for it)
         self._first_page = 1  # where "Read all" starts in a PDF; the pager under the report moves it
         self._page_counts: dict[tuple[str, str], int] = {}  # (uri, etag) -> a PDF's pages (0: couldn't count)
+        self._expand_all = False  # ▾ Expand all: JSON trees show every object and array (it stays on, like the sort)
+        self._reports: list[list[Any]] = []  # the reports on the right, to draw again when that changes
         try:
             self.s3 = _s3_module(core)
         except ImportError as exc:
@@ -1400,6 +1404,7 @@ class S3Explorer:
                                + '<div class="s3x-sk"></div>' * 4 + f"</div>{lines}</div>")
         self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(False)
+        self._draw_expand(False)
         self._renew("right")
 
     def _busy(self, text: str) -> None:
@@ -1414,6 +1419,9 @@ class S3Explorer:
         self._overview = None
         if keep:
             self.shown = [block for blocks in reports for block in blocks]
+            self._reports = reports
+            for tree in self._trees():
+                tree.unfold("all" if self._expand_all else "start")
         if self._widgets is None:
             for blocks in reports:
                 type(self._pane)._show(self._pane, blocks)
@@ -1421,6 +1429,7 @@ class S3Explorer:
         self._content.value = "".join(self.s3._render_html(blocks, self._pane.max_rows) for blocks in reports)
         self._settings.layout.display = self._picks_panel.layout.display = "none"
         self._draw_pager(keep)
+        self._draw_expand(keep)
         self._renew("right")
 
     # ------------------------------------------------------------------ navigation
@@ -1696,6 +1705,7 @@ class S3Explorer:
 
         self._actions = w.HBox(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._actions.add_class("s3x-actions")
+        self._expand_btn = button("▾ Expand all", "s3x-act s3x-expand", "", self._on_expand)
         self._progress = w.Output(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._content = w.HTML(layout=w.Layout(width="100%", flex="0 0 auto"))
         self._pager = w.HBox(layout=w.Layout(width="100%", flex="0 0 auto", display="none"))
@@ -2074,11 +2084,29 @@ class S3Explorer:
                     b.add_class(name)
             b.on_click(lambda _, action=action: self._guard(lambda: self._on_action(action)))
             self._act_buttons[action] = b
-        self._actions.children = tuple(self._act_buttons.values())
+        self._draw_expand(False)
         for widget in old:
-            widget.close()
+            if widget is not self._expand_btn:
+                widget.close()
         self._action = "preview" if self.selected else ""
         self._mark_actions()
+
+    def _draw_expand(self, show: bool = True) -> None:
+        """▾ Expand all, at the end of the buttons above the right pane (beside ✕), while the pane shows a JSON file
+        with something collapsed in it, or with every part expanded by it."""
+        acts = [b for action, b in self._act_buttons.items() if action != "close"]
+        close = [b for action, b in self._act_buttons.items() if action == "close"]
+        expand = show and any(tree.folded for tree in self._trees())
+        self._actions.children = tuple(acts + [self._expand_btn] * expand + close)
+        self._expand_btn._dom_classes = ("s3x-act", "s3x-expand") + (("s3x-on",) if self._expand_all else ())
+        self._expand_btn.tooltip = (
+            "Collapse the JSON back to its first levels, here and in the next files you open" if self._expand_all else
+            "Expand every object and array in this JSON, and in the next files you open, instead of clicking them "
+            "one by one (long strings stay collapsed: click one to read it)")
+
+    def _trees(self) -> list[Any]:
+        """The JSON trees in the report on the right (a .json file's preview)."""
+        return [block for block in self.shown if isinstance(block, self.s3._JsonTree)]
 
     def _mark_actions(self) -> None:
         for action, b in getattr(self, "_act_buttons", {}).items():
@@ -2466,6 +2494,15 @@ class S3Explorer:
         self._pager.layout.display = None
         for widget in old:
             widget.close()
+
+    def _on_expand(self) -> None:
+        """▾ Expand all: every object and array of the JSON on the right, and of the JSON files opened after it,
+        until it's clicked again. The report is drawn again in place, so the pane stays where it was scrolled to."""
+        self._expand_all = not self._expand_all
+        for tree in self._trees():
+            tree.unfold("all" if self._expand_all else "start")
+        self._content.value = "".join(self.s3._render_html(blocks, self._pane.max_rows) for blocks in self._reports)
+        self._draw_expand()
 
     def _on_filter(self) -> None:
         self._query = self._filter.value

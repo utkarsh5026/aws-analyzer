@@ -8283,6 +8283,8 @@ class _JsonTree:
         self.full = False  # the tree stopped at _JSON_ROWS lines
         self.root = self._node(value, "data", cut, 0)
         self._unfold()
+        # an object or array starts folded: unfold("all") would show more (the S3 explorer's "Expand all")
+        self.folded = any(not node.open for node in self._nodes() if node.kind in ("object", "array"))
 
     def _node(self, value: Any, path: str, cut: int, depth: int, key: str | None = None,
               index: int | None = None) -> _JNode:
@@ -8327,6 +8329,21 @@ class _JsonTree:
         node.kind, node.total, node.text = "string", len(value), value[:_JSON_FULL]
         node.tokens = [("js", json.dumps(value[:80].rstrip(), ensure_ascii=False)[:-1] + '…"')]  # its start
         return node
+
+    def _nodes(self) -> Iterator[_JNode]:
+        nodes = [self.root]
+        while nodes:
+            node = nodes.pop()
+            yield node
+            nodes += node.children
+
+    def unfold(self, how: str = "all") -> None:
+        """Unfold every object and array ('all'), or fold the tree back to how it starts ('start'). Long strings
+        stay folded to their start either way: a click shows one."""
+        for node in self._nodes():
+            node.open = how == "all" and node.kind in ("object", "array")
+        if how != "all":
+            self._unfold()
 
     def _unfold(self) -> None:
         """Unfolds the shallow levels first: each object or array whose lines still fit in _JSON_OPEN. In an array
