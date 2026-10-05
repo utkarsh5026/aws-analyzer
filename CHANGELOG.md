@@ -11,6 +11,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-05
+
+### Added
+
+- `S3Navigator.list_rest()` lists the rest of a folder from your own code, one request per 1,000 entries, up to
+  `list_limit` of them (10,000, set with `S3Navigator(list_limit=...)` or `x.nav.list_limit`); `more()` goes on from
+  there. ([#30](https://github.com/utkarsh5026/aws-analyzer/pull/30))
+
 ### Changed
 
 - `chat()` window: the Settings tab shows what's sent and little else. Each setting is one line: its name, its value
@@ -25,8 +33,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   the 2,500th file is found by typing part of its name, and **Size** sorts the whole folder. Past 10,000 entries,
   **Load more from S3** lists the next 10,000 (`x.nav.list_limit` changes how many), and **Look up** asks S3 for a
   name you type the start of; `x.filter("name")` from code does that by itself, and the text view says how to list
-  more. Opening a file by its path finds it however far down its folder it is. For your own code,
-  `S3Navigator.list_rest()` lists the rest of a folder. ([#30](https://github.com/utkarsh5026/aws-analyzer/pull/30))
+  more. Opening a file by its path finds it however far down its folder it is.
+  ([#30](https://github.com/utkarsh5026/aws-analyzer/pull/30))
 - `S3Explorer`'s list shows 100 rows a page with « ‹ › » under it, which say which rows these are
   (`2,401–2,500 of 3,000`), in place of **Show more**, which added 100 rows a click and slowed the list down. Typing
   in the search box is quicker in big folders too: the list is sorted once, and each key only filters it.
@@ -210,7 +218,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.1.0...v0.2.0
