@@ -8283,7 +8283,7 @@ class _JsonTree:
         self.full = False  # the tree stopped at _JSON_ROWS lines
         self.root = self._node(value, "data", cut, 0)
         self._unfold()
-        # an object or array starts folded: unfold("all") would show more (the S3 explorer's "Unfold all")
+        # an object or array starts folded: unfold("all") would show more (the S3 explorer's "Expand all")
         self.folded = any(not node.open for node in self._nodes() if node.kind in ("object", "array"))
 
     def _node(self, value: Any, path: str, cut: int, depth: int, key: str | None = None,

@@ -901,35 +901,35 @@ def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
     assert "pypdf couldn't read this PDF" in text(x)
 
 
-def test_explorer_unfolds_every_part_of_a_json_file(explorer, aws):
+def test_explorer_expands_every_part_of_a_json_file(explorer, aws):
     doc = {"info": {"version": 1}, "note": "x" * 200, "images": [{"id": i, "size": [i, 2 * i]} for i in range(10)]}
     aws.put_object(Bucket=LAKE, Key="curated/images.json", Body=json.dumps(doc).encode())
     aws.put_object(Bucket=LAKE, Key="curated/labels.json", Body=json.dumps({"labels": [{"id": i} for i in range(9)]}))
     x = explorer("s3://lake/curated/images.json")
     folded = x._content.value.count('<details class="jo">')  # the images after the first, and the long note
-    assert folded == 10 and x._unfold_btn not in x._act_buttons.values()
-    assert x._actions.children[-2:] == (x._unfold_btn, x._act_buttons["close"])  # beside ✕
-    assert x._unfold_btn._dom_classes == ("s3x-act", "s3x-unfold") and "one by one" in x._unfold_btn.tooltip
+    assert folded == 10 and x._expand_btn not in x._act_buttons.values()
+    assert x._actions.children[-2:] == (x._expand_btn, x._act_buttons["close"])  # beside ✕
+    assert x._expand_btn.description == "▾ Expand all" and "one by one" in x._expand_btn.tooltip
 
-    x._unfold_btn.click()
+    x._expand_btn.click()
     assert x._content.value.count('<details class="jo">') == 1  # only the long string stays folded
-    assert x._unfold_btn._dom_classes == ("s3x-act", "s3x-unfold", "s3x-on") and "Fold" in x._unfold_btn.tooltip
+    assert x._expand_btn._dom_classes == ("s3x-act", "s3x-expand", "s3x-on") and "Collapse" in x._expand_btn.tooltip
     assert all(tree.root.children[2].children[9].open for tree in x._trees())
     row(x, "labels.json").button.click()  # it stays on for the next file
-    assert x._unfold_btn in x._actions.children and '<details class="jo">' not in x._content.value
+    assert x._expand_btn in x._actions.children and '<details class="jo">' not in x._content.value
     x._act_buttons["head"].click()  # no tree, no button
-    assert x._unfold_btn not in x._actions.children
+    assert x._expand_btn not in x._actions.children
     x._act_buttons["preview"].click()
-    assert x._unfold_btn in x._actions.children and '<details class="jo">' not in x._content.value
+    assert x._expand_btn in x._actions.children and '<details class="jo">' not in x._content.value
 
-    x._unfold_btn.click()  # off: back to the first levels, here and in the next file
-    assert x._content.value.count('<details class="jo">') == 8 and "s3x-on" not in x._unfold_btn._dom_classes
+    x._expand_btn.click()  # off: back to the first levels, here and in the next file
+    assert x._content.value.count('<details class="jo">') == 8 and "s3x-on" not in x._expand_btn._dom_classes
     row(x, "images.json").button.click()
     assert x._content.value.count('<details class="jo">') == folded
-    row(x, "table.json").button.click()  # {"a": 1}: nothing to unfold
-    assert x._unfold_btn not in x._actions.children and x._actions.children[-1] is x._act_buttons["close"]
+    row(x, "table.json").button.click()  # {"a": 1}: nothing to expand
+    assert x._expand_btn not in x._actions.children and x._actions.children[-1] is x._act_buttons["close"]
     x._act_buttons["close"].click()
-    assert x._unfold_btn not in x._actions.children
+    assert x._expand_btn not in x._actions.children
 
 
 def test_explorer_loads_previews_in_the_background(explorer, core, monkeypatch):

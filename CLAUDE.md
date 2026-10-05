@@ -298,9 +298,9 @@ does both, a page at a time). How the UI works:
   either way, and a job already out of date when a worker picks it up is skipped. A worker uses its own
   `S3View(progress="off")` and touches no widgets. Without a running loop (scripts, the tests) reports load inline;
   tests drive the background path inside `asyncio.run`.
-- "▾ Unfold all" (`_draw_unfold`, beside ✕ while the report has a `_JsonTree` with something folded) opens every
+- "▾ Expand all" (`_draw_expand`, beside ✕ while the report has a `_JsonTree` with something folded) opens every
   object and array with `_JsonTree.unfold("all")` and draws the report again in place; it stays on for the next JSON
-  files (`_unfold_all`, applied in `_set_pane`) until it's clicked again (`unfold("start")`).
+  files (`_expand_all`, applied in `_set_pane`) until it's clicked again (`unfold("start")`).
 - "Read all" on a PDF (`_read_pdf`) draws `_MAX_PICTURES` pages from `_first_page`, after counting the pages once per
   file version (`_page_count`); `_draw_pager` puts the buttons for the pages before and after under the report.
 - "⬇ Download .zip" on a folder runs `download_zip` with `zip_max_size` / `zip_max_files` / `zip_folder`, which the
