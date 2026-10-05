@@ -40,6 +40,14 @@ Demo data (moto, us-east-1, everything synthetic):
             auto-stop) and team-reporting (auto-stop), stopped archive-2024 and sandbox, a Code Editor app in
             space forecasting, endpoints churn-v1 (no traffic), churn-v2 (busy) and a serverless one, and a spot
             training job.
+  opensearch  moto domains: vectors-prod (3 x r6g.large + masters, gp3, fine-grained access control), search-legacy
+            (Elasticsearch 7.10, open to the internet, gp2) and rag-dev (one t3.medium). Fake clusters behind them
+            (tests/fake_opensearch.py): vectors-prod holds support-docs (faiss, cosine, 1,024 dims, 1.8M documents
+            reported, 1.5% without a vector, a few repeats, graphs bigger than the nodes' k-NN memory),
+            product-search (lucene, 384 dims), legacy-faq (nmslib, inner product, unnormalized vectors) and
+            app-logs-2026.10 (no vectors). A fake Serverless with kb-support (a Bedrock knowledge base's index),
+            kb-sandbox (no standby replicas) and app-logs (VPC only), CloudWatch OCU use, and a fake Bedrock whose
+            embedding model knows four topics (refunds, shipping, accounts, billing).
 """
 
 from __future__ import annotations
@@ -961,8 +969,210 @@ def seed_sagemaker_env() -> dict:
     return {"client": sagemaker, "clients": {"sts": sts, "cloudwatch": cloudwatch}, "root": str(root)}
 
 
+# ----------------------------------------------------------------------------- OpenSearch
+
+OS_TOPICS = {  # topic -> words a question about it uses, and the passages indexed about it
+    0: (("refund", "refunds", "money back", "return"), [
+        "Refunds go back to the original payment method within 5 to 10 business days.",
+        "To request a refund, open the order and choose Return or refund within 30 days of delivery.",
+        "Digital goods can be refunded within 14 days if they haven't been downloaded.",
+        "Refunds for orders paid with a gift card are returned as store credit.",
+    ]),
+    1: (("ship", "shipping", "delivery", "deliver", "track"), [
+        "Standard shipping takes 3 to 5 business days; express arrives the next business day.",
+        "Track a parcel from Orders, Track package, with the tracking number in the confirmation email.",
+        "Orders over $50 ship free within the continental US.",
+        "Holiday orders placed after December 18 may arrive after Christmas.",
+    ]),
+    2: (("account", "password", "login", "sign in", "email"), [
+        "Reset a forgotten password from the sign-in page with Forgot password.",
+        "Two-step verification can be turned on under Account, Security.",
+        "An account locked after five failed sign-ins unlocks itself after 30 minutes.",
+        "Change the email on an account under Account, Profile; we send a link to confirm it.",
+    ]),
+    3: (("bill", "billing", "invoice", "charge", "payment"), [
+        "Invoices are emailed on the first business day of each month.",
+        "A pending charge disappears within 3 days if the order is cancelled.",
+        "Error E1234 means the card issuer declined the payment: try another card.",
+        "Download past invoices as PDF from Billing, Invoices.",
+    ]),
+}
+
+
+def _os_topic(text: str) -> int | None:
+    lowered = text.lower()
+    for topic, (words, _) in OS_TOPICS.items():
+        if any(word in lowered for word in words):
+            return topic
+    return None
+
+
+def seed_opensearch() -> dict:
+    """moto for the domains; a fake opensearchserverless, CloudWatch, STS and Bedrock (a toy embedding model that
+    knows four topics), and fake OpenSearch clusters behind each endpoint (tests/fake_opensearch.py)."""
+    import boto3
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    from fake_opensearch import FakeCluster, FakeIndex, topic_vector, unit
+
+    es = boto3.client("opensearch", region_name=REGION)
+    secure = {"EncryptionAtRestOptions": {"Enabled": True}, "NodeToNodeEncryptionOptions": {"Enabled": True},
+              "DomainEndpointOptions": {"EnforceHTTPS": True}}
+    es.create_domain(
+        DomainName="vectors-prod", EngineVersion="OpenSearch_2.17",
+        ClusterConfig={"InstanceType": "r6g.large.search", "InstanceCount": 3, "DedicatedMasterEnabled": True,
+                       "DedicatedMasterType": "m6g.large.search", "DedicatedMasterCount": 3,
+                       "ZoneAwarenessEnabled": True, "ZoneAwarenessConfig": {"AvailabilityZoneCount": 3}},
+        EBSOptions={"EBSEnabled": True, "VolumeType": "gp3", "VolumeSize": 200},
+        AdvancedSecurityOptions={"Enabled": True, "InternalUserDatabaseEnabled": False}, **secure)
+    es.create_domain(
+        DomainName="search-legacy", EngineVersion="Elasticsearch_7.10",
+        ClusterConfig={"InstanceType": "m5.large.search", "InstanceCount": 2},
+        EBSOptions={"EBSEnabled": True, "VolumeType": "gp2", "VolumeSize": 100},
+        AccessPolicies=json.dumps({"Version": "2012-10-17", "Statement": [
+            {"Effect": "Allow", "Principal": {"AWS": "*"}, "Action": "es:*", "Resource": "*"}]}))
+    es.create_domain(
+        DomainName="rag-dev", EngineVersion="OpenSearch_2.11",
+        ClusterConfig={"InstanceType": "t3.medium.search", "InstanceCount": 1},
+        EBSOptions={"EBSEnabled": True, "VolumeType": "gp2", "VolumeSize": 20}, **secure)
+
+    rng = random.Random(42)
+
+    def passages(n: int, dims: int, *, missing: float = 0.0, repeats: int = 0, lengths: bool = False) -> list:
+        docs = []
+        for i in range(n):
+            topic = i % 4
+            products = ("the store", "the mobile app", "the marketplace")
+            text = f"{OS_TOPICS[topic][1][(i // 4) % 4]} This applies to {products[i % 3]} (article {i // 4 + 1})."
+            vector = topic_vector(topic, dims, rng)
+            if lengths:  # unnormalized vectors whose length grows with the text, as some models return
+                vector = [x * rng.uniform(0.4, 2.4) for x in vector]
+            source = {"text": text, "embedding": vector, "lang": "en" if i % 5 else "de",
+                      "product": ["store", "app", "marketplace"][i % 3], "updated": f"2026-0{1 + i % 9}-15",
+                      "metadata": {"source": f"s3://acme-support/articles/{['refunds', 'shipping', 'account', 'billing'][topic]}-{i // 4:03d}.md",
+                                   "page": 1 + i % 3}}
+            if missing and rng.random() < missing:
+                source.pop("embedding")
+            docs.append((f"art-{i:05d}", source))
+        for j in range(repeats):  # the same passages indexed twice by an overlapping load
+            doc_id, source = docs[j * 7]
+            docs.append((f"{doc_id}-dup", json.loads(json.dumps(source))))
+        return docs
+
+    def vector_mapping(dims: int, engine: str, space: str, **extra) -> dict:
+        return {"properties": {
+            "text": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 256}}},
+            "embedding": {"type": "knn_vector", "dimension": dims, "method": {
+                "name": "hnsw", "engine": engine, "space_type": space,
+                "parameters": {"m": 16, "ef_construction": 512}}},
+            "lang": {"type": "keyword"}, "product": {"type": "keyword"}, "updated": {"type": "date"},
+            "metadata": {"properties": {"source": {"type": "keyword"}, "page": {"type": "integer"}}},
+            **extra}}
+
+    prod = FakeCluster([
+        FakeIndex("support-docs", vector_mapping(1024, "faiss", "cosinesimil"),
+                  passages(400, 1024, missing=0.015, repeats=9), settings={"knn": True}, shards=2, replicas=1,
+                  segments=34, size_bytes=29 * 1024**3, scale=4500),
+        FakeIndex("product-search", vector_mapping(384, "lucene", "cosinesimil"), passages(120, 384),
+                  settings={"knn": True}, shards=1, replicas=1, size_bytes=740 * 1024**2, scale=650),
+        FakeIndex("legacy-faq", vector_mapping(768, "nmslib", "innerproduct"), passages(80, 768, lengths=True),
+                  settings={"knn": True}, shards=5, replicas=1, size_bytes=96 * 1024**2, scale=20),
+        FakeIndex("app-logs-2026.10", {"properties": {"message": {"type": "text"}, "level": {"type": "keyword"}}},
+                  [(str(i), {"message": "GET /health 200", "level": "info"}) for i in range(50)],
+                  shards=1, replicas=1, size_bytes=2 * 1024**3, scale=200_000),
+        FakeIndex(".kibana_1", {"properties": {"type": {"type": "keyword"}}}, []),
+    ], nodes=3, knn_memory_kb=11_200_000, evictions=36)
+    kb_docs = []
+    for doc_id, source in passages(240, 1024, repeats=4):
+        kb_docs.append((doc_id, {
+            "bedrock-knowledge-base-default-vector": source["embedding"],
+            "AMAZON_BEDROCK_TEXT_CHUNK": source["text"],
+            "AMAZON_BEDROCK_METADATA": json.dumps({"source": source["metadata"]["source"]}),
+            "x-amz-bedrock-kb-source-uri": source["metadata"]["source"],
+            "x-amz-bedrock-kb-data-source-id": "DS0SUPPORT",
+        }))
+    kb = FakeCluster([FakeIndex("bedrock-knowledge-base-default-index", {"properties": {
+        "bedrock-knowledge-base-default-vector": {"type": "knn_vector", "dimension": 1024, "method": {
+            "name": "hnsw", "engine": "faiss", "space_type": "l2", "parameters": {"m": 16, "ef_construction": 512}}},
+        "AMAZON_BEDROCK_TEXT_CHUNK": {"type": "text"},
+        "AMAZON_BEDROCK_METADATA": {"type": "text", "index": False},
+        "x-amz-bedrock-kb-source-uri": {"type": "keyword"},
+        "x-amz-bedrock-kb-data-source-id": {"type": "keyword"},
+    }}, kb_docs, settings={"knn": True, "knn.algo_param.ef_search": 512}, scale=55)], serverless=True)
+    dev = FakeCluster([FakeIndex("notes", vector_mapping(1024, "faiss", "l2"), passages(40, 1024))], nodes=1)
+
+    domains = {"vectors-prod": prod, "search-legacy": FakeCluster([]), "rag-dev": dev}
+    collections = {"kb-support": ("8k2mq7cxlz0r4ef9wtya", kb), "kb-sandbox": ("p1vn4s8hjw2d6ugq0ezc", FakeCluster(
+        [], serverless=True)), "app-logs": ("c9xr2k5mtf3e7yzn1bqw", FakeCluster([], serverless=True))}
+    clusters = {f"{name}.{REGION}.es.amazonaws.com": fake for name, fake in domains.items()}
+    clusters.update({f"{cid}.{REGION}.aoss.amazonaws.com": fake for cid, fake in collections.values()})
+
+    def http(method: str, url: str, body, headers):
+        from urllib.parse import urlsplit
+
+        return clusters[urlsplit(url).hostname](method, url, body, headers)
+
+    created = int((NOW.replace(tzinfo=timezone.utc) - timedelta(days=120)).timestamp() * 1000)
+    details = [
+        {"id": cid, "name": name, "arn": f"arn:aws:aoss:{REGION}:{ACCOUNT}:collection/{cid}", "status": "ACTIVE",
+         "type": {"kb-support": "VECTORSEARCH", "kb-sandbox": "VECTORSEARCH", "app-logs": "TIMESERIES"}[name],
+         "standbyReplicas": "DISABLED" if name == "kb-sandbox" else "ENABLED", "kmsKeyArn": "auto",
+         "createdDate": created + i * 86_400_000 * 20, "lastModifiedDate": created,
+         "collectionEndpoint": f"https://{cid}.{REGION}.aoss.amazonaws.com",
+         "dashboardEndpoint": f"https://{cid}.{REGION}.aoss.amazonaws.com/_dashboards",
+         "description": {"kb-support": "Vector store of the support-docs knowledge base"}.get(name, "")}
+        for i, (name, (cid, _)) in enumerate(collections.items())
+    ]
+    policies = {
+        "kb-public": [{"Rules": [{"ResourceType": "collection", "Resource": ["collection/kb-*"]}],
+                       "AllowFromPublic": True}],
+        "logs-vpc": [{"Rules": [{"ResourceType": "collection", "Resource": ["collection/app-logs"]}],
+                      "SourceVPCEs": ["vpce-0a1b2c3d4e5f6a7b8"]}],
+    }
+
+    def batch_get(ids=None, names=None):
+        found = [d for d in details if (ids and d["id"] in ids) or (names and d["name"] in names)]
+        return {"collectionDetails": found, "collectionErrorDetails": []}
+
+    aoss = _FakeAWS("opensearchserverless", {
+        "list_collections": lambda **_: {"collectionSummaries": [
+            {k: d[k] for k in ("id", "name", "status", "arn")} for d in details]},
+        "batch_get_collection": batch_get,
+        "list_security_policies": lambda type, **_: {"securityPolicySummaries": [
+            {"name": n, "type": type} for n in policies]},
+        "get_security_policy": lambda name, type: {"securityPolicyDetail": {
+            "name": name, "type": type, "policy": policies[name]}},
+        "get_account_settings": lambda: {"accountSettingsDetail": {"capacityLimits": {
+            "maxIndexingCapacityInOCU": 10, "maxSearchCapacityInOCU": 10}}},
+    })
+
+    def metric_data(MetricDataQueries, **_):
+        level = {"IndexingOCU": 2.5, "SearchOCU": 3.4}
+        return {"MetricDataResults": [
+            {"Id": q["Id"], "Label": q["MetricStat"]["Metric"]["MetricName"], "StatusCode": "Complete",
+             "Values": [level[q["MetricStat"]["Metric"]["MetricName"]] + 0.1 * (h % 3) for h in range(24)]}
+            for q in MetricDataQueries]}
+
+    def invoke(modelId, body, contentType=None, accept=None):
+        request = json.loads(body)
+        text = request.get("inputText") or request["texts"][0]
+        size = request.get("dimensions") or 1024
+        topic = _os_topic(text)
+        vector = topic_vector(topic, size, random.Random(len(text))) if topic is not None else unit(
+            [random.Random(text).gauss(0, 1) for _ in range(size)])
+        payload = {"embedding": vector, "inputTextTokenCount": len(text.split()) + 2}
+        return {"body": io.BytesIO(json.dumps(payload).encode()), "contentType": "application/json"}
+
+    sts = _FakeAWS("sts", {"get_caller_identity": lambda: {
+        "UserId": "AROAEXAMPLE:SageMaker", "Account": ACCOUNT,
+        "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/AmazonSageMaker-ExecutionRole/SageMaker"}})
+    return {"http": http, "clients": {
+        "opensearchserverless": aoss, "cloudwatch": _FakeAWS("cloudwatch", {"get_metric_data": metric_data}),
+        "sts": sts, "bedrock-runtime": _FakeAWS("bedrock-runtime", {"invoke_model": invoke})}}
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
-           "sagemaker_env": seed_sagemaker_env}
+           "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch}
 
 
 # ----------------------------------------------------------------------------- run

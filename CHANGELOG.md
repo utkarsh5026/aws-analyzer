@@ -11,6 +11,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `opensearch.py` (`OpenSearchView`): OpenSearch vector (k-NN) indexes, in OpenSearch Service domains, Serverless
+  collections, or any OpenSearch by URL. `overview()` lists every domain and collection with what it runs on, the
+  memory its nodes have for vector graphs, its estimated monthly cost and what Serverless bills even when idle.
+  `indexes("vectors-prod")` shows each index's vector fields (dimensions, engine, similarity), how many documents have
+  a vector, and whether the graphs fit in the memory the nodes have. `index_info("vectors-prod/docs")` explains one
+  index in plain English, with what a score means, what on-disk mode or fp16 would save, the fields you can filter on
+  and the k-NN query to copy. `sample()` checks the vectors for zeros, repeats and odd lengths, and `search()` finds
+  the documents nearest a question (embedded with a Bedrock model, or your own function), a vector, or an existing
+  document (`like="doc-id"`), with `where=` filters. No OpenSearch client library is needed: requests are signed with
+  your AWS credentials, and only reads and searches are sent. Also `pip install aws-analyzer`:
+  `from aws_analyzer import OpenSearchView`.
+
 ## [0.5.0] - 2026-10-05
 
 ### Added

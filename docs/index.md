@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker notebooks from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks and OpenSearch vector indexes from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
 hide:
   - toc
 ---
@@ -106,6 +106,20 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the SageMaker guide →](sagemaker_env.md)
 
+-   `opensearch.py`
+
+    **Amazon OpenSearch**
+
+    Vector indexes in OpenSearch Service domains and Serverless collections.
+    { .what }
+
+    - Every vector field in plain English: size, engine, similarity
+    - Whether the graphs fit in the memory the nodes have
+    - Documents without a vector; zero or repeated vectors
+    - The nearest neighbours of a question, a vector or a document
+
+    [Open the OpenSearch guide →](opensearch.md)
+
 </div>
 
 ## Every service works the same way { #pattern }
@@ -113,7 +127,8 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 The files don't depend on each other, so copy only the ones you need. Each guide shows how to get the file into SageMaker: upload it, fetch it from a cell, or copy it from S3 when the notebook has no internet access.
 
 ```python
-from s3 import S3View      # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env
+from s3 import S3View      # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
+                           # OpenSearchView from opensearch
 
 ui = S3View()              # uses the notebook's IAM role; nothing to configure
 ui.help()                  # every command, grouped by task; ui.help("name") shows one in full

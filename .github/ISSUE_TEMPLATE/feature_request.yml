@@ -18,6 +18,7 @@ body:
         - Bedrock Knowledge Bases (bedrock_kb.py, BedrockKBView)
         - Bedrock chat (bedrock_chat.py, chat())
         - SageMaker (sagemaker_env.py, SageMakerView)
+        - OpenSearch (opensearch.py, OpenSearchView)
         - A new AWS service
         - Something else
     validations:

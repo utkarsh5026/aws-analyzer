@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
 in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `bedrock_chat.py` for a chat
-window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running) that a user pastes
+window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
+OpenSearch vector indexes in Service domains and Serverless collections) that a user pastes
 into a notebook cell or uploads next to a notebook and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that would hide the SageMaker Python SDK. The same
 files are also on PyPI as `aws-analyzer` (`from aws_analyzer import S3View`; see "The PyPI package" below), but the
 build only copies them into the wheel unchanged, so they stay standalone and nothing in them depends on it.
@@ -73,7 +74,7 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, `_prose`, `_call`,
   `_signature`, the render blocks and `_render_html` / `_render_text` with their small helpers, `_friendly_errors`,
   `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
-  deliberately duplicated in all five analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
+  deliberately duplicated in all six analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
   `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
   and findings are laid out as described under "How the View layer works" (asked for S3 first). Until that's
@@ -94,7 +95,12 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
-  the `bedrock:RetrieveAndGenerate` permission). Keep it that way; README lists the read-only IAM permissions per service, so update that list
+  the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
+  question. `opensearch.py` also talks to each domain's or collection's own REST API, signing requests with botocore's
+  `SigV4Auth` (service `es` or `aoss`) and sending them with botocore's `URLLib3Session`, so no OpenSearch client
+  library is needed. `rules.py` can't see those calls: `OpenSearchAnalyzer.request()` sends GET, and POSTs only to
+  `_search` / `_count` (`_READ_POSTS`), refusing anything else before it's sent, and `tests/fake_opensearch.py` fails a
+  test on any other request. Index fixes (replicas, force merge) are shown as opensearch-py calls, never run. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
   operations go unchecked.
@@ -177,7 +183,10 @@ How the View layer works:
   only (S3's `_run_in_threads`), never from a worker, so notebook widgets aren't touched from other threads.
 - `DynamoDBView` keeps `self._pager` so `more()` continues the last `scan` / `query` / `sql`. `BedrockKBView` keeps
   `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`), and
-  `self.kb`, the default knowledge base that `use()` sets.
+  `self.kb`, the default knowledge base that `use()` sets. `OpenSearchView` keeps `self.target` and `self.index`
+  (what `use()` sets): commands name an index like a path, `"domain/index"` or `"collection/index"`
+  (`parse_location`, which also takes collection IDs, ARNs and endpoint URLs), and `_index_ref` falls back to `use()`'s,
+  then to the only domain or collection in the region and its only vector index, or raises `_Hint` to ask.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
   markdown: `_Markdown` (stdlib only, the same in `bedrock_kb` and `bedrock_chat`) parses blocks and inline markup
@@ -218,7 +227,10 @@ How the View layer works:
 Cost estimates come from module-level price tables (`S3_PRICES`, `DYNAMODB_PRICES`, `BEDROCK_PRICES`, and
 `MODEL_PRICES` for $ per 1M tokens by model family, with `GLOBAL_MODEL_PRICES` for the cheaper `global.` inference
 profiles, and `SAGEMAKER_PRICES`, storage plus the hourly price of each type in `INSTANCE_TYPES`, which also holds
-its vCPUs, memory and GPUs; us-east-1 list prices with the date they were read) that callers override with `prices={...}` (and
+its vCPUs, memory and GPUs, and `OPENSEARCH_PRICES`, EBS storage and Serverless OCUs plus the hourly price of each
+OpenSearch instance type in that file's own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
+with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call; us-east-1 list prices with the date they
+were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
 AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker>/current/us-east-1/index.json`; `index.csv` is easier to
@@ -337,6 +349,15 @@ does both, a page at a time). How the UI works:
   (`SageMakerAnalyzer(clients={"sagemaker": ..., "sts": ..., "cloudwatch": ...})`, `max_workers = 1`), and
   `write_root()` / `fake_machine()` build the fake machine. demo.py's `seed_sagemaker_env()` returns fake clients
   and a fake root with sparse files, so the disk shows gigabytes without writing them.
+- OpenSearch: moto covers domains (`create_domain`, `describe_domains`), so `tests/test_opensearch.py` uses it for
+  them, but not `DescribeDomainHealth`, Serverless without a KMS key, `GetAccountSettings` or access policies, so
+  Serverless, CloudWatch, STS and Bedrock come from a `Fake` client (like `test_bedrock_chat.py`'s) passed in
+  `clients=`. The REST side is `tests/fake_opensearch.py`'s `FakeCluster`, passed as `OpenSearchAnalyzer(http=...)`:
+  an in-memory OpenSearch that answers `_cat/indices`, mappings, settings, `_count`, k-NN `_search` with
+  OpenSearch's score formulas, `_stats`, `_cluster/health` and `_plugins/_knn/stats` (`serverless=True` refuses the
+  cluster-level ones, like Serverless; `scale=` makes counts report millions of documents for the demo).
+  demo.py's `seed_opensearch()` imports it from `tests/` and returns an `http` router over a cluster per endpoint,
+  with fake Serverless, CloudWatch, STS and Bedrock clients (a toy embedding model that knows four topics).
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -363,7 +384,7 @@ does both, a page at a time). How the UI works:
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
   README links and old links still work. `index.md` is the home page with one card per service (Material grid
   cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`), and so does the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to). A new
+  `sagemaker_env.md`, `opensearch.md`), and so does the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to). A new
   analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
   README. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
   `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
@@ -376,15 +397,15 @@ does both, a page at a time). How the UI works:
   `-dark` / `#only-dark` (Material shows the one for the reader's theme), then `/// caption` ... `///`.
   The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
-  fake Bedrock and SageMaker: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
+  fake Bedrock, SageMaker and OpenSearch: `shots.py <name>` remakes one figure and sets the `height=` of both its images.
   The explorer is a live widget, so its figures (`explorer`, `explorer-docx`, `explorer-buckets`, and `explorer-tour`,
   an animated WebP of a pointer clicking through it, all in `s3_explorer.md`) come from `explorer_shots.py`, which
   runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows eight of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
-  `bedrock-ask`, `chat-window`, `sagemaker-instance`) as `<picture>`s that switch to the `-dark` file in dark mode.
+  shows nine of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
+  `bedrock-ask`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`) as `<picture>`s that switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
   `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and

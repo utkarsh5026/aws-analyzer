@@ -1,6 +1,6 @@
 """
-aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases and SageMaker
-notebooks, from a SageMaker / Jupyter notebook.
+aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks
+and OpenSearch vector indexes, from a SageMaker / Jupyter notebook.
 
 This is the pip-installed form of the files in the repository's analyzers/ folder: each module here is one of
 those files, unchanged, so it works the same as a copy next to your notebook. Only the import line differs.
@@ -9,7 +9,7 @@ Quick start
 -----------
     %pip install aws-analyzer               # only boto3 is required; aws-analyzer[all] adds every optional package
 
-    from aws_analyzer import S3View          # or DynamoDBView, BedrockKBView, SageMakerView, S3Explorer
+    from aws_analyzer import S3View          # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, S3Explorer
     ui = S3View()
     ui.help()                                # every command, grouped by task
 
@@ -18,8 +18,8 @@ Quick start
 
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
-Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env. Importing this package loads none of them; each
-loads the first time one of its names is used.
+Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch. Importing this package loads none
+of them; each loads the first time one of its names is used.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
+    from .opensearch import OpenSearchAnalyzer, OpenSearchView
     from .s3 import S3Analyzer, S3View
     from .s3_explorer import S3Explorer, S3Navigator
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
@@ -55,6 +56,8 @@ __all__ = [
     "chat",
     "SageMakerAnalyzer",
     "SageMakerView",
+    "OpenSearchAnalyzer",
+    "OpenSearchView",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -70,8 +73,10 @@ _EXPORTS = {  # name -> the module it comes from
     "chat": "bedrock_chat",
     "SageMakerAnalyzer": "sagemaker_env",
     "SageMakerView": "sagemaker_env",
+    "OpenSearchAnalyzer": "opensearch",
+    "OpenSearchView": "opensearch",
 }
-_MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env")
+_MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch")
 
 
 def __getattr__(name: str) -> Any:
