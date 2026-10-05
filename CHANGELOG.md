@@ -11,6 +11,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-05
+
 ### Added
 
 - `opensearch.py` (`OpenSearchView`): OpenSearch vector (k-NN) indexes, in OpenSearch Service domains, Serverless
@@ -21,9 +23,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   index in plain English, with what a score means, what on-disk mode or fp16 would save, the fields you can filter on
   and the k-NN query to copy. `sample()` checks the vectors for zeros, repeats and odd lengths, and `search()` finds
   the documents nearest a question (embedded with a Bedrock model, or your own function), a vector, or an existing
-  document (`like="doc-id"`), with `where=` filters. No OpenSearch client library is needed: requests are signed with
-  your AWS credentials, and only reads and searches are sent. Also `pip install aws-analyzer`:
-  `from aws_analyzer import OpenSearchView`.
+  document (`like="doc-id"`), with `where=` filters. `use("vectors-prod/docs")` sets the index later commands use.
+  No OpenSearch client library is needed: requests are signed with your AWS credentials, and only reads and searches
+  are sent. With the package: `from aws_analyzer import OpenSearchView`. Guide:
+  [OpenSearch vector indexes](https://utkarsh5026.github.io/aws-analyzer/opensearch.html).
+  ([#32](https://github.com/utkarsh5026/aws-analyzer/pull/32))
 
 ## [0.5.0] - 2026-10-05
 
@@ -232,7 +236,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.2.0...v0.3.0
