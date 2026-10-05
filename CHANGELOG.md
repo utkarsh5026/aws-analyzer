@@ -15,7 +15,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - S3 explorer: **▾ Expand all**, above a JSON file's preview (beside **✕**), opens every object and array in the tree
   at once, so you no longer click each one open. It stays on for the next JSON files you open; click it again to
-  collapse them back to the first levels.
+  collapse them back to the first levels. ([#34](https://github.com/utkarsh5026/aws-analyzer/pull/34))
 
 ## [0.6.0] - 2026-10-05
 
