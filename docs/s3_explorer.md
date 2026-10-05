@@ -138,6 +138,7 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
 | **⬇ Download** | Saves a copy in the notebook's folder (the [`download`](s3.md#download) report) |
 | **🔗 Link** | A download link that works for an hour, for someone without AWS access (the `link` report) |
+| **▾ Unfold all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay folded to their start; click one to read it |
 | **✕** | Closes the file and shows the folder again |
 
 Clicking through files doesn't wait. In a notebook, previews and details load in the background: each click shows its file as soon as it's read, and files you clicked past are skipped instead of holding you up. Reports you've opened are kept, so going back to a file shows it at once; **↻** reads the folder and its files again.
