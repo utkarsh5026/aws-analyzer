@@ -41,8 +41,8 @@ def test_package_exports_each_analyzer_and_view(package):
         assert value.__name__ == name
         assert value.__module__ == f"aws_analyzer.{package._EXPORTS[name]}"
     assert set(package.__all__) <= set(dir(package))
-    assert {"s3", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch", "s3_explorer"} <= set(
-        dir(package))
+    assert {"s3", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch", "lambda_functions",
+            "s3_explorer"} <= set(dir(package))
     assert package.s3.parse_size("10MB") == 10 * 1024**2
     with pytest.raises(AttributeError, match="no attribute 'nope'"):
         package.nope

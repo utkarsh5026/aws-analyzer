@@ -45,8 +45,8 @@ just as well for people. The rules that matter most:
 
 1. Branch from `main`.
 2. Add or update tests in [`tests/`](tests/): pure functions directly, AWS calls with moto (or botocore's
-   `Stubber` or a fake client for Bedrock, SageMaker Studio and OpenSearch Serverless, which moto doesn't cover;
-   [`tests/fake_opensearch.py`](tests/fake_opensearch.py) stands in for OpenSearch's REST API).
+   `Stubber` or a fake client for Bedrock, SageMaker Studio, OpenSearch Serverless and the few Lambda reads moto
+   doesn't cover; [`tests/fake_opensearch.py`](tests/fake_opensearch.py) stands in for OpenSearch's REST API).
 3. Update the docs for anything a user would notice: the service's section in [README.md](README.md) and its guide
    in [`docs/`](docs/).
 4. Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md), in the group it belongs to (Added, Changed,

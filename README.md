@@ -7,8 +7,9 @@
 **Understand your AWS data from a SageMaker notebook.**
 
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
-DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes and the SageMaker notebook itself: what's there,
-what it costs, and what to do next. And a chat window for asking a knowledge base, with every setting in reach.
+DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes, Lambda functions and the SageMaker notebook
+itself: what's there, what it costs, and what to do next. And a chat window for asking a knowledge base, with every
+setting in reach.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -20,7 +21,7 @@ what it costs, and what to do next. And a chat window for asking a knowledge bas
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Development](#development) · [Changelog](CHANGELOG.md)
+[Lambda](#aws-lambda) · [Development](#development) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -83,6 +84,7 @@ report still renders.
 | **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
+| **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -108,9 +110,9 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 
 ```python
 from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
-                       # OpenSearchView from opensearch
+                       # OpenSearchView from opensearch, LambdaView from lambda_functions
 # installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView,
-# S3Explorer, chat)
+# LambdaView, S3Explorer, chat)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -124,7 +126,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 >
 > Installed with pip, every `from s3 import ...` in this README and the guides becomes
 > `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env`,
-> `opensearch` and `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight from `aws_analyzer`.
+> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight
+> from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -151,8 +154,8 @@ Every file has the same two layers:
 
 | Layer     | Class                                                                                             | What it does                                                                                                                  |
 | :-------- | :------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------- |
-| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer`, `OpenSearchAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
-| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView`, `OpenSearchView`                         | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
+| **Logic** | `S3Analyzer`, `DynamoDBAnalyzer`, `BedrockKBAnalyzer`, `BedrockChatAnalyzer`, `SageMakerAnalyzer`, `OpenSearchAnalyzer`, `LambdaAnalyzer` | Calls AWS, returns plain Python data (dataclasses, dicts, lists, DataFrames). Never prints.                                   |
+| **UI**    | `S3View`, `DynamoDBView`, `BedrockKBView`, `BedrockChatView`, `SageMakerView`, `OpenSearchView`, `LambdaView`                             | Wraps the analyzer and renders readable cards, bar tables and previews in the notebook (HTML in Jupyter, text in a terminal). |
 
 ### Reading a report
 
@@ -1401,6 +1404,138 @@ and data access policy.
 
 </details>
 
+## AWS Lambda
+
+**Lambda functions, in one region or all of them.** What each function runs and when its runtime loses support,
+what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it
+fails, read from its own logs, with its memory, cold starts and code.
+
+📄 [`analyzers/lambda_functions.py`](analyzers/lambda_functions.py) · 📖 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-functions-dark.webp">
+  <img src="docs/images/lambda-functions-light.webp" alt="functions(regions=&quot;all&quot;): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL">
+</picture>
+
+<p align="center"><sub><code>ui.functions(regions="all")</code>: two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month.</sub></p>
+
+### Quick start
+
+Every command works with boto3 alone, so on SageMaker there's nothing to install. The file isn't called `lambda.py`
+because `lambda` is a Python keyword.
+
+```python
+from lambda_functions import LambdaView
+
+ui = LambdaView()                            # uses the notebook's execution role and region
+ui.help()                                    # every command, grouped by task
+
+ui.functions()                               # every function: runtime, triggers, calls, errors, cost, warnings
+ui.functions(regions="all")                  # ...in every region your account has turned on
+ui.function_info("orders-etl")               # one function in plain English, and its last 30 days
+ui.errors("orders-etl")                      # its errors in the last 24 hours, grouped by cause
+ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
+ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
+ui.code("orders-etl")                        # the files in its package, and the handler's source
+```
+
+> [!NOTE]
+> A function is named by its name, `"name:alias"`, its ARN or a link to it in the Lambda console; pass
+> `region="eu-west-1"` for one in another region. Nothing in the file invokes, changes or deletes a function: where a
+> change would help, the report shows the AWS CLI command to run. Environment variable values never appear in a
+> report, only their names.
+
+### Commands (`LambdaView`)
+
+Grouped the way `ui.help()` lists them.
+
+#### Functions
+
+| Command                                                                  | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region, or in several (`regions="all"` for every region your account has turned on): its runtime and **when that loses support**, memory, timeout, **what triggers it** (queues and streams, services and accounts its resource policy allows, its function URL), calls, error rate, average run time and when it was last called (CloudWatch, 30 days), and the **estimated monthly cost**. Warnings: runtimes past or near end of support, functions anyone can call, idle provisioned concurrency, frequent or rising errors, throttles, runs close to the timeout |
+| `function_info(name, region=None, days=30)`                              | One function in plain English: what it runs (handler, memory and the CPU it buys, timeout, layers), what triggers it and who may call it, **what happens to failed asynchronous events**, what it can reach (role, network, environment variable names), versions, aliases and provisioned concurrency, its last 30 days day by day, and the cost by part. Findings end in the command to fix each: the runtime to move to, the timeout to set, the log retention to add |
+
+#### When something goes wrong
+
+| Command                                                                  | Shows                                                                                                                                                                                                                                                                                                     |
+| :----------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `errors(name, since="24h", region=None, limit=10000)`                    | The errors in its logs **grouped by cause**: timeouts, running out of memory, code that can't load, permissions its role lacks (with the action and resource), throttled or unreachable services, exceptions; how often and when each happened, and the run to look at, next to CloudWatch's count of failed and throttled calls |
+| `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, with each run's REPORT line summed up; `search=` keeps lines with some text (or a CloudWatch Logs filter pattern), and `request_id=` shows one run from start to end                                                                                                          |
+| `performance(name, since="24h", region=None, limit=5000)`                | Run times (median, 1 in 100, longest) against the timeout, **memory used against what it has and the size that would do**, cold starts and their start-up time, timeouts, and the slowest runs, from the REPORT line Lambda logs after each run                                                          |
+
+#### Code
+
+| Command                                                 | Shows                                                                                                                                                                                                                                         |
+| :------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code(name, file=None, region=None, max_size="50MB")`   | What's in its deployment package: files and folders by size, and the source of the handler's file (or `file=`; a secrets file's text is held back). Findings: a handler no file matches, secrets files packed in it, size near Lambda's limit, boto3 bundled although the runtime has it |
+
+### Reference
+
+<details>
+<summary><b>Getting the data</b> (<code>LambdaAnalyzer</code>): functions, metrics, errors and runs as Python objects</summary>
+
+`ui.core` is the `LambdaAnalyzer`. Every UI command has a data method on it:
+
+```python
+lam = ui.core                                          # or LambdaAnalyzer(region="eu-west-1", profile="dev")
+
+ov = lam.overview(regions="all")                       # Overview: .functions, .metrics, .triggers, .accounts
+ov.to_df()                                             # one row per function: settings, calls, errors, cost
+detail = lam.describe("orders-etl")                    # FunctionDetail: .function, .triggers, .aliases, .metrics
+lam.errors("orders-etl", since="7d").groups            # ErrorGroup: kind, message, count, first, last, request_ids
+lam.performance("orders-etl").to_df()                  # one row per run: duration, billed, memory used, cold start
+lam.log_events("orders-etl", pattern='"KeyError"').to_df()
+lam.code("orders-etl").files                           # CodeFile: path, size, compressed
+```
+
+The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
+already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
+`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `percentile`,
+`suggest_memory`, `handler_file`, `secret_like`, and the findings: `function_findings`, `account_findings`,
+`error_findings`, `performance_findings`, `package_findings`.
+
+</details>
+
+<details>
+<summary><b>Cost and runtimes</b>: the prices used, and where the support dates come from</summary>
+
+- Costs are estimates at us-east-1 list prices, read from the AWS Price List API on 2026-10-05 (`LAMBDA_PRICES`):
+  $0.20 per million requests, $0.0000166667 per GB-second of compute on x86_64 ($0.0000133334 on arm64), provisioned
+  concurrency $0.0000041667 per GB-second kept ready ($0.0000033334 on arm64), `/tmp` above 512 MB, and CloudWatch Logs
+  at $0.50 per GB logged and $0.03 per GB-month kept. Usage is what CloudWatch counted over the window (30 days by
+  default) scaled to a month, before the free tier, at the first pricing tier, and with compute on provisioned
+  concurrency at the on-demand rate (it's a little cheaper). API Gateway, SQS and data transfer aren't included. For
+  another region or a discount: `LambdaAnalyzer(prices={"gb_second": 0.0000183})`.
+- Runtime support dates are AWS's published schedule (end of support, then blocked creates, then blocked updates),
+  as of 2026-09-29, in `RUNTIMES`. A runtime gets a warning 90 days before its end of support.
+- The reports read only what they show. `functions()` reads 7 CloudWatch metrics per function and one per region
+  ($0.01 per 1,000) and says how many; reading logs and downloading code cost nothing.
+
+</details>
+
+<details>
+<summary><b>IAM permissions</b>: read-only, and what each one is for</summary>
+
+Read-only. Grant what you need:
+
+| Permission                                                                                                                                                                          | For                                                                          |
+| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- |
+| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code` downloads from          |
+| `lambda:GetPolicy`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionUrlConfig`                                                                                                 | What triggers each function, and who may call it                              |
+| `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates |
+| `lambda:GetAccountSettings`                                                                                                                                                         | Each region's concurrency and code storage limits                             |
+| `cloudwatch:GetMetricData`                                                                                                                                                          | Calls, errors, throttles, run time and log volume                             |
+| `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs` and `performance`                |
+| `ec2:DescribeRegions`                                                                                                                                                               | `functions(regions="all")`: the regions your account has turned on            |
+
+`lambda:GetFunction` also returns the environment variables' values, which the reports never show. Anything you can't
+read shows up as a note instead of an error. The
+[Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#permissions) has a ready-made IAM
+policy.
+
+</details>
+
 ## Development
 
 Issues and pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) explains the set-up and the rules the code
@@ -1423,6 +1558,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   The OpenSearch tests use moto for domains, fake Serverless, CloudWatch and Bedrock clients checked the same way, and
   [`tests/fake_opensearch.py`](tests/fake_opensearch.py), a small in-memory OpenSearch that answers the REST calls
   (k-NN searches included) and fails the test if anything but a read is sent.
+  The Lambda tests use moto for functions, triggers, CloudWatch and logs, with the few Lambda reads moto lacks
+  (account limits, provisioned concurrency) answered by functions checked against the service model.
   The SageMaker tests read a fake machine (metadata file, `/proc`, a home folder) from a temporary folder. The chat
   window's tests click its ipywidgets in Python, against fake Bedrock clients that check every request, response and
   stream event against the service model.
@@ -1432,7 +1569,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   with `--strict`, so a broken link fails there. `docs/index.md` is the home page with a card per service, and each
   service has its own guide ([`docs/s3.md`](docs/s3.md), [`docs/dynamodb.md`](docs/dynamodb.md),
   [`docs/bedrock_kb.md`](docs/bedrock_kb.md), [`docs/bedrock_chat.md`](docs/bedrock_chat.md),
-  [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md)), and so does the S3
+  [`docs/sagemaker_env.md`](docs/sagemaker_env.md), [`docs/opensearch.md`](docs/opensearch.md),
+  [`docs/lambda_functions.md`](docs/lambda_functions.md)), and so does the S3
   explorer ([`docs/s3_explorer.md`](docs/s3_explorer.md)); a new analyzer gets a new guide, a card on the home page and an entry in `mkdocs.yml`'s `nav`.
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and

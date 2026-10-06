@@ -20,6 +20,7 @@ body:
         - Bedrock chat (bedrock_chat.py, chat())
         - SageMaker (sagemaker_env.py, SageMakerView)
         - OpenSearch (opensearch.py, OpenSearchView)
+        - Lambda (lambda_functions.py, LambdaView)
         - Installing the package
         - The guides or README
     validations:
