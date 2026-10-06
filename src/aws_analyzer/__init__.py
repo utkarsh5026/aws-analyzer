@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from .s3_explorer import S3Explorer, S3Navigator
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "__version__",
