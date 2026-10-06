@@ -13,6 +13,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- `lambda_functions.py` (`LambdaView`): AWS Lambda functions, in one region or every region your account has turned
+  on (`functions(regions="all")`). `functions()` lists each function with its runtime and when that loses support,
+  memory, timeout, what triggers it, its calls, error rate and run time over the last 30 days, and its estimated
+  monthly cost, with warnings for runtimes AWS no longer patches, functions anyone can call, provisioned concurrency
+  that sits idle, errors that are frequent or rising, throttles and runs close to the timeout.
+  `function_info("orders-etl")` explains one function in plain English: what triggers it and who may call it, what
+  happens to failed events, what it can reach (environment variable names; their values are never shown), versions,
+  aliases and provisioned concurrency, and its last 30 days day by day. `errors()` groups the errors in its logs by
+  cause (timeouts, running out of memory, code that can't load, permissions its role lacks) with the run to look at,
+  `logs()` shows the newest lines or one run from start to end, `performance()` reads run times, memory used and cold
+  starts and suggests the memory size that would do, and `code()` lists the files in its deployment package and shows
+  the handler's source. Nothing is invoked or changed: where a change would help, the report shows the AWS CLI
+  command. With the package: `from aws_analyzer import LambdaView`. Guide:
+  [Lambda functions](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html).
 - S3 explorer: **▾ Expand all**, above a JSON file's preview (beside **✕**), opens every object and array in the tree
   at once, so you no longer click each one open. It stays on for the next JSON files you open; click it again to
   collapse them back to the first levels. ([#34](https://github.com/utkarsh5026/aws-analyzer/pull/34))

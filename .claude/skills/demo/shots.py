@@ -20,6 +20,8 @@ Scenes:
   sagemaker_env  demo.py's fake SageMaker and fake machine: the JupyterLab space churn-analysis, as /demo uses it.
   opensearch  demo.py's domains (moto) and fake Serverless, CloudWatch, Bedrock and clusters: vectors-prod's
               support-docs index, as /demo uses it.
+  lambda_functions  demo.py's functions (moto, with patched Lambda and Logs clients for what moto lacks):
+              orders-etl, churn-scoring, report-api and the rest, as /demo uses it.
 
 Needs Pillow (pip install pillow) and Chrome: $CHROME, or the headless shell Playwright installs
 (npx playwright install chromium-headless-shell).
@@ -53,7 +55,8 @@ sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
-          "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md", "opensearch": "opensearch.md"}
+          "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md", "opensearch": "opensearch.md",
+          "lambda_functions": "lambda_functions.md"}
 # s3_explorer's figures come from explorer_shots.py and bedrock_chat's from chat_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
@@ -126,6 +129,11 @@ FIGURES = [
     Figure("opensearch-sample", "opensearch", 'ui.sample("vectors-prod/support-docs", n=5)'),
     Figure("opensearch-search", "opensearch", 'ui.search("how do I get my money back?", k=8)',
            setup='ui.use("vectors-prod/support-docs")'),
+    Figure("lambda-functions", "lambda_functions", 'ui.functions(regions="all")'),
+    Figure("lambda-function-info", "lambda_functions", 'ui.function_info("orders-etl")', crop=1400),
+    Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
+    Figure("lambda-performance", "lambda_functions", 'ui.performance("orders-etl")'),
+    Figure("lambda-code", "lambda_functions", 'ui.code("orders-etl")', crop=1150),
 ]
 
 
@@ -852,8 +860,15 @@ def seed_opensearch_docs() -> dict:
     return demo.seed_opensearch()
 
 
+def seed_lambda_docs() -> dict:
+    import demo
+
+    return demo.seed_lambda_functions()
+
+
 SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed_bedrock_docs,
-          "sagemaker_env": seed_sagemaker_docs, "opensearch": seed_opensearch_docs}
+          "sagemaker_env": seed_sagemaker_docs, "opensearch": seed_opensearch_docs,
+          "lambda_functions": seed_lambda_docs}
 
 
 # ----------------------------------------------------------------------------- rendering and screenshots

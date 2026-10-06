@@ -20,12 +20,12 @@ build-backend = "hatchling.build"
 [project]
 name = "aws-analyzer"
 dynamic = ["version", "readme"]
-description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks and OpenSearch vector indexes, from a Jupyter notebook: what's there, what it costs, and what to do next."
+description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions, from a Jupyter notebook: what's there, what it costs, and what to do next."
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Utkarsh Priyadarshi" }]
-keywords = ["aws", "s3", "dynamodb", "bedrock", "knowledge-base", "sagemaker", "opensearch", "vector-search", "jupyter", "notebook", "cost"]
+keywords = ["aws", "s3", "dynamodb", "bedrock", "knowledge-base", "sagemaker", "opensearch", "vector-search", "lambda", "serverless", "jupyter", "notebook", "cost"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: Jupyter",
@@ -85,6 +85,7 @@ packages = ["src/aws_analyzer"]
 "analyzers/bedrock_chat.py" = "aws_analyzer/bedrock_chat.py"
 "analyzers/sagemaker_env.py" = "aws_analyzer/sagemaker_env.py"
 "analyzers/opensearch.py" = "aws_analyzer/opensearch.py"
+"analyzers/lambda_functions.py" = "aws_analyzer/lambda_functions.py"
 
 [tool.hatch.build.targets.sdist]
 include = ["/analyzers/*.py", "/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/requirements-dev.txt"]

@@ -48,6 +48,15 @@ Demo data (moto, us-east-1, everything synthetic):
             app-logs-2026.10 (no vectors). A fake Serverless with kb-support (a Bedrock knowledge base's index),
             kb-sandbox (no standby replicas) and app-logs (VPC only), CloudWatch OCU use, and a fake Bedrock whose
             embedding model knows four topics (refunds, shipping, accounts, billing).
+  lambda_functions  moto functions, triggers, 30 days of CloudWatch numbers and logs, with patched Lambda and Logs
+            clients for what moto lacks (account limits, provisioned concurrency, log sizes) and the deployment
+            packages served from memory. us-east-1: orders-etl (python3.9, SQS and S3 triggers, errors rising for
+            3 days, runs near its 60 s timeout, KeyError / AccessDenied / timeouts in the last 24 hours of logs,
+            logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package),
+            churn-scoring (arm64, EventBridge, 4 copies of provisioned concurrency it never needs), report-api
+            (nodejs20.x, a public function URL, throttled by reserved concurrency 10), feature-backfill (python3.10,
+            never called, no triggers) and support-agent-actions (a Bedrock agent's action group). eu-west-1:
+            gdpr-export (SQS). The run c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
 """
 
 from __future__ import annotations
@@ -1171,8 +1180,341 @@ def seed_opensearch() -> dict:
         "sts": sts, "bedrock-runtime": _FakeAWS("bedrock-runtime", {"invoke_model": invoke})}}
 
 
+# ----------------------------------------------------------------------------- Lambda
+
+LAMBDA_RUN = "c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c"  # a request ID the orders-etl logs use, so calls can be copied
+
+
+def _lambda_package(files: dict[str, str]) -> bytes:
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, text in files.items():
+            archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+ETL_SOURCE = '''"""Loads the day's orders from S3 into the warehouse."""
+import json
+import os
+
+import boto3
+
+from db import connect
+
+s3 = boto3.client("s3")
+table = boto3.resource("dynamodb").Table(os.environ["ORDERS_TABLE"])
+
+
+def handler(event, context):
+    loaded = 0
+    for record in event["Records"]:
+        body = json.loads(record["body"])
+        order = s3.get_object(Bucket=body["bucket"], Key=body["key"])
+        rows = json.loads(order["Body"].read())
+        with connect(os.environ["DB_HOST"], os.environ["DB_PASSWORD"]) as db:
+            for row in rows:
+                db.insert("orders", row)
+                table.put_item(Item={"pk": row["customer_id"], "sk": row["order_id"]})
+                loaded += 1
+    print(f"loaded {loaded} orders")
+    return {"loaded": loaded}
+'''
+
+
+def seed_lambda_functions() -> dict:
+    """moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
+    ListProvisionedConcurrencyConfigs or GetRuntimeManagementConfig, leaves reserved concurrency out of GetFunction
+    and keeps no real log sizes, so the seeder hands the analyzer Lambda and Logs clients per region that answer
+    those, and serves the deployment packages GetFunction links to."""
+    import urllib.request
+
+    import boto3
+
+    rng = random.Random(11)
+    other = "eu-west-1"
+    role = boto3.client("iam").create_role(RoleName="acme-lambda-role", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
+    packages = {
+        "orders-etl": _lambda_package({
+            "etl.py": ETL_SOURCE,
+            "db.py": "def connect(host, password):\n    ...\n",
+            "requirements.txt": "boto3==1.40.0\npsycopg2-binary==2.9.10\n",
+            ".env": "DB_PASSWORD=change-me\n",
+            "boto3/__init__.py": "# boto3, bundled\n" + "#" * (2 * 1024**2),
+            "botocore/data/endpoints.json": '{"partitions": []}' + " " * (11 * 1024**2),
+            "psycopg2/_psycopg.so": "\0" * (3 * 1024**2),
+        }),
+        "churn-scoring": _lambda_package({"app.py": "def predict(event, context):\n    return {'score': 0.42}\n",
+                                          "model/churn.json": '{"trees": []}' + " " * 400_000}),
+        "report-api": _lambda_package({"index.mjs": "export const handler = async (event) => ({ statusCode: 200 });\n"}),
+        "feature-backfill": _lambda_package({"backfill.py": "def run(event, context):\n    return 'done'\n"}),
+        "support-agent-actions": _lambda_package({"actions.py": "def handler(event, context):\n    return event\n"}),
+        "gdpr-export": _lambda_package({"export.py": "def handler(event, context):\n    return 'exported'\n"}),
+    }
+
+    def create(name: str, region: str = REGION, **settings) -> None:
+        params = dict(FunctionName=name, Role=role, Code={"ZipFile": packages[name]}, Runtime="python3.12",
+                      Handler="app.handler")
+        boto3.client("lambda", region_name=region).create_function(**{**params, **settings})
+
+    create("orders-etl", Runtime="python3.9", Handler="etl.handler", MemorySize=1024, Timeout=60,
+           Description="Loads the day's orders from S3 into the warehouse",
+           Environment={"Variables": {"DB_HOST": "warehouse.acme.internal", "DB_PASSWORD": "change-me",
+                                      "ORDERS_TABLE": "orders"}},
+           Tags={"team": "data", "cost-center": "analytics"})
+    create("churn-scoring", Handler="app.predict", Architectures=["arm64"], MemorySize=2048, Timeout=30,
+           Description="Scores customers for churn with the model trained in SageMaker", Tags={"team": "ml"})
+    create("report-api", Runtime="nodejs20.x", Handler="index.handler", MemorySize=512, Timeout=10,
+           Description="Serves the weekly sales report as JSON")
+    create("feature-backfill", Runtime="python3.10", Handler="backfill.run", MemorySize=3008, Timeout=900,
+           Description="One-off backfill of the feature store (2025)")
+    create("support-agent-actions", Runtime="python3.13", Handler="actions.handler", Architectures=["arm64"],
+           MemorySize=256, Timeout=30, Description="Action group for the support Bedrock agent")
+    create("gdpr-export", region=other, Runtime="python3.11", Handler="export.handler", MemorySize=512, Timeout=120,
+           Description="Exports a customer's data on request")
+
+    lam = boto3.client("lambda", region_name=REGION)
+    for code in range(2, 4):  # three published versions of churn-scoring; live points at the newest
+        lam.update_function_code(FunctionName="churn-scoring", ZipFile=_lambda_package(
+            {"app.py": f"def predict(event, context):\n    return {{'score': 0.{code}}}\n"}))
+        lam.publish_version(FunctionName="churn-scoring", Description=f"model v{code}")
+    lam.publish_version(FunctionName="churn-scoring", Description="model v1")
+    newest = max(int(v["Version"]) for v in lam.list_versions_by_function(FunctionName="churn-scoring")["Versions"]
+                 if v["Version"] != "$LATEST")
+    lam.create_alias(FunctionName="churn-scoring", Name="live", FunctionVersion=str(newest))
+    lam.put_function_event_invoke_config(FunctionName="churn-scoring", DestinationConfig={
+        "OnFailure": {"Destination": f"arn:aws:sqs:{REGION}:{ACCOUNT}:churn-scoring-failed"}})
+    lam.add_permission(FunctionName="orders-etl", StatementId="acme-uploads", Action="lambda:InvokeFunction",
+                       Principal="s3.amazonaws.com", SourceArn="arn:aws:s3:::acme-uploads", SourceAccount=ACCOUNT)
+    lam.add_permission(FunctionName="churn-scoring", StatementId="nightly-scoring", Action="lambda:InvokeFunction",
+                       Principal="events.amazonaws.com",
+                       SourceArn=f"arn:aws:events:{REGION}:{ACCOUNT}:rule/nightly-scoring")
+    lam.add_permission(FunctionName="support-agent-actions", StatementId="bedrock-agent",
+                       Action="lambda:InvokeFunction", Principal="bedrock.amazonaws.com",
+                       SourceArn=f"arn:aws:bedrock:{REGION}:{ACCOUNT}:agent/SUPPORT01A")
+    lam.create_function_url_config(FunctionName="report-api", AuthType="NONE")
+    report_policy = {"Version": "2012-10-17", "Statement": [
+        {"Sid": "FunctionURLAllowPublicAccess", "Effect": "Allow", "Principal": "*",
+         "Action": "lambda:InvokeFunctionUrl", "Resource": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:report-api",
+         "Condition": {"StringEquals": {"lambda:FunctionUrlAuthType": "NONE"}}},
+        {"Sid": "FunctionURLAllowInvokeAction", "Effect": "Allow", "Principal": "*", "Action": "lambda:InvokeFunction",
+         "Resource": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:report-api",
+         "Condition": {"Bool": {"lambda:InvokedViaFunctionUrl": "true"}}}]}
+    for region, queue, function in ((REGION, "orders-queue", "orders-etl"), (other, "export-requests", "gdpr-export")):
+        sqs = boto3.client("sqs", region_name=region)
+        url = sqs.create_queue(QueueName=queue)["QueueUrl"]
+        arn = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
+        boto3.client("lambda", region_name=region).create_event_source_mapping(
+            EventSourceArn=arn, FunctionName=function, BatchSize=10)
+
+    # 30 days of CloudWatch numbers: (calls a day, error share, throttles a day, average ms, longest ms, most at once,
+    # bytes logged a day). orders-etl's errors started three days ago.
+    usage = {
+        "orders-etl": (1200, 0.004, 0, 4_000, 58_200, 6, 1.0 * 1024**3),
+        "churn-scoring": (30, 0.0, 0, 900, 2_400, 1, 2 * 1024**2),
+        "report-api": (5000, 0.002, 25, 120, 2_100, 10, 300 * 1024**2),
+        "support-agent-actions": (200, 0.0, 0, 350, 1_200, 2, 20 * 1024**2),
+        "gdpr-export": (50, 0.0, 0, 8_000, 31_000, 2, 5 * 1024**2),
+    }
+    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    for name, (calls, errors, throttles, average, longest, most, logged) in usage.items():
+        region = other if name == "gdpr-export" else REGION
+        cloudwatch = boto3.client("cloudwatch", region_name=region)
+        dims = [{"Name": "FunctionName", "Value": name}]
+        data, logs_data = [], []
+        for day in range(30):
+            when = today - timedelta(days=day) + timedelta(hours=12 if day else 0, minutes=30)
+            count = round(calls * rng.uniform(0.8, 1.2))
+            failed = round(count * (0.03 if name == "orders-etl" and day < 3 else errors))
+            data += [
+                {"MetricName": "Invocations", "Dimensions": dims, "Timestamp": when, "Value": count},
+                {"MetricName": "Errors", "Dimensions": dims, "Timestamp": when, "Value": failed},
+                {"MetricName": "Throttles", "Dimensions": dims, "Timestamp": when,
+                 "Value": round(throttles * rng.uniform(0, 2))},
+                {"MetricName": "Duration", "Dimensions": dims, "Timestamp": when, "StatisticValues": {
+                    "SampleCount": count, "Sum": count * average * rng.uniform(0.9, 1.1), "Minimum": 5.0,
+                    "Maximum": longest * (1 if day == 1 else rng.uniform(0.6, 0.95))}},
+                {"MetricName": "ConcurrentExecutions", "Dimensions": dims, "Timestamp": when,
+                 "Value": float(most if day == 1 else max(1, round(most * rng.uniform(0.4, 1))))},
+            ]
+            logs_data.append({"MetricName": "IncomingBytes", "Timestamp": when, "Value": logged * rng.uniform(0.9, 1.1),
+                              "Dimensions": [{"Name": "LogGroupName", "Value": f"/aws/lambda/{name}"}]})
+        for start in range(0, len(data), 20):
+            cloudwatch.put_metric_data(Namespace="AWS/Lambda", MetricData=data[start:start + 20])
+        for start in range(0, len(logs_data), 20):
+            cloudwatch.put_metric_data(Namespace="AWS/Logs", MetricData=logs_data[start:start + 20])
+    for region, peak in ((REGION, 18.0), (other, 2.0)):
+        boto3.client("cloudwatch", region_name=region).put_metric_data(Namespace="AWS/Lambda", MetricData=[
+            {"MetricName": "ConcurrentExecutions", "Timestamp": today - timedelta(days=day) + timedelta(hours=12),
+             "Value": peak * rng.uniform(0.5, 1)} for day in range(1, 30)])
+
+    # orders-etl's logs for the last 24 hours: a run every 20 minutes or so, with the errors CloudWatch counted.
+    logs = boto3.client("logs", region_name=REGION)
+    for name in ("orders-etl", "churn-scoring", "report-api", "support-agent-actions"):
+        logs.create_log_group(logGroupName=f"/aws/lambda/{name}")
+    for name, days in (("churn-scoring", 30), ("report-api", 14), ("support-agent-actions", 90)):
+        logs.put_retention_policy(logGroupName=f"/aws/lambda/{name}", retentionInDays=days)
+    streams = [f"2026/10/06/[$LATEST]{i:032x}" for i in (0xA1, 0xB2, 0xC3)]
+    for stream in streams:
+        logs.create_log_stream(logGroupName="/aws/lambda/orders-etl", logStreamName=stream)
+    events: dict[str, list[dict]] = {stream: [] for stream in streams}
+    for i in range(70):
+        start = NOW - timedelta(minutes=20 * i + rng.randint(0, 5), seconds=rng.randint(0, 59))
+        rid = LAMBDA_RUN if i == 2 else f"{rng.getrandbits(32):08x}-{rng.getrandbits(16):04x}-4{rng.getrandbits(12):03x}-a{rng.getrandbits(12):03x}-{rng.getrandbits(48):012x}"
+        stream = streams[i % 3]
+        cold = i % 9 == 0
+        kind = "timeout" if i in (5, 31, 47) else "key" if i in (2, 9, 14, 22, 40, 51, 58, 66) else (
+            "denied" if i in (18, 37) else "ok")
+        seconds = 60.0 if kind == "timeout" else rng.uniform(1.5, 9.0) if kind == "ok" else rng.uniform(0.4, 2.0)
+        ms = lambda offset: int((start + timedelta(seconds=offset)).timestamp() * 1000)  # noqa: E731
+        lines = [(0, f"START RequestId: {rid} Version: $LATEST"),
+                 (0.05, f"reading s3://acme-uploads/orders/2026-10-06/batch-{i:03d}.json")]
+        if kind == "key":
+            lines.append((seconds - 0.01, "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n  "
+                                          "File \"/var/task/etl.py\", line 23, in handler\n    table.put_item(Item="
+                                          "{\"pk\": row[\"customer_id\"], \"sk\": row[\"order_id\"]})"))
+        elif kind == "denied":
+            lines.append((seconds - 0.01, "[ERROR] ClientError: An error occurred (AccessDeniedException) when calling "
+                                          "the PutItem operation: User: arn:aws:sts::123456789012:assumed-role/"
+                                          "acme-lambda-role/orders-etl is not authorized to perform: dynamodb:PutItem "
+                                          "on resource: arn:aws:dynamodb:us-east-1:123456789012:table/orders"))
+        elif kind == "timeout":
+            lines.append((60.0, f"{(start + timedelta(seconds=60)).strftime('%Y-%m-%dT%H:%M:%S.000Z')} {rid} Task "
+                                "timed out after 60.00 seconds"))
+        else:
+            lines.append((seconds - 0.02, f"loaded {rng.randint(800, 1500)} orders"))
+        used = rng.randint(140, 182)
+        report = (f"REPORT RequestId: {rid}\tDuration: {seconds * 1000:.2f} ms\tBilled Duration: "
+                  f"{int(seconds * 1000) + 1} ms\tMemory Size: 1024 MB\tMax Memory Used: {used} MB")
+        if cold:
+            report += f"\tInit Duration: {rng.uniform(900, 1400):.2f} ms"
+        if kind == "timeout":
+            report += "\tStatus: timeout"
+        lines += [(seconds, f"END RequestId: {rid}"), (seconds + 0.001, report)]
+        events[stream] += [{"timestamp": ms(offset), "message": message} for offset, message in lines]
+    for stream, batch in events.items():
+        logs.put_log_events(logGroupName="/aws/lambda/orders-etl", logStreamName=stream,
+                            logEvents=sorted(batch, key=lambda e: e["timestamp"]))
+    stored = {"/aws/lambda/orders-etl": int(24.5 * 1024**3), "/aws/lambda/report-api": int(1.2 * 1024**3),
+              "/aws/lambda/churn-scoring": 40 * 1024**2, "/aws/lambda/support-agent-actions": 180 * 1024**2}
+
+    class _Answer:
+        """What urlopen returns, for a deployment package served from memory."""
+
+        def __init__(self, body: bytes):
+            self.body, self.headers = body, {"Content-Length": str(len(body))}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size: int = -1) -> bytes:
+            return self.body if size is None or size < 0 else self.body[:size]
+
+    real_urlopen = urllib.request.urlopen
+
+    def urlopen(url, *args, **kwargs):
+        name = str(url).rsplit("/", 1)[-1].removesuffix(".zip")
+        if "/demo-packages/" in str(url) and name in packages:
+            return _Answer(packages[name])
+        return real_urlopen(url, *args, **kwargs)
+
+    urllib.request.urlopen = urlopen  # the analyzer downloads code with urllib, which moto doesn't serve
+
+    def lambda_client(region):
+        client = boto3.client("lambda", region_name=region or REGION)
+
+        def get_function(FunctionName, **params):
+            answer = client.get_function(FunctionName=FunctionName, **params)
+            answer.pop("ResponseMetadata", None)
+            name = answer["Configuration"]["FunctionName"]
+            answer["Code"]["Location"] = (f"https://awslambda-{region}-tasks.s3.{region}.amazonaws.com/demo-packages/"
+                                          f"{name}.zip")
+            if name == "report-api":
+                answer["Concurrency"] = {"ReservedConcurrentExecutions": 10}
+            return answer
+
+        def get_policy(FunctionName, **params):
+            if FunctionName == "report-api":
+                return {"Policy": json.dumps(report_policy), "RevisionId": "1"}
+            answer = client.get_policy(FunctionName=FunctionName, **params)
+            answer.pop("ResponseMetadata", None)
+            return answer
+
+        def provisioned(FunctionName, **params):
+            if FunctionName != "churn-scoring":
+                return {"ProvisionedConcurrencyConfigs": []}
+            return {"ProvisionedConcurrencyConfigs": [{
+                "FunctionArn": f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:churn-scoring:live",
+                "RequestedProvisionedConcurrentExecutions": 4, "AllocatedProvisionedConcurrentExecutions": 4,
+                "AvailableProvisionedConcurrentExecutions": 4, "Status": "READY"}]}
+
+        handlers = {
+            "get_function": get_function,
+            "get_policy": get_policy,
+            "list_provisioned_concurrency_configs": provisioned,
+            "get_account_settings": lambda: {
+                "AccountLimit": {"TotalCodeSize": 75 * 1024**3, "CodeSizeUnzipped": 250 * 1024**2,
+                                 "CodeSizeZipped": 50 * 1024**2, "ConcurrentExecutions": 1000,
+                                 "UnreservedConcurrentExecutions": 990 if region == REGION else 1000},
+                "AccountUsage": {"TotalCodeSize": int((3.2 if region == REGION else 0.1) * 1024**3),
+                                 "FunctionCount": 5 if region == REGION else 1}},
+            "get_runtime_management_config": lambda FunctionName, **_: {"UpdateRuntimeOn": "Auto"},
+        }
+        return _Patched(client, handlers)
+
+    def logs_client(region):
+        client = boto3.client("logs", region_name=region or REGION)
+
+        def describe_log_groups(**params):
+            answer = client.describe_log_groups(**params)
+            answer.pop("ResponseMetadata", None)
+            for group in answer.get("logGroups", []):
+                group["storedBytes"] = stored.get(group["logGroupName"], group.get("storedBytes", 0))
+            return answer
+
+        return _Patched(client, {"describe_log_groups": describe_log_groups})
+
+    return {"clients": {"lambda": lambda_client, "logs": logs_client}}
+
+
+class _Patched:
+    """A moto client with a few operations answered by functions instead (each checked against the service model)."""
+
+    def __init__(self, client, handlers: dict):
+        from botocore import xform_name
+        from botocore.validate import ParamValidator
+
+        model = client.meta.service_model
+        operations = {xform_name(op): model.operation_model(op) for op in model.operation_names}
+
+        def checked(name, handler):
+            def call(**params):
+                for shape, value in ((operations[name].input_shape, params),):
+                    report = ParamValidator().validate(value, shape)
+                    if report.has_errors():
+                        raise AssertionError(report.generate_report())
+                answer = handler(**params)
+                report = ParamValidator().validate(answer, operations[name].output_shape)
+                if report.has_errors():
+                    raise AssertionError(f"demo {name} response doesn't match the service model:\n"
+                                         f"{report.generate_report()}")
+                return answer
+            return call
+
+        self._client = client
+        self._handlers = {name: checked(name, handler) for name, handler in handlers.items()}
+
+    def __getattr__(self, name: str):
+        return self._handlers.get(name) or getattr(self._client, name)
+
+
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
-           "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch}
+           "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
+           "lambda_functions": seed_lambda_functions}
 
 
 # ----------------------------------------------------------------------------- run

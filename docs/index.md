@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks and OpenSearch vector indexes from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
 hide:
   - toc
 ---
@@ -120,6 +120,20 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the OpenSearch guide →](opensearch.md)
 
+-   `lambda_functions.py`
+
+    **AWS Lambda**
+
+    Lambda functions, in one region or all of them.
+    { .what }
+
+    - Every function's runtime, triggers, calls, errors and cost
+    - Runtimes losing support, and functions anyone can call
+    - Errors grouped by cause, from the function's own logs
+    - Memory used and cold starts, and the size that would do
+
+    [Open the Lambda guide →](lambda_functions.md)
+
 </div>
 
 ## Every service works the same way { #pattern }
@@ -128,7 +142,7 @@ The files don't depend on each other, so copy only the ones you need. Each guide
 
 ```python
 from s3 import S3View      # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
-                           # OpenSearchView from opensearch
+                           # OpenSearchView from opensearch, LambdaView from lambda_functions
 
 ui = S3View()              # uses the notebook's IAM role; nothing to configure
 ui.help()                  # every command, grouped by task; ui.help("name") shows one in full

@@ -31,6 +31,8 @@ service is given, run a short tour:
 - sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
 - opensearch: `ui.overview(); ui.indexes("vectors-prod"); ui.index_info("vectors-prod/support-docs");
   ui.search("how do I get my money back?", index="vectors-prod/support-docs")`
+- lambda_functions: `ui.functions(regions="all"); ui.function_info("orders-etl"); ui.errors("orders-etl");
+  ui.performance("orders-etl")`
 - other services: `ui.help()` and then the service's overview command
 
 `--help` describes the demo data. Most useful:
@@ -79,6 +81,17 @@ service is given, run a short tour:
     (VPC only).
   - The embedding model knows four topics (refunds, shipping, accounts, billing), so a question about one of them
     finds its articles.
+- **Lambda** (moto for the functions, triggers, CloudWatch numbers and logs; the seeder hands the analyzer Lambda and
+  Logs clients that answer what moto lacks: account limits, provisioned concurrency, reserved concurrency, log sizes,
+  and the deployment packages):
+  - us-east-1: `orders-etl` (python3.9, SQS and S3 triggers, errors rising for three days, a run near its 60 s
+    timeout, KeyErrors, AccessDenied and timeouts in its last 24 hours of logs, logs costing more than its compute and
+    kept forever, a `.env` file and bundled boto3 in its package), `churn-scoring` (arm64, EventBridge, 4 copies of
+    provisioned concurrency it never needs), `report-api` (nodejs20.x, a public function URL, throttled at reserved
+    concurrency 10), `feature-backfill` (python3.10, never called, no triggers) and `support-agent-actions` (a Bedrock
+    agent's action group).
+  - eu-west-1: `gdpr-export` (SQS). `regions="all"` reads every region moto lists.
+  - The run `c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c` is one of orders-etl's KeyErrors.
 
 ## Reading the output
 
