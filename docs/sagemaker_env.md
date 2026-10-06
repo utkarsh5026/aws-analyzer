@@ -3,7 +3,7 @@ title: SageMaker Guide
 description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, with aws-analyzer's sagemaker_env.py."
 ---
 
-<p class="eyebrow">aws-analyzer · sagemaker_env.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> aws-analyzer · sagemaker_env.py</p>
 
 # Know the SageMaker notebook you're working in
 

@@ -32,6 +32,9 @@
   color: var(--md-typeset-a-color); font-weight: 650; font-size: .65rem; letter-spacing: .06em;
   text-transform: uppercase; margin: 0 0 .3rem;
 }
+/* The service's AWS Architecture icon, as AWS draws it (no rounding or recolouring) */
+.md-typeset .eyebrow:has(.aws-icon) { display: flex; align-items: center; gap: .55rem; }
+.md-typeset .eyebrow .aws-icon { width: 1.6rem; height: 1.6rem; flex: none; }
 .md-typeset h1 { margin-bottom: .6em; }
 .md-typeset .lede { font-size: 1rem; line-height: 1.55; color: var(--md-default-fg-color--light); max-width: 36rem; }
 .md-typeset ul.pills { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.5rem; padding: 0; list-style: none; }
@@ -90,6 +93,8 @@
 }
 
 /* ---- Home page: one card per service */
+.md-typeset .services > ul > li > p:first-child { display: flex; align-items: center; gap: .6rem; }
+.md-typeset .services .aws-icon { width: 2rem; height: 2rem; flex: none; }
 .md-typeset .services > ul > li > p:first-child code {
   font-size: .62rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px;
   background: var(--aa-accent-soft); color: var(--md-typeset-a-color);

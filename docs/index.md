@@ -22,7 +22,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 <!-- One card per service. A new analyzer gets its own guide (docs/<service>.md), a card here and an entry in mkdocs.yml's nav. -->
 <div class="grid cards services" markdown>
 
--   `s3.py`
+-   ![](images/aws/s3.svg){ .aws-icon width="40" height="40" } `s3.py`
 
     **Amazon S3**
 
@@ -36,7 +36,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the S3 guide →](s3.md)
 
--   `s3_explorer.py`
+-   ![](images/aws/s3.svg){ .aws-icon width="40" height="40" } `s3_explorer.py`
 
     **S3 file explorer**
 
@@ -50,7 +50,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the explorer guide →](s3_explorer.md)
 
--   `dynamodb.py`
+-   ![](images/aws/dynamodb.svg){ .aws-icon width="40" height="40" } `dynamodb.py`
 
     **Amazon DynamoDB**
 
@@ -64,7 +64,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the DynamoDB guide →](dynamodb.md)
 
--   `bedrock_kb.py`
+-   ![](images/aws/bedrock.svg){ .aws-icon width="40" height="40" } `bedrock_kb.py`
 
     **Amazon Bedrock Knowledge Bases**
 
@@ -78,7 +78,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the Knowledge Bases guide →](bedrock_kb.md)
 
--   `bedrock_chat.py`
+-   ![](images/aws/bedrock.svg){ .aws-icon width="40" height="40" } `bedrock_chat.py`
 
     **Bedrock knowledge base chat**
 
@@ -92,7 +92,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the chat guide →](bedrock_chat.md)
 
--   `sagemaker_env.py`
+-   ![](images/aws/sagemaker.svg){ .aws-icon width="40" height="40" } `sagemaker_env.py`
 
     **Amazon SageMaker**
 
@@ -106,7 +106,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the SageMaker guide →](sagemaker_env.md)
 
--   `opensearch.py`
+-   ![](images/aws/opensearch.svg){ .aws-icon width="40" height="40" } `opensearch.py`
 
     **Amazon OpenSearch**
 
@@ -120,7 +120,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the OpenSearch guide →](opensearch.md)
 
--   `lambda_functions.py`
+-   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `lambda_functions.py`
 
     **AWS Lambda**
 

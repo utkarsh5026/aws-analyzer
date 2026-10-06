@@ -3,7 +3,7 @@ title: Lambda Functions Guide
 description: "How to see every AWS Lambda function, in one region or all of them, from a SageMaker notebook with aws-analyzer's lambda_functions.py: runtimes and their end of support, triggers and public access, calls, errors and cost, errors grouped by cause, logs, memory and cold starts, and the code, with examples."
 ---
 
-<p class="eyebrow">aws-analyzer · lambda_functions.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · lambda_functions.py</p>
 
 # See every Lambda function from a SageMaker notebook
 

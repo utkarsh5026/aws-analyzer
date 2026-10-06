@@ -419,7 +419,10 @@ does both, a page at a time). How the UI works:
   cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
   `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so does the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to). A new
   analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
-  README. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
+  README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
+  AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
+  cropped) on its home-page card, in its guide's eyebrow, and in README's Services table and
+  section; a new service copies its icon in from the package. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
   `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
   (`## Permissions { #permissions }`) because README and other pages link to them; code blocks are fenced with a
   language and an optional `title="IAM policy"`; callouts are `!!! note ""` / `!!! warning ""`, troubleshooting

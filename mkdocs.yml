@@ -16,7 +16,9 @@ edit_uri: edit/main/docs/
 copyright: >-
   aws-analyzer is open source. Code, issues and the
   <a href="https://github.com/utkarsh5026/aws-analyzer/blob/main/README.md">README</a> are on
-  <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>.
+  <a href="https://github.com/utkarsh5026/aws-analyzer">GitHub</a>. Service icons are AWS's
+  <a href="https://aws.amazon.com/architecture/icons/">Architecture Icons</a>; AWS and its service names are
+  trademarks of Amazon.com, Inc. or its affiliates.
 
 # Pages stay at s3.html, dynamodb.html, ... as before, so links in the README and elsewhere keep working.
 use_directory_urls: false

@@ -113,6 +113,9 @@ to the first boto3 release that has every operation the file calls, and put any 
   explicit ids, figures, callouts, troubleshooting entries, the `ref` command table), and cover set up in
   SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
+- `docs/images/aws/<service>.svg`: the service's 64 px icon from AWS's Architecture Icons package
+  (https://aws.amazon.com/architecture/icons/), unchanged; the card, the guide's eyebrow and README's Services table
+  and section show it.
 - `docs/index.md`: add a card for the new guide next to the existing ones, and add the guide to `nav` in
   `mkdocs.yml`. Check it with `mkdocs build --strict` (`pip install -r requirements-docs.txt`).
 - `CHANGELOG.md`: a bullet under `## [Unreleased]` → `### Added` naming the service, its file and View, and its
