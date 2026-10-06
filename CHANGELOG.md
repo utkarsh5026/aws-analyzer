@@ -27,6 +27,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   the handler's source. Nothing is invoked or changed: where a change would help, the report shows the AWS CLI
   command. With the package: `from aws_analyzer import LambdaView`. Guide:
   [Lambda functions](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html).
+  ([#35](https://github.com/utkarsh5026/aws-analyzer/pull/35))
 - S3 explorer: **▾ Expand all**, above a JSON file's preview (beside **✕**), opens every object and array in the tree
   at once, so you no longer click each one open. It stays on for the next JSON files you open; click it again to
   collapse them back to the first levels. ([#34](https://github.com/utkarsh5026/aws-analyzer/pull/34))
