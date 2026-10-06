@@ -3,7 +3,7 @@ title: S3 Explorer Guide
 description: "How to click through Amazon S3 buckets and folders like a file explorer in a SageMaker notebook with aws-analyzer's s3_explorer.py, and see what's inside each file as you click it."
 ---
 
-<p class="eyebrow">aws-analyzer · s3_explorer.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/s3.svg" alt="" width="32" height="32"> aws-analyzer · s3_explorer.py</p>
 
 # Click through your S3 buckets like a file explorer
 

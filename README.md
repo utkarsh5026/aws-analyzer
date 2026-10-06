@@ -77,14 +77,14 @@ report still renders.
 
 | Service                            | What it shows you                                                                                                                                                                                                                                       | File and guide                                                                                                                            |
 | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
-| **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
-| **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
-| **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
-| **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
-| **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
-| **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
-| **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
+| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
+| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
+| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
+| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
+| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -189,7 +189,7 @@ command's full description.
 
 ## Amazon S3
 
-**Buckets and the files in them.** Every bucket's size, cost and risks, what's in a folder, a look inside the files,
+<img src="docs/images/aws/s3.svg" width="22" height="22" alt="" align="absmiddle"> **Buckets and the files in them.** Every bucket's size, cost and risks, what's in a folder, a look inside the files,
 and what you could save.
 
 📄 [`analyzers/s3.py`](analyzers/s3.py) · 📖 [S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)
@@ -557,7 +557,7 @@ every command.
 
 ## Amazon DynamoDB
 
-**Tables and the items in them.** Every table's keys, size, billing and cost, the items as plain tables, and what
+<img src="docs/images/aws/dynamodb.svg" width="22" height="22" alt="" align="absmiddle"> **Tables and the items in them.** Every table's keys, size, billing and cost, the items as plain tables, and what
 they hold.
 
 📄 [`analyzers/dynamodb.py`](analyzers/dynamodb.py) · 📖 [DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)
@@ -741,7 +741,7 @@ has a ready-made IAM policy that covers every command.
 
 ## Amazon Bedrock Knowledge Bases
 
-**Knowledge bases, what they retrieve, and the answers built on them.** Settings and sync health, search with
+<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **Knowledge bases, what they retrieve, and the answers built on them.** Settings and sync health, search with
 highlighted passages, answers with citations, and retrieval measured on your own questions.
 
 📄 [`analyzers/bedrock_kb.py`](analyzers/bedrock_kb.py) · 📖 [Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)
@@ -959,7 +959,7 @@ policy that covers every command.
 
 ## Bedrock knowledge base chat
 
-**A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
+<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
 questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field
 of RetrieveAndGenerate) while you watch the request as JSON.
 
@@ -1115,7 +1115,7 @@ box to type into instead of a picker, with a note naming the missing permission.
 
 ## Amazon SageMaker
 
-**The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
+<img src="docs/images/aws/sagemaker.svg" width="22" height="22" alt="" align="absmiddle"> **The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
 costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, and which
 notebooks, apps and endpoints in the region look forgotten.
 
@@ -1246,7 +1246,7 @@ policy that covers every command.
 
 ## Amazon OpenSearch
 
-**Vector (k-NN) indexes in OpenSearch Service domains and Serverless collections.** Each vector field in plain
+<img src="docs/images/aws/opensearch.svg" width="22" height="22" alt="" align="absmiddle"> **Vector (k-NN) indexes in OpenSearch Service domains and Serverless collections.** Each vector field in plain
 English, whether its graphs fit in the memory the nodes have, documents without a vector, vectors that repeat or are
 all zeros, and the documents nearest a question.
 
@@ -1406,7 +1406,7 @@ and data access policy.
 
 ## AWS Lambda
 
-**Lambda functions, in one region or all of them.** What each function runs and when its runtime loses support,
+<img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Lambda functions, in one region or all of them.** What each function runs and when its runtime loses support,
 what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it
 fails, read from its own logs, with its memory, cold starts and code.
 
@@ -1594,3 +1594,6 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
 ## License
 
 [Apache License 2.0](LICENSE).
+
+The service icons are from AWS's [Architecture Icons](https://aws.amazon.com/architecture/icons/), unchanged. AWS and
+the AWS service names are trademarks of Amazon.com, Inc. or its affiliates; this project isn't made or endorsed by AWS.

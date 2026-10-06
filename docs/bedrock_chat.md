@@ -3,7 +3,7 @@ title: Bedrock Chat Guide
 description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, and see the request as JSON."
 ---
 
-<p class="eyebrow">aws-analyzer · bedrock_chat.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> aws-analyzer · bedrock_chat.py</p>
 
 # Chat with a Bedrock knowledge base, and see exactly what's sent
 

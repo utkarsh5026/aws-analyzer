@@ -3,7 +3,7 @@ title: DynamoDB Analyzer Guide
 description: "How to browse, query and understand Amazon DynamoDB tables from a SageMaker notebook with aws-analyzer's dynamodb.py, with examples."
 ---
 
-<p class="eyebrow">aws-analyzer · dynamodb.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/dynamodb.svg" alt="" width="32" height="32"> aws-analyzer · dynamodb.py</p>
 
 # Explore your DynamoDB tables from a SageMaker notebook
 
