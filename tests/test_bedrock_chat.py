@@ -1791,6 +1791,21 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
     assert "Nothing yet" in app.response_view.value
 
 
+def test_window_fills_the_browser_unless_given_a_height(window, core, monkeypatch):
+    app = window._app
+    assert app.log.layout.height is None and all(tab.layout.max_height is None for tab in app.tabs.children)
+    assert ".kbc-app.kbc-app .kbc-log{height:clamp(540px,calc(100vh - 400px),1400px);" in chatmod._CSS
+    assert "body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}" in chatmod._CSS
+    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    monkeypatch.setattr(chatmod, "_in_notebook", lambda: True)
+    shown = []
+    monkeypatch.setattr(BedrockChatView, "_display", lambda self, widget: shown.append(widget))
+    view = chatmod.chat("support-docs", height=800)
+    assert shown == [view._app.root] and view._app.log.layout.height == "800px"
+    assert {tab.layout.max_height for tab in view._app.tabs.children} == {"calc(800px + 80px)"}  # the side follows
+    assert "height" not in view._setup_call()  # a display preference, like stream=, not part of the setup
+
+
 def test_window_adds_edits_and_removes_settings(window):
     app = window._app
     app.chips["temperature"].click()

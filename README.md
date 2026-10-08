@@ -306,7 +306,7 @@ from s3_explorer import S3Explorer, S3Navigator
 
 S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
 S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
-S3Explorer(height=720, page_size=200)                 # taller panes, 200 rows on each page of the list
+S3Explorer(height=720, page_size=200)                 # 720px panes (else they fill the window), 200 rows a page
 S3Explorer(zip_max_size="2GB")                        # zip folders up to 2 GB (x.zip_max_files, x.zip_folder too)
 
 x = S3Explorer("s3://my-bucket/")
@@ -1011,6 +1011,7 @@ chat("support-docs", model="sonnet")       # or start on these: a name, ID or AR
 chat("support-docs", data_source="faq")    # ask only one of its data sources (a name or ID)
 chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
 chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
+chat("support-docs", height=800)           # an 800px conversation (else the window fills the browser's height)
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
 ui.code()                                  # this setup as a Python script, JSON and an AWS CLI command

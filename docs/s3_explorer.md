@@ -68,14 +68,14 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
     S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet")   # a file's folder, with the file shown
     ```
 
-3. **Optional:** another AWS profile or region, taller panes, or bigger zips:
+3. **Optional:** another AWS profile or region, a fixed height, or bigger zips:
 
     ```python
     from s3 import S3Analyzer
 
     S3Explorer("s3://acme-ml-data/", profile="dev")   # another AWS profile (or region=)
     S3Explorer(core=S3Analyzer(region="eu-west-1"))   # an S3Analyzer or S3View you already have
-    S3Explorer(height=720, page_size=200)            # taller panes, 200 rows on each page of the list
+    S3Explorer(height=720, page_size=200)            # 720px panes (else they fill the window), 200 rows a page
     S3Explorer(zip_max_size="2GB")                   # zip folders up to 2 GB (100 MB by default)
     ```
 

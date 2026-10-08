@@ -315,6 +315,9 @@ does both, a page at a time). How the UI works:
   age labels (`pointer-events:none`), so the whole row is the click target. Rows are pooled and reused.
 - Icons are drawn by the CSS: each `_ICON_PATHS` line drawing becomes a `.s3x-i-<name>` mask in the text's colour, and
   the button keeps its glyph (← ✎ ⚙) as its text, hidden by the style.
+- The panes' height is the style's (`.s3x-body`): the browser window's less JupyterLab's bars, at least 560px. VS Code
+  gets 560px, since its `100vh` is the whole notebook's height. `height=` (pixels or CSS) goes on the box instead.
+  `bedrock_chat`'s conversation (`.kbc-log`, at least 540px) and side tabs work the same way.
 - Widgets can't scroll, so `_renew()` puts the list or the report in a new box, which starts at the top. The search
   box and its buttons (`_finder`) sit above that box and stay put, and so does the page bar under it (`_pages`): the
   list shows `page_size` rows from `_offset`, and « ‹ › » (`_on_page`) move it. Never more rows than a page, since

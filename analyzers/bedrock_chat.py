@@ -4012,7 +4012,8 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-files{gap:6px}
 .kbc-app.kbc-app .kbc-file{height:26px;line-height:24px;font-size:12px;padding:0 10px;margin:0;border-radius:999px;background:var(--kc-soft);border:1px solid var(--kc-accent);color:var(--kc-accent)}
 .kbc-app.kbc-app .kbc-file:hover:enabled{border-color:#dc2626;color:#dc2626;background:rgba(239,68,68,.08)}
-.kbc-app.kbc-app .kbc-log{border:1px solid var(--kc-line);border-radius:18px;padding:12px 14px;background:var(--kc-tint)}
+.kbc-app.kbc-app .kbc-log{height:clamp(540px,calc(100vh - 400px),1400px);border:1px solid var(--kc-line);border-radius:18px;padding:12px 14px;background:var(--kc-tint)}
+body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}
 .kbc-app.kbc-app .kbc-composer{margin-top:10px;padding:5px 5px 5px 8px;border:1px solid var(--kc-line-2);border-radius:999px;background:var(--kc-surface);box-shadow:var(--kc-shadow);align-items:center;transition:border-color .15s,box-shadow .15s}
 .kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
 .kbc-app.kbc-app .kbc-composer .widget-text input,.kbc-app.kbc-app .kbc-composer .jupyter-widget-text input{border:0;box-shadow:none;background:transparent;font-size:14px;padding:4px 8px}
@@ -4050,7 +4051,8 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
 .kbc-app.kbc-app .kbc-side .lm-TabBar-tabLabel,.kbc-app.kbc-app .kbc-side .p-TabBar-tabLabel{text-align:center}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:16px;padding:10px 4px 10px 12px;background:var(--kc-surface);overflow:hidden}
-.kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px;overflow:hidden auto;padding-right:8px}
+.kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:clamp(620px,calc(100vh - 320px),1480px);overflow:hidden auto;padding-right:8px}
+body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box>*,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box>*{flex-shrink:0}
 .kbc-app.kbc-app .kbc-head,.kbc-app.kbc-app .kbc-pickers,.kbc-app.kbc-app .kbc-field{overflow:visible}
 .kbc-app.kbc-app .kbc-field{position:relative;margin:0}
@@ -5475,6 +5477,12 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
         return None
 
 
+def _css_height(height: int | str | None) -> str | None:
+    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
+    text = "" if height is None else str(height).strip()
+    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
+
+
 def _cell_number() -> Any:
     """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
     once, not twice."""
@@ -5948,8 +5956,10 @@ class _ChatApp:
         head = w.VBox([top, pickers, self.file_bar], layout=layout(width="100%"))
         head.add_class("kbc-head")
 
-        self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto", height="540px",
-                                        width="100%"))
+        # The style makes the conversation fill the browser window, but in VS Code, whose 100vh is the whole
+        # notebook's height, 540px. The view's height= puts its own on the box, which wins over the style's.
+        self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto",
+                                        height=_css_height(self.view.height), width="100%"))
         self.log.add_class("kbc-log")  # column-reverse keeps it scrolled to the newest message, without a script
         self.mode_pick = w.ToggleButtons(
             options=[("Answer", "answer"), ("Retrieve only", "retrieve")],
@@ -6093,6 +6103,9 @@ class _ChatApp:
                      layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
         for i, title in enumerate(("⚙️ Settings", "🧪 Test", "📋 Code", "🧾 Request JSON", "📨 Last response")):
             tabs.set_title(i, title)
+        height = _css_height(self.view.height)
+        for tab in tabs.children if height else ():  # as tall as the conversation and the question box under it
+            tab.layout.max_height = f"calc({height} + 80px)"
         tabs.add_class("kbc-side")
         self.tabs = tabs
         return tabs
@@ -7280,7 +7293,8 @@ class BedrockChatView:
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
     questions: test questions for ask_all() and the window's Test tab: a list, or text with one per line.
-    stream: show answers in the window as they're written.
+    stream: show answers in the window as they're written. height: the height of the window's conversation. It
+    fills the browser window (at least 540 pixels); a number of pixels (800) or CSS ('70vh') sets it instead.
     retrieve_only: the window's Send only searches (Retrieve): every passage found, with no answer. The window's
     Answer / Retrieve only switch changes it; ask() always answers and retrieve() always only searches.
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'. max_rows: default cap for long tables
@@ -7315,6 +7329,7 @@ class BedrockChatView:
         files: Any = None,
         retrieve_only: bool = False,
         questions: Any = None,
+        height: int | str | None = None,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -7329,6 +7344,7 @@ class BedrockChatView:
         self.picked_files: Any = files  # what files= named; their s3:// paths once resolved ([] = all of them)
         self.model = model  # what model= named; the ID the window picked once it's open
         self.stream = stream
+        self.height = height  # the window's conversation (None: it fills the browser window)
         self.retrieve_only = bool(retrieve_only)  # the window's Send only searches; request() shows that request
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
@@ -8751,6 +8767,7 @@ def chat(
     files: Any = None,
     retrieve_only: bool = False,
     questions: Any = None,
+    height: int | str | None = None,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
@@ -8768,9 +8785,11 @@ def chat(
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
     region and profile; stream=False shows each answer only when it's complete. retrieve_only=True opens the window
     on Retrieve only: questions show every passage the search finds, and no answer. questions= fills the Test tab
-    with a list of test questions to ask with the window's settings (a list, or text with one per line)."""
+    with a list of test questions to ask with the window's settings (a list, or text with one per line). The window
+    fills the browser's height; height= sets the conversation's instead (800 pixels, or CSS such as '70vh')."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
-                           stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only)
+                           stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only,
+                           height=height)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
     for name, value in wanted.items():
         try:
