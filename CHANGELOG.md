@@ -60,7 +60,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   description and when it changed, and each model its ID, provider and price. Type part of a name, an ID, a
   description or a provider to narrow the list (what matched is highlighted), and Enter picks the first. A knowledge
   base ID or ARN pasted whole works even when it isn't listed, or when the role can't list knowledge bases. Files are
-  ticked in the same kind of list. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42))
+  ticked in the same kind of list. A click anywhere else in the window closes an open list. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42),
+  [#47](https://github.com/utkarsh5026/aws-analyzer/pull/47))
 - `s3.py`: `document()` shows a PDF's text laid out to read, the way **📄 Text** does, instead of each page's lines as
   `pypdf` reads them. A note says which running headers and footers it left out, and with `pictures=False` another
   gives the call that draws the pages without text. `ui.core.read_document(uri).text` still has every line. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))

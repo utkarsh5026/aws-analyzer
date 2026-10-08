@@ -3980,7 +3980,7 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .tests .cards{gap:6px;margin:8px 0 6px}
 .kbc .tests .card{padding:5px 10px;min-width:64px;border-radius:10px}
 .kbc .tests .card .v{font-size:13.5px}
-.kbc-app{box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
+.kbc-app{position:relative;isolation:isolate;box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
 .kbc-app *{box-sizing:border-box}
 .kbc-app .widget-html-content,.kbc-app .jupyter-widget-html-content{min-width:0}
 .kbc-app.kbc-app .kbc-head{padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--kc-line);gap:10px 14px}
@@ -4054,6 +4054,8 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box>*,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box>*{flex-shrink:0}
 .kbc-app.kbc-app .kbc-head,.kbc-app.kbc-app .kbc-pickers,.kbc-app.kbc-app .kbc-field{overflow:visible}
 .kbc-app.kbc-app .kbc-field{position:relative;margin:0}
+.kbc-app.kbc-app .kbc-field.kbc-open{z-index:41}
+.kbc-app.kbc-app .kbc-backdrop,.kbc-app.kbc-app .kbc-backdrop:hover:enabled,.kbc-app.kbc-app .kbc-backdrop:active:enabled,.kbc-app.kbc-app .kbc-backdrop:focus-visible{position:absolute;top:0;left:0;z-index:30;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;box-shadow:none;outline:none;transform:none;cursor:default}
 .kbc-app.kbc-app .kbc-file-bar{gap:6px;margin:10px 0 0}
 .kbc-app.kbc-app .kbc-trig{position:relative;min-height:46px;margin:0;overflow:visible}
 .kbc-app.kbc-app .kbc-trig>.kbc-trig-b{position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:0;border:1px solid var(--kc-line-2);border-radius:12px;background:var(--kc-surface);box-shadow:0 1px 2px rgba(15,23,42,.05)}
@@ -5601,7 +5603,10 @@ class _Picker:
     The search box finds every word anywhere in a line (name, ID, description...), best first (search_rank), with
     what it found marked. Enter picks the first line; when nothing matches, on_text gets the text (an ID the list
     doesn't hold). With multi=True a click ticks or unticks a line and the list stays open. on_pick gets the value
-    picked (the values, with multi); setting the value from code (set_value) doesn't call it."""
+    picked (the values, with multi); setting the value from code (set_value) doesn't call it.
+
+    While a list is open, the window's backdrop (an invisible button over the rest of the window, under the open
+    field) takes a click anywhere else and closes it, as a dropdown would."""
 
     def __init__(self, app: _ChatApp, label: str, noun: str, *, on_pick: Callable[[Any], None], placeholder: str,
                  empty: str, on_text: Callable[[str], None] | None = None, on_open: Callable[[], None] | None = None,
@@ -5702,6 +5707,7 @@ class _Picker:
             self.on_open()
         self.message = ""
         self.panel.layout.display = ""
+        self.app.backdrop.layout.display = ""
         _class_if(self.field, "kbc-open", True)
         self._draw_list()
         if hasattr(self.search, "focus"):  # ipywidgets 8
@@ -5711,6 +5717,8 @@ class _Picker:
         if not self.is_open:
             return
         self.panel.layout.display = "none"
+        if not any(p.is_open for p in self.app.pickers):
+            self.app.backdrop.layout.display = "none"
         _class_if(self.field, "kbc-open", False)
         self.app._quietly(self.search, value="")
         self.message = ""
@@ -5920,6 +5928,10 @@ class _ChatApp:
     def _build(self) -> Any:
         w, layout = self.w, self.w.Layout
         style = w.HTML(_CSS, layout=layout(display="none"))
+        # over the window while a picker's list is open (under that picker), so a click anywhere else closes it
+        self.backdrop = w.Button(layout=layout(display="none"))
+        self.backdrop.add_class("kbc-backdrop")
+        self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
         self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
         self.new_button = w.Button(description="+ New chat", tooltip="Forget this conversation: the next question "
                                    "starts a new Bedrock session", layout=layout(width="auto", flex="0 0 auto"))
@@ -5959,7 +5971,7 @@ class _ChatApp:
                                                                       margin="0 16px 8px 0"))
         side = self._side()
         body = w.HBox([chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
-        root = w.VBox([style, head, body], layout=layout(width="100%"))
+        root = w.VBox([style, head, body, self.backdrop], layout=layout(width="100%"))
         root.add_class("kbc-app")
 
         self.bubbles = [w.HTML(_wrap(self._hello()), layout=layout(width="auto"))]
@@ -6389,6 +6401,11 @@ class _ChatApp:
         )
 
     # ---------------------------------------------------------------- plumbing
+
+    def _close_lists(self) -> None:
+        """A click on the backdrop, anywhere in the window but the open list: closes it."""
+        for picker in self.pickers:
+            picker.close()
 
     def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(handler)
