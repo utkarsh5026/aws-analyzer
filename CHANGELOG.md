@@ -24,6 +24,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   next questions at one data source without ending the conversation. From code: `chat("support-docs",
   data_source="faq")` or `ui.use(data_source="faq")`. **Edit JSON** reads it back from the request's filter. It needs
   `bedrock:ListDataSources` (by ID it works without).
+- `bedrock_chat.py`: **📄 Pick files** in the chat window lists the knowledge base's indexed files; type part of a
+  name and pick one or several, and the next questions search only those files (click a chip to drop one, **All
+  files** to search everything again). `ui.files()` lists them as a report, with failed ones marked, and
+  `ui.use(files=["refund-policy.pdf", "faq/returns.md"])` or `chat(..., files=[...])` picks them from code, by name,
+  path or `s3://` path. It needs `bedrock:ListKnowledgeBaseDocuments` (by `s3://` path it works without).
 
 ## [0.7.0] - 2026-10-06
 

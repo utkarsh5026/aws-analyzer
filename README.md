@@ -990,7 +990,7 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top, with a Pick files button; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
 </picture>
 
 <p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
@@ -1003,6 +1003,7 @@ from bedrock_chat import chat              # installed with pip: from aws_analyz
 chat()                                     # pick the knowledge base and the model in the window
 chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
 chat("support-docs", data_source="faq")    # ask only one of its data sources (a name or ID)
+chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ```
 
@@ -1010,8 +1011,10 @@ The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip ins
 browser tab). Without it, or outside Jupyter, every command below still works as a report.
 
 - **The pickers.** The knowledge base, the model and, when the knowledge base has more than one, the **data source**
-  questions search ("All data sources" by default). Another data source or model keeps the conversation; another
-  knowledge base starts a new one.
+  questions search ("All data sources" by default). **📄 Pick files** lists the knowledge base's indexed files: type
+  part of a name, choose it, and the next questions search only the files picked (shown as chips; click one to drop
+  it, or **All files**). Another data source, file or model keeps the conversation; another knowledge base starts a
+  new one.
 - **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
   one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
@@ -1058,7 +1061,8 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `use(kb=None, model=None, data_source=None)` | Switches the knowledge base (a new conversation), the model or the data source questions search (the same one): `use(data_source="faq")`, a list of them, or `"all"` |
+| `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base (a new conversation), the model, or what questions search (the same one): `use(data_source="faq")`, `use(files=["refund-policy.pdf", "faq/returns.md"])` (names, paths in the bucket or `s3://` paths), or `"all"` |
+| `files(match=None)` | The knowledge base's files to pick from: name, folder, data source, whether it's indexed, when it changed, and which ones questions search. `files("refund")` keeps those whose path contains it |
 | `kbs()` | The knowledge bases in the region: name, ID, status, description and when each changed |
 | `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
 
@@ -1103,7 +1107,9 @@ params = core.request("support-docs", "refund window?", {"n": 8})        # the r
 a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
 a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)  # a follow-up
 a = core.ask("support-docs", "refund window?", data_source="faq")       # one data source: a.data_sources
+a = core.ask("support-docs", "refund window?", files=["refund-policy.pdf"])   # only these files: a.files
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
+core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
 core.schema().fields["temperature"]   # Field: path, type, range, what it does
 ```
@@ -1111,7 +1117,8 @@ core.schema().fields["temperature"]   # Field: path, type, range, what it does
 The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
 `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`,
 `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
-`describe_setting`, `answer_cost`, and the findings: `settings_findings` and `answer_findings`.
+`files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`,
+`answer_cost`, and the findings: `settings_findings` and `answer_findings`.
 
 </details>
 
@@ -1135,6 +1142,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 |:---|:---|
 | `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
 | `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
+| `bedrock:ListKnowledgeBaseDocuments` | **Pick files**, `files`, and `files=` by name (an `s3://` path works without it) |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
 

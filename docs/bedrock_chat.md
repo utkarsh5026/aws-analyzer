@@ -56,6 +56,7 @@ The examples use a knowledge base called `support-docs` holding support policies
     chat()                                         # pick the knowledge base and the model in the window
     chat("support-docs", model="sonnet")           # or start on these: a name, ID or ARN; a model ID or short name
     chat("support-docs", data_source="faq")        # ask only one of its data sources (a name or ID)
+    chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
     chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
     ```
 
@@ -77,8 +78,8 @@ The examples use a knowledge base called `support-docs` holding support policies
 
 Type a question and press Enter. The answer appears as it's written, then settles into its final form: the text with each cited span shaded and numbered, who answered and how long it took (and how long until the first words), how many sources it cites, how much of it they back up, and an estimated cost. Answers written in markdown are laid out as such: headings, bullet and numbered lists, **bold** and *italic*, tables, code blocks and links, with the cited spans still shaded inside them.
 
-![The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-light.webp#only-light){ width="984" height="842" loading=lazy }
-![The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-dark.webp#only-dark){ width="984" height="842" loading=lazy }
+![The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top, with a Pick files button; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-light.webp#only-light){ width="984" height="842" loading=lazy }
+![The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top, with a Pick files button; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-dark.webp#only-dark){ width="984" height="842" loading=lazy }
 /// caption
 Two questions about refunds, in the same Bedrock session. The second asks for a list, and the answer's markdown is laid out: bullets, bold, and a citation after each cited span.
 ///
@@ -88,8 +89,15 @@ Two questions about refunds, in the same Bedrock session. The second asks for a 
 - **Request and response JSON**, folded under each answer: exactly what that question sent and what came back, so you can compare answers asked with different settings.
 - **Findings** appear under an answer when something's off, and say which setting to try: Bedrock's “unable to assist” reply (retrieve more passages, try HYBRID search, or loosen the filter), an answer that cites nothing, one mostly not backed by its sources, a guardrail that stepped in, or an answer cut off by `max_tokens`.
 - **Data source.** When the knowledge base has more than one data source (an S3 bucket of policies, a crawled help site), a **Data source** picker sits next to it: pick one and the next questions search only that one, until you pick another or **All data sources**. It's sent as a filter on the data source ID Bedrock gives every chunk, so it needs no metadata files and works together with the `filter` setting. The conversation goes on.
-- **Follow-ups** keep the conversation: Bedrock remembers the earlier questions. **New chat** starts over, and so does picking another knowledge base. Another model or data source keeps the conversation.
+- **Files.** **📄 Pick files** lists the files the knowledge base has indexed (from its S3 and custom data sources). Type part of a name and choose it from the list (Enter takes the only match, and a full `s3://` path works too): the next questions search only the files picked, shown as chips next to the button. Click a chip to drop that file, or **All files** to search every file again. It's a filter on the file path Bedrock gives every chunk, so it works together with the data source and the `filter` setting. `ui.files()` lists the same files as a report, with failed ones marked.
+- **Follow-ups** keep the conversation: Bedrock remembers the earlier questions. **New chat** starts over, and so does picking another knowledge base. Another model, data source or set of files keeps the conversation.
 - The line under the box counts the questions and the estimated cost so far. An error shows where the answer would have been, says what to do, and puts your question back in the box.
+
+![The chat window with two files picked next to Pick files, refund-policy.pdf and eu-returns.pdf, each a chip with a ✕, a box to type another file's name and an All files button; the last answer, about refund times, says under the model's name that only those two files were searched](images/chat-files-light.webp#only-light){ width="984" height="882" loading=lazy }
+![The chat window with two files picked next to Pick files, refund-policy.pdf and eu-returns.pdf, each a chip with a ✕, a box to type another file's name and an All files button; the last answer, about refund times, says under the model's name that only those two files were searched](images/chat-files-dark.webp#only-dark){ width="984" height="882" loading=lazy }
+/// caption
+Two files picked: the next answers come only from them, and the conversation goes on.
+///
 
 ## Settings { #settings }
 
@@ -137,7 +145,7 @@ Values are forgiving: `"0.2"` and `0.2`, `"hybrid"` and `"HYBRID"`, JSON or a Py
 
 ## The request as JSON { #json }
 
-The **🧾 Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base, model and data source from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
+The **🧾 Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base, model, data source and files from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
 
 ![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="882" loading=lazy }
 ![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="882" loading=lazy }
@@ -146,7 +154,7 @@ The next request, continuing the conversation. Highlighted keys are your setting
 ///
 
 - **JSON** shows the same request as plain JSON text, and **Python** the same call with boto3, ready to paste into your own code, both in colour. One click on either selects all of it.
-- **Edit JSON** opens the request as text. Add, change or delete any field, then **Apply**: the settings, the knowledge base, the model and the data source (a condition on `x-amz-bedrock-kb-data-source-id` in the filter) follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes. While the editor is open, it's the view: **Tree**, **JSON** and **Python** wait until you Apply or Cancel.
+- **Edit JSON** opens the request as text. Add, change or delete any field, then **Apply**: the settings, the knowledge base, the model, the data source and the files (conditions on `x-amz-bedrock-kb-data-source-id` and `x-amz-bedrock-kb-source-uri` in the filter) follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes. While the editor is open, it's the view: **Tree**, **JSON** and **Python** wait until you Apply or Cancel.
 - If the request changes while you're editing (a setting changed in the Settings tab or from another cell, another model, an answer that started a session), an editor you haven't touched takes the new request. One you have keeps your edits and says what Apply would undo; **Start over** puts the request as it is now in the box.
 
 ![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-light.webp#only-light){ width="984" height="842" loading=lazy }
@@ -174,6 +182,8 @@ ui.ask("How long do refunds take?")    # the answer with [1][2] citations, sourc
 ui.ask("And for digital goods?")       # a follow-up in the same conversation
 ui.set(temperature=0.2, n=8)           # change settings; None removes one
 ui.use(data_source="faq")              # ask only one data source ("all" for every one)
+ui.files()                             # the knowledge base's files, to pick from
+ui.use(files=["refund-policy.pdf"])    # ask only these files: names, paths or s3:// paths ("all" for every one)
 ui.unset("temperature")                # stop sending one
 ui.settings()                          # every setting in plain English, with warnings
 ui.fields("rerank")                    # every field you can send that mentions "rerank"
@@ -201,11 +211,13 @@ params = core.request("support-docs", "refund window?", {"n": 8, "temperature": 
 a = core.ask("support-docs", "refund window?", {"n": 8}, model="sonnet")
 a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)              # a follow-up
 a = core.ask("support-docs", "refund window?", data_source="faq")                       # a.data_sources: {ID: name}
+a = core.ask("support-docs", "refund window?", files=["refund-policy.pdf"])             # a.files: s3:// paths
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
+core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.schema().fields["temperature"]   # Field: its path, type, range and what it does
 ```
 
-The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `describe_setting`, `answer_cost`, and the findings, `settings_findings` and `answer_findings`.
+The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`, `answer_cost`, and the findings, `settings_findings` and `answer_findings`.
 
 ## Cost { #cost }
 
@@ -220,7 +232,7 @@ ui.app()
 
 ## Permissions { #permissions }
 
-Everything is read-only: RetrieveAndGenerate reads the knowledge base and generates text. A list the role can't read (knowledge bases, models) becomes a box to type into instead of a picker, with a note that says which permission is missing; without the data source list, questions search every data source unless you name one by its ID. This policy covers everything:
+Everything is read-only: RetrieveAndGenerate reads the knowledge base and generates text. A list the role can't read (knowledge bases, models) becomes a box to type into instead of a picker, with a note that says which permission is missing; without the data source list, questions search every data source unless you name one by its ID, and without the file list, files are named by their `s3://` paths. This policy covers everything:
 
 ```json title="IAM policy"
 {
@@ -229,8 +241,8 @@ Everything is read-only: RetrieveAndGenerate reads the knowledge base and genera
     {
       "Sid": "AskKnowledgeBases",
       "Effect": "Allow",
-      "Action": ["bedrock:ListKnowledgeBases", "bedrock:ListDataSources", "bedrock:Retrieve",
-                 "bedrock:RetrieveAndGenerate"],
+      "Action": ["bedrock:ListKnowledgeBases", "bedrock:ListDataSources", "bedrock:ListKnowledgeBaseDocuments",
+                 "bedrock:Retrieve", "bedrock:RetrieveAndGenerate"],
       "Resource": "*"
     },
     {
@@ -253,6 +265,7 @@ Everything is read-only: RetrieveAndGenerate reads the knowledge base and genera
 |---|---|
 | `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
 | `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
+| `bedrock:ListKnowledgeBaseDocuments` | **Pick files**, `files`, and `files=` by name (an `s3://` path works without it) |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`; streamed answers use the same permission |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
 | `kms:Decrypt`, `kms:GenerateDataKey` on the key | Only with the `kms_key` setting |
@@ -305,7 +318,7 @@ Every `BedrockChatView` command. `ui.help()` prints the same list grouped by tas
 
 | Command | What it shows |
 |---|---|
-| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, **values)` | Opens the window and returns the view behind it |
+| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, **values)` | Opens the window and returns the view behind it |
 | `app()` | The chat window |
 | `ask(question)` | An answer with \[1\]\[2\] citations, sources, findings and cost, as a report, in the same conversation |
 | `new_chat()` | Forgets the conversation; the settings stay |
@@ -316,7 +329,8 @@ Every `BedrockChatView` command. `ui.help()` prints the same list grouped by tas
 | `unset(*names)` | Stops sending settings |
 | `fields(match=None)` | Every field RetrieveAndGenerate takes: its name, type and range, what it does, and its path |
 | `request(question=None)` | The JSON the next question sends, and the same call in Python |
-| `use(kb=None, model=None, data_source=None)` | Switches the knowledge base, the model or the data source questions search |
+| `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base, the model, or the data source or files questions search |
+| `files(match=None)` | The knowledge base's files to pick from, whether each is indexed, and which ones questions search |
 | `kbs()` | The knowledge bases in the region |
 | `models(match=None)` | The models you can chat with, how each is called, and its price |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |

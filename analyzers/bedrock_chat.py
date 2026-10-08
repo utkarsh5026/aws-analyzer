@@ -35,6 +35,8 @@ More
     ui.ask("How long do refunds take?")               # an answer as a report, in the same conversation
     ui.set(temperature=0.2, search_type="hybrid")     # change settings (an open window follows)
     ui.use(data_source="faq")                         # ask only one of the knowledge base's data sources
+    ui.files()                                        # the knowledge base's files, to pick from
+    ui.use(files=["refund-policy.pdf", "faq/returns.md"])   # ask only these files ("all" for every file)
     ui.set("generationConfiguration.performanceConfig.latency", "optimized")   # any field, by its path
     ui.unset("temperature")                           # stop sending one
     ui.settings()                                     # what's sent, in plain English, with warnings
@@ -174,6 +176,8 @@ _MODEL_ALIASES = {
 # What every new chat sends: the passages to retrieve (Bedrock's own default, shown so it's easy to change).
 DEFAULT_SETTINGS: dict[str, Any] = {"n": 5}
 
+FILE_LIMIT = 5_000  # files listed to pick from; one past it can still be named by its s3:// path
+SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "METADATA_UPDATE_FAILED"}  # has chunks
 MAX_QUESTION_CHARS = 1000  # RetrieveAndGenerate takes questions (input.text) of up to 1,000 characters
 
 # A prompt template to start from when you add the `prompt` setting. $search_results$ is where Bedrock puts the
@@ -589,6 +593,36 @@ class DataSource:
 
 
 @dataclass
+class KBDocument:
+    """One document (file or record) of a data source, and whether it's searchable."""
+
+    data_source_id: str
+    uri: str  # s3://... for S3 data sources, the document ID for custom ones
+    status: str  # INDEXED | FAILED | PENDING | IN_PROGRESS | IGNORED | PARTIALLY_INDEXED | ...
+    reason: str = ""  # why it failed or was ignored
+    updated: datetime | None = None
+
+    @property
+    def name(self) -> str:
+        return source_name(self.uri)
+
+
+@dataclass
+class FileList:
+    """The files of a knowledge base, as ListKnowledgeBaseDocuments lists them, to pick from."""
+
+    kb_id: str
+    documents: list[KBDocument] = field(default_factory=list)
+    truncated: bool = False  # stopped at FILE_LIMIT: there are more
+    errors: dict[str, str] = field(default_factory=dict)  # data source ID -> why its files couldn't be listed
+
+    @property
+    def searchable(self) -> list[KBDocument]:
+        """The files a question can find something in: indexed, at least in part."""
+        return [d for d in self.documents if d.status in SEARCHABLE]
+
+
+@dataclass
 class ModelInfo:
     """A model ask() can use, and how to call it."""
 
@@ -773,6 +807,7 @@ class Answer:
     output_tokens: int = 0
     notes: list[str] = field(default_factory=list)  # what happened on the way (a new session, no streaming)
     data_sources: dict[str, str] = field(default_factory=dict)  # ID -> name of the only ones searched; {} = all
+    files: list[str] = field(default_factory=list)  # s3:// paths of the only files searched; [] = all
 
     @property
     def cited(self) -> list[int]:
@@ -825,6 +860,23 @@ def _page_number(value: Any) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def parse_document(desc: dict[str, Any]) -> KBDocument:
+    """One ListKnowledgeBaseDocuments 'documentDetails' entry -> KBDocument."""
+    ident = desc.get("identifier") or {}
+    uri = (
+        (ident.get("s3") or {}).get("uri")
+        or (ident.get("custom") or {}).get("id")
+        or ""
+    )
+    return KBDocument(
+        data_source_id=desc.get("dataSourceId", ""),
+        uri=uri,
+        status=desc.get("status", ""),
+        reason=desc.get("statusReason") or "",
+        updated=desc.get("updatedAt"),
+    )
 
 
 def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
@@ -1449,15 +1501,40 @@ def describe_sources(sources: dict[str, str]) -> str:
     return f"data source{'s' if len(names) > 1 else ''} {listed}"
 
 
-def split_data_sources(condition: Any) -> tuple[list[str], Any]:
-    """The opposite of with_data_sources(): a RetrievalFilter -> ([IDs of the data sources it keeps], the rest of the
-    filter, or None). A filter without a data source condition comes back as it is, with []."""
+SOURCE_URI_KEY = "x-amz-bedrock-kb-source-uri"  # Bedrock tags every chunk with the file it came from
 
-    def ids_of(part: Any) -> list[str] | None:
+
+def files_filter(uris: Iterable[str]) -> dict[str, Any] | None:
+    """A RetrievalFilter that keeps only passages from these files (their s3:// paths, as Bedrock stores them):
+    {'equals': ...} for one, {'in': ...} for several, None for none."""
+    unique = list(dict.fromkeys(str(u) for u in uris if u))
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return {"equals": {"key": SOURCE_URI_KEY, "value": unique[0]}}
+    return {"in": {"key": SOURCE_URI_KEY, "value": unique}}
+
+
+def with_files(condition: dict[str, Any] | None, uris: Iterable[str]) -> dict[str, Any] | None:
+    """A RetrievalFilter narrowed to these files: both must match."""
+    only = files_filter(uris)
+    if only is None:
+        return condition
+    if not condition:
+        return only
+    rest = condition["andAll"] if list(condition) == ["andAll"] else [condition]
+    return {"andAll": [only, *rest]}
+
+
+def split_condition(condition: Any, key: str) -> tuple[list[str], Any]:
+    """Takes the condition on one of Bedrock's own keys (DATA_SOURCE_KEY, SOURCE_URI_KEY) out of a RetrievalFilter:
+    -> ([the values it allows], the rest of the filter, or None). A filter without one comes back as it is, with []."""
+
+    def values_of(part: Any) -> list[str] | None:
         if not isinstance(part, dict) or len(part) != 1:
             return None
         op, body = next(iter(part.items()))
-        if not isinstance(body, dict) or body.get("key") != DATA_SOURCE_KEY:
+        if not isinstance(body, dict) or body.get("key") != key:
             return None
         value = body.get("value")
         if op == "equals" and isinstance(value, str):
@@ -1466,17 +1543,78 @@ def split_data_sources(condition: Any) -> tuple[list[str], Any]:
             return list(value)
         return None
 
-    found = ids_of(condition)
+    found = values_of(condition)
     if found is not None:
         return found, None
     if isinstance(condition, dict) and list(condition) == ["andAll"] and isinstance(condition["andAll"], list):
         parts = condition["andAll"]
         for i, part in enumerate(parts):
-            found = ids_of(part)
+            found = values_of(part)
             if found is not None:
                 rest = parts[:i] + parts[i + 1 :]
                 return found, rest[0] if len(rest) == 1 else {"andAll": rest} if rest else None
     return [], condition
+
+
+def split_data_sources(condition: Any) -> tuple[list[str], Any]:
+    """The opposite of with_data_sources(): a RetrievalFilter -> ([IDs of the data sources it keeps], the rest of the
+    filter, or None). A filter without a data source condition comes back as it is, with []."""
+    return split_condition(condition, DATA_SOURCE_KEY)
+
+
+def file_path(uri: str) -> str:
+    """'s3://support-docs-bucket/policies/refund-policy.pdf' -> 'policies/refund-policy.pdf' (the path in its bucket)."""
+    rest = uri.split("://", 1)[1] if "://" in uri else uri
+    return rest.split("/", 1)[1] if "/" in rest else rest
+
+
+def file_labels(uris: Iterable[str]) -> dict[str, str]:
+    """{s3:// path: how to show it}: its path in the bucket, or bucket and path when two buckets hold the same one."""
+    uris = list(dict.fromkeys(uris))
+    counts = Counter(file_path(u) for u in uris)
+    return {u: file_path(u) if counts[file_path(u)] == 1 else u.split("://", 1)[-1] for u in uris}
+
+
+def match_files(documents: Iterable[KBDocument], wanted: Iterable[str]) -> tuple[list[str], list[str]]:
+    """Files named by s3:// path, path in the bucket ('policies/refund-policy.pdf') or name ('refund-policy.pdf', any
+    case) -> ([their s3:// paths], [what's wrong with the ones that name no file, or several]). An s3:// path is
+    taken as it is, listed or not."""
+    docs = [d for d in documents if d.uri]
+    labels = file_labels(d.uri for d in docs)
+    found: list[str] = []
+    problems: list[str] = []
+    for w in wanted:
+        if "://" in w:
+            found.append(w)
+            continue
+        low = w.lower().lstrip("/")
+        hits = list(dict.fromkeys(
+            d.uri for d in docs if labels[d.uri].lower() == low or d.uri.lower().endswith("/" + low)))
+        if len(hits) == 1:
+            found.append(hits[0])
+        elif hits:
+            shown = ", ".join(repr(labels[u]) for u in hits[:4]) + (", …" if len(hits) > 4 else "")
+            problems.append(f"{w!r} names {len(hits)} files ({shown}): pass more of its path, like "
+                            f"{labels[hits[0]]!r}")
+        else:
+            names: dict[str, list[str]] = {}
+            for d in docs:
+                names.setdefault(source_name(d.uri).lower(), []).append(labels[d.uri])
+            close = difflib.get_close_matches(source_name(low), list(names), n=2, cutoff=0.6)
+            guesses = [label for c in close for label in names[c]][:3]
+            hint = f" Did you mean {' or '.join(map(repr, guesses))}?" if guesses else ""
+            problems.append(f"No file {w!r} in the knowledge base.{hint}")
+    return list(dict.fromkeys(found)), problems
+
+
+def describe_files(uris: list[str]) -> str:
+    """The files searched, in words: 'every file', "file 'refund-policy.pdf'", '3 files'."""
+    if not uris:
+        return "every file"
+    if len(uris) == 1:
+        return f"file {source_name(uris[0])!r}"
+    names = [repr(source_name(u)) for u in uris]
+    return f"files {', '.join(names[:-1])} and {names[-1]}" if len(uris) <= 3 else f"{len(uris)} files"
 
 
 def rerank_arn(model: Any, region: str) -> str:
@@ -1607,10 +1745,11 @@ def build_request(
     session_id: str | None = None,
     region: str = "",
     data_sources: Iterable[str] = (),
+    files: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The RetrieveAndGenerate request for a question: the knowledge base, the model, and each setting at its place
-    in the JSON. settings is {key: value} as normalize_settings() returns it. data_sources: the IDs of the only data
-    sources to search, added to the filter. Required fields that can only have one value
+    in the JSON. settings is {key: value} as normalize_settings() returns it. data_sources (IDs) and files (s3://
+    paths) are the only ones to search, added to the filter. Required fields that can only have one value
     (rerankingConfiguration.type) are filled in. No AWS call."""
     params: dict[str, Any] = {"input": {"text": question}}
     if session_id:
@@ -1624,7 +1763,7 @@ def build_request(
             continue
         value = rerank_arn(settings[key], region) if key == "reranker" else copy.deepcopy(settings[key])
         _put(params, f.path, value)
-    only = with_data_sources(_get(params, _FILTER_PATH), data_sources)
+    only = with_data_sources(with_files(_get(params, _FILTER_PATH), files), data_sources)
     if only is not None:
         _put(params, _FILTER_PATH, only)
     for path, value in schema.auto:
@@ -1636,8 +1775,8 @@ def build_request(
 
 def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[str, Any], dict[str, Any]]:
     """A RetrieveAndGenerate request (one you edited, say) -> (picked, settings): picked holds the 'question',
-    'knowledgeBaseId', 'modelArn', 'sessionId' and 'dataSources' (IDs) it names, and settings is {key: value} like
-    normalize_settings()'s. The opposite of build_request(). A ValueError names anything the chat can't send."""
+    'knowledgeBaseId', 'modelArn', 'sessionId', 'dataSources' (IDs) and 'files' (s3:// paths) it names, and settings
+    is {key: value} like normalize_settings()'s. The opposite of build_request(). A ValueError names anything the chat can't send."""
     if not isinstance(params, dict):
         raise ValueError("The request is a JSON object: {\"input\": ..., \"retrieveAndGenerateConfiguration\": ...}")
     by_path = {f.path: f for f in schema.fields.values()}
@@ -1659,8 +1798,11 @@ def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[
                                     "KNOWLEDGE_BASE")
             elif here in auto:
                 continue
-            elif here == _FILTER_PATH and split_data_sources(value)[0]:
-                picked["dataSources"], rest = split_data_sources(value)
+            elif here == _FILTER_PATH and (split_data_sources(value)[0] or split_condition(value, SOURCE_URI_KEY)[0]):
+                ids, rest = split_data_sources(value)
+                uris, rest = split_condition(rest, SOURCE_URI_KEY)
+                picked.update({"dataSources": ids} if ids else {})
+                picked.update({"files": uris} if uris else {})
                 if rest is not None:
                     try:
                         values[by_path[here].key] = coerce_setting(by_path[here], rest)
@@ -1783,6 +1925,10 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
             tries.append("match exact words too (set(search_type='HYBRID'))")
         if a.settings.get("filter") is not None:
             tries.append("check the filter isn't too narrow (unset('filter'))")
+        if a.files:
+            tries.append(f"search more than {describe_files(a.files)} (use(files='all'))")
+        if a.data_sources:
+            tries.append("search every data source (use(data_source='all'))")
         what = "Bedrock's default \"unable to assist\" reply" if text else "An empty answer"
         found.append(("warn", f"{what}: the passages it found don't hold the answer, or none were found. Try to "
                               + (", or ".join(tries) if tries else "ask with the words your documents use") + "."))
@@ -1797,6 +1943,16 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
     elif a.grounded_share < 0.5:
         found.append(("warn", f"Only {a.grounded_share:.0%} of the answer is backed by a citation; the rest may be the "
                               "model's own knowledge. Check the sentences without a [n]."))
+    outside = [i for i, p in enumerate(a.sources, 1)
+               if (a.data_sources and p.data_source_id and p.data_source_id not in a.data_sources)
+               or (a.files and p.uri and p.uri not in a.files)]
+    if outside:
+        picked = " and ".join(filter(None, [describe_sources(a.data_sources) if a.data_sources else "",
+                                            describe_files(a.files) if a.files else ""]))
+        found.append(("warn", f"{_plural(len(outside), 'source')} ({', '.join(f'[{i}]' for i in outside[:5])}) came "
+                              f"from outside {picked}: this vector store didn't apply the filter on Bedrock's own "
+                              "keys. Tag the files with your own metadata instead (a <file>.metadata.json), sync, and "
+                              "use the filter setting."))
     limit = a.settings.get("max_tokens")
     if limit and a.output_tokens >= 0.9 * limit:
         found.append(("warn", f"The answer is about as long as max_tokens allows ({limit:,}), so it may have been cut "
@@ -1987,6 +2143,7 @@ class BedrockChatAnalyzer:
         self._names: dict[str, str] | None = None  # knowledge base ID -> name
         self._kbs: list[KnowledgeBase] | None = None
         self._sources: dict[str, list[DataSource]] = {}  # knowledge base ID -> its data sources, as last listed
+        self._files: dict[str, FileList] = {}  # knowledge base ID -> its files, as last listed
         self._schema: Schema | None = None
         self.stream_problem: str | None = None  # why answers can't stream here, once a streamed call has failed
 
@@ -2094,6 +2251,12 @@ class BedrockChatAnalyzer:
         """{ID: name} of a knowledge base's data sources (one ListDataSources, cached)."""
         return {ds.id: ds.name for ds in self.data_sources(kb, refresh=refresh)}
 
+    def file_status(self, kb_id: str, uri: str) -> str:
+        """A file's status (INDEXED, FAILED ...) when its knowledge base's files have been listed ('' otherwise).
+        Makes no AWS call."""
+        listing = self._files.get(kb_id)
+        return next((d.status for d in listing.documents if d.uri == uri), "") if listing else ""
+
     def data_source_name(self, kb_id: str, ds_id: str) -> str:
         """The name of a data source already listed (its ID otherwise). Makes no AWS call."""
         return next((ds.name for ds in self._sources.get(kb_id, []) if ds.id == ds_id and ds.name), ds_id)
@@ -2134,6 +2297,62 @@ class BedrockChatAnalyzer:
             listed = ", ".join(f"{name} ({ds_id})" for ds_id, name in sorted(names.items(), key=lambda i: i[1].lower()))
             raise ValueError(text + (f" Its data sources: {listed}." if names else " It has no data sources."))
         return found
+
+    def files(self, kb: str, *, limit: int = FILE_LIMIT, refresh: bool = False) -> FileList:
+        """The files a knowledge base has indexed (or tried to), from each data source that keeps a list of them (S3
+        and custom ones): s3:// path, status, data source and when it changed. Up to `limit` of them, cached. A data
+        source whose files can't be listed is recorded in `errors`."""
+        kb_id = self.resolve(kb)
+        if refresh or kb_id not in self._files:
+            listing = FileList(kb_id)
+            for ds in self.data_sources(kb_id):
+                try:
+                    for page in self.client.get_paginator("list_knowledge_base_documents").paginate(
+                            knowledgeBaseId=kb_id, dataSourceId=ds.id):
+                        for desc in page.get("documentDetails", []):
+                            if len(listing.documents) >= limit:
+                                listing.truncated = True
+                                break
+                            listing.documents.append(parse_document(desc))
+                        if listing.truncated:
+                            break
+                except (ClientError, BotoCoreError) as exc:
+                    listing.errors[ds.id] = _error_name(exc)
+                if listing.truncated:
+                    break
+            self._files[kb_id] = listing
+        return self._files[kb_id]
+
+    def resolve_files(self, kb: str, files: Any) -> list[str]:
+        """The s3:// paths of the files questions should search, from files=: s3:// paths, paths in the bucket
+        ('policies/refund-policy.pdf') or file names ('refund-policy.pdf', any case), or a list of them. None, [] or
+        'all' -> [] (every file). Names are looked up in files(); a name that matches no file, or several, raises a
+        ValueError that says so."""
+        if files is None or (isinstance(files, str) and files.strip().lower() in ("all", "*")):
+            return []
+        items = list(files) if isinstance(files, (list, tuple, set, frozenset)) else [files]
+        wanted = [str(item.uri if isinstance(item, KBDocument) else item).strip() for item in items]
+        if any(not w for w in wanted):
+            raise ValueError("files= takes file names or s3:// paths, or a list of them")
+        if all("://" in w for w in wanted):
+            return list(dict.fromkeys(wanted))
+        kb_id = self.resolve(kb)
+        cached = kb_id in self._files
+        listing = self.files(kb_id)
+        uris, problems = match_files(listing.documents, wanted)
+        if problems and cached:  # maybe added since they were listed
+            listing = self.files(kb_id, refresh=True)
+            uris, problems = match_files(listing.documents, wanted)
+        if problems:
+            text = ". ".join(p.rstrip(".") for p in problems) + "."
+            if listing.truncated:
+                text += f" Only the first {len(listing.documents):,} files were listed: pass its full s3:// path."
+            elif listing.errors and not listing.documents:
+                code = next(iter(listing.errors.values()))
+                text += (f" The files couldn't be listed ({_why(code, 'bedrock:ListKnowledgeBaseDocuments')}): pass "
+                         "full s3:// paths instead.")
+            raise ValueError(text)
+        return uris
 
     def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
         if service not in self._clients:
@@ -2259,16 +2478,19 @@ class BedrockChatAnalyzer:
         model: str | None = None,
         session_id: str | None = None,
         data_source: Any = None,
+        files: Any = None,
     ) -> dict[str, Any]:
         """The RetrieveAndGenerate request ask() would send, without sending it: the knowledge base and model
-        resolved, each setting at its place in the JSON, and data_source= (a name or ID, or a list) in the filter."""
+        resolved, each setting at its place in the JSON, and data_source= (a name or ID, or a list) and files= (names
+        or s3:// paths) in the filter."""
         schema = self.schema()
         values = normalize_settings(settings, schema)
         kb_id = self.resolve(kb)
         sources = self.resolve_sources(kb_id, data_source)
+        uris = self.resolve_files(kb_id, files)
         _, arn = self.resolve_model(model)
         return build_request(_question_text(question), kb_id, arn, values, schema, session_id=session_id,
-                             region=self.region, data_sources=sources)
+                             region=self.region, data_sources=sources, files=uris)
 
     def send(
         self,
@@ -2348,24 +2570,27 @@ class BedrockChatAnalyzer:
         stream: bool = False,
         on_text: Callable[[str], None] | None = None,
         data_source: Any = None,
+        files: Any = None,
     ) -> Answer:
         """An answer from the knowledge base (RetrieveAndGenerate), with its citations, sources, request and response.
         session_id continues an earlier conversation; if Bedrock has ended it, a new one starts and the Answer says
         so. stream=True calls on_text with the answer so far as it's written. data_source= searches only that data
-        source (a name or ID, or a list of them)."""
+        source (a name or ID, or a list of them), and files= only those files (names or s3:// paths)."""
         values = normalize_settings(settings, self.schema())
         sources = self.resolve_sources(kb, data_source)
-        params = self.request(kb, question, values, model=model, session_id=session_id, data_source=sources)
+        uris = self.resolve_files(kb, files)
+        params = self.request(kb, question, values, model=model, session_id=session_id, data_source=sources,
+                              files=uris)
         try:
             answer = self.send(params, values, stream=stream, on_text=on_text)
-            answer.data_sources = sources
+            answer.data_sources, answer.files = sources, uris
             return answer
         except ClientError as exc:
             if not session_id or not _session_expired(exc):
                 raise
         params.pop("sessionId", None)
         answer = self.send(params, values, stream=stream, on_text=on_text)
-        answer.data_sources = sources
+        answer.data_sources, answer.files = sources, uris
         answer.notes.append("The earlier conversation had expired (Bedrock ends them after a while), so this question "
                             "started a new one: it was answered without the earlier questions.")
         return answer
@@ -2696,6 +2921,9 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-x{padding:0;min-width:22px;height:22px;line-height:20px;font-size:11px;border-radius:999px;background:transparent;border-color:transparent;opacity:.55}
 .kbc-app.kbc-app .kbc-x:hover:enabled{opacity:1;background:rgba(239,68,68,.12);color:#dc2626}
 .kbc-app.kbc-app .kbc-small{height:24px;line-height:22px;font-size:11.5px;padding:0 11px;border-radius:999px}
+.kbc-app.kbc-app .kbc-files{gap:6px}
+.kbc-app.kbc-app .kbc-file{height:26px;line-height:24px;font-size:12px;padding:0 10px;margin:0;border-radius:999px;background:var(--kc-soft);border:1px solid var(--kc-accent);color:var(--kc-accent)}
+.kbc-app.kbc-app .kbc-file:hover:enabled{border-color:#dc2626;color:#dc2626;background:rgba(239,68,68,.08)}
 .kbc-app.kbc-app .kbc-log{border:1px solid var(--kc-line);border-radius:18px;padding:12px 14px;background:var(--kc-tint)}
 .kbc-app.kbc-app .kbc-composer{margin-top:10px;padding:5px 5px 5px 8px;border:1px solid var(--kc-line-2);border-radius:999px;background:var(--kc-surface);box-shadow:var(--kc-shadow);align-items:center;transition:border-color .15s,box-shadow .15s}
 .kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
@@ -4060,8 +4288,9 @@ class _ChatApp:
         self.kb_pick = self._kb_picker()
         self.source_pick = self._source_picker()
         self.model_pick = self._model_picker()
+        self.files_box = self._files_picker()
         top = w.HBox([self.title, self.new_button], layout=layout(width="100%", align_items="center"))
-        pickers = w.HBox([self.kb_pick, self.source_pick, self.model_pick],
+        pickers = w.HBox([self.kb_pick, self.source_pick, self.model_pick, self.files_box],
                          layout=layout(width="100%", flex_flow="row wrap", margin="10px 0 0 0"))
         pickers.add_class("kbc-pickers")
         head = w.VBox([top, pickers], layout=layout(width="100%"))
@@ -4277,6 +4506,123 @@ class _ChatApp:
         picker.layout.display = "" if len(options) > 2 or value else "none"
         return problem
 
+    def _files_picker(self) -> Any:
+        w, layout = self.w, self.w.Layout
+        self.file_options: dict[str, str] = {}  # how a file is shown -> its s3:// path, for the files listed
+        self.files_kb: str | None = None  # the knowledge base they were listed for
+        label = w.Label("Files", layout=layout(width="auto", margin="0 4px 0 0"))
+        self.file_chips = w.HBox(layout=layout(width="auto", flex_flow="row wrap", align_items="center"))
+        self.file_chips.add_class("kbc-files")
+        self.file_box = w.Combobox(placeholder="Type part of a file name", options=[], ensure_option=False,
+                                   continuous_update=True, layout=layout(width="300px", display="none"))
+        self.file_box.observe(self._safely(self._file_typed), names="value")
+        self.file_box.on_msg(self._on_enter(self._file_entered))
+        self.pick_files_button = w.Button(description="📄 Pick files", tooltip="Ask only some of the knowledge "
+                                          "base's files", layout=layout(width="auto"))
+        self.pick_files_button.add_class("kbc-small")
+        self.pick_files_button.on_click(self._safely(lambda _button: self._open_files()))
+        self.all_files_button = w.Button(description="All files", tooltip="Search every file again",
+                                         layout=layout(width="auto", display="none"))
+        self.all_files_button.add_class("kbc-small")
+        self.all_files_button.add_class("kbc-ghost")
+        self.all_files_button.on_click(self._safely(lambda _button: self._set_files([])))
+        box = w.HBox([label, self.file_chips, self.file_box, self.pick_files_button, self.all_files_button],
+                     layout=layout(width="auto", align_items="center", flex_flow="row wrap"))
+        box.add_class("kbc-files")
+        self.files_box = box
+        problem = self._draw_files()
+        if problem:
+            self.problems.append(problem)
+        return box
+
+    def _draw_files(self) -> str:
+        """The picked files as chips (a click removes one), and the buttons that fit. Returns what went wrong."""
+        w, view = self.w, self.view
+        problem = ""
+        if self.files_kb is not None and self.files_kb != view.kb:  # another knowledge base: list its files anew
+            self.file_options, self.files_kb = {}, None
+            self._quietly(self.file_box, options=[], value="")
+            self.file_box.layout.display = "none"
+        uris: list[str] = []
+        if view.kb is not None and view.picked_files:
+            try:
+                uris = view._files_for(view.kb)
+            except (ClientError, BotoCoreError, ValueError) as exc:
+                problem = f"{str(exc).rstrip('.')}. Questions search every file."
+                view.picked_files = []
+        chips = []
+        for uri in uris:
+            chip = w.Button(description=f"{source_name(uri)} ✕", tooltip=f"{uri}: click to stop asking only it",
+                            layout=w.Layout(width="auto"))
+            chip.add_class("kbc-file")
+            chip.on_click(self._safely(lambda _button, uri=uri: self._remove_file(uri)))
+            chips.append(chip)
+        self.file_chips.children = chips
+        self.files_box.layout.display = "none" if view.kb is None else ""
+        self.all_files_button.layout.display = "" if uris else "none"
+        self.pick_files_button.layout.display = "" if self.file_box.layout.display == "none" else "none"
+        return problem
+
+    def _open_files(self) -> None:
+        """Lists the knowledge base's files into the box, to pick from."""
+        view = self.view
+        if view.kb is None:
+            self._set_status("Pick a knowledge base first.", "warn")
+            return
+        listing = view.core.files(view.kb)
+        self.file_options = {label: uri for uri, label in file_labels(d.uri for d in listing.searchable).items()}
+        self.files_kb = view.kb
+        self._quietly(self.file_box, options=sorted(self.file_options, key=str.lower), value="")
+        self.file_box.layout.display = ""
+        self._draw_files()
+        notes = [f"{_plural(len(self.file_options), 'indexed file')} to pick from: type part of a name and choose it "
+                 "from the list (Enter takes the only match)."]
+        if listing.truncated:
+            notes.append(f"Only the first {len(listing.documents):,} files were listed; type a full s3:// path for "
+                         "another.")
+        if listing.errors:
+            try:
+                names = view.core.data_source_names(view.kb)  # listed already, by files()
+            except (ClientError, BotoCoreError):
+                names = {}
+            notes.append(", ".join(names.get(ds_id) or ds_id for ds_id in listing.errors) + " has no file list "
+                         "(only S3 and custom data sources keep one).")
+        self._set_status(" ".join(notes), "" if self.file_options else "warn")
+
+    def _file_typed(self, change: dict[str, Any]) -> None:
+        if not self.quiet and change["new"] in self.file_options:  # chosen from the list
+            self._add_file(self.file_options[change["new"]])
+
+    def _file_entered(self) -> None:
+        text = self.file_box.value.strip()
+        if not text:
+            return
+        if text in self.file_options or "://" in text:
+            self._add_file(self.file_options.get(text, text))
+            return
+        matches = [label for label in self.file_options if text.lower() in label.lower()]
+        if len(matches) == 1:
+            self._add_file(self.file_options[matches[0]])
+        elif matches:
+            self._set_status(f"{len(matches):,} files contain {text!r}: choose one from the list, or type more of "
+                             "its name.", "warn")
+        else:
+            self._set_status(f"No indexed file's path contains {text!r}.", "warn")
+
+    def _add_file(self, uri: str) -> None:
+        self._quietly(self.file_box, value="")
+        self._set_files([*self.view._files_now(), uri])
+
+    def _remove_file(self, uri: str) -> None:
+        self._set_files([u for u in self.view._files_now() if u != uri])
+
+    def _set_files(self, uris: list[str]) -> None:
+        self.view.picked_files = list(dict.fromkeys(uris))
+        self._draw_files()
+        self._refresh()
+        self._set_status(f"The next questions search {describe_files(self.view.picked_files)}; the conversation goes "
+                         "on.", "ok")
+
     def _model_picker(self) -> Any:
         w, view = self.w, self.view
         models: list[ModelInfo] = []
@@ -4318,6 +4664,8 @@ class _ChatApp:
             "to see exactly what was sent and what came back.<ul>"
             + ("<li><b>Data source</b> asks only one of the knowledge base's data sources; by default questions "
                "search all of them.</li>" if self.source_pick.layout.display != "none" else "")
+            + "<li><b>📄 Pick files</b> asks only the files you pick: type part of a name and choose it from the "
+            "list.</li>"
             + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
             "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
@@ -4393,6 +4741,7 @@ class _ChatApp:
         if self.stream_box.value != self.view.stream:
             self._quietly(self.stream_box, value=self.view.stream)
         self._fill_sources()
+        self._draw_files()
         self.pending -= set(self.view.values)
         self._sync_rows()
         self._refresh()
@@ -4479,6 +4828,7 @@ class _ChatApp:
         kb_id = self.view.core.resolve(str(change["new"]))
         if kb_id != self.view.kb:
             self.view._use_kb(kb_id)
+            self._draw_files()
             problem = self._fill_sources()
             self.cleared(f"Now asking {self.view.core.kb_name(kb_id)}: a new conversation." + (f" {problem}" if problem
                                                                                                else ""))
@@ -4947,6 +5297,7 @@ class BedrockChatView:
 
     kb: the knowledge base (a name, ID or ARN); without it, the only one in the region, or the window's first.
     data_source: ask only this one of its data sources (a name or ID, or a list of them); default all of them.
+    files: ask only these files (names, paths in the bucket or s3:// paths); default all of them.
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
     stream: show answers in the window as they're written.
@@ -4959,7 +5310,7 @@ class BedrockChatView:
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💬 Chat": ("app", "ask", "new_chat", "transcript", "last"),
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request"),
-        "📚 Knowledge base and model": ("use", "kbs", "models"),
+        "📚 Knowledge base, files and model": ("use", "kbs", "files", "models"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -4977,6 +5328,7 @@ class BedrockChatView:
         settings: dict[str, Any] | None = None,
         stream: bool = True,
         data_source: Any = None,
+        files: Any = None,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -4988,6 +5340,7 @@ class BedrockChatView:
         self.core = core or BedrockChatAnalyzer()
         self.kb = kb  # what kb= named; its ID once resolved
         self.data_source: Any = data_source  # what data_source= named; {ID: name} once resolved ({} = all of them)
+        self.picked_files: Any = files  # what files= named; their s3:// paths once resolved ([] = all of them)
         self.model = model  # what model= named; the ID the window picked once it's open
         self.stream = stream
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
@@ -5309,7 +5662,7 @@ class BedrockChatView:
 
     def _use_kb(self, kb_id: str) -> None:
         self.kb = kb_id
-        self.data_source = None  # another knowledge base has other data sources
+        self.data_source = self.picked_files = None  # another knowledge base has other data sources and files
         self._reset()
 
     def _sources(self, kb_id: str) -> dict[str, str]:
@@ -5330,6 +5683,28 @@ class BedrockChatView:
         """'all', or the names of the only data sources questions search."""
         sources = self._sources_now()
         return ", ".join(name or ds_id for ds_id, name in sources.items()) if sources else "all"
+
+    def _files_for(self, kb_id: str) -> list[str]:
+        """The s3:// paths of the only files questions search ([] = all of them), resolved from files=."""
+        self.picked_files = self.core.resolve_files(kb_id, self.picked_files)
+        return self.picked_files
+
+    def _files_now(self) -> list[str]:
+        """The files questions search, if they can be told yet ([] otherwise)."""
+        if not self.picked_files:
+            return []
+        try:
+            return self._files_for(self._kb_id())
+        except (ValueError, ClientError, BotoCoreError):
+            return []
+
+    def _files_text(self) -> str:
+        """'all', or the names of the only files questions search."""
+        uris = self._files_now()
+        if not uris:
+            return "all"
+        names = [source_name(u) for u in uris]
+        return ", ".join(names) if len(names) <= 3 else f"{len(names)} files"
 
     def _reset(self) -> None:
         self.answers, self.session_id = [], None
@@ -5367,7 +5742,8 @@ class BedrockChatView:
         """Asks one question of this conversation and keeps the answer."""
         kb_id = self._kb_id()
         a = self.core.ask(kb_id, question, self.values, model=self.model, session_id=self.session_id,
-                          stream=on_text is not None, on_text=on_text, data_source=self._sources(kb_id))
+                          stream=on_text is not None, on_text=on_text, data_source=self._sources(kb_id),
+                          files=self._files_for(kb_id))
         a.kb_name = a.kb_name or self.core.kb_name(kb_id)
         self.session_id = a.session_id
         self.answers.append(a)
@@ -5382,8 +5758,9 @@ class BedrockChatView:
 
     def _meta(self, a: Answer) -> str:
         """'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004'."""
-        parts = [self._model_label(a.model)] + ([f"only {describe_sources(a.data_sources)}"] if a.data_sources
-                                                 else []) + [f"{a.seconds:.1f}s"]
+        only = [describe_sources(a.data_sources) if a.data_sources else "", describe_files(a.files) if a.files else ""]
+        parts = [self._model_label(a.model)] + ([f"only {' and '.join(filter(None, only))}"] if any(only) else []) + [
+            f"{a.seconds:.1f}s"]
         if a.first_words is not None:
             parts[-1] += f" (first words {a.first_words:.1f}s)"
         if a.text.strip():
@@ -5416,7 +5793,8 @@ class BedrockChatView:
             arn = str(self.model or self.core.default_model or DEFAULT_MODEL)
         schema = self.core.schema()
         params = build_request(question or "<your question>", kb_id, arn, self.values, schema,
-                               session_id=self.session_id, region=self._region(), data_sources=self._sources_now())
+                               session_id=self.session_id, region=self._region(), data_sources=self._sources_now(),
+                               files=self._files_now())
         problems = [p for p in validate_request(params, schema) if not kb_id.startswith("<") or "knowledgeBaseId"
                     not in p]
         return params, problems
@@ -5429,8 +5807,10 @@ class BedrockChatView:
         notes = {("input", "text"): "your question", ("sessionId",): "continues this conversation",
                  (*_KB_CONFIG, "knowledgeBaseId"): "knowledge base picker", (*_KB_CONFIG, "modelArn"): "model picker"}
         notes.update({path: "required; filled in for you" for path, _ in self.core.schema().auto})
-        if self._sources_now():
-            notes[_FILTER_PATH] = "data source picker" + (" and your filter" if "filter" in self.values else "")
+        pickers = [name for name, on in (("data source", self._sources_now()), ("files", self._files_now())) if on]
+        if pickers:
+            notes[_FILTER_PATH] = " and ".join(pickers) + " picker" + ("s" if len(pickers) > 1 else "") + (
+                " and your filter" if "filter" in self.values else "")
         return notes
 
     def _setup_call(self) -> str:
@@ -5441,6 +5821,9 @@ class BedrockChatView:
         if sources:
             names = [name or ds_id for ds_id, name in sources.items()]
             kwargs["data_source"] = names[0] if len(names) == 1 else names
+        uris = self._files_now()
+        if uris:
+            kwargs["files"] = list(file_labels(uris).values())
         kwargs.update({k: v for k, v in self.values.items() if k.isidentifier()})
         paths = {k: v for k, v in self.values.items() if not k.isidentifier()}
         if paths or any(key not in self.values for key in DEFAULT_SETTINGS):
@@ -5464,14 +5847,18 @@ class BedrockChatView:
         kb = picked.get("knowledgeBaseId")
         kb_id = self.core.resolve(kb) if kb else self._kb_id()
         sources = self.core.resolve_sources(kb_id, picked.get("dataSources") or [])
+        uris = list(dict.fromkeys(picked.get("files") or []))
         before = self._sources_now() if kb_id == self.kb else {}
+        files_before = self._files_now() if kb_id == self.kb else []
         changes = []
         if kb_id != self.kb:
             changes.append(f"knowledge base {self.core.kb_name(kb_id)} (a new conversation)")
             self._use_kb(kb_id)
         if list(sources) != list(before):
             changes.append(f"questions search {describe_sources(sources)}")
-        self.data_source = sources
+        if uris != files_before:
+            changes.append(f"questions search {describe_files(uris)}")
+        self.data_source, self.picked_files = sources, uris
         model = picked.get("modelArn")
         if model:
             try:
@@ -5501,7 +5888,8 @@ class BedrockChatView:
         response."""
         kb = a.kb_name or a.kb_id
         tokens = f"~{a.input_tokens + a.output_tokens:,}"
-        only = f" · only {describe_sources(a.data_sources)}" if a.data_sources else ""
+        only = "".join([f" · only {describe_sources(a.data_sources)}" if a.data_sources else "",
+                        f" · only {describe_files(a.files)}" if a.files else ""])
         blocks: list[Any] = [
             _Title(f"{kb}: {_clip(a.question, 80)}",
                    f"Bedrock RetrieveAndGenerate · question {number} of this conversation{only} · cost at "
@@ -5641,8 +6029,8 @@ class BedrockChatView:
         blocks: list[Any] = [
             _Title(f"Settings: {_plural(len(self.values), 'setting')} sent with every question",
                    f"{kb} · {model} · fields() lists every one you can add"),
-            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()), ("Model", model),
-                    ("Settings", f"{len(self.values):,}"),
+            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()), ("Files", self._files_text()),
+                    ("Model", model), ("Settings", f"{len(self.values):,}"),
                     ("Conversation", f"{_plural(len(self.answers), 'question')} so far" if self.answers else "new")]),
             _Table(["Setting", "Value", "What it means", "Sent as"], self._settings_rows(), max_rows=0,
                    code_cols=(0,)),
@@ -5733,7 +6121,7 @@ class BedrockChatView:
         self._show([
             _Title("The request " + (f"for: {_clip(question, 70)}" if question else "your next question sends"),
                    "RetrieveAndGenerate · highlighted: your settings · nothing is sent"),
-            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()),
+            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()), ("Files", self._files_text()),
                     ("Model", self._model_label(self.model or "")), ("Settings", f"{len(self.values):,}"),
                     ("Conversation", "continues this one" if self.session_id else "new")]),
             _Findings(found + settings_findings(self.values, self.model or "")),
@@ -5745,19 +6133,29 @@ class BedrockChatView:
     # ------------------------------------------------------ knowledge base, model
 
     @_friendly_errors
-    def use(self, kb: str | None = None, model: str | None = None, data_source: Any = None) -> None:
-        """Switches the knowledge base, the model or the data source questions go to. Another knowledge base starts a
-        new conversation; another model or data source keeps it. data_source= is one of the knowledge base's data
-        sources (a name or ID, or a list of them), or 'all'."""
-        notes = []
-        if kb is not None:
-            kb_id = self.core.resolve(kb)
-            sources = self.core.resolve_sources(kb_id, data_source)  # checked before anything changes
+    def use(self, kb: str | None = None, model: str | None = None, data_source: Any = None,
+            files: Any = None) -> None:
+        """Switches the knowledge base, the model, or what questions search: data_source= (one of the knowledge base's
+        data sources, a name or ID, or a list) and files= (file names, paths or s3:// paths, which files() lists), or
+        'all' for every one. Another knowledge base starts a new conversation; the rest keep it."""
+        if kb is None and model is None and data_source is None and files is None:
+            raise _Hint("Pass kb=, model=, data_source= or files=: use('support-docs'), use(model='sonnet'), "
+                        "use(data_source='faq'), use(files=['refund-policy.pdf']). kbs(), models() and files() list "
+                        "them.")
+        # everything is checked before anything changes
+        kb_id = self.core.resolve(kb) if kb is not None else None
+        target = kb_id or (self._kb_id() if data_source is not None or files is not None else "")
+        sources = self.core.resolve_sources(target, data_source) if data_source is not None else None
+        uris = self.core.resolve_files(target, files) if files is not None else None
+        model_id = self.core.resolve_model(model)[0] if model is not None else None
+        notes: list[str] = []
+        level = "ok"
+        if kb_id is not None:
             if kb_id != self.kb:
                 self._use_kb(kb_id)
                 self._changed(f"Now asking {self.core.kb_name(kb_id)}: a new conversation.")
             notes.append(f"Knowledge base: {self.core.kb_name(kb_id)} ({kb_id}).")
-            if data_source is None:
+            if data_source is None and files is None:
                 try:
                     names = [ds.name or ds.id for ds in self.core.data_sources(kb_id)]
                 except (ClientError, BotoCoreError):
@@ -5766,20 +6164,92 @@ class BedrockChatView:
                     notes.append(f"It has {len(names)} data sources ({', '.join(names[:6])}"
                                  f"{', …' if len(names) > 6 else ''}): {_call('use', data_source=names[0])} asks only "
                                  "one.")
-        if data_source is not None:
-            sources = self.core.resolve_sources(self._kb_id(), data_source) if kb is None else sources
+        if sources is not None:
             self.data_source = sources
-            self._changed()
             notes.append(f"Questions search {describe_sources(sources)}.")
-        if model is not None:
-            self.model = self.core.resolve_model(model)[0]
-            self._changed()
+        if uris is not None:
+            self.picked_files = uris
+            notes.append(f"Questions search {describe_files(uris)}.")
+            unindexed = [u for u in uris if self.core.file_status(target, u) not in ("", *SEARCHABLE)]
+            if unindexed:
+                level = "warn"
+                status = self.core.file_status(target, unindexed[0]).lower().replace("_", " ")
+                one = len(unindexed) == 1
+                what = describe_files(unindexed)
+                notes.append(f"{what[:1].upper()}{what[1:]} {'is' if one else 'are'}n't indexed ({status}), so "
+                             f"nothing can come from {'it' if one else 'them'}: files() shows each file's status.")
+        if model_id is not None:
+            self.model = model_id
             notes.append(f"Model: {self._model_label(self.model)} ({self.model}).")
-        if not notes:
-            raise _Hint("Pass kb=, model= or data_source=: use('support-docs'), use(model='sonnet'), "
-                        "use(data_source='faq'). kbs() and models() list them.")
-        self._show([_Note(" ".join(notes), "ok"), _Next([("ask('...')", "ask it something"),
-                                                          ("settings()", "what's sent with every question")])])
+        if sources is not None or uris is not None or model_id is not None:
+            self._changed()
+        self._show([_Note(" ".join(notes), level), _Next([("ask('...')", "ask it something"),
+                                                           ("settings()", "what's sent with every question")])])
+
+    @_friendly_errors
+    def files(self, match: str | None = None) -> None:
+        """The knowledge base's files, to point questions at: name, folder, data source, whether it's indexed and when
+        it changed, with the ones questions search marked. match= keeps those whose path contains it."""
+        kb_id = self._kb_id()
+        with self._progress("Listing files", unit="files"):
+            listing = self.core.files(kb_id)
+        picked = set(self._files_now())
+        try:
+            names = self.core.data_source_names(kb_id)
+        except (ClientError, BotoCoreError):
+            names = {}
+        wanted = str(match).lower() if match else ""
+        labels = file_labels(d.uri for d in listing.documents)
+        docs = sorted((d for d in listing.documents if not wanted or wanted in d.uri.lower()),
+                      key=lambda d: (d.uri not in picked, labels.get(d.uri, d.uri).lower()))
+        tones = {"FAILED": "bad", "NOT_FOUND": "bad"}
+        rows = [[source_name(d.uri) + (" (picked)" if d.uri in picked else ""),
+                 labels[d.uri].rsplit("/", 1)[0] + "/" if "/" in labels.get(d.uri, "") else "-",
+                 names.get(d.data_source_id) or d.data_source_id or "-",
+                 _Tone(d.status.lower().replace("_", " "), "" if d.status in SEARCHABLE else tones.get(d.status, "warn")),
+                 human_age(d.updated)] for d in docs]
+        unindexed = len(listing.documents) - len(listing.searchable)
+        found: list[tuple[str, str]] = []
+        if unindexed:
+            found.append(("warn", f"{_plural(unindexed, 'file')} {'is' if unindexed == 1 else 'are'}n't indexed (failed, "
+                                  "ignored or still syncing), so questions can't find anything in them. bedrock_kb.py's "
+                                  "documents(status='FAILED') says why; a sync picks up fixed files."))
+        for ds_id, code in listing.errors.items():
+            name = names.get(ds_id) or ds_id
+            reason = (_why(code, "bedrock:ListKnowledgeBaseDocuments") if "Denied" in code
+                      else f"{code}: only S3 and custom data sources keep one")
+            found.append(("info", f"The data source {name!r} has no file list ({reason}), so its files can't be picked. "
+                                  "It's searched as long as no files are picked."))
+        if listing.truncated:
+            found.append(("info", f"Only the first {len(listing.documents):,} files were listed. A file past them can "
+                                  "still be picked by its full path: use(files=['s3://...'])."))
+        kb = self.core.kb_name(kb_id)
+        blocks: list[Any] = [
+            _Title(f"Files in {kb} ({len(docs):,}{'+' if listing.truncated and not wanted else ''})",
+                   (f"matching {match!r} · " if match else "") + "use(files=[...]) or the window's Pick files makes "
+                   "questions search only some of them"),
+            _Cards([("Files", f"{len(listing.documents):,}{'+' if listing.truncated else ''}"),
+                    ("Indexed", f"{len(listing.searchable):,}"),
+                    ("Not indexed", f"{unindexed:,}", "warn" if unindexed else ""),
+                    ("Questions search", self._files_text())]),
+            _Findings(found),
+            _Table(["File", "Folder", "Data source", "Status", "Changed"], rows,
+                   title=f"Matching {match!r}" if match else ""),
+        ]
+        if not docs:
+            blocks.append(_Note(f"No file's path contains {match!r}. files() lists them all." if match else
+                                "No files are listed for this knowledge base.", "warn" if match else ""))
+        steps: list[tuple[str, str]] = []
+        first = next((d for d in docs if d.status in SEARCHABLE and d.uri not in picked), None)
+        if first is not None:
+            steps.append((_call("use", files=[labels[first.uri]]), "ask only this file"))
+        if picked:
+            steps.append((_call("use", files="all"), "ask every file again"))
+        elif len(docs) > 50 and not match:
+            steps.append((_call("files", "refund"), "only the files whose path contains a word"))
+        steps.append(("app()", "pick files in the chat window (Pick files)"))
+        blocks.append(_Next(steps))
+        self._show(blocks)
 
     @_friendly_errors
     def kbs(self) -> None:
@@ -5847,6 +6317,7 @@ def chat(
     settings: dict[str, Any] | None = None,
     stream: bool = True,
     data_source: Any = None,
+    files: Any = None,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
@@ -5854,6 +6325,7 @@ def chat(
         chat()                                        # pick the knowledge base and the model in the window
         chat("support-docs", model="sonnet")          # by name, ID or ARN; model by ID, profile or short name
         chat("support-docs", data_source="faq")       # ask only one of its data sources (name or ID)
+        chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
         chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
         chat("support-docs", settings={"generationConfiguration.performanceConfig.latency": "optimized"})
 
@@ -5861,7 +6333,7 @@ def chat(
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
     region and profile; stream=False shows each answer only when it's complete."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
-                           stream=stream, data_source=data_source)
+                           stream=stream, data_source=data_source, files=files)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
     for name, value in wanted.items():
         try:
