@@ -5,9 +5,9 @@
 
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
-(support-docs), then uses the window the way a person would: types a question and presses Enter, adds settings,
-searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, picks files, and asks the last
-question again on Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
+(support-docs), then uses the window the way a person would: types a question and presses Enter, opens the knowledge
+base list, adds settings, searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, ticks
+files, and asks the last question again on Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
 
@@ -36,8 +36,8 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files",
-           "chat-retrieve")
+FIGURES = ("chat-window", "chat-pick", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit",
+           "chat-files", "chat-retrieve")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -124,6 +124,17 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     answered(2)
     page.locator(".kbc-app details.src summary").last.click()
     shot("chat-window")
+
+    def field(label: str):
+        """The header field (a _Picker's button) with this label."""
+        return page.locator(".kbc-app .kbc-field", has=page.locator(f".fxl:text-is('{label}')")).locator(
+            "button.kbc-trig-b").first
+
+    if "chat-pick" in wanted:
+        field("Knowledge base").click()
+        page.wait_for_selector(".kbc-app .kbc-pop .kbc-opt", timeout=10_000)
+        shot("chat-pick")
+        field("Knowledge base").click()  # closes it again
     page.locator(".kbc-app button.kbc-add").click()  # opens Add a setting
     for label in ("+ Temperature", "+ Metadata filter", "+ Reranker"):
         page.locator(f".kbc-app button:has-text('{label}')").first.click()
@@ -171,13 +182,16 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
             page.locator(".kbc-app .kbc-row", has=page.locator(f".rh b:text-is('{name}')")).locator(
                 "button.kbc-x").first.click()
             time.sleep(0.4)
-        page.locator(".kbc-app button:has-text('Pick files')").click()
-        files = page.locator(".kbc-app input[placeholder='Type part of a file name']")
+        field("Files").click()
+        files = page.locator(".kbc-app input[placeholder='Search by file name or folder']")
         files.wait_for(state="visible", timeout=10_000)
         for label in ("policies/refund-policy.pdf", "policies/eu-returns.pdf"):
-            files.fill(label)  # what choosing it from the list does
+            files.fill(label)
+            files.press("Enter")  # ticks the only file it finds
             page.wait_for_function(f"document.querySelector('.kbc-app').innerText.includes('{label.split('/')[-1]} ✕')",
                                    timeout=10_000)
+        field("Files").click()  # closes the list
+        page.mouse.move(1, 1)  # off the chips, which turn red under the pointer
         box.fill("How long do refunds take?")
         box.press("Enter")
         answered(3)

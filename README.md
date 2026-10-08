@@ -995,7 +995,7 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top, with a Pick files button; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
 </picture>
 
 <p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
@@ -1016,11 +1016,12 @@ ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"te
 The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
 browser tab). Without it, or outside Jupyter, every command below still works as a report.
 
-- **The pickers.** The knowledge base, the model and, when the knowledge base has more than one, the **data source**
-  questions search ("All data sources" by default). **📄 Pick files** lists the knowledge base's indexed files: type
-  part of a name, choose it, and the next questions search only the files picked (shown as chips; click one to drop
-  it, or **All files**). Another data source, file or model keeps the conversation; another knowledge base starts a
-  new one.
+- **The pickers.** The fields at the top: the knowledge base, the model and, when the knowledge base has more than
+  one, the **data source** questions search ("All data sources" by default), and the **files**. Click one to open its
+  list, with a search box that finds a line by name, part of an ID (`K7QJ` finds `K7QJ2M4XNA`), description or
+  provider; Enter picks the first, and a whole knowledge base ID or ARN works even when it isn't listed. Tick files
+  and the next questions search only them (shown as chips; click one to drop it, or **All files**). Another data
+  source, file or model keeps the conversation; another knowledge base starts a new one.
 - **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
   one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
@@ -1077,7 +1078,7 @@ window follows them.
 |:---|:---|
 | `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base (a new conversation), the model, or what questions search (the same one): `use(data_source="faq")`, `use(files=["refund-policy.pdf", "faq/returns.md"])` (names, paths in the bucket or `s3://` paths), or `"all"` |
 | `files(match=None)` | The knowledge base's files to pick from: name, folder, data source, whether it's indexed, when it changed, and which ones questions search. `files("refund")` keeps those whose path contains it |
-| `kbs()` | The knowledge bases in the region: name, ID, status, description and when each changed |
+| `kbs(match=None)` | The knowledge bases in the region: name, ID, status, description and when each changed; `match=` finds them by name, ID or description |
 | `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
 
 ### Settings with short names
@@ -1160,14 +1161,14 @@ search and an answer to the same question).
 
 | Permission | Used by |
 |:---|:---|
-| `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
-| `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
-| `bedrock:ListKnowledgeBaseDocuments` | **Pick files**, `files`, and `files=` by name (an `s3://` path works without it) |
+| `bedrock:ListKnowledgeBases` | The knowledge base list, `kbs`, and finding a knowledge base by name (an ID works without it) |
+| `bedrock:ListDataSources` | The data source list, and `data_source=` by name (an ID works without it) |
+| `bedrock:ListKnowledgeBaseDocuments` | The **Files** list, `files`, and `files=` by name (an `s3://` path works without it) |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
-| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
+| `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model list, `models`, and turning `model="sonnet"` into an ID |
 
-A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read becomes a
-box to type into instead of a picker, with a note naming the missing permission. The
+A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read stays empty,
+with a note naming the missing permission, and its search box takes an ID instead. The
 [chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html#permissions) has a ready-made IAM policy.
 
 </details>
