@@ -1,7 +1,11 @@
 import ast
+import asyncio
 import html
 import json
 import re
+import shlex
+import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -17,6 +21,8 @@ from bedrock_chat import (
     DEFAULT_PROMPT,
     DEFAULT_SETTINGS,
     Answer,
+    Batch,
+    BatchItem,
     BedrockChatAnalyzer,
     BedrockChatView,
     Citation,
@@ -30,18 +36,30 @@ from bedrock_chat import (
     answer_cost,
     answer_findings,
     as_filter,
+    batch_changes,
+    batch_estimate,
+    batch_findings,
     build_request,
     build_retrieve_request,
     cited_ranks,
+    cli_command,
     compare_findings,
     coerce_setting,
     collect_stream,
+    config_json,
+    config_of,
     describe_filter,
     describe_setting,
+    expected_at,
+    format_questions,
+    item_verdict,
     normalize_settings,
+    parse_questions,
     parse_rag,
     parse_retrieve,
     python_call,
+    python_script,
+    question_list,
     request_schema,
     retrieve_settings,
     settings_findings,
@@ -786,6 +804,216 @@ def test_a_search_costs_the_embedding_and_the_reranking():
     assert answer_cost(s) == pytest.approx(0.001 + 0.02 * estimate("How long?") / 1e6)
 
 
+# ------------------------------------------------- test runs: a list of questions, and the setup as code
+
+REFUSED = "Sorry, I am unable to assist you with this request."
+
+
+def asked(question, a=None, expected=None, **kwargs):
+    """A test question that came back with `a` (an answer citing refund-policy.pdf p.3 and p.4 by default)."""
+    a = a or answer()
+    a.question = question
+    return BatchItem(question, expected, answer=a, **kwargs)
+
+
+def run_of(*items, settings=None, **fields):
+    fields = {"kb_id": KB_ID, "kb_name": "support-docs", "model": "us.anthropic.claude-sonnet-5", **fields}
+    return Batch(items=list(items), settings=settings or {"n": 5}, **fields)
+
+
+def test_parse_questions_reads_a_pasted_list():
+    text = ("1. How long do refunds take? | refund-policy.pdf\n- Can I return a digital product?\n\n# a comment\n"
+            "Q: Do you ship to the UK?\tshipping.md | faq/returns.md\n   * What does E1234 mean?  \n| no question\n"
+            "2024 refund rules?")
+    cases = parse_questions(text)
+    assert cases == [("How long do refunds take?", "refund-policy.pdf"), ("Can I return a digital product?", None),
+                     ("Do you ship to the UK?", ["shipping.md", "faq/returns.md"]), ("What does E1234 mean?", None),
+                     ("2024 refund rules?", None)]  # a number that isn't a list mark stays
+    assert parse_questions(format_questions(cases)) == cases
+    assert format_questions([("Two\nlines?", None)]) == "Two lines?"
+    assert parse_questions("") == [] and parse_questions(None) == []
+
+
+def test_question_list_takes_what_a_notebook_has():
+    assert question_list(["How long? | refund-policy.pdf", "  ", None, "Can I return it?"]) == [
+        ("How long?", "refund-policy.pdf"), ("Can I return it?", None)]
+    assert question_list([("How long?", ["a.pdf", "b.pdf"]), {"question": "Return?", "expected": ""},
+                          {"question": "Ship?", "source": "shipping.md"}]) == [
+        ("How long?", ["a.pdf", "b.pdf"]), ("Return?", None), ("Ship?", "shipping.md")]
+    assert question_list("One?\nTwo? | two.md") == [("One?", None), ("Two?", "two.md")]
+    assert question_list(Batch(items=[BatchItem("One?", "one.md"), BatchItem("Two?")])) == [("One?", "one.md"),
+                                                                                             ("Two?", None)]
+    with pytest.raises(ValueError, match="No questions to ask: pass a list, like ask_all"):
+        question_list(["", None])
+    with pytest.raises(ValueError, match="takes questions as text with one per line"):
+        question_list([42])
+    pd = pytest.importorskip("pandas")
+    frame = pd.DataFrame({"question": ["One?", "Two?", None], "expected": ["one.md", float("nan"), "x"]})
+    assert question_list(frame) == [("One?", "one.md"), ("Two?", None)]
+    assert question_list(pd.Series(["One?", "Two? | two.md"])) == [("One?", None), ("Two?", "two.md")]
+
+
+def test_expected_sources_and_how_each_question_did():
+    a = answer()  # cites refund-policy.pdf p.3 as [1] and p.4 as [2]
+    assert expected_at(a, "refund-policy") == 1 and expected_at(a, ["nope", "10 BUSINESS days"]) == 2
+    assert expected_at(a, "shipping.md") is None and expected_at(a, None) is None and expected_at(a, "  ") is None
+    assert expected_at(search(), "SHIPPING.MD") == 3  # a search: its rank
+
+    def verdict(**kwargs):
+        return item_verdict(BatchItem("q", **kwargs))
+
+    thin = answer()
+    thin.citations = thin.citations[:1]
+    thin.text += " " + "More words that no source backs up." * 3
+    assert verdict(answer=answer()) == ("answered", "ok")
+    assert verdict(answer=answer(), expected="shipping.md") == ("expected not cited", "warn")
+    assert verdict(answer=answer(REFUSED)) == ("unable to assist", "warn")
+    assert verdict(answer=answer("")) == ("empty answer", "warn")
+    assert verdict(answer=answer("They take a week.")) == ("no citations", "warn")
+    assert verdict(answer=thin) == ("partly grounded", "warn")
+    assert verdict(answer=answer(guardrail_action="INTERVENED")) == ("guardrail stepped in", "warn")
+    assert verdict(error="Too long.") == ("not sent", "warn")
+    assert verdict(error="Rate exceeded.", error_code="ThrottlingException") == ("failed", "bad")
+    assert verdict() == ("not asked", "")
+    assert verdict(answer=search()) == ("3 passages", "ok")
+    assert verdict(answer=search(), expected="bank transfer") == ("found #2", "ok")
+    assert verdict(answer=search(), expected="nope") == ("expected not found", "warn")
+    assert verdict(answer=search([])) == ("nothing found", "warn")
+
+
+def test_batch_findings_say_what_to_try():
+    assert batch_findings(run_of(asked("How long?"), asked("And bank transfers?"))) == []
+    run = run_of(asked("How long?", expected="refund-policy"), asked("Digital goods?", answer(REFUSED)),
+                 asked("Shipping?", answer("A week."), expected="shipping"),
+                 BatchItem("Third?", error="Rate exceeded.", error_code="ThrottlingException"),
+                 BatchItem("Fourth?", error="Rate exceeded.", error_code="ThrottlingException"),
+                 BatchItem("x" * 1001, error="Bedrock takes questions of up to 1,000 characters, and this one has "
+                                             "1,001. Shorten it, or ask it as two questions."))
+    found = dict((m.split(":")[0], (level, m)) for level, m in batch_findings(run))
+    level, message = found["2 of 6 questions failed (ThrottlingException ×2)"]
+    assert level == "warn" and message.endswith("Rate exceeded. Bedrock throttled them: ask fewer at a time "
+                                                "(ask_all(workers=1)).")
+    level, message = found["1 question ('" + "x" * 47 + "…') wasn't sent"]
+    assert level == "warn" and "Bedrock takes questions of up to 1,000 characters" in message
+    level, message = found["1 of 3 answers is Bedrock's \"unable to assist\" reply or empty ('Digital goods?')"]
+    assert level == "warn" and "retrieve('Digital goods?') shows what the search finds for it" in message
+    assert "set(n=10)" in message and "set(search_type='HYBRID')" in message and "ask_all() again" in message
+    level, message = found["1 of 3 answers cites no source ('Shipping?')"]
+    assert level == "warn" and "the model's own knowledge" in message
+    level, message = found["The expected source isn't cited in 1 of 2 answers checked ('Shipping?' expected "
+                           "'shipping', cited nothing). retrieve('Shipping?') shows whether the search finds it; if it "
+                           "doesn't, check the file is indexed (files()), then try set(search_type='HYBRID') or "
+                           "set(n=10)."]
+    assert level == "warn"
+    thin = answer(output_tokens=19)
+    thin.citations = thin.citations[:1]
+    thin.text += " " + "More words that no source backs up." * 3
+    more = run_of(asked("Blocked?", answer(guardrail_action="INTERVENED", files=[RETURNS_MD])),
+                  asked("Thin?", thin), BatchItem("Not asked?", request={"input": {"text": "Not asked?"}}),
+                  settings={"max_tokens": 20}, files=[RETURNS_MD], skipped=4, stopped=True)
+    thin.files = [RETURNS_MD]  # asked about returns.md only, as ask_all() records it
+    text = " | ".join(m for _, m in batch_findings(more))
+    for part in ("A guardrail stepped in on 1 question ('Blocked?')", "1 of 2 answers is less than half backed by "
+                 "citations ('Thin?')", "1 of 2 answers reached max_tokens (20) and may be cut off ('Thin?'): raise "
+                 "it (set(max_tokens=1024))", "2 of 2 questions got passages from outside file 'returns.md'",
+                 "Stopped before 1 question was asked: ask_all() asks the whole list again.",
+                 "Only the first 3 of 7 questions were asked (limit=3): ask_all(limit=7) asks them all."):
+        assert part in text, part
+    searches = run_of(asked("How long?", search(), expected="refund-policy"), asked("Holiday shipping?", search([])),
+                      asked("Bank?", search(), expected="bank transfer"), asked("Nope?", search(), expected="nope"),
+                      retrieve_only=True)
+    text = " | ".join(m for _, m in batch_findings(searches))
+    for part in ("Nothing came back for 1 of 4 questions ('Holiday shipping?'), so an answer would have nothing to go "
+                 "on. Try to retrieve more passages (set(n=10))", "The expected source wasn't among the passages "
+                 "found for 1 of 3 questions checked ('Nope?' expected 'nope'; first came refund-policy.pdf p.3, "
+                 "refund-policy.pdf p.4)", "1 question found the expected source below the first passage (MRR 0.50; "
+                 "1.00 means it always came first). A reranker (set(reranker='cohere'))"):
+        assert part in text, part
+
+
+def test_batch_changes_say_which_questions_did_better_or_worse():
+    before = run_of(asked("How long?"), asked("Digital goods?", answer(REFUSED)), asked("Bank?"))
+    after = run_of(asked("How long?", answer(REFUSED)), asked("Digital goods?"), asked("bank?"), settings={"n": 10},
+                   model="us.anthropic.claude-opus-5")
+    (level, message), = batch_changes(before, after)
+    assert level == "warn" and message.startswith("Since the last run (n 5 → 10; model claude-sonnet-5 → "
+                                                  "claude-opus-5): ")
+    assert "1 question did better ('Digital goods?' unable to assist → answered)" in message
+    assert "1 question did worse ('How long?' answered → unable to assist)" in message
+    assert batch_changes(before, before) == [("info", "Since the last run (the same setup): all 3 questions did as "
+                                                      "before.")]
+    fewer = run_of(asked("How long?"), asked("Elsewhere?"))
+    assert batch_changes(before, fewer)[0][1] == ("Since the last run (the same setup; the 1 question both runs "
+                                                  "asked): the question did as before.")
+    assert batch_changes(before, run_of(asked("Other?"))) == []
+
+
+def test_batch_estimate_prices_a_run_before_it_runs():
+    qs = ["How long do refunds take?", "Can I return a digital product?"]
+    tokens = sum(estimate(q) + estimate(DEFAULT_PROMPT) + 5 * 300 for q in qs)
+    embedding = sum(0.02 * estimate(q) / 1e6 for q in qs)
+    assert batch_estimate(qs, {"n": 5}, "us.anthropic.claude-sonnet-5") == pytest.approx(
+        (tokens * 2.20 + 600 * 11.00) / 1e6 + embedding)
+    assert batch_estimate(qs, {"n": 5}, "acme.unknown-v1") is None
+    assert batch_estimate(qs, {"reranker": "cohere"}, "", retrieve_only=True) == pytest.approx(2 * 0.002 + embedding)
+
+
+def test_python_script_asks_the_questions_with_boto3_alone(monkeypatch, capsys):
+    values = normalize_settings({"n": 8, "temperature": 0.2, "prompt": "Don't guess.\n$search_results$\n"
+                                 "$output_format_instructions$"}, SCHEMA)
+    params = build_request("How long?", KB_ID, SONNET_PROFILE, values, SCHEMA, session_id="s-1", region="us-east-1")
+    code = python_script(params, "us-east-1", ["How long do refunds take?", "Can I return it, and how?"],
+                         about="From the tests.")
+    assert "# From the tests." in code and "boto3.client('bedrock-agent-runtime', region_name='us-east-1')" in code
+    config = ast.literal_eval(code.split("CONFIG = ", 1)[1].split("\n\n\ndef ", 1)[0])
+    assert config == config_of(params) and "sessionId" not in config and "input" not in config
+    runtime = fakes()["bedrock-agent-runtime"]
+    monkeypatch.setitem(sys.modules, "boto3", SimpleNamespace(client=lambda service, **_: runtime))
+    exec(compile(code, "<script>", "exec"), {})  # the script as a user would run it, against the fake Bedrock
+    out = capsys.readouterr().out
+    assert out.startswith("Q: How long do refunds take?\nA: Refunds take 5-7 business days.") and out.count("Q: ") == 2
+    assert "   cited: s3://docs/policies/refund-policy.pdf\n" in out
+    sent = runtime.called("retrieve_and_generate")
+    assert [p["input"]["text"] for p in sent] == ["How long do refunds take?", "Can I return it, and how?"]
+    assert all({k: v for k, v in p.items() if k != "input"} == config for p in sent)
+    search_params = build_retrieve_request("How long?", KB_ID, values, SCHEMA)
+    code = python_script(search_params)  # no questions: the request's own
+    assert "boto3.client('bedrock-agent-runtime')" in code and "questions = ['How long?']" in code
+    exec(compile(code, "<script>", "exec"), {})
+    out = capsys.readouterr().out
+    assert out.startswith("Q: How long?\n   0.810  s3://docs/policies/refund-policy.pdf  Refunds are issued within")
+    assert runtime.called("retrieve") == [search_params]
+
+
+def test_config_json_and_the_aws_cli_command():
+    values = normalize_settings({"n": 8, "prompt": "Don't guess. $search_results$ $output_format_instructions$",
+                                 "kms_key": "arn:aws:kms:us-east-1:1:key/k"}, SCHEMA)
+    params = build_request("How long?", KB_ID, SONNET_PROFILE, values, SCHEMA, session_id="s-1")
+    assert json.loads(config_json(params)) == config_of(params) == {
+        k: params[k] for k in ("retrieveAndGenerateConfiguration", "sessionConfiguration")}
+    command = cli_command(params, "eu-west-1", "Can I return it, and how?")
+    assert command.startswith("aws bedrock-agent-runtime retrieve-and-generate \\\n  --region eu-west-1 \\\n  "
+                              "--query output.text --output text \\\n  --cli-input-json '{")
+    words = shlex.split(command.replace("\\\n", " "))
+    sent = json.loads(words[words.index("--cli-input-json") + 1])  # the quote in the prompt survives the shell
+    assert sent == {"input": {"text": "Can I return it, and how?"}, **config_of(params)}
+    assert validate_request(sent, SCHEMA) == []
+    search_params = build_retrieve_request("How long?", KB_ID, values, SCHEMA)
+    words = shlex.split(cli_command(search_params).replace("\\\n", " "))
+    assert words[:3] == ["aws", "bedrock-agent-runtime", "retrieve"] and "--region" not in words
+    assert json.loads(words[words.index("--cli-input-json") + 1]) == search_params  # its own question
+    assert 'retrievalResults[].[score, metadata."x-amz-bedrock-kb-source-uri"]' in words
+
+
+def test_code_is_highlighted_and_escaped():
+    command = cli_command(build_request("<b>?", KB_ID, SONNET_PROFILE, {}, SCHEMA), "us-east-1")
+    out = chatmod._shell_html(command)
+    assert plain(out) == command and '<span class="pa">--cli-input-json</span>' in out
+    assert '<span class="jk">&quot;knowledgeBaseId&quot;</span>' in out and "<b>" not in out
+    assert chatmod._code_html('{"a": 1}', "json") == '{<span class="jk">&quot;a&quot;</span>: <span class="jn">1</span>}'
+    assert chatmod._code_html("<x>", "other") == "&lt;x&gt;"
+
+
 # ----------------------------------------------------------------------------- AWS
 
 
@@ -1042,6 +1270,97 @@ def test_missing_region_is_a_readable_error(monkeypatch):
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     with pytest.raises(ValueError, match=r"No AWS region is set.*chat\(region='us-east-1'\)"):
         BedrockChatAnalyzer().client
+
+
+def by_question(**params):
+    """RetrieveAndGenerate that can't help with a question about the moon until it retrieves 8 passages or more."""
+    vector = params[KB[0]][KB[1]].get("retrievalConfiguration", {}).get("vectorSearchConfiguration", {})
+    if "moon" in params["input"]["text"] and vector.get("numberOfResults", 5) < 8:
+        return rag_resp(REFUSED, citations=())
+    return rag_resp()
+
+
+def test_ask_all_asks_each_question_on_its_own():
+    clients = fakes(rag=by_question)
+    core = BedrockChatAnalyzer(clients=clients)
+    ticks = []
+    batch = core.ask_all("support-docs", ["How long do refunds take? | refund-policy", "Do you ship to the moon?",
+                                          "And bank transfers?"], {"n": 5, "temperature": 0.2}, model="sonnet",
+                         workers=2, progress=lambda done, total: ticks.append((done, total)))
+    assert [i.question for i in batch.items] == ["How long do refunds take?", "Do you ship to the moon?",
+                                                 "And bank transfers?"]  # in the order given
+    assert (batch.kb_id, batch.kb_name, batch.model) == (KB_ID, "support-docs", "us.anthropic.claude-sonnet-5")
+    assert batch.settings == {"n": 5, "temperature": 0.2} and not batch.stopped and batch.seconds > 0
+    assert ticks == [(1, 3), (2, 3), (3, 3)] and batch.request["input"] == {"text": "<your question>"}
+    runtime = clients["bedrock-agent-runtime"]
+    sent = runtime.called("retrieve_and_generate")
+    assert sorted(p["input"]["text"] for p in sent) == sorted(i.question for i in batch.items)
+    assert all("sessionId" not in p for p in sent)  # each on its own: never a follow-up
+    assert all(p[KB[0]] == batch.request[KB[0]] for p in sent) and not runtime.called("retrieve_and_generate_stream")
+    first, moon, bank = batch.items
+    assert first.found == 1 and item_verdict(first) == ("answered", "ok") and first.cost > 0
+    assert item_verdict(moon) == ("unable to assist", "warn") and first.answer.settings == batch.settings
+    assert first.answer.kb_name == "support-docs" and batch.cost == pytest.approx(sum(i.cost for i in batch.items))
+    assert batch.failed == [] and len(batch.asked) == 3
+
+
+def test_ask_all_keeps_going_when_bedrock_refuses_a_question():
+    def flaky(**params):
+        if "bank" in params["input"]["text"]:
+            raise client_error("ThrottlingException", "Rate exceeded.")
+        return rag_resp()
+
+    core = BedrockChatAnalyzer(clients=fakes(rag=flaky))
+    batch = core.ask_all(KB_ID, ["How long?", "And bank transfers?", "x" * 1001, "Fourth?"], limit=3, workers=1)
+    ok, throttled, long = batch.items
+    assert ok.answer is not None and throttled.answer is None and batch.skipped == 1
+    assert (throttled.error_code, throttled.error) == ("ThrottlingException", "Rate exceeded.")
+    assert long.error.startswith("Bedrock takes questions of up to 1,000 characters") and not long.request
+    assert batch.failed == [throttled, long] and not batch.stopped
+    assert len(core.ask_all(KB_ID, ["a?", "b?"], limit=None).items) == 2
+    assert len(core.ask_all(KB_ID, ["a?", "b?"], limit="0").items) == 2  # 0, like None: every question
+    with pytest.raises(ValueError, match="limit takes a number of questions"):
+        core.ask_all(KB_ID, ["a?"], limit=-1)
+    with pytest.raises(ValueError, match="No questions to ask"):
+        core.ask_all(KB_ID, " \n# only a comment")
+
+
+def test_ask_all_stops_sending_when_asked_to():
+    stop = threading.Event()
+
+    def stopping(**params):
+        stop.set()  # Stop, while the first question is being answered
+        return rag_resp()
+
+    clients = fakes(rag=stopping)
+    core = BedrockChatAnalyzer(clients=clients)
+    batch = core.ask_all(KB_ID, ["One?", "Two?", "Three?"], workers=1, stop=stop)
+    assert [i.answer is not None for i in batch.items] == [True, False, False] and batch.stopped
+    assert len(clients["bedrock-agent-runtime"].called("retrieve_and_generate")) == 1  # the rest weren't sent
+    assert item_verdict(batch.items[1]) == ("not asked", "")
+    assert batch_findings(batch)[-1] == ("info", "Stopped before 2 questions were asked: ask_all() asks the whole "
+                                                 "list again.")
+
+    def interrupt(done, total):
+        raise KeyboardInterrupt  # the notebook's stop button: what came back is kept
+
+    batch = core.ask_all(KB_ID, ["One?", "Two?", "Three?"], workers=1, progress=interrupt)
+    assert batch.items[0].answer is not None and batch.items[2].answer is None and batch.stopped
+
+
+def test_ask_all_retrieve_only_searches():
+    clients = fakes()
+    core = BedrockChatAnalyzer(clients=clients)
+    batch = core.ask_all("support-docs", [("How long?", "bank transfer"), ("Shipping?", "nope")],
+                         {"n": 3, "temperature": 0.2}, retrieve_only=True)
+    assert batch.retrieve_only and batch.model == "" and batch.settings == {"n": 3}
+    assert [item_verdict(i) for i in batch.items] == [("found #2", "ok"), ("expected not found", "warn")]
+    runtime = clients["bedrock-agent-runtime"]
+    assert not runtime.called("retrieve_and_generate") and len(runtime.called("retrieve")) == 2
+    assert batch.request == {"knowledgeBaseId": KB_ID, "retrievalQuery": {"text": "<your question>"},
+                             "retrievalConfiguration": {"vectorSearchConfiguration": {"numberOfResults": 3}}}
+    assert not clients["bedrock"].called("list_foundation_models")  # a search needs no model
+    assert batch.items[0].cost == pytest.approx(0.02 * estimate("How long?") / 1e6)
 
 
 # ----------------------------------------------------------------------------- UI (reports)
@@ -1333,6 +1652,74 @@ def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, ca
                                                                      "n=5)")
     view = chatmod.chat("support-docs", retrieve_only=True)
     assert view.retrieve_only and view._setup_call() == "chat('support-docs', retrieve_only=True, n=5)"
+
+
+def test_ui_ask_all_reports_each_question_and_what_changed(capsys):
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=fakes(rag=by_question)), kb="support-docs", mode="text",
+                         progress="off")
+    assert "Pass the questions to ask: ask_all(['How long do refunds take?'" in run(capsys, ui.ask_all)
+    assert "No test runs yet: ask_all(['a question', 'another'])" in run(capsys, ui.results)
+    out = run(capsys, ui.ask_all, "How long do refunds take? | refund-policy\nDo you ship to the moon?\n"
+                                  "And bank transfers? | shipping")
+    for text in ("Test run on support-docs: 3 questions", "test run 1 · each question asked on its own, not as a "
+                 "follow-up · Claude Haiku 4.5 · n=5 · cost at us-east-1 list prices", "Questions: 3",
+                 "Answered: 2 of 3 (!)", "Grounded: 69%", "Expected cited: 1 of 2 (!)", "Est. cost: ",
+                 "1 of 3 answers is Bedrock's \"unable to assist\" reply or empty ('Do you ship to the moon?')",
+                 "The expected source isn't cited in 1 of 2 answers checked ('And bank transfers?' expected "
+                 "'shipping', cited refund-policy.pdf)", "1. How long do refunds take?",
+                 "   [answered] Claude Haiku 4.5 · ", "   Expected 'refund-policy': cited as [1]",
+                 "   Refunds take 5-7 business days [1].", "   [1] refund-policy.pdf p.3",
+                 "2. Do you ship to the moon?", "   [unable to assist] Claude Haiku 4.5",
+                 "Each question was asked on its own (a new Bedrock session each)",
+                 "retrieve('Do you ship to the moon?')", "ask_all()   "):
+        assert text in out, text
+    assert ui.questions[0] == ("How long do refunds take?", "refund-policy") and len(ui.batches) == 1
+    assert ui.answers == [] and ui.session_id is None  # the conversation isn't touched
+    ui.set(n=8)
+    out = run(capsys, ui.ask_all)  # the same questions again, with n=8: the moon question is answered now
+    assert "test run 2 · " in out and "n=8" in out and "Answered: 3 of 3" in out
+    assert ("Since the last run (n 5 → 8): 1 question did better ('Do you ship to the moon?' unable to assist → "
+            "answered)") in out
+    assert "   [answered] (↑ was unable to assist) Claude Haiku 4.5" in out
+    assert "test run 1 · " in run(capsys, ui.results, 0)
+    assert "There are 2 test runs: results(0) is the first and results(-1) the last." in run(capsys, ui.results, 5)
+    out = run(capsys, ui.ask_all, ["How long?", "Bank?"], retrieve_only=True)
+    assert "Retrieve: the search only, no answers" in out and "Found passages: 2 of 2" in out
+    assert "Since the last run" not in out  # the last run of searches: none before it
+    assert "#1 · refund-policy.pdf p.3 · score 0.810" in out and len(ui.batches) == 3
+
+
+def test_ui_code_gives_the_setup_to_copy(ui, capsys):
+    ui.set(temperature=0.2)
+    out = run(capsys, ui.code)
+    for text in ("This setup as code: support-docs", "RetrieveAndGenerate · nothing is sent", "Questions: none yet",
+                 "-- Python: asks a question (put yours in) with this setup and prints each answer with the files it "
+                 "cites (boto3 only) --", "questions = ['<your question>']", "'temperature': 0.2",
+                 "# Knowledge base support-docs (KBID123456), answered by Claude Haiku 4.5.",
+                 "-- The config as JSON: the request without the question --", '"retrieveAndGenerateConfiguration": {',
+                 "-- AWS CLI: one question from a terminal (bash or zsh) --",
+                 "aws bedrock-agent-runtime retrieve-and-generate \\", "--cli-input-json file://bedrock-config.json",
+                 "code(retrieve_only=True)"):
+        assert text in out, text
+    ui.ask("How long do refunds take?")  # the conversation's questions, when there are no test questions
+    assert "questions = ['How long do refunds take?']" in run(capsys, ui.code)
+    out = run(capsys, ui.code, ["Q1?", "Q2?"], retrieve_only=True)
+    assert "Retrieve: the search only, no answer" in out and "return client.retrieve(retrievalQuery=" in out
+    assert "questions = ['Q1?', 'Q2?']" in out and "aws bedrock-agent-runtime retrieve \\" in out
+    assert "temperature" not in out  # the answer's settings aren't part of a search
+    ui.set(guardrail_id="gr-1")
+    out = run(capsys, ui.code)
+    assert "Bedrock would refuse this request, so the code would fail the same way: Missing required parameter" in out
+
+
+def test_chat_fills_the_test_tab(core, monkeypatch, capsys):
+    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    view = chatmod.chat("support-docs", questions="One?\nTwo? | two.md")
+    assert view.questions == [("One?", None), ("Two?", "two.md")]
+    view = chatmod.chat("support-docs", questions=[42])
+    assert view.questions == [] and view._notes[0].startswith("The test questions weren't used: ask_all() takes")
+    assert BedrockChatView(core, questions=["One?"], mode="text").questions == [("One?", None)]
+    capsys.readouterr()
 
 
 # ----------------------------------------------------------------------------- UI (the chat window)
@@ -1896,6 +2283,146 @@ def test_window_lists_nothing_it_cant_read(core, monkeypatch):
     app.question.value = "How long?"
     app._send()
     assert view.answers and "Refunds take" in texts(app)[-1]
+
+
+def open_window(monkeypatch, clients=None, **kwargs):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients or fakes()), kb="support-docs", mode="html",
+                           progress="off", **kwargs)
+    view._display = lambda widget: None
+    view.app()
+    return view
+
+
+def code_text(app):
+    """What the Code tab's code block shows, as text."""
+    return plain(re.search(r"<pre[^>]*>(.*)</pre>", app.code_view.value, re.S).group(1))
+
+
+def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys):
+    view = open_window(monkeypatch, fakes(rag=by_question))
+    app = view._app
+    assert [app.tabs.get_title(i) for i in range(5)] == ["⚙️ Settings", "🧪 Test", "📋 Code", "🧾 Request JSON",
+                                                         "📨 Last response"]
+    assert "<b>🧪 Test</b> asks a list of questions" in texts(app)[0] and "<b>📋 Code</b> gives" in texts(app)[0]
+    assert app.run_button.disabled and app.run_button.description == "▶ Run"
+    assert "Type or paste questions above." in app.test_note.value
+    app.test_box.value = "How long do refunds take? | refund-policy\n2. Do you ship to the moon?\nAnd bank transfers?"
+    assert app.run_button.description == "▶ Run 3 questions" and not app.run_button.disabled
+    assert "Claude Haiku 4.5 · about $" in app.test_note.value and "(estimate)" in app.test_note.value
+    app.run_button.click()  # no event loop here, so the questions are asked right away
+    batch = view.batches[-1]
+    assert [i.question for i in batch.items] == ["How long do refunds take?", "Do you ship to the moon?",
+                                                 "And bank transfers?"]
+    assert app.test_rows.children == tuple(app.batch_rows[:3]) and view.answers == []  # not the conversation
+    first = app.batch_rows[0].value
+    assert "How long do refunds take?" in first and "answered" in first and "cited as [1]" in first
+    assert "<sup>[1]</sup>" in first and "Request and response JSON" in first  # the answer, as the chat shows it
+    assert "unable to assist" in app.batch_rows[1].value and 'class="bq warn"' in app.batch_rows[1].value
+    head = app.test_head.value
+    assert 'Test run 1<span class="hint">support-docs · Claude Haiku 4.5 · n=5' in head and "2 of 3" in head
+    assert "Bedrock&#x27;s &quot;unable to assist&quot; reply" in head
+    assert "Test run 1: 3 of 3 questions came back in " in app.status.value and "ui.results()" in app.status.value
+    assert app.run_button.description == "▶ Run 3 questions" and app.stop_button.layout.display == "none"
+    assert "questions = [" in code_text(app) and "Do you ship to the moon?" in code_text(app)
+    view.set(n=8)  # from another cell; then Run again: each line says what changed
+    app.run_button.click()
+    assert "↑ was unable to assist" in app.batch_rows[1].value and "Test run 2" in app.test_head.value
+    assert "Since the last run (n 5 → 8): 1 question did better" in app.test_head.value
+    app.test_box.value = "  "
+    app._run_tests()
+    assert "Type or paste questions in the 🧪 Test tab first" in app.status.value and len(view.batches) == 2
+    capsys.readouterr()
+
+
+def test_window_test_tab_runs_in_the_background_and_stops(monkeypatch):
+    gate = threading.Event()
+
+    def slow(**params):
+        gate.wait(5)
+        return rag_resp()
+
+    view = open_window(monkeypatch, fakes(rag=slow))
+    app = view._app
+
+    async def main():
+        app.test_box.value = "\n".join(f"Question {n}?" for n in range(1, 7))
+        app.run_button.click()  # in a notebook the click returns at once, and the questions are asked meanwhile
+        task = app.batch_task
+        assert task is not None and app.running and app.run_button.disabled
+        assert app.run_button.description == "Asking… 0 of 6" and app.stop_button.layout.display == ""
+        assert all("asking…" in row.value for row in app.batch_rows[:6])
+        await asyncio.sleep(0.3)
+        app.stop_button.click()  # four are being answered; the other two aren't sent
+        assert app.stop_button.description == "Stopping…" and app.stop_button.disabled
+        assert "Stopping: no more questions are sent" in app.status.value
+        gate.set()
+        await task
+        batch = view.batches[-1]
+        assert [i.answer is not None for i in batch.items] == [True] * 4 + [False] * 2 and batch.stopped
+        assert "not asked" in app.batch_rows[5].value and "answered" in app.batch_rows[0].value
+        assert "Stopped before 2 questions were asked" in app.test_head.value
+        assert not app.running and app.stop_button.layout.display == "none" and app.batch_task is None
+        assert "stopped before the rest were asked" in app.status.value
+        assert len(view.core._runtime_client().called("retrieve_and_generate")) == 4
+
+    asyncio.run(main())
+
+
+def test_window_shows_a_test_run_from_another_cell(window, capsys):
+    app = window._app
+    window.ask_all(["How long?", "And bank transfers? | refund-policy"])
+    assert app.test_box.value == "How long?\nAnd bank transfers? | refund-policy" and len(app.test_rows.children) == 2
+    assert "Test run 1" in app.test_head.value and app.run_button.description == "▶ Run 2 questions"
+    assert "cited as [1]" in app.batch_rows[1].value
+    capsys.readouterr()
+
+
+def test_window_opens_on_the_test_questions_and_the_last_run(core, monkeypatch, capsys):
+    view = BedrockChatView(core, kb="support-docs", mode="text", progress="off", questions=["One?", "Two? | two.md"])
+    view.ask_all()
+    capsys.readouterr()
+    view.use_html = True
+    view._display = lambda widget: None
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    view.app()
+    app = view._app
+    assert app.test_box.value == "One?\nTwo? | two.md" and len(app.test_rows.children) == 2
+    assert "Test run 1" in app.test_head.value and "expected not cited" in app.batch_rows[1].value
+
+
+def test_window_code_tab_follows_the_setup(window):
+    app = window._app
+    assert "A script that asks a question (put yours in) with this setup" in app.code_view.value
+    assert "client.retrieve_and_generate(**request)" in code_text(app) and "'numberOfResults': 5" in code_text(app)
+    app.chips["temperature"].click()
+    assert "'temperature': 0.2" in code_text(app)
+    app.test_box.value = "How long?\nAnd bank transfers?"
+    assert "questions = ['How long?', 'And bank transfers?']" in code_text(app)
+    window.set(guardrail_id="gr-1")
+    assert "Bedrock would refuse this request, so the code would fail the same way" in app.code_view.value
+    window.unset("guardrail_id")
+    app.code_mode.value = "JSON"
+    assert json.loads(code_text(app)) == config_of(window._preview()[0])
+    assert "Save it as bedrock-config.json" in app.code_view.value
+    app.code_mode.value = "AWS CLI"
+    words = shlex.split(code_text(app).replace("\\\n", " "))
+    assert json.loads(words[words.index("--cli-input-json") + 1])["input"] == {"text": "How long?"}
+    app.mode_pick.value = "retrieve"  # the search-only setup
+    assert code_text(app).startswith("aws bedrock-agent-runtime retrieve \\")
+    app.code_mode.value = "Python"
+    assert "client.retrieve(retrievalQuery={'text': question}, **CONFIG)" in code_text(app)
+    assert "temperature" not in code_text(app)
+
+
+def test_batch_to_df():
+    pytest.importorskip("pandas")
+    df = run_of(asked("How long?", expected="refund-policy", cost=0.01),
+                BatchItem("Bank?", error="Rate exceeded.", error_code="ThrottlingException")).to_df()
+    assert list(df["result"]) == ["answered", "failed"] and df.loc[0, "found"] == 1
+    assert df.loc[1, "error"] == "Rate exceeded." and df.loc[0, "sources"] == ["refund-policy.pdf p.3",
+                                                                               "refund-policy.pdf p.4"]
+    assert 0 < df.loc[0, "grounded"] < 1 and df.loc[0, "cost"] == 0.01
 
 
 def test_answer_to_df():

@@ -5,9 +5,10 @@
 
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
-(support-docs), then uses the window the way a person would: types a question and presses Enter, opens the knowledge
-base list, adds settings, searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, ticks
-files, and asks the last question again on Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
+(support-docs), then uses the window the way a person would: types a question and presses Enter, runs a list of test
+questions in the Test tab and opens the Code tab, opens the knowledge base list, adds settings, searches for a setting,
+opens the Request JSON tab and its Python view, edits the JSON, ticks files, and asks the last question again on
+Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
 
@@ -36,8 +37,17 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-pick", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit",
-           "chat-files", "chat-retrieve")
+FIGURES = ("chat-window", "chat-test", "chat-code", "chat-pick", "chat-settings", "chat-add", "chat-request",
+           "chat-python", "chat-edit", "chat-files", "chat-retrieve")
+
+# The Test tab's questions: four answered (one only partly backed by its sources), two that demo.py's Bedrock can't
+# answer, and the file each should cite after a |.
+TEST_QUESTIONS = """How long do refunds take? | refund-policy.pdf
+Can I get a refund on a digital product? | digital-goods.pdf
+What does error E1234 mean? | payment-errors.md
+How do I reset my password?
+How long does shipping to the UK take? | shipping-times.pdf
+What is the holiday shipping cutoff?"""
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -105,8 +115,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
 
     def answered(count: int) -> None:
         page.wait_for_function(
-            f"document.querySelectorAll('.kbc-app .msg.bot').length >= {count} && "
-            "!document.querySelector('.kbc-app .wait') && !document.querySelector('.kbc-app .caret')", timeout=30_000)
+            f"document.querySelectorAll('.kbc-app .kbc-log .msg.bot').length >= {count} && "  # not the Test tab's
+            "!document.querySelector('.kbc-app .kbc-log .wait') && !document.querySelector('.kbc-app .caret')",
+            timeout=30_000)
 
     def scroll_to(element: str) -> None:
         """Scrolls the open tab so the element (a JS expression) is at its top: each tab scrolls on its own, in the
@@ -124,6 +135,18 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     answered(2)
     page.locator(".kbc-app details.src summary").last.click()
     shot("chat-window")
+    tab = ".kbc-app .lm-TabBar-tab:has-text('{0}'), .kbc-app .p-TabBar-tab:has-text('{0}')"
+    if "chat-test" in wanted or "chat-code" in wanted:
+        page.locator(tab.format("Test")).first.click()
+        page.locator(".kbc-app textarea[placeholder^='How long do refunds take?']").fill(TEST_QUESTIONS)
+        page.locator(".kbc-app button:has-text('Run 6 questions')").click()  # its label follows the box
+        page.wait_for_function("document.querySelector('.kbc-app .tests') && "
+                               "!document.querySelector('.kbc-app .bq.wait')", timeout=60_000)
+        scroll_to("document.querySelector('.kbc-app .tests').closest('.widget-html')")
+        shot("chat-test")
+        page.locator(tab.format("Code")).first.click()
+        shot("chat-code")
+        page.locator(tab.format("Settings")).first.click()
 
     def field(label: str):
         """The header field (a _Picker's button) with this label."""
@@ -157,10 +180,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     scroll_to("document.querySelector('.kbc-app .kbc-card')")
     shot("chat-add")
     search.fill("")
-    tab = ".kbc-app .lm-TabBar-tab:has-text('{0}'), .kbc-app .p-TabBar-tab:has-text('{0}')"
     page.locator(tab.format("Request JSON")).first.click()
     shot("chat-request")
-    page.locator(".kbc-app .widget-toggle-button:has-text('Python')").first.click()
+    page.locator(".kbc-app .widget-toggle-button:visible:has-text('Python')").first.click()  # not the Code tab's
     shot("chat-python")
     page.locator(".kbc-app .widget-toggle-button:has-text('Tree')").first.click()
     page.locator(".kbc-app button:has-text('Edit JSON')").click()
@@ -172,7 +194,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     editor.fill(editor.input_value().replace('"temperature": 0.2', '"temperature": 0.2,\n            "topK": 50'))
     editor.evaluate("el => { el.scrollTop = el.scrollHeight; }")
     page.locator(".kbc-app button:has-text('Apply')").click()
-    page.wait_for_selector(".kbc-app .note.warn", timeout=10_000)
+    page.wait_for_selector(".kbc-app .note.warn:visible", timeout=10_000)  # the Test tab's are hidden
     scroll_to("[...document.querySelectorAll('.kbc-app .note.warn')].find(el => el.offsetParent)")
     shot("chat-edit")
     if "chat-files" in wanted or "chat-retrieve" in wanted:

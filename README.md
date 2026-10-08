@@ -81,7 +81,7 @@ report still renders.
 | <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
 | <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
@@ -989,7 +989,8 @@ policy that covers every command.
 
 <img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
 questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field
-of RetrieveAndGenerate) while you watch the request as JSON.
+of RetrieveAndGenerate) while you watch the request as JSON. Then ask a whole list of test questions with that setup,
+see how each one did, and copy the setup as a Python script, JSON or an AWS CLI command.
 
 📄 [`analyzers/bedrock_chat.py`](analyzers/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
 
@@ -1011,6 +1012,8 @@ chat("support-docs", data_source="faq")    # ask only one of its data sources (a
 chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
 chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
+ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
+ui.code()                                  # this setup as a Python script, JSON and an AWS CLI command
 ```
 
 The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
@@ -1045,6 +1048,17 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
   back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
   while you were editing without saying so. **📨 Last response** shows what came back.
+- **🧪 Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
+  model, data source, files and settings, on its own (never as a follow-up), a few at a time, while the window stays
+  usable (**Stop** sends no more). Each question gets a line saying how it did (answered, "unable to assist", no
+  citations, partly grounded, failed) with its grounded share, sources and time, and opens to the full answer. Add
+  `| refund-policy.pdf` after a question to check that the answer cites that file. Cards and findings sum up the run
+  and say which setting to try; change it and **Run** again, and each line says whether that question did better or
+  worse. Before you run, the estimated cost shows beside the button. On **Retrieve only**, the list is searched instead.
+- **📋 Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
+  questions, printing each answer and the files it cites; the config as JSON (the request without the question,
+  which `client.retrieve_and_generate(input={"text": question}, **config)` or the AWS CLI's `--cli-input-json` sends);
+  or the AWS CLI command for one question. It follows every change to the knowledge base, model, files and settings.
 
 ### Commands (`BedrockChatView`)
 
@@ -1055,12 +1069,19 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Request JSON and Last response tabs |
+| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Code, Request JSON and Last response tabs |
 | `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
 | `retrieve(question)` | Only the search behind an answer (Retrieve, the same settings without the model): every passage found, best first, with its score, and no answer. After `ask()` with the same question, which passages the answer cited, and whether a poor answer comes from the search or the model |
 | `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
 | `transcript()` | The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't) |
 | `last()` | The last answer (or search) in full: every passage, the exact request and response as JSON, and the same call in Python |
+
+#### Test a list of questions
+
+| Command | What it shows |
+|:---|:---|
+| `ask_all(questions=None, *, retrieve_only=None, workers=4, limit=50)` | Asks a list of test questions with these settings, each on its own (not as a follow-up), and shows how each did: answered or "unable to assist", grounded share, sources, the file it should cite (`"question \| file"`), time and estimated cost, with findings across them all. `ask_all()` asks the last list again and says which questions did better or worse since the last run. `questions` is a list, text with one per line, or a DataFrame with `question` and `expected` columns |
+| `results(run=-1)` | A test run again, as a report that stays in the saved notebook: the last one, or `results(0)` for the first. Nothing is asked again |
 
 #### Settings
 
@@ -1071,6 +1092,7 @@ window follows them.
 | `unset(*names)` | Stops sending settings: `unset("temperature", "top_p")` |
 | `fields(match=None)` | Every field RetrieveAndGenerate takes in this boto3: the name `set()` takes, its type and range, what it does and its path. `fields("rerank")` keeps those that mention it |
 | `request(question=None, retrieve_only=None)` | The exact JSON the next question sends, highlighted, with what Bedrock would refuse in it, and the same call in Python. Nothing is sent. `retrieve_only=True` shows the Retrieve request `retrieve()` sends (default: the window's Answer / Retrieve only) |
+| `code(questions=None, retrieve_only=None)` | This setup as code to copy and run anywhere: a Python script (boto3 only) that asks your test questions and prints each answer with the files it cites, the config as JSON (the request without the question), and the AWS CLI command for one question. Nothing is sent |
 
 #### Knowledge base and model
 
@@ -1130,6 +1152,12 @@ core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
 core.schema().fields["temperature"]   # Field: path, type, range, what it does
+
+batch = core.ask_all("support-docs", ["refund window? | refund-policy.pdf", "gift returns?"], {"n": 8},
+                     model="sonnet", workers=4)   # Batch: each question asked on its own
+batch.items[0].answer, batch.items[0].found, batch.items[0].cost   # its Answer, where the file came up ([n]), USD
+batch.failed, batch.cost, batch.to_df()                           # what Bedrock refused, the total, one row each
+ui.batches                            # every test run of the view, oldest first; ui.questions: the Test tab's list
 ```
 
 The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
@@ -1138,7 +1166,9 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
 `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`,
 `answer_cost`, `cited_ranks`, and the findings: `settings_findings`, `answer_findings` and `compare_findings` (a
-search and an answer to the same question).
+search and an answer to the same question). For test runs: `parse_questions`, `format_questions`, `question_list`,
+`match_expected`, `expected_at`, `item_verdict`, `batch_estimate`, `batch_findings` and `batch_changes` (two runs of
+the same questions). For the code: `config_of`, `config_json`, `python_script` and `cli_command`.
 
 </details>
 
@@ -1153,6 +1183,10 @@ search and an answer to the same question).
   `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
   in the table shows its cost as unknown.
 - Bedrock takes questions of up to 1,000 characters; the chat says so before sending a longer one.
+- A test run (`ask_all()`, the 🧪 Test tab) costs what its questions would cost asked one by one, and the window shows
+  an estimate before you run it (about 300 tokens per passage and per answer). It asks up to 50 questions
+  (`ask_all(limit=None)` for all of them), four at a time; the client slows down and retries when Bedrock throttles,
+  and a question that still fails is listed with the reason while the rest are asked.
 
 </details>
 

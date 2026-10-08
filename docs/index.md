@@ -87,8 +87,8 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     - Pick the knowledge base and the model; answers stream in
     - Each answer's citations, sources, request and response, or only the search behind it
-    - Add, change or remove any RetrieveAndGenerate setting
-    - The request as highlighted JSON you can edit, or as Python
+    - Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command
+    - Test a list of questions, and see which did better after a change
 
     [Open the chat guide →](bedrock_chat.md)
 

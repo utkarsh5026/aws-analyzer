@@ -1,13 +1,13 @@
 ---
 title: Bedrock Chat Guide
-description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, see the request as JSON, and check the search apart from the answer."
+description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, see the request as JSON, check the search apart from the answer, test a list of questions, and copy the setup as code."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> aws-analyzer · bedrock_chat.py</p>
 
 # Chat with a Bedrock knowledge base, and see exactly what's sent
 
-One Python file and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer.
+One Python file and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer. Then ask a whole list of test questions with the setup you've built, and copy it as a Python script, JSON or an AWS CLI command.
 { .lede }
 
 <ul class="pills">
@@ -15,6 +15,8 @@ One Python file and one call, `chat()`, open a chat window in your notebook. Pic
   <li>Every RetrieveAndGenerate field</li>
   <li>Answers stream as they're written</li>
   <li>Retrieval and answer, checked apart</li>
+  <li>A list of test questions, compared run to run</li>
+  <li>The setup as Python, JSON or the AWS CLI</li>
   <li>Read-only: changes no knowledge base</li>
 </ul>
 
@@ -60,6 +62,7 @@ The examples use a knowledge base called `support-docs` holding support policies
     chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
     chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
     chat("support-docs", retrieve_only=True)       # questions only search: every passage found, no answer
+    chat("support-docs", questions=["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])
     ```
 
 3. **Optional:** another region or AWS profile, or keep the view to use from other cells.
@@ -80,8 +83,8 @@ The examples use a knowledge base called `support-docs` holding support policies
 
 Type a question and press Enter. The answer appears as it's written, then settles into its final form: the text with each cited span shaded and numbered, who answered and how long it took (and how long until the first words), how many sources it cites, how much of it they back up, and an estimated cost. Answers written in markdown are laid out as such: headings, bullet and numbered lists, **bold** and *italic*, tables, code blocks and links, with the cited spans still shaded inside them.
 
-![The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-light.webp#only-light){ width="984" height="824" loading=lazy }
-![The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-dark.webp#only-dark){ width="984" height="824" loading=lazy }
+![The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-light.webp#only-light){ width="984" height="818" loading=lazy }
+![The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; the end of an answer about digital goods, its source open, then a question asking for a summary as a list, answered in markdown: a bold lead-in and two bullets, each with its cited span shaded and numbered, the model's name over its time, grounded share and cost, and its two sources; on the right, the Settings tab with Passages 5 and Search type HYBRID, each on one line with its value beside its name and explained in a sentence, and a button to add a setting](images/chat-window-dark.webp#only-dark){ width="984" height="818" loading=lazy }
 /// caption
 Two questions about refunds, in the same Bedrock session. The second asks for a list, and the answer's markdown is laid out: bullets, bold, and a citation after each cited span.
 ///
@@ -103,8 +106,8 @@ The fields across the top say what the next question asks: which knowledge base,
 - **Data source** appears when the knowledge base has more than one (an S3 bucket of policies, a crawled help site): pick one and the next questions search only that one, until you pick another or **All data sources**. It's sent as a filter on the data source ID Bedrock gives every chunk, so it needs no metadata files and works together with the `filter` setting. The conversation goes on.
 - **Files** lists the files the knowledge base has indexed (from its S3 and custom data sources), the first time you open it. A click ticks a file, and the list stays open so you can tick more; a second click unticks it. Enter ticks the only file the search finds, and a full `s3://` path works too. The next questions search only the files ticked, shown as chips on a line under the fields: click a chip to drop that file, or **All files** to search every file again. It's a filter on the file path Bedrock gives every chunk, so it works together with the data source and the `filter` setting. `ui.files()` lists the same files as a report, with failed ones marked.
 
-![The chat window with the Knowledge base field open under the header: a search box reading Search by name, ID or description, then four knowledge bases, each with a status dot, its name, its ID in a code font, its description and when it changed; hr-policies, legacy-faq (failed, with a red dot), sales-playbooks and support-docs, which is ticked and shaded as the one in use; under them, 4 knowledge bases](images/chat-pick-light.webp#only-light){ width="984" height="824" loading=lazy }
-![The chat window with the Knowledge base field open under the header: a search box reading Search by name, ID or description, then four knowledge bases, each with a status dot, its name, its ID in a code font, its description and when it changed; hr-policies, legacy-faq (failed, with a red dot), sales-playbooks and support-docs, which is ticked and shaded as the one in use; under them, 4 knowledge bases](images/chat-pick-dark.webp#only-dark){ width="984" height="824" loading=lazy }
+![The chat window with the Knowledge base field open under the header: a search box reading Search by name, ID or description, then four knowledge bases, each with a status dot, its name, its ID in a code font, its description and when it changed; hr-policies, legacy-faq (failed, with a red dot), sales-playbooks and support-docs, which is ticked and shaded as the one in use; under them, 4 knowledge bases](images/chat-pick-light.webp#only-light){ width="984" height="818" loading=lazy }
+![The chat window with the Knowledge base field open under the header: a search box reading Search by name, ID or description, then four knowledge bases, each with a status dot, its name, its ID in a code font, its description and when it changed; hr-policies, legacy-faq (failed, with a red dot), sales-playbooks and support-docs, which is ticked and shaded as the one in use; under them, 4 knowledge bases](images/chat-pick-dark.webp#only-dark){ width="984" height="818" loading=lazy }
 /// caption
 The knowledge base list, open. Type part of a name or an ID to narrow it; Enter picks the first.
 ///
@@ -119,8 +122,8 @@ Two files ticked: the next answers come only from them, and the conversation goe
 
 An answer is two steps: Bedrock searches the knowledge base, then the model writes from the passages it found. When an answer is wrong or Bedrock says it's “unable to assist”, either step can be the cause. Switch **Answer** to **Retrieve only**, beside the question box, and the next questions only search: the same search an answer makes (Retrieve instead of RetrieveAndGenerate, with the same passages, search type, filter, reranker, data source and files), and no model.
 
-![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-light.webp#only-light){ width="984" height="824" loading=lazy }
-![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-dark.webp#only-dark){ width="984" height="824" loading=lazy }
+![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-light.webp#only-light){ width="984" height="818" loading=lazy }
+![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-dark.webp#only-dark){ width="984" height="818" loading=lazy }
 /// caption
 The same question asked both ways: the search found five passages, and the answer used the top two.
 ///
@@ -135,8 +138,8 @@ The same question asked both ways: the search found five passages, and the answe
 
 The **⚙️ Settings** tab lists everything sent with every question, one line each: its name, its value, and what that value means, in a sentence. Hover a name for what the setting does, what it takes and where it goes in the request. Only what's listed is sent; for everything else Bedrock uses its defaults.
 
-![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; numbers, lists and the slider sit beside their names, text and JSON under them, and each line has a remove button; under them, a button to add a setting](images/chat-settings-light.webp#only-light){ width="984" height="864" loading=lazy }
-![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; numbers, lists and the slider sit beside their names, text and JSON under them, and each line has a remove button; under them, a button to add a setting](images/chat-settings-dark.webp#only-dark){ width="984" height="864" loading=lazy }
+![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; numbers, lists and the slider sit beside their names, text and JSON under them, and each line has a remove button; under them, a button to add a setting](images/chat-settings-light.webp#only-light){ width="984" height="858" loading=lazy }
+![The Settings tab after adding three settings: Passages 5, Search type HYBRID, a metadata filter typed as {"team": "billing"} and explained as Only documents where team = "billing", the Cohere reranker, and a Temperature slider at 0.20 explained as steady, factual wording; numbers, lists and the slider sit beside their names, text and JSON under them, and each line has a remove button; under them, a button to add a setting](images/chat-settings-dark.webp#only-dark){ width="984" height="858" loading=lazy }
 /// caption
 A filter, a reranker and a temperature added with one click each, every value explained in a sentence.
 ///
@@ -145,8 +148,8 @@ A filter, a reranker and a temperature added with one click each, every value ex
 - **Remove** one with **✕**.
 - **Add** one with **+ Add a setting**, which opens under the list: the common ones take one click (**+ Temperature**, **+ Metadata filter**, **+ Reranker**...), and for anything else, type in its search box: a name (`rerank`), a path (`performanceConfig.latency`) or what it does (`encrypts`). The matches are listed with what each one takes and does, and **+ Add** next to each; Enter adds the best one. A misspelt name (`temprature`) lists the closest ones. **Browse all** lists every field, grouped by what it changes. The fields come from your installed boto3's description of the API, so every field it can send is there, with its type and range. A setting you've just added is outlined until you add another, and **✕** folds Add a setting away again.
 
-![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-light.webp#only-light){ width="984" height="864" loading=lazy }
-![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-dark.webp#only-dark){ width="984" height="864" loading=lazy }
+![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-light.webp#only-light){ width="984" height="858" loading=lazy }
+![Add a setting with rerank typed in the search box: under it, the matching settings, each with its name, what it takes and what it does in a sentence and its path, and a + Add button; Reranker shows Added, since it's already sent](images/chat-add-dark.webp#only-dark){ width="984" height="858" loading=lazy }
 /// caption
 Searching the settings: every field whose name, path or description mentions "rerank", with a button to add each.
 ///
@@ -175,12 +178,66 @@ Pass these to `chat()` or `set()` as keywords. Paths and the API's own names wor
 
 Values are forgiving: `"0.2"` and `0.2`, `"hybrid"` and `"HYBRID"`, JSON or a Python dict for the JSON fields, one stop sequence per line. `ui.fields()` lists every field, including the ones without a short name (the reranker's metadata settings, the orchestration step's inference settings...).
 
+## Test a list of questions { #test }
+
+One good answer doesn't tell you a setup works. The **🧪 Test** tab asks a whole list of questions with the setup you've built: the knowledge base, model, data source, files and settings. Paste the questions one per line (a column copied from a spreadsheet works, and list numbers and bullets are dropped); the button says how many it will ask, and beside it, roughly what that costs. **Run** asks them a few at a time, each on its own: never as a follow-up, so their order doesn't matter and none sees another's answer. The window stays usable meanwhile, and **Stop** sends no more.
+
+![The chat window with the Test tab open: Test run 1 with support-docs, Claude Sonnet 5 and the settings n=5 and search type HYBRID; cards for 6 questions, 4 of 6 answered outlined as a warning, 63% grounded, 3 of 4 expected sources cited, about a cent and 3.8 seconds; a warning that 2 of 6 answers are Bedrock's unable to assist reply, naming them, with the retrieve call that shows what the search found for the first and the settings to try; a note that the answer about error E1234 is less than half backed by citations; then a line per question with its number, its result as a coloured label (answered, unable to assist, partly grounded), its grounded share, sources cited and time](images/chat-test-light.webp#only-light){ width="984" height="858" loading=lazy }
+![The chat window with the Test tab open: Test run 1 with support-docs, Claude Sonnet 5 and the settings n=5 and search type HYBRID; cards for 6 questions, 4 of 6 answered outlined as a warning, 63% grounded, 3 of 4 expected sources cited, about a cent and 3.8 seconds; a warning that 2 of 6 answers are Bedrock's unable to assist reply, naming them, with the retrieve call that shows what the search found for the first and the settings to try; a note that the answer about error E1234 is less than half backed by citations; then a line per question with its number, its result as a coloured label (answered, unable to assist, partly grounded), its grounded share, sources cited and time](images/chat-test-dark.webp#only-dark){ width="984" height="858" loading=lazy }
+/// caption
+Six test questions asked with the window's settings: four answered, two Bedrock couldn't help with, and what to try next.
+///
+
+- **A line per question**, filled in as its answer comes back: how it did (answered, "unable to assist", no citations, partly grounded, a guardrail stepped in, failed), its grounded share, how many sources it cites and how long it took. Click one to read the answer as the chat shows it: citations, sources, findings, and the request and response.
+- **Check the source.** Add `|` and a piece of a file name (or of its path or text) after a question, `How long do refunds take? | refund-policy.pdf`, and its line says whether the answer cites that file, and as which `[n]`. Several, each after its own `|`, mean any of them.
+- **Cards and findings** sum up the run: how many were answered, the average grounded share, expected sources cited, failures, the estimated cost and the time. The findings name the questions and the next step: `retrieve('...')` for the search behind the first answer that didn't work, the setting to try, or fewer questions at a time when Bedrock throttled.
+- **Run it again.** Change a setting (more passages, HYBRID search, a reranker, another model) and **Run**: each line says whether that question did better or worse (`↑ was unable to assist`), and a finding sums up the change: *Since the last run (n 5 → 10): 1 question did better; grounded 63% → 71% on average.*
+- On **Retrieve only**, the list is searched instead: each line opens to the passages found, best first, and says where the expected file ranked.
+
+From code, `ui.ask_all(...)` asks a list and shows the run as a report, `ui.ask_all()` asks the last list again, `ui.results()` shows a run again as a report that stays in the saved notebook, and `ui.batches[-1].to_df()` has one row per question. A run asks up to 50 questions; `ui.ask_all(limit=None)` asks every one.
+
+```python
+ui.ask_all("""How long do refunds take? | refund-policy.pdf
+Can I get a refund on a digital product? | digital-goods.pdf
+What does error E1234 mean?""")
+ui.set(search_type="hybrid")
+ui.ask_all()                         # the same questions: which did better or worse
+df = ui.batches[-1].to_df()          # question, result, answer, grounded, sources, found, seconds, cost, error
+```
+
+## Use the setup in your code { #code }
+
+The **📋 Code** tab gives the setup you've built as code to copy and run anywhere boto3 or the AWS CLI has credentials, and follows every change: the knowledge base, model, data source, files and settings.
+
+![The chat window with the Code tab open: Python, JSON and AWS CLI buttons, Python selected; a line saying it's a script that asks 6 test questions with this setup and prints each answer with the files it cites, and needs only boto3; then the script, highlighted: import boto3, a client for bedrock-agent-runtime in us-east-1, a comment naming the knowledge base and the model, and CONFIG holding the retrieveAndGenerateConfiguration with the knowledge base ID, the model's inference profile and the search settings](images/chat-code-light.webp#only-light){ width="984" height="818" loading=lazy }
+![The chat window with the Code tab open: Python, JSON and AWS CLI buttons, Python selected; a line saying it's a script that asks 6 test questions with this setup and prints each answer with the files it cites, and needs only boto3; then the script, highlighted: import boto3, a client for bedrock-agent-runtime in us-east-1, a comment naming the knowledge base and the model, and CONFIG holding the retrieveAndGenerateConfiguration with the knowledge base ID, the model's inference profile and the search settings](images/chat-code-dark.webp#only-dark){ width="984" height="818" loading=lazy }
+/// caption
+**Python**: a script that asks the test questions with this setup, using only boto3.
+///
+
+- **Python** is a whole script: the setup as `CONFIG`, an `ask(question)` function (pass an earlier response's `sessionId` to follow up on it), and a loop that asks your test questions (or, without any, this conversation's) and prints each answer with the files it cites. Paste it into a cell, or save it as a `.py` file and run it. On **Retrieve only**, it searches instead and prints each passage's score and file.
+- **JSON** is the config: the API's own request without the question. Save it as `bedrock-config.json`, then send it with any question:
+
+    ```python
+    import json, boto3
+
+    config = json.load(open("bedrock-config.json"))
+    client = boto3.client("bedrock-agent-runtime")
+    response = client.retrieve_and_generate(input={"text": "How long do refunds take?"}, **config)
+    ```
+
+    or from a terminal: `aws bedrock-agent-runtime retrieve-and-generate --cli-input-json file://bedrock-config.json --input '{"text": "How long do refunds take?"}'`.
+
+- **AWS CLI** is the whole command for the first test question, to paste into a terminal (bash or zsh) with the AWS CLI v2. It prints the answer.
+
+A setup Bedrock would refuse (a guardrail ID without its version, say) shows a warning over the code, since the code would fail the same way. From code, `ui.code()` shows all three as a report.
+
 ## The request as JSON { #json }
 
 The **🧾 Request JSON** tab shows the exact request your next question will send, and follows every change you make. Your settings are highlighted; the fields the chat fills in are labelled (the knowledge base, model, data source and files from the pickers, the session that continues the conversation, required fields such as the reranker's `type`). Each object folds with a click.
 
-![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="864" loading=lazy }
-![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="864" loading=lazy }
+![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-light.webp#only-light){ width="984" height="858" loading=lazy }
+![The Request JSON tab: the next request as a folding tree with keys, strings and numbers in colour, numberOfResults, overrideSearchType, filter and the reranker's modelArn highlighted as your settings, and notes after the question placeholder, the session ID, the knowledge base ID and the model ARN saying where each comes from](images/chat-request-dark.webp#only-dark){ width="984" height="858" loading=lazy }
 /// caption
 The next request, continuing the conversation. Highlighted keys are your settings.
 ///
@@ -189,15 +246,15 @@ The next request, continuing the conversation. Highlighted keys are your setting
 - **Edit JSON** opens the request as text. Add, change or delete any field, then **Apply**: the settings, the knowledge base, the model, the data source and the files (conditions on `x-amz-bedrock-kb-data-source-id` and `x-amz-bedrock-kb-source-uri` in the filter) follow what you wrote. Before anything changes, the request is checked the way boto3 checks it before sending, so a misspelt field, a wrong type or a missing required field is refused with the reason, and nothing changes. While the editor is open, it's the view: **Tree**, **JSON** and **Python** wait until you Apply or Cancel.
 - If the request changes while you're editing (a setting changed in the Settings tab or from another cell, another model, an answer that started a session), an editor you haven't touched takes the new request. One you have keeps your edits and says what Apply would undo; **Start over** puts the request as it is now in the box.
 
-![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-light.webp#only-light){ width="984" height="824" loading=lazy }
-![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-dark.webp#only-dark){ width="984" height="824" loading=lazy }
+![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-light.webp#only-light){ width="984" height="818" loading=lazy }
+![The Python view of the Request JSON tab: the boto3 call that sends the same request, with keywords, function names, keyword arguments, keys, text and numbers each in their own colour](images/chat-python-dark.webp#only-dark){ width="984" height="818" loading=lazy }
 /// caption
 **Python**: the same request as a boto3 call, highlighted, to paste into your own code.
 ///
 - **📨 Last response** shows what Bedrock sent back, folded below the top levels, and the request that was sent.
 
-![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-light.webp#only-light){ width="984" height="863" loading=lazy }
-![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-dark.webp#only-dark){ width="984" height="863" loading=lazy }
+![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-light.webp#only-light){ width="984" height="857" loading=lazy }
+![Edit JSON with topK added next to temperature; after Apply, a warning says Bedrock would refuse this request: unknown parameter topK in textInferenceConfig, which must be one of maxTokens, stopSequences, temperature, topP, and that settings a model takes beyond these go in additionalModelRequestFields, the model_fields setting](images/chat-edit-dark.webp#only-dark){ width="984" height="857" loading=lazy }
 /// caption
 A field Bedrock doesn't take is refused before anything is sent, with the fields that are allowed there and where model-specific ones go.
 ///
@@ -223,6 +280,10 @@ ui.fields("rerank")                    # every field you can send that mentions 
 ui.request()                           # the JSON the next question sends, and the Python call
 ui.request(retrieve_only=True)         # the Retrieve request retrieve() sends
 ui.last()                              # the last answer: passages in full, request and response
+ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each checked
+ui.ask_all()                           # the same list again, after a change: which did better or worse
+ui.results()                           # the last test run, as a report
+ui.code()                              # this setup as a Python script, JSON and an AWS CLI command
 ui.transcript()                        # the whole conversation
 ui.new_chat()                          # start over
 ui.app()                               # the window
@@ -251,13 +312,18 @@ r = core.retrieve("support-docs", "refund window?", {"n": 8})        # only the 
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.schema().fields["temperature"]   # Field: its path, type, range and what it does
+
+batch = core.ask_all("support-docs", ["refund window? | refund-policy.pdf", "gift returns?"], {"n": 8})
+batch.items[0].answer                 # its Answer (None when it failed: batch.items[0].error says why)
+batch.items[0].found                  # the [n] the answer cites refund-policy.pdf as (None: not cited)
+batch.to_df()                         # one row per question; ui.batches holds every test run
 ```
 
-The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`, `answer_cost`, `cited_ranks`, and the findings, `settings_findings`, `answer_findings` and `compare_findings` (a search and an answer to the same question).
+The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`, `answer_cost`, `cited_ranks`, and the findings, `settings_findings`, `answer_findings` and `compare_findings` (a search and an answer to the same question). For test runs: `parse_questions`, `format_questions`, `question_list`, `match_expected`, `expected_at`, `item_verdict`, `batch_estimate`, `batch_findings` and `batch_changes` (two runs of the same questions); and for the code, `config_of`, `config_json`, `python_script` and `cli_command`.
 
 ## Cost { #cost }
 
-Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES` and `BEDROCK_PRICES`, the same tables as `bedrock_kb.py`); a model not in the table shows its cost as unknown. For exact token counts, use `bedrock_kb.py`'s `ask(engine="converse")`. A **Retrieve only** search calls no model, so it costs the question's embedding and, with a reranker, the reranking.
+Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES` and `BEDROCK_PRICES`, the same tables as `bedrock_kb.py`); a model not in the table shows its cost as unknown. For exact token counts, use `bedrock_kb.py`'s `ask(engine="converse")`. A **Retrieve only** search calls no model, so it costs the question's embedding and, with a reranker, the reranking. A [test run](#test) costs what its questions would cost asked one by one; the 🧪 Test tab shows an estimate before you run it (guessing about 300 tokens per passage and per answer), and the run's cards show its estimated cost after.
 
 ```python
 from bedrock_chat import BedrockChatAnalyzer, BedrockChatView
@@ -338,6 +404,10 @@ A model also has to be enabled for the account under **Model access** in the Bed
 
     The fields come from the installed boto3's description of the API, so a field AWS added recently needs a newer boto3: `%pip install -U boto3`, then restart the kernel. Model-specific settings (`top_k`, reasoning budgets) go in `model_fields`.
 
+??? question "Some test questions failed with ThrottlingException"
+
+    Bedrock limits how many requests, and how many tokens, a model takes per minute. A test run asks four questions at a time, and the client slows down and retries when Bedrock throttles; a question that still fails gets a line saying so, and the rest are asked. Ask them again with fewer at a time, `ui.ask_all(workers=1)`, or ask for a higher quota in the Service Quotas console.
+
 ??? question "A follow-up says the conversation expired"
 
     Bedrock ends sessions after a while. The chat starts a new one and says so; that answer doesn't know the earlier questions, so ask the full question if it needs them.
@@ -354,18 +424,21 @@ Every `BedrockChatView` command. `ui.help()` prints the same list grouped by tas
 
 | Command | What it shows |
 |---|---|
-| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, retrieve_only=False, **values)` | Opens the window and returns the view behind it |
+| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, retrieve_only=False, questions=None, **values)` | Opens the window and returns the view behind it; `questions=` fills the Test tab |
 | `app()` | The chat window |
 | `ask(question)` | An answer with \[1\]\[2\] citations, sources, findings and cost, as a report, in the same conversation |
 | `retrieve(question)` | Only the search behind an answer: every passage found, best first, with its score, and which ones the answer to the same question cited |
 | `new_chat()` | Forgets the conversation; the settings stay |
 | `transcript()` | The conversation so far, as a report that stays in the saved notebook |
 | `last()` | The last answer (or search) in full: every passage, the request and the response, and the call in Python |
+| `ask_all(questions=None, *, retrieve_only=None, workers=4, limit=50)` | A list of test questions asked with these settings, each on its own: how each did, its grounded share, sources and the file it should cite, findings across them all, and what changed since the last run. `ask_all()` asks the last list again |
+| `results(run=-1)` | A test run again, as a report that stays in the saved notebook |
 | `settings()` | What's sent with every question, in plain English, with warnings and the `chat(...)` call that opens the setup again |
 | `set(name=None, value=None, **values)` | Changes settings: `set(temperature=0.2)`, or `set("a.field.path", value)` |
 | `unset(*names)` | Stops sending settings |
 | `fields(match=None)` | Every field RetrieveAndGenerate takes: its name, type and range, what it does, and its path |
 | `request(question=None, retrieve_only=None)` | The JSON the next question sends, and the same call in Python; `retrieve_only=True` for the Retrieve request |
+| `code(questions=None, retrieve_only=None)` | This setup as a Python script (boto3 only) that asks your test questions, the config as JSON, and the AWS CLI command for one question |
 | `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base, the model, or the data source or files questions search |
 | `files(match=None)` | The knowledge base's files to pick from, whether each is indexed, and which ones questions search |
 | `kbs(match=None)` | The knowledge bases in the region; `match=` keeps those whose name, ID or description holds it |

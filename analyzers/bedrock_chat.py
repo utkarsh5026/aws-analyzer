@@ -9,10 +9,15 @@ from this repo is needed.
     chat("support-docs", model="sonnet", n=8, temperature=0.2)
 
 The window has the conversation on the left (each answer with its [1] citations, its sources, and the exact request
-and response) and three tabs on the right:
+and response) and five tabs on the right:
 
     Settings       what's sent with every question: passages, search type, filter, reranker, temperature, prompt...
                    Change a value in place, remove it with x, or add any field RetrieveAndGenerate takes.
+    Test           a list of questions, one per line, asked with these settings, each on its own: how each did
+                   (answered, "unable to assist", grounded, the file it should cite), and what changed since the last
+                   run. Change a setting, run them again, and each line says whether it did better.
+    Code           this setup to copy and run anywhere: a Python script (boto3 only) that asks your test questions,
+                   the config as JSON (the request without the question), or an AWS CLI command.
     Request JSON   the exact request your next question sends, highlighted. Edit it by hand, or copy it as Python.
     Last response  what Bedrock sent back, as JSON.
 
@@ -49,19 +54,26 @@ More
     ui.fields("reranker")                               # every field you can set: type, range, what it does
     ui.request()                                      # the exact JSON your next question sends, and the Python call
     ui.last()                                         # the last answer: sources in full, request and response
+    ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a list, each answered
+    ui.set(n=10); ui.ask_all()                        # the same list again: which questions did better or worse
+    ui.results()                                      # the last test run again, as a report
+    ui.code()                                         # this setup as a Python script, JSON and an AWS CLI command
     ui.new_chat()                                     # forget the conversation
     ui.help()                                         # every command
 
     a = ui.answers[-1]                                # Answer: a.text, a.citations, a.sources, a.request, a.response
+    df = ui.batches[-1].to_df()                       # the last test run: one row per question
     core = ui.core                                    # BedrockChatAnalyzer
     params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
     a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
     r = core.retrieve("support-docs", "refund window?", {"n": 8})          # r.sources: every passage, ranked
+    batch = core.ask_all("support-docs", ["refund window?", "gift returns?"], {"n": 8})   # Batch: an Answer each
 """
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import copy
 import difflib
 import functools
@@ -72,13 +84,17 @@ import io
 import json
 import keyword
 import math
+import queue
 import re
+import shlex
 import sys
 import textwrap
+import threading
 import time
 import tokenize
 import unicodedata
 from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -185,6 +201,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {"n": 5}
 FILE_LIMIT = 5_000  # files listed to pick from; one past it can still be named by its s3:// path
 SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "METADATA_UPDATE_FAILED"}  # has chunks
 MAX_QUESTION_CHARS = 1000  # RetrieveAndGenerate takes questions (input.text) of up to 1,000 characters
+BATCH_LIMIT = 50  # test questions ask_all() and the window's Test tab ask at most, unless limit= says otherwise
+BATCH_WORKERS = 4  # test questions in flight at once; the client's adaptive retries slow down when Bedrock throttles
 
 # A prompt template to start from when you add the `prompt` setting. $search_results$ is where Bedrock puts the
 # passages, and $output_format_instructions$ where it asks the model to cite them.
@@ -845,6 +863,83 @@ class Answer:
                 for i, p in enumerate(self.sources, 1)
             ]
         )
+
+
+@dataclass
+class BatchItem:
+    """One question of a test run: what was asked, what came back (or why nothing did), and where the source it was
+    expected to come from turned up."""
+
+    question: str
+    expected: Any = None  # a piece of the file name, s3:// path or text the answer should come from (a list: any)
+    answer: Answer | None = None  # None when it failed, wasn't sent, or wasn't asked (the run stopped first)
+    error: str = ""  # why it failed (Bedrock's message), or why it wasn't sent (a question that's too long)
+    error_code: str = ""  # 'ThrottlingException', 'AccessDeniedException'...; '' when it wasn't sent at all
+    cost: float | None = None  # estimated USD; None for a model that isn't in the price table, or nothing asked
+    request: dict[str, Any] = field(default_factory=dict)  # what was (or would have been) sent
+
+    @property
+    def found(self) -> int | None:
+        """Where the expected source came up: the [n] the answer cites it as, or its rank in a retrieve-only search.
+        None when it didn't come up, or nothing was expected."""
+        return expected_at(self.answer, self.expected) if self.answer is not None else None
+
+
+@dataclass
+class Batch:
+    """A list of test questions asked with one setup, each on its own (never as a follow-up), and what came back.
+    ask_all() returns one, and the view keeps every run in view.batches."""
+
+    items: list[BatchItem] = field(default_factory=list)  # in the order the questions were given
+    kb_id: str = ""
+    kb_name: str = ""
+    model: str = ""  # the model ID or inference profile that answered ('' for a retrieve-only run)
+    settings: dict[str, Any] = field(default_factory=dict)  # what was sent with every question
+    data_sources: dict[str, str] = field(default_factory=dict)  # ID -> name of the only ones searched; {} = all
+    files: list[str] = field(default_factory=list)  # s3:// paths of the only files searched; [] = all
+    retrieve_only: bool = False  # each question only searched (Retrieve): every passage found, no answer
+    request: dict[str, Any] = field(default_factory=dict)  # the setup: the request, with a placeholder question
+    seconds: float = 0.0  # from the first question sent to the last answer back
+    skipped: int = 0  # questions past limit=, not asked
+    stopped: bool = False  # stopped (Stop, or an interrupt) before every question was asked
+
+    @property
+    def asked(self) -> list[BatchItem]:
+        """The questions that came back: with an answer, or with the search's passages."""
+        return [i for i in self.items if i.answer is not None]
+
+    @property
+    def failed(self) -> list[BatchItem]:
+        """The questions Bedrock refused, and the ones that couldn't be sent."""
+        return [i for i in self.items if i.error]
+
+    @property
+    def cost(self) -> float:
+        """Estimated USD for the questions asked, as far as their model's price is known."""
+        return sum(i.cost for i in self.items if i.cost is not None)
+
+    def to_df(self):
+        """One row per question: the question, the source expected, how it did, the answer, its grounded share, the
+        sources it cites (every passage found, for a retrieve-only run), where the expected one came up, the best
+        score, time, estimated cost and any error."""
+        pd = _require("pandas", "Batch.to_df")
+        rows = []
+        for n, item in enumerate(self.items, 1):
+            a = item.answer
+            spoke = a is not None and not a.retrieve_only and bool(a.text.strip())
+            rows.append({
+                "n": n, "question": item.question, "expected": item.expected, "result": item_verdict(item)[0],
+                "answer": a.text if spoke else None,
+                "grounded": a.grounded_share if spoke else None,
+                "sources": [p.source for p in a.sources] if a is not None else [],
+                "found": item.found,
+                "best_score": (max((p.score for p in a.sources if p.score is not None), default=None)
+                               if a is not None and a.retrieve_only else None),
+                "seconds": a.seconds if a is not None else None,
+                "cost": item.cost,
+                "error": item.error or None,
+            })
+        return pd.DataFrame(rows)
 
 
 # =============================================================================
@@ -2238,6 +2333,390 @@ def answer_cost(
                                    question_tokens=estimate_tokens(a.question))
 
 
+# ---------------------------------------------- test runs: a list of questions asked with one setup
+
+_LIST_MARK_RE = re.compile(r"^(?:[-*•]|\d{1,4}[.)]|q\d{0,4}\s*[:.)])\s+", re.IGNORECASE)
+_THROTTLED = {"ThrottlingException", "TooManyRequestsException", "ServiceQuotaExceededException"}
+_GRADES = {"ok": 2, "warn": 1, "bad": 0}  # how a question did, to tell whether it did better than before
+
+
+def _filled(value: Any) -> bool:
+    """Whether a value says something: not None, NaN or pandas' NA (an empty cell), blank text or an empty list."""
+    if value is None or (isinstance(value, float) and math.isnan(value)) or type(value).__name__ in ("NAType",
+                                                                                                     "NaTType"):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return bool(value)
+    return True
+
+
+def parse_questions(text: str) -> list[tuple[str, Any]]:
+    """Test questions pasted as text, one per line -> [(question, expected or None)]. Blank lines and lines starting
+    with # are left out, and a list mark in front ('1.', '-', 'Q:') is dropped. After a | (or a tab, as two columns
+    pasted from a spreadsheet) comes the source the answer should come from: a piece of its file name, s3:// path or
+    text. Several, each after its own |, mean any of them.
+
+        How long do refunds take? | refund-policy.pdf
+        2. Can I return a digital product?"""
+    cases: list[tuple[str, Any]] = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        question, expected = _split_case(_LIST_MARK_RE.sub("", line, count=1))
+        if question:
+            cases.append((question, expected))
+    return cases
+
+
+def _split_case(line: str) -> tuple[str, Any]:
+    """'How long? | refund-policy.pdf' -> ('How long?', 'refund-policy.pdf'); several after their own | -> a list."""
+    question, *rest = re.split(r"\s*[|\t]\s*", line.strip())
+    expected = [e.strip() for e in rest if e.strip()]
+    return question.strip(), expected[0] if len(expected) == 1 else expected or None
+
+
+def format_questions(cases: Iterable[tuple[str, Any]]) -> str:
+    """The opposite of parse_questions(): one question per line, each expected source after a ' | '."""
+    lines = []
+    for question, expected in cases:
+        wanted = ([] if not _filled(expected) else [str(expected)] if isinstance(expected, str)
+                  else [str(e) for e in expected])
+        lines.append(" | ".join([" ".join(str(question).split()), *wanted]))
+    return "\n".join(lines)
+
+
+def question_list(questions: Any) -> list[tuple[str, Any]]:
+    """What ask_all() takes -> [(question, expected or None)]: text with one question per line (parse_questions()),
+    a list of questions, of (question, expected) pairs or of dicts with 'question' and 'expected', a DataFrame with
+    those columns, or an earlier run (a Batch) to ask its questions again. Blank questions are left out; a ValueError
+    says what to pass when nothing is left."""
+    if isinstance(questions, str):
+        cases = parse_questions(questions)
+    else:
+        if isinstance(questions, Batch):
+            rows: list[Any] = [(i.question, i.expected) for i in questions.items]
+        elif hasattr(questions, "to_dict") and hasattr(questions, "columns"):  # a DataFrame
+            rows = questions.to_dict("records")
+        elif hasattr(questions, "tolist") and not isinstance(questions, (list, tuple)):  # a Series or an array
+            rows = questions.tolist()
+        else:
+            rows = list(questions or [])
+        cases = []
+        for row in rows:
+            if not _filled(row):  # a gap in the list
+                continue
+            if isinstance(row, dict):
+                question, expected = row.get("question"), row.get("expected", row.get("source"))
+            elif isinstance(row, (list, tuple)) and len(row) == 2:
+                question, expected = row
+            elif isinstance(row, str):
+                question, expected = _split_case(row)  # 'question | expected file', as in the window
+            else:
+                raise ValueError("ask_all() takes questions as text with one per line, a list of questions, (question, "
+                                 f"expected file) pairs, or dicts with 'question' and 'expected'; got {row!r}")
+            if _filled(question):
+                cases.append((str(question).strip(), expected if _filled(expected) else None))
+    if not cases:
+        raise ValueError("No questions to ask: pass a list, like ask_all(['How long do refunds take?', 'Can I return "
+                         "a digital product?']), or text with one question per line")
+    return cases
+
+
+def match_expected(passage: Passage, expected: Any) -> bool:
+    """Whether a passage is the one a test question expects: `expected` is a case-insensitive piece of its URI, its file
+    name or its text (a list means any of them)."""
+    wanted = [expected] if isinstance(expected, str) else list(expected or [])
+    haystack = f"{passage.uri}\n{source_name(passage.uri)}\n{passage.text}".lower()
+    return any(str(w).strip().lower() in haystack for w in wanted if str(w).strip())
+
+
+def expected_at(a: Answer, expected: Any) -> int | None:
+    """Where a test question's expected source came up (see match_expected()): the [n] an answer cites it as, or its
+    rank in a retrieve-only search. None when it didn't come up, or nothing was expected."""
+    if not _filled(expected):
+        return None
+    for n, p in enumerate(a.sources, 1):
+        if match_expected(p, expected):
+            return p.rank if a.retrieve_only else n
+    return None
+
+
+def _unhelpful(a: Answer) -> bool:
+    """An empty answer, or Bedrock's "unable to assist" reply."""
+    text = a.text.strip()
+    return not text or _REFUSAL in text.lower()
+
+
+def item_verdict(item: BatchItem) -> tuple[str, str]:
+    """How a test question did, in a few words, and its tone: ('answered', 'ok'), ('unable to assist', 'warn'),
+    ('expected not cited', 'warn'), ('failed', 'bad'), ('found #2', 'ok') for a search..."""
+    a = item.answer
+    if a is None:
+        if item.error_code:
+            return "failed", "bad"
+        return ("not sent", "warn") if item.error else ("not asked", "")
+    checked = _filled(item.expected)
+    if a.retrieve_only:
+        if not a.sources:
+            return "nothing found", "warn"
+        if checked:
+            return (f"found #{item.found}", "ok") if item.found else ("expected not found", "warn")
+        return _plural(len(a.sources), "passage"), "ok"
+    if a.guardrail_action == "INTERVENED":
+        return "guardrail stepped in", "warn"
+    if _unhelpful(a):
+        return ("unable to assist" if a.text.strip() else "empty answer"), "warn"
+    if checked and not item.found:
+        return "expected not cited", "warn"
+    if not a.cited:
+        return "no citations", "warn"
+    if a.grounded_share < 0.5:
+        return "partly grounded", "warn"
+    return "answered", "ok"
+
+
+def _examples(items: list[BatchItem], count: int = 2, width: int = 48) -> str:
+    """"'How long do refunds take?', 'Can I return…'" (and ', …' when there are more)."""
+    shown = ", ".join(repr(_clip(i.question, width)) for i in items[:count])
+    return shown + (", …" if len(items) > count else "")
+
+
+def _out_of(part: int, whole: int, noun: str = "answer") -> str:
+    """'1 of 6 answers'."""
+    return f"{part:,} of {_plural(whole, noun)}"
+
+
+def _tries(settings: dict[str, Any], data_sources: dict[str, str], files: list[str]) -> str:
+    """What to try when a search finds nothing useful: 'retrieve more passages (set(n=10)), or ...'."""
+    tries = []
+    if (settings.get("n") or 5) < 10:
+        tries.append("retrieve more passages (set(n=10))")
+    if settings.get("search_type") != "HYBRID":
+        tries.append("match exact words too (set(search_type='HYBRID'))")
+    if settings.get("filter") is not None:
+        tries.append("check the filter isn't too narrow (unset('filter'))")
+    if files:
+        tries.append(f"search more than {describe_files(files)} (use(files='all'))")
+    if data_sources:
+        tries.append("search every data source (use(data_source='all'))")
+    return ", or ".join(tries) or "ask with the words your documents use"
+
+
+def _avg_grounded(batch: Batch) -> float | None:
+    """The average grounded share of a run's answers that say something (not "unable to assist")."""
+    shares = [i.answer.grounded_share for i in batch.asked if not i.answer.retrieve_only and not _unhelpful(i.answer)
+              and i.answer.guardrail_action != "INTERVENED"]
+    return sum(shares) / len(shares) if shares else None
+
+
+def batch_findings(batch: Batch, explain: Callable[[str, str], str] | None = None) -> list[tuple[str, str]]:
+    """What a test run says to change -> [(level, message)]: questions that failed or weren't sent, answers that
+    couldn't help or cite nothing, expected sources that didn't come up, answers cut off, and which setting to try.
+    explain(code, message) can add what to do about an AWS error (the view passes its own)."""
+    found: list[tuple[str, str]] = []
+    items, asked = batch.items, batch.asked
+    failed = [i for i in items if i.error_code]
+    if failed:
+        codes = Counter(i.error_code for i in failed)
+        top = codes.most_common(1)[0][0]
+        first = next(i for i in failed if i.error_code == top)
+        message = (explain(top, first.error) if explain else first.error).rstrip()
+        what = ", ".join(f"{code} ×{n}" if n > 1 else code for code, n in codes.most_common())
+        tip = f" Bedrock throttled them: ask fewer at a time ({_call('ask_all', workers=1)})." if top in _THROTTLED else ""
+        found.append(("warn", f"{_out_of(len(failed), len(items), 'question')} failed ({what}): "
+                              f"{message.rstrip('.')}.{tip}"))
+    unsent = [i for i in items if i.error and not i.error_code]
+    if unsent:
+        one = len(unsent) == 1
+        found.append(("warn", f"{_plural(len(unsent), 'question')} ({_examples(unsent)}) {'was' if one else 'were'}n't "
+                              f"sent: {unsent[0].error.rstrip('.')}."))
+    if batch.retrieve_only:
+        found += _search_batch_findings(batch, asked)
+    else:
+        found += _answer_batch_findings(batch, asked)
+    outside = [i for i in asked if _outside_picks(i.answer)]
+    if outside:
+        picked = " and ".join(filter(None, [describe_sources(batch.data_sources) if batch.data_sources else "",
+                                            describe_files(batch.files) if batch.files else ""]))
+        found.append(("warn", f"{_out_of(len(outside), len(asked), 'question')} got passages from outside {picked} "
+                              f"({_examples(outside)}): this vector store didn't apply the filter on Bedrock's own "
+                              "keys. Tag the files with your own metadata instead (a <file>.metadata.json), sync, and "
+                              "use the filter setting."))
+    waiting = [i for i in items if i.answer is None and not i.error]
+    if waiting:
+        one = len(waiting) == 1
+        found.append(("info", f"Stopped before {_plural(len(waiting), 'question')} {'was' if one else 'were'} asked: "
+                              "ask_all() asks the whole list again."))
+    if batch.skipped:
+        everything = len(items) + batch.skipped
+        found.append(("info", f"Only the first {len(items):,} of {everything:,} questions were asked (limit="
+                              f"{len(items)}): {_call('ask_all', limit=everything)} asks them all."))
+    return found
+
+
+def _answer_batch_findings(batch: Batch, asked: list[BatchItem]) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    blocked = [i for i in asked if i.answer.guardrail_action == "INTERVENED"]
+    unable = [i for i in asked if i not in blocked and _unhelpful(i.answer)]
+    if blocked:
+        found.append(("warn", f"A guardrail stepped in on {_plural(len(blocked), 'question')} ({_examples(blocked)}): "
+                              "the question or the answer was blocked or rewritten. The guardrail's settings in the "
+                              "Bedrock console say what it blocks."))
+    if unable:
+        one = len(unable) == 1
+        found.append(("warn", f"{_out_of(len(unable), len(asked))} {'is' if one else 'are'} Bedrock's \"unable to "
+                              f"assist\" reply or empty ({_examples(unable)}): the passages found don't hold the "
+                              f"answer, or none were found. {_call('retrieve', unable[0].question)} shows what the "
+                              f"search finds for {'it' if one else 'the first'}; then try to "
+                              f"{_tries(batch.settings, batch.data_sources, batch.files)}, and ask_all() again to "
+                              "compare."))
+    spoke = [i for i in asked if i not in blocked and i not in unable]
+    uncited = [i for i in spoke if not i.answer.cited]
+    if uncited:
+        prompt = batch.settings.get("prompt")
+        if isinstance(prompt, str) and "$output_format_instructions$" not in prompt:
+            why = ("the prompt has no $output_format_instructions$, which is where Bedrock asks the model to cite its "
+                   "sources. Add it back to the prompt")
+        else:
+            why = "they may come from the model's own knowledge rather than your documents"
+        verb = "cites" if len(uncited) == 1 else "cite"
+        found.append(("warn", f"{_out_of(len(uncited), len(asked))} {verb} no source ({_examples(uncited)}): {why}."))
+    thin = [i for i in spoke if i.answer.cited and i.answer.grounded_share < 0.5]
+    if thin:
+        one = len(thin) == 1
+        found.append(("info", f"{_out_of(len(thin), len(asked))} {'is' if one else 'are'} less than half backed by "
+                              f"citations ({_examples(thin)}); the rest may be the model's own knowledge. Check the "
+                              "sentences without a [n]."))
+    checked = [i for i in asked if _filled(i.expected)]
+    missed = [i for i in checked if i.found is None and i not in unable and i not in blocked]
+    if missed:
+        first = missed[0]
+        cited = ", ".join(dict.fromkeys(source_name(p.uri) or p.source for p in first.answer.sources)) or "nothing"
+        found.append(("warn", f"The expected source isn't cited in {_out_of(len(missed), len(checked))} checked "
+                              f"({first.question!r} expected {_short(first.expected, 40)}, cited {cited}). "
+                              f"{_call('retrieve', first.question)} shows whether the search finds it; if it doesn't, "
+                              "check the file is indexed (files()), then try set(search_type='HYBRID') or "
+                              "set(n=10)."))
+    limit = batch.settings.get("max_tokens")
+    cut = [i for i in spoke if limit and i.answer.output_tokens >= 0.9 * limit]
+    if cut:
+        found.append(("warn", f"{_out_of(len(cut), len(asked))} reached max_tokens ({limit:,}) and may be cut off "
+                              f"({_examples(cut)}): raise it (set(max_tokens={max(limit * 2, 1024)}))."))
+    return found
+
+
+def _search_batch_findings(batch: Batch, asked: list[BatchItem]) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    empty = [i for i in asked if not i.answer.sources]
+    if empty:
+        found.append(("warn", f"Nothing came back for {_out_of(len(empty), len(asked), 'question')} "
+                              f"({_examples(empty)}), so an answer would have nothing to go on. Try to "
+                              f"{_tries(batch.settings, batch.data_sources, batch.files)}."))
+    checked = [i for i in asked if _filled(i.expected)]
+    missed = [i for i in checked if i.answer.sources and i.found is None]
+    if missed:
+        first = missed[0]
+        came = ", ".join(dict.fromkeys(p.source for p in first.answer.sources[:2]))
+        found.append(("warn", f"The expected source wasn't among the passages found for "
+                              f"{_out_of(len(missed), len(checked), 'question')} checked ({first.question!r} expected "
+                              f"{_short(first.expected, 40)}; first came {came}). Check the file is indexed (files()); "
+                              f"then try to {_tries(batch.settings, batch.data_sources, batch.files)}."))
+    late = [i for i in checked if i.found is not None and i.found > 1]
+    if late:
+        mrr = sum(1 / i.found for i in checked if i.found) / len(checked)
+        rerank = "" if batch.settings.get("reranker") else " A reranker (set(reranker='cohere')) or HYBRID search can " \
+                                                           "move it up."
+        found.append(("info", f"{_plural(len(late), 'question')} found the expected source below the first passage "
+                              f"(MRR {mrr:.2f}; 1.00 means it always came first).{rerank}"))
+    return found
+
+
+def _key(question: str) -> str:
+    return " ".join(str(question).lower().split())
+
+
+def _settings_text(settings: dict[str, Any]) -> str:
+    """The settings on one line: 'n=8, where team = "billing", temperature=0.2, prompt (412 characters)'."""
+    parts = []
+    for key, value in settings.items():
+        if key == "filter":
+            parts.append(f"where {describe_filter(value)}")
+        elif isinstance(value, str) and len(value) > 40:
+            parts.append(f"{key} ({len(value):,} characters)")
+        else:
+            parts.append(f"{key}={_short(value, 30)}")
+    return ", ".join(parts)
+
+
+def batch_changes(before: Batch, after: Batch, label: Callable[[str], str] | None = None) -> list[tuple[str, str]]:
+    """What changed since an earlier run of the same questions -> [(level, message)]: what differs in the setup (the
+    settings, model, knowledge base, data sources and files), which questions did better or worse, and the averages.
+    [] when the two runs share no question. label(model) names a model (its short ID by default)."""
+    name = label or short_model
+    old = {_key(i.question): i for i in before.items if i.answer is not None or i.error_code}
+    pairs = [(old[_key(i.question)], i) for i in after.items
+             if _key(i.question) in old and (i.answer is not None or i.error_code)]
+    if not pairs:
+        return []
+    setup = _diff(before.settings, after.settings)
+    if before.retrieve_only != after.retrieve_only:
+        setup.append("answers → retrieve only" if after.retrieve_only else "retrieve only → answers")
+    elif before.model != after.model and not after.retrieve_only:
+        setup.append(f"model {name(before.model)} → {name(after.model)}")
+    if before.kb_id != after.kb_id:
+        setup.append(f"knowledge base {before.kb_name or before.kb_id} → {after.kb_name or after.kb_id}")
+    if before.data_sources != after.data_sources:
+        setup.append(f"{describe_sources(before.data_sources)} → {describe_sources(after.data_sources)}")
+    if before.files != after.files:
+        setup.append(f"{describe_files(before.files)} → {describe_files(after.files)}")
+    better, worse = [], []
+    for was, now in pairs:
+        (old_label, old_tone), (new_label, new_tone) = item_verdict(was), item_verdict(now)
+        if _GRADES.get(new_tone, 1) > _GRADES.get(old_tone, 1):
+            better.append(f"{_clip(now.question, 40)!r} {old_label} → {new_label}")
+        elif _GRADES.get(new_tone, 1) < _GRADES.get(old_tone, 1):
+            worse.append(f"{_clip(now.question, 40)!r} {old_label} → {new_label}")
+    parts = []
+    for changed, how in ((better, "did better"), (worse, "did worse")):
+        if changed:
+            more = ", …" if len(changed) > 2 else ""
+            parts.append(f"{_plural(len(changed), 'question')} {how} ({'; '.join(changed[:2])}{more})")
+    if not parts:
+        parts.append(f"{'both questions' if len(pairs) == 2 else f'all {len(pairs)} questions'} did as before"
+                     if len(pairs) > 1 else "the question did as before")
+    before_share, after_share = _avg_grounded(before), _avg_grounded(after)
+    if before_share is not None and after_share is not None and round(before_share, 2) != round(after_share, 2):
+        parts.append(f"grounded {before_share:.0%} → {after_share:.0%} on average")
+    if human_money(before.cost) != human_money(after.cost):
+        parts.append(f"cost {human_money(before.cost)} → {human_money(after.cost)}")
+    shared = "" if len(pairs) == len(after.items) == len(before.items) else (
+        f"; the {_plural(len(pairs), 'question')} both runs asked")
+    what = "; ".join(setup) if setup else "the same setup"
+    return [("warn" if worse else "info", f"Since the last run ({what}{shared}): " + "; ".join(parts) + ".")]
+
+
+def batch_estimate(questions: Iterable[str], settings: dict[str, Any], model: str, *, retrieve_only: bool = False,
+                   model_prices: dict[str, tuple[float, float]] | None = None,
+                   prices: dict[str, float] | None = None) -> float | None:
+    """Roughly what asking these questions costs in USD, before they're asked: each question's embedding (and its
+    reranking), and for answers the model's tokens, guessing about 300 tokens a passage and 300 for each answer. None
+    when the model isn't in the price table. An estimate: label it as one."""
+    texts = [str(q) for q in questions]
+    search = sum(query_cost(1, settings.get("reranker") or False, prices, question_tokens=estimate_tokens(q))
+                 for q in texts)
+    if retrieve_only:
+        return search
+    given = (settings.get("rerank_n") if settings.get("reranker") else None) or settings.get("n") or 5
+    prompt = estimate_tokens(settings.get("prompt") or DEFAULT_PROMPT)
+    tokens_in = sum(estimate_tokens(q) + prompt + given * 300 for q in texts)
+    tokens_out = min(300, settings.get("max_tokens") or 300) * len(texts)
+    generation = generation_cost(tokens_in, tokens_out, model, model_prices)
+    return None if generation is None else generation + search
+
+
 def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | None = None) -> str:
     """A JSON value as Python source, one key per line once it's too long for one line. column is where the value
     starts on its line (after its key), when that's further than indent."""
@@ -2272,6 +2751,105 @@ def python_call(params: dict[str, Any], region: str = "", width: int = 100) -> s
         f"response = client.retrieve_and_generate(**{_py_literal(params, width=width)})\n"
         "print(response['output']['text'])"
     )
+
+
+# --------------------------------------------------------- this setup as code, to copy and run anywhere
+
+_QUESTION_KEYS = ("input", "retrievalQuery", "sessionId")  # what a request holds besides its setup
+
+
+def config_of(params: dict[str, Any]) -> dict[str, Any]:
+    """A request without its question and session: the setup (knowledge base, model, settings, filter) to keep and send
+    with any question: client.retrieve_and_generate(input={'text': question}, **config), or for a Retrieve request
+    client.retrieve(retrievalQuery={'text': question}, **config)."""
+    return {key: copy.deepcopy(value) for key, value in params.items() if key not in _QUESTION_KEYS}
+
+
+def config_json(params: dict[str, Any]) -> str:
+    """config_of(params) as indented JSON: the file to keep the setup in, which the AWS CLI's --cli-input-json reads."""
+    return json.dumps(_plain_json(config_of(params)), indent=2, ensure_ascii=False)
+
+
+def _request_question(params: dict[str, Any]) -> str:
+    return str((params.get("input") or params.get("retrievalQuery") or {}).get("text") or "")
+
+
+def python_script(params: dict[str, Any], region: str = "", questions: Iterable[str] = (), *, about: str = "",
+                  width: int = 100) -> str:
+    """A script that asks a list of questions with the same setup as `params` (a RetrieveAndGenerate or Retrieve
+    request) and prints each answer with the files it cites (for Retrieve, each passage found, with its score). It
+    needs only boto3: paste it into a cell, or save it as a .py file and run it. Without questions it asks the
+    request's own. about: a comment saying where the setup came from. width is where long lines break."""
+    asked = [str(q) for q in questions] or [_request_question(params) or "<your question>"]
+    where = f", region_name={region!r}" if region else ""
+    lines = ["import boto3", "", f"client = boto3.client('bedrock-agent-runtime'{where})", ""]
+    lines += [f"# {line}" for line in textwrap.wrap(about, width - 2)]
+    lines.append(f"CONFIG = {_py_literal(config_of(params), width=width, column=9)}")
+    listing = f"questions = {_py_literal(asked, width=width, column=12)}"
+    if _is_retrieve(params):
+        lines += [
+            "", "",
+            "def search(question):",
+            '    """Every passage the knowledge base finds for a question, best first, with its score."""',
+            "    return client.retrieve(retrievalQuery={'text': question}, **CONFIG)",
+            "", "",
+            listing,
+            "for question in questions:",
+            "    print('Q:', question)",
+            "    for result in search(question)['retrievalResults']:",
+            "        uri = result.get('metadata', {}).get('x-amz-bedrock-kb-source-uri', '')",
+            "        text = ' '.join(result['content'].get('text', '').split())",
+            "        print(f\"   {result.get('score', 0):.3f}  {uri}  {text[:100]}\")",
+            "    print()",
+        ]
+    else:
+        lines += [
+            "", "",
+            "def ask(question, session_id=None):",
+            '    """Bedrock\'s answer to a question. Pass an earlier response\'s sessionId to follow up on it."""',
+            "    request = {'input': {'text': question}, **CONFIG}",
+            "    if session_id:",
+            "        request['sessionId'] = session_id",
+            "    return client.retrieve_and_generate(**request)",
+            "", "",
+            "def cited_files(response):",
+            '    """The files an answer cites, each once."""',
+            "    files = []",
+            "    for citation in response.get('citations', []):",
+            "        for ref in citation.get('retrievedReferences', []):",
+            "            uri = ref.get('metadata', {}).get('x-amz-bedrock-kb-source-uri', '')",
+            "            if uri and uri not in files:",
+            "                files.append(uri)",
+            "    return files",
+            "", "",
+            listing,
+            "for question in questions:",
+            "    response = ask(question)",
+            "    print('Q:', question)",
+            "    print('A:', response['output']['text'])",
+            "    for uri in cited_files(response):",
+            "        print('   cited:', uri)",
+            "    print()",
+        ]
+    return "\n".join(lines)
+
+
+def cli_command(params: dict[str, Any], region: str = "", question: str | None = None) -> str:
+    """The AWS CLI (v2) command that sends the same request from a terminal (bash or zsh) with `question` (the
+    request's own when None), and prints the answer: for a Retrieve request, each passage's score and file."""
+    text = question if question is not None else (_request_question(params) or "<your question>")
+    if _is_retrieve(params):
+        request = {"retrievalQuery": {"text": text}, **config_of(params)}
+        lines = ["aws bedrock-agent-runtime retrieve"]
+        shown = """--query 'retrievalResults[].[score, metadata."x-amz-bedrock-kb-source-uri"]' --output table"""
+    else:
+        request = {"input": {"text": text}, **config_of(params)}
+        lines = ["aws bedrock-agent-runtime retrieve-and-generate"]
+        shown = "--query output.text --output text"
+    if region:
+        lines.append(f"--region {shlex.quote(region)}")
+    lines += [shown, "--cli-input-json " + shlex.quote(json.dumps(_plain_json(request), indent=2, ensure_ascii=False))]
+    return " \\\n  ".join(lines)
 
 
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
@@ -2875,6 +3453,146 @@ class BedrockChatAnalyzer:
                             "started a new one: it was answered without the earlier questions.")
         return answer
 
+    def ask_all(
+        self,
+        kb: str,
+        questions: Any,
+        settings: dict[str, Any] | None = None,
+        *,
+        model: str | None = None,
+        data_source: Any = None,
+        files: Any = None,
+        retrieve_only: bool = False,
+        workers: int = BATCH_WORKERS,
+        limit: int | None = BATCH_LIMIT,
+        progress: Callable[..., None] | None = None,
+        stop: threading.Event | None = None,
+    ) -> Batch:
+        """Asks a list of test questions with one setup (knowledge base, model, settings, data sources and files),
+        each on its own, never as a follow-up, `workers` at a time, and returns a Batch: each question's Answer (or why
+        Bedrock refused it), where its expected source came up, and its estimated cost. questions: text with one per
+        line ('question | expected file'), a list of questions or of (question, expected) pairs, a DataFrame with
+        'question' and 'expected' columns, or an earlier Batch. retrieve_only=True only searches (Retrieve). Up to
+        `limit` questions are asked (None for all). A question Bedrock refuses is recorded, not raised, and the rest
+        are still asked; setting `stop` (a threading.Event) asks no more."""
+        batch = self._prepare_batch(kb, questions, settings, model=model, data_source=data_source, files=files,
+                                    retrieve_only=retrieve_only, limit=limit)
+        return self._run_batch(batch, workers=workers, progress=progress, stop=stop)
+
+    def _prepare_batch(
+        self,
+        kb: str,
+        questions: Any,
+        settings: dict[str, Any] | None = None,
+        *,
+        model: str | None = None,
+        data_source: Any = None,
+        files: Any = None,
+        retrieve_only: bool = False,
+        limit: int | None = BATCH_LIMIT,
+    ) -> Batch:
+        """A test run, ready to send: the knowledge base, model, data sources and files resolved once, and each
+        question's request built, every question on its own (no session). Sends no question."""
+        schema = self.schema()
+        values = normalize_settings(settings, schema)
+        cases = question_list(questions)
+        cap = None if limit is None else _as_int(limit, "limit", hint=", or None for every question")
+        if cap is not None and cap < 0:
+            raise ValueError(f"limit takes a number of questions, like 50, or None for every question; got {limit!r}")
+        cap = cap or None  # 0, like None, asks every question
+        kb_id = self.resolve(kb)
+        sources = self.resolve_sources(kb_id, data_source)
+        uris = self.resolve_files(kb_id, files)
+        arn = "" if retrieve_only else self.resolve_model(model)[1]
+        batch = Batch(kb_id=kb_id, kb_name=self.kb_name(kb_id), model=_model_id(arn), data_sources=sources, files=uris,
+                      settings=retrieve_settings(values, schema) if retrieve_only else values,
+                      retrieve_only=retrieve_only)
+
+        def built(question: str) -> dict[str, Any]:
+            if retrieve_only:
+                return build_retrieve_request(question, kb_id, values, schema, region=self.region,
+                                              data_sources=sources, files=uris)
+            return build_request(question, kb_id, arn, values, schema, region=self.region, data_sources=sources,
+                                 files=uris)
+
+        batch.request = built("<your question>")
+        kept = cases if cap is None else cases[:cap]
+        batch.skipped = len(cases) - len(kept)
+        for question, expected in kept:
+            item = BatchItem(question, expected)
+            try:
+                item.request = built(_question_text(question))
+            except ValueError as exc:  # too long: said on its line, and the rest are still asked
+                item.error = str(exc)
+            batch.items.append(item)
+        return batch
+
+    def _run_batch(
+        self,
+        batch: Batch,
+        *,
+        workers: int = BATCH_WORKERS,
+        progress: Callable[..., None] | None = None,
+        stop: threading.Event | None = None,
+        on_item: Callable[[BatchItem], None] | None = None,
+    ) -> Batch:
+        """Sends a prepared test run's questions, `workers` at a time. Each answer (or error) and its cost are filled
+        in on the calling thread, which also calls progress(done, total) and on_item(item) as each comes back: nothing
+        else is touched from the worker threads. Once `stop` is set, or the run is interrupted, no more questions are
+        sent and what came back is kept; batch.stopped says so."""
+        todo = [i for i in batch.items if i.request and i.answer is None and not i.error]
+        if not todo:
+            return batch
+        count = max(1, min(_as_int(workers, "workers"), len(todo)))
+        self._runtime_client()  # made before the threads start: a boto3 session isn't thread-safe
+        started = time.monotonic()
+        pool = ThreadPoolExecutor(max_workers=count, thread_name_prefix="bedrock-chat")
+        waiting: list[BatchItem] = list(todo)
+        running: dict[Any, BatchItem] = {}  # the questions being asked, by their future
+        done, interrupted = 0, False
+
+        def send_more() -> None:  # one question per free thread, so nothing waits to be sent once stop is set
+            while waiting and len(running) < count and not (stop is not None and stop.is_set()):
+                item = waiting.pop(0)
+                running[pool.submit(self.send, item.request, batch.settings)] = item
+
+        try:
+            send_more()
+            while running:
+                finished, _ = wait(running, timeout=0.25, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    item = running.pop(future)
+                    self._fill(item, future, batch)
+                    done += 1
+                    if progress is not None:
+                        progress(done, len(todo))
+                    if on_item is not None:
+                        on_item(item)
+                send_more()
+        except KeyboardInterrupt:  # the notebook's stop button: keep what came back, and send nothing more
+            interrupted = True
+        finally:
+            pool.shutdown(wait=not interrupted, cancel_futures=True)
+            batch.seconds += time.monotonic() - started
+            batch.stopped = any(i.answer is None and not i.error for i in batch.items if i.request)
+        return batch
+
+    def _fill(self, item: BatchItem, future: Any, batch: Batch) -> None:
+        """A test question's answer and its cost, or why Bedrock refused it, from its finished future."""
+        try:
+            a = future.result()
+        except ClientError as exc:
+            error = exc.response.get("Error", {})
+            item.error_code, item.error = error.get("Code") or "Error", error.get("Message") or str(exc)
+            return
+        except BotoCoreError as exc:
+            item.error_code, item.error = type(exc).__name__, str(exc)
+            return
+        a.kb_name = a.kb_name or batch.kb_name
+        a.data_sources, a.files = dict(batch.data_sources), list(batch.files)
+        item.answer = a
+        item.cost = answer_cost(a, self.model_prices, self.prices)
+
 
 # =============================================================================
 # 5. BedrockChatView - notebook UI layer (the chat window, and reports of what BedrockChatAnalyzer returns)
@@ -2979,10 +3697,33 @@ class _Turn:
 
 @dataclass
 class _Code:
-    """Python to copy, highlighted in HTML (one click selects all of it), as it is in text."""
+    """Code to copy, highlighted in HTML (one click selects all of it), as it is in text."""
 
     text: str
     title: str = ""
+    lang: str = "python"  # 'python' | 'json' | 'shell'
+
+
+@dataclass
+class _ResultRow:
+    """One question of a test run, as a report or the window's Test tab shows it."""
+
+    number: int
+    item: BatchItem
+    verdict: str  # 'answered', 'unable to assist', 'found #2'...
+    tone: str  # 'ok' | 'warn' | 'bad' | ''
+    meta: str = ""  # who answered, how fast, cited, grounded, cost: 'Claude Opus 5 · 2.1s · ...'
+    findings: list[tuple[str, str]] = field(default_factory=list)  # about this answer alone
+    error: str = ""  # why it failed, with what to do about it
+    change: str = ""  # since the last run: 'was unable to assist'
+    better: bool = False  # the change is for the better
+
+
+@dataclass
+class _Results:
+    """A test run's questions: a line each, opening to the answer (or the passages found) in full."""
+
+    rows: list[_ResultRow]
 
 
 _CSS = """<style>
@@ -3211,6 +3952,34 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .opf{font-size:11px;opacity:.6;padding:7px 8px 0;margin-top:4px;border-top:1px solid var(--kc-line);line-height:1.4}
 .kbc .opf.warn{opacity:1;color:#d97706}
 .kbc .opf.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
+.kbc .bqs{margin:6px 0 10px}
+.kbc details.bq,.kbc .bq.wait{border:1px solid var(--kc-line);border-radius:12px;margin:0 0 6px;background:var(--kc-surface)}
+.kbc details.bq>summary,.kbc .bq.wait{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:7px 10px;line-height:1.35}
+.kbc details.bq>summary{cursor:pointer;list-style:none;border-radius:11px}
+.kbc details.bq>summary::-webkit-details-marker{display:none}
+.kbc details.bq>summary:hover{background:var(--kc-tint)}
+.kbc details.bq[open]>summary{border-bottom:1px solid var(--kc-line);border-radius:11px 11px 0 0}
+.kbc details.bq.ok{border-left:3px solid rgba(16,185,129,.7)}
+.kbc details.bq.warn{border-left:3px solid rgba(245,158,11,.85)}
+.kbc details.bq.bad{border-left:3px solid rgba(239,68,68,.8)}
+.kbc .bq .bn{flex:0 0 auto;min-width:20px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:650;color:var(--kc-accent);background:var(--kc-soft)}
+.kbc .bq .bt{flex:1 1 260px;min-width:0;font-weight:600;overflow-wrap:anywhere}
+.kbc .bq .bx{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin-left:auto}
+.kbc .bqs.narrow .bq .bx{flex:1 1 100%;margin-left:28px}
+.kbc .bq .pill{font-size:11px;white-space:nowrap}
+.kbc .bq .pill:not(.ok):not(.warn):not(.bad){background:var(--kc-tint-2)}
+.kbc .bq .bm{font-size:11px;opacity:.62;white-space:nowrap;font-variant-numeric:tabular-nums}
+.kbc .bq .bc{font-size:10.5px;font-weight:650;white-space:nowrap;padding:0 7px;border-radius:999px}
+.kbc .bq .bc.up{color:#059669;background:rgba(16,185,129,.13)}
+.kbc .bq .bc.down{color:#dc2626;background:rgba(239,68,68,.11)}
+.kbc .bq .bb{padding:8px 12px 10px}
+.kbc .bq .bb>.msg{max-width:none;margin:0;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent}
+.kbc .bq .be{font-size:12px;opacity:.75;margin:0 0 6px}
+.kbc .bq.wait{opacity:.72}
+.kbc .bq.wait .spin{margin:0}
+.kbc .tests .cards{gap:6px;margin:8px 0 6px}
+.kbc .tests .card{padding:5px 10px;min-width:64px;border-radius:10px}
+.kbc .tests .card .v{font-size:13.5px}
 .kbc-app{box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
 .kbc-app *{box-sizing:border-box}
 .kbc-app .widget-html-content,.kbc-app .jupyter-widget-html-content{min-width:0}
@@ -3274,8 +4043,8 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active:hover:enabled{background:var(--kc-surface)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:disabled{opacity:.4}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar,.kbc-app.kbc-app .kbc-side>.p-TabBar{padding:4px;border-radius:14px;background:var(--kc-tint-2);min-height:0;border:0;overflow:visible;margin:0 0 10px}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:3px;border:0;align-items:stretch}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 0;min-width:0;min-height:28px;line-height:28px;margin:0;padding:0 8px;border:0;border-radius:10px;font-size:12px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:2px;border:0;align-items:stretch;flex-wrap:wrap}
+.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 auto;min-width:fit-content;min-height:28px;line-height:28px;margin:0;padding:0 6px;border:0;border-radius:10px;font-size:12px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab:hover:not(.lm-mod-current),.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab:hover:not(.p-mod-current){background:var(--kc-tint);opacity:.95}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:28px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
 .kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
@@ -3471,7 +4240,31 @@ _JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE]
 
 def _json_text_html(value: Any) -> str:
     """JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped)."""
-    text = json.dumps(_plain_json(value), indent=2, ensure_ascii=False)
+    return _json_source_html(json.dumps(_plain_json(value), indent=2, ensure_ascii=False))
+
+
+_SHELL_RE = re.compile(r"(?<![\w-])(--[\w-]+)|'(\{.*?\})'(?=\s|$)", re.S)
+
+
+def _shell_html(command: str) -> str:
+    """A shell command (the AWS CLI's): its options in colour, and the JSON it passes in single quotes highlighted as
+    JSON. Every piece is escaped."""
+    out, last = [], 0
+    for m in _SHELL_RE.finditer(command):
+        out.append(_esc(command[last:m.start()]))
+        out.append(f'<span class="pa">{_esc(m.group(1))}</span>' if m.group(1)
+                   else f"'{_json_source_html(m.group(2))}'")
+        last = m.end()
+    return "".join(out) + _esc(command[last:])
+
+
+def _code_html(text: str, lang: str) -> str:
+    """Code as highlighted HTML: Python, JSON or a shell command."""
+    return {"python": _python_html, "json": _json_source_html, "shell": _shell_html}.get(lang, _esc)(text)
+
+
+def _json_source_html(text: str) -> str:
+    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
     out, last = [], 0
     for m in _JSON_TOKEN_RE.finditer(text):
         out.append(_esc(text[last:m.start()]))
@@ -3650,6 +4443,98 @@ def _question_html(question: str) -> str:
     return f'<div class="ask"><div class="msg you">{_esc(question)}</div>{_YOU}</div>'
 
 
+def _cards_html(items: list[tuple[str, ...]]) -> str:
+    cards = "".join(
+        f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
+        f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
+        for item in items
+    )
+    return f'<div class="cards">{cards}</div>'
+
+
+def _findings_html(block: _Findings) -> str:
+    """The findings panel: warnings first, with how many there are of each; block.empty (an ok note) when there's
+    none."""
+    items = _ordered(block.items)
+    if items:
+        notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
+        head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
+        return f'<div class="fd">{head}{notes}</div>'
+    return f'<div class="note ok">{_prose(block.empty)}</div>' if block.empty else ""
+
+
+def _row_stats(item: BatchItem) -> str:
+    """The numbers on a test question's line: '92% grounded · 2 cited · 2.1s', 'best 0.812 · 0.3s'."""
+    a = item.answer
+    if a is None:
+        return item.error_code
+    if a.retrieve_only:
+        top = max((p.score for p in a.sources if p.score is not None), default=None)
+        return " · ".join(filter(None, [f"best {_score(top)}" if top is not None else "", f"{a.seconds:.1f}s"]))
+    if _unhelpful(a):
+        return f"{a.seconds:.1f}s"
+    return f"{a.grounded_share:.0%} grounded · {len(a.cited)} cited · {a.seconds:.1f}s"
+
+
+def _expected_text(item: BatchItem) -> str:
+    """'expected 'refund-policy.pdf': cited as [1]' ('' when nothing was expected)."""
+    if not _filled(item.expected) or item.answer is None:
+        return ""
+    if item.answer.retrieve_only:
+        where = f"found at #{item.found}" if item.found else "not among the passages found"
+    else:
+        where = f"cited as [{item.found}]" if item.found else "not cited"
+    return f"Expected {_short(item.expected, 60)}: {where}"
+
+
+def _result_html(row: _ResultRow) -> str:
+    """A test question as a line (number, question, how it did, its numbers, what changed since the last run) that
+    opens to the answer in full, as the chat shows answers: citations, sources, findings, request and response."""
+    item, a = row.item, row.item.answer
+    tone = row.tone if row.tone in _TONES else ""
+    pill = f'<span class="pill{" " + tone if tone else ""}">{_esc(row.verdict)}</span>'
+    change = (f'<span class="bc{" up" if row.better else " down"}" title="Since the last run">'
+              f'{"↑" if row.better else "↓"} {_esc(row.change)}</span>' if row.change else "")
+    summary = (f'<summary><span class="bn">{row.number}</span><span class="bt">{_esc(item.question)}</span>'
+               f'<span class="bx">{change}{pill}<span class="bm">{_esc(_row_stats(item))}</span></span></summary>')
+    expected = _expected_text(item)
+    body = f'<div class="be">{_esc(expected)}</div>' if expected else ""
+    if a is None:
+        what = row.error or item.error or "Not asked: the run stopped before this question."
+        body += f'<div class="note {"warn" if item.error else "info"}">{_prose(what)}</div>'
+    elif a.retrieve_only:
+        body += _search_html(a, row.meta, row.findings, {})
+    else:
+        body += _turn_html(a, row.meta, row.findings)
+    return f'<details class="bq{" " + tone if tone else ""}">{summary}<div class="bb">{body}</div></details>'
+
+
+def _waiting_html(number: int, question: str, sending: bool = True) -> str:
+    """A test question still waiting for its answer, in the window."""
+    state = "asking…" if sending else "not asked"
+    spin = '<span class="spin"></span>' if sending else ""
+    return (f'<div class="bq wait"><span class="bn">{number}</span><span class="bt">{_esc(question)}</span>'
+            f'<span class="bx">{spin}<span class="bm">{state}</span></span></div>')
+
+
+def _result_lines(row: _ResultRow) -> list[str]:
+    """A test question as text: its number and question, how it did with who answered and how fast, the expected
+    source, and the answer with its [n] markers and sources (every passage found, for a search)."""
+    item, a = row.item, row.item.answer
+    change = f" ({'↑' if row.better else '↓'} {row.change})" if row.change else ""
+    what = row.meta if a is not None else row.error or item.error or "the run stopped before this question"
+    out = ["", f"{row.number}. {item.question}", f"   [{row.verdict}]{change} {what}"]
+    expected = _expected_text(item)
+    if expected:
+        out.append(f"   {expected}")
+    if a is not None and a.retrieve_only:
+        out += [" " + line for line in _passage_lines(a, {})] or ["   (no passages found)"]
+    elif a is not None:
+        out += _answer_lines(_with_markers(a.text, a.citations), 100, "   ")
+        out += [f"   [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
+    return out
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
     out = [_CSS, '<div class="kbc">']
     for block in blocks:
@@ -3660,25 +4545,11 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             if block.sub:
                 out.append(f'<div class="sub">{_prose(block.sub)}</div>')
         elif isinstance(block, _Cards):
-            cards = "".join(
-                f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
-                f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
-                for item in block.items
-            )
-            out.append(f'<div class="cards">{cards}</div>')
+            out.append(_cards_html(block.items))
         elif isinstance(block, _Note):
             out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
         elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                notes = "".join(
-                    f'<div class="note {level}">{_prose(message)}</div>'
-                    for level, message in items
-                )
-                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
-                out.append(f'<div class="fd">{head}{notes}</div>')
-            elif block.empty:
-                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
+            out.append(_findings_html(block))
         elif isinstance(block, _Next):
             if block.items:
                 calls = "".join(
@@ -3783,7 +4654,9 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
         elif isinstance(block, _Code):
             hint = '<span class="hint">click it to select all, then copy</span>'
             out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
-            out.append(f'<pre class="code hl"{_SELECT}>{_python_html(block.text)}</pre>')
+            out.append(f'<pre class="code hl"{_SELECT}>{_code_html(block.text, block.lang)}</pre>')
+        elif isinstance(block, _Results):
+            out.append(f'<div class="bqs">{"".join(_result_html(row) for row in block.rows)}</div>')
         elif isinstance(block, _Turn):
             out.append(_question_html(block.answer.question))
             if block.answer.retrieve_only:
@@ -4436,6 +5309,9 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out += ["", f"-- {block.title} --"]
             out.append(json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False))
+        elif isinstance(block, _Results):
+            for row in block.rows:
+                out += _result_lines(row)
         elif isinstance(block, _Turn):
             a = block.answer
             if a.retrieve_only:
@@ -4586,6 +5462,15 @@ def _per_million(price: float | None) -> str:
     if price is None:
         return "-"
     return f"${price:,.2f}" if price >= 0.1 or price == 0 else f"${price:.3f}"
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
+    where a test run asks its questions while the click waits."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def _cell_number() -> Any:
@@ -5022,6 +5907,12 @@ class _ChatApp:
         self.unlisted: set[str] = set()  # knowledge bases whose data sources couldn't be listed: not tried again
         self.pickers: list[_Picker] = []  # the header's fields: one list open at a time
         self._params: dict[str, Any] | None = None
+        self.batch: Batch | None = None  # the test run the Test tab shows
+        self.batch_rows: list[Any] = []  # an HTML widget per question of it, reused by the next run
+        self.batch_old: dict[str, BatchItem] = {}  # the run before it, by question: what each did then
+        self.batch_task: Any = None  # the run going on in the background, in a notebook
+        self.batch_stop: threading.Event | None = None  # Stop sets it: no more questions are sent
+        self.running = False  # a test run is going on
         self.root = self._build()
 
     # ------------------------------------------------------------------ layout
@@ -5080,6 +5971,10 @@ class _ChatApp:
         self._sync_rows()
         self._refresh()
         self._render_response()
+        if self.view.batches:  # test runs from before the window opened: the last one shows in the Test tab
+            self.batch = self.view.batches[-1]
+            self.batch_old = self.view._old_items(self.batch)
+            self._draw_batch(self.batch)
         notes = list(self.problems) + list(self.view._notes)
         self.view._notes = []
         if notes:
@@ -5182,12 +6077,54 @@ class _ChatApp:
         self.response_view = w.HTML(layout=layout(width="100%"))
         response_tab = w.VBox([self.response_mode, self.response_view], layout=layout(width="100%"))
 
-        tabs = w.Tab(children=[settings_tab, request_tab, response_tab],
+        tabs = w.Tab(children=[settings_tab, self._test_tab(), self._code_tab(), request_tab, response_tab],
                      layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
-        for i, title in enumerate(("⚙️ Settings", "🧾 Request JSON", "📨 Last response")):
+        for i, title in enumerate(("⚙️ Settings", "🧪 Test", "📋 Code", "🧾 Request JSON", "📨 Last response")):
             tabs.set_title(i, title)
         tabs.add_class("kbc-side")
+        self.tabs = tabs
         return tabs
+
+    def _test_tab(self) -> Any:
+        """🧪 Test: a list of questions asked with the window's setup, each on its own, and how each did."""
+        w, layout = self.w, self.w.Layout
+        self.test_box = w.Textarea(value=format_questions(self.view.questions), rows=7, continuous_update=True,
+                                   placeholder="How long do refunds take? | refund-policy.pdf\nCan I return a digital "
+                                               "product?\nWhat does error E1234 mean?", layout=layout(width="100%"))
+        self.test_box.observe(self._safely(self._tests_typed), names="value")
+        self.run_button = w.Button(description="▶ Run", button_style="primary", tooltip="Ask every question with "
+                                   "these settings, each on its own (not as a follow-up)",
+                                   layout=layout(width="auto", flex="0 0 auto"))
+        self.run_button.on_click(self._safely(self._run_tests))
+        self.stop_button = w.Button(description="■ Stop", tooltip="Send no more questions: the ones already sent "
+                                    "finish", layout=layout(width="auto", flex="0 0 auto", margin="0 0 0 6px",
+                                                            display="none"))
+        self.stop_button.on_click(self._safely(self._stop_tests))
+        self.test_note = w.HTML(layout=layout(flex="1 1 auto", min_width="0", margin="0 0 0 10px"))
+        actions = w.HBox([self.run_button, self.stop_button, self.test_note],
+                         layout=layout(width="100%", align_items="center", margin="6px 0 4px 0"))
+        self.test_head = w.HTML(layout=layout(width="100%"))
+        self.test_rows = w.VBox(layout=layout(width="100%"))
+        intro = w.HTML(_wrap(
+            '<div class="ph">Test a list of questions<span class="hint">each asked on its own</span></div>'
+            '<div class="pd">One question per line, asked with the knowledge base, model and settings above. Add '
+            "<b>|</b> and a file name to check that the answer cites it. Change a setting and run them again to see "
+            "which did better.</div>"))
+        return w.VBox([intro, self.test_box, actions, self.test_head, self.test_rows], layout=layout(width="100%"))
+
+    def _code_tab(self) -> Any:
+        """📋 Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
+        w, layout = self.w, self.w.Layout
+        self.code_mode = w.ToggleButtons(options=["Python", "JSON", "AWS CLI"], value="Python",
+                                         tooltips=["A script that asks your test questions with this setup (boto3 "
+                                                   "only)", "This setup as the API's own JSON: the request without "
+                                                   "the question", "One question from a terminal, with the AWS CLI"],
+                                         style={"button_width": "74px"}, layout=layout(margin="0 0 6px 0"))
+        self.code_mode.observe(self._safely(lambda _change: self._render_code()), names="value")
+        self.code_view = w.HTML(layout=layout(width="100%"))
+        head = w.HTML(_wrap('<div class="ph">Use this setup in your code<span class="hint">it follows every change'
+                            "</span></div>"))
+        return w.VBox([head, self.code_mode, self.code_view], layout=layout(width="100%"))
 
     def _kb_picker(self) -> _Picker:
         view = self.view
@@ -5445,6 +6382,9 @@ class _ChatApp:
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
             "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
             "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
+            "<li><b>🧪 Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
+            "did. Change a setting and run them again: each line says whether it did better.</li>"
+            "<li><b>📋 Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
             "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div></div>"
         )
 
@@ -6013,6 +6953,8 @@ class _ChatApp:
         self._render_request()
         if self.editing:
             self._follow_edit()
+        self._draw_test_note()
+        self._render_code()
 
     def _render_request(self) -> None:
         params, view = self._params, self.view
@@ -6121,6 +7063,194 @@ class _ChatApp:
         self.sync()
         self._set_status("Applied: " + "; ".join(changes) + ".", "ok")
 
+    # ------------------------------------------------- test questions and code
+
+    def _tests_typed(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        self._draw_test_note()
+        self._render_code()  # the script asks the test questions
+
+    def _draw_test_note(self) -> None:
+        """Beside Run: how many questions it asks, how (answers from which model, or searches only), and roughly what
+        that costs."""
+        if self.running:
+            return
+        cases = parse_questions(self.test_box.value)
+        count = min(len(cases), BATCH_LIMIT)
+        self.run_button.description = f"▶ Run {_plural(count, 'question')}" if count else "▶ Run"
+        self.run_button.disabled = not count
+        if not cases:
+            self._set(self.test_note, _wrap('<div class="pd" style="margin:0">Type or paste questions above.</div>'))
+            return
+        view = self.view
+        retrieve = view.retrieve_only
+        model = str(view.model or view.core.default_model or DEFAULT_MODEL)
+        cost = batch_estimate([q for q, _ in cases[:count]],
+                              retrieve_settings(view.values, self.schema) if retrieve else view.values, model,
+                              retrieve_only=retrieve, model_prices=view.core.model_prices, prices=view.core.prices)
+        parts = [f"the first {count} of {len(cases)}" if len(cases) > count else "",
+                 "searches only (Retrieve only)" if retrieve else view._model_label(model),
+                 f"about {human_money(cost)} (estimate)" if cost is not None else "cost unknown"]
+        self._set(self.test_note, _wrap(f'<div class="pd" style="margin:0">{_esc(" · ".join(filter(None, parts)))}'
+                                        "</div>"))
+
+    def _run_tests(self, *_: Any) -> None:
+        """Run: every question in the box, asked with the window's setup, each on its own. In a notebook the
+        questions are asked on worker threads while the window stays usable, and each line fills in as its answer
+        comes back; elsewhere (a script, the tests) right away."""
+        if self.running:
+            return
+        cases = parse_questions(self.test_box.value)
+        if not cases:
+            self._set_status("Type or paste questions in the 🧪 Test tab first, one per line.")
+            return
+        view = self.view
+        batch = view._prepare(cases, view.retrieve_only, BATCH_LIMIT)
+        self.batch, self.batch_old, self.running = batch, view._old_items(batch), True
+        self.batch_stop = stop = threading.Event()
+        self.stop_button.disabled, self.stop_button.description = False, "■ Stop"
+        self.stop_button.layout.display = ""
+        self._show_progress(batch)
+        self._draw_batch(batch)
+        self._render_code()
+        loop = _running_loop()
+        if loop is None:
+            try:
+                view.core._run_batch(batch, stop=stop, on_item=self._tested)
+            finally:
+                self._tests_done(batch)
+            return
+        self.batch_task = loop.create_task(self._run_later(batch, stop))
+
+    async def _run_later(self, batch: Batch, stop: threading.Event) -> None:
+        """A test run on a worker thread: each question's line is drawn on the kernel's event loop, where the clicks
+        run, as its answer comes back, so Stop and the rest of the window keep working meanwhile."""
+        finished: queue.SimpleQueue = queue.SimpleQueue()
+        work = asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(self.view.core._run_batch, batch, stop=stop, on_item=finished.put))
+        try:
+            while not work.done():
+                await asyncio.wait([work], timeout=0.2)
+                self._drain(finished)
+            await work
+        except Exception as exc:  # a bug: still said in the window, and not in the kernel's log
+            self._set_status(self._error_text(exc), "warn")
+        finally:
+            self._drain(finished)
+            self._tests_done(batch)
+
+    def _drain(self, finished: queue.SimpleQueue) -> None:
+        while True:
+            try:
+                item = finished.get_nowait()
+            except queue.Empty:
+                return
+            self._safely(self._tested)(item)
+
+    def _show_progress(self, batch: Batch) -> None:
+        sent = [i for i in batch.items if i.request]
+        back = sum(i.answer is not None or bool(i.error_code) for i in sent)
+        self.run_button.disabled = True
+        self.run_button.description = f"{'Searching' if batch.retrieve_only else 'Asking'}… {back} of {len(sent)}"
+
+    def _tested(self, item: BatchItem) -> None:
+        """A test question came back: its line shows how it did, and Run how many are back."""
+        batch = self.batch
+        index = next((k for k, i in enumerate(batch.items) if i is item), None) if batch is not None else None
+        if index is None or index >= len(self.batch_rows):
+            return
+        row = self.view._result_row(index + 1, item, self.batch_old)
+        self._set(self.batch_rows[index], _wrap(f'<div class="bqs narrow">{_result_html(row)}</div>'))
+        self._show_progress(batch)
+
+    def _stop_tests(self, *_: Any) -> None:
+        if self.running and self.batch_stop is not None:
+            self.batch_stop.set()
+            self.stop_button.disabled, self.stop_button.description = True, "Stopping…"
+            self._set_status("Stopping: no more questions are sent, and the ones already sent finish first.")
+
+    def _tests_done(self, batch: Batch) -> None:
+        """The run is over, or stopped: every line, the summary and findings, and Run again."""
+        if batch is not self.batch:  # another run took the tab meanwhile (ask_all() in another cell)
+            return
+        self.running, self.batch_stop, self.batch_task = False, None, None
+        self.stop_button.layout.display = "none"
+        self._draw_batch(batch)
+        self._draw_test_note()
+        number = next((k for k, b in enumerate(self.view.batches, 1) if b is batch), len(self.view.batches))
+        line = (f"Test run {number}: {len(batch.asked)} of {_plural(len(batch.items), 'question')} came back in "
+                f"{_duration(batch.seconds)} · {self.view._batch_cost_text(batch)} (estimated)")
+        if batch.stopped:
+            line += " · stopped before the rest were asked"
+        line += " · ui.results() shows it as a report that stays in the saved notebook."
+        self._set_status(line, "warn" if batch.failed else "ok")
+
+    def ran(self, batch: Batch) -> None:
+        """A test run from another cell (ask_all()) shows in the Test tab."""
+        self._quietly(self.test_box, value=format_questions(self.view.questions))
+        self.batch, self.batch_old = batch, self.view._old_items(batch)
+        self._tests_done(batch)
+        self._render_code()
+
+    def _draw_batch(self, batch: Batch) -> None:
+        """The Test tab's results: the run's summary and findings, then a line per question, which opens to its
+        answer (a spinner while it's being asked)."""
+        view = self.view
+        while len(self.batch_rows) < len(batch.items):
+            self.batch_rows.append(self.w.HTML(layout=self.w.Layout(width="100%")))
+        for k, item in enumerate(batch.items):
+            if item.answer is not None or item.error:
+                inner = _result_html(view._result_row(k + 1, item, self.batch_old))
+            else:
+                inner = _waiting_html(k + 1, item.question, sending=self.running)
+            self._set(self.batch_rows[k], _wrap(f'<div class="bqs narrow">{inner}</div>'))
+        self.test_rows.children = tuple(self.batch_rows[:len(batch.items)])
+        number = next((k for k, b in enumerate(view.batches, 1) if b is batch), len(view.batches))
+        how = "searches only (Retrieve)" if batch.retrieve_only else view._model_label(batch.model)
+        what = " · ".join(filter(None, [batch.kb_name or batch.kb_id, how, _settings_text(batch.settings)]))
+        head = f'<div class="ph" style="margin-top:12px">Test run {number}<span class="hint">{_esc(what)}</span></div>'
+        if self.running:
+            head += ('<div class="pd">Each question is asked on its own, not as a follow-up. Each line fills in as its '
+                     "answer comes back; click one to read it.</div>")
+        else:
+            checked = any(_filled(i.expected) for i in batch.items)
+            empty = (("Every search found passages" if batch.retrieve_only else "Every question was answered, citing "
+                      "its sources") + (", and the expected one." if checked else "."))
+            head += (f'<div class="tests">{_cards_html(view._batch_cards(batch))}'
+                     f"{_findings_html(_Findings(view._batch_findings(batch), empty))}</div>")
+        self._set(self.test_head, _wrap(head))
+
+    def _render_code(self) -> None:
+        """The Code tab: the setup as a Python script that asks the test questions, its JSON, or an AWS CLI command."""
+        view = self.view
+        asked = [q for q, _ in parse_questions(self.test_box.value)] or view._code_questions()
+        retrieve = view.retrieve_only
+        params, problems = view._preview(asked[0] if asked else None)
+        region = view._region()
+        if self.code_mode.value == "JSON":
+            send = ("client.retrieve(retrievalQuery={'text': question}, **config)" if retrieve else
+                    "client.retrieve_and_generate(input={'text': question}, **config)")
+            lead = (f"This setup as the API's own JSON: the request without the question. Save it as "
+                    f"bedrock-config.json; then {send} sends it with any question, and the AWS CLI reads it with "
+                    "--cli-input-json file://bedrock-config.json.")
+            body = _json_text_html(config_of(params))
+        elif self.code_mode.value == "AWS CLI":
+            lead = ("The first test question from a terminal (bash or zsh) with the AWS CLI v2: paste it and press "
+                    "Enter. " + ("It prints each passage's score and file." if retrieve else "It prints the answer."))
+            body = _shell_html(cli_command(params, region, asked[0] if asked else None))
+        else:
+            count = _plural(len(asked), "test question") if asked else "a question (put yours in)"
+            what = "every passage each one finds, with its score" if retrieve else "each answer with the files it cites"
+            lead = (f"A script that asks {count} with this setup and prints {what}. It needs only boto3: paste it "
+                    "into a cell, or save it as a .py file and run it.")
+            body = _python_html(python_script(params, region, asked, about=view._about(retrieve),
+                                              width=_PYTHON_WIDTH))
+        refused = "Bedrock would refuse this request, so the code would fail the same way: "
+        warn = "".join(f'<div class="note warn">{_prose(refused + p)}</div>' for p in problems)
+        self._set(self.code_view, _wrap(f'<div class="pd">{_prose(lead)}</div>{warn}'
+                                        f'<pre class="code hl"{_SELECT}>{body}</pre>'))
+
 
 class BedrockChatView:
     """The chat window, and reports, over BedrockChatAnalyzer. Each command renders something and returns nothing:
@@ -6132,6 +7262,7 @@ class BedrockChatView:
     files: ask only these files (names, paths in the bucket or s3:// paths); default all of them.
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
+    questions: test questions for ask_all() and the window's Test tab: a list, or text with one per line.
     stream: show answers in the window as they're written.
     retrieve_only: the window's Send only searches (Retrieve): every passage found, with no answer. The window's
     Answer / Retrieve only switch changes it; ask() always answers and retrieve() always only searches.
@@ -6143,14 +7274,16 @@ class BedrockChatView:
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💬 Chat": ("app", "ask", "retrieve", "new_chat", "transcript", "last"),
-        "⚙️ Settings": ("settings", "set", "unset", "fields", "request"),
+        "🧪 Test a list of questions": ("ask_all", "results"),
+        "⚙️ Settings": ("settings", "set", "unset", "fields", "request", "code"),
         "📚 Knowledge base, files and model": ("use", "kbs", "files", "models"),
         "❓ Help": ("help",),
     }
     _START = (
         ("app()", "the chat window: pick a model, change settings, see the JSON"),
         ("ask('a question')", "an answer with citations, as a report"),
-        ("fields()", "every setting you can send"),
+        ("ask_all(['a question', 'another'])", "a list of test questions, each answered and checked"),
+        ("code()", "this setup as Python, JSON or an AWS CLI command, to copy"),
     )
 
     def __init__(
@@ -6164,6 +7297,7 @@ class BedrockChatView:
         data_source: Any = None,
         files: Any = None,
         retrieve_only: bool = False,
+        questions: Any = None,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -6187,6 +7321,9 @@ class BedrockChatView:
         )
         self.answers: list[Answer] = []  # this conversation, oldest first; retrieve-only searches too
         self.session_id: str | None = None  # Bedrock's session for it, once the first answer came back
+        # the test questions (the window's Test tab), and every test run of them, oldest first
+        self.questions: list[tuple[str, Any]] = question_list(questions) if _filled(questions) else []
+        self.batches: list[Batch] = []
         self._app: _ChatApp | None = None
         self._shown_in: Any = None  # the cell that last showed the window
         self._notes: list[str] = []  # problems with chat()'s arguments, shown when the window opens
@@ -6491,6 +7628,11 @@ class BedrockChatView:
     def _model_label(self, model: str) -> str:
         """The model's name when the model list has been read ('Claude Sonnet 5'), else its short ID."""
         wanted = model or str(self.core.default_model or DEFAULT_MODEL)
+        if self.core._models:  # read already, so no AWS call: a short name or the default finds the model it calls
+            try:
+                wanted = self.core.resolve_model(wanted)[0]
+            except ValueError:
+                pass
         for m in self.core._models or []:
             if wanted in (m.invoke_id, m.id, m.arn):
                 return m.name or m.id
@@ -6933,6 +8075,161 @@ class BedrockChatView:
         return [[key, _short(value, 70), describe_setting(fields[key], value), fields[key].where]
                 for key, value in self.values.items()]
 
+    # ------------------------------------------------------ test runs and code
+
+    def _prepare(self, questions: Any, retrieve_only: bool, limit: Any = BATCH_LIMIT) -> Batch:
+        """A test run of these questions with this setup (knowledge base, model, settings, data source and files), ready
+        to send and kept in self.batches. The questions become the Test tab's list."""
+        cases = question_list(questions)
+        kb_id = self._kb_id()
+        batch = self.core._prepare_batch(kb_id, cases, self.values, model=self.model, data_source=self._sources(kb_id),
+                                         files=self._files_for(kb_id), retrieve_only=retrieve_only, limit=limit)
+        self.questions = cases
+        self.batches.append(batch)
+        return batch
+
+    def _before(self, batch: Batch) -> Batch | None:
+        """The last run before this one that asked some of the same questions the same way (answers, or searches)."""
+        keys = {_key(i.question) for i in batch.items}
+        at = next((k for k, b in enumerate(self.batches) if b is batch), len(self.batches))
+        for earlier in reversed(self.batches[:at]):
+            if earlier.retrieve_only == batch.retrieve_only and keys & {_key(i.question) for i in earlier.items}:
+                return earlier
+        return None
+
+    def _item_error(self, item: BatchItem) -> str:
+        """Why a test question failed, with what to do about it."""
+        return f"{item.error_code}: {self._explain(item.error_code, item.error)}" if item.error_code else item.error
+
+    def _result_rows(self, batch: Batch) -> list[_ResultRow]:
+        """Each question of a run with how it did, and how that changed since the run before it."""
+        old = self._old_items(batch)
+        return [self._result_row(n, item, old) for n, item in enumerate(batch.items, 1)]
+
+    def _old_items(self, batch: Batch) -> dict[str, BatchItem]:
+        """The run before this one's questions that came back, by question."""
+        before = self._before(batch)
+        return {_key(i.question): i for i in before.items if i.answer is not None or i.error_code} if before else {}
+
+    def _result_row(self, number: int, item: BatchItem, old: dict[str, BatchItem]) -> _ResultRow:
+        verdict, tone = item_verdict(item)
+        a = item.answer
+        row = _ResultRow(number, item, verdict, tone, self._meta(a) if a is not None else "",
+                         answer_findings(a) if a is not None else [], self._item_error(item))
+        was = old.get(_key(item.question))
+        if was is not None and (a is not None or item.error_code):
+            label, old_tone = item_verdict(was)
+            if _GRADES.get(tone, 1) != _GRADES.get(old_tone, 1):
+                row.change, row.better = f"was {label}", _GRADES.get(tone, 1) > _GRADES.get(old_tone, 1)
+        return row
+
+    def _batch_cost_text(self, batch: Batch) -> str:
+        if any(i.cost is None for i in batch.asked):
+            return "unknown (pass model_prices=...)"
+        text = human_money(batch.cost)
+        return text if text.startswith("<") else "~" + text
+
+    def _batch_cards(self, batch: Batch) -> list[tuple[str, ...]]:
+        """The numbers that say how a run went: answered (or found), grounded, expected sources, failures, cost, time.
+        A card is coloured when a finding of the same report is about it."""
+        items, asked = batch.items, batch.asked
+        checked = [i for i in asked if _filled(i.expected)]
+        hits = [i for i in checked if i.found is not None]
+        cards: list[tuple[str, ...]] = [
+            ("Questions", f"{len(items):,}" + (f" of {len(items) + batch.skipped:,}" if batch.skipped else ""))]
+        if batch.retrieve_only:
+            some = [i for i in asked if i.answer.sources]
+            cards.append(("Found passages", f"{len(some)} of {len(asked)}", "warn" if len(some) < len(asked) else ""))
+            if checked:
+                mrr = sum(1 / i.found for i in hits) / len(checked)
+                cards += [("Expected found", f"{len(hits)} of {len(checked)}", "warn" if len(hits) < len(checked)
+                           else ""), ("MRR", f"{mrr:.2f}")]
+        else:
+            spoke = [i for i in asked if not _unhelpful(i.answer) and i.answer.guardrail_action != "INTERVENED"]
+            share = _avg_grounded(batch)
+            cards += [("Answered", f"{len(spoke)} of {len(asked)}", "warn" if len(spoke) < len(asked) else ""),
+                      ("Grounded", f"{share:.0%}" if share is not None else "-")]
+            if checked:  # warn when an answer that said something missed it (the others have their own warning)
+                missed = any(i in spoke and i.found is None for i in checked)
+                cards.append(("Expected cited", f"{len(hits)} of {len(checked)}", "warn" if missed else ""))
+        if batch.failed:
+            cards.append(("Failed", f"{len(batch.failed):,}", "bad"))
+        return cards + [("Est. cost", self._batch_cost_text(batch)), ("Time", _duration(batch.seconds))]
+
+    def _batch_findings(self, batch: Batch) -> list[tuple[str, str]]:
+        before = self._before(batch)
+        return batch_findings(batch, self._explain) + (batch_changes(before, batch, self._model_label) if before
+                                                       else [])
+
+    def _batch_blocks(self, batch: Batch) -> list[Any]:
+        """A test run as a report: title, cards, findings across every question and since the run before, then each
+        question with how it did, opening to its answer."""
+        kb = batch.kb_name or batch.kb_id
+        number = next((k for k, b in enumerate(self.batches, 1) if b is batch), len(self.batches))
+        narrowed = [f"only {describe_sources(batch.data_sources)}" if batch.data_sources else "",
+                    f"only {describe_files(batch.files)}" if batch.files else ""]
+        sent = _settings_text(batch.settings) or "no settings (Bedrock's defaults)"
+        how = "Retrieve: the search only, no answers" if batch.retrieve_only else self._model_label(batch.model)
+        sub = " · ".join(filter(None, [f"test run {number}", "each question asked on its own, not as a follow-up", how,
+                                       *narrowed, sent,
+                                       f"cost at {self._price_basis(models=not batch.retrieve_only)}"]))
+        checked = any(_filled(i.expected) for i in batch.items)
+        if batch.retrieve_only:
+            empty = "Every search found passages" + (", and the expected source among them." if checked else ".")
+            note = ("Each question only searched (Retrieve) with the search settings, so no model was called: the "
+                    "cost is each question's embedding" + (" and its reranking." if batch.settings.get("reranker")
+                                                           else ".") + " Scores rank one search's passages: compare "
+                    "them within a question, not across questions.")
+        else:
+            empty = "Every question was answered, citing its sources" + (
+                ", and the expected one." if checked else ".")
+            note = ("Each question was asked on its own (a new Bedrock session each), so none follows up on another. "
+                    "Tokens and cost are estimated from characters: RetrieveAndGenerate doesn't report tokens.")
+        return [
+            _Title(f"Test run on {kb}: {_plural(len(batch.items), 'question')}", sub),
+            _Cards(self._batch_cards(batch)),
+            _Findings(self._batch_findings(batch), empty=empty),
+            _Results(self._result_rows(batch)),
+            _Note(note),
+            _Next(self._batch_steps(batch)),
+        ]
+
+    def _batch_steps(self, batch: Batch) -> list[tuple[str, str]]:
+        """What to run after a test run: the search behind the first question that didn't work, a setting to try,
+        and the same questions again."""
+        steps: list[tuple[str, str]] = []
+        weak = next((i for i in batch.asked if item_verdict(i)[1] == "warn"), None)
+        if weak is not None and not batch.retrieve_only:
+            steps.append((_call("retrieve", weak.question), "the search behind the first answer that didn't work"))
+        elif weak is not None:
+            steps.append(("files()", "whether the files those questions need are indexed"))
+        steps.append((self._next_set(), "change a setting"))
+        steps.append(("ask_all()", "the same questions again: the report says what changed"))
+        if weak is None:
+            steps.append(("code()", "this setup as Python, JSON or an AWS CLI command"))
+        return steps
+
+    def _code_questions(self, questions: Any = None) -> list[str]:
+        """The questions the code asks: these, else the test questions, else this conversation's (each once)."""
+        if questions is not None:
+            return [q for q, _ in question_list(questions)]
+        if self.questions:
+            return [q for q, _ in self.questions]
+        return list(dict.fromkeys(a.question for a in self.answers))[-5:]
+
+    def _about(self, retrieve_only: bool) -> str:
+        """The comment over the code's CONFIG: the setup, in words."""
+        kb_id = self.kb or ""
+        name = self.core.kb_name(kb_id) if kb_id else ""
+        parts = [f"Knowledge base {name} ({kb_id})" if name and name != kb_id else
+                 f"Knowledge base {kb_id or '(not picked yet)'}"]
+        parts.append("searched only (Retrieve), no answer" if retrieve_only else
+                     f"answered by {self._model_label(self.model or '')}")
+        sources, uris = self._sources_now(), self._files_now()
+        parts += [f"only {describe_sources(sources)}"] if sources else []
+        parts += [f"only {describe_files(uris)}"] if uris else []
+        return ", ".join(parts) + ". Set up in the bedrock_chat window; each question is asked on its own."
+
     # ---------------------------------------------------------------------- chat
 
     @_friendly_errors
@@ -7015,6 +8312,47 @@ class BedrockChatView:
         if not self.answers:
             raise _Hint("No questions yet: ask('...') or app() first.")
         self._show(self._answer_blocks(self.answers[-1], len(self.answers), full=True))
+
+    # ------------------------------------------------------- test questions
+
+    @_friendly_errors
+    def ask_all(self, questions: Any = None, *, retrieve_only: bool | None = None, workers: int = BATCH_WORKERS,
+                limit: int | None = BATCH_LIMIT) -> None:
+        """Asks a list of test questions with these settings and shows how each did: answered or "unable to assist",
+        grounded share, sources cited, time and estimated cost, with findings across them all and what changed since
+        the last run. Each question is asked on its own, not as a follow-up.
+
+        questions: a list, or text with one question per line. 'question | file' also checks that the answer cites
+        that file (a piece of its name, path or text). ask_all() with no questions asks the last list again: change a
+        setting, run it, and the report says which questions did better or worse. retrieve_only=True only searches
+        (default: the window's Answer / Retrieve only). workers questions are asked at a time, and up to limit of them
+        (None for all). ui.batches[-1].to_df() has the answers as a table."""
+        if questions is None:
+            if not self.questions:
+                raise _Hint("Pass the questions to ask: ask_all(['How long do refunds take?', 'Can I return a digital "
+                            "product?']), or text with one per line. Add | and a file name to check the answer cites "
+                            "it: 'How long do refunds take? | refund-policy.pdf'.")
+            questions = self.questions
+        retrieve = self._retrieving(retrieve_only)
+        batch = self._prepare(questions, retrieve, limit)
+        with self._progress("Searching" if retrieve else "Asking", unit="questions") as tick:
+            self.core._run_batch(batch, workers=workers, progress=tick)
+        if self._app is not None:
+            self._app.ran(batch)
+        self._show(self._batch_blocks(batch))
+
+    @_friendly_errors
+    def results(self, run: int = -1) -> None:
+        """A test run again, as a report that stays in the notebook when it's saved (the window doesn't): the last
+        run, or results(0) for the first. Nothing is asked again."""
+        if not self.batches:
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), or the window's 🧪 Test tab.")
+        try:
+            batch = self.batches[_as_int(run, "run")]
+        except IndexError:
+            raise _Hint(f"There {'is' if len(self.batches) == 1 else 'are'} {_plural(len(self.batches), 'test run')}: "
+                        f"results(0) is the first and results(-1) the last.") from None
+        self._show(self._batch_blocks(batch))
 
     # ------------------------------------------------------------------ settings
 
@@ -7146,6 +8484,51 @@ class BedrockChatView:
             _Next([("settings()", "the settings in plain English"), (self._next_set(), "change one"),
                    (_call("request", retrieve_only=not retrieve), "the answer's request" if retrieve else
                     "the search-only request retrieve() sends")]),
+        ]
+        self._show(blocks)
+
+    @_friendly_errors
+    def code(self, questions: Any = None, retrieve_only: bool | None = None) -> None:
+        """This setup as code to copy and run anywhere: a Python script (boto3 only) that asks your test questions and
+        prints each answer with the files it cites, the config as JSON (the request without the question), and the
+        AWS CLI command for one question. It follows the knowledge base, model, data source, files and settings.
+        Nothing is sent. questions: the ones the script asks (default: the test questions, else this conversation's);
+        retrieve_only=True gives the search-only (Retrieve) setup."""
+        retrieve = self._retrieving(retrieve_only)
+        asked = self._code_questions(questions)
+        params, problems = self._preview(asked[0] if asked else None, retrieve)
+        region = self._region()
+        kb = self.core.kb_name(self.kb) if self.kb else "(not picked yet)"
+        sent = retrieve_settings(self.values, self.core.schema()) if retrieve else self.values
+        found = [("warn", f"Bedrock would refuse this request, so the code would fail the same way: {p}")
+                 for p in problems]
+        api = "Retrieve: the search only, no answer" if retrieve else "RetrieveAndGenerate"
+        what = "every passage each question finds" if retrieve else "each answer with the files it cites"
+        count = _plural(len(asked), "question") if asked else "a question (put yours in)"
+        send = ("client.retrieve(retrievalQuery={'text': question}, **config)" if retrieve
+                else "client.retrieve_and_generate(input={'text': question}, **config)")
+        blocks: list[Any] = [
+            _Title(f"This setup as code: {kb}", f"{api} · nothing is sent · copy it and run it wherever boto3 or the "
+                                                "AWS CLI has credentials"),
+            _Cards([("Knowledge base", kb), ("Model", "none: no answer" if retrieve else
+                                             self._model_label(self.model or "")),
+                    ("Data source", self._sources_text()), ("Files", self._files_text()),
+                    ("Settings", f"{len(sent):,}"), ("Questions", f"{len(asked):,}" if asked else "none yet")]),
+            _Findings(found + settings_findings(sent, self.model or "")),
+            _Code(python_script(params, region, asked, about=self._about(retrieve)),
+                  f"Python: asks {count} with this setup and prints {what} (boto3 only)"),
+            _Code(config_json(params), "The config as JSON: the request without the question", lang="json"),
+            _Code(cli_command(params, region, asked[0] if asked else None),
+                  "AWS CLI: one question from a terminal (bash or zsh)", lang="shell"),
+            _Note(f"The JSON is the API's own request without the question: save it as bedrock-config.json, and "
+                  f"{send} sends it with any question (config = json.load(open('bedrock-config.json'))). The AWS CLI "
+                  "reads it with --cli-input-json file://bedrock-config.json. The script and the command use the AWS "
+                  "credentials and region of wherever they run."),
+            _Next([("ask_all()" if self.questions else "ask_all(['a question', 'another'])",
+                    "ask the test questions here first, with this setup"),
+                   ("settings()", "what each setting does"),
+                   (_call("code", retrieve_only=not retrieve), "the answer's setup" if retrieve else
+                    "the search-only (Retrieve) setup")]),
         ]
         self._show(blocks)
 
@@ -7350,6 +8733,7 @@ def chat(
     data_source: Any = None,
     files: Any = None,
     retrieve_only: bool = False,
+    questions: Any = None,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
@@ -7361,11 +8745,13 @@ def chat(
         chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
         chat("support-docs", settings={"generationConfiguration.performanceConfig.latency": "optimized"})
         chat("support-docs", retrieve_only=True)      # questions only search: every passage found, no answer
+        chat("support-docs", questions=["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])
 
     Settings passed as keywords (or settings=, for paths) are added to DEFAULT_SETTINGS; settings={} starts from none.
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
     region and profile; stream=False shows each answer only when it's complete. retrieve_only=True opens the window
-    on Retrieve only: questions show every passage the search finds, and no answer."""
+    on Retrieve only: questions show every passage the search finds, and no answer. questions= fills the Test tab
+    with a list of test questions to ask with the window's settings (a list, or text with one per line)."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
                            stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
@@ -7374,5 +8760,10 @@ def chat(
             view._update({name: value})
         except ValueError as exc:
             view._notes.append(f"Not used: {str(exc).replace(' Nothing was changed.', '')}")
+    if _filled(questions):
+        try:
+            view.questions = question_list(questions)
+        except ValueError as exc:
+            view._notes.append(f"The test questions weren't used: {exc}.")
     view.app()
     return view
