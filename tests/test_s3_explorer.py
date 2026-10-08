@@ -357,6 +357,16 @@ def text(x):
     return s3mod._render_text(x.shown, 0)
 
 
+def test_explorer_fills_the_window_unless_given_a_height(explorer):
+    x = explorer()
+    assert x._body.layout.height is None and "s3x-body" in x._body._dom_classes  # the style sizes it
+    assert ".s3x .s3x-body{height:clamp(560px,calc(100vh - 220px),1400px)}" in sx._CSS
+    assert "body[class*=vscode-] .s3x .s3x-body{height:560px}" in sx._CSS  # VS Code's 100vh is the whole notebook
+    assert explorer(height=720)._body.layout.height == "720px"
+    assert explorer(height="80vh")._body.layout.height == "80vh"
+    assert [sx._css_height(h) for h in ("720", " 600.5 ", "", None)] == ["720px", "600.5px", None, None]
+
+
 def test_explorer_opens_folders_and_files_by_clicking(explorer):
     x = explorer()
     assert rows(x) == ["🪣  lake", "🪣  models"] and x._back_btn.disabled and x._up_btn.disabled

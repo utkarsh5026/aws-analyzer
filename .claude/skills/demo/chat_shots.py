@@ -58,7 +58,9 @@ from moto import mock_aws
 mock_aws().start()
 import demo, bedrock_chat
 core = bedrock_chat.BedrockChatAnalyzer(region="us-east-1", **demo.seed_bedrock_kb())
-ui = bedrock_chat.BedrockChatView(core, kb="support-docs", model="sonnet", settings={{"n": 5, "search_type": "hybrid"}})
+# height=540: the figures don't grow with the browser's height
+ui = bedrock_chat.BedrockChatView(core, kb="support-docs", model="sonnet", settings={{"n": 5, "search_type": "hybrid"}},
+                                  height=540)
 ui"""
 
 

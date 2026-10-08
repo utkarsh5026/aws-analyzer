@@ -65,9 +65,10 @@ The examples use a knowledge base called `support-docs` holding support policies
     chat("support-docs", questions=["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])
     ```
 
-3. **Optional:** another region or AWS profile, or keep the view to use from other cells.
+3. **Optional:** another region or AWS profile, a fixed height, or keep the view to use from other cells.
 
     ```python
+    chat("support-docs", height=800)   # an 800px conversation (else the window fills the browser's height)
     ui = chat("support-docs", region="us-west-2", profile="dev")
     ui.set(max_tokens=1024)      # the open window follows
     ui.transcript()              # the conversation as a report that stays in the saved notebook
@@ -424,7 +425,7 @@ Every `BedrockChatView` command. `ui.help()` prints the same list grouped by tas
 
 | Command | What it shows |
 |---|---|
-| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, retrieve_only=False, questions=None, **values)` | Opens the window and returns the view behind it; `questions=` fills the Test tab |
+| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, retrieve_only=False, questions=None, height=None, **values)` | Opens the window and returns the view behind it; `questions=` fills the Test tab, and `height=` sets the conversation's height (it fills the browser window by default) |
 | `app()` | The chat window |
 | `ask(question)` | An answer with \[1\]\[2\] citations, sources, findings and cost, as a report, in the same conversation |
 | `retrieve(question)` | Only the search behind an answer: every passage found, best first, with its score, and which ones the answer to the same question cited |

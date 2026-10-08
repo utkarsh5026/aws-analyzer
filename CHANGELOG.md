@@ -46,6 +46,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- `s3_explorer.py` and `bedrock_chat.py`: the S3 explorer and the chat window fill the browser window's height
+  instead of a fixed 560 and 540 pixels, so a big screen shows more files, more of a report and more of the
+  conversation. They stay at least that tall, and keep those heights in VS Code. `S3Explorer(height=720)` and the new
+  `chat(height=800)` set a height of your own, in pixels or as CSS (`"80vh"`). ([#48](https://github.com/utkarsh5026/aws-analyzer/pull/48))
 - `s3_explorer.py`: **↗ Open in new tab** replaces **🔗 Link** above a file. One click opens the file in a new browser
   tab, where PDFs, pictures, sound, video and text files show instead of downloading, even when they were stored as a
   generic type (a CSV or log file shows as text). Other files download to your computer. Right-click it to copy the

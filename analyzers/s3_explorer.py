@@ -147,6 +147,12 @@ def _plural(count: int, word: str) -> str:
     return f"{count:,} {word}{'' if count == 1 else 's'}"
 
 
+def _css_height(height: int | str | None) -> str | None:
+    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
+    text = "" if height is None else str(height).strip()
+    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
+
+
 def _fmt_dt(moment: datetime | None) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if moment else ""
 
@@ -784,6 +790,8 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 .s3x button.jupyter-button:active:enabled{background-color:var(--s3x-hover)}
 .s3x .s3x-ic::before{content:"";display:block;flex:0 0 auto;width:16px;height:16px;background:currentColor;
  -webkit-mask:var(--s3x-icon) center/contain no-repeat;mask:var(--s3x-icon) center/contain no-repeat}
+.s3x .s3x-body{height:clamp(560px,calc(100vh - 220px),1400px)}
+body[class*=vscode-] .s3x .s3x-body{height:560px}
 .s3x .s3x-bar{align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--s3x-line)}
 .s3x .s3x-bar>*,.s3x .s3x-navs>*{margin:0}
 .s3x .s3x-navs{flex:0 0 auto;gap:2px;padding:2px;border-radius:10px;background:var(--s3x-fill)}
@@ -1000,7 +1008,8 @@ class S3Explorer:
     uri: where to start ('s3://bucket/prefix/', 'bucket/prefix', a file's path, a console link); leave it
     out to start from your buckets.
     core: an S3Analyzer or S3View to use (else one is made from profile / region).
-    height: the height of the two panes in pixels. page_size: rows on each page of the list.
+    height: the height of the two panes. They fill the browser window (at least 560 pixels); a number of pixels
+    (720) or CSS ('80vh') sets it instead. page_size: rows on each page of the list.
     zip_max_size: the biggest folder "Download .zip" packs ('100MB', '2GB'); ⚙ Settings changes it, and the most
     files in a zip (zip_max_files, 10,000) and where zips go (zip_folder, the notebook's folder).
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
@@ -1015,7 +1024,7 @@ class S3Explorer:
         *,
         profile: str | None = None,
         region: str | None = None,
-        height: int = 560,
+        height: int | str | None = None,
         page_size: int = 100,
         zip_max_size: int | str = "100MB",
         mode: str = "auto",
@@ -1729,7 +1738,10 @@ class S3Explorer:
         self._picks_bar.add_class("s3x-picks")
         self._side = w.VBox([self._finder], layout=w.Layout(width="42%", min_width="300px", flex="0 0 auto"))
         self._side.add_class("s3x-side")
-        self._body = w.HBox(layout=w.Layout(width="100%", height=f"{self.height}px"))
+        # The style makes the panes fill the browser window, but in VS Code, whose 100vh is the whole notebook's
+        # height, 560px. height= puts its own on the box, which wins over the style's.
+        self._body = w.HBox(layout=w.Layout(width="100%", height=_css_height(self.height)))
+        self._body.add_class("s3x-body")
         self._left = self._right = None
         self._renew("left", "right")
         self._status = w.HTML(layout=w.Layout(width="100%"))
