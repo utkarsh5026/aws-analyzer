@@ -11,6 +11,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-08
+
 ### Added
 
 - `bedrock_kb.py`: `ask()`, `search()`, `compare()` and `evaluate()` take `data_source=`, so a question can be answered
@@ -278,7 +280,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.4.0...v0.5.0
