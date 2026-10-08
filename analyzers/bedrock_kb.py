@@ -142,7 +142,7 @@ GLOBAL_MODEL_PRICES: dict[str, tuple[float, float]] = {
     "nova-2-lite": (0.30, 2.50),
 }
 
-DEFAULT_MODEL = "anthropic.claude-opus-5"  # Claude Opus 5; resolve_model() finds the ID or profile to call it with
+DEFAULT_MODEL = "anthropic.claude-haiku-4-5"  # Claude Haiku 4.5; resolve_model() finds the ID or profile to call it with
 _MODEL_ALIASES = {
     "opus": "claude-opus-5",
     "sonnet": "claude-sonnet-5",
@@ -2777,7 +2777,7 @@ class BedrockKBAnalyzer:
     Methods take the knowledge base first, as an ID, a name (any case) or an ARN. Nothing here starts a sync or
     changes a document; where one is needed, sync_command() gives the command to run.
     `prices` and `model_prices` override BEDROCK_PRICES and MODEL_PRICES for cost estimates; `default_model` is the
-    model ask() and generate() use when none is given (DEFAULT_MODEL, Claude Opus 5, otherwise). `clients` pre-fills the boto3 clients by service name
+    model ask() and generate() use when none is given (DEFAULT_MODEL, Claude Haiku 4.5, otherwise). `clients` pre-fills the boto3 clients by service name
     ('bedrock-agent', 'bedrock-agent-runtime', 'bedrock-runtime', 'bedrock', 's3'), e.g. to use stubbed ones.
     """
 
@@ -2805,7 +2805,7 @@ class BedrockKBAnalyzer:
         self.prices = {**BEDROCK_PRICES, **(prices or {})}
         self.model_prices = {**MODEL_PRICES, **(model_prices or {})}
         self.default_model = (
-            default_model  # what model=None means (None: DEFAULT_MODEL, Claude Opus 5)
+            default_model  # what model=None means (None: DEFAULT_MODEL, Claude Haiku 4.5)
         )
         self._models: list[ModelInfo] | None = None
         self._profiles: list[dict[str, Any]] = []
@@ -3362,7 +3362,7 @@ class BedrockKBAnalyzer:
 
     def resolve_model(self, name: str | None = None) -> tuple[str, str]:
         """(ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
-        'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Opus 5).
+        'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Haiku 4.5).
         A model that can't be called on demand resolves to this region's inference profile. If the model list can't
         be read, the name is used as given."""
         wanted = str(name or self.default_model or DEFAULT_MODEL).strip()

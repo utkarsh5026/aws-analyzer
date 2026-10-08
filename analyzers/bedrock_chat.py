@@ -165,7 +165,7 @@ GLOBAL_MODEL_PRICES: dict[str, tuple[float, float]] = {
 }
 
 
-DEFAULT_MODEL = "anthropic.claude-opus-5"  # Claude Opus 5; resolve_model() finds the ID or profile to call it with
+DEFAULT_MODEL = "anthropic.claude-haiku-4-5"  # Claude Haiku 4.5; resolve_model() finds the ID or profile to call it with
 
 
 _MODEL_ALIASES = {
@@ -2648,7 +2648,7 @@ class BedrockChatAnalyzer:
 
     def resolve_model(self, name: str | None = None) -> tuple[str, str]:
         """(ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
-        'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Opus 5).
+        'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Haiku 4.5).
         A model that can't be called on demand resolves to this region's inference profile. If the model list can't
         be read, the name is used as given."""
         wanted = str(name or self.default_model or DEFAULT_MODEL).strip()

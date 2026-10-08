@@ -202,8 +202,8 @@ ui.ask("How long do refunds take?", data_source="faq")     # from one data sourc
 ui.chunk(1)                                                # source [1] in full
 ```
 
-![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-light.webp#only-light){ width="984" height="403" loading=lazy }
-![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-dark.webp#only-dark){ width="984" height="403" loading=lazy }
+![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-light.webp#only-light){ width="984" height="405" loading=lazy }
+![ask(): an answer about refund times with a \[1\] and a \[2\] marker, 77% grounded because its last sentence cites nothing, cards for sources used, model, estimated tokens, cost and time, and the two cited passages from refund-policy.pdf](images/bedrock-ask-dark.webp#only-dark){ width="984" height="405" loading=lazy }
 /// caption
 `ui.ask("How long do refunds take?")`: cited spans are shaded and link to their source. The last sentence cites nothing, so the answer is 77% grounded. Tokens are an estimate here, because RetrieveAndGenerate doesn't report them.
 ///
@@ -245,7 +245,7 @@ ui.ask("How long do refunds take?", engine="converse", prompt=MY_PROMPT)
 
 ### Choosing a model
 
-`model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`, `"claude-opus-5"`, `"nova-pro"`. The default is Claude Opus 5, called through the region's inference profile when it can't be called on demand. `models()` lists the text models you can use in the region, the ID to pass, how each is called and its price per million tokens.
+`model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`, `"claude-opus-5"`, `"nova-pro"`. The default is Claude Haiku 4.5, called through the region's inference profile when it can't be called on demand. `models()` lists the text models you can use in the region, the ID to pass, how each is called and its price per million tokens.
 
 ```python
 ui.models()
@@ -253,8 +253,8 @@ ui.models("claude")
 ui = BedrockKBView(BedrockKBAnalyzer(default_model="sonnet"))   # a different default
 ```
 
-![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-light.webp#only-light){ width="984" height="475" loading=lazy }
-![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-opus-5](images/bedrock-models-dark.webp#only-dark){ width="984" height="475" loading=lazy }
+![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-haiku-4-5-20251001-v1:0](images/bedrock-models-light.webp#only-light){ width="984" height="477" loading=lazy }
+![models(): nine text models with the ID to pass as model=, name, provider, whether it's called on demand or through an inference profile, and the price per million input and output tokens; the default for ask() is us.anthropic.claude-haiku-4-5-20251001-v1:0](images/bedrock-models-dark.webp#only-dark){ width="984" height="477" loading=lazy }
 /// caption
 `ui.models()`: the ID to pass as `model=`, how each model is called, and what it costs per million tokens.
 ///
