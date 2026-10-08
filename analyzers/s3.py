@@ -30,8 +30,9 @@ Quick start
     ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")   # preview a lifecycle rule
     ui.deleted("s3://my-bucket/data/")              # deleted files you can still restore
     ui.duplicates("s3://my-bucket/data/")           # identical files (size, ETag, SHA-256) and what they cost
-    ui.download("s3://my-bucket/data/")             # a file or folder to the notebook's disk, with progress
+    ui.download("s3://my-bucket/data/")             # a file or folder into s3-downloads/, with progress
     ui.download_zip("s3://my-bucket/data/")         # the same as one .zip, once size / disk / access checks pass
+    ui.downloads()                                  # what's downloaded, the disk it takes; clean_downloads() deletes it
 
     For clicking through folders and files instead, put s3_explorer.py next to this file:
     from s3_explorer import S3Explorer; S3Explorer("s3://my-bucket/data/")
@@ -2120,6 +2121,68 @@ class ZipDownload:
 
 
 @dataclass
+class LocalDownload:
+    """A file, folder or zip in the downloads folder (see S3Analyzer.list_downloads)."""
+
+    name: str  # its name in the downloads folder
+    path: str  # where it is (absolute)
+    kind: str  # 'file' | 'folder' | 'zip' | 'unfinished' (a .zip.part a stopped download_zip left)
+    size: int  # bytes, with everything below a folder
+    files: int  # 1 for a file
+    downloaded: datetime  # when it was last written here (UTC); file times are S3's, so this is the change time
+
+    @property
+    def is_folder(self) -> bool:
+        return self.kind == "folder"
+
+
+@dataclass
+class DownloadsFolder:
+    """What download() and download_zip() saved: the downloads folder and what's in it (S3Analyzer.list_downloads)."""
+
+    path: str  # the folder (absolute)
+    exists: bool = False
+    managed: bool = False  # made for downloads (it has aws-analyzer's .gitignore): clean_downloads may empty it
+    protected: str = ""  # why it must never be emptied ('the notebook's folder', ...), '' when nothing stops it
+    entries: list[LocalDownload] = field(default_factory=list)  # newest first
+    disk_free: int | None = None  # bytes free on its disk
+    errors: dict[str, str] = field(default_factory=dict)  # name -> why it couldn't be read
+
+    @property
+    def size(self) -> int:
+        return sum(entry.size for entry in self.entries)
+
+    @property
+    def files(self) -> int:
+        return sum(entry.files for entry in self.entries)
+
+    def to_df(self):
+        """One row per download: name, kind, size, files, downloaded, path."""
+        pd = _require("pandas", "DownloadsFolder.to_df")
+        return pd.DataFrame(
+            [vars(entry) for entry in self.entries],
+            columns=["name", "kind", "size", "files", "downloaded", "path"],
+        )
+
+
+@dataclass
+class DownloadsCleanup:
+    """What S3Analyzer.clean_downloads deleted, or would delete with dry_run=True."""
+
+    path: str  # the downloads folder
+    removed: list[LocalDownload] = field(default_factory=list)  # deleted (or to delete), newest first
+    kept: list[LocalDownload] = field(default_factory=list)  # left: not named, or newer than older_than
+    failed: dict[str, str] = field(default_factory=dict)  # name -> why it couldn't be deleted (it stays)
+    dry_run: bool = False
+    older_than: datetime | None = None  # only what was downloaded before this went
+
+    @property
+    def freed(self) -> int:
+        """Bytes deleted (with dry_run, that would be)."""
+        return sum(entry.size for entry in self.removed if entry.name not in self.failed)
+
+
+@dataclass
 class ArchiveEntry:
     name: str
     size: int
@@ -2368,6 +2431,12 @@ AGE_BANDS: list[
     ("> 3 years", None),
 ]
 ARCHIVE_CLASSES = {"GLACIER", "DEEP_ARCHIVE"}  # need a restore before GetObject works
+DOWNLOADS = "s3-downloads"  # where download() and download_zip() save without a path=: this folder, next to the notebook
+_DOWNLOADS_MARK = (  # the .gitignore in a folder made for downloads: clean_downloads may empty it, and git skips it
+    "# Made by aws-analyzer for what download() and download_zip() save from S3.\n"
+    "# S3View().clean_downloads() deletes them; this file keeps them out of git.\n"
+    "*\n"
+)
 
 # Storage price in USD per GB-month (GB = 2**30 bytes): us-east-1 list prices for the first 50 TB, checked
 # against the AWS Price List API on 2026-09-27. Other regions and volume tiers differ; pass
@@ -3230,6 +3299,43 @@ def zip_findings(plan: ZipPlan) -> list[tuple[str, str]]:
                 "folder or clash with another file's (the table lists them).",
             )
         )
+    return found
+
+
+def downloads_findings(folder: DownloadsFolder, now: datetime | None = None) -> list[tuple[str, str]]:
+    """What to tidy up in the downloads folder, and the call that does it -> [(level, message)]: downloads in a
+    folder that isn't theirs, unfinished zips, a disk running out of room, downloads over a month old."""
+    found: list[tuple[str, str]] = []
+    own = f"S3View(downloads={DOWNLOADS!r})"
+    if folder.protected:
+        found.append(("warn", f"Downloads go into {folder.path}, {folder.protected}: they mix with your own files "
+                              f"and clean_downloads() can't tidy them up. Give them a folder of their own: {own}."))
+    elif folder.exists and not folder.managed:
+        found.append(("warn", f"{folder.path} wasn't made for downloads (it has no aws-analyzer .gitignore), so "
+                              "clean_downloads() won't empty it, in case it holds your own files. Delete what you "
+                              f"don't need there yourself, or give downloads a folder of their own: {own}."))
+    cleanable = folder.managed and not folder.protected
+    unfinished = [entry for entry in folder.entries if entry.kind == "unfinished"]
+    if unfinished:
+        size = sum(entry.size for entry in unfinished)
+        names = [entry.name for entry in unfinished]
+        fix = (f" {_call('clean_downloads', names if len(names) > 1 else names[0])} deletes "
+               f"{'them' if len(names) > 1 else 'it'}.") if cleanable else ""
+        found.append(("warn", f"{_plural(len(unfinished), 'unfinished zip')} ({human_size(size)}): a download_zip() "
+                              f"that stopped (a restarted kernel) left {', '.join(names[:3])}"
+                              f"{', ...' if len(names) > 3 else ''}, which won't open.{fix}"))
+    if folder.disk_free is not None and folder.size and folder.disk_free < max(folder.size, GB):
+        fix = ("clean_downloads() deletes them all, or clean_downloads(older_than='7d') those from before this week"
+               if cleanable else "delete the ones you're done with")
+        found.append(("warn", f"The disk is running out of room: {human_size(folder.disk_free)} free, and downloads "
+                              f"take {human_size(folder.size)}. The next big download or zip may not fit: {fix}."))
+    month = (now or _utcnow()) - timedelta(days=30)
+    old = [entry for entry in folder.entries if entry.downloaded < month and entry.kind != "unfinished"]
+    if old and cleanable:
+        found.append(("info", f"{_plural(len(old), 'download')} ({human_size(sum(e.size for e in old))}) "
+                              f"{'is' if len(old) == 1 else 'are'} over a month old: "
+                              f"{_call('clean_downloads', older_than='30d')} deletes "
+                              f"{'it' if len(old) == 1 else 'them'} and keeps the newer ones."))
     return found
 
 
@@ -4827,6 +4933,52 @@ def _free_space(path: str) -> int:
     return shutil.disk_usage(folder).free
 
 
+def _protected_folder(folder: str) -> str:
+    """Why clean_downloads must never empty `folder` (absolute), or '': the notebook's folder or one above it, the
+    home folder, or a disk's root."""
+    here = os.path.abspath(os.getcwd())
+    if folder == here:
+        return "the notebook's own folder"
+    if os.path.dirname(folder) == folder:
+        return "the root of the disk"
+    if folder == os.path.abspath(os.path.expanduser("~")):
+        return "your home folder"
+    if here.startswith(folder.rstrip(os.sep) + os.sep):
+        return "a folder that holds the notebook's own"
+    return ""
+
+
+def _made_for_downloads(folder: str) -> bool:
+    """Whether `folder` has the .gitignore download() puts in a downloads folder it makes (_DOWNLOADS_MARK)."""
+    try:
+        with open(os.path.join(folder, ".gitignore"), encoding="utf-8") as mark:
+            return mark.readline() == _DOWNLOADS_MARK.split("\n")[0] + "\n"
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _local_download(path: str, name: str) -> LocalDownload:
+    """One entry of the downloads folder: its size, files and when it was last written (a folder's newest file).
+    Downloads keep S3's time as their modified time, so the change time says when they were downloaded."""
+    info = os.lstat(path)
+    newest, size, files = max(info.st_mtime, info.st_ctime), info.st_size, 1
+    is_folder = os.path.isdir(path) and not os.path.islink(path)
+    if is_folder:
+        size = files = 0
+        for root, _, names in os.walk(path):  # doesn't follow links
+            for file in names:
+                try:
+                    found = os.lstat(os.path.join(root, file))
+                except OSError:
+                    continue
+                size, files = size + found.st_size, files + 1
+                newest = max(newest, found.st_mtime, found.st_ctime)
+    lower = name.lower()
+    kind = ("folder" if is_folder else "unfinished" if lower.endswith(".zip.part")
+            else "zip" if lower.endswith(".zip") else "file")
+    return LocalDownload(name, path, kind, size, files, datetime.fromtimestamp(newest, timezone.utc))
+
+
 def _memory_available() -> int | None:
     """RAM the notebook can still use (MemAvailable on Linux), or None when it can't be read."""
     try:
@@ -5240,6 +5392,8 @@ class S3Analyzer:
     Anywhere a `uri` is taken you can pass 's3://bucket/prefix' or 'bucket/prefix'.
     Scans accept `limit` (stop after N keys) and `progress` (called with the running count).
     `prices` overrides S3_PRICES (USD per GB-month by storage class) for cost estimates.
+    `downloads` is the folder download(), download_folder() and download_zip() save into when they're given no
+    path (DOWNLOADS, 's3-downloads', relative to the notebook's folder; '~/...' and absolute paths work too).
     """
 
     def __init__(
@@ -5250,6 +5404,7 @@ class S3Analyzer:
         profile: str | None = None,
         client: Any = None,
         prices: dict[str, float] | None = None,
+        downloads: str | None = None,
     ):
         self.session = session or boto3.Session(
             profile_name=profile, region_name=region
@@ -5263,6 +5418,7 @@ class S3Analyzer:
         )
         self.client = client or self.session.client("s3", config=self._config)
         self.prices = {**S3_PRICES, **(prices or {})}
+        self.downloads = downloads or DOWNLOADS  # where downloads go without a path (see downloads_folder())
         self._regional_clients: dict[str, Any] = {}
         self._cloudwatch_clients: dict[str, Any] = {}
         self._regions: dict[str, str] = {}
@@ -7229,10 +7385,10 @@ class S3Analyzer:
         *,
         progress: Callable[[int, int], None] | None = None,
     ) -> str:
-        """Download one file to `path` (a file or directory; default: current directory). Returns the local path.
-        Refuses when the disk hasn't room. progress gets (bytes downloaded, file size)."""
+        """Download one file to `path` (a file or directory; default: the downloads folder, see downloads_folder()).
+        Returns the local path. Refuses when the disk hasn't room. progress gets (bytes downloaded, file size)."""
         bucket, key = parse_s3_uri(uri)
-        path = path or os.path.basename(key)
+        path = path or os.path.join(self.downloads_folder(), os.path.basename(key))
         if os.path.isdir(path):
             path = os.path.join(path, os.path.basename(key))
         head = self.client.head_object(Bucket=bucket, Key=key)
@@ -7255,14 +7411,16 @@ class S3Analyzer:
         progress: Callable[[int, int], None] | None = None,
         list_progress: Callable[[int], None] | None = None,
     ) -> FolderDownload:
-        """Download every file under a folder into `path` (default: a folder of the same name in the current
-        directory), keeping the sub-folders. A file already there with the same size and time is skipped, so
-        running it again resumes. GLACIER / DEEP_ARCHIVE files are skipped (they need a restore first). Refuses
-        when the disk hasn't room. progress gets (bytes downloaded, bytes to download)."""
+        """Download every file under a folder into `path` (default: a folder of the same name in the downloads
+        folder, see downloads_folder()), keeping the sub-folders. A file already there with the same size and time
+        is skipped, so running it again resumes. GLACIER / DEEP_ARCHIVE files are skipped (they need a restore
+        first). Refuses when the disk hasn't room. progress gets (bytes downloaded, bytes to download)."""
         bucket, prefix = parse_s3_uri(uri)
         if prefix and not prefix.endswith("/"):
             prefix += "/"  # 's3://b/data' means the folder data/, not also data-old/
-        root = os.path.abspath(path or prefix.rstrip("/").rsplit("/", 1)[-1] or bucket)
+        root = os.path.abspath(
+            path or os.path.join(self.downloads_folder(), prefix.rstrip("/").rsplit("/", 1)[-1] or bucket)
+        )
         result = FolderDownload(uri=s3_uri(bucket, prefix), path=root)
         started = time.monotonic()
         jobs = []
@@ -7337,6 +7495,7 @@ class S3Analyzer:
             if progress:
                 progress(done[0], total)
 
+        self._make_downloads_folder([job[2] for job in jobs])
         report()
         failed: dict[str, Exception] = {}
         for job, _, error in _run_in_threads(
@@ -7359,9 +7518,10 @@ class S3Analyzer:
     ) -> ZipPlan:
         """Check whether a file or folder can be zipped here, without downloading it: what would go in, the size
         and file-count limits, free disk space and memory, and whether the files can be read (one 1-byte read).
-        `path` is the .zip to write (default: named after the folder, in the current directory). `uri` can also be
-        a list of files and folders from one bucket (s3:// paths, or ObjectInfo from a listing): they go in one zip,
-        laid out as they are under the folder they share, which names it ('churn-12-files.zip')."""
+        `path` is the .zip to write (default: named after the folder, in the downloads folder, see
+        downloads_folder()). `uri` can also be a list of files and folders from one bucket (s3:// paths, or
+        ObjectInfo from a listing): they go in one zip, laid out as they are under the folder they share, which
+        names it ('churn-12-files.zip')."""
         limit = parse_size(max_size)
         if limit is None:
             raise ValueError("max_size can't be None; pass a size such as '2GB'")
@@ -7403,7 +7563,7 @@ class S3Analyzer:
             else:
                 listing = self.iter_objects(plan_uri, progress=progress)
         if path is None:
-            path = f"{name}.zip"
+            path = os.path.join(self.downloads_folder(), f"{name}.zip")
         elif os.path.isdir(path):
             path = os.path.join(path, f"{name}.zip")
         elif not path.lower().endswith(".zip"):
@@ -7547,6 +7707,8 @@ class S3Analyzer:
         part = (
             plan.path + ".part"
         )  # renamed once complete, so a stopped zip never looks finished
+        self._make_downloads_folder([plan.path])
+        os.makedirs(os.path.dirname(plan.path), exist_ok=True)
         try:
             with (
                 zipfile.ZipFile(part, "w", allowZip64=True) as archive,
@@ -7650,6 +7812,125 @@ class S3Analyzer:
                     report()
         finally:
             body.close()
+
+    # ------------------------------------------------------------------ the downloads folder (local, no AWS calls)
+
+    def downloads_folder(self) -> str:
+        """The folder downloads go into when they're given no path (absolute): `self.downloads`, 's3-downloads'
+        next to the notebook unless S3Analyzer(downloads=...) or S3View(downloads=...) says otherwise."""
+        return os.path.abspath(os.path.expanduser(str(self.downloads).strip() or "."))
+
+    def _make_downloads_folder(self, paths: Iterable[str]) -> None:
+        """Before writing `paths`: when one goes in the downloads folder and that folder is new (or empty), make it
+        with aws-analyzer's .gitignore, which keeps it out of git and lets clean_downloads empty it."""
+        folder = self.downloads_folder()
+        if _protected_folder(folder) or not any(
+            os.path.abspath(path).startswith(folder.rstrip(os.sep) + os.sep) for path in paths
+        ):
+            return
+        try:
+            if os.path.isdir(folder) and os.listdir(folder):
+                return  # it held files already: maybe the user's own, so it isn't marked as one to empty
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, ".gitignore"), "w", encoding="utf-8") as mark:
+                mark.write(_DOWNLOADS_MARK)
+        except OSError:
+            pass  # the download itself says what's wrong with the folder
+
+    def list_downloads(self) -> DownloadsFolder:
+        """What's in the downloads folder (see downloads_folder()): each file, folder and zip download() and
+        download_zip() saved, newest first, with its size, files and when it was downloaded; the disk's free space;
+        and whether clean_downloads may empty it (`managed`: a folder made for downloads). The notebook's own
+        folder, the home folder and the ones above them (`protected`) aren't listed: what's there isn't downloads."""
+        path = self.downloads_folder()
+        folder = DownloadsFolder(path, exists=os.path.isdir(path), protected=_protected_folder(path))
+        if not folder.exists:
+            return folder
+        folder.managed = _made_for_downloads(path)
+        try:
+            folder.disk_free = _free_space(path)
+        except OSError:
+            pass
+        if folder.protected:
+            return folder
+        try:
+            names = sorted(os.listdir(path))
+        except OSError as exc:
+            folder.errors["."] = exc.strerror or type(exc).__name__
+            return folder
+        for name in names:
+            if name == ".gitignore" and folder.managed:
+                continue
+            try:
+                folder.entries.append(_local_download(os.path.join(path, name), name))
+            except OSError as exc:
+                folder.errors[name] = exc.strerror or type(exc).__name__
+        folder.entries.sort(key=lambda entry: entry.downloaded, reverse=True)
+        return folder
+
+    def clean_downloads(
+        self,
+        names: str | Iterable[Any] | None = None,
+        *,
+        older_than: datetime | date | timedelta | str | None = None,
+        dry_run: bool = False,
+    ) -> DownloadsCleanup:
+        """Delete downloads from the downloads folder to free the disk: all of them, the ones named (a name as
+        list_downloads gives it, 'churn.zip', or a path to it), or those downloaded before older_than ('7d',
+        '2024-05-01'). dry_run=True deletes nothing and says what would go. Nothing in S3 changes.
+
+        Only a folder made for downloads is emptied (it has aws-analyzer's .gitignore, which stays): one that held
+        other files first, the notebook's own folder or the home folder raise ValueError, as does a name that
+        isn't there."""
+        folder = self.list_downloads()
+        own = f"S3View(downloads={DOWNLOADS!r})"
+        if folder.protected:
+            raise ValueError(f"{folder.path} is {folder.protected}, so clean_downloads won't empty it. Give downloads "
+                             f"a folder of their own: {own}")
+        if folder.exists and not folder.managed:
+            raise ValueError(f"{folder.path} wasn't made for downloads (it has no aws-analyzer .gitignore), so "
+                             "clean_downloads won't empty it, in case it holds your own files. Delete what you don't "
+                             f"need there yourself, or give downloads a folder of their own: {own}")
+        chosen = folder.entries
+        if names is not None:
+            by_name = {entry.name: entry for entry in folder.entries}
+            wanted = set()
+            for item in [names] if isinstance(names, (str, LocalDownload)) else list(names):
+                name = self._download_name(item, folder.path)
+                if name not in by_name:
+                    close = difflib.get_close_matches(os.path.basename(str(name)).rstrip("/"), list(by_name), n=3)
+                    hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+                    raise ValueError(f"No download named {str(getattr(item, 'name', item))!r} in {folder.path}."
+                                     f"{hint} downloads() lists what's there")
+                wanted.add(name)
+            chosen = [entry for entry in chosen if entry.name in wanted]
+        cutoff = parse_time(older_than)
+        if cutoff is not None:
+            chosen = [entry for entry in chosen if entry.downloaded < cutoff]
+        result = DownloadsCleanup(folder.path, removed=chosen, dry_run=dry_run, older_than=cutoff,
+                                  kept=[entry for entry in folder.entries if entry not in chosen])
+        if dry_run:
+            return result
+        for entry in chosen:
+            try:
+                if entry.is_folder:
+                    shutil.rmtree(entry.path)
+                else:
+                    os.remove(entry.path)
+            except OSError as exc:
+                result.failed[entry.name] = exc.strerror or type(exc).__name__
+        return result
+
+    @staticmethod
+    def _download_name(item: Any, folder: str) -> str:
+        """A name or path given to clean_downloads -> the name of the entry it is in the downloads folder ('churn/',
+        's3-downloads/churn.zip', a LocalDownload); '' for a path elsewhere, or inside one of them."""
+        text = os.path.expanduser(str(getattr(item, "path", item)).strip())
+        for base in (os.getcwd(), folder):  # a path from the notebook's folder, or a name in the downloads folder
+            full = os.path.abspath(os.path.join(base, text))
+            if os.path.dirname(full) == folder:
+                return os.path.basename(full)
+        return text
 
 
 # =============================================================================
@@ -9722,6 +10003,8 @@ class S3View:
     max_rows: default cap for long tables (set to 0 for no cap).
     progress: 'auto' (a tqdm bar while long commands run, when tqdm is installed; else a line with the count,
     rate and time left), 'plain' (always that line) or 'off'.
+    downloads: the folder download() and download_zip() save into without a path (it sets core.downloads):
+    's3-downloads' next to the notebook by default; downloads() lists it and clean_downloads() empties it.
     """
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
@@ -9740,14 +10023,8 @@ class S3View:
         ),
         "💰 Cut cost": ("duplicates", "what_if", "uploads"),
         "🕘 Versions and deleted files": ("versions", "history", "deleted"),
-        "📄 Open a file": (
-            "head",
-            "preview",
-            "document",
-            "download",
-            "download_zip",
-            "link",
-        ),
+        "📄 Open a file": ("head", "preview", "document", "link"),
+        "⬇ Download": ("download", "download_zip", "downloads", "clean_downloads"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -9762,12 +10039,15 @@ class S3View:
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
+        downloads: str | None = None,
     ):
         if mode not in ("auto", "html", "text"):
             raise ValueError("mode must be 'auto', 'html' or 'text'")
         if progress not in ("auto", "plain", "off"):
             raise ValueError("progress must be 'auto', 'plain' or 'off'")
         self.core = core or S3Analyzer()
+        if downloads is not None:
+            self.core.downloads = downloads
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
         self.progress = progress
@@ -11775,7 +12055,7 @@ class S3View:
             steps.append((_call("document", p.uri, pages=more, pictures=True), f"{span} as pictures"))
         blocks.append(
             _Next(
-                steps + [(_call("download", p.uri), "a copy in this notebook's folder")]
+                steps + [(_call("download", p.uri), "a copy on the notebook's disk, in s3-downloads")]
             )
         )
         self._show(blocks)
@@ -11885,7 +12165,11 @@ class S3View:
         self, uri: str, path: str | None = None, *, limit: int | None = None
     ) -> None:
         """Download a file, or a whole folder with its sub-folders, with a progress bar, and say where it went.
-        Files already downloaded are skipped, so running it again resumes, e.g. download('s3://b/data/', 'data')."""
+        Files already downloaded are skipped, so running it again resumes.
+
+        Without a path it saves into the downloads folder (s3-downloads next to the notebook; S3View(downloads=...)
+        picks another), so downloads don't mix with your notebooks and code: downloads() lists them and
+        clean_downloads() deletes them. A path saves there instead, e.g. download('s3://b/data/', '/tmp/data')."""
         bucket, key = parse_s3_uri(uri)
         if key and not key.endswith("/") and self.core.exists(uri):
             started = time.monotonic()
@@ -11911,6 +12195,7 @@ class S3View:
                         code=True,
                     )
                 )
+            blocks.append(self._downloads_next(local))
             return self._show(blocks)
         with (
             self._progress("Listing", unit="files") as list_tick,
@@ -11998,7 +12283,17 @@ class S3View:
                     path_cols=(0,),
                 )
             )
+        if d.downloaded.count or d.already_there.count:
+            blocks.append(self._downloads_next(d.path))
         self._show(blocks)
+
+    def _downloads_next(self, path: str) -> _Next:
+        """The Next block of a download: what's downloaded so far, and deleting this one when it's done with."""
+        steps = [(_call("downloads"), "everything downloaded so far, how much disk it takes, and cleaning up")]
+        folder = self.core.downloads_folder()
+        if os.path.dirname(path) == folder and _made_for_downloads(folder) and not _protected_folder(folder):
+            steps.append((_call("clean_downloads", os.path.basename(path)), "delete this download when you're done"))
+        return _Next(steps)
 
     @_friendly_errors
     def download_zip(
@@ -12015,7 +12310,8 @@ class S3View:
 
         Pass a list to zip several files and folders from one bucket together, laid out as they are under the
         folder they share: download_zip(['s3://b/raw/a.csv', 's3://b/raw/b.csv', 's3://b/raw/2024/']) makes
-        raw-3-items.zip."""
+        raw-3-items.zip. Without a path the zip goes in the downloads folder (s3-downloads next to the notebook;
+        see download())."""
         with (
             self._progress("Listing", unit="files") as list_tick,
             self._progress("Zipping", unit="B") as tick,
@@ -12147,6 +12443,125 @@ class S3View:
                     path_cols=(0,),
                 )
             )
+        if z.written:
+            blocks.append(self._downloads_next(plan.path))
+        self._show(blocks)
+
+    @_friendly_errors
+    def downloads(self) -> None:
+        """What you've downloaded: each file, folder and zip in the downloads folder with its size and when it was
+        downloaded, how much of the disk they take, and the clean_downloads() calls that delete them.
+
+        The downloads folder is where download() and download_zip() save without a path: s3-downloads, next to the
+        notebook. S3View(downloads='~/scratch/s3') or ui.core.downloads = '...' picks another. It's made with the
+        first download, with a .gitignore that keeps it out of git and marks it as one clean_downloads() may empty."""
+        d = self.core.list_downloads()
+        blocks: list[Any] = [_Title("Downloads", f"in {d.path}")]
+        if d.protected:  # not listed: it holds your notebooks too
+            return self._show(blocks + [_Findings(downloads_findings(d))])
+        if not d.exists or not (d.entries or d.errors):
+            blocks += [
+                _Note(f"Nothing downloaded yet: download(uri) and download_zip(uri) save into {d.path}"
+                      f"{'' if d.exists else ', which is made with the first download'}."),
+                _Findings(downloads_findings(d)),
+                _Next([(_call("download", "s3://bucket/path/"), "a file or a folder, with a progress bar"),
+                       (_call("download_zip", "s3://bucket/folder/"), "a folder as one .zip, to get it onto your "
+                        "computer")]),
+            ]
+            return self._show(blocks)
+        found = downloads_findings(d)
+        low = any(message.startswith("The disk is running out") for _, message in found)
+        oldest = min(entry.downloaded for entry in d.entries) if d.entries else None
+        blocks += [
+            _Cards([
+                ("Downloads", f"{len(d.entries):,}"),
+                ("Files", f"{d.files:,}"),
+                ("Size", human_size(d.size)),
+                ("Oldest", human_age(oldest)),
+                ("Free disk", human_size(d.disk_free), *(("warn",) if low else ())),
+            ]),
+            _Findings(found, empty="Nothing to tidy up: every download is under a month old, and the disk has room."),
+            _Table(
+                ["Name", "What", "Size", "Files", "Downloaded"],
+                [[entry.name + ("/" if entry.is_folder else ""), entry.kind, human_size(entry.size),
+                  f"{entry.files:,}", human_age(entry.downloaded)] for entry in d.entries],
+                title="In the downloads folder, newest first",
+                path_cols=(0,),
+            ),
+        ]
+        if d.errors:
+            blocks.append(_Note(f"Couldn't read {', '.join(sorted(d.errors))} ({', '.join(sorted(set(d.errors.values())))}), "
+                                "so the totals leave it out.", "warn"))
+        if d.managed and not d.protected and d.entries:
+            biggest = max(d.entries, key=lambda entry: entry.size)
+            blocks.append(_Next([
+                (_call("clean_downloads", dry_run=True), "what clean_downloads() would delete, deleting nothing"),
+                (_call("clean_downloads", older_than="7d"), "delete what was downloaded before this week"),
+                (_call("clean_downloads", biggest.name), f"delete the biggest, {human_size(biggest.size)}"),
+            ]))
+        self._show(blocks)
+
+    @_friendly_errors
+    def clean_downloads(
+        self,
+        names: str | Iterable[str] | None = None,
+        *,
+        older_than: datetime | date | timedelta | str | None = None,
+        dry_run: bool = False,
+    ) -> None:
+        """Delete downloads to free the disk: everything download() and download_zip() saved in the downloads
+        folder, or the ones named (clean_downloads('churn.zip'), as downloads() lists them), or those downloaded
+        before older_than ('7d', '2024-05-01'). dry_run=True only shows what would go. Nothing in S3 changes.
+
+        It only empties a folder made for downloads (s3-downloads, or the one S3View(downloads=...) names, when
+        download() made it): never the notebook's own folder, your home folder, or a folder that held other files
+        first. The folder itself stays, so the next download goes in the same place."""
+        c = self.core.clean_downloads(names, older_than=older_than, dry_run=dry_run)
+        removed = [entry for entry in c.removed if entry.name not in c.failed]
+        verb = "Would delete" if dry_run else "Deleted"
+        when = f" downloaded before {c.older_than:%Y-%m-%d %H:%M} UTC" if c.older_than else ""
+        try:
+            free = human_size(_free_space(c.path))
+        except OSError:
+            free = "-"
+        blocks: list[Any] = [
+            _Title(f"{verb} {_plural(len(removed), 'download')}" if c.removed else "Nothing to delete",
+                   f"from {c.path}"),
+            _Cards([
+                (verb, f"{len(removed):,}"),
+                ("Would free" if dry_run else "Freed", human_size(c.freed)),
+                ("Kept", f"{len(c.kept):,}"),
+                ("Free disk", free),
+            ]),
+        ]
+        if not c.removed:
+            what = (f"Nothing in the downloads folder was downloaded before {c.older_than:%Y-%m-%d}" if c.older_than
+                    else "Nothing was named" if c.kept else "The downloads folder is empty")
+            blocks.append(_Note(f"{what}; downloads() lists what's there." if c.kept else f"{what}."))
+        elif dry_run:
+            again = {key: value for key, value in (("older_than", older_than),) if value is not None}
+            call = _call("clean_downloads", *([names] if names is not None else []), **again)
+            blocks.append(_Note(f"Nothing was deleted (dry_run=True): {call} deletes "
+                                f"{'it' if len(removed) == 1 else 'these'}{when}, {human_size(c.freed)}.", "ok"))
+        elif removed:
+            blocks.append(_Note(f"Freed {human_size(c.freed)} on the notebook's disk; the files are still in S3, so "
+                                "download() gets them again.", "ok"))
+        if c.failed:
+            blocks.append(_Note(f"{_plural(len(c.failed), 'download')} couldn't be deleted "
+                                f"({', '.join(sorted(set(c.failed.values())))}); the table says which. A file that's "
+                                "open elsewhere (a running job) can't be deleted until it's closed.", "warn"))
+            blocks.append(_Table(["Name", "Why"], [[name, why] for name, why in sorted(c.failed.items())],
+                                 title="Not deleted", path_cols=(0,)))
+        if removed:
+            blocks.append(_Table(
+                ["Name", "What", "Size", "Files", "Downloaded"],
+                [[entry.name + ("/" if entry.is_folder else ""), entry.kind, human_size(entry.size),
+                  f"{entry.files:,}", human_age(entry.downloaded)] for entry in removed],
+                title="Would delete" if dry_run else "Deleted",
+                path_cols=(0,),
+            ))
+        if c.kept:
+            blocks.append(_Next([(_call("downloads"), f"the {_plural(len(c.kept), 'download')} left")]))
         self._show(blocks)
 
     @_friendly_errors

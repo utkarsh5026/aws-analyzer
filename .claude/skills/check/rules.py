@@ -175,8 +175,9 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         for member in view.body:
             if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) or member.name.startswith("_"):
                 continue
-            if any(isinstance(d, ast.Name) and d.id == "property" for d in member.decorator_list):
-                continue  # an attribute to read, not a command
+            if any(isinstance(d, ast.Name) and d.id == "property"
+                   or isinstance(d, ast.Attribute) and d.attr in ("setter", "deleter") for d in member.decorator_list):
+                continue  # an attribute to read or set, not a command
             where = f"{rel}:{member.lineno} {view.name}.{member.name}"
             decorators = {d.id if isinstance(d, ast.Name) else getattr(d, "attr", "") for d in member.decorator_list}
             if member.name != "help" and "_friendly_errors" not in decorators:

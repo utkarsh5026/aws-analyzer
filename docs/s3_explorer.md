@@ -77,6 +77,7 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
     S3Explorer(core=S3Analyzer(region="eu-west-1"))   # an S3Analyzer or S3View you already have
     S3Explorer(height=720, page_size=200)            # 720px panes (else they fill the window), 200 rows a page
     S3Explorer(zip_max_size="2GB")                   # zip folders up to 2 GB (100 MB by default)
+    S3Explorer(downloads="~/scratch/s3")             # save downloads and zips there (default: s3-downloads)
     ```
 
 </div>
@@ -137,7 +138,7 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 | **🏷️ Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
 | **📄 Text** | For a PDF: its words laid out to read, with headings, paragraphs and lists, [50 pages at a time](#pdf) |
-| **⬇ Download** | Saves a copy in the notebook's folder (the [`download`](s3.md#download) report) |
+| **⬇ Download** | Saves a copy in `s3-downloads`, next to the notebook (the [`download`](s3.md#download) report; **⚙** changes the folder) |
 | **↗ Open in new tab** | Opens the file in a new browser tab: PDFs, pictures, sound, video and text show there, even when they were stored as a generic type, and other files download to your computer. Its link works for an hour: right-click it to copy the link for someone without AWS access, or run `x.ui.link(path)` to see it written out |
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
 | **✕** | Closes the file and shows the folder again |
@@ -194,15 +195,17 @@ The buttons above the right pane change with where you are:
 
 ### Download a folder as a .zip { #zip }
 
-**⬇ Download .zip** packs everything below the folder you're in into one `.zip` in the notebook's folder, named after the folder. First it checks, like [`download_zip()`](s3.md#download), that the folder is within 100 MB and 10,000 files, that there's room on the disk and in memory, and that you can read the files. If a check fails, it says which and writes nothing. Files in Glacier are left out, and the report says how many. To get the zip onto your computer, right-click it in JupyterLab's file browser and choose **Download**.
+**⬇ Download .zip** packs everything below the folder you're in into one `.zip` in [`s3-downloads`](s3.md#downloads), next to the notebook, named after the folder. First it checks, like [`download_zip()`](s3.md#download), that the folder is within 100 MB and 10,000 files, that there's room on the disk and in memory, and that you can read the files. If a check fails, it says which and writes nothing. Files in Glacier are left out, and the report says how many. To get the zip onto your computer, right-click it in JupyterLab's file browser and choose **Download**.
 
-**⚙** at the top right changes the limits and the folder zips go to (Enter in a box saves, like **Save**). They last until the kernel restarts. To start with others:
+**⚙** at the top right changes the limits and the folder downloads and zips go to (Enter in a box saves, like **Save**). They last until the kernel restarts. To start with others:
 
 ```python
 x = S3Explorer(zip_max_size="2GB")   # folders up to 2 GB
 x.zip_max_files = 50_000             # and up to 50,000 files
-x.zip_folder = "~/zips"              # made when the first zip is saved
+x.downloads = "~/zips"               # where ⬇ Download and the zips save; made with the first one
 ```
+
+The folder is the same one `S3View`'s [`download()`](s3.md#downloads) uses, so `x.ui.downloads()` in a cell lists what you've downloaded and how much disk it takes, and `x.ui.clean_downloads()` deletes it.
 
 ### Download some files { #select }
 
@@ -359,7 +362,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 
 ## Reference { #reference }
 
-`S3Explorer(uri="", core=None, *, profile=None, region=None, height=560, page_size=100, zip_max_size="100MB", mode="auto", progress="auto")` opens the explorer and returns it.
+`S3Explorer(uri="", core=None, *, profile=None, region=None, height=560, page_size=100, zip_max_size="100MB", downloads=None, mode="auto", progress="auto")` opens the explorer and returns it.
 
 <div class="ref" markdown>
 
@@ -371,6 +374,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `height` | The height of the two panes, in pixels |
 | `page_size` | Rows on each page of the list; **«** **‹** **›** **»** under it move between pages |
 | `zip_max_size` | The biggest folder **⬇ Download .zip** packs; **⚙** changes it |
+| `downloads` | The folder **⬇ Download** and the zips save into: `s3-downloads`, next to the notebook, unless set; **⚙** changes it |
 | `mode` | `"auto"`: the clickable explorer in Jupyter, a text listing elsewhere. `"widgets"` or `"text"` to choose |
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
 
@@ -386,6 +390,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `ui` | An `S3View` for your own cells: `x.ui.summary(x.location)` |
 | `nav` | The `S3Navigator` behind the list |
 | `picked` | The files and folders ticked in the list, as `s3://` paths: `x.ui.download_zip(x.picked)` |
-| `zip_max_size`, `zip_max_files`, `zip_folder` | The **⬇ Download .zip** and **⬇ Download selected** limits, and where zips go, which **⚙** edits |
+| `zip_max_size`, `zip_max_files` | The **⬇ Download .zip** and **⬇ Download selected** limits, which **⚙** edits |
+| `downloads` | Where **⬇ Download** and the zips save (the `S3Analyzer`'s downloads folder), which **⚙** edits; `zip_folder` is its old name |
 
 </div>
