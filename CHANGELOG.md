@@ -36,7 +36,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   tab, where PDFs, pictures, sound, video and text files show instead of downloading, even when they were stored as a
   generic type (a CSV or log file shows as text). Other files download to your computer. Right-click it to copy the
   link (it works for an hour); `x.ui.link(path)` still shows a download link. `S3Analyzer.presigned_url(uri,
-  inline=True)` makes the same kind of link from code.
+  inline=True)` makes the same kind of link from code. ([#46](https://github.com/utkarsh5026/aws-analyzer/pull/46))
 - `bedrock_chat.py` and `bedrock_kb.py`: `chat()`, `ask()` and `generate()` use Claude Haiku 4.5 when you don't
   pick a model, instead of Claude Opus 5: answers come faster and cost a fifth as much ($1.10 / $5.50 per 1M tokens
   in us-east-1). To keep Opus, pass `model="opus"`, or set it once with `BedrockChatAnalyzer(default_model="opus")`
