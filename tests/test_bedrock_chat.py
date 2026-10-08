@@ -20,6 +20,7 @@ from bedrock_chat import (
     BedrockChatAnalyzer,
     BedrockChatView,
     Citation,
+    Passage,
     _answer_lines,
     _diff,
     _markdown_html,
@@ -30,14 +31,19 @@ from bedrock_chat import (
     answer_findings,
     as_filter,
     build_request,
+    build_retrieve_request,
+    cited_ranks,
+    compare_findings,
     coerce_setting,
     collect_stream,
     describe_filter,
     describe_setting,
     normalize_settings,
     parse_rag,
+    parse_retrieve,
     python_call,
     request_schema,
+    retrieve_settings,
     settings_findings,
     describe_files,
     file_labels,
@@ -87,6 +93,8 @@ def ref(text, key="policies/refund-policy.pdf", page=3, **metadata):
 
 REFUND = ref("Refunds are issued within 5-7 business days of receiving the returned item.", team="billing")
 BANK = ref("Orders paid by bank transfer can take up to 10 business days.", page=4)
+SHIPPING = ref("Standard shipping takes 3-5 business days within the EU.", "faq/shipping.md", page=None)
+RETRIEVED = {"retrievalResults": [{**REFUND, "score": 0.81}, {**BANK, "score": 0.62}, {**SHIPPING, "score": 0.4}]}
 ANSWER = "Refunds take 5-7 business days. Bank transfers can take up to 10 days. Ask support for anything else."
 
 
@@ -180,12 +188,14 @@ def doc(uri, status="INDEXED", ds_id=DS_ID, kb_id=KB_ID):
             "identifier": {"dataSourceType": "S3", "s3": {"uri": uri}}}
 
 
-def fakes(kbs=None, rag=None, stream=None, sources=None, documents=None):
+def fakes(kbs=None, rag=None, stream=None, sources=None, documents=None, retrieve=None):
     """bedrock-agent (the knowledge base list, each one's data sources and their files), bedrock (models) and
     bedrock-agent-runtime fakes. sources: {knowledge base ID: [data source summaries]}; one data source each by
-    default. documents: {data source ID: [document details] or an exception}; three files each by default."""
+    default. documents: {data source ID: [document details] or an exception}; three files each by default. retrieve
+    answers Retrieve (RETRIEVED by default: the two passages rag_resp() cites, then one it doesn't)."""
     kbs = [kb_summary()] if kbs is None else kbs
     rag = rag or (lambda **params: rag_resp())
+    retrieve = retrieve or (lambda **params: RETRIEVED)
     sources = sources or {}
     documents = documents or {}
 
@@ -205,7 +215,7 @@ def fakes(kbs=None, rag=None, stream=None, sources=None, documents=None):
         resp = rag(**params)
         return {"sessionId": resp["sessionId"], "stream": stream_events(resp)}
 
-    runtime = {"retrieve_and_generate": rag}
+    runtime = {"retrieve_and_generate": rag, "retrieve": retrieve}
     if stream is not False:
         runtime["retrieve_and_generate_stream"] = stream or streamed
     return {
@@ -689,6 +699,90 @@ def test_schema_needs_a_boto3_that_knows_retrieve_and_generate():
         request_schema(Old())
 
 
+def test_retrieve_request_is_the_same_search_without_the_model():
+    values = normalize_settings({"n": 20, "search_type": "hybrid", "reranker": "cohere", "rerank_n": 4,
+                                 "where": {"team": "billing"}, "temperature": 0.2, "query_decomposition": True,
+                                 "kms_key": "arn:aws:kms:us-east-1:1:key/k"}, SCHEMA)
+    assert list(retrieve_settings(values, SCHEMA)) == ["n", "search_type", "filter", "reranker", "rerank_n"]
+    rag = build_request("q?", KB_ID, SONNET_PROFILE, values, SCHEMA, region="us-east-1", data_sources=[DS_ID],
+                        files=[REFUND_PDF])
+    params = build_retrieve_request("q?", KB_ID, values, SCHEMA, region="us-east-1", data_sources=[DS_ID],
+                                    files=[REFUND_PDF])
+    assert list(params) == ["knowledgeBaseId", "retrievalQuery", "retrievalConfiguration"]
+    assert params["retrievalQuery"] == {"text": "q?"} and params["knowledgeBaseId"] == KB_ID
+    assert params["retrievalConfiguration"] == rag[KB[0]][KB[1]]["retrievalConfiguration"]  # the very same search
+    assert validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)  # Edit JSON reads it back
+    assert picked == {"question": "q?", "knowledgeBaseId": KB_ID, "dataSources": [DS_ID], "files": [REFUND_PDF],
+                      "retrieve_only": True}
+    assert back == retrieve_settings(values, SCHEMA)
+    assert list(build_retrieve_request("q", KB_ID, {"temperature": 0.2}, SCHEMA)) == ["knowledgeBaseId",
+                                                                                      "retrievalQuery"]
+    params["nextToken"] = "abc"
+    with pytest.raises(ValueError, match="The chat doesn't send nextToken"):
+        settings_from_request(params, SCHEMA)
+    params.pop("nextToken")
+    params["retrievalConfiguration"]["vectorSearchConfiguration"]["numberOfResult"] = 3
+    assert any('Unknown parameter in retrievalConfiguration.vectorSearchConfiguration: "numberOfResult"' in p
+               for p in validate_request(params, SCHEMA))  # checked against Retrieve's own shape
+
+
+def test_python_call_for_a_retrieve_request():
+    params = build_retrieve_request("How long?", KB_ID, {"n": 8}, SCHEMA)
+    code = python_call(params, "us-east-1")
+    compile(code, "<cell>", "exec")
+    assert ast.literal_eval(code.split("retrieve(**", 1)[1].rsplit(")\nfor", 1)[0]) == params
+    assert "retrieve_and_generate" not in code and "response['retrievalResults']" in code
+
+
+def search(passages=(REFUND, BANK, SHIPPING), settings=None, question="How long?", **kwargs):
+    a = Answer(question, "", sources=parse_retrieve({"retrievalResults": list(passages)}), settings=settings or {"n": 5},
+               retrieve_only=True)
+    for name, value in kwargs.items():
+        setattr(a, name, value)
+    return a
+
+
+def test_search_findings_say_what_to_widen():
+    assert answer_findings(search()) == []
+    (level, message), = answer_findings(search([], {"n": 5, "filter": {"equals": {"key": "a", "value": 1}}},
+                                               files=[REFUND_PDF], data_sources={DS_ID: "faq"}))
+    assert level == "warn" and message.startswith("Nothing came back, so an answer would have nothing to go on.")
+    assert "unset('filter')" in message and "use(files='all')" in message and "use(data_source='all')" in message
+    assert "files() shows each one's status" in answer_findings(search([]))[0][1]
+    (level, message), = answer_findings(search([REFUND, BANK, REFUND]))
+    assert level == "info" and "All 3 passages come from one file (refund-policy.pdf)" in message
+    assert "set(n=10)" in message and "set(search_type='HYBRID')" in message
+    outside = answer_findings(search(files=[RETURNS_MD]))
+    assert outside[0][1].startswith("3 passages (#1, #2, #3) came from outside file 'returns.md'")
+
+
+def test_a_search_and_an_answer_to_the_same_question_line_up():
+    a, s = answer(), search()
+    assert cited_ranks(s, a) == {1: 1, 2: 2}
+    (level, message), = compare_findings(s, a)
+    assert level == "info" and message == ("The answer cites 2 of the 3 passages the search found (#1 as [1], #2 as "
+                                           "[2]); the other one wasn't cited.")
+    flipped = search([{**SHIPPING}, {**BANK}])  # the answer's [1] isn't among them
+    assert cited_ranks(flipped, a) == {2: 2}
+    found = compare_findings(flipped, a)
+    assert "#2 as [2]" in found[0][1] and "Source [1] of the answer isn't among the search's passages" in found[1][1]
+    refused = compare_findings(s, answer("Sorry, I am unable to assist you with this request."))
+    assert refused[0][0] == "warn" and "yet the search found 3 passages" in refused[0][1]
+    assert "set(prompt=...)" in refused[0][1]
+    # without chunk IDs, the same file and text is the same passage
+    bare = Passage(1, "  Refunds are issued within 5-7 business days of receiving the returned item.",
+                   uri="s3://docs/policies/refund-policy.pdf")
+    assert cited_ranks(Answer("q", "", sources=[bare], retrieve_only=True), a) == {1: 1}
+
+
+def test_a_search_costs_the_embedding_and_the_reranking():
+    s = search(question="How long?")
+    assert answer_cost(s) == pytest.approx(0.02 * estimate("How long?") / 1e6)
+    s.settings = {"reranker": "amazon"}
+    assert answer_cost(s) == pytest.approx(0.001 + 0.02 * estimate("How long?") / 1e6)
+
+
 # ----------------------------------------------------------------------------- AWS
 
 
@@ -822,6 +916,36 @@ def test_request_resolves_without_sending(core, clients):
         core.request("nope", "q")
     with pytest.raises(ValueError, match="temperature can be 0 to 1"):
         core.request(KB_ID, "q", {"temperature": 7})
+
+
+def test_retrieve_sends_only_the_search_and_returns_every_passage(stubs):
+    stubs.list_kbs()  # the knowledge base by name; no model is looked up
+    expected = {"knowledgeBaseId": KB_ID, "retrievalQuery": {"text": "How long do refunds take?"},
+                "retrievalConfiguration": {"vectorSearchConfiguration": {"numberOfResults": 8,
+                                                                         "overrideSearchType": "HYBRID"}}}
+    stubs.runtime.add_response("retrieve", RETRIEVED, expected)
+    a = stubs.analyzer().retrieve("support-docs", "How long do refunds take?",
+                                  {"n": 8, "search_type": "hybrid", "temperature": 0.2, "prompt": DEFAULT_PROMPT})
+    assert a.retrieve_only and a.text == "" and a.citations == [] and a.session_id is None
+    assert (a.kb_id, a.kb_name, a.model) == (KB_ID, "support-docs", "")
+    assert [(p.rank, p.source, p.score) for p in a.sources] == [(1, "refund-policy.pdf p.3", 0.81),
+                                                               (2, "refund-policy.pdf p.4", 0.62),
+                                                               (3, "shipping.md", 0.4)]
+    assert a.settings == {"n": 8, "search_type": "HYBRID"}  # what was sent: the answer's settings weren't
+    assert a.request == expected and a.response["retrievalResults"] and (a.input_tokens, a.output_tokens) == (0, 0)
+
+
+def test_retrieve_narrows_like_ask_and_its_request_needs_no_model(core, clients):
+    a = core.retrieve(KB_ID, "q", data_source="docs-s3", files=["refund-policy.pdf"])
+    assert a.data_sources == {DS_ID: "docs-s3"} and a.files == [REFUND_PDF]
+    assert clients["bedrock-agent-runtime"].called("retrieve")[0]["retrievalConfiguration"] == {
+        "vectorSearchConfiguration": {"filter": {"andAll": [{"equals": {"key": DS_KEY, "value": DS_ID}},
+                                                            {"equals": {"key": URI_KEY, "value": REFUND_PDF}}]}}}
+    params = core.request(KB_ID, "q", {"n": 3}, model="opus", session_id="s-1", retrieve_only=True)
+    assert params == {"knowledgeBaseId": KB_ID, "retrievalQuery": {"text": "q"},
+                      "retrievalConfiguration": {"vectorSearchConfiguration": {"numberOfResults": 3}}}
+    assert clients["bedrock"].calls == []  # a search calls no model, so none is looked up
+    assert core.send(params).retrieve_only  # send() takes a Retrieve request too
 
 
 def test_knowledge_bases_are_listed_once(core, clients):
@@ -961,6 +1085,51 @@ def test_ui_last_transcript_and_new_chat(ui, capsys):
     out = run(capsys, ui.new_chat)
     assert "New conversation (1 earlier question forgotten)" in out
     assert ui.answers == [] and ui.session_id is None and ui.values == DEFAULT_SETTINGS
+
+
+def test_ui_retrieve_shows_every_passage_and_what_the_answer_cited(ui, clients, capsys):
+    ui.set(temperature=0.2)
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "retrieve('How long do refunds take?')" in out  # the next step: the search behind it
+    out = run(capsys, ui.retrieve, "how long do refunds  take?")  # the same question, written a little differently
+    for text in ("support-docs: how long do refunds  take?", "Bedrock Retrieve: the search only, no answer",
+                 "question 2 of this conversation", "Passages: 3", "Best score: 0.810", "Files: 2",
+                 "Cited by the answer: 2 of 3", "The answer cites 2 of the 3 passages the search found (#1 as [1], "
+                 "#2 as [2]); the other one wasn't cited.", "-- Passages, best first --",
+                 "#  Score  File               Page  Cited as  Passage", "3  0.400  shipping.md        -     -",
+                 "Retrieve sent the search settings only (n=5)", "last()"):
+        assert text in out, text
+    sent = clients["bedrock-agent-runtime"].called("retrieve")[-1]
+    assert "sessionId" not in sent and "temperature" not in str(sent)
+    assert ui.session_id == "session-1" and len(ui.answers) == 2 and ui.answers[-1].retrieve_only  # the session stays
+    out = run(capsys, ui.ask, "How long do refunds take?")  # an answer after a search says where its sources ranked
+    assert "The answer cites 2 of the 3 passages the search found" in out
+    assert clients["bedrock-agent-runtime"].called("retrieve_and_generate")[-1]["sessionId"] == "session-1"
+    out = run(capsys, ui.transcript)
+    assert "Bedrock RetrieveAndGenerate and Retrieve" in out and "Retrieve only: 1" in out
+    assert "Bedrock search (Retrieve only · 3 passages · best score 0.810 · " in out
+    assert "  #1 · refund-policy.pdf p.3 · score 0.810 · cited [1]" in out
+    ui.retrieve("Nothing like it")
+    out = run(capsys, ui.last)
+    assert "-- Request sent --" in out and "client.retrieve(**{" in out and '"retrievalResults"' in out
+    assert "Refunds are issued within 5-7 business days of receiving the returned item." in out
+    assert "ask('Nothing like it')" in out and "Cited by the answer" not in out  # no answer to compare with yet
+    assert "4 questions in this conversation (2 retrieve only)" in ui._conversation_line()
+
+
+def test_ui_request_and_settings_follow_retrieve_only(ui, capsys):
+    ui.set(temperature=0.2, search_type="hybrid")
+    out = run(capsys, ui.request, retrieve_only=True)
+    assert "Retrieve: the search only, no answer" in out and '"retrievalQuery"' in out and "temperature" in out
+    assert "Model: none: no answer" in out and "Settings: 2 of 3" in out and "Conversation: not part of it" in out
+    assert "Retrieve sends the search settings only: temperature waits for an answer." in out
+    assert "request(retrieve_only=False)" in out and '"temperature"' not in out
+    assert "RetrieveAndGenerate · highlighted" in run(capsys, ui.request)  # the window's mode: Answer
+    ui.retrieve_only = True
+    assert '"retrievalQuery"' in run(capsys, ui.request)
+    out = run(capsys, ui.settings)
+    assert "The window is on Retrieve only" in out and "temperature waits for an answer" in out
+    assert "retrieve_only=True" in ui._setup_call()
 
 
 def test_ui_settings_set_and_unset(ui, capsys):
@@ -1133,6 +1302,8 @@ def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, ca
     view = chatmod.chat("support-docs", data_source="docs-s3")
     assert view.values == DEFAULT_SETTINGS and view._setup_call() == ("chat('support-docs', data_source='docs-s3', "
                                                                      "n=5)")
+    view = chatmod.chat("support-docs", retrieve_only=True)
+    assert view.retrieve_only and view._setup_call() == "chat('support-docs', retrieve_only=True, n=5)"
 
 
 # ----------------------------------------------------------------------------- UI (the chat window)
@@ -1286,6 +1457,67 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     assert clients["bedrock-agent-runtime"].called("retrieve_and_generate_stream")[1]["sessionId"] == "session-1"
     app.response_mode.value = "Request sent"
     assert "And bank transfers?" in app.response_view.value
+
+
+def test_window_retrieve_only_searches_without_an_answer(window, clients):
+    app = window._app
+    assert app.mode_pick.value == "answer" and app.mode_pick in app.composer.children
+    assert "<b>Retrieve only</b>, beside the box, only searches" in texts(app)[0]
+    app.question.value = "How long do refunds take?"
+    app._send()
+    app.chips["temperature"].click()
+    app.mode_pick.value = "retrieve"
+    assert window.retrieve_only and app.send_button.description == "Retrieve" and app.model_pick.disabled
+    assert app.question.value == "How long do refunds take?"  # the last question, to ask it the other way
+    assert "Your last question is back in the box: press Enter to see what it retrieves." in app.status.value
+    assert "temperature waits for Answer" in app.status.value
+    assert "Not sent with Retrieve only" in app.row_notes["temperature"].value
+    assert "kbc-off" in app.rows["temperature"]._dom_classes and "kbc-off" not in app.rows["n"]._dom_classes
+    assert "Generation · not sent with Retrieve only" in app.headers["Generation"].value
+    assert "retrievalQuery" in app.request_view.value and "temperature" not in app.request_view.value
+    assert "Retrieve, the search only" in app.request_view.value and "Retrieve (retrieve only)" in app.title.value
+    app.question._handle_custom_msg({"event": "submit"}, [])  # Enter
+    a = window.answers[-1]
+    assert a.retrieve_only and not a.streamed and window.session_id == "session-1"
+    assert "Searching" not in texts(app)[-1] and "Retrieve only" in texts(app)[-1]
+    assert "3 passages, best first" in texts(app)[-1] and "cited [1]" in texts(app)[-1]
+    assert "The answer cites 2 of the 3 passages the search found" in texts(app)[-1]
+    assert "Search 2 · " in app.response_view.value and "retrievalResults" in app.response_view.value
+    assert "2 questions in this conversation (1 retrieve only)" in app.status.value
+    assert app.send_button.description == "Retrieve" and not app.send_button.disabled
+    assert clients["bedrock-agent-runtime"].called("retrieve")[-1]["retrievalQuery"] == {
+        "text": "How long do refunds take?"}
+    # Edit JSON shows the Retrieve request; applying it keeps the answer's settings, which it has no place for
+    app.edit_button.click()
+    assert '"retrievalQuery"' in app.editor.value
+    app.editor.value = app.editor.value.replace('"numberOfResults": 5', '"numberOfResults": 9')
+    app._apply()
+    assert window.values == {"n": 9, "temperature": 0.2} and window.retrieve_only
+    assert "Applied: n 5 → 9." in app.status.value
+    # a RetrieveAndGenerate request turns Answer back on
+    app.edit_button.click()
+    request = json.loads(json.dumps(window._preview(retrieve_only=False)[0]))
+    app.editor.value = json.dumps(request)
+    app._apply()
+    assert not window.retrieve_only and app.mode_pick.value == "answer" and not app.model_pick.disabled
+    assert "Answer: questions get an answer" in app.status.value and app.send_button.description == "Send"
+    window.retrieve_only = True  # from another cell
+    window.set(n=4)
+    assert app.mode_pick.value == "retrieve" and app.send_button.description == "Retrieve"
+
+
+def test_window_opens_on_retrieve_only(core, monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    view = BedrockChatView(core, kb=KB_ID, mode="html", retrieve_only=True, settings={"n": 5, "temperature": 0.3})
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    assert app.mode_pick.value == "retrieve" and app.model_pick.disabled
+    assert app.question.placeholder == "Type a question to search for"
+    app.mode_pick.value = "answer"  # no question yet: the box stays empty
+    assert app.question.value == "" and "Answer: the next questions get an answer from Claude Opus 5." in (
+        app.status.value)
+    assert "kbc-off" not in app.rows["temperature"]._dom_classes
 
 
 def test_window_shows_errors_where_the_answer_would_be(core, monkeypatch):
@@ -1558,3 +1790,5 @@ def test_answer_to_df():
     pytest.importorskip("pandas")
     df = Answer(**{**vars(answer())}).to_df()
     assert list(df["n"]) == [1, 2] and df.loc[0, "source"] == "refund-policy.pdf" and df.loc[1, "page"] == 4
+    df = Answer("q", "", sources=parse_retrieve(RETRIEVED), retrieve_only=True).to_df()
+    assert list(df["score"]) == [0.81, 0.62, 0.4]

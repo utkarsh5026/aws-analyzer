@@ -240,7 +240,13 @@ How the View layer works:
   callback goes through `_ChatApp._safely`, which shows errors in
   the window (a callback's exception would only reach the browser log); Enter in a text box is the box's `submit`
   message (`_ChatApp._on_enter`, as in the explorer: `on_submit` is deprecated). View commands run from other cells
-  update an open window through `view._changed()`. `_ipython_display_` shows the window once per cell, so a cell
+  update an open window through `view._changed()`. The composer's Answer / Retrieve only switch (`mode_pick`, saved as
+  `view.retrieve_only`) makes Send a Retrieve search: `build_retrieve_request` takes the RetrieveAndGenerate request's
+  `retrievalConfiguration` and nothing else (`retrieve_settings`; the answer's rows are dimmed, `_off`), and the
+  result is an `Answer` with `retrieve_only=True` (no text; `sources` is every passage, ranked, with scores) kept in
+  `view.answers` without touching the session. `ask()` always answers and `retrieve()` always searches; `_counterpart`
+  pairs a turn with the same question asked the other way, for `cited_ranks` and `compare_findings`.
+  `_ipython_display_` shows the window once per cell, so a cell
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
 - `sagemaker_env` also reads the machine it runs on: SageMaker's `/opt/ml/metadata/resource-metadata.json` (which

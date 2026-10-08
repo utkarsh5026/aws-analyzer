@@ -86,7 +86,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     { .what }
 
     - Pick the knowledge base and the model; answers stream in
-    - Each answer's citations, sources, request and response
+    - Each answer's citations, sources, request and response, or only the search behind it
     - Add, change or remove any RetrieveAndGenerate setting
     - The request as highlighted JSON you can edit, or as Python
 

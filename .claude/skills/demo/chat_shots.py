@@ -6,7 +6,8 @@
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, adds settings,
-searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, picks files. Each figure is the window, 984 CSS px wide at 1.5x like the other
+searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, picks files, and asks the last
+question again on Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
 
@@ -35,7 +36,8 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files")
+FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files",
+           "chat-retrieve")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -162,7 +164,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     page.wait_for_selector(".kbc-app .note.warn", timeout=10_000)
     scroll_to("[...document.querySelectorAll('.kbc-app .note.warn')].find(el => el.offsetParent)")
     shot("chat-edit")
-    if "chat-files" in wanted:
+    if "chat-files" in wanted or "chat-retrieve" in wanted:
         page.locator(".kbc-app button:has-text('Cancel')").click()
         page.locator(tab.format("Settings")).first.click()
         for name in ("Temperature", "Reranker", "Metadata filter"):  # back to the settings the window opened with
@@ -180,6 +182,22 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         box.press("Enter")
         answered(3)
         shot("chat-files")
+    if "chat-retrieve" in wanted:
+        if page.locator(".kbc-app button.kbc-add").is_visible():  # Add a setting may still be open from before
+            page.locator(".kbc-app button.kbc-add").click()
+        page.locator(".kbc-app button:has-text('+ Temperature')").first.click()  # for the answer: shown as not sent
+        time.sleep(0.4)
+        page.locator(".kbc-app .kbc-card .kbc-x").first.click()
+        page.locator(".kbc-app button:has-text('All files')").click()
+        page.locator(".kbc-app .widget-toggle-button:has-text('Retrieve only')").first.click()
+        search = page.locator(".kbc-app input[placeholder='Type a question to search for']")
+        for _ in range(50):  # the last question comes back into the box from the kernel
+            if search.input_value():
+                break
+            time.sleep(0.2)
+        search.press("Enter")
+        answered(4)
+        shot("chat-retrieve")
     return shots
 
 

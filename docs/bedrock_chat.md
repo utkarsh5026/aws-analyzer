@@ -1,19 +1,20 @@
 ---
 title: Bedrock Chat Guide
-description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, and see the request as JSON."
+description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, see the request as JSON, and check the search apart from the answer."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> aws-analyzer · bedrock_chat.py</p>
 
 # Chat with a Bedrock knowledge base, and see exactly what's sent
 
-One Python file and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit.
+One Python file and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer.
 { .lede }
 
 <ul class="pills">
   <li>One file, boto3 + ipywidgets</li>
   <li>Every RetrieveAndGenerate field</li>
   <li>Answers stream as they're written</li>
+  <li>Retrieval and answer, checked apart</li>
   <li>Read-only: changes no knowledge base</li>
 </ul>
 
@@ -58,6 +59,7 @@ The examples use a knowledge base called `support-docs` holding support policies
     chat("support-docs", data_source="faq")        # ask only one of its data sources (a name or ID)
     chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
     chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
+    chat("support-docs", retrieve_only=True)       # questions only search: every passage found, no answer
     ```
 
 3. **Optional:** another region or AWS profile, or keep the view to use from other cells.
@@ -91,6 +93,7 @@ Two questions about refunds, in the same Bedrock session. The second asks for a 
 - **Data source.** When the knowledge base has more than one data source (an S3 bucket of policies, a crawled help site), a **Data source** picker sits next to it: pick one and the next questions search only that one, until you pick another or **All data sources**. It's sent as a filter on the data source ID Bedrock gives every chunk, so it needs no metadata files and works together with the `filter` setting. The conversation goes on.
 - **Files.** **📄 Pick files** lists the files the knowledge base has indexed (from its S3 and custom data sources). Type part of a name and choose it from the list (Enter takes the only match, and a full `s3://` path works too): the next questions search only the files picked, shown as chips next to the button. Click a chip to drop that file, or **All files** to search every file again. It's a filter on the file path Bedrock gives every chunk, so it works together with the data source and the `filter` setting. `ui.files()` lists the same files as a report, with failed ones marked.
 - **Follow-ups** keep the conversation: Bedrock remembers the earlier questions. **New chat** starts over, and so does picking another knowledge base. Another model, data source or set of files keeps the conversation.
+- **Answer / Retrieve only**, beside the question box, picks what a question does: get an answer, or [only search](#retrieve).
 - The line under the box counts the questions and the estimated cost so far. An error shows where the answer would have been, says what to do, and puts your question back in the box.
 
 ![The chat window with two files picked next to Pick files, refund-policy.pdf and eu-returns.pdf, each a chip with a ✕, a box to type another file's name and an All files button; the last answer, about refund times, says under the model's name that only those two files were searched](images/chat-files-light.webp#only-light){ width="984" height="882" loading=lazy }
@@ -98,6 +101,22 @@ Two questions about refunds, in the same Bedrock session. The second asks for a 
 /// caption
 Two files picked: the next answers come only from them, and the conversation goes on.
 ///
+
+## Retrieve only: the search without the answer { #retrieve }
+
+An answer is two steps: Bedrock searches the knowledge base, then the model writes from the passages it found. When an answer is wrong or Bedrock says it's “unable to assist”, either step can be the cause. Switch **Answer** to **Retrieve only**, beside the question box, and the next questions only search: the same search an answer makes (Retrieve instead of RetrieveAndGenerate, with the same passages, search type, filter, reranker, data source and files), and no model.
+
+![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-light.webp#only-light){ width="984" height="842" loading=lazy }
+![The chat window on Retrieve only: after an answer about refund times, the same question searched again; the search lists five passages, best first, each with its file and page, its score with a bar against the best one, and the start of its text with the question's words highlighted; the two the answer cited are tagged cited [1] and cited [2], and a note under them says the answer cites 2 of the 5 passages the search found; under the conversation, the question box with Answer and Retrieve only beside it and a Retrieve button; on the right, Temperature dimmed under Generation, not sent with Retrieve only](images/chat-retrieve-dark.webp#only-dark){ width="984" height="842" loading=lazy }
+/// caption
+The same question asked both ways: the search found five passages, and the answer used the top two.
+///
+
+- **Every passage, best first.** Each one shows its file and page, its relevance score with a bar against the best one, and the start of its text with the question's words highlighted. Click one to read it in full, with its location and metadata. Scores rank one search's passages: compare them with each other, not with another search's.
+- **Ask it both ways.** Switching puts your last question back in the box, so Enter asks it the other way. A search after an answer to the same question tags the passages the answer cited (`cited [1]`) and says how many of the passages found it used; an answer after a search says the same. When the answer was “unable to assist” although the search found passages, the finding says so: if they hold the answer, the search works and the answer step is what to fix (another model, or your own prompt). If nothing relevant comes back, the search is: more passages, HYBRID search, a looser filter, other files.
+- **Only the search settings are sent.** The answer's settings (temperature, prompt, guardrail…) stay in the Settings tab, dimmed and marked as not sent, until you switch back. The Request JSON tab shows the Retrieve request, and its **Python** view the `client.retrieve(...)` call.
+- **It doesn't touch the conversation.** A search joins the chat but not Bedrock's session, so the next answer still follows up on the earlier answers. Bedrock can fold the earlier questions into a follow-up before it searches, so ask a whole question when you compare.
+- From code: `ui.retrieve("How long do refunds take?")` only searches and `ui.ask(...)` answers, whichever way the window's switch is set, and `chat(..., retrieve_only=True)` opens the window on Retrieve only.
 
 ## Settings { #settings }
 
@@ -180,6 +199,7 @@ from bedrock_chat import BedrockChatView
 ui = BedrockChatView(kb="support-docs", model="sonnet")
 ui.ask("How long do refunds take?")    # the answer with [1][2] citations, sources, findings, cost
 ui.ask("And for digital goods?")       # a follow-up in the same conversation
+ui.retrieve("How long do refunds take?")   # only the search: every passage found, which ones the answer cited
 ui.set(temperature=0.2, n=8)           # change settings; None removes one
 ui.use(data_source="faq")              # ask only one data source ("all" for every one)
 ui.files()                             # the knowledge base's files, to pick from
@@ -188,6 +208,7 @@ ui.unset("temperature")                # stop sending one
 ui.settings()                          # every setting in plain English, with warnings
 ui.fields("rerank")                    # every field you can send that mentions "rerank"
 ui.request()                           # the JSON the next question sends, and the Python call
+ui.request(retrieve_only=True)         # the Retrieve request retrieve() sends
 ui.last()                              # the last answer: passages in full, request and response
 ui.transcript()                        # the whole conversation
 ui.new_chat()                          # start over
@@ -198,13 +219,14 @@ The window lives in the running notebook: it doesn't come back when a saved note
 
 ## Use the data in Python { #python }
 
-`ui.answers` holds the conversation's answers, `ui.values` the settings, and `ui.core` the `BedrockChatAnalyzer`, which returns data instead of printing:
+`ui.answers` holds the conversation's answers (and searches), `ui.values` the settings, and `ui.core` the `BedrockChatAnalyzer`, which returns data instead of printing:
 
 ```python
 a = ui.answers[-1]                     # Answer
 a.text, a.citations, a.sources, a.grounded_share
 a.request, a.response                  # exactly what was sent and what came back
 df = a.to_df()                         # one row per cited source
+a.retrieve_only                        # a search: no text, and a.sources is every passage found, with p.score
 
 core = ui.core
 params = core.request("support-docs", "refund window?", {"n": 8, "temperature": 0.2})   # the request, not sent
@@ -212,16 +234,17 @@ a = core.ask("support-docs", "refund window?", {"n": 8}, model="sonnet")
 a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)              # a follow-up
 a = core.ask("support-docs", "refund window?", data_source="faq")                       # a.data_sources: {ID: name}
 a = core.ask("support-docs", "refund window?", files=["refund-policy.pdf"])             # a.files: s3:// paths
+r = core.retrieve("support-docs", "refund window?", {"n": 8})        # only the search: r.sources, with scores
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.schema().fields["temperature"]   # Field: its path, type, range and what it does
 ```
 
-The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`, `answer_cost`, and the findings, `settings_findings` and `answer_findings`.
+The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`, `build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`, `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`, `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`, `answer_cost`, `cited_ranks`, and the findings, `settings_findings`, `answer_findings` and `compare_findings` (a search and an answer to the same question).
 
 ## Cost { #cost }
 
-Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES` and `BEDROCK_PRICES`, the same tables as `bedrock_kb.py`); a model not in the table shows its cost as unknown. For exact token counts, use `bedrock_kb.py`'s `ask(engine="converse")`.
+Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES` and `BEDROCK_PRICES`, the same tables as `bedrock_kb.py`); a model not in the table shows its cost as unknown. For exact token counts, use `bedrock_kb.py`'s `ask(engine="converse")`. A **Retrieve only** search calls no model, so it costs the question's embedding and, with a reranker, the reranking.
 
 ```python
 from bedrock_chat import BedrockChatAnalyzer, BedrockChatView
@@ -232,7 +255,7 @@ ui.app()
 
 ## Permissions { #permissions }
 
-Everything is read-only: RetrieveAndGenerate reads the knowledge base and generates text. A list the role can't read (knowledge bases, models) becomes a box to type into instead of a picker, with a note that says which permission is missing; without the data source list, questions search every data source unless you name one by its ID, and without the file list, files are named by their `s3://` paths. This policy covers everything:
+Everything is read-only: RetrieveAndGenerate reads the knowledge base and generates text, and Retrieve only reads it. A list the role can't read (knowledge bases, models) becomes a box to type into instead of a picker, with a note that says which permission is missing; without the data source list, questions search every data source unless you name one by its ID, and without the file list, files are named by their `s3://` paths. This policy covers everything:
 
 ```json title="IAM policy"
 {
@@ -266,7 +289,7 @@ Everything is read-only: RetrieveAndGenerate reads the knowledge base and genera
 | `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
 | `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
 | `bedrock:ListKnowledgeBaseDocuments` | **Pick files**, `files`, and `files=` by name (an `s3://` path works without it) |
-| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`; streamed answers use the same permission |
+| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`; streamed answers use the same permission. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
 | `kms:Decrypt`, `kms:GenerateDataKey` on the key | Only with the `kms_key` setting |
 
@@ -292,7 +315,7 @@ A model also has to be enabled for the account under **Model access** in the Bed
 
 ??? question "The answer is “Sorry, I am unable to assist you with this request.”"
 
-    RetrieveAndGenerate's reply when the passages it retrieved don't hold the answer. The finding under the answer says what to try: more passages, HYBRID search, or a looser filter. `bedrock_kb.py`'s `search()` shows every passage a question retrieves, not only the cited ones.
+    RetrieveAndGenerate's reply when the passages it retrieved don't hold the answer. The finding under the answer says what to try: more passages, HYBRID search, or a looser filter. To see every passage the question retrieves, not only the cited ones, ask it again on [Retrieve only](#retrieve): if the passages do hold the answer, the model is the step to change.
 
 ??? question "Answers arrive all at once instead of word by word"
 
@@ -318,17 +341,18 @@ Every `BedrockChatView` command. `ui.help()` prints the same list grouped by tas
 
 | Command | What it shows |
 |---|---|
-| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, **values)` | Opens the window and returns the view behind it |
+| `chat(kb=None, model=None, *, region=None, profile=None, settings=None, stream=True, data_source=None, files=None, retrieve_only=False, **values)` | Opens the window and returns the view behind it |
 | `app()` | The chat window |
 | `ask(question)` | An answer with \[1\]\[2\] citations, sources, findings and cost, as a report, in the same conversation |
+| `retrieve(question)` | Only the search behind an answer: every passage found, best first, with its score, and which ones the answer to the same question cited |
 | `new_chat()` | Forgets the conversation; the settings stay |
 | `transcript()` | The conversation so far, as a report that stays in the saved notebook |
-| `last()` | The last answer in full: every cited passage, the request and the response, and the call in Python |
+| `last()` | The last answer (or search) in full: every passage, the request and the response, and the call in Python |
 | `settings()` | What's sent with every question, in plain English, with warnings and the `chat(...)` call that opens the setup again |
 | `set(name=None, value=None, **values)` | Changes settings: `set(temperature=0.2)`, or `set("a.field.path", value)` |
 | `unset(*names)` | Stops sending settings |
 | `fields(match=None)` | Every field RetrieveAndGenerate takes: its name, type and range, what it does, and its path |
-| `request(question=None)` | The JSON the next question sends, and the same call in Python |
+| `request(question=None, retrieve_only=None)` | The JSON the next question sends, and the same call in Python; `retrieve_only=True` for the Retrieve request |
 | `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base, the model, or the data source or files questions search |
 | `files(match=None)` | The knowledge base's files to pick from, whether each is indexed, and which ones questions search |
 | `kbs()` | The knowledge bases in the region |

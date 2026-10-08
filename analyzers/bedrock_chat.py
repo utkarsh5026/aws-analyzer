@@ -16,6 +16,10 @@ and response) and three tabs on the right:
     Request JSON   the exact request your next question sends, highlighted. Edit it by hand, or copy it as Python.
     Last response  what Bedrock sent back, as JSON.
 
+Answer / Retrieve only, beside the question box, picks what a question does: an answer from the model
+(RetrieveAndGenerate), or only the search behind it (Retrieve): every passage it finds, best first, with its score,
+and no answer. Ask the same question both ways to tell a retrieval problem from an answer problem.
+
 Requirements: boto3 (required). ipywidgets for the window (preinstalled on SageMaker). Without it, or outside
 Jupyter, ask() and the other commands below work as reports.
 
@@ -27,12 +31,13 @@ The file has two layers:
     BedrockChatView      Notebook UI: the chat window, plus commands that render reports (HTML in Jupyter, plain
                          text in a terminal).
 
-Nothing here changes a knowledge base: RetrieveAndGenerate reads it and generates text.
+Nothing here changes a knowledge base: RetrieveAndGenerate reads it and generates text, and Retrieve only reads it.
 
 More
 ----
     ui = chat("support-docs")                         # the window; ui is the view behind it
     ui.ask("How long do refunds take?")               # an answer as a report, in the same conversation
+    ui.retrieve("How long do refunds take?")          # only the search: every passage it finds, no answer
     ui.set(temperature=0.2, search_type="hybrid")     # change settings (an open window follows)
     ui.use(data_source="faq")                         # ask only one of the knowledge base's data sources
     ui.files()                                        # the knowledge base's files, to pick from
@@ -51,6 +56,7 @@ More
     core = ui.core                                    # BedrockChatAnalyzer
     params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
     a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
+    r = core.retrieve("support-docs", "refund window?", {"n": 8})          # r.sources: every passage, ranked
 """
 
 from __future__ import annotations
@@ -721,6 +727,7 @@ class Schema:
     auto: list[tuple[tuple[str, ...], str]] = field(default_factory=list)  # required, one possible value: filled in
     input_shape: Any = None  # botocore's input shape, for validate_request()
     boto: str = ""  # the botocore version the fields came from
+    retrieve_shape: Any = None  # Retrieve's input shape, for validate_request() on a retrieve-only request
 
     def find(self, name: Any) -> Field:
         """The field a name means: its short name or another name ('topP'), its path (full, from
@@ -786,7 +793,8 @@ class Schema:
 @dataclass
 class Answer:
     """One question of the conversation and Bedrock's answer: the text, the passages it cites, and the exact
-    request and response."""
+    request and response. Asked retrieve-only (Retrieve), there's no answer: text is empty and sources holds every
+    passage the search found, best first, each with its score."""
 
     question: str
     text: str
@@ -808,6 +816,7 @@ class Answer:
     notes: list[str] = field(default_factory=list)  # what happened on the way (a new session, no streaming)
     data_sources: dict[str, str] = field(default_factory=dict)  # ID -> name of the only ones searched; {} = all
     files: list[str] = field(default_factory=list)  # s3:// paths of the only files searched; [] = all
+    retrieve_only: bool = False  # a search without an answer (Retrieve): sources are every passage it found, ranked
 
     @property
     def cited(self) -> list[int]:
@@ -826,11 +835,12 @@ class Answer:
         return sum(covered[i] for i in chars) / len(chars) if chars else 0.0
 
     def to_df(self):
-        """One row per source: its number, where it's from, its page and its text."""
+        """One row per source: its number, where it's from, its page, its score (retrieve-only searches) and its
+        text."""
         pd = _require("pandas", "Answer.to_df")
         return pd.DataFrame(
             [
-                {"n": i, "source": source_name(p.uri), "page": p.page, "uri": p.uri, "text": p.text,
+                {"n": i, "source": source_name(p.uri), "page": p.page, "score": p.score, "uri": p.uri, "text": p.text,
                  "metadata": p.metadata}
                 for i, p in enumerate(self.sources, 1)
             ]
@@ -915,6 +925,14 @@ def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
         content_type=content_type,
         row=row,
     )
+
+
+def parse_retrieve(resp: dict[str, Any]) -> list[Passage]:
+    """A Retrieve response -> Passages, best first."""
+    return [
+        parse_passage(ref, i)
+        for i, ref in enumerate(resp.get("retrievalResults") or [], 1)
+    ]
 
 
 def _span(text: str, part: dict[str, Any]) -> tuple[int, int]:
@@ -1273,7 +1291,11 @@ def request_schema(service_model: Any = None) -> Schema:
     walk(shape, ())
     order = {path: i for i, path in enumerate(known)}
     found.sort(key=lambda f: (_GROUP_ORDER.index(f.group), order.get(f.path, len(order))))
-    return Schema({f.key: f for f in found}, auto, shape, botocore.__version__)
+    try:
+        retrieve = service_model.operation_model("Retrieve").input_shape
+    except Exception:  # OperationNotFoundError
+        retrieve = None
+    return Schema({f.key: f for f in found}, auto, shape, botocore.__version__, retrieve)
 
 
 def _check_range(f: Field, number: float) -> None:
@@ -1773,12 +1795,77 @@ def build_request(
     return params
 
 
+# -------------------------------------------- retrieve only: the search without the answer
+
+_RETRIEVAL = (*_KB_CONFIG, "retrievalConfiguration")  # the part of the request a Retrieve request takes as it is
+
+
+def _is_retrieve(params: Any) -> bool:
+    """Whether a request is Retrieve's (retrievalQuery and knowledgeBaseId at its root), not RetrieveAndGenerate's."""
+    return isinstance(params, dict) and "retrieveAndGenerateConfiguration" not in params and (
+        "retrievalQuery" in params or "knowledgeBaseId" in params)
+
+
+def _retrieve_path(path: tuple[str, ...]) -> tuple[str, ...] | None:
+    """Where a RetrieveAndGenerate path goes in a Retrieve request; None when Retrieve has no place for it."""
+    return path[len(_KB_CONFIG):] if path[: len(_RETRIEVAL)] == _RETRIEVAL else None
+
+
+def retrieve_settings(settings: dict[str, Any], schema: Schema) -> dict[str, Any]:
+    """The settings a retrieve-only search sends: the Retrieval ones (passages, search type, filter, reranker...).
+    The rest are for the model's answer, which a search doesn't ask for."""
+    return {key: value for key, value in settings.items()
+            if key in schema.fields and _retrieve_path(schema.fields[key].path) is not None}
+
+
+def build_retrieve_request(
+    question: str,
+    kb_id: str,
+    settings: dict[str, Any],
+    schema: Schema,
+    *,
+    region: str = "",
+    data_sources: Iterable[str] = (),
+    files: Iterable[str] = (),
+) -> dict[str, Any]:
+    """The Retrieve request for a question: the same search build_request()'s RetrieveAndGenerate request makes
+    (passages, search type, filter, reranker, data sources and files) without the model, so what comes back is every
+    passage found instead of an answer. Settings for the answer (temperature, prompt...) are left out. No AWS call."""
+    full = build_request(question, kb_id, "", retrieve_settings(settings, schema), schema, region=region,
+                         data_sources=data_sources, files=files)
+    params: dict[str, Any] = {"knowledgeBaseId": kb_id, "retrievalQuery": {"text": question}}
+    retrieval = _get(full, _RETRIEVAL)
+    if retrieval:
+        params["retrievalConfiguration"] = retrieval
+    return params
+
+
+def _retrieve_as_rag(params: dict[str, Any]) -> dict[str, Any]:
+    """A Retrieve request laid out like RetrieveAndGenerate's, so settings_from_request() reads both. A field
+    RetrieveAndGenerate has no place for stays at the root, where it's named as one the chat can't send."""
+    out: dict[str, Any] = {}
+    kb: dict[str, Any] = {}
+    for name, value in params.items():
+        if name == "retrievalQuery":
+            out["input"] = value
+        elif name in ("knowledgeBaseId", "retrievalConfiguration"):
+            kb[name] = value
+        else:
+            out[name] = value
+    out["retrieveAndGenerateConfiguration"] = {"type": "KNOWLEDGE_BASE", "knowledgeBaseConfiguration": kb}
+    return out
+
+
 def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[str, Any], dict[str, Any]]:
-    """A RetrieveAndGenerate request (one you edited, say) -> (picked, settings): picked holds the 'question',
-    'knowledgeBaseId', 'modelArn', 'sessionId', 'dataSources' (IDs) and 'files' (s3:// paths) it names, and settings
-    is {key: value} like normalize_settings()'s. The opposite of build_request(). A ValueError names anything the chat can't send."""
+    """A RetrieveAndGenerate or Retrieve request (one you edited, say) -> (picked, settings): picked holds the
+    'question', 'knowledgeBaseId', 'modelArn', 'sessionId', 'dataSources' (IDs) and 'files' (s3:// paths) it names,
+    and 'retrieve_only': True for a Retrieve request; settings is {key: value} like normalize_settings()'s. The
+    opposite of build_request() and build_retrieve_request(). A ValueError names anything the chat can't send."""
     if not isinstance(params, dict):
         raise ValueError("The request is a JSON object: {\"input\": ..., \"retrieveAndGenerateConfiguration\": ...}")
+    retrieve_only = _is_retrieve(params)
+    if retrieve_only:
+        params = _retrieve_as_rag(params)
     by_path = {f.path: f for f in schema.fields.values()}
     fixed = {("input", "text"): "question", ("sessionId",): "sessionId",
              (*_KB_CONFIG, "knowledgeBaseId"): "knowledgeBaseId", (*_KB_CONFIG, "modelArn"): "modelArn"}
@@ -1822,15 +1909,19 @@ def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[
     if problems:
         text = "; ".join(problems)
         raise ValueError(text[:1].upper() + text[1:] + ".")
+    if retrieve_only:
+        picked["retrieve_only"] = True
     return picked, {key: values[key] for key in schema.fields if key in values}
 
 
 def validate_request(params: dict[str, Any], schema: Schema) -> list[str]:
-    """What's wrong with a request according to the service model (botocore's own checks, the ones it runs before
-    sending): unknown fields, wrong types, numbers out of range, missing required fields. [] when it's fine."""
-    if schema.input_shape is None:
+    """What's wrong with a request (RetrieveAndGenerate's, or Retrieve's) according to the service model (botocore's
+    own checks, the ones it runs before sending): unknown fields, wrong types, numbers out of range, missing required
+    fields. [] when it's fine."""
+    shape = schema.retrieve_shape if _is_retrieve(params) else schema.input_shape
+    if shape is None:
         return []
-    report = ParamValidator().validate(params, schema.input_shape)
+    report = ParamValidator().validate(params, shape)
     if not report.has_errors():
         return []
     prefix = ".".join(_KB_CONFIG) + "."
@@ -1910,8 +2001,57 @@ def settings_findings(settings: dict[str, Any], model: str = "") -> list[tuple[s
     return found
 
 
+def _outside_picks(a: Answer) -> list[int]:
+    """The numbers of the passages that came from outside the data sources and files the question was asked of."""
+    return [i for i, p in enumerate(a.sources, 1)
+            if (a.data_sources and p.data_source_id and p.data_source_id not in a.data_sources)
+            or (a.files and p.uri and p.uri not in a.files)]
+
+
+def _outside_finding(a: Answer, outside: list[int]) -> tuple[str, str]:
+    picked = " and ".join(filter(None, [describe_sources(a.data_sources) if a.data_sources else "",
+                                        describe_files(a.files) if a.files else ""]))
+    what = (f"{_plural(len(outside), 'passage')} ({', '.join(f'#{i}' for i in outside[:5])})" if a.retrieve_only
+            else f"{_plural(len(outside), 'source')} ({', '.join(f'[{i}]' for i in outside[:5])})")
+    return ("warn", f"{what} came from outside {picked}: this vector store didn't apply the filter on Bedrock's own "
+                    "keys. Tag the files with your own metadata instead (a <file>.metadata.json), sync, and use the "
+                    "filter setting.")
+
+
+def _search_findings(a: Answer) -> list[tuple[str, str]]:
+    """What a retrieve-only search found, and what to try when it isn't what an answer needs."""
+    found: list[tuple[str, str]] = []
+    if not a.sources:
+        tries = []
+        if a.settings.get("filter") is not None:
+            tries.append("check the filter isn't too narrow (unset('filter'))")
+        if a.files:
+            tries.append(f"search more than {describe_files(a.files)} (use(files='all'))")
+        if a.data_sources:
+            tries.append("search every data source (use(data_source='all'))")
+        found.append(("warn", "Nothing came back, so an answer would have nothing to go on. Try to "
+                              + (", or ".join(tries) if tries else "check that the knowledge base has indexed files "
+                                 "(files() shows each one's status)") + "."))
+    outside = _outside_picks(a)
+    if outside:
+        found.append(_outside_finding(a, outside))
+    files = {p.uri or p.source for p in a.sources}
+    if len(a.sources) >= 3 and len(files) == 1:
+        tries = ["more passages (set(n=10))"] if (a.settings.get("n") or 5) < 10 else []
+        if a.settings.get("search_type") != "HYBRID":
+            tries.append("exact words too (set(search_type='HYBRID'))")
+        found.append(("info", f"All {len(a.sources)} passages come from one file ({source_name(next(iter(files)))}). "
+                              "If the answer could be in other files, try " + (" or ".join(tries) or "a filter that "
+                              "leaves this one out") + "."))
+    found += [("info", note) for note in a.notes]
+    return found
+
+
 def answer_findings(a: Answer) -> list[tuple[str, str]]:
-    """How far to trust an answer, and which setting to try next -> [(level, message)]."""
+    """How far to trust an answer, and which setting to try next -> [(level, message)]. For a retrieve-only search,
+    what it found and what to try when it isn't what an answer needs."""
+    if a.retrieve_only:
+        return _search_findings(a)
     found: list[tuple[str, str]] = []
     if a.guardrail_action == "INTERVENED":
         found.append(("warn", "A guardrail stepped in: the question or the answer was blocked or rewritten. The "
@@ -1943,21 +2083,61 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
     elif a.grounded_share < 0.5:
         found.append(("warn", f"Only {a.grounded_share:.0%} of the answer is backed by a citation; the rest may be the "
                               "model's own knowledge. Check the sentences without a [n]."))
-    outside = [i for i, p in enumerate(a.sources, 1)
-               if (a.data_sources and p.data_source_id and p.data_source_id not in a.data_sources)
-               or (a.files and p.uri and p.uri not in a.files)]
+    outside = _outside_picks(a)
     if outside:
-        picked = " and ".join(filter(None, [describe_sources(a.data_sources) if a.data_sources else "",
-                                            describe_files(a.files) if a.files else ""]))
-        found.append(("warn", f"{_plural(len(outside), 'source')} ({', '.join(f'[{i}]' for i in outside[:5])}) came "
-                              f"from outside {picked}: this vector store didn't apply the filter on Bedrock's own "
-                              "keys. Tag the files with your own metadata instead (a <file>.metadata.json), sync, and "
-                              "use the filter setting."))
+        found.append(_outside_finding(a, outside))
     limit = a.settings.get("max_tokens")
     if limit and a.output_tokens >= 0.9 * limit:
         found.append(("warn", f"The answer is about as long as max_tokens allows ({limit:,}), so it may have been cut "
                               f"off: raise it (set(max_tokens={max(limit * 2, 1024)}))."))
     found += [("info", note) for note in a.notes]
+    return found
+
+
+def _same_passage(a: Passage, b: Passage) -> bool:
+    if a.chunk_id and b.chunk_id:
+        return a.chunk_id == b.chunk_id
+    return a.uri == b.uri and " ".join(a.text.split()) == " ".join(b.text.split())
+
+
+def cited_ranks(search: Answer, answer: Answer) -> dict[int, int]:
+    """{rank in a retrieve-only search: [n] in an answer} for each passage the search found that the answer cites,
+    in rank order: how a search and an answer to the same question line up."""
+    ranks: dict[int, int] = {}
+    for n, cited in enumerate(answer.sources, 1):
+        for p in search.sources:
+            if _same_passage(p, cited):
+                ranks.setdefault(p.rank, n)
+                break
+    return dict(sorted(ranks.items()))
+
+
+def compare_findings(search: Answer, answer: Answer) -> list[tuple[str, str]]:
+    """What asking a question both ways shows (a retrieve-only search, and an answer): which of the passages found
+    the answer cites, and whether a poor answer comes from the search or from the answer step -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    ranks = cited_ranks(search, answer)
+    count = len(search.sources)
+    text = answer.text.strip()
+    if (not text or _REFUSAL in text.lower()) and count:
+        what = "empty" if not text else "Bedrock's \"unable to assist\" reply"
+        found.append(("warn", f"The answer to this question was {what}, yet the search found "
+                              f"{_plural(count, 'passage')}. If they hold the answer, the search works and the answer "
+                              "step doesn't: try another model, or a prompt that asks it to answer from the search "
+                              "results (set(prompt=...)). If they don't, the search is what to fix."))
+    elif ranks:
+        pairs = ", ".join(f"#{rank} as [{n}]" for rank, n in ranks.items())
+        rest = count - len(ranks)
+        found.append(("info", f"The answer cites {len(ranks)} of the {_plural(count, 'passage')} the search found "
+                              f"({pairs})" + (f"; the other {rest} weren't cited." if rest > 1 else
+                                              "; the other one wasn't cited." if rest else ".")))
+    missing = [n for n in range(1, len(answer.sources) + 1) if n not in ranks.values()]
+    if missing:
+        one = len(missing) == 1
+        found.append(("info", f"{'Source' if one else 'Sources'} {', '.join(f'[{n}]' for n in missing[:5])} of the "
+                              f"answer {'is' if one else 'are'}n't among the search's passages, so the two searches "
+                              "differed: other settings, query decomposition, or a follow-up question Bedrock "
+                              "rewrote with the earlier ones."))
     return found
 
 
@@ -2006,7 +2186,10 @@ def answer_cost(
     prices: dict[str, float] | None = None,
 ) -> float | None:
     """Estimated USD for one answer: the model's tokens (estimated from characters), embedding the question and, with
-    a reranker, the reranking. None when the model isn't in the price table (pass model_prices=...)."""
+    a reranker, the reranking. None when the model isn't in the price table (pass model_prices=...). A retrieve-only
+    search costs the embedding and the reranking only."""
+    if a.retrieve_only:
+        return query_cost(1, a.settings.get("reranker") or False, prices, question_tokens=estimate_tokens(a.question))
     generation = generation_cost(a.input_tokens, a.output_tokens, a.model, model_prices)
     if generation is None:
         return None
@@ -2031,9 +2214,17 @@ def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | Non
 
 
 def python_call(params: dict[str, Any], region: str = "", width: int = 100) -> str:
-    """The same RetrieveAndGenerate call as Python, to paste into a cell or a script. width is where long lines
-    break."""
+    """The same RetrieveAndGenerate (or Retrieve) call as Python, to paste into a cell or a script. width is where
+    long lines break."""
     where = f", region_name={region!r}" if region else ""
+    if _is_retrieve(params):
+        return (
+            "import boto3\n\n"
+            f"client = boto3.client('bedrock-agent-runtime'{where})\n"
+            f"response = client.retrieve(**{_py_literal(params, width=width)})\n"
+            "for result in response['retrievalResults']:\n"
+            "    print(result.get('score'), result['content'].get('text', '')[:200])"
+        )
     return (
         "import boto3\n\n"
         f"client = boto3.client('bedrock-agent-runtime'{where})\n"
@@ -2108,7 +2299,8 @@ def _question_text(question: Any) -> str:
 
 class BedrockChatAnalyzer:
     """Pure logic for chatting with a Bedrock knowledge base: builds RetrieveAndGenerate requests from settings,
-    sends them and returns an Answer. Nothing is printed, and nothing in AWS is changed.
+    sends them and returns an Answer, or only the search behind one (Retrieve, retrieve()). Nothing is printed, and
+    nothing in AWS is changed.
 
     Knowledge bases are named by ID, name (any case) or ARN; models by ID, inference profile, ARN or a short name
     ('opus', 'sonnet', 'haiku', 'nova'...). Settings are {name: value} with the names fields() lists. `prices` and
@@ -2479,15 +2671,20 @@ class BedrockChatAnalyzer:
         session_id: str | None = None,
         data_source: Any = None,
         files: Any = None,
+        retrieve_only: bool = False,
     ) -> dict[str, Any]:
         """The RetrieveAndGenerate request ask() would send, without sending it: the knowledge base and model
         resolved, each setting at its place in the JSON, and data_source= (a name or ID, or a list) and files= (names
-        or s3:// paths) in the filter."""
+        or s3:// paths) in the filter. retrieve_only=True gives retrieve()'s Retrieve request instead: the same
+        search, without the model."""
         schema = self.schema()
         values = normalize_settings(settings, schema)
         kb_id = self.resolve(kb)
         sources = self.resolve_sources(kb_id, data_source)
         uris = self.resolve_files(kb_id, files)
+        if retrieve_only:
+            return build_retrieve_request(_question_text(question), kb_id, values, schema, region=self.region,
+                                          data_sources=sources, files=uris)
         _, arn = self.resolve_model(model)
         return build_request(_question_text(question), kb_id, arn, values, schema, session_id=session_id,
                              region=self.region, data_sources=sources, files=uris)
@@ -2503,7 +2700,10 @@ class BedrockChatAnalyzer:
         """Sends a RetrieveAndGenerate request as it is and returns the Answer. stream=True uses
         RetrieveAndGenerateStream and calls on_text with the answer so far as it's written; where streaming isn't
         allowed or this boto3 can't, the answer comes all at once and says why. settings (the ones the request was
-        built from) are kept on the Answer, for its findings."""
+        built from) are kept on the Answer, for its findings. A Retrieve request is sent with Retrieve, and comes back
+        as a retrieve-only Answer: every passage found, no text."""
+        if _is_retrieve(params):
+            return self._send_retrieve(params, settings)
         runtime = self._runtime_client()
         started = time.monotonic()
         notes: list[str] = []
@@ -2558,6 +2758,45 @@ class BedrockChatAnalyzer:
                                + max(given, len(answer.sources)) * per_passage)
         answer.output_tokens = estimate_tokens(answer.text)
         return answer
+
+    def _send_retrieve(self, params: dict[str, Any], settings: dict[str, Any] | None) -> Answer:
+        started = time.monotonic()
+        response = self._runtime_client().retrieve(**params)
+        kb_id = params.get("knowledgeBaseId", "")
+        return Answer(
+            question=(params.get("retrievalQuery") or {}).get("text") or "",
+            text="",
+            sources=parse_retrieve(response),
+            guardrail_action=response.get("guardrailAction"),
+            kb_id=kb_id,
+            kb_name=(self._names or {}).get(kb_id, ""),
+            settings=dict(settings or {}),
+            request=params,
+            response=response,
+            seconds=time.monotonic() - started,
+            retrieve_only=True,
+        )
+
+    def retrieve(
+        self,
+        kb: str,
+        question: str,
+        settings: dict[str, Any] | None = None,
+        *,
+        data_source: Any = None,
+        files: Any = None,
+    ) -> Answer:
+        """Every passage a question retrieves, best first, with its score, and no answer (Retrieve): the search an
+        answer with these settings starts from, without the model. Only the Retrieval settings are sent (passages,
+        search type, filter, reranker), and kept on the Answer; data_source= and files= narrow it as in ask()."""
+        schema = self.schema()
+        values = normalize_settings(settings, schema)
+        sources = self.resolve_sources(kb, data_source)
+        uris = self.resolve_files(kb, files)
+        params = self.request(kb, question, values, data_source=sources, files=uris, retrieve_only=True)
+        a = self.send(params, retrieve_settings(values, schema))
+        a.data_sources, a.files = sources, uris
+        return a
 
     def ask(
         self,
@@ -2694,6 +2933,7 @@ class _Turn:
     answer: Answer
     meta: str  # 'claude-sonnet-5 · 2.1s · 2 sources cited · ~$0.004'
     findings: list[tuple[str, str]] = field(default_factory=list)
+    ranks: dict[int, int] = field(default_factory=dict)  # a search's ranks the answer to its question cites -> [n]
 
 
 @dataclass
@@ -2848,6 +3088,14 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc details.src[open]>summary .sn{display:none}
 .kbc details.src .pt{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 8px 6px 31px;padding:8px 12px;border-left:3px solid var(--kc-ring);border-radius:3px 9px 9px 3px;background:var(--kc-surface);max-height:280px;overflow:auto;line-height:1.5}
 .kbc details.src .pm{margin:0 8px 6px 31px;opacity:.6;overflow-wrap:anywhere}
+.kbc .srcs.hits{margin-top:2px;padding-top:0;border-top:0}
+.kbc .hits details.src>summary{flex-wrap:wrap;row-gap:2px;white-space:normal;padding:4px 6px}
+.kbc .hits details.src .sf{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.kbc .hits details.src .sn{flex:1 1 100%;margin-left:25px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.45}
+.kbc .sc{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-variant-numeric:tabular-nums;opacity:.7}
+.kbc .sc .sb{display:inline-block;width:34px;height:5px;border-radius:3px;background:var(--kc-tint-2);overflow:hidden}
+.kbc .sc .sb i{display:block;height:100%;border-radius:3px;background:var(--kc-accent)}
+.kbc .ct{flex:0 0 auto;font-size:10.5px;font-weight:650;padding:0 7px;border-radius:999px;color:var(--kc-accent);background:var(--kc-soft)}
 .kbc details.raw{margin-top:8px;font-size:12px}
 .kbc details.raw>summary{cursor:pointer;opacity:.65;width:fit-content;padding:2px 8px 2px 4px;border-radius:7px}
 .kbc details.raw>summary:hover{opacity:1;background:var(--kc-tint-2)}
@@ -2876,6 +3124,7 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .rp code{font-size:10px}
 .kbc .rp.bad{opacity:1;color:#dc2626}
 .kbc .rp.pending{opacity:.9;color:#d97706}
+.kbc .rp.off{font-style:italic}
 .kbc .fc{min-width:0;line-height:1.35}
 .kbc .fc .fl{display:flex;align-items:baseline;gap:7px;min-width:0}
 .kbc .fc .fl b{font-weight:600;font-size:12px;white-space:nowrap}
@@ -2929,12 +3178,15 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
 .kbc-app.kbc-app .kbc-composer .widget-text input,.kbc-app.kbc-app .kbc-composer .jupyter-widget-text input{border:0;box-shadow:none;background:transparent;font-size:14px;padding:4px 8px}
 .kbc-app.kbc-app .kbc-composer .jupyter-button{border-radius:999px;height:34px;line-height:34px;padding:0 18px}
+.kbc-app.kbc-app .kbc-composer .widget-toggle-buttons,.kbc-app.kbc-app .kbc-composer .jupyter-widget-toggle-buttons{border-radius:999px;margin:0 4px 0 0}
+.kbc-app.kbc-app .kbc-composer .widget-toggle-buttons .widget-toggle-button,.kbc-app.kbc-app .kbc-composer .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{height:26px;line-height:26px;padding:0 11px;border-radius:999px}
 .kbc-app.kbc-app .kbc-row{border:1px solid transparent;border-top-color:var(--kc-line);border-radius:0;padding:6px 2px 7px 6px;margin:0;background:transparent;transition:background-color .2s,border-color .2s,box-shadow .2s}
 .kbc-app.kbc-app .kbc-row:hover{background:var(--kc-tint)}
 .kbc-app.kbc-app .kbc-row .rp{margin-top:1px}
 .kbc-app.kbc-app .kbc-row.kbc-fresh{border-color:var(--kc-accent);border-radius:10px;box-shadow:0 0 0 2px var(--kc-soft)}
 .kbc-app.kbc-app .kbc-row.kbc-broken{border-color:rgba(220,38,38,.6);border-radius:10px}
 .kbc-app.kbc-app .kbc-row.kbc-pending{border-style:dashed;border-color:rgba(217,119,6,.7);border-radius:10px}
+.kbc-app.kbc-app .kbc-row.kbc-off{opacity:.55}
 .kbc-app.kbc-app .kbc-add{height:30px;border:1px dashed var(--kc-line-2);border-radius:10px;background:transparent;font-size:12px;opacity:.8}
 .kbc-app.kbc-app .kbc-add:hover:enabled{opacity:1;border-style:solid;border-color:var(--kc-accent);color:var(--kc-accent);background:var(--kc-soft)}
 .kbc-app.kbc-app .kbc-foot{margin-top:14px;padding:10px 0 0 2px;border-top:1px solid var(--kc-line)}
@@ -3215,12 +3467,59 @@ def _sources_html(a: Answer) -> str:
 
 _AVATAR = '<span class="av">\u2726</span>'  # the mark before the model's name on each answer
 _YOU = '<span class="av me" title="You">🧑</span>'  # and the one beside each of your questions
+_SEARCH = '<span class="av">🔎</span>'  # and the one on a retrieve-only search's passages
 
 
-def _meta_html(meta: str) -> str:
+def _meta_html(meta: str, avatar: str = _AVATAR) -> str:
     """'Claude Sonnet 5 · 2.1s · ~$0.004' as the head of an answer: the model's name in bold over the rest."""
     model, _, rest = meta.partition(" · ")
-    return f'{_AVATAR}<div><b>{_esc(model)}</b><div class="wm">{_esc(rest)}</div></div>'
+    return f'{avatar}<div><b>{_esc(model)}</b><div class="wm">{_esc(rest)}</div></div>'
+
+
+def _score(score: float | None) -> str:
+    """A passage's relevance score: 0.8213 -> '0.821', 0.61 -> '0.610'; None -> ''."""
+    return "" if score is None else f"{score:.3f}"
+
+
+def _search_html(a: Answer, meta: str, findings: list[tuple[str, str]], ranks: dict[int, int], *,
+                 raw: bool = True) -> str:
+    """A retrieve-only search as a chat message: every passage found, best first, each with its score (and a bar
+    against the best one), the [n] the answer to the same question cites it as, and the start of its text, opening to
+    all of it; then the findings and (raw=True) the request and response JSON folded at the bottom."""
+    terms = question_terms(a.question)
+    top = max((p.score for p in a.sources if p.score is not None and p.score > 0), default=None)
+    items = []
+    for p in a.sources:
+        where = " · ".join(filter(None, [source_name(p.uri) or p.uri or "(unknown source)",
+                                         f"p.{p.page}" if p.page is not None else ""]))
+        score = ""
+        if p.score is not None:
+            share = max(0.0, min(1.0, p.score / top)) * 100 if top else 0.0
+            score = (f'<span class="sc" title="Relevance score: compare it with this search\'s other scores only">'
+                     f'<span class="sb"><i style="width:{share:.0f}%"></i></span>{_esc(_score(p.score))}</span>')
+        n = ranks.get(p.rank)
+        cited = (f'<span class="ct" title="The answer to this question cites it as [{n}]">cited [{n}]</span>'
+                 if n else "")
+        meta_line = " · ".join(f"{k}={v}" for k, v in p.metadata.items())
+        body = f'<div class="pt">{_highlight(p.text, terms)}</div>'
+        body += f'<div class="pm">{_esc(p.uri)}</div>' if p.uri else ""
+        body += f'<div class="pm">{_esc(meta_line)}</div>' if meta_line else ""
+        snippet = _highlight(best_snippet(p.text, terms, 220), terms)
+        items.append(f'<details class="src"><summary><span class="sx">{p.rank}</span><span class="sf">{_esc(where)}'
+                     f'</span>{score}{cited}<span class="sn">{snippet}</span></summary>{body}</details>')
+    if items:
+        head = f"{_plural(len(items), 'passage')}, best first" if len(items) > 1 else "1 passage"
+        passages = f'<div class="srcs hits"><div class="sh">{_esc(head)}</div>{"".join(items)}</div>'
+    else:
+        passages = '<div class="ans"><p class="none">(no passages found)</p></div>'
+    notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(findings))
+    json_part = ""
+    if raw:
+        json_part = (f'<details class="raw"><summary>Request and response JSON</summary>'
+                     f'<div class="jh">Request</div>{_json_html(a.request)}'
+                     f'<div class="jh">Response</div>{_json_html(a.response, open_depth=3)}</details>')
+    return (f'<div class="msg bot"><div class="who">{_meta_html(meta, _SEARCH)}</div>{passages}{notes}{json_part}'
+            "</div>")
 
 
 def _turn_html(a: Answer, meta: str, findings: list[tuple[str, str]], *, raw: bool = True) -> str:
@@ -3387,7 +3686,10 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
             out.append(f'<pre class="code hl"{_SELECT}>{_python_html(block.text)}</pre>')
         elif isinstance(block, _Turn):
             out.append(_question_html(block.answer.question))
-            out.append(_turn_html(block.answer, block.meta, block.findings))
+            if block.answer.retrieve_only:
+                out.append(_search_html(block.answer, block.meta, block.findings, block.ranks))
+            else:
+                out.append(_turn_html(block.answer, block.meta, block.findings))
         elif isinstance(block, _Answer):
             out.append(f'<div class="ans">{_answer_html(block)}</div>')
     out.append("</div>")
@@ -4036,9 +4338,13 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             out.append(json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False))
         elif isinstance(block, _Turn):
             a = block.answer
-            out += ["", f"You: {a.question}", f"Bedrock ({block.meta}):"]
-            out += _answer_lines(_with_markers(a.text, a.citations), 100, "  ")
-            out += [f"  [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
+            if a.retrieve_only:
+                out += ["", f"You: {a.question}", f"Bedrock search ({block.meta}):"]
+                out += _passage_lines(a, block.ranks) or ["  (no passages found)"]
+            else:
+                out += ["", f"You: {a.question}", f"Bedrock ({block.meta}):"]
+                out += _answer_lines(_with_markers(a.text, a.citations), 100, "  ")
+                out += [f"  [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
             out += ["  " + _MARKS.get(level, "[i] ") + message for level, message in _ordered(block.findings)]
         elif isinstance(block, _Answer):
             text = (
@@ -4048,6 +4354,20 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             )
             out += _answer_lines(text, 100)
     return "\n".join(out)
+
+
+def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
+    """A retrieve-only search's passages as text: rank, score, source and the [n] the answer cites it as, over the
+    start of its text."""
+    terms = question_terms(a.question)
+    out: list[str] = []
+    for p in a.sources:
+        cited = f"cited [{ranks[p.rank]}]" if p.rank in ranks else ""
+        score = f"score {_score(p.score)}" if p.score is not None else ""
+        out.append("  " + " · ".join(filter(None, [f"#{p.rank}", p.source, score, cited])))
+        out += textwrap.wrap(f'"{best_snippet(p.text, terms, 200)}"', 100, initial_indent="     ",
+                             subsequent_indent="      ")
+    return out
 
 
 def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
@@ -4239,6 +4559,23 @@ def _wrap(inner: str) -> str:
     return f'<div class="kbc">{inner}</div>'
 
 
+def _waiting(keys: list[str]) -> str:
+    """['temperature'] -> 'temperature waits', ['temperature', 'prompt'] -> 'temperature and prompt wait'."""
+    names = ", ".join(keys[:-1]) + " and " + keys[-1] if len(keys) > 1 else "".join(keys)
+    return f"{names} {'waits' if len(keys) == 1 else 'wait'}"
+
+
+def _setting_marks(keys: Iterable[str], schema: Schema, retrieve_only: bool = False) -> dict[tuple[str, ...], str]:
+    """{path in the request: 'set as <key>'} for the settings a request sends, to highlight them in its JSON."""
+    marks = {}
+    for key in keys:
+        f = schema.fields.get(key)
+        path = (_retrieve_path(f.path) if retrieve_only else f.path) if f is not None else None
+        if path:
+            marks[path] = f"set as {key}"
+    return marks
+
+
 _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max_tokens", "prompt", "query_decomposition")
 _SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
 _BESIDE = ("integer", "float", "boolean", "choice")  # kinds whose box sits beside the setting's name
@@ -4299,6 +4636,13 @@ class _ChatApp:
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto", height="540px",
                                         width="100%"))
         self.log.add_class("kbc-log")  # column-reverse keeps it scrolled to the newest message, without a script
+        self.mode_pick = w.ToggleButtons(
+            options=[("Answer", "answer"), ("Retrieve only", "retrieve")],
+            value="retrieve" if self.view.retrieve_only else "answer",
+            tooltips=["Search, then the model answers with citations (RetrieveAndGenerate)",
+                      "Only search: every passage found, best first, with its score, and no answer (Retrieve)"],
+            style={"button_width": "auto"}, layout=layout(flex="0 0 auto"))
+        self.mode_pick.observe(self._safely(self._mode_changed), names="value")
         self.question = w.Text(placeholder="Ask a question, then press Enter", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
         self.question.on_msg(self._on_enter(self._send))
@@ -4306,9 +4650,9 @@ class _ChatApp:
                                     layout=layout(width="auto", flex="0 0 auto"))
         self.send_button.on_click(self._safely(self._send))
         self.status = w.HTML(layout=layout(width="100%"))
-        composer = w.HBox([self.question, self.send_button], layout=layout(width="100%"))
-        composer.add_class("kbc-composer")
-        chat = w.VBox([self.log, composer, self.status], layout=layout(flex="1 1 460px", min_width="320px",
+        self.composer = w.HBox([self.mode_pick, self.question, self.send_button], layout=layout(width="100%"))
+        self.composer.add_class("kbc-composer")
+        chat = w.VBox([self.log, self.composer, self.status], layout=layout(flex="1 1 460px", min_width="320px",
                                                                       margin="0 16px 8px 0"))
         side = self._side()
         body = w.HBox([chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
@@ -4320,6 +4664,7 @@ class _ChatApp:
             self._add(_question_html(a.question))
             self._add(self.view._turn_html(a))
         self._show_log()
+        self._show_mode()
         self._sync_rows()
         self._refresh()
         self._render_response()
@@ -4666,6 +5011,9 @@ class _ChatApp:
                "search all of them.</li>" if self.source_pick.layout.display != "none" else "")
             + "<li><b>📄 Pick files</b> asks only the files you pick: type part of a name and choose it from the "
             "list.</li>"
+            "<li><b>Retrieve only</b>, beside the box, only searches: every passage a question finds, best first, "
+            "with its score, and no answer. Ask the same question both ways to see which passages the answer cites, "
+            "and whether a poor answer comes from the search or the model.</li>"
             + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
             "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
@@ -4740,6 +5088,9 @@ class _ChatApp:
             self._quietly(self.model_pick, value=self.view.model)
         if self.stream_box.value != self.view.stream:
             self._quietly(self.stream_box, value=self.view.stream)
+        if (self.mode_pick.value == "retrieve") != self.view.retrieve_only:
+            self._quietly(self.mode_pick, value="retrieve" if self.view.retrieve_only else "answer")
+            self._show_mode()
         self._fill_sources()
         self._draw_files()
         self.pending -= set(self.view.values)
@@ -4760,14 +5111,15 @@ class _ChatApp:
                              f"{len(question):,}: shorten it.", "warn")
             return
         view = self.view
+        retrieve = view.retrieve_only
         self.busy = True
-        self.send_button.disabled, self.send_button.description = True, "Asking…"
+        self.send_button.disabled, self.send_button.description = True, "Searching…" if retrieve else "Asking…"
         self.question.value = ""
         self._add(_question_html(question))
         model = view._model_label(view.model or "")
         name = view.core.kb_name(view.kb) if view.kb else "the knowledge base"
-        waiting = (f'<div class="msg bot wait"><span class="dots"><i></i><i></i><i></i></span>Searching '
-                   f"{_esc(name)} and asking {_esc(model)}…</div>")
+        doing = f"Searching {_esc(name)}" + (" (retrieve only: no answer)" if retrieve else f" and asking {_esc(model)}")
+        waiting = f'<div class="msg bot wait"><span class="dots"><i></i><i></i><i></i></span>{doing}…</div>'
         bot = self._add(waiting)
         self._show_log()
         if self.broken:
@@ -4783,7 +5135,7 @@ class _ChatApp:
                 bot.value = _wrap(_writing_html(model, text))
 
         try:
-            a = view._turn(question, on_text=on_text if view.stream else None)
+            a = view._turn(question, on_text=on_text if view.stream and not retrieve else None, retrieve_only=retrieve)
         except Exception as exc:  # shown in the conversation, where the answer would have been
             bot.value = _wrap(f'<div class="msg bot err">{_prose(self._error_text(exc))}<div class="who" '
                               'style="margin-top:6px">Your question is back in the box: change a setting, or the '
@@ -4797,7 +5149,39 @@ class _ChatApp:
             self._set_status(view._conversation_line())
         finally:
             self.busy = False
-            self.send_button.disabled, self.send_button.description = False, "Send"
+            self.send_button.disabled = False
+            self._show_mode()
+
+    def _show_mode(self) -> None:
+        """The box, the button and the model picker as Answer or Retrieve only has them: a search needs no model."""
+        retrieve = self.view.retrieve_only
+        self.send_button.description = "Retrieve" if retrieve else "Send"
+        self.send_button.tooltip = "Search only (Enter does too)" if retrieve else "Ask (Enter does too)"
+        self.question.placeholder = ("Type a question to search for" if retrieve
+                                     else "Ask a question, then press Enter")
+        self.model_pick.disabled = retrieve
+
+    def _mode_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        view = self.view
+        view.retrieve_only = change["new"] == "retrieve"
+        self._show_mode()
+        self._sync_rows()
+        self._refresh()
+        again = ""
+        if view.answers and not self.question.value.strip():  # to ask the last question the other way
+            self.question.value = view.answers[-1].question
+            again = " Your last question is back in the box: press Enter to " + (
+                "see what it retrieves." if view.retrieve_only else "ask it.")
+        if view.retrieve_only:
+            unsent = view._unsent()
+            self._set_status("Retrieve only: the next questions only search, and show every passage found, best "
+                             "first, with no answer." + (f" {_waiting(unsent)} for Answer." if unsent else "")
+                             + again, "ok")
+        else:
+            self._set_status(f"Answer: the next questions get an answer from {view._model_label(view.model or '')}."
+                             + again, "ok")
 
     def added(self, a: Answer) -> None:
         """An answer asked from another cell (ask()) joins the conversation shown here."""
@@ -4925,12 +5309,18 @@ class _ChatApp:
         self.inputs[key], self.row_notes[key], self.removes[key] = value_box, note, remove
         return row
 
+    def _off(self, key: str) -> bool:
+        """Whether a setting is left out because the window is on Retrieve only (it's for the answer)."""
+        return self.view.retrieve_only and _retrieve_path(self.schema.fields[key].path) is None
+
     def _note_row(self, key: str) -> None:
         f = self.schema.fields[key]
         if key in self.broken:
             text, css = f"Not sent: {_esc(self.broken[key])}", "rp bad"
         elif key in self.pending:
             text, css = "Not sent until you fill it in.", "rp pending"
+        elif self._off(key):
+            text, css = "Not sent with Retrieve only: it's for the answer.", "rp off"
         else:
             text, css = _esc(describe_setting(f, self.view.values.get(key))), "rp"
         self._set(self.row_notes[key], _wrap(f'<div class="{css}">{text}</div>'))
@@ -4940,7 +5330,7 @@ class _ChatApp:
         row = self.rows.get(key)
         if row is not None:
             for css_class, on in (("kbc-broken", key in self.broken), ("kbc-pending", key in self.pending),
-                                  ("kbc-fresh", key == self.fresh)):
+                                  ("kbc-fresh", key == self.fresh), ("kbc-off", self._off(key))):
                 if on and css_class not in row._dom_classes:
                     row.add_class(css_class)
                 elif not on and css_class in row._dom_classes:
@@ -4968,7 +5358,10 @@ class _ChatApp:
             if f.group != group:
                 group = f.group
                 if group not in self.headers:
-                    self.headers[group] = self.w.HTML(_wrap(f'<div class="gh">{_esc(group)}</div>'))
+                    self.headers[group] = self.w.HTML()
+                off = self.view.retrieve_only and group != "Retrieval"
+                self._set(self.headers[group], _wrap(f'<div class="gh">{_esc(group)}'
+                                                     + (" · not sent with Retrieve only" if off else "") + "</div>"))
                 children.append(self.headers[group])
             children.append(self.rows[key])
         if not keys:
@@ -5170,14 +5563,16 @@ class _ChatApp:
             region = view.core.region
         except ValueError:
             region = "no region"
-        sub = " · ".join(filter(None, [view.kb if view.kb != name else "", region, "RetrieveAndGenerate"]))
+        api = "Retrieve (retrieve only)" if view.retrieve_only else "RetrieveAndGenerate"
+        sub = " · ".join(filter(None, [view.kb if view.kb != name else "", region, api]))
         self._set(self.title, _wrap(f'<div class="hd">{_AVATAR}<div style="min-width:0"><h3>{_esc(name)}<span '
                                     f'class="badge">{_esc(_BADGE)}</span></h3><div class="sub">{_esc(sub)}</div></div>'
                                     "</div>"))
         params, problems = view._preview()
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
         found += [("warn", f"{key} isn't sent: {why}") for key, why in self.broken.items()]
-        found += settings_findings(view.values, view.model or "")
+        sent = retrieve_settings(view.values, self.schema) if view.retrieve_only else view.values
+        found += settings_findings(sent, view.model or "")
         notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(found))
         self._set(self.findings, _wrap(f'<div style="margin:0 0 10px">{notes}</div>') if notes else "")
         self._set(self.setup, _wrap(f'<details class="setup"><summary>Open this setup again<span class="hint">the '
@@ -5202,7 +5597,11 @@ class _ChatApp:
         else:
             body = _json_html(params, marks=view._marks(), notes=view._json_notes())
             hint = "Highlighted: your settings. Click ▸ to fold a part."
-        lead = "The request your next question sends" + (", continuing this conversation" if view.session_id else "")
+        if view.retrieve_only:
+            lead = "The request your next question sends: Retrieve, the search only, with no answer"
+        else:
+            lead = "The request your next question sends" + (", continuing this conversation" if view.session_id
+                                                             else "")
         self._set(self.request_view, _wrap(f'<div class="pd">{_esc(lead)}. {_esc(hint)}</div>{body}'))
 
     def _render_response(self) -> None:
@@ -5211,11 +5610,12 @@ class _ChatApp:
                                                 "and what Bedrock sends back shows here as JSON.</div>"))
             return
         a = self.view.answers[-1]
-        how = "streamed: built from the stream's events" if a.streamed else "RetrieveAndGenerate"
-        meta = f"Answer {len(self.view.answers)} · {a.seconds:.1f}s · {how}"
+        how = ("Retrieve" if a.retrieve_only else "streamed: built from the stream's events" if a.streamed
+               else "RetrieveAndGenerate")
+        meta = f"{'Search' if a.retrieve_only else 'Answer'} {len(self.view.answers)} · {a.seconds:.1f}s · {how}"
         if self.response_mode.value == "Request sent":
-            body = _json_html(a.request, marks={self.schema.fields[k].path: f"set as {k}" for k in a.settings
-                                                if k in self.schema.fields and k != "reranker"})
+            body = _json_html(a.request, marks=_setting_marks([k for k in a.settings if k != "reranker"], self.schema,
+                                                              a.retrieve_only))
         else:
             body = _json_html(a.response, open_depth=3)
         self._set(self.response_view, _wrap(f'<div class="pd" style="margin-top:8px">{_esc(meta)}</div>{body}'))
@@ -5260,11 +5660,12 @@ class _ChatApp:
         changes = []
         try:
             picked, settings = settings_from_request(json.loads(self.edit_base), self.schema)
-            changes = _diff(settings, self.view.values)
-            for label, key, path in (("the knowledge base", "knowledgeBaseId", (*_KB_CONFIG, "knowledgeBaseId")),
-                                     ("the model", "modelArn", (*_KB_CONFIG, "modelArn")),
-                                     ("the conversation", "sessionId", ("sessionId",))):
-                if picked.get(key) != _get(self._params, path):
+            now, _ = settings_from_request(self._params or {}, self.schema)
+            sent = retrieve_settings(self.view.values, self.schema) if picked.get("retrieve_only") else self.view.values
+            changes = _diff(settings, sent)
+            for label, key in (("the knowledge base", "knowledgeBaseId"), ("the model", "modelArn"),
+                               ("the conversation", "sessionId"), ("Answer / Retrieve only", "retrieve_only")):
+                if picked.get(key) != now.get(key):
                     changes.append(f"{label} changed")
         except (ValueError, TypeError):
             pass
@@ -5301,6 +5702,8 @@ class BedrockChatView:
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
     stream: show answers in the window as they're written.
+    retrieve_only: the window's Send only searches (Retrieve): every passage found, with no answer. The window's
+    Answer / Retrieve only switch changes it; ask() always answers and retrieve() always only searches.
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'. max_rows: default cap for long tables
     (0 for no cap). progress: 'auto' (a tqdm bar while a report's question runs, when tqdm is installed; else a line
     with the time), 'plain' (always that line) or 'off'.
@@ -5308,7 +5711,7 @@ class BedrockChatView:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
-        "💬 Chat": ("app", "ask", "new_chat", "transcript", "last"),
+        "💬 Chat": ("app", "ask", "retrieve", "new_chat", "transcript", "last"),
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request"),
         "📚 Knowledge base, files and model": ("use", "kbs", "files", "models"),
         "❓ Help": ("help",),
@@ -5329,6 +5732,7 @@ class BedrockChatView:
         stream: bool = True,
         data_source: Any = None,
         files: Any = None,
+        retrieve_only: bool = False,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -5343,13 +5747,14 @@ class BedrockChatView:
         self.picked_files: Any = files  # what files= named; their s3:// paths once resolved ([] = all of them)
         self.model = model  # what model= named; the ID the window picked once it's open
         self.stream = stream
+        self.retrieve_only = bool(retrieve_only)  # the window's Send only searches; request() shows that request
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
         self.progress = progress
         self.values: dict[str, Any] = normalize_settings(
             DEFAULT_SETTINGS if settings is None else settings, self.core.schema()
         )
-        self.answers: list[Answer] = []  # this conversation, oldest first
+        self.answers: list[Answer] = []  # this conversation, oldest first; retrieve-only searches too
         self.session_id: str | None = None  # Bedrock's session for it, once the first answer came back
         self._app: _ChatApp | None = None
         self._shown_in: Any = None  # the cell that last showed the window
@@ -5738,16 +6143,47 @@ class BedrockChatView:
         self.values = new
         return changes
 
-    def _turn(self, question: str, on_text: Callable[[str], None] | None = None) -> Answer:
-        """Asks one question of this conversation and keeps the answer."""
+    def _turn(self, question: str, on_text: Callable[[str], None] | None = None, retrieve_only: bool = False
+              ) -> Answer:
+        """Asks one question of this conversation and keeps the answer. retrieve_only=True only searches (Retrieve):
+        the passages join the conversation, and the Bedrock session the answers share isn't touched."""
         kb_id = self._kb_id()
-        a = self.core.ask(kb_id, question, self.values, model=self.model, session_id=self.session_id,
-                          stream=on_text is not None, on_text=on_text, data_source=self._sources(kb_id),
-                          files=self._files_for(kb_id))
+        if retrieve_only:
+            a = self.core.retrieve(kb_id, question, self.values, data_source=self._sources(kb_id),
+                                   files=self._files_for(kb_id))
+        else:
+            a = self.core.ask(kb_id, question, self.values, model=self.model, session_id=self.session_id,
+                              stream=on_text is not None, on_text=on_text, data_source=self._sources(kb_id),
+                              files=self._files_for(kb_id))
+            self.session_id = a.session_id
         a.kb_name = a.kb_name or self.core.kb_name(kb_id)
-        self.session_id = a.session_id
         self.answers.append(a)
         return a
+
+    def _counterpart(self, a: Answer) -> Answer | None:
+        """The latest question before `a` that asked the same thing the other way (an answer for a search, a search
+        for an answer), to compare the two."""
+        wanted = " ".join(a.question.lower().split())
+        before = next((i for i, t in enumerate(self.answers) if t is a), len(self.answers))
+        for t in reversed(self.answers[:before]):
+            if (t.retrieve_only != a.retrieve_only and t.kb_id == a.kb_id
+                    and " ".join(t.question.lower().split()) == wanted):
+                return t
+        return None
+
+    def _findings(self, a: Answer) -> list[tuple[str, str]]:
+        """An answer's (or a search's) findings, and what comparing it with the same question asked the other way
+        shows."""
+        found = answer_findings(a)
+        other = self._counterpart(a)
+        if other is not None:
+            found += compare_findings(a, other) if a.retrieve_only else compare_findings(other, a)
+        return found
+
+    def _ranks(self, a: Answer) -> dict[int, int]:
+        """For a search: {rank: [n]} of its passages the answer to the same question cites ({} without one)."""
+        other = self._counterpart(a) if a.retrieve_only else None
+        return cited_ranks(a, other) if other is not None else {}
 
     def _cost_text(self, a: Answer) -> str:
         cost = answer_cost(a, self.core.model_prices, self.core.prices)
@@ -5757,10 +6193,16 @@ class BedrockChatView:
         return text if text.startswith("<") else "~" + text
 
     def _meta(self, a: Answer) -> str:
-        """'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004'."""
+        """'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004', or for a search 'Retrieve only · 8
+        passages · best score 0.821 · 0.4s · <$0.01'."""
         only = [describe_sources(a.data_sources) if a.data_sources else "", describe_files(a.files) if a.files else ""]
-        parts = [self._model_label(a.model)] + ([f"only {' and '.join(filter(None, only))}"] if any(only) else []) + [
-            f"{a.seconds:.1f}s"]
+        narrowed = [f"only {' and '.join(filter(None, only))}"] if any(only) else []
+        if a.retrieve_only:
+            top = max((p.score for p in a.sources if p.score is not None), default=None)
+            parts = ["Retrieve only", *narrowed, _plural(len(a.sources), "passage")]
+            parts += [f"best score {_score(top)}"] if top is not None else []
+            return " · ".join(parts + [f"{a.seconds:.1f}s", self._cost_text(a)])
+        parts = [self._model_label(a.model), *narrowed, f"{a.seconds:.1f}s"]
         if a.first_words is not None:
             parts[-1] += f" (first words {a.first_words:.1f}s)"
         if a.text.strip():
@@ -5768,48 +6210,78 @@ class BedrockChatView:
         return " · ".join(parts + [self._cost_text(a)])
 
     def _turn_html(self, a: Answer) -> str:
-        return _turn_html(a, self._meta(a), answer_findings(a))
+        if a.retrieve_only:
+            return _search_html(a, self._meta(a), self._findings(a), self._ranks(a))
+        return _turn_html(a, self._meta(a), self._findings(a))
 
     def _conversation_line(self) -> str:
         if not self.answers:
             return "A new conversation: Bedrock keeps the earlier questions in mind for follow-ups."
         costs = [answer_cost(a, self.core.model_prices, self.core.prices) for a in self.answers]
         total = human_money(sum(c for c in costs if c is not None))
-        line = f"{_plural(len(self.answers), 'question')} in this conversation · {total} so far (estimated)"
+        searches = sum(a.retrieve_only for a in self.answers)
+        line = (f"{_plural(len(self.answers), 'question')} in this conversation"
+                + (f" ({searches} retrieve only)" if searches else "") + f" · {total} so far (estimated)")
         if self.session_id:
             line += f" · session {self.session_id[:8]}…"
         return line + " · New chat starts over."
 
-    def _preview(self, question: str | None = None) -> tuple[dict[str, Any], list[str]]:
-        """The request the next question would send, and what Bedrock would refuse in it. Never raises: a knowledge
-        base or model that can't be resolved yet shows as a placeholder."""
+    def _retrieving(self, retrieve_only: bool | None) -> bool:
+        return self.retrieve_only if retrieve_only is None else bool(retrieve_only)
+
+    def _unsent(self, retrieve_only: bool | None = None) -> list[str]:
+        """The settings the next request leaves out: the answer's, when it only searches."""
+        if not self._retrieving(retrieve_only):
+            return []
+        sent = retrieve_settings(self.values, self.core.schema())
+        return [key for key in self.values if key not in sent]
+
+    def _preview(self, question: str | None = None, retrieve_only: bool | None = None
+                 ) -> tuple[dict[str, Any], list[str]]:
+        """The request the next question would send (a Retrieve request when it only searches; the window's mode
+        when retrieve_only is None), and what Bedrock would refuse in it. Never raises: a knowledge base or model that
+        can't be resolved yet shows as a placeholder."""
         try:
             kb_id = self._kb_id()
         except (ValueError, ClientError, BotoCoreError):
             kb_id = "<knowledge base ID>"
-        try:
-            _, arn = self.core.resolve_model(self.model)
-        except (ValueError, ClientError, BotoCoreError):
-            arn = str(self.model or self.core.default_model or DEFAULT_MODEL)
         schema = self.core.schema()
-        params = build_request(question or "<your question>", kb_id, arn, self.values, schema,
-                               session_id=self.session_id, region=self._region(), data_sources=self._sources_now(),
-                               files=self._files_now())
+        if self._retrieving(retrieve_only):
+            params = build_retrieve_request(question or "<your question>", kb_id, self.values, schema,
+                                            region=self._region(), data_sources=self._sources_now(),
+                                            files=self._files_now())
+        else:
+            try:
+                _, arn = self.core.resolve_model(self.model)
+            except (ValueError, ClientError, BotoCoreError):
+                arn = str(self.model or self.core.default_model or DEFAULT_MODEL)
+            params = build_request(question or "<your question>", kb_id, arn, self.values, schema,
+                                   session_id=self.session_id, region=self._region(),
+                                   data_sources=self._sources_now(), files=self._files_now())
         problems = [p for p in validate_request(params, schema) if not kb_id.startswith("<") or "knowledgeBaseId"
                     not in p]
         return params, problems
 
-    def _marks(self) -> dict[tuple[str, ...], str]:
-        fields = self.core.schema().fields
-        return {fields[key].path: f"set as {key}" for key in self.values if key in fields}
+    def _marks(self, retrieve_only: bool | None = None) -> dict[tuple[str, ...], str]:
+        return _setting_marks(self.values, self.core.schema(), self._retrieving(retrieve_only))
 
-    def _json_notes(self) -> dict[tuple[str, ...], str]:
-        notes = {("input", "text"): "your question", ("sessionId",): "continues this conversation",
-                 (*_KB_CONFIG, "knowledgeBaseId"): "knowledge base picker", (*_KB_CONFIG, "modelArn"): "model picker"}
-        notes.update({path: "required; filled in for you" for path, _ in self.core.schema().auto})
+    def _json_notes(self, retrieve_only: bool | None = None) -> dict[tuple[str, ...], str]:
+        schema = self.core.schema()
+        if self._retrieving(retrieve_only):
+            notes = {("retrievalQuery", "text"): "your question", ("knowledgeBaseId",): "knowledge base picker"}
+            for path, _ in schema.auto:
+                if _retrieve_path(path):
+                    notes[_retrieve_path(path)] = "required; filled in for you"
+            where = _retrieve_path(_FILTER_PATH)
+        else:
+            notes = {("input", "text"): "your question", ("sessionId",): "continues this conversation",
+                     (*_KB_CONFIG, "knowledgeBaseId"): "knowledge base picker",
+                     (*_KB_CONFIG, "modelArn"): "model picker"}
+            notes.update({path: "required; filled in for you" for path, _ in schema.auto})
+            where = _FILTER_PATH
         pickers = [name for name, on in (("data source", self._sources_now()), ("files", self._files_now())) if on]
-        if pickers:
-            notes[_FILTER_PATH] = " and ".join(pickers) + " picker" + ("s" if len(pickers) > 1 else "") + (
+        if pickers and where:
+            notes[where] = " and ".join(pickers) + " picker" + ("s" if len(pickers) > 1 else "") + (
                 " and your filter" if "filter" in self.values else "")
         return notes
 
@@ -5824,6 +6296,8 @@ class BedrockChatView:
         uris = self._files_now()
         if uris:
             kwargs["files"] = list(file_labels(uris).values())
+        if self.retrieve_only:
+            kwargs["retrieve_only"] = True
         kwargs.update({k: v for k, v in self.values.items() if k.isidentifier()})
         paths = {k: v for k, v in self.values.items() if not k.isidentifier()}
         if paths or any(key not in self.values for key in DEFAULT_SETTINGS):
@@ -5831,8 +6305,10 @@ class BedrockChatView:
         return _call("chat", *args, **kwargs)
 
     def _apply_request(self, text: str) -> list[str]:
-        """Takes a request edited by hand: its knowledge base, model, session and settings become the chat's. Raises
-        a ValueError, changing nothing, if Bedrock would refuse it or the chat can't send it."""
+        """Takes a request edited by hand: its knowledge base, model, session and settings become the chat's. A
+        Retrieve request turns Retrieve only on (a RetrieveAndGenerate one turns it off) and leaves the answer's
+        settings, which it has no place for, as they are. Raises a ValueError, changing nothing, if Bedrock would
+        refuse it or the chat can't send it."""
         params = _loads(text, "The request")
         schema = self.core.schema()
         if not isinstance(params, dict):
@@ -5844,6 +6320,11 @@ class BedrockChatView:
                                 "generationConfiguration.additionalModelRequestFields: the model_fields setting.")
             raise ValueError("Bedrock would refuse this request:\n" + "\n".join(f"• {p}" for p in problems))
         picked, settings = settings_from_request(params, schema)
+        retrieve_only = bool(picked.get("retrieve_only"))
+        if retrieve_only:  # the answer's settings stay as they are: a Retrieve request has no place for them
+            sent = retrieve_settings(self.values, schema)
+            kept = {**{k: v for k, v in self.values.items() if k not in sent}, **settings}
+            settings = {key: kept[key] for key in schema.fields if key in kept}
         kb = picked.get("knowledgeBaseId")
         kb_id = self.core.resolve(kb) if kb else self._kb_id()
         sources = self.core.resolve_sources(kb_id, picked.get("dataSources") or [])
@@ -5859,6 +6340,9 @@ class BedrockChatView:
         if uris != files_before:
             changes.append(f"questions search {describe_files(uris)}")
         self.data_source, self.picked_files = sources, uris
+        if retrieve_only != self.retrieve_only:
+            changes.append("Retrieve only: questions only search" if retrieve_only else "Answer: questions get an answer")
+            self.retrieve_only = retrieve_only
         model = picked.get("modelArn")
         if model:
             try:
@@ -5869,7 +6353,7 @@ class BedrockChatView:
                 self.model = self._model_from_arn(model)
                 changes.append(f"model {self._model_label(self.model)}")
         session = picked.get("sessionId")
-        if session != self.session_id and not (session is None and not self.answers):
+        if not retrieve_only and session != self.session_id and not (session is None and not self.answers):
             changes.append("a new conversation" if session is None else f"session {session}")
             self.session_id = session
         changes += _diff(self.values, settings)
@@ -5883,9 +6367,76 @@ class BedrockChatView:
                 return m.invoke_id
         return arn
 
+    def _search_blocks(self, a: Answer, number: int, *, full: bool = False) -> list[Any]:
+        """A retrieve-only search: title, cards, findings and every passage found, best first, with its score and the
+        [n] the answer to the same question cites it as; full=True shows each passage whole, with the request, the
+        response and the call in Python."""
+        kb = a.kb_name or a.kb_id
+        only = "".join([f" · only {describe_sources(a.data_sources)}" if a.data_sources else "",
+                        f" · only {describe_files(a.files)}" if a.files else ""])
+        other = self._counterpart(a)
+        ranks = cited_ranks(a, other) if other is not None else {}
+        findings = self._findings(a)
+        top = max((p.score for p in a.sources if p.score is not None), default=None)
+        cards: list[tuple[str, ...]] = [
+            ("Passages", f"{len(a.sources):,}", "" if a.sources else "warn"),
+            ("Best score", _score(top) or "-"),
+            ("Files", f"{len({p.uri or p.source for p in a.sources}):,}"),
+        ]
+        if other is not None:
+            cards.append(("Cited by the answer", f"{len(ranks)} of {len(a.sources)}"))
+        cards += [("Est. cost", self._cost_text(a)), ("Time", f"{a.seconds:.1f}s")]
+        blocks: list[Any] = [
+            _Title(f"{kb}: {_clip(a.question, 80)}",
+                   f"Bedrock Retrieve: the search only, no answer · question {number} of this conversation{only} · "
+                   f"cost at {self._price_basis()}"),
+            _Cards(cards),
+            _Findings(findings),
+        ]
+        terms = question_terms(a.question)
+        names = self._source_names(a.kb_id, a.sources)
+        rows = [
+            [str(p.rank), _score(p.score) or "-", source_name(p.uri) or p.uri or "-",
+             "-" if p.page is None else str(p.page)]
+            + ([names.get(p.data_source_id, "-")] if names else [])
+            + ([f"[{ranks[p.rank]}]" if p.rank in ranks else "-"] if other is not None else [])
+            + [p.text if full else f'"{best_snippet(p.text, terms, 90)}"']
+            for p in a.sources
+        ]
+        headers = (["#", "Score", "File", "Page"] + (["Data source"] if names else [])
+                   + (["Cited as"] if other is not None else []) + ["Passage"])
+        blocks.append(_Table(headers, rows, title="Passages, best first", max_rows=0))
+        if full:
+            marks = _setting_marks(a.settings, self.core.schema(), retrieve_only=True)
+            blocks += [
+                _Json(a.request, "Request sent", marks=marks, notes=self._json_notes(retrieve_only=True)),
+                _Json(a.response, "Response", open_depth=3),
+                _Code(python_call(a.request, self._region()), "The same call in Python"),
+            ]
+        sent = ", ".join(f"{k}={_short(v, 30)}" for k, v in a.settings.items()) or "none set"
+        blocks.append(_Note(f"Retrieve sent the search settings only ({sent}), with the data source and files an "
+                            "answer would use. Scores rank this search's passages: compare them with each other, not "
+                            "with another search's. The cost is the question's embedding"
+                            + (" and the reranking." if a.settings.get("reranker") else ".")))
+        steps: list[tuple[str, str]] = []
+        if other is None:
+            steps.append((_call("ask", a.question), "the answer to the same question, to compare"))
+        steps.append(("request(retrieve_only=True)", "the Retrieve request the next search sends") if full else
+                     ("last()", "every passage in full, the request and the response"))
+        top_source = None if a.data_sources else self._top_source(a.sources, names)
+        if top_source:
+            steps.append((_call("use", data_source=top_source[0]), f"search only data source {top_source[0]!r}, where "
+                          f"{_plural(top_source[1], 'passage')} came from"))
+        elif (a.settings.get("n") or 5) < 10:
+            steps.append(("set(n=10)", "retrieve more passages"))
+        blocks.append(_Next(steps))
+        return blocks
+
     def _answer_blocks(self, a: Answer, number: int, *, full: bool = False) -> list[Any]:
         """Title, cards, the answer, findings and sources; full=True adds every passage in full, the request and the
         response."""
+        if a.retrieve_only:
+            return self._search_blocks(a, number, full=full)
         kb = a.kb_name or a.kb_id
         tokens = f"~{a.input_tokens + a.output_tokens:,}"
         only = "".join([f" · only {describe_sources(a.data_sources)}" if a.data_sources else "",
@@ -5903,7 +6454,7 @@ class BedrockChatView:
                 ("Time", f"{a.seconds:.1f}s"),
             ]),
             _Answer(a.text, a.citations),
-            _Findings(answer_findings(a)),
+            _Findings(self._findings(a)),
         ]
         terms = question_terms(a.question)
         names = self._source_names(a.kb_id, a.sources)
@@ -5916,10 +6467,9 @@ class BedrockChatView:
         headers = ["#", "File", "Page"] + (["Data source"] if names else []) + ["Passage"]
         blocks.append(_Table(headers, rows, title="Sources", max_rows=0))
         if full:
-            fields = self.core.schema().fields
-            marks = {fields[k].path: f"set as {k}" for k in a.settings if k in fields}
+            marks = _setting_marks(a.settings, self.core.schema())
             blocks += [
-                _Json(a.request, "Request sent", marks=marks, notes=self._json_notes()),
+                _Json(a.request, "Request sent", marks=marks, notes=self._json_notes(retrieve_only=False)),
                 _Json(a.response, "Response", open_depth=3),
                 _Code(python_call(a.request, self._region()), "The same call in Python"),
             ]
@@ -5932,6 +6482,9 @@ class BedrockChatView:
         if top_source:
             steps.append((_call("use", data_source=top_source[0]), f"ask only data source {top_source[0]!r}, where "
                           f"{_plural(top_source[1], 'source')} came from"))
+        elif self._counterpart(a) is None:
+            steps.append((_call("retrieve", a.question), "every passage the search finds, to see what the answer "
+                          "left out"))
         else:
             steps.append(("app()", "the chat window, with settings and JSON side by side"))
         blocks.append(_Next(steps))
@@ -5971,9 +6524,22 @@ class BedrockChatView:
     @_friendly_errors
     def ask(self, question: str) -> None:
         """The answer to a question, with [1][2] citations, grounded %, sources, model, estimated cost and time.
-        Each question follows up on the ones before it (new_chat() starts over); an open window shows it too."""
+        Each question follows up on the ones before it (new_chat() starts over); an open window shows it too.
+        retrieve('...') shows only the search behind it."""
         with self._progress("Asking", unit="answers"):
             a = self._turn(question)
+        if self._app is not None:
+            self._app.added(a)
+        self._show(self._answer_blocks(a, len(self.answers)))
+
+    @_friendly_errors
+    def retrieve(self, question: str) -> None:
+        """Only the search behind an answer: every passage a question retrieves, best first, with its score, and no
+        answer (Retrieve, with the same settings, data source and files, without the model). Asked both ways, the
+        same question shows which passages the answer cites, and whether a poor answer comes from the search or
+        from the model. It joins the conversation, and an open window shows it too."""
+        with self._progress("Searching", unit="searches"):
+            a = self._turn(question, retrieve_only=True)
         if self._app is not None:
             self._app.added(a)
         self._show(self._answer_blocks(a, len(self.answers)))
@@ -5994,17 +6560,20 @@ class BedrockChatView:
             raise _Hint("No questions yet: ask('...') or app() first.")
         a0 = self.answers[0]
         costs = [answer_cost(a, self.core.model_prices, self.core.prices) for a in self.answers]
+        searches = sum(a.retrieve_only for a in self.answers)
+        apis = " and ".join(name for name, used in (("RetrieveAndGenerate", searches < len(self.answers)),
+                                                    ("Retrieve", searches)) if used)
+        models = ", ".join(dict.fromkeys(self._model_label(a.model) for a in self.answers if not a.retrieve_only))
+        cards: list[tuple[str, ...]] = [("Questions", f"{len(self.answers):,}")]
+        cards += [("Retrieve only", f"{searches:,}")] if searches else []
+        cards += [("Est. cost", human_money(sum(c for c in costs if c is not None))), ("Models", models or "-"),
+                  ("Session", (self.session_id or "-")[:12])]
         blocks: list[Any] = [
             _Title(f"Conversation with {a0.kb_name or a0.kb_id} ({_plural(len(self.answers), 'question')})",
-                   f"Bedrock RetrieveAndGenerate · costs estimated at {self._price_basis(models=True)}"),
-            _Cards([
-                ("Questions", f"{len(self.answers):,}"),
-                ("Est. cost", human_money(sum(c for c in costs if c is not None))),
-                ("Models", ", ".join(dict.fromkeys(self._model_label(a.model) for a in self.answers))),
-                ("Session", (self.session_id or "-")[:12]),
-            ]),
+                   f"Bedrock {apis} · costs estimated at {self._price_basis(models=True)}"),
+            _Cards(cards),
         ]
-        blocks += [_Turn(a, self._meta(a), answer_findings(a)) for a in self.answers]
+        blocks += [_Turn(a, self._meta(a), self._findings(a), self._ranks(a)) for a in self.answers]
         blocks.append(_Next([("last()", "the last answer's sources in full, its request and response"),
                              ("new_chat()", "start over")]))
         self._show(blocks)
@@ -6012,7 +6581,7 @@ class BedrockChatView:
     @_friendly_errors
     def last(self) -> None:
         """The last answer in full: every cited passage, the exact request sent and the response, and the same call in
-        Python."""
+        Python. After a retrieve-only search, every passage it found, in full."""
         if not self.answers:
             raise _Hint("No questions yet: ask('...') or app() first.")
         self._show(self._answer_blocks(self.answers[-1], len(self.answers), full=True))
@@ -6038,8 +6607,14 @@ class BedrockChatView:
         if not self.values:
             blocks.append(_Note("Nothing is set, so Bedrock uses its defaults: 5 passages, its own prompt and the "
                                 "model's own temperature."))
+        unsent = self._unsent()
+        if unsent:
+            blocks.append(_Note(f"The window is on Retrieve only, so its questions only search, and send the search "
+                                f"settings only: {_waiting(unsent)} for an answer (ask(), or Answer in the "
+                                "window)."))
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
-        blocks.append(_Findings(found + settings_findings(self.values, self.model or ""),
+        sent = retrieve_settings(self.values, self.core.schema()) if self.retrieve_only else self.values
+        blocks.append(_Findings(found + settings_findings(sent, self.model or ""),
                                 empty="Nothing here looks wrong, as far as the API's own checks go."))
         blocks.append(_Code(self._setup_call(), "Open this setup again"))
         blocks.append(_Next([
@@ -6112,23 +6687,37 @@ class BedrockChatView:
         self._show(blocks)
 
     @_friendly_errors
-    def request(self, question: str | None = None) -> None:
+    def request(self, question: str | None = None, retrieve_only: bool | None = None) -> None:
         """The exact RetrieveAndGenerate request your next question sends, as highlighted JSON, and the same call in
-        Python. Nothing is sent."""
-        params, problems = self._preview(_question_text(question) if question is not None else None)
+        Python. Nothing is sent. retrieve_only=True shows retrieve()'s Retrieve request (the search only), False the
+        answer's; by default, the one the window's Send makes."""
+        retrieve = self._retrieving(retrieve_only)
+        params, problems = self._preview(_question_text(question) if question is not None else None, retrieve)
         kb = self.core.kb_name(self.kb) if self.kb else "(not picked yet)"
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
-        self._show([
+        unsent = self._unsent(retrieve)
+        sent = retrieve_settings(self.values, self.core.schema()) if retrieve else self.values
+        blocks: list[Any] = [
             _Title("The request " + (f"for: {_clip(question, 70)}" if question else "your next question sends"),
-                   "RetrieveAndGenerate · highlighted: your settings · nothing is sent"),
+                   ("Retrieve: the search only, no answer" if retrieve else "RetrieveAndGenerate")
+                   + " · highlighted: your settings · nothing is sent"),
             _Cards([("Knowledge base", kb), ("Data source", self._sources_text()), ("Files", self._files_text()),
-                    ("Model", self._model_label(self.model or "")), ("Settings", f"{len(self.values):,}"),
-                    ("Conversation", "continues this one" if self.session_id else "new")]),
-            _Findings(found + settings_findings(self.values, self.model or "")),
-            _Json(params, "Request", marks=self._marks(), notes=self._json_notes()),
+                    ("Model", "none: no answer" if retrieve else self._model_label(self.model or "")),
+                    ("Settings", f"{len(sent):,} of {len(self.values):,}" if unsent else f"{len(self.values):,}"),
+                    ("Conversation", "not part of it" if retrieve else "continues this one" if self.session_id
+                     else "new")]),
+            _Findings(found + settings_findings(sent, self.model or "")),
+        ]
+        if unsent:
+            blocks.append(_Note(f"Retrieve sends the search settings only: {_waiting(unsent)} for an answer."))
+        blocks += [
+            _Json(params, "Request", marks=self._marks(retrieve), notes=self._json_notes(retrieve)),
             _Code(python_call(params, self._region()), "The same call in Python"),
-            _Next([("settings()", "the settings in plain English"), (self._next_set(), "change one")]),
-        ])
+            _Next([("settings()", "the settings in plain English"), (self._next_set(), "change one"),
+                   (_call("request", retrieve_only=not retrieve), "the answer's request" if retrieve else
+                    "the search-only request retrieve() sends")]),
+        ]
+        self._show(blocks)
 
     # ------------------------------------------------------ knowledge base, model
 
@@ -6318,6 +6907,7 @@ def chat(
     stream: bool = True,
     data_source: Any = None,
     files: Any = None,
+    retrieve_only: bool = False,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
@@ -6328,12 +6918,14 @@ def chat(
         chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
         chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
         chat("support-docs", settings={"generationConfiguration.performanceConfig.latency": "optimized"})
+        chat("support-docs", retrieve_only=True)      # questions only search: every passage found, no answer
 
     Settings passed as keywords (or settings=, for paths) are added to DEFAULT_SETTINGS; settings={} starts from none.
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
-    region and profile; stream=False shows each answer only when it's complete."""
+    region and profile; stream=False shows each answer only when it's complete. retrieve_only=True opens the window
+    on Retrieve only: questions show every passage the search finds, and no answer."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
-                           stream=stream, data_source=data_source, files=files)
+                           stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
     for name, value in wanted.items():
         try:
