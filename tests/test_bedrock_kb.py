@@ -385,6 +385,8 @@ PROFILES = [
 OPUS_PROFILE = (
     f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.anthropic.claude-opus-5"
 )
+HAIKU = "us.anthropic.claude-haiku-4-5-20251001-v1:0"  # what DEFAULT_MODEL resolves to
+HAIKU_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/{HAIKU}"
 
 
 def denied(stub, operation, code="AccessDeniedException"):
@@ -1852,10 +1854,7 @@ def test_resolve_sources_without_list_permission(aws, core):
 
 def test_resolve_model_short_names(aws, core):
     aws.models()
-    assert core.resolve_model() == (
-        "us.anthropic.claude-opus-5",
-        OPUS_PROFILE,
-    )  # Claude Opus 5 by default
+    assert core.resolve_model() == (HAIKU, HAIKU_PROFILE)  # Claude Haiku 4.5 by default
     assert core.resolve_model("opus")[0] == "us.anthropic.claude-opus-5"
     assert core.resolve_model("claude-opus-5-5")[0] == "us.anthropic.claude-opus-5-5"
     assert (
@@ -1888,7 +1887,7 @@ def test_resolve_model_uses_the_name_when_models_cant_be_listed(aws):
     )
 
 
-def rag_params(question, config=None, session=None, model_arn=OPUS_PROFILE, n=5):
+def rag_params(question, config=None, session=None, model_arn=HAIKU_PROFILE, n=5):
     kb = {
         "knowledgeBaseId": KB_ID,
         "modelArn": model_arn,
@@ -1919,7 +1918,7 @@ def test_retrieve_and_generate_sends_only_what_was_passed(aws, core):
     )  # no temperature, no max tokens, no prompt
     a = core.retrieve_and_generate("support-docs", "refund window?")
     assert (
-        a.model == "us.anthropic.claude-opus-5"
+        a.model == HAIKU
         and a.tokens_estimated
         and a.kb_name == "support-docs"
     )
@@ -2490,7 +2489,7 @@ def test_ui_ask(aws, ui, capsys):
         "Ask support-docs: How long do refunds take?",
         "Grounded: 75%",
         "Sources used: 3",
-        "Model: claude-opus-5 (KB engine)",
+        "Model: claude-haiku-4-5 (KB engine)",
         "Tokens: ~",
         " (estimate)",
         "Est. cost: <$0.01",
@@ -2742,7 +2741,7 @@ def test_ui_models(aws, ui, capsys):
         "Models for ask() in us-east-1 (6)",
         "On demand: 2",
         "Through a profile: 4",
-        "Default for ask(): us.anthropic.claude-opus-5",
+        "Default for ask(): us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "us.anthropic.claude-opus-5-5",
         "inference profile",
         "$5.50",
