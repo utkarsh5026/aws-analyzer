@@ -48,7 +48,9 @@ from bedrock_chat import (
     describe_files,
     file_labels,
     match_files,
+    match_kbs,
     parse_document,
+    search_rank,
     settings_from_request,
     split_data_sources,
     validate_request,
@@ -1192,6 +1194,32 @@ def test_ui_use_kbs_and_models(core, capsys):
     assert "us.anthropic.claude-sonnet-5 (in use)" in out and "amazon.nova-pro-v1:0" in out
     assert "Pass kb=, model=, data_source= or files=" in run(capsys, ui.use)
     assert "Did you mean 'sales'" in run(capsys, ui.use, "sale")
+    out = run(capsys, ui.kbs, "kbid65")  # part of an ID, any case
+    assert "Knowledge bases in us-east-1 (1 of 2)" in out and "matching 'kbid65' by name, ID or description" in out
+    assert "KBID654321" in out and "KBID123456" not in out
+    out = run(capsys, ui.kbs, f"arn:aws:bedrock:us-east-1:{ACCOUNT}:knowledge-base/{KB_ID}")
+    assert "(1 of 2)" in out and "support-docs" in out and "KBID654321" not in out
+    out = run(capsys, ui.kbs, "suport-docs")
+    assert "No knowledge base's name, ID or description holds 'suport-docs'. Did you mean 'support-docs'?" in out
+    assert "kbs() lists all 2." in out
+
+
+def test_search_rank_and_match_kbs():
+    assert search_rank("", ["anything"]) == 3  # an empty search finds everything
+    assert search_rank("KBID123456", ["support-docs", "KBID123456"]) == 0  # a whole ID
+    assert search_rank("kbid12", ["support-docs", "KBID123456"]) == 1  # the start of one, any case
+    assert search_rank("docs", ["support-docs"]) == 2
+    assert search_rank("refund answers", ["support-docs", "Refund and returns answers"]) == 3  # every word somewhere
+    assert search_rank("refund invoices", ["support-docs", "Refund and returns answers"]) is None
+    kbs = [chatmod.KnowledgeBase("KBID123456", "support-docs", "ACTIVE", "Refunds and returns"),
+           chatmod.KnowledgeBase("SUPP000001", "archive", "FAILED", "Old support answers"),
+           chatmod.KnowledgeBase("KBID654321", "sales", "ACTIVE", "Pitch decks")]
+    assert [kb.name for kb in match_kbs(kbs, "supp")] == ["support-docs", "archive"]  # names and IDs first
+    assert [kb.name for kb in match_kbs(kbs, "654321")] == ["sales"]
+    assert [kb.name for kb in match_kbs(kbs, f"arn:aws:bedrock:us-east-1:{ACCOUNT}:knowledge-base/KBID654321")] == [
+        "sales"]
+    assert [kb.name for kb in match_kbs(kbs, "failed")] == ["archive"]  # its status
+    assert match_kbs(kbs, "nothing") == [] and len(match_kbs(kbs, "")) == 3
 
 
 
@@ -1327,13 +1355,37 @@ def texts(app):
     return [bubble.value for bubble in app.bubbles]
 
 
+def click_line(picker, value):
+    """Opens a picker and clicks the line holding `value`, as a person would."""
+    if not picker.is_open:
+        picker.button.click()
+    picker.rows[value][1].click()
+
+
+def find(picker, text):
+    """Opens a picker and types in its search box -> the values of the lines it shows."""
+    if not picker.is_open:
+        picker.button.click()
+    picker.search.value = text
+    return picker.shown
+
+
+def enter(picker, text):
+    find(picker, text)
+    picker.search._handle_custom_msg({"event": "submit"}, [])
+
+
 def test_window_opens_on_the_knowledge_base_and_model(window):
     app = window._app
     assert "kbc-app" in app.root._dom_classes
     assert (app.kb_pick.value, app.model_pick.value) == (KB_ID, "us.anthropic.claude-opus-5")
-    assert ("Claude Opus 5 · Anthropic · $5.50 / $27.50 per 1M tokens", "us.anthropic.claude-opus-5") in (
-        app.model_pick.options)
-    assert [label for label, _ in app.model_pick.options][0].startswith("Nova Pro · Amazon")  # by provider
+    assert "support-docs" in app.kb_pick.face.value and KB_ID in app.kb_pick.face.value  # the field: name and ID
+    opus = app.model_pick._choice("us.anthropic.claude-opus-5")
+    assert (opus.title, opus.badge) == ("Claude Opus 5", "Anthropic · $5.50 / $27.50")
+    assert opus.note == "Anthropic · inference profile · $5.50 / $27.50 per 1M tokens"
+    assert "Claude Opus 5" in app.model_pick.face.value and "$5.50 / $27.50" in app.model_pick.face.value
+    assert app.model_pick.choices[0].title == "Nova Pro"  # by provider
+    assert not any(picker.is_open for picker in app.pickers)  # the lists open on a click
     assert list(app.rows) == ["n"] and app.inputs["n"].value == 5
     assert "Retrieves the 5 passages that match best." in app.row_notes["n"].value
     name = app.rows["n"].children[0]
@@ -1602,12 +1654,50 @@ def test_window_switches_model_and_knowledge_base(core, monkeypatch):
     assert view.kb == KB2_ID  # the first active one, by name
     app.question.value = "q"
     app._send()
-    app.model_pick.value = "us.anthropic.claude-sonnet-5"
+    click_line(app.model_pick, "us.anthropic.claude-sonnet-5")
     assert view.model == "us.anthropic.claude-sonnet-5" and view.answers  # a new model keeps the conversation
-    assert SONNET_PROFILE in app.request_view.value
-    app.kb_pick.value = KB_ID
+    assert SONNET_PROFILE in app.request_view.value and not app.model_pick.is_open  # a pick closes the list
+    assert "Claude Sonnet 5" in app.model_pick.face.value
+    click_line(app.kb_pick, KB_ID)
     assert view.kb == KB_ID and view.answers == [] and view.session_id is None
     assert "Now asking support-docs: a new conversation." in texts(app)[-1]
+
+
+def test_window_finds_a_knowledge_base_by_name_or_id(monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales"), kb_summary("ZZZZ999999", "archive", "FAILED")])
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    kb = app.kb_pick
+    kb.button.click()
+    assert kb.is_open and "kbc-open" in kb.field._dom_classes
+    assert kb.shown == ["ZZZZ999999", KB2_ID, KB_ID]  # by name
+    assert "kbc-on" in kb.rows[KB_ID][0]._dom_classes and "kbc-on" not in kb.rows[KB2_ID][0]._dom_classes
+    assert '<span class="dot bad">' in kb.rows["ZZZZ999999"][2].value and "failed · archive answers" in (
+        kb.rows["ZZZZ999999"][2].value)
+    assert "3 knowledge bases" in plain(kb.foot.value)
+    assert find(kb, "kbid65") == [KB2_ID]  # part of an ID, any case
+    assert "<mark>KBID65</mark>4321" in kb.rows[KB2_ID][2].value
+    assert "1 of 3 knowledge bases · Enter picks the first" in plain(kb.foot.value)
+    assert find(kb, f"arn:aws:bedrock:us-east-1:{ACCOUNT}:knowledge-base/{KB_ID}") == [KB_ID]  # an ARN
+    assert find(kb, "answers") == ["ZZZZ999999", KB2_ID, KB_ID]  # their descriptions
+    assert find(kb, "SUPPORT") == [KB_ID]
+    assert find(kb, "nothing-here") == [] and "No knowledge base matches 'nothing-here'. Enter tries it as an ID." in (
+        plain(kb.foot.value))
+    enter(kb, "nothing-here")
+    assert kb.is_open and "No knowledge base 'nothing-here' in us-east-1." in plain(kb.foot.value)
+    enter(kb, "kbid65")  # Enter picks the first line
+    assert view.kb == KB2_ID and not kb.is_open and kb.search.value == ""
+    assert "Now asking sales: a new conversation." in texts(app)[-1] and "sales" in kb.face.value
+    app.model_pick.button.click()
+    kb.button.click()  # one list open at a time
+    assert kb.is_open and not app.model_pick.is_open
+    kb.button.click()  # a second click closes it
+    assert not kb.is_open
+    view.use("support-docs")  # from another cell
+    assert kb.value == KB_ID and "support-docs" in kb.face.value
 
 
 
@@ -1619,12 +1709,15 @@ def test_window_picks_a_data_source(monkeypatch):
     view.app()
     app = view._app
     pick = app.source_pick
-    assert pick.layout.display == "" and pick.value == ""
-    assert list(pick.options) == [("All data sources", ""), ("faq", DS_ID), ("help-site", DS2_ID)]
+    assert pick.visible and pick.value == ""
+    assert [(c.title, c.value) for c in pick.choices] == [("All data sources", ""), ("faq", DS_ID),
+                                                          ("help-site", DS2_ID)]
     assert "<b>Data source</b> asks only one" in texts(app)[0]
+    assert find(pick, "dsid") == [DS_ID, DS2_ID] and find(pick, "help") == [DS2_ID]  # by ID or name
+    pick.close()
     app.question.value = "q"
     app._send()
-    pick.value = DS2_ID
+    click_line(pick, DS2_ID)
     assert view.data_source == {DS2_ID: "help-site"} and view.answers  # the conversation goes on
     assert "The next questions search data source &#x27;help-site&#x27;" in app.status.value
     assert DS2_ID in app.request_view.value and "data source picker" in app.request_view.value
@@ -1635,7 +1728,7 @@ def test_window_picks_a_data_source(monkeypatch):
     assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
         "equals": {"key": DS_KEY, "value": DS2_ID}}
     assert "only data source &#x27;help-site&#x27;" in texts(app)[-1]
-    pick.value = ""
+    click_line(pick, "")
     assert view.data_source == {} and DS2_ID not in app.request_view.value
     # Edit JSON: a data source condition in the filter moves the picker
     app.edit_button.click()
@@ -1646,19 +1739,20 @@ def test_window_picks_a_data_source(monkeypatch):
     app._apply()
     assert view.data_source == {DS_ID: "faq", DS2_ID: "help-site"} and view.values["filter"] == {
         "equals": {"key": "team", "value": "a"}}
-    assert pick.value == f"{DS_ID},{DS2_ID}" and ("faq + help-site", f"{DS_ID},{DS2_ID}") in pick.options
+    assert pick.value == f"{DS_ID},{DS2_ID}" and "faq + help-site" in pick.face.value
+    assert ("faq + help-site", f"{DS_ID},{DS2_ID}") in [(c.title, c.value) for c in pick.choices]
     assert "questions search data sources &#x27;faq&#x27; and &#x27;help-site&#x27;" in app.status.value
     # another knowledge base has its own data sources (one here: nothing to pick)
-    app.kb_pick.value = KB2_ID
-    assert view.data_source is None and pick.value == "" and pick.layout.display == "none"
+    click_line(app.kb_pick, KB2_ID)
+    assert view.data_source is None and pick.value == "" and not pick.visible
     assert "<b>Data source</b>" not in texts(app)[0]
 
 
 def test_window_data_source_from_another_cell_and_one_it_cant_list(window, monkeypatch, capsys):
     app = window._app
-    assert app.source_pick.layout.display == "none"  # one data source: nothing to pick
+    assert not app.source_pick.visible  # one data source: nothing to pick
     window.use(data_source="docs-s3")
-    assert app.source_pick.value == DS_ID and app.source_pick.layout.display == ""
+    assert app.source_pick.value == DS_ID and app.source_pick.visible and "docs-s3" in app.source_pick.face.value
     capsys.readouterr()
 
     def denied(**_):
@@ -1671,46 +1765,51 @@ def test_window_data_source_from_another_cell_and_one_it_cant_list(window, monke
     view._display = lambda widget: None
     view.app()
     pick = view._app.source_pick
-    assert pick.value == DS2_ID and (DS2_ID, DS2_ID) in pick.options  # an ID still works
+    assert pick.value == DS2_ID and (DS2_ID, DS2_ID) in [(c.title, c.value) for c in pick.choices]  # an ID works
     assert "Couldn&#x27;t list the data sources (AccessDeniedException; needs bedrock:ListDataSources)" in (
         view._app.status.value)
 
 
 def test_window_picks_files(window, monkeypatch):
     app = window._app
-    assert app.files_box.layout.display == "" and app.file_box.layout.display == "none"
-    assert app.pick_files_button.layout.display == "" and app.all_files_button.layout.display == "none"
-    assert "Pick files</b> asks only the files you pick" in texts(app)[0]
-    app.pick_files_button.click()
-    assert app.file_box.layout.display == "" and app.pick_files_button.layout.display == "none"
-    assert list(app.file_box.options) == ["faq/returns.md", "policies/refund-policy.pdf"]  # indexed ones only
-    assert "2 indexed files to pick from" in app.status.value
-    app.file_box.value = "policies/refund-policy.pdf"  # chosen from the list
-    assert window.picked_files == [REFUND_PDF] and app.file_box.value == ""
+    files = app.files_pick
+    assert files.visible and not files.is_open and files.choices == []  # listed once opened
+    assert app.file_bar.layout.display == "none" and "All files" in files.face.value
+    assert "<b>Files</b> asks only the files you tick" in texts(app)[0]
+    files.button.click()
+    assert files.is_open and files.shown == [RETURNS_MD, REFUND_PDF]  # indexed ones only, by path
+    assert "2 indexed files · a click ticks or unticks one" in plain(files.foot.value)
+    files.rows[REFUND_PDF][1].click()  # ticks it; the list stays open for more
+    assert window.picked_files == [REFUND_PDF] and files.is_open and "kbc-on" in files.rows[REFUND_PDF][0]._dom_classes
     assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
-    assert app.all_files_button.layout.display == ""
+    assert "1 file" in files.face.value and app.file_bar.layout.display == ""
+    assert "1 ticked" in plain(files.foot.value)
     assert REFUND_PDF in app.request_view.value and "files picker" in app.request_view.value
     assert "The next questions search file &#x27;refund-policy.pdf&#x27;" in app.status.value
-    app.file_box.value = "RETURNS"
-    app.file_box._handle_custom_msg({"event": "submit"}, [])  # Enter takes the only match
+    enter(files, "RETURNS")  # Enter ticks the only match
+    assert window.picked_files == [REFUND_PDF, RETURNS_MD] and files.search.value == ""
+    enter(files, "re")
+    assert "2 indexed files match 're': click the ones you want" in plain(files.foot.value)
+    enter(files, "nothing-like-it")
+    assert "No indexed file's path holds 'nothing-like-it'" in plain(files.foot.value)
+    enter(files, "s3://docs/elsewhere/unlisted.pdf")  # a full path is taken as it is
+    assert window.picked_files == [REFUND_PDF, RETURNS_MD, "s3://docs/elsewhere/unlisted.pdf"]
+    assert "3 files" in files.face.value
+    app.file_chips.children[-1].click()  # a chip's click stops asking only that file
     assert window.picked_files == [REFUND_PDF, RETURNS_MD]
-    app.file_box.value = "re"
-    app.file_box._handle_custom_msg({"event": "submit"}, [])
-    assert "2 files contain &#x27;re&#x27;: choose one from the list" in app.status.value
-    app.file_box.value = "nothing-like-it"
-    app.file_box._handle_custom_msg({"event": "submit"}, [])
-    assert "No indexed file&#x27;s path contains &#x27;nothing-like-it&#x27;" in app.status.value
     app.question.value = "q"
     app._send()
     sent = window.core._runtime_client().called("retrieve_and_generate_stream")[-1]
     assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
         "in": {"key": URI_KEY, "value": [REFUND_PDF, RETURNS_MD]}}
-    app.file_chips.children[0].click()  # a chip's click stops asking only that file
+    click_line(files, REFUND_PDF)  # a second click unticks it
     assert window.picked_files == [RETURNS_MD]
     app.all_files_button.click()
     assert window.picked_files == [] and app.file_chips.children == () and URI_KEY not in app.request_view.value
+    assert "All files" in files.face.value and app.file_bar.layout.display == "none"
     window.use(files=["refund-policy.pdf"])  # from another cell
     assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
+    assert files.picked == [REFUND_PDF]
 
 
 def test_window_files_reset_with_another_knowledge_base(monkeypatch):
@@ -1722,15 +1821,17 @@ def test_window_files_reset_with_another_knowledge_base(monkeypatch):
     view.app()
     app = view._app
     assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
-    app.pick_files_button.click()
-    app.kb_pick.value = KB2_ID
-    assert view.picked_files is None and app.file_chips.children == () and app.file_box.layout.display == "none"
-    assert app.files_kb is None and app.pick_files_button.layout.display == ""
+    app.files_pick.button.click()
+    assert app.files_kb == KB_ID and app.files_pick.shown
+    click_line(app.kb_pick, KB2_ID)
+    assert view.picked_files is None and app.file_chips.children == () and not app.files_pick.is_open
+    assert app.files_kb is None and app.files_pick.choices == [] and app.files_pick.picked == []
     bad = BedrockChatView(BedrockChatAnalyzer(clients=fakes()), kb="support-docs", mode="html", files="nope.pdf")
     bad._display = lambda widget: None
     bad.app()
     assert "No file &#x27;nope.pdf&#x27; in the knowledge base. Questions search every file." in bad._app.status.value
     assert bad.picked_files == []
+
 
 def test_window_follows_other_cells(window, capsys):
     app = window._app
@@ -1778,9 +1879,19 @@ def test_window_lists_nothing_it_cant_read(core, monkeypatch):
     view._display = lambda widget: None
     view.app()
     app = view._app
-    assert isinstance(app.kb_pick, widgets.Text) and isinstance(app.model_pick, widgets.Text)
+    assert app.kb_pick.choices == [] and app.model_pick.choices == []
+    assert (app.kb_pick.value, app.model_pick.value) == (KB_ID, "us.anthropic.claude-opus-5")
+    assert KB_ID in app.kb_pick.face.value  # what it was given, as it was given
     assert "Couldn&#x27;t list the knowledge bases (AccessDeniedException; needs bedrock:ListKnowledgeBases)" in (
         app.status.value)
+    app.kb_pick.button.click()
+    assert "Couldn't list the knowledge bases" in plain(app.kb_pick.foot.value)
+    assert "Type one's ID or ARN and press Enter." in plain(app.kb_pick.foot.value)
+    enter(app.kb_pick, KB2_ID)  # an ID works without the list
+    assert view.kb == KB2_ID and KB2_ID in app.kb_pick.face.value and not app.kb_pick.is_open
+    enter(app.kb_pick, KB_ID)
+    enter(app.model_pick, "us.anthropic.claude-sonnet-5")
+    assert view.model == "us.anthropic.claude-sonnet-5" and "us.anthropic.claude-sonnet-5" in app.model_pick.face.value
     app.question.value = "How long?"
     app._send()
     assert view.answers and "Refunds take" in texts(app)[-1]

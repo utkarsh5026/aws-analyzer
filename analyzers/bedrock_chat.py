@@ -1639,6 +1639,47 @@ def describe_files(uris: list[str]) -> str:
     return f"files {', '.join(names[:-1])} and {names[-1]}" if len(uris) <= 3 else f"{len(uris)} files"
 
 
+def search_rank(text: str, fields: Iterable[Any]) -> int | None:
+    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
+    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
+    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
+    empty search finds everything, at 3."""
+    wanted = " ".join(str(text or "").lower().split())
+    if not wanted:
+        return 3
+    values = [" ".join(str(f).lower().split()) for f in fields if f]
+    if wanted in values:
+        return 0
+    if any(v.startswith(wanted) for v in values):
+        return 1
+    if any(wanted in v for v in values):
+        return 2
+    if all(any(word in v for v in values) for word in wanted.split()):
+        return 3
+    return None
+
+
+def kb_search_text(text: str) -> str:
+    """What to search knowledge bases for: a knowledge base ARN becomes the ID inside it, anything else stays."""
+    try:
+        kind, value = parse_kb_ref(text)
+    except ValueError:
+        return str(text or "").strip()
+    return value if kind == "arn" else str(text).strip()
+
+
+def match_kbs(kbs: Iterable[KnowledgeBase], text: str) -> list[KnowledgeBase]:
+    """The knowledge bases a search finds by name, ID (or part of either), ARN, description or status, best first:
+    an exact name or ID, then one that starts with the text, then the rest in the order given."""
+    wanted = kb_search_text(text)
+    ranked = []
+    for i, kb in enumerate(kbs):
+        rank = search_rank(wanted, (kb.name, kb.id, kb.description, kb.status))
+        if rank is not None:
+            ranked.append((rank, i, kb))
+    return [kb for _, _, kb in sorted(ranked, key=lambda r: r[:2])]
+
+
 def rerank_arn(model: Any, region: str) -> str:
     """'cohere' (or True), 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants."""
     model_id = DEFAULT_RERANK_MODEL if model is True else _RERANK_ALIASES.get(str(model).lower(), str(model))
@@ -3140,12 +3181,41 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .hd h3{margin:0;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kbc .hd h3 .badge{margin:0 0 0 8px}
 .kbc .hd .sub{margin:2px 0 0}
+.kbc .fx{position:relative;padding:6px 34px 6px 12px;min-width:0;line-height:1.3}
+.kbc .fbl{font-size:12px;opacity:.65;margin-right:2px;white-space:nowrap}
+.kbc .fxl{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.55;white-space:nowrap}
+.kbc .fxv{display:flex;align-items:center;gap:7px;min-width:0;margin-top:2px;font-size:13px;white-space:nowrap}
+.kbc .fxv b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 0 auto;max-width:100%}
+.kbc .fxv b.fxe{font-weight:400;opacity:.5}
+.kbc .fxb{font-size:11.5px;opacity:.55;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 10 auto}
+.kbc .fxb.id,.kbc .opi{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.kbc .chev{position:absolute;right:14px;top:50%;width:7px;height:7px;margin-top:-6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(45deg);opacity:.5;transition:transform .15s,margin-top .15s}
+.kbc-open .kbc .chev{transform:rotate(225deg);margin-top:-2px;opacity:.85;color:var(--kc-accent)}
+.kbc .dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:rgba(127,127,127,.55)}
+.kbc .dot.ok{background:#10b981}
+.kbc .dot.warn{background:#f59e0b}
+.kbc .dot.bad{background:#ef4444}
+.kbc .dot.none{background:transparent}
+.kbc .op{display:flex;align-items:center;gap:10px;padding:7px 10px;min-width:0;line-height:1.35}
+.kbc .op .dot{align-self:flex-start;margin-top:6px}
+.kbc .opb{flex:1 1 auto;min-width:0}
+.kbc .opt{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}
+.kbc .opt b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 0 auto;max-width:100%}
+.kbc .opi{opacity:.6;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 10 auto}
+.kbc .opn{font-size:11.5px;opacity:.62;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .op mark{padding:0}
+.kbc .opk{flex:0 0 auto;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;line-height:1;color:var(--kc-accent)}
+.kbc .op.on .opk::after{content:"\\2713"}
+.kbc .op.multi .opk{border:1.5px solid var(--kc-line-2);border-radius:5px}
+.kbc .op.multi.on .opk{background:var(--kc-accent);border-color:var(--kc-accent);color:#fff}
+.kbc .opf{font-size:11px;opacity:.6;padding:7px 8px 0;margin-top:4px;border-top:1px solid var(--kc-line);line-height:1.4}
+.kbc .opf.warn{opacity:1;color:#d97706}
+.kbc .opf.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
 .kbc-app{box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
 .kbc-app *{box-sizing:border-box}
 .kbc-app .widget-html-content,.kbc-app .jupyter-widget-html-content{min-width:0}
 .kbc-app.kbc-app .kbc-head{padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--kc-line);gap:10px 14px}
-.kbc-app.kbc-app .kbc-pickers{gap:8px 18px}
-.kbc-app.kbc-app .kbc-pickers .widget-label{color:inherit;opacity:.65;font-size:12px;font-weight:500}
+.kbc-app.kbc-app .kbc-pickers{gap:8px 10px;align-items:flex-start}
 .kbc-app.kbc-app .widget-text input,.kbc-app.kbc-app .widget-textarea textarea,.kbc-app.kbc-app .widget-dropdown>select,.kbc-app.kbc-app .jupyter-widget-text input,.kbc-app.kbc-app .jupyter-widget-textarea textarea,.kbc-app.kbc-app .jupyter-widget-dropdown>select{border:1px solid var(--kc-line-2);border-radius:10px;background-color:var(--kc-surface);color:inherit;transition:border-color .15s,box-shadow .15s}
 .kbc-app.kbc-app .widget-text input,.kbc-app.kbc-app .jupyter-widget-text input{padding:4px 11px}
 .kbc-app.kbc-app .widget-dropdown>select,.kbc-app.kbc-app .jupyter-widget-dropdown>select{padding:0 26px 0 11px;cursor:pointer}
@@ -3213,6 +3283,26 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:16px;padding:10px 4px 10px 12px;background:var(--kc-surface);overflow:hidden}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px;overflow:hidden auto;padding-right:8px}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box>*,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box>*{flex-shrink:0}
+.kbc-app.kbc-app .kbc-head,.kbc-app.kbc-app .kbc-pickers,.kbc-app.kbc-app .kbc-field{overflow:visible}
+.kbc-app.kbc-app .kbc-field{position:relative;margin:0}
+.kbc-app.kbc-app .kbc-file-bar{gap:6px;margin:10px 0 0}
+.kbc-app.kbc-app .kbc-trig{position:relative;min-height:46px;margin:0;overflow:visible}
+.kbc-app.kbc-app .kbc-trig>.kbc-trig-b{position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:0;border:1px solid var(--kc-line-2);border-radius:12px;background:var(--kc-surface);box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.kbc-app.kbc-app .kbc-trig>.kbc-trig-b:hover:enabled{border-color:var(--kc-accent);background:var(--kc-surface)}
+.kbc-app.kbc-app .kbc-open .kbc-trig>.kbc-trig-b{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
+.kbc-app.kbc-app .kbc-trig>.kbc-trig-b:disabled{opacity:1}
+.kbc-app.kbc-app .kbc-trig>.kbc-face,.kbc-app.kbc-app .kbc-opt>.kbc-opt-t{position:relative;z-index:1;pointer-events:none;margin:0;min-width:0;height:auto}
+.kbc-app.kbc-app .kbc-field.kbc-off{opacity:.5}
+.kbc-app.kbc-app .kbc-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:40;width:100%;min-width:340px;max-width:min(560px,calc(100vw - 48px));padding:8px;border:1px solid var(--kc-line-2);border-radius:14px;background:var(--kc-bg);box-shadow:0 14px 36px rgba(15,23,42,.2),0 3px 8px rgba(15,23,42,.08);overflow:visible;--jp-widgets-inline-height:34px}
+.kbc-app.kbc-app .kbc-pop .kbc-x{margin-left:6px}
+.kbc-app.kbc-app .kbc-find input,.kbc-app.kbc-app .kbc-find input:focus{padding:4px 11px 4px 32px;border-radius:10px;background:var(--kc-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E") no-repeat 11px center/14px}
+.kbc-app.kbc-app .kbc-opts{max-height:336px;overflow:hidden auto;margin:6px 0 0;padding:0 2px 0 0}
+.kbc-app.kbc-app .kbc-opts>*{flex:0 0 auto}
+.kbc-app.kbc-app .kbc-opt{position:relative;margin:0 0 2px;overflow:visible}
+.kbc-app.kbc-app .kbc-opt>.kbc-opt-b{position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:0;border:1px solid transparent;border-radius:10px;background:transparent;box-shadow:none}
+.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:hover:enabled{background:var(--kc-tint-2);border-color:transparent}
+.kbc-app.kbc-app .kbc-opt.kbc-on>.kbc-opt-b,.kbc-app.kbc-app .kbc-opt.kbc-on>.kbc-opt-b:hover:enabled{background:var(--kc-soft);border-color:var(--kc-ring)}
+.kbc-app.kbc-app .kbc-trig>.kbc-trig-b:active:enabled,.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:active:enabled{transform:none}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
 </style>"""
@@ -3445,6 +3535,16 @@ def _highlight(text: str, terms: Iterable[str]) -> str:
     regex = _terms_regex(terms)
     if regex is None:
         return _esc(text)
+    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
+
+
+def _marked(text: str, words: Iterable[str]) -> str:
+    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
+    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
+    unique = sorted({w for w in words if w}, key=len, reverse=True)
+    if not unique:
+        return _esc(text)
+    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
     return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
 
 
@@ -4559,6 +4659,14 @@ def _wrap(inner: str) -> str:
     return f'<div class="kbc">{inner}</div>'
 
 
+def _class_if(widget: Any, name: str, on: bool) -> None:
+    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
+    if on and name not in widget._dom_classes:
+        widget.add_class(name)
+    elif not on and name in widget._dom_classes:
+        widget.remove_class(name)
+
+
 def _waiting(keys: list[str]) -> str:
     """['temperature'] -> 'temperature waits', ['temperature', 'prompt'] -> 'temperature and prompt wait'."""
     names = ", ".join(keys[:-1]) + " and " + keys[-1] if len(keys) > 1 else "".join(keys)
@@ -4580,6 +4688,309 @@ _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max
 _SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
 _BESIDE = ("integer", "float", "boolean", "choice")  # kinds whose box sits beside the setting's name
 _PYTHON_WIDTH = 64  # where the Request JSON tab's Python breaks lines, so it fits the tab
+_PICKER_ROWS = 40  # lines a picker's list shows at once; the search box finds the rest
+
+
+@dataclass
+class _Choice:
+    """One line of a picker's list."""
+
+    value: str  # what picking it sets: a knowledge base ID, a model ID, data source IDs, a file's s3:// path
+    title: str  # its name
+    detail: str = ""  # beside the name, in a code font: its ID
+    note: str = ""  # the line under it: what it is, its status, when it changed
+    badge: str = ""  # beside the name on the field once it's picked, instead of the detail
+    tone: str = ""  # the dot before it: 'ok' | 'warn' | 'bad', or '' for none
+    also: tuple[str, ...] = ()  # more text the search box finds it by (an ARN, a model's foundation model ID)
+
+    def fields(self) -> tuple[str, ...]:
+        return (self.title, self.value, self.detail, self.note, *self.also)
+
+
+class _Picker:
+    """A field of the window's header that opens a list to pick from, with a search box over it: the knowledge base,
+    data source, model and files pickers. Plain widgets and CSS, like the rest of the window: the field is a button
+    under its label and value, the list opens under it over the chat (.kbc-pop), and each line is a button under its
+    text, so the whole line is the click target.
+
+    The search box finds every word anywhere in a line (name, ID, description...), best first (search_rank), with
+    what it found marked. Enter picks the first line; when nothing matches, on_text gets the text (an ID the list
+    doesn't hold). With multi=True a click ticks or unticks a line and the list stays open. on_pick gets the value
+    picked (the values, with multi); setting the value from code (set_value) doesn't call it."""
+
+    def __init__(self, app: _ChatApp, label: str, noun: str, *, on_pick: Callable[[Any], None], placeholder: str,
+                 empty: str, on_text: Callable[[str], None] | None = None, on_open: Callable[[], None] | None = None,
+                 query: Callable[[str], str] | None = None,
+                 describe: Callable[[list[str]], tuple[str, str]] | None = None, multi: bool = False,
+                 basis: str = "240px", list_width: str = ""):
+        w, layout = app.w, app.w.Layout
+        self.app, self.label, self.noun, self.multi, self.empty = app, label, noun, multi, empty
+        self.on_pick, self.on_text, self.on_open, self.query, self.describe = on_pick, on_text, on_open, query, describe
+        self.choices: list[_Choice] = []
+        self.picked: list[str] = []  # the value picked (one, unless multi)
+        self.problem = ""  # why there's nothing to list (it couldn't be read), shown under the list
+        self.note = ""  # more to say under the list (only part of it was listed)
+        self.message = ""  # what went wrong with the last Enter, until the next key
+        self.tip_off = ""  # the field's tooltip while it's disabled
+        self.shown: list[str] = []  # the values of the lines the list shows, top to bottom
+        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # value -> (its line, the line's button, its text)
+        self.button = w.Button(layout=layout(width="100%", height="100%"))
+        self.button.add_class("kbc-trig-b")
+        self.button.on_click(app._safely(lambda _button: self.toggle()))
+        self.face = w.HTML(layout=layout(width="100%"))
+        self.face.add_class("kbc-face")
+        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
+        trigger.add_class("kbc-trig")
+        self.search = w.Text(placeholder=placeholder, continuous_update=True,
+                             layout=layout(flex="1 1 auto", width="auto"))
+        self.search.add_class("kbc-find")
+        self.search.observe(app._safely(self._typed), names="value")
+        self.search.on_msg(app._on_enter(self._entered))
+        close = w.Button(description="✕", tooltip="Close the list", layout=layout(width="26px", flex="0 0 auto"))
+        close.add_class("kbc-x")
+        close.on_click(app._safely(lambda _button: self.close()))
+        self.list = w.VBox(layout=layout(width="100%"))
+        self.list.add_class("kbc-opts")
+        self.foot = w.HTML(layout=layout(width="100%"))
+        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
+                             self.list, self.foot], layout=layout(display="none", min_width=list_width or None))
+        self.panel.add_class("kbc-pop")
+        # the header's fields share its row, each from its basis up to 420px, and wrap when they don't fit
+        self.field = w.VBox([trigger, self.panel], layout=layout(flex=f"1 1 {basis}", min_width="150px",
+                                                                 max_width="420px"))
+        self.field.add_class("kbc-field")
+        app.pickers.append(self)
+        self._draw()
+
+    @property
+    def value(self) -> str:
+        """The value picked ('' when none); with multi, see `picked`."""
+        return self.picked[0] if self.picked else ""
+
+    @property
+    def is_open(self) -> bool:
+        return self.panel.layout.display != "none"
+
+    @property
+    def visible(self) -> bool:
+        return self.field.layout.display != "none"
+
+    @visible.setter
+    def visible(self, on: bool) -> None:
+        self.field.layout.display = "" if on else "none"
+        if not on:
+            self.close()
+
+    @property
+    def disabled(self) -> bool:
+        return bool(self.button.disabled)
+
+    @disabled.setter
+    def disabled(self, on: bool) -> None:
+        if on:
+            self.close()
+        self.button.disabled = on
+        _class_if(self.field, "kbc-off", on)
+        self._draw()
+
+    def set_choices(self, choices: Iterable[_Choice], picked: Any = None) -> None:
+        """What the list holds, and (unless None) what's picked."""
+        self.choices = list(choices)
+        if picked is None:
+            self._draw()
+        else:
+            self.set_value(picked)
+
+    def set_value(self, picked: Any) -> None:
+        """Shows `picked` (a value, or a list of them with multi) as picked, without calling on_pick."""
+        values = [picked] if isinstance(picked, str) else [str(v) for v in picked or []]
+        self.picked = [v for v in values if v] if self.multi else values[:1]
+        self._draw()
+
+    def open(self) -> None:
+        if self.disabled or self.is_open:
+            return
+        for other in self.app.pickers:  # one list open at a time
+            if other is not self:
+                other.close()
+        if self.on_open is not None:
+            self.on_open()
+        self.message = ""
+        self.panel.layout.display = ""
+        _class_if(self.field, "kbc-open", True)
+        self._draw_list()
+        if hasattr(self.search, "focus"):  # ipywidgets 8
+            self.search.focus()
+
+    def close(self) -> None:
+        if not self.is_open:
+            return
+        self.panel.layout.display = "none"
+        _class_if(self.field, "kbc-open", False)
+        self.app._quietly(self.search, value="")
+        self.message = ""
+
+    def toggle(self) -> None:
+        if self.is_open:
+            self.close()
+        else:
+            self.open()
+
+    def matches(self) -> list[_Choice]:
+        """The lines the search box finds, best first; every line, in order, while it's empty."""
+        text = str(self.search.value or "")
+        text = self.query(text) if self.query else text
+        ranked = []
+        for i, c in enumerate(self.choices):
+            rank = search_rank(text, c.fields())
+            if rank is not None:
+                ranked.append((rank, i, c))
+        return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
+
+    def _choice(self, value: str) -> _Choice | None:
+        return next((c for c in self.choices if c.value == value), None)
+
+    def _draw(self) -> None:
+        """The field: its label, what's picked and a chevron."""
+        tone, mono = "", False
+        if self.describe is not None:
+            title, badge = self.describe(list(self.picked))
+        else:
+            c = self._choice(self.value)
+            if c is None:
+                title, badge = self.value, ""
+            else:
+                title, badge, tone, mono = c.title, c.badge or c.detail, c.tone, not c.badge
+        shown = f"<b>{_esc(title)}</b>" if title else f'<b class="fxe">{_esc(self.empty)}</b>'
+        self.app._set(self.face, _wrap(
+            f'<div class="fx"><div class="fxl">{_esc(self.label)}</div><div class="fxv">'
+            + (f'<span class="dot {tone}"></span>' if tone else "") + shown
+            + (f'<span class="fxb{" id" if mono else ""}">{_esc(badge)}</span>' if badge else "")
+            + '</div><span class="chev"></span></div>'))
+        if self.disabled and self.tip_off:
+            tip = self.tip_off
+        else:
+            tip = f"{self.label}: {title or self.empty}" + (f" ({badge})" if badge else "") + (
+                ". Click to search the list" + (" by name or ID" if self.query or self.on_text else ""))
+        if self.button.tooltip != tip:
+            self.button.tooltip = tip
+        if self.is_open:
+            self._draw_list()
+
+    def _row(self, c: _Choice, words: list[str], dots: bool) -> Any:
+        if c.value not in self.rows:
+            w, layout = self.app.w, self.app.w.Layout
+            button = w.Button(layout=layout(width="100%", height="100%"))
+            button.add_class("kbc-opt-b")
+            button.on_click(self.app._safely(lambda _button, value=c.value: self._clicked(value)))
+            text = w.HTML(layout=layout(width="100%"))
+            text.add_class("kbc-opt-t")
+            row = w.Box([button, text], layout=layout(width="100%"))
+            row.add_class("kbc-opt")
+            self.rows[c.value] = (row, button, text)
+        row, button, text = self.rows[c.value]
+        on = c.value in self.picked
+        _class_if(row, "kbc-on", on)
+        tip = " · ".join(part for part in (c.title, c.detail, c.note) if part)
+        if self.multi:
+            tip += ": click to stop asking only it" if on else ": click to ask it"
+        if button.tooltip != tip:
+            button.tooltip = tip
+        dot = f'<span class="dot {c.tone or "none"}"></span>' if dots else ""
+        self.app._set(text, _wrap(
+            f'<div class="op{" on" if on else ""}{" multi" if self.multi else ""}">{dot}<div class="opb">'
+            f'<div class="opt"><b>{_marked(c.title, words)}</b>'
+            + (f'<span class="opi">{_marked(c.detail, words)}</span>' if c.detail else "") + "</div>"
+            + (f'<div class="opn">{_marked(c.note, words)}</div>' if c.note else "")
+            + '</div><span class="opk"></span></div>'))
+        return row
+
+    def _draw_list(self) -> None:
+        text = str(self.search.value or "").strip()
+        found = self.matches()
+        shown = found[:_PICKER_ROWS]
+        words = (self.query(text) if self.query else text).split()
+        dots = any(c.tone for c in self.choices)
+        self.list.children = [self._row(c, words, dots) for c in shown]
+        self.shown = [c.value for c in shown]
+        level, line = "", ""
+        if self.message:
+            level, line = "warn", self.message
+        elif not self.choices:
+            level = "warn" if self.problem else ""
+            line = self.problem or f"There's no {self.noun} to pick from."
+        elif text and not found:
+            level = "warn"
+            line = f"No {self.noun} matches {text!r}." + (
+                " Enter tries it as an ID." if self.on_text is not None and not self.multi else "")
+        else:
+            line = (f"{len(found):,} of {_plural(len(self.choices), self.noun)}" if text
+                    else _plural(len(self.choices), self.noun))
+            if len(found) > len(shown):
+                line += f", the first {len(shown):,} shown: type more to narrow them"
+            if self.multi:
+                line += (f" · {len(self.picked):,} ticked" if self.picked else "") + " · a click ticks or unticks one"
+            elif text:
+                line += " · Enter picks the first"
+            if self.note:
+                line += f". {self.note}"
+        self.app._set(self.foot, _wrap(f'<div class="opf {level}">{_prose(line)}</div>') if line else "")
+
+    def _typed(self, change: dict[str, Any]) -> None:
+        if self.app.quiet:
+            return
+        self.message = ""
+        self._draw_list()
+
+    def _clicked(self, value: str) -> None:
+        self.message = ""
+        if self.multi:
+            self.picked = [v for v in self.picked if v != value] if value in self.picked else [*self.picked, value]
+            self._draw()
+            self.on_pick(list(self.picked))
+            return
+        self.close()
+        if value != self.value or not self.picked:
+            self.picked = [value]
+            self._draw()
+            self.on_pick(value)
+
+    def _entered(self) -> None:
+        """Enter in the search box: picks the first line found (with multi, the only one), or hands the text to
+        on_text when nothing is found."""
+        text = str(self.search.value or "").strip()
+        if not text:
+            if not self.multi:
+                self.close()
+            return
+        found = self.matches()
+        if self.multi:
+            exact = [c for c in found if search_rank(text, c.fields()) == 0]
+            pick = exact[0] if len(exact) == 1 else found[0] if len(found) == 1 else None
+        else:
+            pick = found[0] if found else None
+        try:
+            if pick is not None and self.multi:
+                self.app._quietly(self.search, value="")
+                if pick.value not in self.picked:
+                    self._clicked(pick.value)
+            elif pick is not None:
+                self._clicked(pick.value)
+            elif found:
+                self.message = (f"{_plural(len(found), self.noun)} match {text!r}: click the ones you want, or type "
+                                "more of the name.")
+            elif self.on_text is not None:
+                self.on_text(text)
+                if self.multi:
+                    self.app._quietly(self.search, value="")
+                else:
+                    self.close()
+            else:
+                self.message = f"No {self.noun} matches {text!r}."
+        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
+            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
+        if self.is_open:
+            self._draw_list()
 
 
 class _ChatApp:
@@ -4609,6 +5020,7 @@ class _ChatApp:
         self.edit_base = ""  # the request the editor was filled with, to tell whether it's been changed since
         self.problems: list[str] = []  # why a picker couldn't list its choices
         self.unlisted: set[str] = set()  # knowledge bases whose data sources couldn't be listed: not tried again
+        self.pickers: list[_Picker] = []  # the header's fields: one list open at a time
         self._params: dict[str, Any] | None = None
         self.root = self._build()
 
@@ -4625,12 +5037,12 @@ class _ChatApp:
         self.kb_pick = self._kb_picker()
         self.source_pick = self._source_picker()
         self.model_pick = self._model_picker()
-        self.files_box = self._files_picker()
+        self.files_pick = self._files_picker()
         top = w.HBox([self.title, self.new_button], layout=layout(width="100%", align_items="center"))
-        pickers = w.HBox([self.kb_pick, self.source_pick, self.model_pick, self.files_box],
-                         layout=layout(width="100%", flex_flow="row wrap", margin="10px 0 0 0"))
+        pickers = w.HBox([self.kb_pick.field, self.source_pick.field, self.model_pick.field, self.files_pick.field],
+                         layout=layout(width="100%", flex_flow="row wrap", margin="12px 0 0 0"))
         pickers.add_class("kbc-pickers")
-        head = w.VBox([top, pickers], layout=layout(width="100%"))
+        head = w.VBox([top, pickers, self.file_bar], layout=layout(width="100%"))
         head.add_class("kbc-head")
 
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto", height="540px",
@@ -4777,45 +5189,51 @@ class _ChatApp:
         tabs.add_class("kbc-side")
         return tabs
 
-    def _kb_picker(self) -> Any:
-        w, view = self.w, self.view
+    def _kb_picker(self) -> _Picker:
+        view = self.view
+        picker = _Picker(self, "Knowledge base", "knowledge base", on_pick=self._kb_picked, on_text=self._kb_typed,
+                         query=kb_search_text, placeholder="Search by name, ID or description",
+                         empty="Pick a knowledge base", basis="250px", list_width="420px")
         kbs: list[KnowledgeBase] | None
         try:
             kbs = view.core.knowledge_bases()
         except (ClientError, BotoCoreError, ValueError) as exc:
             kbs = None
             reason = _why(_error_name(exc), "bedrock:ListKnowledgeBases") if not isinstance(exc, ValueError) else exc
-            self.problems.append(f"Couldn't list the knowledge bases ({reason}): type one's ID in the box.")
-        current = None
+            self.problems.append(f"Couldn't list the knowledge bases ({reason}): click Knowledge base and type one's "
+                                 "ID.")
+            picker.problem = f"Couldn't list the knowledge bases ({reason}). Type one's ID or ARN and press Enter."
+        current = view.kb
         if kbs:
             try:
                 current = view._kb_id() if view.kb is not None or len(kbs) == 1 else None
             except (ValueError, ClientError, BotoCoreError) as exc:
                 self.problems.append(str(exc))
+                current = None
             if current is None:  # pick one to start with: the first active one
                 ready = [kb for kb in sorted(kbs, key=lambda k: k.name.lower()) if kb.status == "ACTIVE"]
                 current = (ready or sorted(kbs, key=lambda k: k.name.lower()))[0].id
                 view.kb = current
-            options = [(kb.name + ("" if kb.status == "ACTIVE" else f" ({kb.status.lower()})"), kb.id)
-                       for kb in sorted(kbs, key=lambda k: k.name.lower())]
-            picker = w.Dropdown(options=options, value=current, description="Knowledge base",
-                                style={"description_width": "initial"}, layout=w.Layout(width="320px"))
-        else:
-            if kbs == []:
-                self.problems.append(f"There are no knowledge bases in {view.core.region}. They're regional: "
-                                     "chat(region='us-west-2') looks in another region.")
-            picker = w.Text(value=view.kb or "", placeholder="knowledge base ID or name", description="Knowledge base",
-                            continuous_update=False, style={"description_width": "initial"},
-                            layout=w.Layout(width="320px"))
-        picker.observe(self._safely(self._kb_changed), names="value")
+        elif kbs == []:
+            self.problems.append(f"There are no knowledge bases in {view.core.region}. They're regional: "
+                                 "chat(region='us-west-2') looks in another region.")
+            picker.problem = (f"There are no knowledge bases in {view.core.region}; chat(region='us-west-2') looks in "
+                              "another region. One's ID or ARN still works here: type it and press Enter.")
+        picker.set_choices([self._kb_choice(kb) for kb in sorted(kbs or [], key=lambda k: k.name.lower())],
+                           current or "")
         return picker
 
-    def _source_picker(self) -> Any:
-        w = self.w
-        picker = w.Dropdown(options=[("All data sources", "")], value="", description="Data source",
-                            tooltip="Ask only one of the knowledge base's data sources",
-                            style={"description_width": "initial"}, layout=w.Layout(width="280px"))
-        picker.observe(self._safely(self._source_changed), names="value")
+    @staticmethod
+    def _kb_choice(kb: KnowledgeBase) -> _Choice:
+        status = "" if kb.status == "ACTIVE" else kb.status.lower().replace("_", " ")
+        changed = f"changed {human_age(kb.updated)}" if kb.updated else ""
+        tone = {"ACTIVE": "ok", "FAILED": "bad", "DELETE_UNSUCCESSFUL": "bad"}.get(kb.status, "warn")
+        return _Choice(kb.id, kb.name or kb.id, detail=kb.id, tone=tone, also=(kb.status,),
+                       note=" · ".join(part for part in (status, kb.description, changed) if part))
+
+    def _source_picker(self) -> _Picker:
+        picker = _Picker(self, "Data source", "data source", on_pick=self._source_picked,
+                         placeholder="Search by name or ID", empty="All data sources", basis="190px")
         self.source_pick = picker
         problem = self._fill_sources()
         if problem:
@@ -4842,52 +5260,60 @@ class _ChatApp:
             except (ClientError, BotoCoreError, ValueError) as exc:
                 problem = f"{exc} Questions search all of them."
                 view.data_source = {}
-        options = [("All data sources", "")] + [
-            (ds.name or ds.id, ds.id) for ds in sorted(sources, key=lambda d: (d.name or d.id).lower())]
+        tones = {"AVAILABLE": "ok", "DELETE_UNSUCCESSFUL": "bad"}
+        choices = [_Choice("", "All data sources", note=f"Questions search all {len(sources)}" if sources else
+                           "Questions search every data source")]
+        for ds in sorted(sources, key=lambda d: (d.name or d.id).lower()):
+            status = "" if ds.status == "AVAILABLE" else ds.status.lower().replace("_", " ")
+            changed = f"changed {human_age(ds.updated)}" if ds.updated else ""
+            choices.append(_Choice(ds.id, ds.name or ds.id, detail=ds.id, tone=tones.get(ds.status, "warn"),
+                                   note=" · ".join(part for part in (status, ds.description, changed) if part)))
         value = ",".join(current)
-        if value and value not in {v for _, v in options}:  # several, or one that couldn't be listed
-            options.insert(1, (" + ".join(name or ds_id for ds_id, name in current.items()), value))
-        self._quietly(picker, options=options, value=value)
-        picker.layout.display = "" if len(options) > 2 or value else "none"
+        if value and value not in {c.value for c in choices}:  # several, or one that couldn't be listed
+            choices.insert(1, _Choice(value, " + ".join(name or ds_id for ds_id, name in current.items()),
+                                      badge=_plural(len(current), "data source") if len(current) > 1 else "",
+                                      note="Picked with Edit JSON or use(data_source=...)", also=tuple(current)))
+        picker.set_choices(choices, value)
+        picker.visible = len(choices) > 2 or bool(value)
         return problem
 
-    def _files_picker(self) -> Any:
+    def _files_picker(self) -> _Picker:
+        """The Files field, and the line under the header that shows the files ticked, as chips."""
         w, layout = self.w, self.w.Layout
-        self.file_options: dict[str, str] = {}  # how a file is shown -> its s3:// path, for the files listed
-        self.files_kb: str | None = None  # the knowledge base they were listed for
-        label = w.Label("Files", layout=layout(width="auto", margin="0 4px 0 0"))
+        self.files_kb: str | None = None  # the knowledge base whose files the list holds
+        self.files_pick = _Picker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
+                                  on_open=self._list_files, describe=self._files_face, multi=True,
+                                  placeholder="Search by file name or folder", empty="All files", basis="140px")
         self.file_chips = w.HBox(layout=layout(width="auto", flex_flow="row wrap", align_items="center"))
         self.file_chips.add_class("kbc-files")
-        self.file_box = w.Combobox(placeholder="Type part of a file name", options=[], ensure_option=False,
-                                   continuous_update=True, layout=layout(width="300px", display="none"))
-        self.file_box.observe(self._safely(self._file_typed), names="value")
-        self.file_box.on_msg(self._on_enter(self._file_entered))
-        self.pick_files_button = w.Button(description="📄 Pick files", tooltip="Ask only some of the knowledge "
-                                          "base's files", layout=layout(width="auto"))
-        self.pick_files_button.add_class("kbc-small")
-        self.pick_files_button.on_click(self._safely(lambda _button: self._open_files()))
         self.all_files_button = w.Button(description="All files", tooltip="Search every file again",
-                                         layout=layout(width="auto", display="none"))
+                                         layout=layout(width="auto"))
         self.all_files_button.add_class("kbc-small")
         self.all_files_button.add_class("kbc-ghost")
         self.all_files_button.on_click(self._safely(lambda _button: self._set_files([])))
-        box = w.HBox([label, self.file_chips, self.file_box, self.pick_files_button, self.all_files_button],
-                     layout=layout(width="auto", align_items="center", flex_flow="row wrap"))
-        box.add_class("kbc-files")
-        self.files_box = box
+        label = w.HTML(_wrap('<span class="fbl">Questions search only</span>'), layout=layout(flex="0 0 auto"))
+        self.file_bar = w.HBox([label, self.file_chips, self.all_files_button],
+                               layout=layout(width="100%", align_items="center", flex_flow="row wrap",
+                                             display="none"))
+        self.file_bar.add_class("kbc-file-bar")
         problem = self._draw_files()
         if problem:
             self.problems.append(problem)
-        return box
+        return self.files_pick
+
+    @staticmethod
+    def _files_face(uris: list[str]) -> tuple[str, str]:
+        return ("All files" if not uris else _plural(len(uris), "file")), ""
 
     def _draw_files(self) -> str:
         """The picked files as chips (a click removes one), and the buttons that fit. Returns what went wrong."""
         w, view = self.w, self.view
         problem = ""
         if self.files_kb is not None and self.files_kb != view.kb:  # another knowledge base: list its files anew
-            self.file_options, self.files_kb = {}, None
-            self._quietly(self.file_box, options=[], value="")
-            self.file_box.layout.display = "none"
+            self.files_kb = None
+            self.files_pick.problem = self.files_pick.note = ""
+            self.files_pick.close()
+            self.files_pick.set_choices([])
         uris: list[str] = []
         if view.kb is not None and view.picked_files:
             try:
@@ -4903,59 +5329,59 @@ class _ChatApp:
             chip.on_click(self._safely(lambda _button, uri=uri: self._remove_file(uri)))
             chips.append(chip)
         self.file_chips.children = chips
-        self.files_box.layout.display = "none" if view.kb is None else ""
-        self.all_files_button.layout.display = "" if uris else "none"
-        self.pick_files_button.layout.display = "" if self.file_box.layout.display == "none" else "none"
+        self.files_pick.set_value(uris)
+        self.files_pick.visible = view.kb is not None
+        self.file_bar.layout.display = "" if uris else "none"
         return problem
 
-    def _open_files(self) -> None:
-        """Lists the knowledge base's files into the box, to pick from."""
-        view = self.view
+    def _list_files(self) -> None:
+        """Lists the knowledge base's indexed files into the Files list, once per knowledge base (when it opens)."""
+        view, picker = self.view, self.files_pick
         if view.kb is None:
-            self._set_status("Pick a knowledge base first.", "warn")
+            raise _Hint("Pick a knowledge base first.")
+        if self.files_kb == view.kb:
             return
-        listing = view.core.files(view.kb)
-        self.file_options = {label: uri for uri, label in file_labels(d.uri for d in listing.searchable).items()}
         self.files_kb = view.kb
-        self._quietly(self.file_box, options=sorted(self.file_options, key=str.lower), value="")
-        self.file_box.layout.display = ""
-        self._draw_files()
-        notes = [f"{_plural(len(self.file_options), 'indexed file')} to pick from: type part of a name and choose it "
-                 "from the list (Enter takes the only match)."]
+        picker.problem = picker.note = ""
+        try:
+            listing = view.core.files(view.kb)
+        except (ClientError, BotoCoreError) as exc:
+            picker.problem = (f"Couldn't list the files ({_why(_error_name(exc), 'bedrock:ListKnowledgeBaseDocuments')})"
+                              ". Type a file's s3:// path and press Enter.")
+            picker.set_choices([])
+            return
+        try:
+            names = view.core.data_source_names(view.kb)  # listed already, by files()
+        except (ClientError, BotoCoreError):
+            names = {}
+        labels = file_labels(d.uri for d in listing.searchable)
+        several = len({d.data_source_id for d in listing.documents}) > 1
+        choices = []
+        for d in sorted(listing.searchable, key=lambda d: labels[d.uri].lower()):
+            label = labels[d.uri]
+            folder = label.rsplit("/", 1)[0] + "/" if "/" in label else ""
+            parts = (folder, names.get(d.data_source_id) or d.data_source_id if several else "",
+                     "partly indexed" if d.status != "INDEXED" else "")
+            choices.append(_Choice(d.uri, source_name(d.uri), note=" · ".join(p for p in parts if p),
+                                   also=(label, d.uri)))
+        notes = []
         if listing.truncated:
             notes.append(f"Only the first {len(listing.documents):,} files were listed; type a full s3:// path for "
-                         "another.")
+                         "another")
         if listing.errors:
-            try:
-                names = view.core.data_source_names(view.kb)  # listed already, by files()
-            except (ClientError, BotoCoreError):
-                names = {}
             notes.append(", ".join(names.get(ds_id) or ds_id for ds_id in listing.errors) + " has no file list "
-                         "(only S3 and custom data sources keep one).")
-        self._set_status(" ".join(notes), "" if self.file_options else "warn")
+                         "(only S3 and custom data sources keep one)")
+        picker.note = ". ".join(notes)
+        picker.set_choices(choices)
 
-    def _file_typed(self, change: dict[str, Any]) -> None:
-        if not self.quiet and change["new"] in self.file_options:  # chosen from the list
-            self._add_file(self.file_options[change["new"]])
-
-    def _file_entered(self) -> None:
-        text = self.file_box.value.strip()
-        if not text:
-            return
-        if text in self.file_options or "://" in text:
-            self._add_file(self.file_options.get(text, text))
-            return
-        matches = [label for label in self.file_options if text.lower() in label.lower()]
-        if len(matches) == 1:
-            self._add_file(self.file_options[matches[0]])
-        elif matches:
-            self._set_status(f"{len(matches):,} files contain {text!r}: choose one from the list, or type more of "
-                             "its name.", "warn")
-        else:
-            self._set_status(f"No indexed file's path contains {text!r}.", "warn")
+    def _file_typed(self, text: str) -> None:
+        """Enter on text no listed file holds: a full s3:// path is picked as it is."""
+        if "://" not in text:
+            raise _Hint(f"No indexed file's path holds {text!r}. A file that isn't listed can be picked by its full "
+                        "s3:// path.")
+        self._add_file(text)
 
     def _add_file(self, uri: str) -> None:
-        self._quietly(self.file_box, value="")
         self._set_files([*self.view._files_now(), uri])
 
     def _remove_file(self, uri: str) -> None:
@@ -4968,37 +5394,37 @@ class _ChatApp:
         self._set_status(f"The next questions search {describe_files(self.view.picked_files)}; the conversation goes "
                          "on.", "ok")
 
-    def _model_picker(self) -> Any:
-        w, view = self.w, self.view
+    def _model_picker(self) -> _Picker:
+        view = self.view
+        picker = _Picker(self, "Model", "model", on_pick=self._model_picked, on_text=self._model_typed,
+                         placeholder="Search by name, provider or ID", empty="Pick a model", basis="300px",
+                         list_width="420px")
+        picker.tip_off = "Retrieve only doesn't use a model: switch to Answer to pick one"
         models: list[ModelInfo] = []
         current = str(view.model or view.core.default_model or DEFAULT_MODEL)
         try:
             models = [m for m in view.core.models() if m.via != "provisioned only"]
             current = view.core.resolve_model(view.model)[0]
         except (ClientError, BotoCoreError) as exc:
-            self.problems.append(f"Couldn't list the models ({_why(_error_name(exc), 'bedrock:ListFoundationModels')}"
-                                 "): type a model ID in the box.")
+            reason = _why(_error_name(exc), 'bedrock:ListFoundationModels')
+            self.problems.append(f"Couldn't list the models ({reason}): click Model and type a model ID.")
+            picker.problem = (f"Couldn't list the models ({reason}). Type a model ID or inference profile and press "
+                              "Enter.")
         except ValueError as exc:
             self.problems.append(str(exc))
         if models:
-            options = [(self._model_option(m), m.invoke_id) for m in models]
-            if current not in {value for _, value in options}:
-                options.insert(0, (current, current))
             view.model = current
-            picker = w.Dropdown(options=options, value=current, description="Model",
-                                style={"description_width": "initial"}, layout=w.Layout(width="440px"))
-        else:
-            picker = w.Text(value=current, placeholder="model ID, inference profile or 'sonnet'", description="Model",
-                            continuous_update=False, style={"description_width": "initial"},
-                            layout=w.Layout(width="440px"))
-        picker.observe(self._safely(self._model_changed), names="value")
+        picker.set_choices([self._model_choice(m) for m in models], current)
         return picker
 
     @staticmethod
-    def _model_option(m: ModelInfo) -> str:
-        price = f" · ${m.price_in:,.2f} / ${m.price_out:,.2f} per 1M tokens" if m.price_in is not None else ""
-        legacy = " (legacy)" if m.status == "LEGACY" else ""
-        return f"{m.name or m.id} · {m.provider}{legacy}{price}"
+    def _model_choice(m: ModelInfo) -> _Choice:
+        price = f"${m.price_in:,.2f} / ${m.price_out:,.2f}" if m.price_in is not None else ""
+        how = m.via + (" (legacy)" if m.status == "LEGACY" else "")
+        return _Choice(m.invoke_id, m.name or m.id, detail=m.invoke_id, also=(m.id, m.arn),
+                       badge=" · ".join(part for part in (m.provider, price) if part),
+                       note=" · ".join(part for part in (m.provider, how, f"{price} per 1M tokens" if price
+                                                         else "price unknown") if part))
 
     def _hello(self) -> str:
         view = self.view
@@ -5007,10 +5433,11 @@ class _ChatApp:
             f'<div class="hello">{_AVATAR}<div><b>Ask {_esc(name)} a question.</b> Answers cite the passages they come '
             "from <sup>[1]</sup>; click a source to read it, and open <i>Request and response JSON</i> under an answer "
             "to see exactly what was sent and what came back.<ul>"
+            "<li><b>Knowledge base</b> and <b>Model</b>, above, switch to another: click one and search its list by "
+            "name or ID, or paste an ID and press Enter.</li>"
             + ("<li><b>Data source</b> asks only one of the knowledge base's data sources; by default questions "
-               "search all of them.</li>" if self.source_pick.layout.display != "none" else "")
-            + "<li><b>📄 Pick files</b> asks only the files you pick: type part of a name and choose it from the "
-            "list.</li>"
+               "search all of them.</li>" if self.source_pick.visible else "")
+            + "<li><b>Files</b> asks only the files you tick: search them by name or folder.</li>"
             "<li><b>Retrieve only</b>, beside the box, only searches: every passage a question finds, best first, "
             "with its score, and no answer. Ask the same question both ways to see which passages the answer cites, "
             "and whether a poor answer comes from the search or the model.</li>"
@@ -5077,15 +5504,10 @@ class _ChatApp:
 
     def sync(self) -> None:
         """Follows changes made from another cell (set(), use(), new_chat(), ask())."""
-        if self.view.kb is not None and getattr(self.kb_pick, "value", None) != self.view.kb:
-            options = {value for _, value in getattr(self.kb_pick, "options", ())} or None
-            if options is None or self.view.kb in options:
-                self._quietly(self.kb_pick, value=self.view.kb)
-        if self.view.model is not None and getattr(self.model_pick, "value", None) != self.view.model:
-            options = {value for _, value in getattr(self.model_pick, "options", ())}
-            if options and self.view.model not in options:
-                self._quietly(self.model_pick, options=[(self.view.model, self.view.model), *self.model_pick.options])
-            self._quietly(self.model_pick, value=self.view.model)
+        if self.view.kb is not None and self.kb_pick.value != self.view.kb:
+            self.kb_pick.set_value(self.view.kb)
+        if self.view.model is not None and self.model_pick.value != self.view.model:
+            self.model_pick.set_value(self.view.model)
         if self.stream_box.value != self.view.stream:
             self._quietly(self.stream_box, value=self.view.stream)
         if (self.mode_pick.value == "retrieve") != self.view.retrieve_only:
@@ -5206,10 +5628,8 @@ class _ChatApp:
         self.view._reset()
         self.cleared("New conversation: the next question starts a new Bedrock session.")
 
-    def _kb_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or not change["new"]:
-            return
-        kb_id = self.view.core.resolve(str(change["new"]))
+    def _kb_picked(self, value: str) -> None:
+        kb_id = self.view.core.resolve(value)
         if kb_id != self.view.kb:
             self.view._use_kb(kb_id)
             self._draw_files()
@@ -5217,21 +5637,32 @@ class _ChatApp:
             self.cleared(f"Now asking {self.view.core.kb_name(kb_id)}: a new conversation." + (f" {problem}" if problem
                                                                                                else ""))
 
-    def _source_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or self.view.kb is None:
+    def _kb_typed(self, text: str) -> None:
+        """Enter on a knowledge base the list doesn't hold (it couldn't be listed, or was made since): its ID, name or
+        ARN. A ValueError says which knowledge bases there are."""
+        kb_id = self.view.core.resolve(text)
+        self.kb_pick.set_value(kb_id)
+        self._kb_picked(kb_id)
+
+    def _source_picked(self, value: str) -> None:
+        if self.view.kb is None:
             return
-        ids = [ds_id for ds_id in str(change["new"] or "").split(",") if ds_id]
+        ids = [ds_id for ds_id in str(value or "").split(",") if ds_id]
         self.view.data_source = self.view.core.resolve_sources(self.view.kb, ids)
         self._refresh()
         self._set_status(f"The next questions search {describe_sources(self.view.data_source)}; the conversation "
                          "goes on.", "ok")
 
-    def _model_changed(self, change: dict[str, Any]) -> None:
-        if self.quiet or not change["new"]:
-            return
-        self.view.model = str(change["new"]).strip()
+    def _model_picked(self, value: str) -> None:
+        self.view.model = str(value).strip()
         self._refresh()
         self._set_status(f"The next question goes to {self.view._model_label(self.view.model)}.", "ok")
+
+    def _model_typed(self, text: str) -> None:
+        """Enter on a model the list doesn't hold: its ID, inference profile or ARN, or a short name ('sonnet')."""
+        model_id = self.view.core.resolve_model(text)[0]
+        self.model_pick.set_value(model_id)
+        self._model_picked(model_id)
 
     def _stream_changed(self, change: dict[str, Any]) -> None:
         self.view.stream = bool(change["new"])
@@ -6117,10 +6548,9 @@ class BedrockChatView:
     def _changed(self, note: str = "") -> None:
         """An open window follows what a command changed."""
         if self._app is not None:
-            if note:
+            self._app.sync()
+            if note:  # another knowledge base, or a new chat: the conversation starts over
                 self._app.cleared(note)
-            else:
-                self._app.sync()
 
     def _update(self, values: dict[str, Any]) -> list[str]:
         """Applies {name: value} (None removes) to the settings, all or nothing, and says what changed."""
@@ -6815,7 +7245,7 @@ class BedrockChatView:
         kb = self.core.kb_name(kb_id)
         blocks: list[Any] = [
             _Title(f"Files in {kb} ({len(docs):,}{'+' if listing.truncated and not wanted else ''})",
-                   (f"matching {match!r} · " if match else "") + "use(files=[...]) or the window's Pick files makes "
+                   (f"matching {match!r} · " if match else "") + "use(files=[...]) or the window's Files list makes "
                    "questions search only some of them"),
             _Cards([("Files", f"{len(listing.documents):,}{'+' if listing.truncated else ''}"),
                     ("Indexed", f"{len(listing.searchable):,}"),
@@ -6836,28 +7266,40 @@ class BedrockChatView:
             steps.append((_call("use", files="all"), "ask every file again"))
         elif len(docs) > 50 and not match:
             steps.append((_call("files", "refund"), "only the files whose path contains a word"))
-        steps.append(("app()", "pick files in the chat window (Pick files)"))
+        steps.append(("app()", "tick files in the chat window's Files list"))
         blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
-    def kbs(self) -> None:
+    def kbs(self, match: str | None = None) -> None:
         """Every knowledge base in the region you can chat with: name, ID, status, description and when it last
-        changed."""
-        kbs = sorted(self.core.knowledge_bases(refresh=True), key=lambda k: k.name.lower())
+        changed. match= keeps those whose name, ID, ARN or description holds it, best match first: kbs('support'),
+        kbs('K7QJ')."""
+        every = sorted(self.core.knowledge_bases(refresh=True), key=lambda k: k.name.lower())
+        kbs = match_kbs(every, match) if match else every
         tones = {"ACTIVE": "ok", "FAILED": "bad", "DELETE_UNSUCCESSFUL": "bad"}
         rows = [[kb.name + (" (in use)" if kb.id == self.kb else ""), kb.id, _Tone(kb.status, tones.get(kb.status,
                  "warn")), human_age(kb.updated), _clip(kb.description, 80)] for kb in kbs]
         ready = [kb for kb in kbs if kb.status == "ACTIVE"]
+        count = f"{len(kbs)} of {len(every)}" if match else f"{len(kbs)}"
         blocks: list[Any] = [
-            _Title(f"Knowledge bases in {self.core.region} ({len(kbs)})", "the ones you can chat with"),
-            _Cards([("Knowledge bases", f"{len(kbs):,}"), ("Active", f"{len(ready):,}"),
+            _Title(f"Knowledge bases in {self.core.region} ({count})",
+                   (f"matching {match!r} by name, ID or description · " if match else "") + "the ones you can chat "
+                   "with"),
+            _Cards([("Knowledge bases", f"{len(every):,}"), ("Active", f"{sum(kb.status == 'ACTIVE' for kb in every):,}"),
                     ("In use", self.core.kb_name(self.kb) if self.kb else "none yet")]),
             _Table(["Name", "ID", "Status", "Changed", "Description"], rows, max_rows=0, code_cols=(1,)),
         ]
-        if not kbs:
+        if not every:
             blocks.append(_Note("There are none here. Knowledge bases are regional: chat(region='us-west-2') looks "
                                 "in another region.", "warn"))
+        elif not kbs:
+            close = difflib.get_close_matches(str(match).lower(), {kb.name.lower(): kb.name for kb in every}, n=3,
+                                              cutoff=0.6)
+            guess = [kb.name for kb in every if kb.name.lower() in close]
+            blocks.append(_Note(f"No knowledge base's name, ID or description holds {match!r}."
+                                + (f" Did you mean {' or '.join(map(repr, guess))}?" if guess else "")
+                                + f" kbs() lists all {len(every)}.", "warn"))
         if ready:
             blocks.append(_Next([(_call("use", ready[0].name), "ask this one"),
                                  (_call("chat", ready[0].name), "the chat window on it")]))

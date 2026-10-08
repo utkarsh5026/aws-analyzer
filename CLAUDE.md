@@ -229,10 +229,16 @@ How the View layer works:
   runs botocore's `ParamValidator`. The data source is picked like the knowledge base and model, not a setting:
   `view.data_source` (`{ID: name}`, reset by another knowledge base) goes into the filter through
   `build_request(data_sources=)`, `split_data_sources()` takes it back out of an edited request, and the window's
-  Data source picker (`_fill_sources`) shows only when the knowledge base has more than one. Files work the same way
+  Data source field (`_fill_sources`) shows only when the knowledge base has more than one. Files work the same way
   on `x-amz-bedrock-kb-source-uri`: `view.picked_files` (s3:// paths; `resolve_files` / `match_files` turn names into
   paths from `core.files()`, a cached ListKnowledgeBaseDocuments), `build_request(files=)`, `split_condition()`, and
-  **Pick files** (`_open_files` fills a `Combobox` only when clicked; picked files are chips, `_draw_files`). **Add a setting** lists `Schema.search(text)` (names, then paths, then
+  the Files field (`_list_files` fills it only when it's first opened; ticked files are chips, `_draw_files`).
+  The header's four fields are `_Picker`s: a button under its face (label, name, ID) that opens a list of `_Choice`
+  lines over the chat (`.kbc-pop`, absolutely placed, so the boxes around it are `overflow:visible`), each line a
+  button under its text, with a search box that ranks lines by `search_rank` (name, ID, description...; `match_kbs`
+  and `kbs(match=)` use it too) and marks what it found (`_marked`). Enter picks the first line, or hands text the
+  list doesn't hold to `on_text` (an ID or ARN, through `core.resolve`); `multi=True` (Files) ticks lines and stays
+  open. Set a picker's value from code with `set_value`, which doesn't call `on_pick`. **Add a setting** lists `Schema.search(text)` (names, then paths, then
   descriptions; a near miss falls back to difflib), or every field by group with Browse all. With Edit JSON open, the
   view buttons are disabled, and `_follow_edit` refills an untouched editor when the request changes, or warns what
   Apply would undo in an edited one. Each tab scrolls on its own (the box inside the tab's frame), and `_set` only
