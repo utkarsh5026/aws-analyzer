@@ -2325,9 +2325,31 @@ def test_simulate_lifecycle(core):
     )  # all new
 
 
+@pytest.mark.parametrize(
+    "key, expected",
+    [
+        ("docs/report.pdf", "application/pdf"),
+        ("img/cat.JPG", "image/jpeg"),
+        ("talk.mp4", "video/mp4"),
+        ("data.json", "application/json"),
+        ("site/index.html", "text/html"),
+        ("raw/part-0.csv", "text/plain; charset=utf-8"),  # a browser would save text/csv
+        ("logs/app.log", "text/plain; charset=utf-8"),
+        ("raw/part-0.csv.gz", None),  # compressed: it downloads
+        ("t.parquet", None),
+        ("README", None),
+    ],
+)
+def test_browser_type(key, expected):
+    assert s3mod._browser_type(key) == expected
+
+
 def test_presigned_url_and_download(core, tmp_path):
     url = core.presigned_url(f"s3://{BUCKET}/docs/readme.md", expires=60)
-    assert BUCKET in url and "readme.md" in url
+    assert BUCKET in url and "readme.md" in url and "response-content" not in url
+    shown = core.presigned_url(f"s3://{BUCKET}/docs/readme.md", inline=True)  # opens in the tab as text
+    assert "response-content-disposition=inline" in shown
+    assert "response-content-type=text%2Fplain%3B%20charset%3Dutf-8" in shown
     seen = []
     path = core.download(
         f"s3://{BUCKET}/docs/readme.md",
