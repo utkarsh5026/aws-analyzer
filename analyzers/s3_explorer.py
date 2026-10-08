@@ -8,7 +8,8 @@ or date. Over the list, a search box finds files by name or type ('.csv', '.csv 
 show only one kind, a chip per file type filters with one click, and "Include subfolders" searches everything below
 the folder. A big folder shows its first rows at once and lists the rest in the background (up to 10,000 entries),
 so the search covers all of it; the list shows 100 rows a page, with « ‹ › » under it to move between pages.
-"Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full size), and
+"Read all" shows a whole PDF as it looks, 20 pages at a time (click a page to see it full size), "Text" shows its
+words laid out to read (headings, paragraphs and lists, without the running headers and footers), and
 "Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes. Tick files (a
 checkbox shows when you point at a row) and "Download selected" zips just those, under a name you can change.
 
@@ -944,6 +945,7 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
 @media (prefers-reduced-motion:reduce){.s3x *,.s3x *::before{transition:none!important;animation-duration:2.5s!important}}
 """ + _icon_rules() + "\n</style>"
 _DOCUMENTS = ("pdf", "docx", "docm", "dotx", "pptx", "pptm", "potx", "ppsx")  # files "Read all" opens
+_TEXT_PAGES = 50  # PDF pages one "Text" report shows (text is light, so more than the 20 "Read all" draws)
 _CLICK_GRACE = 0.35  # seconds after the rows change during which a click is ignored (it was aimed at the old rows)
 _BACKGROUND = ("preview", "head")  # quick reports (no progress bar) that load on worker threads in a notebook
 _WORKERS = 4  # background reports loading at once, so a click doesn't wait for files clicked before it
@@ -1037,7 +1039,7 @@ class S3Explorer:
         self._job = 0  # counts changes of the right pane; a background report made for an older one isn't shown
         self._workers: ThreadPoolExecutor | None = None  # the threads background reports load on
         self._task: Any = None  # the last background report's asyncio task (tests wait for it)
-        self._first_page = 1  # where "Read all" starts in a PDF; the pager under the report moves it
+        self._first_page = 1  # where "Read all" or "Text" starts in a PDF; the pager under the report moves it
         self._page_counts: dict[tuple[str, str], int] = {}  # (uri, etag) -> a PDF's pages (0: couldn't count)
         self._expand_all = False  # ▾ Expand all: JSON trees show every object and array (it stays on, like the sort)
         self._reports: list[list[Any]] = []  # the reports on the right, to draw again when that changes
@@ -1327,7 +1329,8 @@ class S3Explorer:
             return
         name = Entry("file", *parse_location(self.selected)).name if self.selected else ""
         waiting = {"preview": f"Opening {name}…", "head": f"Reading the details of {name}…",
-                   "document": f"Reading {name}…", "download": f"Downloading {name}…",
+                   "document": f"Reading {name}…", "text": f"Reading the text of {name}…",
+                   "download": f"Downloading {name}…",
                    "summary": "Reading every file below this folder…",
                    "zip": "Listing every file below this folder, then zipping them…",
                    "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
@@ -2062,6 +2065,9 @@ class S3Explorer:
             if kind in _DOCUMENTS:
                 actions.append(("document", "📖 Read all", "Every page as it looks, 20 at a time (click a page to see it "
                                 "full size)" if kind == "pdf" else "The whole document, page by page"))
+            if kind == "pdf":
+                actions.append(("text", "📄 Text", f"The words of every page, {_TEXT_PAGES} at a time, laid out to read: "
+                                "headings, paragraphs and lists, without the running headers and footers"))
             actions += [("download", "⬇ Download", "Save a copy in this notebook's folder"),
                         ("link", "🔗 Link", "A download link that works for an hour, without AWS access"),
                         ("close", "✕", "Close the file and show this folder")]
@@ -2166,6 +2172,8 @@ class S3Explorer:
             self._report("head", "head", uri)
         elif action == "document" and _extension(Entry("file", *parse_location(uri)).name).split(".")[0] == "pdf":
             self._show_pages(1)
+        elif action == "text":
+            self._show_pages(1, "text")
         elif action == "document":
             self._report("document", "document", uri)
         elif action == "download":
@@ -2435,12 +2443,13 @@ class S3Explorer:
             "" if os.path.isdir(os.path.expanduser(folder)) else " (made when the first zip is saved)")
         say(f"Saved: “⬇ Download .zip” now packs folders up to {self._zip_limit()}, into {where}.", "ok")
 
-    # ------------------------------------------------------------------ a PDF, page by page
+    # ------------------------------------------------------------------ a PDF, page by page: as it looks, or its text
 
-    def _show_pages(self, first: int) -> None:
-        """Read all, for a PDF: its pages as they look, from `first` on (the pager under the report moves on)."""
+    def _show_pages(self, first: int, action: str = "document") -> None:
+        """Read all (action 'document': the pages as they look) or Text ('text': their words laid out to read), for
+        a PDF, from page `first` on; the pager under the report moves on."""
         self._first_page = first
-        self._report("document", self._read_pdf, self.selected, variant=first)
+        self._report(action, self._read_pdf if action == "document" else self._read_text, self.selected, variant=first)
 
     def _read_pdf(self, uri: str) -> None:
         """The pages of a PDF drawn as they print, one report's worth (s3's _MAX_PICTURES, 20) from _first_page on,
@@ -2457,6 +2466,22 @@ class S3Explorer:
             span = f"Pages {first}–{last} of {count:,}; the buttons at the end show the others. " if count > last - first + 1 else ""
             report.insert(at, self.s3._Note(f"{span}Click a page to see it full size; ‹ › there step through the pages."))
 
+    def _read_text(self, uri: str) -> None:
+        """Text, for a PDF: the words of one report's worth of pages (_TEXT_PAGES, 50) from _first_page on, as
+        s3's document(pictures=False) lays them out: headings, paragraphs and lists, a line where each page starts,
+        and no running headers or footers."""
+        count = self._page_count(uri)
+        if not count:  # a broken or locked PDF, or no pypdf: document() says what's wrong
+            self._pane.document(uri, pictures=False)
+            return
+        first, last = self._page_span(count)
+        self._pane.document(uri, pages=range(first, last + 1), pictures=False)
+        report = self._captured[-1] if self._captured else []
+        if report and isinstance(report[0], self.s3._Title) and count > last - first + 1:
+            at = next((i + 1 for i, block in enumerate(report) if isinstance(block, self.s3._Cards)), 1)
+            report.insert(at, self.s3._Note(f"Pages {first}–{last} of {count:,}; the buttons at the end show the "
+                                            "others, and 📖 Read all shows the pages as they look."))
+
     def _page_count(self, uri: str) -> int:
         """How many pages a PDF has (0 when it can't be read), once per file version."""
         entry = self._entry()
@@ -2468,17 +2493,21 @@ class S3Explorer:
                 self._page_counts[key] = 0
         return self._page_counts[key]
 
+    def _per_report(self) -> int:
+        """PDF pages one report shows: Read all draws s3's _MAX_PICTURES (20), Text shows _TEXT_PAGES (50)."""
+        return _TEXT_PAGES if self._action == "text" else self.s3._MAX_PICTURES
+
     def _page_span(self, count: int) -> tuple[int, int]:
-        """The first and last page "Read all" shows now."""
+        """The first and last page "Read all" or "Text" shows now."""
         first = max(1, min(self._first_page, count))
-        return first, min(first + self.s3._MAX_PICTURES - 1, count)
+        return first, min(first + self._per_report() - 1, count)
 
     def _draw_pager(self, show: bool = True) -> None:
-        """The buttons under a PDF's pages that show the pages before and after them."""
+        """The buttons under a PDF's pages (or their text) that show the pages before and after them."""
         w, entry = self._widgets, self._entry()
         count = self._page_counts.get((self.selected, entry.etag if entry else ""), 0)
-        per = self.s3._MAX_PICTURES
-        if not (show and self._action == "document" and count > per):
+        per, action = self._per_report(), self._action
+        if not (show and action in ("document", "text") and count > per):
             self._pager.layout.display = "none"
             return
         first, last = self._page_span(count)
@@ -2488,7 +2517,7 @@ class S3Explorer:
             if 1 <= start <= count and start != first:
                 b = w.Button(description=label, tooltip=tip, layout=w.Layout(width="auto"))
                 b.add_class("s3x-act")
-                b.on_click(lambda _, start=start: self._guard(lambda: self._show_pages(start)))
+                b.on_click(lambda _, start=start: self._guard(lambda: self._show_pages(start, action)))
                 children.append(b)
         self._pager.children = children
         self._pager.layout.display = None

@@ -901,6 +901,35 @@ def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
     assert "pypdf couldn't read this PDF" in text(x)
 
 
+def test_explorer_reads_a_pdfs_text(explorer, aws):
+    aws.put_object(Bucket=LAKE, Key="docs/long.pdf", Body=pdf_bytes(*(f"Page {n} text" for n in range(1, 61))))
+    aws.put_object(Bucket=LAKE, Key="docs/broken.pdf", Body=b"%PDF-1.4 not really")
+    aws.put_object(Bucket=LAKE, Key="docs/notes.txt", Body=b"plain text")
+    x = explorer("s3://lake/docs/long.pdf")
+    assert "laid out to read" in x._act_buttons["text"].tooltip
+
+    x._act_buttons["text"].click()
+    flows = [block for block in x.shown if isinstance(block, s3mod._Flow)]
+    assert len(flows) == 1 and [value for role, value in flows[0].items if role == "page"] == list(range(1, 51))
+    assert ("p", "Page 3 text") in flows[0].items and not any(isinstance(b, s3mod._Pages) for b in x.shown)
+    assert '<div class="pg">Page 2</div>' in x._content.value and '<div class="zw"' not in x._content.value
+    assert "Pages 1–50 of 60; the buttons at the end show the others, and 📖 Read all shows the pages" in text(x)
+    assert x._action == "text" and pager(x) == ["Pages 1–50 of 60", "Pages 51–60 ›"]
+    x._pager.children[1].click()
+    assert [value for role, value in x.shown[-1].items if role == "page"] == list(range(51, 61))
+    assert x._action == "text" and pager(x) == ["Pages 51–60 of 60", "‹ Pages 1–50"]
+    x._act_buttons["document"].click()  # the pages as they look: 20 a report
+    assert pager(x) == ["Pages 1–20 of 60", "Pages 21–40 ›"]
+    x._act_buttons["text"].click()  # shown again from the cache
+    assert pager(x)[0] == "Pages 1–50 of 60" and x._act_buttons["text"]._dom_classes == ("s3x-act", "s3x-on")
+
+    row(x, "broken.pdf").button.click()
+    x._act_buttons["text"].click()  # it can't be counted: document() says why
+    assert "pypdf couldn't read this PDF" in text(x) and x._pager.layout.display == "none"
+    row(x, "notes.txt").button.click()
+    assert "text" not in x._act_buttons and "document" not in x._act_buttons
+
+
 def test_explorer_expands_every_part_of_a_json_file(explorer, aws):
     doc = {"info": {"version": 1}, "note": "x" * 200, "images": [{"id": i, "size": [i, 2 * i]} for i in range(10)]}
     aws.put_object(Bucket=LAKE, Key="curated/images.json", Body=json.dumps(doc).encode())

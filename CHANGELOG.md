@@ -22,6 +22,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `chat(..., retrieve_only=True)` and `ui.request(retrieve_only=True)`. It needs only `bedrock:Retrieve`. ([#41](https://github.com/utkarsh5026/aws-analyzer/pull/41))
 - `bedrock_chat.py`: `ui.kbs("K7QJ")` finds knowledge bases by name, ID (or part of one), ARN or description, best
   match first, and suggests the name you may have meant when nothing matches. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42))
+- `s3_explorer.py`: **📄 Text** on a PDF, beside **📖 Read all**: the PDF's words, 50 pages at a time, laid out to read
+  like a web page (headings from the font sizes, paragraphs joined back up from the PDF's lines, bullet and numbered
+  lists, a thin line where each page starts), without the running headers, footers and page numbers repeated on every
+  page. **📖 Read all** still shows the pages as they look. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
+- `s3.py`: `pdf_flow(doc)` turns a PDF read with `read_pdf(uri, layout=True)` (or `parse_pdf(..., layout=True)`) into
+  headings, paragraphs and list items, ready to read or to send to a model, and `pdf_furniture(doc)` lists the running
+  headers and footers it leaves out. `doc.layout` holds each page's lines with where they sit, their size and weight. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
 
 ### Changed
 
@@ -31,6 +38,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   description or a provider to narrow the list (what matched is highlighted), and Enter picks the first. A knowledge
   base ID or ARN pasted whole works even when it isn't listed, or when the role can't list knowledge bases. Files are
   ticked in the same kind of list. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42))
+- `s3.py`: `document()` shows a PDF's text laid out to read, the way **📄 Text** does, instead of each page's lines as
+  `pypdf` reads them. A note says which running headers and footers it left out, and with `pictures=False` another
+  gives the call that draws the pages without text. `ui.core.read_document(uri).text` still has every line. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
 
 ## [0.8.0] - 2026-10-08
 

@@ -136,6 +136,7 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 | **👁️ Preview** | What's inside the file (the [`preview`](s3.md#files) report) |
 | **🏷️ Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
+| **📄 Text** | For a PDF: its words laid out to read, with headings, paragraphs and lists, [50 pages at a time](#pdf) |
 | **⬇ Download** | Saves a copy in the notebook's folder (the [`download`](s3.md#download) report) |
 | **🔗 Link** | A download link that works for an hour, for someone without AWS access (the `link` report) |
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
@@ -149,11 +150,19 @@ Clicking through files doesn't wait. In a notebook, previews and details load in
 A Word file's first paragraphs; **📖 Read all** shows the whole document, pictures in place.
 ///
 
-### Read a PDF page by page { #pdf }
+### Read a PDF, as it looks or as text { #pdf }
 
 **📖 Read all** on a PDF shows its pages as they look, 20 at a time, with each page's text folded underneath. Buttons under the last page show the 20 before and after. Click a page to see it as big as the notebook: **‹** **›** step to the pages before and after, and **✕** (or a click on the page) goes back.
 
-Drawing the pages needs `pypdf`, `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, **📖 Read all** says what to install. Word and PowerPoint files need nothing extra.
+**📄 Text** shows its words instead, 50 pages at a time, laid out to read like a web page: headings (from the font sizes), paragraphs joined back up from the PDF's lines, bullet and numbered lists, and a thin line where each page starts. The running headers, footers and page numbers are left out, and a note under the text says which. It's the quickest way to read a long report, or to check what a knowledge base or a model will get from a PDF. A page without text (a scan) says so; **📖 Read all** shows it as a picture. A PDF only places lines of text on a page, so the layout is worked out: lists drawn as shapes read as a paragraph, and a table reads as one line per row (see [the S3 guide](s3.md#documents)).
+
+![S3Explorer in the docs folder with the data retention policy PDF highlighted and 📄 Text pressed; on the right its page and word counts, title and author, then the policy laid out to read under a thin Page 1 line: its title, a paragraph, a heading and a bulleted list](images/explorer-pdf-text-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer in the docs folder with the data retention policy PDF highlighted and 📄 Text pressed; on the right its page and word counts, title and author, then the policy laid out to read under a thin Page 1 line: its title, a paragraph, a heading and a bulleted list](images/explorer-pdf-text-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+/// caption
+**📄 Text** on a two-page PDF: the words to read, without the header and page numbers repeated on every page.
+///
+
+**📄 Text** needs `pypdf`, and drawing the pages also needs `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, the button says what to install. Word and PowerPoint files need nothing extra.
 
 ### Files in Glacier { #archived }
 
@@ -308,7 +317,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 |---|---|
 | `s3:ListAllMyBuckets` | The list of buckets you start from. Without it, open a bucket by its path |
 | `s3:ListBucket` | Listing folders, **Include subfolders**, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
-| `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
+| `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **📄 Text**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
 | `s3:GetObjectTagging` | The tags in **🏷️ Details**; without it, the rest of **🏷️ Details** still shows |
 | `kms:Decrypt` on the key | Files encrypted with SSE-KMS |
 

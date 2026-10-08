@@ -19,6 +19,8 @@ Linux. The figures then come out the same wherever they're made.
 
 Needs what the dev requirements have plus JupyterLab and Playwright:
     pip install jupyterlab playwright        # Playwright finds Chromium in $PLAYWRIGHT_BROWSERS_PATH
+When that Chromium is another version than the Playwright installed expects, point $CHROME at it
+(CHROME=/opt/pw-browsers/chromium-*/chrome-linux/chrome in a cloud session).
 """
 
 from __future__ import annotations
@@ -69,6 +71,8 @@ FIGURES = [
            "First 20 rows"),
     Figure("explorer-docx", 'x = S3Explorer("s3://acme-ml-data/docs/model-card-churn-xgb.docx", core=core, height=500)',
            "Training data"),
+    Figure("explorer-pdf-text", 'x = S3Explorer("s3://acme-ml-data/docs/data-retention-policy.pdf", core=core, height=500)',
+           "Text of page 1", (Step("act:Text", "Left out what repeats"),)),
     Figure("explorer-buckets", START, "Your buckets", (Step("act:Every bucket", "Buckets by size"),)),
     Figure("explorer-search", 'x = S3Explorer("s3://acme-ml-data/training/", core=core, height=500)\n'
            'x.filter(".tar", subfolders=True)', "Files below"),
@@ -289,7 +293,8 @@ def main() -> int:
                 except OSError:
                     time.sleep(0.5)
             with sync_playwright() as p:
-                browser = p.chromium.launch(env={**os.environ, "FONTCONFIG_FILE": str(work / "fonts.conf")})
+                browser = p.chromium.launch(executable_path=os.environ.get("CHROME") or None,
+                                            env={**os.environ, "FONTCONFIG_FILE": str(work / "fonts.conf")})
                 page = browser.new_page(viewport={"width": 1500, "height": 1400}, device_scale_factor=shots.SCALE)
                 for figure in chosen:
                     heights = set()
