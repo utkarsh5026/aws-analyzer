@@ -81,7 +81,7 @@ report still renders.
 | <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
 | <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Add, change or remove any RetrieveAndGenerate setting<br>• The request as highlighted JSON you can edit, or as Python | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
@@ -1004,6 +1004,7 @@ chat()                                     # pick the knowledge base and the mod
 chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
 chat("support-docs", data_source="faq")    # ask only one of its data sources (a name or ID)
 chat("support-docs", files=["refund-policy.pdf", "faq/returns.md"])   # or only these files
+chat("support-docs", retrieve_only=True)   # questions only search: every passage found, no answer
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ```
 
@@ -1020,6 +1021,13 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
   Findings under an answer say which setting to try (Bedrock's "unable to assist" reply, no citations, a guardrail,
   cut off at `max_tokens`). Follow-ups keep Bedrock's session; **New chat** starts over.
+- **Answer / Retrieve only.** The switch beside the question box. **Retrieve only** sends the same search without
+  the model (Retrieve instead of RetrieveAndGenerate): every passage the question finds, best first, with its score
+  and the start of its text, and no answer. Ask a question both ways to check the search and the answer apart: the
+  search marks the passages the answer to the same question cited (`cited [1]`), and a finding says when the answer
+  came back "unable to assist" although the search found passages (the answer step, not the search, is what to fix).
+  Switching puts your last question back in the box; the settings for the answer (temperature, prompt...) are
+  dimmed while they aren't sent.
 - **⚙️ Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
   name for what it does and its path in the request). Change it in place, remove it with ✕, or open **+ Add a
   setting** to add the common ones with one click, search **every** field by
@@ -1043,9 +1051,10 @@ window follows them.
 |:---|:---|
 | `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Request JSON and Last response tabs |
 | `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
+| `retrieve(question)` | Only the search behind an answer (Retrieve, the same settings without the model): every passage found, best first, with its score, and no answer. After `ask()` with the same question, which passages the answer cited, and whether a poor answer comes from the search or the model |
 | `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
 | `transcript()` | The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't) |
-| `last()` | The last answer in full: every cited passage, the exact request and response as JSON, and the same call in Python |
+| `last()` | The last answer (or search) in full: every passage, the exact request and response as JSON, and the same call in Python |
 
 #### Settings
 
@@ -1055,7 +1064,7 @@ window follows them.
 | `set(name=None, value=None, **values)` | Changes settings: `set(temperature=0.2, n=8)`, or `set("generationConfiguration.performanceConfig.latency", "optimized")` for any field. `None` removes one |
 | `unset(*names)` | Stops sending settings: `unset("temperature", "top_p")` |
 | `fields(match=None)` | Every field RetrieveAndGenerate takes in this boto3: the name `set()` takes, its type and range, what it does and its path. `fields("rerank")` keeps those that mention it |
-| `request(question=None)` | The exact JSON the next question sends, highlighted, with what Bedrock would refuse in it, and the same call in Python. Nothing is sent |
+| `request(question=None, retrieve_only=None)` | The exact JSON the next question sends, highlighted, with what Bedrock would refuse in it, and the same call in Python. Nothing is sent. `retrieve_only=True` shows the Retrieve request `retrieve()` sends (default: the window's Answer / Retrieve only) |
 
 #### Knowledge base and model
 
@@ -1096,8 +1105,9 @@ Every other field goes by its path from `knowledgeBaseConfiguration`, e.g.
 <summary><b>Getting the data</b> (<code>BedrockChatAnalyzer</code>): requests and answers as Python objects</summary>
 
 ```python
-a = ui.answers[-1]                    # Answer: the conversation's answers, oldest first
+a = ui.answers[-1]                    # Answer: the conversation's answers (and searches), oldest first
 a.text, a.citations, a.sources, a.grounded_share
+a.retrieve_only                       # a search: no text, and a.sources is every passage found, with p.score
 a.request, a.response                 # exactly what was sent and what came back
 a.to_df()                             # one row per cited source
 ui.values                             # the settings: {'n': 8, 'temperature': 0.2, ...}
@@ -1108,6 +1118,8 @@ a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, mod
 a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)  # a follow-up
 a = core.ask("support-docs", "refund window?", data_source="faq")       # one data source: a.data_sources
 a = core.ask("support-docs", "refund window?", files=["refund-policy.pdf"])   # only these files: a.files
+r = core.retrieve("support-docs", "refund window?", {"n": 8})    # only the search: r.sources, ranked, with scores
+core.request("support-docs", "refund window?", retrieve_only=True)      # the Retrieve request, not sent
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
 core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
@@ -1115,10 +1127,12 @@ core.schema().fields["temperature"]   # Field: path, type, range, what it does
 ```
 
 The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
-`settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`,
+`build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`,
+`parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`,
 `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
 `files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`,
-`answer_cost`, and the findings: `settings_findings` and `answer_findings`.
+`answer_cost`, `cited_ranks`, and the findings: `settings_findings`, `answer_findings` and `compare_findings` (a
+search and an answer to the same question).
 
 </details>
 
@@ -1128,6 +1142,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 - RetrieveAndGenerate doesn't report tokens, so they're estimated from characters (the question, the prompt and
   the passages retrieved; only the cited ones come back, so their average size stands in for the rest) and labelled
   as estimates. The estimate adds the question's embedding and, with a reranker, the reranking.
+- A retrieve-only search costs the question's embedding and, with a reranker, the reranking: no model is called.
 - Prices are the same us-east-1 list prices as `bedrock_kb.py` (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES`,
   `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
   in the table shows its cost as unknown.
@@ -1143,7 +1158,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 | `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
 | `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
 | `bedrock:ListKnowledgeBaseDocuments` | **Pick files**, `files`, and `files=` by name (an `s3://` path works without it) |
-| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why |
+| `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
 
 A model also has to be enabled under **Model access** in the Bedrock console. A list the role can't read becomes a
