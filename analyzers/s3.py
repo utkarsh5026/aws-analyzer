@@ -992,10 +992,15 @@ def parse_pdf(
     *,
     pages: Iterable[int] | None = None,
     password: str | None = None,
+    layout: bool = False,
+    progress: Callable[[int, int], None] | None = None,
 ) -> Document:
     """A PDF (path or seekable binary file) -> Document with one part per page. Needs pypdf.
-    pages: 1-based page numbers to read. Scanned pages have no text layer and come back empty."""
+    pages: 1-based page numbers to read. Scanned pages have no text layer and come back empty.
+    layout=True also keeps each page's lines with where they start, their size and whether they're bold
+    (doc.layout), which pdf_flow turns into headings, paragraphs and lists. progress gets (pages read, pages to read)."""
     pypdf = _require("pypdf", "Reading PDF text")
+    laid: list[PdfPage] = []
     try:
         reader = pypdf.PdfReader(source)
         if reader.is_encrypted and not reader.decrypt(password or ""):
@@ -1005,7 +1010,17 @@ def parse_pdf(
         bad = [n for n in wanted if not 1 <= n <= count]
         if bad:
             raise ValueError(f"Page {bad[0]} doesn't exist; the PDF has {count} pages")
-        parts = [reader.pages[n - 1].extract_text() or "" for n in wanted]
+        parts = []
+        for number in wanted:
+            page = reader.pages[number - 1]
+            if layout:
+                text, lines = _pdf_page_layout(page, number)
+                laid.append(lines)
+            else:
+                text = page.extract_text()
+            parts.append(text or "")
+            if progress:
+                progress(len(parts), len(wanted))
         meta = reader.metadata
         title, author = (meta.title, meta.author) if meta else (None, None)
     except pypdf.errors.PyPdfError as exc:
@@ -1018,7 +1033,87 @@ def parse_pdf(
         title=title or None,
         author=author or None,
         page_count=count,
+        layout=laid,
     )
+
+
+_BOLD_FONT = re.compile(r"bold|black|heavy|semibold|demibold", re.I)  # a bold font, by its name: /ABCDEF+Carlito-Bold
+_LIST_MARK = re.compile(r"[•◦▪▫●○■□‣⁃∙·\x7f-]|[-–—*]|\(?(?:\d{1,3}|[a-zA-Z])[.)]?")  # alone on a line
+
+
+def _pdf_page_layout(page: Any, number: int) -> tuple[str, PdfPage]:
+    """A pypdf page -> (its text, as extract_text() reads it, and its lines with where each starts, its size and
+    weight). The lines are pypdf's, read through its visitor_text hook, except that a bullet or number drawn
+    apart from its item joins the item's line, and so does a piece pypdf put on a line of its own although it
+    sits on the line before (the next cell of a table row). A line pypdf can't place (text turned sideways, or a
+    sideways page) gets no position, and pdf_flow lays it out by its text alone."""
+    box = page.mediabox
+    left, bottom, width, height = float(box.left), float(box.bottom), float(box.width), float(box.height)
+    sideways = int(page.get("/Rotate", 0) or 0) % 180 != 0
+    found: list[PdfLine] = []
+    line: dict[str, Any] = {}
+
+    def start() -> None:
+        line.update(text="", at=None, sizes=Counter(), chars=0, bold=0, first="", pieces=0)
+
+    def end() -> None:
+        text = line["text"].strip()
+        if line["pieces"] > 1 and line["first"].isdigit() and _LIST_MARK.fullmatch(line["first"]):
+            text = line["first"] + "." + text[len(line["first"]):]  # '1' drawn before its item: '1. Hire ...'
+        if text:
+            x, y = line["at"] or (None, None)
+            size = line["sizes"].most_common(1)[0][0] if line["sizes"] else 0.0
+            found.append(PdfLine(text, x, y, size, line["bold"] * 2 > line["chars"]))
+        start()
+
+    def visit(text: Any, cm: Any, tm: Any, font: Any, size: Any) -> None:
+        if not text:
+            return
+        at, points = None, 0.0
+        try:  # where the text starts on the page: the text matrix times the current matrix
+            a, b, c, d, e, f = (float(v) for v in tm)
+            ca, cb, cc, cd, ce, cf = (float(v) for v in cm)
+            x, y = e * ca + f * cc + ce, e * cb + f * cd + cf
+            across = (a * ca + b * cc, a * cb + b * cd)
+            points = float(size) * math.hypot(c * ca + d * cc, c * cb + d * cd)
+            if (not sideways and abs(across[0]) > abs(across[1]) and left <= x <= left + width
+                    and bottom <= y <= bottom + height):
+                at = (round(x - left, 1), round(bottom + height - y, 1))
+        except (TypeError, ValueError):
+            pass
+        heavy = bool(_BOLD_FONT.search(str(font.get("/BaseFont", "")))) if hasattr(font, "get") else False
+        for i, piece in enumerate(str(text).split("\n")):
+            if i:
+                end()
+            if piece.strip():
+                line["at"] = line["at"] or at
+                line["first"] = line["first"] or piece.strip()
+                line["pieces"] += 1
+            line["text"] += piece
+            chars = sum(not ch.isspace() for ch in piece)
+            if chars and points > 0:
+                line["sizes"][round(points * 2) / 2] += chars
+                line["chars"] += chars
+                line["bold"] += chars * heavy
+
+    start()
+    text = page.extract_text(visitor_text=visit)
+    end()
+    lines: list[PdfLine] = []
+    for item in found:
+        prev = lines[-1] if lines else None
+        if prev is not None and None not in (prev.x, prev.y, item.x, item.y) and item.x > prev.x:
+            apart, em = abs(item.y - prev.y), max(prev.size, item.size, 1.0)
+            if apart < 0.6 * em and _LIST_MARK.fullmatch(prev.text):
+                mark = prev.text + "." if prev.text.isdigit() else prev.text
+                lines[-1] = PdfLine(f"{mark} {item.text}", prev.x, item.y, item.size, item.bold)
+                continue
+            if apart < 0.3 * em:
+                lines[-1] = PdfLine(f"{prev.text} {item.text}", prev.x, prev.y, max(prev.size, item.size),
+                                    prev.bold and item.bold)
+                continue
+        lines.append(item)
+    return text or "", PdfPage(number, round(width, 1), round(height, 1), lines)
 
 
 def _encode_picture(image: Any) -> tuple[bytes, str]:
@@ -2051,6 +2146,29 @@ class Picture:
 
 
 @dataclass
+class PdfLine:
+    """One line of a PDF page as it prints: its text, where it starts (points from the page's left and top
+    edges; None when pypdf couldn't place it), its font size in points and whether its font is bold."""
+
+    text: str
+    x: float | None = None
+    y: float | None = None
+    size: float = 0.0
+    bold: bool = False
+
+
+@dataclass
+class PdfPage:
+    """A PDF page's lines in the order pypdf reads them, and the page's size in points (read_pdf(..., layout=True));
+    pdf_flow lays them out to read."""
+
+    number: int
+    width: float = 0.0
+    height: float = 0.0
+    lines: list[PdfLine] = field(default_factory=list)
+
+
+@dataclass
 class Document:
     """Text of a PDF, Word (.docx) or PowerPoint (.pptx) file (see S3Analyzer.read_document)."""
 
@@ -2078,6 +2196,7 @@ class Document:
     roles: list[str] = field(default_factory=list)  # DOCX, per part: 'title', 'h1'.., 'li', 'table' or 'p'
     pictures: list[Picture] = field(default_factory=list)  # PDF pages drawn, or a DOCX's pictures in order
     errors: dict[str, str] = field(default_factory=dict)  # what couldn't be read, and why: {'pictures': ...}
+    layout: list[PdfPage] = field(default_factory=list)  # PDF read with layout=True: each page's lines (pdf_flow)
 
     @property
     def text(self) -> str:
@@ -3710,6 +3829,165 @@ def policy_findings(statements: list[PolicyStatement]) -> list[tuple[str, str]]:
             )
         )
     return found
+
+
+# ---- A PDF's text laid out to read (pdf_flow): headings, paragraphs and lists from where its lines sit
+
+_PDF_BULLET = re.compile(r"([•◦▪▫●○■□‣⁃∙·\x7f-]|[-–—*])\s+(?=\S)")  # '• ', Symbol / Wingdings bullets
+_LIST_NUMBER = re.compile(r"\(?(?:\d{1,3}(?:\.\d{1,3})*|[a-zA-Z]|[ivxlcdm]{1,6})[.)]\s+(?=\S)")  # '1. ', 'a) ', '(iv) '
+_PAGE_NUMBER = re.compile(
+    r"(?:page\s+)?[-–—(\[]?\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*[-–—)\]]?(?:\s*(?:of|/)\s*\d{1,4})?", re.I)
+_SENTENCE_END = re.compile(r"[.!?:;…。]['\"”’)\]]*$")
+_PDF_LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st",
+                                "\xad": ""})
+
+
+def _pdf_pages(doc: Document | Iterable[PdfPage]) -> list[PdfPage]:
+    """The pages to lay out: a Document's layout (read with layout=True), else its pages' text as lines with no
+    place or size; or the PdfPages given."""
+    if not isinstance(doc, Document):
+        return list(doc)
+    return doc.layout or [PdfPage(number, lines=[PdfLine(text.strip()) for text in part.splitlines() if text.strip()])
+                          for number, part in zip(doc.numbers, doc.parts)]
+
+
+def _pdf_furniture(pages: list[PdfPage]) -> set[tuple[int, int]]:
+    """(index in pages, line index) of the running headers and footers: lines in the top or bottom tenth of a page
+    that come back on at least two pages and 40% of the pages with text (digits aside, so 'Page 3 of 9' does),
+    and page numbers there."""
+    edges: dict[tuple[int, int], str] = {}
+    on_pages: dict[str, set[int]] = defaultdict(set)
+    numbers = set()
+    texts = [at for at, page in enumerate(pages) if page.lines]
+    for at in texts:
+        page = pages[at]
+        for i, line in enumerate(page.lines):
+            if line.y is None or not page.height or 0.1 * page.height <= line.y <= 0.9 * page.height:
+                continue
+            edges[(at, i)] = key = re.sub(r"\d+", "#", " ".join(line.text.lower().split()))
+            on_pages[key].add(at)
+            if _PAGE_NUMBER.fullmatch(line.text.strip()):
+                numbers.add((at, i))
+    need = max(2, math.ceil(0.4 * len(texts)))
+    return numbers | {where for where, key in edges.items() if len(on_pages[key]) >= need}
+
+
+def pdf_furniture(doc: Document | Iterable[PdfPage]) -> list[str]:
+    """The running headers and footers pdf_flow leaves out of a PDF's text, each once ('ACME - Confidential'),
+    then 'page numbers' if there were any."""
+    pages = _pdf_pages(doc)
+    said, numbers = {}, False
+    for at, i in sorted(_pdf_furniture(pages)):
+        text = pages[at].lines[i].text
+        if _PAGE_NUMBER.fullmatch(text.strip()):
+            numbers = True
+        else:
+            said.setdefault(re.sub(r"\d+", "#", text.lower()), text)
+    return list(said.values()) + ["page numbers"] * numbers
+
+
+def pdf_flow(doc: Document | Iterable[PdfPage]) -> list[tuple[str, Any]]:
+    """A PDF's text laid out to read, from read_pdf(uri, layout=True) (or its doc.layout): ('page', number) where
+    each page starts, then its headings ('title', 'h1' to 'h3' by font size; a short bold line is a heading too),
+    paragraphs ('p': lines that run on are joined, a word split at the end of a line is made whole, and a line
+    that ends short keeps its line break, '\\n', so table rows and addresses stay apart) and list items ('li',
+    without the bullet; a numbered item keeps its number). Running headers and footers (pdf_furniture) are left
+    out, and a page with no text is ('missing', a line saying so). A Document read without layout=True is laid
+    out from its text alone: paragraphs, no headings."""
+    pages = _pdf_pages(doc)
+    skip = _pdf_furniture(pages)
+    kept = [(page, [line for i, line in enumerate(page.lines) if (at, i) not in skip and line.text.strip()])
+            for at, page in enumerate(pages)]
+    every = [line for _, lines in kept for line in lines]
+    sizes: Counter = Counter()
+    for line in every:
+        sizes[line.size] += len(line.text)
+    body = sizes.most_common(1)[0][0] if sizes else 0.0  # the size most of the text is in
+    bold_body = 2 * sum(len(line.text) for line in every if line.size == body and line.bold) > sizes[body]
+
+    def big(line: PdfLine) -> bool:
+        return body > 0 and line.size >= body * 1.15
+
+    def heading(line: PdfLine) -> bool:
+        if sum(ch.isalnum() for ch in line.text) < 2 or len(line.text) > 160:
+            return False
+        return big(line) or (line.bold and not bold_body and line.size >= body * 0.95 and len(line.text) <= 90
+                             and not line.text.endswith((".", ",", ";")))
+
+    steps = sorted({round(line.size) for line in every if big(line) and heading(line)}, reverse=True)
+    largest = [id(line) for line in every if steps and big(line) and heading(line) and round(line.size) == steps[0]]
+    first = kept[0][1] if kept else []
+    at = [i for i, line in enumerate(first) if id(line) in largest]
+    titled = (len(steps) > 1 and pages[0].number == 1 and len(at) == len(largest) <= 3  # one big title on page 1,
+              and at == list(range(at[0], at[0] + len(at)))  # on up to 3 lines that read as one heading
+              and all(b.y is None or a.y is None or 0 < b.y - a.y < 1.4 * b.size
+                      for a, b in zip(first[at[0]:], first[at[0] + 1:at[-1] + 1])))
+
+    def role(line: PdfLine) -> str:
+        if not big(line):  # a bold line in the body's size: a level under the sized headings
+            return f"h{max(1, min(len(steps) - titled + 1, 3))}"
+        rank = steps.index(round(line.size)) - titled
+        return "title" if rank < 0 else f"h{min(rank + 1, 3)}"
+
+    gaps: list[float] = []
+    for _, lines in kept:
+        gaps += [b.y - a.y for a, b in zip(lines, lines[1:]) if a.y is not None and b.y is not None
+                 and a.size == b.size == body and 0 < b.y - a.y < 3 * max(body, 1)]
+    step = sorted(gaps)[(len(gaps) - 1) // 2] if gaps else 1.2 * max(body, 1)  # from a line of body text to the next
+
+    def measure(lines: list[PdfLine]) -> float:  # characters in a full line of body text
+        lengths = sorted(len(line.text) for line in lines if line.size == body)
+        return lengths[int(len(lengths) * 0.9)] if lengths else 0
+
+    whole = measure(every)
+    items: list[tuple[str, Any]] = []
+    for page, lines in kept:
+        items.append(("page", page.number))
+        if not any(line.text.strip() for line in page.lines):
+            items.append(("missing", "No text on this page (probably a scan), so only its picture shows what's on it"))
+            continue
+        width = max(measure(lines) if sum(line.size == body for line in lines) >= 8 else whole, 40)
+        prev: PdfLine | None = None
+        start_x: float | None = None  # where the paragraph or list item being read starts
+        for line in lines:
+            text, last = line.text, items[-1][0]
+            gap = line.y - prev.y if prev is not None and prev.y is not None and line.y is not None else None
+            same = prev is not None and abs(prev.size - line.size) < 0.5 and prev.bold == line.bold
+            wrapped = prev is not None and len(prev.text) + 1 + len(text.split()[0]) > 0.85 * width
+            ends = prev is not None and bool(_SENTENCE_END.search(prev.text))
+            near = gap is not None and 0 < gap <= step * 1.4
+            runs_on = same and last in ("p", "li") and (
+                (near and not (line.x is not None and start_x is not None and last == "li" and line.x <= start_x + 1)
+                 and not (line.x is not None and prev.x is not None and line.x > prev.x + 0.8 * line.size
+                          and last == "p" and (ends or not wrapped)))  # a first-line indent starts a paragraph
+                or (gap is None and (wrapped or not ends))
+                or (gap is not None and (gap < 0 or gap > 3 * step) and wrapped and not ends))  # the next column
+            bullet = _PDF_BULLET.match(text)
+            marker = bullet or _LIST_NUMBER.match(text)
+            plain = bullet is not None and bullet.group(1) not in "-–—*"  # a bullet, not a dash or a number
+            if heading(line):
+                if last in ("title", "h1", "h2", "h3") and prev is not None and same and heading(prev) and (
+                        gap is None or 0 < gap < 1.4 * line.size):
+                    items[-1] = (last, f"{items[-1][1]} {text}")  # a heading on two lines
+                else:
+                    items.append((role(line), text))
+            elif marker and (plain or not (runs_on and last == "p" and wrapped and not ends)):  # not '...in\n2. ...'
+                items.append(("li", text[bullet.end():] if bullet else text))
+                start_x = line.x
+            elif runs_on:
+                before = items[-1][1]
+                if before.endswith("\xad"):
+                    joined = before + text
+                elif wrapped and re.search(r"[^\W\d_]-$", before) and text[:1].islower():
+                    joined = before[:-1] + text  # a word split at the end of the line
+                else:
+                    joined = before + (" " if wrapped else "\n") + text
+                items[-1] = (last, joined)
+            else:
+                items.append(("p", text))
+                start_x = line.x
+            prev = line
+    return [(role, value.translate(_PDF_LIGATURES) if role != "page" else value) for role, value in items]
 
 
 # ---- What's inside a file (describe_file, file_details_findings)
@@ -6316,19 +6594,23 @@ class S3Analyzer:
         pictures: bool | None = False,
         max_pictures: int | None = None,
         compression: str | None = None,
+        layout: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> Document:
         """Text of a PDF, one part per page (needs pypdf). pages: 1-based page numbers, e.g. [1, 2] or
         range(1, 11); only those are read. Scanned pages have no text layer and come back empty.
         pictures=True also draws each page read into doc.pictures, None only the pages with no text (scans);
         drawing needs pypdfium2 and pillow, and what stops it goes in doc.errors['pictures'] instead of
-        raising. max_pictures: draw at most this many. progress gets (pages drawn, pages to draw)."""
+        raising. max_pictures: draw at most this many. layout=True also keeps where each line sits, its size
+        and weight (doc.layout), for pdf_flow(doc): the text as headings, paragraphs and lists. progress gets
+        (pages drawn, pages to draw), or with pictures=False (pages read, pages to read)."""
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
         with self._open_document(
             bucket, key, codec, whole_under=256 * MB if pages is None else 16 * MB
         ) as handle:
-            doc = parse_pdf(handle, s3_uri(bucket, key), pages=pages, password=password)
+            doc = parse_pdf(handle, s3_uri(bucket, key), pages=pages, password=password, layout=layout,
+                            progress=progress if pictures is False else None)
             if pictures is not False:
                 drawn = [n for n, text in zip(doc.numbers, doc.parts) if pictures or not text.strip()]
                 try:
@@ -6393,12 +6675,14 @@ class S3Analyzer:
         pictures: bool | None = False,
         max_pictures: int | None = None,
         compression: str | None = None,
+        layout: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> Document:
         """Text of a PDF, Word .docx or PowerPoint .pptx, told apart by name or content. pages: page numbers
         (PDF) or slide numbers (PPTX). doc.text is everything; doc.parts has one entry per page / slide.
         pictures: for a PDF, True draws every page read and None the pages without text (see read_pdf);
-        for a Word file, True or None loads its pictures. False (the default) reads text only."""
+        for a Word file, True or None loads its pictures. False (the default) reads text only. layout=True
+        keeps a PDF's lines with where they sit (see read_pdf and pdf_flow)."""
         bucket, key = parse_s3_uri(uri)
         fmt, codec = detect_format(key)
         codec = codec if compression is None else compression
@@ -6416,6 +6700,7 @@ class S3Analyzer:
                 pictures=pictures,
                 max_pictures=max_pictures,
                 compression=codec or "",
+                layout=layout,
                 progress=progress,
             )
         if fmt == "pptx":
@@ -7457,8 +7742,10 @@ class _Pages:
 
 @dataclass
 class _Flow:
-    """A Word document in reading order: ('title' | 'h1'.. | 'p' | 'li', text), ('table', rows),
-    ('picture', Picture) or ('missing', a line about a picture that isn't shown)."""
+    """A document in reading order: ('title' | 'h1'.. | 'p' | 'li', text), ('table', rows), ('picture', Picture),
+    ('missing', a line about something that isn't shown) and, in a PDF's text (pdf_flow), ('page', number) where
+    each page starts. A 'p' keeps its line breaks, and an 'li' that starts with its own number ('2. ', 'b) ')
+    shows no bullet."""
 
     items: list[tuple[str, Any]]
     title: str = ""
@@ -7626,6 +7913,10 @@ _CSS = """<style>
 .s3a .flow .d1{font-size:18px}
 .s3a .flow .d2{font-size:15px}
 .s3a .flow ul{margin:0 0 8px;padding-left:22px}
+.s3a .flow li.n{list-style:none}
+.s3a .flow .pg{display:flex;align-items:center;gap:10px;margin:22px 0 12px;font-size:11px;opacity:.55;letter-spacing:.04em}
+.s3a .flow .pg::before,.s3a .flow .pg::after{content:"";flex:1;border-top:1px solid rgba(127,127,127,.45)}
+.s3a .flow .pg:first-child{margin-top:0}
 .s3a .flow figure{margin:10px 0}
 .s3a .flow img{display:block;height:auto;max-height:none}
 .s3a .flow .pm{margin:8px 0;padding:5px 10px;border:1px dashed rgba(127,127,127,.5);border-radius:4px;font-size:12px;opacity:.75}
@@ -8154,14 +8445,17 @@ class _Zoom:
 
 
 def _flow_html(items: list[tuple[str, Any]]) -> str:
-    """A Word document's _Flow items as HTML. Every piece of its text is escaped; headings are styled divs,
-    not <h1>.. tags, so they don't land in the notebook's table of contents."""
+    """A document's _Flow items as HTML. Every piece of its text is escaped; headings are styled divs, not
+    <h1>.. tags, so they don't land in the notebook's table of contents."""
     out: list[str] = []
     for i, (role, value) in enumerate(items):
         if role == "li":
             opens = i == 0 or items[i - 1][0] != "li"
             closes = i == len(items) - 1 or items[i + 1][0] != "li"
-            out.append(("<ul>" if opens else "") + f"<li>{_esc(value)}</li>" + ("</ul>" if closes else ""))
+            numbered = ' class="n"' if _LIST_NUMBER.match(value) else ""
+            out.append(("<ul>" if opens else "") + f"<li{numbered}>{_esc(value)}</li>" + ("</ul>" if closes else ""))
+        elif role == "page":
+            out.append(f'<div class="pg">Page {_esc(value)}</div>')
         elif role == "title" or role.startswith("h"):
             level = 0 if role == "title" else min(int(role[1:]), 3)
             out.append(f'<div class="dh d{level}">{_esc(value)}</div>')
@@ -8181,11 +8475,13 @@ def _flow_html(items: list[tuple[str, Any]]) -> str:
 
 
 def _flow_text(items: list[tuple[str, Any]]) -> str:
-    """A Word document's _Flow items as plain text: '#' headings, '- ' list items, ' | ' tables."""
+    """A document's _Flow items as plain text: '#' headings, '- ' list items, ' | ' tables, '-- Page 2 --'."""
     out: list[str] = []
     for i, (role, value) in enumerate(items):
         if role == "li":
-            text = f"- {value}"
+            text = value if _LIST_NUMBER.match(value) else f"- {value}"
+        elif role == "page":
+            text = f"-- Page {value} --"
         elif role == "title" or role.startswith("h"):
             text = "#" * (1 if role == "title" else min(int(role[1:]) + 1, 6)) + f" {value}"
         elif role == "table":
@@ -9045,6 +9341,42 @@ def _flow_items(doc: Document, *, max_parts: int | None = None, max_chars: int |
         counts["chars"] += len(part)
     pictures_before(len(doc.parts))
     return items, False, counts["capped"]
+
+
+def _pdf_blocks(doc: Document, drawn: dict[int, Picture], max_chars: int) -> tuple[list[Any], bool]:
+    """A PDF's pages in order: the pages with text laid out by pdf_flow, in one _Flow with a line where each page
+    starts, and the drawn pages (`drawn`, by page number) as pictures with their text folded under them. Stops
+    after max_chars characters -> (blocks, whether it stopped early)."""
+    texts = dict(zip(doc.numbers, doc.parts))
+    blocks: list[Any] = []
+    items: list[tuple[str, Any]] = []
+    shown, page, cut = 0, None, False
+    for role, value in pdf_flow(doc):
+        if shown >= max_chars:
+            cut = True
+            break
+        if role == "page":
+            page = value
+            if page in drawn:
+                if items:
+                    blocks.append(_Flow(items))
+                    items = []
+                blocks.append(_Pages([drawn[page]], title=f"Page {page}"))
+                text = texts.get(page, "")
+                if text.strip():
+                    blocks.append(_Text(text[: max_chars - shown], title=f"Text of page {page}", wrap=True,
+                                        collapsed=True))
+                shown += len(text)
+                continue
+        elif page in drawn:
+            continue
+        else:
+            value = value[: max_chars - shown]
+            shown += len(value)
+        items.append((role, value))
+    if items:
+        blocks.append(_Flow(items))
+    return blocks, cut
 
 
 def _pages_title(pictures: list[Picture], count: int | None) -> str:
@@ -11437,16 +11769,19 @@ class S3View:
         pictures: bool | None = None,
         max_chars: int = 200_000,
     ) -> None:
-        """A document as it reads: a Word file with its headings, lists, tables and pictures in place, or a PDF
-        or PowerPoint deck page by page (slide by slide), e.g. document(uri, pages=[1, 2]). PDF pages with no
-        text, such as scans, are drawn as pictures; pictures=True draws every page, pictures=False none.
+        """A document as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF's
+        text laid out to read (headings, paragraphs and lists, a line where each page starts, and no running
+        headers, footers or page numbers), or a PowerPoint deck slide by slide, e.g. document(uri, pages=[1, 2]).
+        PDF pages with no text, such as scans, are drawn as pictures; pictures=True draws every page as it looks
+        (with its text folded under it), pictures=False none.
 
         A PDF's text needs pypdf, and drawing its pages needs pypdfium2 and pillow. One report shows at most
         20 pages or pictures, so the notebook stays small; pass pages= for other pages. Click a drawn page to see
-        it as big as the notebook, with ‹ › to step through the pages and ✕ to go back."""
-        with self._progress("Drawing pages", unit="pages") as tick:
+        it as big as the notebook, with ‹ › to step through the pages and ✕ to go back. The PDF's text as
+        pypdf reads it, line by line, is in ui.core.read_document(uri).text."""
+        with self._progress("Reading pages" if pictures is False else "Drawing pages", unit="pages") as tick:
             doc = self.core.read_document(uri, pages=pages, password=password, pictures=pictures,
-                                          max_pictures=_MAX_PICTURES, progress=tick)
+                                          max_pictures=_MAX_PICTURES, layout=True, progress=tick)
         if doc.kind == "docx":  # Word's saved page count is often stale, so count paragraphs instead
             cards = [("Paragraphs", f"{len(doc.parts) - len(doc.tables):,}"), ("Tables", f"{len(doc.tables):,}")]
             cards += [("Pictures", f"{len(doc.pictures):,}")] if doc.pictures else []
@@ -11487,6 +11822,24 @@ class S3View:
                     f"Drew {len(drawn)} of the {len(wanted)} pages {'asked for' if pictures else 'without text'} "
                     f"(one report draws {_MAX_PICTURES}, so the notebook stays small); "
                     f"{_call('document', doc.uri, pages=_page_numbers(rest), pictures=True)} draws the next ones."))
+            elif pictures is False and blank and len(blank) < len(doc.parts):
+                one, some = len(blank) == 1, blank[:_MAX_PICTURES]
+                blocks.append(_Note(
+                    f"{'Page ' + str(blank[0]) + ' has' if one else _plural(len(blank), 'page') + ' have'} no text "
+                    f"(probably {'a scan' if one else 'scans'}): "
+                    f"{_call('document', doc.uri, pages=_page_numbers(some), pictures=True)} draws "
+                    f"{'it' if len(some) == 1 else 'them'}."))
+            shown_blocks, cut = _pdf_blocks(doc, drawn, max_chars)
+            blocks += shown_blocks + ([stopped] if cut else [])
+            left_out = pdf_furniture(doc) if any(n not in drawn for n in doc.numbers) else []
+            if left_out:
+                said = [f"“{_clip(text, 60)}”" for text in left_out if text != "page numbers"][:2]
+                said += ["page numbers"] if left_out[-1] == "page numbers" else []
+                blocks.append(_Note(
+                    f"Left out what repeats at the top and bottom of the pages ({', '.join(said)}), so the text "
+                    f"reads on; {_call('ui.core.read_document', doc.uri)}.text has every line."))
+            self._show(blocks)
+            return
         name, shown = ("Page" if doc.kind == "pdf" else "Slide"), 0
         for i, (number, part) in enumerate(zip(doc.numbers, doc.parts)):
             if shown >= max_chars:

@@ -35,9 +35,12 @@ from s3 import (
     MB,
     TB,
     BucketConfig,
+    Document,
     FileDetails,
     FileDetailsReport,
     ObjectInfo,
+    PdfLine,
+    PdfPage,
     Picture,
     S3Analyzer,
     S3View,
@@ -70,6 +73,8 @@ from s3 import (
     parse_s3_uri,
     parse_size,
     parse_time,
+    pdf_flow,
+    pdf_furniture,
     policy_findings,
     render_pdf_pages,
     simulate_lifecycle_objects,
@@ -1105,6 +1110,98 @@ def test_parse_pdf_with_a_password():
     assert parse_pdf(io.BytesIO(buffer.getvalue()), password="letmein").parts == [
         "Secret page"
     ]
+
+
+def test_parse_pdf_keeps_its_layout():
+    data = layout_pdf(*REPORT_PAGES)
+    doc = parse_pdf(io.BytesIO(data), layout=True)
+    assert doc.parts == parse_pdf(io.BytesIO(data)).parts and parse_pdf(io.BytesIO(data)).layout == []
+    assert [(page.number, page.width, page.height) for page in doc.layout] == [(1, 612, 792), (2, 612, 792), (3, 612, 792)]
+    assert doc.layout[0].lines[:3] == [
+        PdfLine("ACME - internal", 72, 52, 8),
+        PdfLine("Quarterly report", 72, 92, 20, bold=True),  # from the top of the page, in points
+        PdfLine("Revenue grew in every region this quarter, led by the storage busi-", 72, 132, 11),
+    ]
+    assert [line.text for line in doc.layout[0].lines[4:]] == [
+        "• Storage grew 12%.", "1. Hire forty engineers.", "Region Growth", "1"]  # the number drawn before its item
+    assert doc.layout[2].lines == []
+    assert pdf_flow(doc) == [
+        ("page", 1), ("h1", "Quarterly report"),
+        ("p", "Revenue grew in every region this quarter, led by the storage business, where customers signed longer "
+              "contracts."),
+        ("li", "Storage grew 12%."), ("li", "1. Hire forty engineers."), ("p", "Region Growth"),
+        ("page", 2), ("p", "Costs rose more slowly."),
+        ("page", 3), ("missing", "No text on this page (probably a scan), so only its picture shows what's on it"),
+    ]
+    assert pdf_furniture(doc) == ["ACME - internal", "page numbers"]
+    pages = [1]
+    parse_pdf(io.BytesIO(data), layout=True, progress=lambda done, total: pages.append((done, total)))
+    assert pages == [1, (1, 3), (2, 3), (3, 3)]
+
+
+def test_pdf_flow():
+    line = PdfLine
+    first = PdfPage(1, 612, 792, [
+        line("ACME data platform - internal", 72, 40, 8),  # running header: left out
+        line("Data retention policy", 72, 100, 20, bold=True),
+        line("Raw events are kept for 13 months, then deleted, so that the platform's infor-", 72, 140, 11),
+        line("mation stays small. Curated tables are kept while a model or report uses them.", 72, 154, 11),
+        line("Checkpoint ﬁles move to cheaper storage after 30 days.", 72, 168, 11),
+        line("Exceptions", 72, 200, 14, bold=True),
+        line("• Data under legal hold is kept until the hold is lifted by the legal team, who", 72, 230, 11),
+        line("decide case by case.", 84, 244, 11),  # under the bullet's text: the same item
+        line("• Ask before deleting anything in archive/.", 72, 258, 11),
+        line("1. Write to the data platform team.", 72, 272, 11),
+        line("Owner", 72, 300, 11, bold=True),  # a short bold line: a heading, under the sized ones
+        line("Team Contact", 72, 320, 11),  # short lines keep their line breaks
+        line("Data platform data@acme.example", 72, 334, 11),
+        line("1", 300, 760, 9),  # page number: left out
+    ])
+    second = PdfPage(2, 612, 792, [line("ACME data platform - internal", 72, 40, 8),
+                                   line("This policy is reviewed every year.", 72, 100, 11), line("2", 300, 760, 9)])
+    assert pdf_flow([first, second, PdfPage(3, 612, 792)]) == [
+        ("page", 1),
+        ("title", "Data retention policy"),  # the one biggest heading, on page 1
+        ("p", "Raw events are kept for 13 months, then deleted, so that the platform's information stays small. "
+              "Curated tables are kept while a model or report uses them. Checkpoint files move to cheaper storage "
+              "after 30 days."),
+        ("h1", "Exceptions"),
+        ("li", "Data under legal hold is kept until the hold is lifted by the legal team, who decide case by case."),
+        ("li", "Ask before deleting anything in archive/."),
+        ("li", "1. Write to the data platform team."),
+        ("h2", "Owner"),
+        ("p", "Team Contact\nData platform data@acme.example"),
+        ("page", 2), ("p", "This policy is reviewed every year."),
+        ("page", 3), ("missing", "No text on this page (probably a scan), so only its picture shows what's on it"),
+    ]
+    assert pdf_furniture([first, second]) == ["ACME data platform - internal", "page numbers"]
+    assert pdf_furniture([first]) == ["page numbers"]  # one page: nothing repeats
+    columns = PdfPage(1, 612, 792, [
+        line("Revenue grew in every region this quarter, led by the storage business, where", 72, 100, 11),
+        line("new customers signed longer contracts than last year, so costs grew slower than", 72, 114, 11),
+        line("revenue. The board approved a buyback.", 320, 100, 11),  # the next column, back at the top
+        line("Hiring stays flat.", 320, 128, 11),  # a blank line's gap: a new paragraph
+    ])
+    assert pdf_flow([columns]) == [
+        ("page", 1),
+        ("p", "Revenue grew in every region this quarter, led by the storage business, where new customers signed "
+              "longer contracts than last year, so costs grew slower than revenue. The board approved a buyback."),
+        ("p", "Hiring stays flat."),
+    ]
+
+
+def test_pdf_flow_from_text_alone():
+    doc = Document("s3://b/a.pdf", "pdf", parts=[
+        "Revenue grew in every region this quarter, led by the storage business, where new\n"
+        "customers signed longer contracts than last year.\nThe board approved a buyback.", ""], numbers=[4, 5])
+    assert pdf_flow(doc) == [
+        ("page", 4),
+        ("p", "Revenue grew in every region this quarter, led by the storage business, where new customers signed "
+              "longer contracts than last year."),
+        ("p", "The board approved a buyback."),
+        ("page", 5), ("missing", "No text on this page (probably a scan), so only its picture shows what's on it"),
+    ]
+    assert pdf_furniture(doc) == []
 
 
 def test_parse_docx_roles_and_pictures():
@@ -2464,6 +2561,45 @@ def pdf_bytes(*pages, title=None):
     return bytes(out)
 
 
+def layout_pdf(*pages):
+    """A PDF whose pages (612 x 792 points) are lists of (x, y, size, bold, text) runs, y from the bottom of the
+    page, each drawn on its own in Helvetica or Helvetica-Bold."""
+    count = len(pages)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (5 + 2 * i) for i in range(count)), count),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    ]
+    for i, runs in enumerate(pages):
+        stream = " ".join(f"BT /F{2 if bold else 1} {size} Tf {x} {y} Td ({text}) Tj ET"
+                          for x, y, size, bold, text in runs).encode("latin-1")
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+                       b"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>" % (6 + 2 * i))
+        objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%s\nendobj\n" % (number, body)
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+REPORT_PAGES = (  # a heading, a paragraph with a word split over two lines, a bullet, a numbered item drawn apart
+    [(72, 740, 8, False, "ACME - internal"), (72, 700, 20, True, "Quarterly report"),
+     (72, 660, 11, False, "Revenue grew in every region this quarter, led by the storage busi-"),
+     (72, 646, 11, False, "ness, where customers signed longer contracts."),
+     (72, 618, 11, False, "\x95"), (90, 618, 11, False, "Storage grew 12%."),
+     (72, 600, 12, False, "1"), (90, 602, 11, False, "Hire forty engineers."),
+     (72, 572, 11, False, "Region"), (160, 572, 11, False, "Growth"), (300, 40, 9, False, "1")],
+    [(72, 740, 8, False, "ACME - internal"), (72, 700, 11, False, "Costs rose more slowly."), (300, 40, 9, False, "2")],
+    [],
+)
+
+
 W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 P_NS = (
     'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
@@ -3351,10 +3487,32 @@ def test_ui_documents_as_pictures(ui, capsys, formats, monkeypatch):
     monkeypatch.setitem(sys.modules, "pypdfium2", None)
     missing = run(capsys, ui.document, uri_of("docs/scan.pdf"))
     assert "Seeing PDF pages as pictures needs `pypdfium2` (pip install pypdfium2)." in missing
-    assert "-- Page 1 --\n(no text)" in missing
+    assert "-- Page 1 --\n\n[No text on this page (probably a scan)" in missing
     monkeypatch.setitem(sys.modules, "pypdf", None)
     neither = run(capsys, ui.document, uri_of("docs/report.pdf"))
     assert "[!] Reading PDF text needs `pypdf` (pip install pypdf).\n" in neither and "ImportError" not in neither
+
+
+def test_ui_document_lays_out_a_pdfs_text(ui, capsys, aws, formats):
+    aws.put_object(Bucket=FORMATS, Key="docs/quarterly.pdf", Body=layout_pdf(*REPORT_PAGES))
+    uri = uri_of("docs/quarterly.pdf")
+    out = run(capsys, ui.document, uri, pictures=False)
+    assert ("-- Page 1 --\n\n## Quarterly report\n\nRevenue grew in every region this quarter, led by the storage "
+            "business, where customers signed longer contracts.\n\n- Storage grew 12%.\n1. Hire forty engineers."
+            "\n\nRegion Growth\n\n-- Page 2 --\n\nCosts rose more slowly.\n\n-- Page 3 --\n\n[No text on this page") in out
+    assert "ACME - internal" not in out.split("Left out")[0]  # the running header and page numbers aren't in the text
+    assert ("Left out what repeats at the top and bottom of the pages (“ACME - internal”, page numbers), so the text "
+            "reads on; ui.core.read_document('s3://formats/docs/quarterly.pdf').text has every line.") in out
+    assert ("Page 3 has no text (probably a scan): document('s3://formats/docs/quarterly.pdf', pages=[3], "
+            "pictures=True) draws it.") in out
+    drawn = run(capsys, ui.document, uri)  # the page without text is drawn, between the text of the others
+    assert "-- Page 2 --\n\nCosts rose more slowly.\n\n-- Page 3 --\n[Page 3: a picture" in drawn
+    every = run(capsys, ui.document, uri, pictures=True)  # every page drawn: no text laid out, nothing left out
+    assert "## Quarterly report" not in every and "-- Text of page 1 --\nACME - internal" in every
+    assert "Left out" not in every
+    html = s3mod._render_html([s3mod._Flow([("page", 2), ("li", "2. Two"), ("li", "A bullet"), ("p", "a\nb")])], 0)
+    assert '<div class="pg">Page 2</div><ul><li class="n">2. Two</li><li>A bullet</li></ul><p>a\nb</p>' in html
+    assert ".s3a .flow li.n{list-style:none}" in html
 
 
 def test_ui_duplicates(ui, capsys, aws, dupes):

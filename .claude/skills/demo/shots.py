@@ -158,17 +158,47 @@ def _tar_gz(files: dict[str, bytes], when: datetime) -> bytes:
     return buffer.getvalue()
 
 
-def _pdf(pages: list[list[str]], title: str, author: str) -> bytes:
-    """A PDF with a few lines of text per page and a title and author."""
+def _pdf(pages: list[list[str]], title: str, author: str, header: str = "") -> bytes:
+    """A PDF with a title and author, laid out like a document. Each page is a list of lines, drawn one under the
+    other: '# Title' in 20 pt bold, '## Heading' in 14 pt bold, '- item' as a bullet ('  more' carries its text on),
+    '' as a gap, and the rest in 11 pt. `header` goes at the top of every page and 'Page 1 of 2' at the bottom,
+    drawn last, as many apps do."""
+    def text(x: float, y: float, size: float, bold: bool, words: str) -> str:
+        words = words.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        return f"BT /F{2 if bold else 1} {size} Tf {x} {y} Td ({words}) Tj ET"
+
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
-               b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(len(pages))),
+               b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (5 + 2 * i) for i in range(len(pages))),
                                                              len(pages)),
-               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"]
     for i, lines in enumerate(pages):
-        text = " ".join(f"({line}) Tj T*" for line in lines)
-        stream = f"BT /F1 11 Tf 14 TL 50 740 Td {text} ET".encode()
+        runs, y = [], 700.0
+        for line in lines:
+            if line.startswith("# "):
+                runs.append(text(72, y, 20, True, line[2:]))
+                y -= 34
+            elif line.startswith("## "):
+                y -= 10
+                runs.append(text(72, y, 14, True, line[3:]))
+                y -= 22
+            elif line.startswith("- "):
+                runs += [text(72, y, 11, False, "\x95"), text(86, y, 11, False, line[2:])]
+                y -= 14
+            elif line.startswith("  "):
+                runs.append(text(86, y, 11, False, line[2:]))
+                y -= 14
+            elif line:
+                runs.append(text(72, y, 11, False, line))
+                y -= 14
+            else:
+                y -= 10
+        if header:
+            runs.append(text(72, 752, 8, False, header))
+        runs.append(text(282, 40, 8, False, f"Page {i + 1} of {len(pages)}"))
+        stream = " ".join(runs).encode("latin-1")
         objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
-                       b"/Resources << /Font << /F1 3 0 R >> >> >>" % (5 + 2 * i))
+                       b"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>" % (6 + 2 * i))
         objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
     objects.append(b"<< /Title (%s) /Author (%s) >>" % (title.encode(), author.encode()))
     out, offsets = bytearray(b"%PDF-1.4\n"), []
@@ -588,12 +618,27 @@ def seed_s3_docs() -> dict:
         ("Next quarter", "Move checkpoints to cheaper storage\nRetire the v1 fraud model", ""),
     ], "Q3 ML platform review", "ML platform team"), 18)
     put("docs/data-retention-policy.pdf", _pdf([
-        ["Data retention policy", "", "Raw events are kept for 13 months, then deleted.",
-         "Curated tables are kept while a model or report uses them.",
-         "Training checkpoints move to cheaper storage after 30 days."],
-        ["Exceptions", "", "Data under legal hold is kept until the hold is lifted.",
-         "Ask the data platform team before deleting anything in archive/."],
-    ], "Data retention policy", "Data platform team"), 90)
+        ["# Data retention policy",
+         "This policy says how long the data platform keeps each kind of data in acme-ml-data,",
+         "and what happens to it after that. It applies to every team that writes to the bucket,",
+         "and the data platform team reviews it every year.",
+         "## What we keep, and for how long",
+         "- Raw events are kept for 13 months, then deleted by a lifecycle rule.",
+         "- Curated tables are kept while a model or a report uses them; the owner of each",
+         "  table checks this every quarter.",
+         "- Training checkpoints move to cheaper storage after 30 days, and the last three of",
+         "  each model are kept.",
+         "## Personal data",
+         "Tables with customer data are pseudonymised before they reach curated/. When a",
+         "customer asks to be forgotten, their rows are removed from every curated table within",
+         "30 days, and from the raw events when those expire."],
+        ["## Exceptions",
+         "Data under legal hold is kept until the hold is lifted, whatever this policy says. Ask",
+         "the data platform team before deleting anything in archive/, which holds the evidence",
+         "for past audits.",
+         "## Contact",
+         "data-platform@acme.example, or #data-platform on Slack."],
+    ], "Data retention policy", "Data platform team", header="Acme data platform \xb7 internal"), 90)
     put("docs/invoices/vendor-invoice-0471.pdf", _scanned_pdf([
         ["INVOICE  2025-0471", "", "Harbourside Labelling Ltd.", "12 Harbour Road, Bristol BS1 4RN", "",
          "Bill to: Acme ML platform team", "Date: 3 September 2025", "",
