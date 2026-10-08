@@ -20,6 +20,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   cited, and a finding says when the answer was "unable to assist" although the search found passages, so you can
   tell a retrieval problem from an answer problem. From code: `ui.retrieve("How long do refunds take?")`,
   `chat(..., retrieve_only=True)` and `ui.request(retrieve_only=True)`. It needs only `bedrock:Retrieve`. ([#41](https://github.com/utkarsh5026/aws-analyzer/pull/41))
+- `bedrock_chat.py`: `ui.kbs("K7QJ")` finds knowledge bases by name, ID (or part of one), ARN or description, best
+  match first, and suggests the name you may have meant when nothing matches. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42))
+
+### Changed
+
+- `bedrock_chat.py`: the chat window's knowledge base, model, data source and files pickers are searchable lists
+  instead of drop-downs. Click a field to open its list: each knowledge base shows its ID, a status dot, its
+  description and when it changed, and each model its ID, provider and price. Type part of a name, an ID, a
+  description or a provider to narrow the list (what matched is highlighted), and Enter picks the first. A knowledge
+  base ID or ARN pasted whole works even when it isn't listed, or when the role can't list knowledge bases. Files are
+  ticked in the same kind of list. ([#42](https://github.com/utkarsh5026/aws-analyzer/pull/42))
 
 ## [0.8.0] - 2026-10-08
 
