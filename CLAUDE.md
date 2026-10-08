@@ -95,7 +95,8 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
-  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead).
+  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead). Local files are only
+  written where the user asks: S3 downloads, and `bedrock_chat`'s `save_runs()` / `log=`, which only append lines.
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
   the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
@@ -255,15 +256,33 @@ How the View layer works:
   result is an `Answer` with `retrieve_only=True` (no text; `sources` is every passage, ranked, with scores) kept in
   `view.answers` without touching the session. `ask()` always answers and `retrieve()` always searches; `_counterpart`
   pairs a turn with the same question asked the other way, for `cited_ranks` and `compare_findings`.
-  The side tabs are Settings, Test, Code, Request JSON and Last response. **Test** asks a list of questions
+  The side tabs are Settings, Test, Runs, Code, Request JSON and Last response (`_ChatApp.TEST_TAB` / `RUNS_TAB`).
+  **Test** asks a list of questions
   (`parse_questions`: one per line, `question | expected file`) with the window's setup, each on its own (no session):
   `BedrockChatAnalyzer.ask_all` is `_prepare_batch` (resolves once, builds every request) then `_run_batch`, which
-  sends one question per free thread (`workers`, so nothing is queued once `stop` is set) and fills each `BatchItem`
+  is `_run_batches` for one run: it sends one question per free thread (`workers`, so nothing is queued once `stop` is
+  set), the first question of every run before the second, and fills each `BatchItem`
   (answer or error, and cost) on its calling thread, where `progress` and `on_item` run too. In a notebook the tab
-  runs `_run_batch` in the loop's executor (`_run_later`) and draws each line on the event loop as it comes back, from a
-  queue `on_item` fills, so Stop (a `threading.Event`) and the rest of the window keep working; without a loop it runs
-  inline. Runs are kept in `view.batches` (`view.questions` is the list), and `_before` / `batch_changes` compare a run
-  with the last one of the same kind. **Code** shows the setup from `_preview` as `python_script` (boto3 only, asking the
+  runs the work in the loop's executor (`_start` / `_run_later`) and draws each line on the event loop as it comes back,
+  from a queue `on_item` fills, so Stop (a `threading.Event`) and the rest of the window keep working; without a loop it
+  runs inline. Runs are kept in `view.batches` (`view.questions` is the list), numbered from 1 as the reports show them
+  (`_run_number`; `_run` turns a number, or -1, into the run), and `_before` / `batch_changes` compare a run with the
+  last one of the same kind (outside its own sweep; a sweep before it gives its setup that matches, else its best).
+  **Try variations** (the Test tab's card, `parse_variations`: `n = 5, 10` lines) and `sweep()` make a `Sweep`:
+  `sweep_setups` turns lists of values into every combination, `_prepare_sweep` prepares a `Batch` per setup
+  (`apply_setup` on the settings in use; `model` / `data_source` / `files` are picked, not settings; setups that come out
+  the same are dropped) and `_run_sweep` sends them all through one `_run_batches`, so a stopped sweep leaves every setup
+  with the same questions. `rank_runs` scores runs (`run_score`, on `shared_questions`) by expected sources cited, then
+  answers, then grounded share in 5-point steps (searches: found, MRR, passages), the cheaper first when tied, and
+  `ranking_findings` says which beats the setup in use (`_now_in`, or an earlier run of the same questions), what each
+  varied setting changed, when a lead could be chance, and which questions no setup handled. `_compare_blocks` draws a
+  sweep or `compare_runs()`: the ranking table, then the question × setup matrix. A sweep over `SWEEP_MAX_COST`
+  (estimated, `sweep_estimate`) isn't sent without `max_cost=` or, in the window, a second click (`_ChatApp.confirm`).
+  **Runs** lists `view.batches` newest first (`_runs_blocks`, ranked within `_families`), and Show / Use this setup
+  (`_switch_to`) / Compare act on the picked one. `save_runs()` and `log=` append `run_record` JSON lines to a local file
+  (`_append_runs`: only runs whose ID isn't in it yet, never rewriting it; Bedrock's raw responses are left out), and
+  `load_runs()` reads them back (`read_runs`), sorted by when they ran, sweeps rebuilt from their batches' `sweep` ID.
+  **Code** shows the setup from `_preview` as `python_script` (boto3 only, asking the
   test questions), `config_json` (`config_of`: the request without its question and session) or `cli_command`; `code()`
   shows all three as a report.
   `_ipython_display_` shows the window once per cell, so a cell
@@ -434,8 +453,9 @@ does both, a page at a time). How the UI works:
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
   replace `view._display`, and click and type through the widgets in Python (ipywidgets is in
   `requirements-dev.txt` for this). The Test tab's background run is tested inside `asyncio.run`, with a handler held
-  back by a `threading.Event`, as the explorer's tests do; `python_script`'s output is run with `exec` against a `Fake`
-  client put in `sys.modules["boto3"]`.
+  back by a `threading.Event`, as the explorer's tests do (a sweep's too); `python_script`'s output is run with `exec`
+  against a `Fake` client put in `sys.modules["boto3"]`. `save_runs()` / `load_runs()` tests `monkeypatch.chdir` into
+  `tmp_path`.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),

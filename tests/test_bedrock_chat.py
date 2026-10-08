@@ -35,6 +35,7 @@ from bedrock_chat import (
     _question_text,
     answer_cost,
     answer_findings,
+    apply_setup,
     as_filter,
     batch_changes,
     batch_estimate,
@@ -52,17 +53,30 @@ from bedrock_chat import (
     describe_setting,
     expected_at,
     format_questions,
+    format_variations,
     item_verdict,
     normalize_settings,
     parse_questions,
     parse_rag,
     parse_retrieve,
+    parse_variations,
     python_call,
     python_script,
     question_list,
+    rank_runs,
+    ranking_findings,
+    read_runs,
     request_schema,
     retrieve_settings,
+    run_from_record,
+    run_record,
+    run_score,
     settings_findings,
+    setup_label,
+    shared_questions,
+    sweep_estimate,
+    sweep_setups,
+    varied_setups,
     describe_files,
     file_labels,
     match_files,
@@ -958,6 +972,180 @@ def test_batch_estimate_prices_a_run_before_it_runs():
     assert batch_estimate(qs, {"reranker": "cohere"}, "", retrieve_only=True) == pytest.approx(2 * 0.002 + embedding)
 
 
+def test_sweep_setups_makes_every_combination():
+    assert sweep_setups({"n": [5, 10], "search_type": ["SEMANTIC", "HYBRID"]}) == [
+        {"n": 5, "search_type": "SEMANTIC"}, {"n": 5, "search_type": "HYBRID"},
+        {"n": 10, "search_type": "SEMANTIC"}, {"n": 10, "search_type": "HYBRID"}]
+    # one value goes in every setup, None leaves a setting out, and names are forgiving
+    assert sweep_setups({"Model": ("haiku", "sonnet"), "temperature": 0.2, "reranker": [None, "cohere"]}) == [
+        {"model": "haiku", "temperature": 0.2, "reranker": None}, {"model": "haiku", "temperature": 0.2,
+                                                                     "reranker": "cohere"},
+        {"model": "sonnet", "temperature": 0.2, "reranker": None}, {"model": "sonnet", "temperature": 0.2,
+                                                                      "reranker": "cohere"}]
+    assert sweep_setups({"data source": ["faq", "all"], "n": {8, 4}}) == [
+        {"data_source": "faq", "n": 4}, {"data_source": "faq", "n": 8}, {"data_source": "all", "n": 4},
+        {"data_source": "all", "n": 8}]
+    # whole setups, each combined with the lists, and the same setup only once
+    assert sweep_setups({"n": [5]}, [{"search_type": "HYBRID"}, {"reranker": "cohere"}, {"search_type": "HYBRID"}]) == [
+        {"search_type": "HYBRID", "n": 5}, {"reranker": "cohere", "n": 5}]
+    assert sweep_setups(setups=[{"n": 5}, {"n": 10, "reranker": "cohere"}]) == [{"n": 5}, {"n": 10, "reranker": "cohere"}]
+    with pytest.raises(ValueError, match="That's one setup, so there's nothing to compare"):
+        sweep_setups({"n": 5, "temperature": 0.2})
+    many = {"n": [1, 2, 3], "search_type": ["A", "B", "C"], "model": ["x", "y"]}
+    with pytest.raises(ValueError, match=re.escape("That's 18 setups (3 n × 3 search_type × 2 model), and a sweep asks "
+                                                   "up to 16: try fewer values, or pass max_setups=18.")):
+        sweep_setups(many)
+    assert len(sweep_setups(many, limit=None)) == 18
+    with pytest.raises(ValueError, match="n has no values to try"):
+        sweep_setups({"n": []})
+    with pytest.raises(ValueError, match="setups takes a list of dicts"):
+        sweep_setups(setups=["n=5"])
+
+
+def test_parse_variations_reads_the_try_variations_box():
+    text = ('n = 5, 10\n# a comment\n\nsearch_type: SEMANTIC, "HYBRID"\nreranker = none, cohere\n'
+            'filter = {"team": "billing", "year": 2024}, none\nData source = all, "faq, archived"\n'
+            'prompt = "Hi, $search_results$"\nmodel: arn:aws:bedrock:us-east-1::foundation-model/x, haiku')
+    assert parse_variations(text) == {
+        "n": ["5", "10"], "search_type": ["SEMANTIC", "HYBRID"], "reranker": [None, "cohere"],
+        "filter": ['{"team": "billing", "year": 2024}', None], "data_source": ["all", "faq, archived"],
+        "prompt": ["Hi, $search_results$"], "model": ["arn:aws:bedrock:us-east-1::foundation-model/x", "haiku"]}
+    grid = {"n": [5, 10], "reranker": [None, "cohere"], "data_source": ["faq, archived"]}
+    assert format_variations(grid) == 'n = 5, 10\nreranker = none, cohere\ndata_source = "faq, archived"'
+    assert parse_variations(format_variations(grid)) == {"n": ["5", "10"], "reranker": [None, "cohere"],
+                                                         "data_source": ["faq, archived"]}
+    assert parse_variations("") == {} and parse_variations("# nothing yet") == {}
+    for typed, message in (("n 5, 10", "Line 1: write a setting, =, then the values to try, like n = 5, 10"),
+                           ("= 5", "Line 1: write a setting"), ("n = 5\n\nn =", "Line 3: n has no values"),
+                           ("n = 5\nN = 10", "Line 2: N is on line 1 already")):
+        with pytest.raises(ValueError, match=re.escape(message)):
+            parse_variations(typed)
+
+
+def test_apply_setup_changes_the_settings_it_starts_from():
+    base = {"n": 5, "temperature": 0.2}
+    assert apply_setup(base, {"number_of_results": "10", "temperature": None, "search_type": "hybrid",
+                              "model": "sonnet", "data_source": "faq"}, SCHEMA) == {"n": 10, "search_type": "HYBRID"}
+    assert base == {"n": 5, "temperature": 0.2}  # changed in a copy
+    with pytest.raises(ValueError, match="n takes a number"):
+        apply_setup(base, {"n": "lots"}, SCHEMA)
+
+
+def test_runs_are_scored_and_ranked_on_the_questions_they_share():
+    def run(moon, cost):
+        return run_of(asked("How long?", expected="refund-policy", cost=cost), asked("Bank?", cost=cost),
+                      asked("Moon?", answer() if moon else answer(REFUSED), cost=cost))
+
+    good, unable, dear = run(True, 0.002), run(False, 0.001), run(True, 0.003)
+    s = run_score(unable)
+    assert (s.questions, s.answered, s.checked, s.hits, s.failed) == (3, 2, 1, 1, 0)
+    assert s.cost == pytest.approx(0.003) and s.per_question() == pytest.approx(0.001)
+    assert s.grounded == pytest.approx(answer().grounded_share) and s.mrr is None
+    assert [b for b, _ in rank_runs([unable, dear, good])] == [good, dear, unable]  # the cheaper first when as good
+    stopped = run_of(asked("How long?", expected="refund-policy", cost=0.001), BatchItem("Bank?", request={"x": 1}),
+                     BatchItem("Moon?", error="Rate exceeded.", error_code="ThrottlingException"))
+    assert shared_questions([good, stopped]) == {"how long?", "moon?"}  # a question not asked isn't compared
+    s = run_score(stopped, shared_questions([good, stopped]))
+    assert (s.questions, s.answered, s.failed, s.checked, s.hits) == (2, 1, 1, 1, 1)
+    assert run_score(run_of(asked("q?"))).cost is None  # a price that isn't known
+    first = run_of(asked("How long?", search(), expected="refund-policy"), retrieve_only=True)
+    second = run_of(asked("How long?", search(), expected="bank transfer"), retrieve_only=True)
+    assert [(s.hits, s.mrr) for s in map(run_score, (first, second))] == [(1, 1.0), (1, 0.5)]
+    assert rank_runs([second, first])[0][0] is first
+
+
+def test_ranking_findings_name_the_best_setup_and_what_each_setting_changed():
+    def setup(n, kind, moon, cost):
+        return run_of(asked("How long?", expected="refund-policy", cost=cost),
+                      asked("Moon?", answer() if moon else answer(REFUSED), cost=cost),
+                      settings={"n": n, "search_type": kind})
+
+    runs = [setup(5, "SEMANTIC", False, 0.001), setup(5, "HYBRID", False, 0.001), setup(10, "SEMANTIC", True, 0.002),
+            setup(10, "HYBRID", True, 0.002)]
+    found = ranking_findings(runs, now=runs[0])
+    assert found[0] == ("warn", "n=10 · search_type=SEMANTIC did better than your setup now (n=5 · search_type=SEMANTIC): "
+                                "it answers 2 of 2 questions, against 1 of 2, for about $0.10 more per 100 questions "
+                                "(estimate). use_run(3) switches to it.")
+    assert ("info", "n=10 did best in each of the 2 groups of setups that differ only in n.") in found
+    assert ("info", "search_type made no difference: each of the 2 groups of setups that differ only in search_type "
+                    "did the same on these questions.") in found
+    assert len(found) == 3 and ranking_findings(runs, now=runs[0], brief=True) == found[:1]
+    (level, message), = [f for f in ranking_findings(runs, now=runs[2]) if "your setup" in f[1].lower()]
+    assert level == "info" and message.startswith("Your setup now (n=10 · search_type=SEMANTIC) did as well as any "
+                                                  "setup tried")
+    # one value: the lead could be chance; an earlier run with the setup in use; nothing different
+    two = ranking_findings(runs[1:3], number=lambda b: 7)
+    assert two[0] == ("info", "n=10 · search_type=SEMANTIC did best: it answers 2 of 2 questions, against 1 of 2 for "
+                              "the worst setup (n=5 · search_type=HYBRID). use_run(7) switches to it.")
+    assert two[1][1].startswith("n=10 · search_type=SEMANTIC leads n=5 · search_type=HYBRID by one question, which can "
+                                "be chance")
+    earlier = ranking_findings(runs[2:], now=runs[0])[0]
+    assert earlier == ("warn", "search_type=SEMANTIC did better than your setup now (run 3: n=5 · "
+                               "search_type=SEMANTIC): it answers 2 of 2 questions, against 1 of 2, for about $0.10 "
+                               "more per 100 questions (estimate). use_run(1) switches to it.")
+    unasked = run_of(BatchItem("How long?", request={"x": 1}), BatchItem("Moon?", request={"x": 1}))
+    assert not any("your setup" in m for _, m in ranking_findings(runs[1:3], now=unasked))  # nothing to compare on
+    same = ranking_findings(runs[:2])
+    assert same[0][1].startswith("Every setup did as well as the others on these 2 questions (each cites the expected "
+                                 "source in 1 of 1 question), so what was tried made no difference here.")
+    assert same[1] == ("warn", "1 question didn't work with any setup ('Moon?'; unable to assist with the best one): "
+                               "nothing tried here fixes it, so the documents may not hold the answer, or a file isn't "
+                               "indexed. retrieve('Moon?') shows what the search finds, and files() whether a file is "
+                               "indexed.")
+    refused = run_of(BatchItem("How long?", error="HYBRID isn't supported.", error_code="ValidationException"),
+                     BatchItem("Moon?", error="HYBRID isn't supported.", error_code="ValidationException"),
+                     settings={"n": 5, "search_type": "HYBRID"})
+    text = " | ".join(m for _, m in ranking_findings([runs[0], refused], explain=lambda code, m: m + " Unset it."))
+    assert ("search_type=HYBRID (run 2): 2 of 2 questions failed (ValidationException): HYBRID isn't supported. "
+            "Unset it.") in text
+    assert ranking_findings(runs[:1]) == []
+
+
+def test_setup_labels_say_what_differs():
+    plain = run_of(asked("q?"))
+    picked = run_of(asked("q?"), model="us.anthropic.claude-opus-5", data_sources={DS_ID: "faq"}, files=[REFUND_PDF],
+                    settings={"n": 10, "reranker": "cohere", "filter": {"equals": {"key": "team", "value": "billing"}},
+                              "prompt": "x" * 50 + "$search_results$"})
+    varied = varied_setups([plain, picked])
+    assert set(varied) == {"model", "data_source", "files", "n", "reranker", "filter", "prompt"}
+    assert setup_label(plain, varied) == ("model=claude-sonnet-5 · n=5 · data_source=all · files=all · reranker=none · "
+                                          "no filter · prompt=default")
+    assert setup_label(picked, varied, lambda m: "Claude Opus 5") == (
+        'model=Claude Opus 5 · n=10 · data_source=faq · files=refund-policy.pdf · reranker=cohere · where team = '
+        '"billing" · prompt=#2 (66 characters)')
+    assert setup_label(plain, varied_setups([plain, plain])) == "the same setup"
+
+
+def test_runs_are_saved_as_json_lines_and_read_back():
+    a = answer()
+    a.response = {"output": {"text": a.text}}
+    batch = run_of(asked("How long?", a, expected=["refund-policy", "x"], cost=0.002, request={"input": {"text": "x"}}),
+                   BatchItem("Bank?", error="Rate exceeded.", error_code="ThrottlingException"),
+                   id="abc123", label="baseline", started=NOW, data_sources={DS_ID: "docs-s3"}, files=[REFUND_PDF],
+                   settings={"n": 5, "filter": {"equals": {"key": "team", "value": "billing"}}}, seconds=2.5)
+    line = json.dumps(run_record(batch))
+    assert '"response"' not in line  # Bedrock's raw response isn't kept: the answer and its sources are
+    (back,), problems = read_runs(["", line])
+    assert problems == [] and (back.id, back.label, back.started, back.seconds) == ("abc123", "baseline", NOW, 2.5)
+    assert (back.settings, back.data_sources, back.files) == (batch.settings, batch.data_sources, batch.files)
+    first, failed = back.items
+    assert first.expected == ["refund-policy", "x"] and first.cost == 0.002 and first.request == {"input": {"text": "x"}}
+    assert first.answer.text == a.text and first.answer.cited == a.cited and first.answer.response == {}
+    assert first.answer.sources[0].source == "refund-policy.pdf p.3" and first.found == 1
+    assert (failed.error_code, failed.answer) == ("ThrottlingException", None)
+    assert run_score(back) == run_score(batch) and item_verdict(first) == item_verdict(batch.items[0])
+    newer = json.loads(line)
+    newer["added_later"] = newer["items"][0]["answer"]["added_later"] = True
+    assert run_from_record(newer).id == "abc123"  # what a newer version adds is left out
+    broken = {**json.loads(line), "items": [{"question": "q?", "answer": {"text": "no question"}}]}
+    _, problems = read_runs(["{", json.dumps({"format": "other"}), json.dumps({**json.loads(line), "id": ""}),
+                             json.dumps(broken)])
+    assert problems[:3] == ["line 1 isn't JSON (Expecting property name enclosed in double quotes)",
+                            "line 2 is not a test run saved by save_runs() (format 'other', not "
+                            "'aws-analyzer/bedrock-chat-run/1')", "line 3 is a test run without an id"]
+    assert problems[3].startswith("line 4 is a test run that can't be read back (TypeError: ")
+
+
 def test_python_script_asks_the_questions_with_boto3_alone(monkeypatch, capsys):
     values = normalize_settings({"n": 8, "temperature": 0.2, "prompt": "Don't guess.\n$search_results$\n"
                                  "$output_format_instructions$"}, SCHEMA)
@@ -1363,6 +1551,60 @@ def test_ask_all_retrieve_only_searches():
     assert batch.items[0].cost == pytest.approx(0.02 * estimate("How long?") / 1e6)
 
 
+def test_sweep_asks_every_setup_a_question_at_a_time():
+    clients = fakes(rag=by_question)
+    core = BedrockChatAnalyzer(clients=clients)
+    ticks = []
+    sweep = core.sweep("support-docs", ["How long do refunds take? | refund-policy", "Do you ship to the moon?"],
+                       sweep_setups({"n": [5, 8], "model": ["haiku", "sonnet"]}), {"n": 5, "temperature": 0.2},
+                       workers=1, progress=lambda done, total: ticks.append((done, total)), label="first try")
+    assert [b.label for b in sweep.batches] == [
+        "first try · model=claude-haiku-4-5 · n=5", "first try · model=claude-sonnet-5 · n=5",
+        "first try · model=claude-haiku-4-5 · n=8", "first try · model=claude-sonnet-5 · n=8"]
+    assert ticks[-1] == (8, 8) and not sweep.stopped and sweep.seconds > 0 and list(sweep.varied) == ["model", "n"]
+    assert len({b.id for b in sweep.batches}) == 4 and {b.sweep for b in sweep.batches} == {sweep.id}
+    assert all(b.started is not None and b.settings["temperature"] == 0.2 for b in sweep.batches)
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate")
+    assert [p["input"]["text"] for p in sent] == ["How long do refunds take?"] * 4 + ["Do you ship to the moon?"] * 4
+    vector = [p[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["numberOfResults"] for p in sent]
+    assert vector == [5, 5, 8, 8] * 2 and len({p[KB[0]][KB[1]]["modelArn"] for p in sent}) == 2
+    assert sweep.best is sweep.batches[2]  # n=8 answers the moon question, and Haiku costs less than Sonnet
+    assert sweep.cost == pytest.approx(sum(b.cost for b in sweep.batches))
+    assert sweep_estimate(sweep) == 0.0  # nothing left to ask
+    with pytest.raises(ValueError, match="Those setups come out the same"):
+        core.sweep(KB_ID, ["a?"], [{"n": 5}, {"n": "5"}])
+    with pytest.raises(ValueError, match="The setup with n='lots' can't be sent: n takes a number"):
+        core.sweep(KB_ID, ["a?"], [{"n": 5}, {"n": "lots"}])
+    with pytest.raises(ValueError, match="^No questions to ask"):  # not one setup's problem: said as it is
+        core.sweep(KB_ID, " ", [{"n": 5}, {"n": 8}])
+    with pytest.raises(ValueError, match="^limit takes a number of questions"):
+        core.sweep(KB_ID, ["a?"], [{"n": 5}, {"n": 8}], limit=-1)
+    assert len(clients["bedrock-agent-runtime"].called("retrieve_and_generate")) == 8  # nothing more was sent
+    search = core.sweep(KB_ID, ["a?"], sweep_setups({"n": [3, 8], "temperature": [0, 0.5]}), retrieve_only=True)
+    assert len(search.batches) == 2 and search.varied == {"n": [3, 8]}  # a search sends no temperature
+    assert all(b.model == "" and b.retrieve_only for b in search.batches)
+
+
+def test_sweep_stopped_leaves_every_setup_with_the_same_questions():
+    stop = threading.Event()
+    asked_so_far = []
+
+    def counting(**params):
+        asked_so_far.append(params["input"]["text"])
+        if len(asked_so_far) == 2:  # Stop, while the second setup answers the first question
+            stop.set()
+        return rag_resp()
+
+    core = BedrockChatAnalyzer(clients=fakes(rag=counting))
+    sweep = core.sweep(KB_ID, ["One?", "Two?", "Three?"], [{"n": 5}, {"n": 8}], workers=1, stop=stop)
+    assert asked_so_far == ["One?", "One?"] and sweep.stopped and all(b.stopped for b in sweep.batches)
+    assert [[i.answer is not None for i in b.items] for b in sweep.batches] == [[True, False, False]] * 2
+    assert shared_questions(sweep.batches) == {"one?"}
+    assert ("info", "Ranked on the 1 question every setup came back with: 2 questions weren't asked with every setup "
+                    "(the run stopped first, or Bedrock refused them).") in ranking_findings(sweep.batches)
+    assert sweep_estimate(sweep) > 0  # what's left to ask
+
+
 # ----------------------------------------------------------------------------- UI (reports)
 
 
@@ -1681,12 +1923,138 @@ def test_ui_ask_all_reports_each_question_and_what_changed(capsys):
     assert ("Since the last run (n 5 → 8): 1 question did better ('Do you ship to the moon?' unable to assist → "
             "answered)") in out
     assert "   [answered] (↑ was unable to assist) Claude Haiku 4.5" in out
-    assert "test run 1 · " in run(capsys, ui.results, 0)
-    assert "There are 2 test runs: results(0) is the first and results(-1) the last." in run(capsys, ui.results, 5)
+    assert "test run 1 · " in run(capsys, ui.results, 1)  # numbered as the reports number them
+    assert "test run 2 · " in run(capsys, ui.results, -1) and "test run 1 · " in run(capsys, ui.results, "1")
+    for wrong in (0, 5, "two"):
+        assert "There are 2 test runs, numbered from 1: 1 to 2 (-1 is the last)." in run(capsys, ui.results, wrong)
     out = run(capsys, ui.ask_all, ["How long?", "Bank?"], retrieve_only=True)
     assert "Retrieve: the search only, no answers" in out and "Found passages: 2 of 2" in out
     assert "Since the last run" not in out  # the last run of searches: none before it
     assert "#1 · refund-policy.pdf p.3 · score 0.810" in out and len(ui.batches) == 3
+
+
+def text_view(**kwargs):
+    return BedrockChatView(BedrockChatAnalyzer(clients=kwargs.pop("clients", None) or fakes(rag=by_question),
+                                               **kwargs.pop("core", {})),
+                           kb="support-docs", mode="text", progress="off", **kwargs)
+
+
+TWO_QUESTIONS = "How long do refunds take? | refund-policy\nDo you ship to the moon?"
+
+
+def test_ui_sweep_ranks_the_setups_and_says_which_to_use(capsys):
+    ui = text_view()
+    assert "Pass the questions to ask: sweep([" in run(capsys, ui.sweep, n=[5, 8])
+    assert "test run 1 (baseline) · " in run(capsys, ui.ask_all, TWO_QUESTIONS, label="baseline")
+    assert "Pass what to try, a list of values each: sweep(n=[5, 10]" in run(capsys, ui.sweep)
+    out = run(capsys, ui.sweep, n=[5, 8], search_type=["SEMANTIC", "HYBRID"])
+    for text in ("Sweep on support-docs: 4 setups × 2 questions", "runs 2–5 · each question asked on its own with "
+                 "each setup · Claude Haiku 4.5 · ranked by expected sources cited, then answers, then grounded share",
+                 "Setups: 4   Questions: 2   Calls: 8   Best: run 4   Expected cited (best): 1 of 1",
+                 "[!] n=8 · search_type=SEMANTIC did better than your setup now (run 1: n=5 · search_type=default): it "
+                 "answers 2 of 2 questions, against 1 of 2", "use_run(4) switches to it.",
+                 "[i] n=8 did best in each of the 2 groups of setups that differ only in n.",
+                 "[i] search_type made no difference", "These runs are kept in this notebook's memory only",
+                 "-- Setups, best first --", "Rank  Run  n  search_type  Answered  Grounded  Expected cited  Failed",
+                 "How each question did with each setup (#1 is the best, as above): the 1 question the setup changes "
+                 "first", "Do you ship to the moon?   answered", "unable to assist", "use_run(4)   switch to the best "
+                 "setup", "results(4)   the best setup's answers"):
+        assert text in out, text
+    assert len(ui.batches) == 5 and len(ui.sweeps) == 1 and all(a is b for a, b in zip(ui.sweeps[0].batches,
+                                                                                       ui.batches[1:]))
+    assert ui.questions == [("How long do refunds take?", "refund-policy"), ("Do you ship to the moon?", None)]
+    out = run(capsys, ui.results, 4)
+    assert "test run 4 (sweep 1: n=8 · search_type=SEMANTIC) · " in out and "use_run(4)" in out
+    assert "Since the last run (n 5 → 8; search_type = 'SEMANTIC' (added))" in out  # the run before the sweep
+    assert ("That's 17 setups (17 n), and a sweep asks up to 16: try fewer values, or pass max_setups=17."
+            in run(capsys, ui.sweep, n=list(range(1, 18))))
+    out = run(capsys, ui.sweep, ["How long?"], n=[5, 8], search_type=["SEMANTIC", "HYBRID"], retrieve_only=True)
+    assert "Sweep on support-docs: 4 setups × 1 question" in out and "Retrieve: the search only" in out
+    assert "Found passages (best): 1 of 1" in out and "search finds the same passages every time" in out
+
+
+def test_ui_sweep_isnt_sent_over_max_cost(capsys):
+    ui = text_view(core={"model_prices": {"claude-haiku-4-5": (900.0, 900.0)}})
+    out = run(capsys, ui.sweep, ["How long?", "Bank?"], n=[5, 8])
+    assert "That's 2 setups × 2 questions = 4 calls, about $" in out and "(estimate, your prices), more than " \
+           "max_cost=2, so nothing was sent. Pass max_cost=" in out
+    assert ui.batches == [] and not ui.core._runtime_client().called("retrieve_and_generate")
+    assert "Sweep on support-docs: 2 setups × 2 questions" in run(capsys, ui.sweep, ["How long?", "Bank?"], n=[5, 8],
+                                                                   max_cost=None)
+
+
+def test_ui_runs_compare_runs_and_use_run(capsys):
+    ui = text_view()
+    assert "No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10])" in run(capsys, ui.runs)
+    run(capsys, ui.ask_all, TWO_QUESTIONS, label="baseline")
+    assert "Only run 1 asked these questions this way, so there's nothing to compare it with" in run(
+        capsys, ui.compare_runs)
+    run(capsys, ui.sweep, n=[5, 8])
+    out = run(capsys, ui.runs)
+    for text in ("Test runs: 3 so far", "newest first · rank: against the other runs of the same questions",
+                 "Runs: 3   Sweeps: 1   Question lists: 1   Best of the last list: run 3", "Saved to: not saved",
+                 "sweep 1: n=8", "Claude Haiku 4.5 · n=8", "2 of 2 answered", "1 of 3", "baseline",
+                 "did better than your setup now", "keep them in a file, to read back after a restart"):
+        assert text in out, text
+    assert out.index("sweep 1: n=8") < out.index("baseline")  # newest first
+    assert "made no difference" not in out and "compare_runs()" in out  # what changed what: compare_runs() says it
+    out = run(capsys, ui.compare_runs, 1, "3")
+    assert "2 test runs on support-docs compared: 2 questions" in out and "runs 1, 3 · " in out
+    assert "-- Runs, best first --" in out and "2 (now)    1  5  1 of 2" in out  # run 1's setup is the one in use
+    assert "3 test runs on support-docs compared" in run(capsys, ui.compare_runs)
+    assert "There are 3 test runs, numbered from 1: 1 to 3 (-1 is the last)." in run(capsys, ui.compare_runs, 1, 9)
+    out = run(capsys, ui.use_run)  # the best run of the last list
+    assert "Now using the setup of run 3 (sweep 1: n=8): n 5 → 8." in out and ui.values == {"n": 8}
+    assert "The setup of run 3 (sweep 1: n=8) is the one in use already." in run(capsys, ui.use_run, -1)
+    ui.set(temperature=0.2)
+    run(capsys, ui.ask_all, ["How long?"], retrieve_only=True)
+    assert "Run 4 only searched and run 1 answered: compare runs of one kind." in run(capsys, ui.compare_runs, 1, 4)
+    assert "Those runs have no question in common" in run(capsys, ui.compare_runs, 1, run_of(asked("Else?")))
+    out = run(capsys, ui.use_run, 1)
+    assert "Now using the setup of run 1 (baseline): n 8 → 5; temperature removed." in out
+    ui.set(temperature=0.5, n=3)
+    assert "n 3 → 8" in run(capsys, ui.use_run, 4) and ui.values == {"n": 8, "temperature": 0.5}  # a search keeps it
+    run(capsys, ui.sweep, ["How long?"], model=["haiku", "sonnet"])
+    out = run(capsys, ui.use_run, 6)
+    assert "model Claude Haiku 4.5 → Claude Sonnet 5" in out and ui.model == "us.anthropic.claude-sonnet-5"
+
+
+def test_ui_saves_test_runs_and_reads_them_back(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ui = text_view()
+    out = run(capsys, ui.save_runs)
+    assert "No test runs yet, so nothing was written: every run from now on is added to kb-test-runs.jsonl" in out
+    assert ui.log == "kb-test-runs.jsonl"
+    run(capsys, ui.ask_all, TWO_QUESTIONS, label="baseline")
+    out = run(capsys, ui.sweep, n=[5, 8])
+    assert "memory only" not in out  # every run went into the file as it finished
+    lines = (tmp_path / "kb-test-runs.jsonl").read_text().splitlines()
+    assert len(lines) == 3 and json.loads(lines[0])["label"] == "baseline"
+    out = run(capsys, ui.save_runs)
+    assert f"Every run here is in kb-test-runs.jsonl (in {tmp_path}) already (3 in the file)." in out
+    assert len((tmp_path / "kb-test-runs.jsonl").read_text().splitlines()) == 3  # none written twice
+    again = text_view()  # after a kernel restart
+    out = run(capsys, again.load_runs)
+    assert "Loaded 3 test runs from kb-test-runs.jsonl." in out and "Test runs: 3 so far" in out
+    assert "Saved to: kb-test-runs.jsonl" in out and "memory only" not in out
+    assert [b.label for b in again.batches] == ["baseline", "n=5", "n=8"] and len(again.sweeps) == 1
+    assert again.questions == [("How long do refunds take?", "refund-policy"), ("Do you ship to the moon?", None)]
+    assert "test run 3 (sweep 1: n=8) · " in run(capsys, again.results, 3)
+    assert "Every run in kb-test-runs.jsonl is here already (3)." in run(capsys, again.load_runs)
+    out = run(capsys, again.ask_all)  # the loaded questions, with the setup in use
+    assert "test run 4 · " in out and "Since the last run (the same setup): both questions did as before." in out
+    assert "1 of 4 runs is kept in this notebook's memory only" in run(capsys, again.runs)
+    assert "There's no file nope.jsonl in " in run(capsys, again.load_runs, "nope.jsonl")
+    (tmp_path / "bad.jsonl").write_text(lines[0] + "\nnot json\n")
+    out = run(capsys, text_view().load_runs, "bad.jsonl")
+    assert "Loaded 1 test run from bad.jsonl." in out
+    assert "1 line couldn't be read: line 2 isn't JSON (Expecting value). The rest were loaded." in out
+    assert "is a folder: pass a file in it, like save_runs(" in run(capsys, again.save_runs, str(tmp_path))
+    out = run(capsys, again.save_runs, str(tmp_path / "no-such-folder" / "runs.jsonl"))
+    assert "Couldn't save to " in out and "No such file or directory" in out
+    logged = text_view(log=str(tmp_path / "missing" / "runs.jsonl"))
+    out = run(capsys, logged.ask_all, ["How long?"])
+    assert "[!] This run wasn't saved to " in out and "save_runs('another/path.jsonl')" in out
 
 
 def test_ui_code_gives_the_setup_to_copy(ui, capsys):
@@ -2322,8 +2690,8 @@ def code_text(app):
 def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys):
     view = open_window(monkeypatch, fakes(rag=by_question))
     app = view._app
-    assert [app.tabs.get_title(i) for i in range(5)] == ["⚙️ Settings", "🧪 Test", "📋 Code", "🧾 Request JSON",
-                                                         "📨 Last response"]
+    assert [app.tabs.get_title(i) for i in range(6)] == ["⚙️ Settings", "🧪 Test", "📈 Runs", "📋 Code",
+                                                         "🧾 Request JSON", "📨 Last response"]
     assert "<b>🧪 Test</b> asks a list of questions" in texts(app)[0] and "<b>📋 Code</b> gives" in texts(app)[0]
     assert app.run_button.disabled and app.run_button.description == "▶ Run"
     assert "Type or paste questions above." in app.test_note.value
@@ -2398,6 +2766,161 @@ def test_window_shows_a_test_run_from_another_cell(window, capsys):
     capsys.readouterr()
 
 
+def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
+    view = open_window(monkeypatch, fakes(rag=by_question))
+    app = view._app
+    assert app.varying_card.layout.display == "none" and app.vary_button.description == "+ Try variations"
+    assert "<b>Try variations</b>" in texts(app)[0] and "<b>📈 Runs</b> keeps every test run" in texts(app)[0]
+    app.test_box.value = "How long do refunds take? | refund-policy\nDo you ship to the moon?\nAnd bank transfers?"
+    app.vary_button.click()
+    assert app.varying_card.layout.display == "" and app.vary_button.layout.display == "none"
+    assert app.vary_box.value == "n = 5, 10\nsearch_type = SEMANTIC, HYBRID"  # a start, to change
+    assert [c.description for c in app.vary_chip_box.children] == ["+ Passages", "+ Search type", "+ Reranker",
+                                                                    "+ Model", "+ Temperature"]  # one data source
+    assert app.run_button.description == "▶ Run 4 setups × 3 questions"
+    assert "12 calls · Claude Haiku 4.5 · about $" in app.test_note.value and "4 setups: every" in app.vary_note.value
+    app.vary_chips["model"].click()
+    assert app.vary_box.value.endswith("\nmodel = haiku, sonnet") and "Claude Haiku" not in app.test_note.value
+    assert app.run_button.description == "▶ Run 8 setups × 3 questions" and "24 calls" in app.test_note.value
+    app.vary_box.value = "Passages = 3, 4\nmodel = haiku, sonnet"
+    app.vary_chips["n"].click()  # takes the place of the line for passages
+    assert app.vary_box.value == "n = 5, 10\nmodel = haiku, sonnet"
+    app.vary_box.value = "n = 5, 8\nserch_type = SEMANTIC, HYBRID"
+    assert app.run_button.disabled and "No setting &#x27;serch_type&#x27;" in app.vary_note.value
+    assert "Fix the line above, or close Try variations" in app.test_note.value
+    app.vary_box.value = "n = 5"
+    assert app.run_button.disabled and "Those come out as one setup: give two or more values to try, like n = 5, 10." \
+        in app.vary_note.value
+    app.vary_box.value = "n = 1, 2, 3, 4, 5\nsearch_type = SEMANTIC, HYBRID\nreranker = none, cohere"
+    assert "That&#x27;s 20 setups, and Try variations asks up to 16 at a time: try fewer values." in app.vary_note.value
+    app.vary_box.value = "n = 5, 8\nsearch_type = SEMANTIC, HYBRID"
+    app.run_button.click()  # no event loop here: asked right away
+    sweep = view.sweeps[-1]
+    assert len(view.batches) == 4 and all(a is b for a, b in zip(view.batches, sweep.batches))
+    head = html.unescape(app.sweep_head.value)
+    assert "Sweep 1" in head and "Setups, best first" in head and "n=8 · search_type=SEMANTIC did best" in head
+    assert app.sweep_bar.layout.display == "" and app.setup_pick.value == 3 and sweep.best is view.batches[2]
+    assert [label for label, _ in app.setup_pick.options][0] == "#1 · run 3 · n=8 · search_type=SEMANTIC"
+    assert "Test run 3 (n=8 · search_type=SEMANTIC)" in app.test_head.value and len(app.test_rows.children) == 3
+    assert "Sweep 1: 4 setups × 3 questions in " in app.status.value and "best: run 3" in app.status.value
+    assert app.run_button.description == "▶ Run 4 setups × 3 questions" and view.answers == []
+    app.setup_pick.value = 1  # n=5: its answers show under the ranking
+    assert "Test run 1 (n=5 · search_type=SEMANTIC)" in app.test_head.value
+    assert "unable to assist" in app.batch_rows[1].value
+    app.use_setup_button.click()
+    assert view.values == {"n": 5, "search_type": "SEMANTIC"} and "Now using the setup of run 1" in app.status.value
+    app.close_vary.click()  # Run asks with one setup again
+    assert app.varying_card.layout.display == "none" and app.run_button.description == "▶ Run 3 questions"
+    app.run_button.click()
+    assert app.sweep_head.value == "" and app.sweep_bar.layout.display == "none" and "Test run 5" in app.test_head.value
+    assert "Since the last run (the same setup)" in html.unescape(app.test_head.value)  # the sweep's same setup
+    view.sweep(n=[3, 8])  # from another cell: the window shows it
+    assert "Sweep 2" in app.sweep_head.value and app.setup_pick.value == view._run_number(view.sweeps[-1].best)
+    capsys.readouterr()
+
+
+def test_window_asks_twice_before_a_costly_sweep(monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes()
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients, model_prices={"claude-haiku-4-5": (900.0, 900.0)}),
+                           kb="support-docs", mode="html", progress="off")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    app.test_box.value = "How long?\nBank?"
+    app.vary_button.click()
+    app.run_button.click()
+    assert "more than the $2.00 the window asks without checking: click Run again" in app.status.value
+    assert app.run_button.description.startswith("▶ Run anyway (about $") and view.batches == []
+    assert not clients["bedrock-agent-runtime"].called("retrieve_and_generate")
+    app.run_button.click()
+    assert len(view.batches) == 4 and len(clients["bedrock-agent-runtime"].called("retrieve_and_generate")) == 8
+    assert app.run_button.description == "▶ Run 4 setups × 2 questions"
+
+
+def test_window_sweep_runs_in_the_background_and_stops(monkeypatch):
+    gate = threading.Event()
+
+    def slow(**params):
+        gate.wait(5)
+        return rag_resp()
+
+    view = open_window(monkeypatch, fakes(rag=slow))
+    app = view._app
+
+    async def main():
+        app.test_box.value = "One?\nTwo?\nThree?"
+        app.vary_button.click()
+        app.vary_box.value = "n = 5, 8"
+        app.run_button.click()  # returns at once: four questions are asked meanwhile, the first two of each setup
+        task = app.batch_task
+        assert task is not None and app.running and app.run_button.description == "Asking… 0 of 6"
+        assert "0 of 3 back" in app.sweep_head.value and 'class="spin"' in app.sweep_head.value
+        assert app.stop_button.layout.display == "" and app.sweep_bar.layout.display == "none"
+        await asyncio.sleep(0.3)
+        app.stop_button.click()
+        gate.set()
+        await task
+        sweep = view.sweeps[-1]
+        assert sweep.stopped and [[i.answer is not None for i in b.items] for b in sweep.batches] == [
+            [True, True, False]] * 2
+        assert "Ranked on the 2 questions every setup came back with" in html.unescape(app.sweep_head.value)
+        assert not app.running and app.stop_button.layout.display == "none" and app.batch_task is None
+        assert "stopped before every setup was asked every question" in app.status.value
+
+    asyncio.run(main())
+
+
+def test_window_runs_tab_lists_shows_switches_compares_and_saves(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    view = open_window(monkeypatch, fakes(rag=by_question))
+    app = view._app
+    assert "No test runs yet" in app.runs_view.value and app.run_actions.layout.display == "none"
+    view.ask_all(["How long? | refund-policy", "Do you ship to the moon?"], label="baseline")  # from other cells
+    view.sweep(n=[5, 8])
+    runs = html.unescape(app.runs_view.value)
+    assert "sweep 1: n=8" in runs and "baseline" in runs and "1 of 3" in runs and "results(3)" in runs
+    assert "did better than your setup now" in runs and app.run_actions.layout.display == ""
+    assert [label for label, _ in app.run_pick.options] == [
+        "Run 3 · sweep 1: n=8 · 2 of 2 answered · 69% grounded", "Run 2 · sweep 1: n=5 · 1 of 2 answered · 69% grounded",
+        "Run 1 · baseline · 1 of 2 answered · 69% grounded"]
+    assert "These runs are in this notebook's memory only: Save keeps them" in html.unescape(app.runs_note.value)
+    app.run_pick.value = 1
+    app.show_run_button.click()
+    assert app.tabs.selected_index == app.TEST_TAB and "Test run 1 (baseline)" in app.test_head.value
+    assert app.sweep_bar.layout.display == "none" and "The 🧪 Test tab shows run 1 (baseline)." in app.status.value
+    app.run_pick.value = 2
+    app.show_run_button.click()  # a sweep's run: the sweep, with that setup's answers under it
+    assert "Sweep 1" in app.sweep_head.value and app.setup_pick.value == 2 and "Test run 2 (n=5)" in app.test_head.value
+    app.run_pick.value = 3
+    app.use_run_button.click()
+    assert view.values == {"n": 8} and "Now using the setup of run 3 (sweep 1: n=8): n 5 → 8." in app.status.value
+    app.compare_button.click()
+    assert "3 test runs on support-docs compared" in html.unescape(app.compare_view.value)
+    view.ask_all(["Something else?"])
+    app.run_pick.value = 4
+    app.compare_button.click()
+    assert "Only run 4 asked these questions this way" in html.unescape(app.compare_view.value)
+    app.runs_file.value = "mine.jsonl"
+    app.save_runs_button.click()
+    assert "Saved 4 test runs to mine.jsonl" in app.runs_note.value and view.log == "mine.jsonl"
+    assert len((tmp_path / "mine.jsonl").read_text().splitlines()) == 4
+    view.ask_all(["Something else?"])  # added to the file as it finishes
+    assert len((tmp_path / "mine.jsonl").read_text().splitlines()) == 5
+    assert "Every run is added to mine.jsonl as it finishes." in app.runs_note.value
+    other = open_window(monkeypatch, fakes(rag=by_question))  # after a restart
+    other._app.runs_file.value = "mine.jsonl"
+    other._app.load_runs_button.click()
+    assert len(other.batches) == 5 and "Loaded 5 test runs from mine.jsonl." in other._app.runs_note.value
+    assert "Test run 5" in other._app.test_head.value and other._app.test_box.value == "Something else?"
+    other._app.runs_file.value = "nope.jsonl"
+    other._app.load_runs_button.click()
+    assert "There&#x27;s no file nope.jsonl" in other._app.status.value
+    app.tabs.selected_index = app.RUNS_TAB  # drawn again when looked at
+    assert "Run 5 · " in app.run_pick.options[0][0]
+    capsys.readouterr()
+
+
 def test_window_opens_on_the_test_questions_and_the_last_run(core, monkeypatch, capsys):
     view = BedrockChatView(core, kb="support-docs", mode="text", progress="off", questions=["One?", "Two? | two.md"])
     view.ask_all()
@@ -2443,6 +2966,16 @@ def test_batch_to_df():
     assert df.loc[1, "error"] == "Rate exceeded." and df.loc[0, "sources"] == ["refund-policy.pdf p.3",
                                                                                "refund-policy.pdf p.4"]
     assert 0 < df.loc[0, "grounded"] < 1 and df.loc[0, "cost"] == 0.01
+
+
+def test_sweep_to_df():
+    pytest.importorskip("pandas")
+    sweep = BedrockChatAnalyzer(clients=fakes(rag=by_question)).sweep(
+        KB_ID, ["How long? | refund-policy", "Do you ship to the moon?"], [{"n": 5}, {"n": 8}])
+    df = sweep.to_df()
+    assert list(df["rank"]) == [1, 2] and list(df["n"]) == [8, 5]  # best first
+    assert list(df["answered"]) == [2, 1] and list(df["expected_hits"]) == [1, 1] and list(df["failed"]) == [0, 0]
+    assert df["cost"].sum() == pytest.approx(sweep.cost)
 
 
 def test_answer_to_df():

@@ -6,7 +6,8 @@
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, runs a list of test
-questions in the Test tab and opens the Code tab, opens the knowledge base list, adds settings, searches for a setting,
+questions in the Test tab and opens the Code tab, asks them with Try variations and opens the Runs tab, opens the
+knowledge base list, adds settings, searches for a setting,
 opens the Request JSON tab and its Python view, edits the JSON, ticks files, and asks the last question again on
 Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
@@ -37,8 +38,8 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-test", "chat-code", "chat-pick", "chat-settings", "chat-add", "chat-request",
-           "chat-python", "chat-edit", "chat-files", "chat-retrieve")
+FIGURES = ("chat-window", "chat-test", "chat-code", "chat-sweep", "chat-runs", "chat-pick", "chat-settings",
+           "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files", "chat-retrieve")
 
 # The Test tab's questions: four answered (one only partly backed by its sources), two that demo.py's Bedrock can't
 # answer, and the file each should cite after a |.
@@ -48,6 +49,10 @@ What does error E1234 mean? | payment-errors.md
 How do I reset my password?
 How long does shipping to the UK take? | shipping-times.pdf
 What is the holiday shipping cutoff?"""
+
+# Try variations, on the same questions: 4 setups, where the reranker changes the answers and the passages don't.
+SWEEP = """n = 3, 8
+reranker = none, cohere"""
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -149,6 +154,23 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         page.locator(tab.format("Code")).first.click()
         shot("chat-code")
         page.locator(tab.format("Settings")).first.click()
+    if "chat-sweep" in wanted or "chat-runs" in wanted:
+        page.locator(tab.format("Test")).first.click()
+        if not page.locator(".kbc-app textarea[placeholder^='How long do refunds take?']").input_value():
+            page.locator(".kbc-app textarea[placeholder^='How long do refunds take?']").fill(TEST_QUESTIONS)
+        page.locator(".kbc-app button:has-text('Try variations')").click()
+        page.locator(".kbc-app textarea[placeholder^='n = 5, 10']").fill(SWEEP)
+        page.locator(".kbc-app button:has-text('Run 4 setups')").click()  # its label follows the box
+        page.wait_for_function("document.querySelector('.kbc-app .kbc-side').innerText.includes('Answers of') && "
+                               "!document.querySelector('.kbc-app .bq.wait')", timeout=180_000)
+        scroll_to("[...document.querySelectorAll('.kbc-app .kbc-side .ph')].find(el => el.offsetParent && "
+                  "el.innerText.startsWith('Sweep'))")
+        shot("chat-sweep")
+        page.locator(tab.format("Runs")).first.click()
+        page.wait_for_function("document.querySelector('.kbc-app .kbc-side').innerText.includes('Every test run')",
+                               timeout=10_000)
+        shot("chat-runs")
+        page.locator(tab.format("Settings")).first.click()
 
     def field(label: str):
         """The header field (a _Picker's button) with this label."""
@@ -160,7 +182,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         page.wait_for_selector(".kbc-app .kbc-pop .kbc-opt", timeout=10_000)
         shot("chat-pick")
         field("Knowledge base").click()  # closes it again
-    page.locator(".kbc-app button.kbc-add").click()  # opens Add a setting
+    page.locator(".kbc-app button.kbc-add:has-text('Add a setting')").click()  # opens Add a setting
     for label in ("+ Temperature", "+ Metadata filter", "+ Reranker"):
         page.locator(f".kbc-app button:has-text('{label}')").first.click()
         time.sleep(0.4)
@@ -175,7 +197,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     page.locator(".kbc-app .kbc-card .kbc-x").first.click()  # folds it away again
     scroll_to("document.querySelector('.kbc-app .kbc-row')")
     shot("chat-settings")
-    page.locator(".kbc-app button.kbc-add").click()
+    page.locator(".kbc-app button.kbc-add:has-text('Add a setting')").click()
     search = page.locator(".kbc-app input[placeholder^='Search:']")
     search.fill("rerank")
     page.wait_for_selector(".kbc-app .kbc-pick", timeout=10_000)
@@ -221,8 +243,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         answered(3)
         shot("chat-files")
     if "chat-retrieve" in wanted:
-        if page.locator(".kbc-app button.kbc-add").is_visible():  # Add a setting may still be open from before
-            page.locator(".kbc-app button.kbc-add").click()
+        add = page.locator(".kbc-app button.kbc-add:has-text('Add a setting')")
+        if add.is_visible():  # Add a setting may still be open from before
+            add.click()
         page.locator(".kbc-app button:has-text('+ Temperature')").first.click()  # for the answer: shown as not sent
         time.sleep(0.4)
         page.locator(".kbc-app .kbc-card .kbc-x").first.click()

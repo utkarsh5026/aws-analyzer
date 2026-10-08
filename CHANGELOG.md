@@ -13,6 +13,23 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- `bedrock_chat.py`: **Try variations**, in the chat window's 🧪 Test tab, and `ui.sweep(...)`, ask your test questions
+  with every combination of the settings, models, data sources or files you're unsure of, instead of changing one and
+  running the list again: `ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"], model=["haiku", "sonnet"])`, or a
+  line per setting in the window (`n = 5, 10`), with one-click lines for the common ones. The setups come back ranked
+  (expected files cited, then answers, then grounded share, the cheaper first when as good), with findings that say
+  which setup beats yours and for how much, what each setting changed ("temperature made no difference"), when a lead
+  is small enough to be chance, and which questions no setup could answer, plus how each question did with each setup.
+  `ui.use_run()` (or **Use this setup**) switches to the best one. A sweep is estimated before it's sent and isn't sent
+  over $2 (`max_cost=`; in the window, a second click) or 16 setups (`max_setups=`); with `retrieve_only=True` it costs
+  only the questions' embeddings.
+- `bedrock_chat.py`: **📈 Runs**, a new tab in the chat window, and `ui.runs()` list every test run, newest first, each
+  ranked against the other runs of the same questions, so you can see what each change got you; `ui.compare_runs(2, 5)`
+  puts runs side by side, question by question, and `ui.use_run(5)` switches to a run's setup. **Save** (or
+  `ui.save_runs()`) keeps the runs in `kb-test-runs.jsonl` beside the notebook, a JSON line per run with each answer and
+  its sources, and adds every later run as it finishes; **Load** (`ui.load_runs()`) reads them back after a kernel
+  restart, or from a teammate. `chat(..., log="kb-test-runs.jsonl")` saves from the start, and `ask_all(label=...)`
+  names a run.
 - `bedrock_chat.py`: **Answer / Retrieve only**, beside the chat window's question box. On **Retrieve only**, a
   question only searches: the same search an answer makes (Retrieve, with the same passages, search type, filter,
   reranker, data source and files) and no model, showing every passage found, best first, with its score. Switching
@@ -36,7 +53,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   sources and time, and opens to the full answer; `How long do refunds take? | refund-policy.pdf` also checks that
   the answer cites that file. Findings sum up the run and say which setting to try, and after a change, running the
   list again (`ui.ask_all()`) says which questions did better or worse. The estimated cost shows before you run.
-  `ui.results()` shows a run again as a report, `ui.batches[-1].to_df()` gives one row per question, and
+  `ui.results()` shows a run again as a report (`ui.results(1)` the first), `ui.batches[-1].to_df()` gives one row per
+  question, and
   `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
 - `bedrock_chat.py`: **📋 Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
   Python script that needs only boto3 and asks your test questions, printing each answer with the files it cites; the
