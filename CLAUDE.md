@@ -239,7 +239,9 @@ How the View layer works:
   button under its text, with a search box that ranks lines by `search_rank` (name, ID, description...; `match_kbs`
   and `kbs(match=)` use it too) and marks what it found (`_marked`). Enter picks the first line, or hands text the
   list doesn't hold to `on_text` (an ID or ARN, through `core.resolve`); `multi=True` (Files) ticks lines and stays
-  open. Set a picker's value from code with `set_value`, which doesn't call `on_pick`. **Add a setting** lists `Schema.search(text)` (names, then paths, then
+  open. While a list is open, `_ChatApp.backdrop` (a transparent button over the whole window, `.kbc-backdrop`, under
+  the open field, which `.kbc-open` lifts above it) takes a click anywhere else and closes it. Set a picker's value
+  from code with `set_value`, which doesn't call `on_pick`. **Add a setting** lists `Schema.search(text)` (names, then paths, then
   descriptions; a near miss falls back to difflib), or every field by group with Browse all. With Edit JSON open, the
   view buttons are disabled, and `_follow_edit` refills an untouched editor when the request changes, or warns what
   Apply would undo in an edited one. Each tab scrolls on its own (the box inside the tab's frame), and `_set` only

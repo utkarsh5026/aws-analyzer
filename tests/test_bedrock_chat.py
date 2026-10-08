@@ -2082,8 +2082,13 @@ def test_window_finds_a_knowledge_base_by_name_or_id(monkeypatch):
     app.model_pick.button.click()
     kb.button.click()  # one list open at a time
     assert kb.is_open and not app.model_pick.is_open
+    assert app.backdrop in app.root.children and app.backdrop.layout.display == ""  # over the rest of the window
     kb.button.click()  # a second click closes it
-    assert not kb.is_open
+    assert not kb.is_open and app.backdrop.layout.display == "none"  # clicks reach the window again
+    app.files_pick.button.click()
+    assert app.files_pick.is_open and app.backdrop.layout.display == ""
+    app.backdrop.click()  # a click anywhere else in the window closes the list
+    assert not app.files_pick.is_open and app.backdrop.layout.display == "none"
     view.use("support-docs")  # from another cell
     assert kb.value == KB_ID and "support-docs" in kb.face.value
 
