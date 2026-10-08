@@ -117,8 +117,8 @@ ui.kb_info("support-docs")
 ui.kb_info()                                 # the default knowledge base
 ```
 
-![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-light.webp#only-light){ width="984" height="1114" loading=lazy }
-![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English, the recent syncs and the tags](images/bedrock-kb-info-dark.webp#only-dark){ width="984" height="1114" loading=lazy }
+![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English and the data_source= that asks each, the recent syncs and the tags](images/bedrock-kb-info-light.webp#only-light){ width="984" height="1215" loading=lazy }
+![kb_info(): cards for status, type, vector store, embedding model, data sources, last sync, idle cost and creation date; findings about 2 documents that failed to index, a data source that keeps its chunks when deleted, and the idle cost of OpenSearch Serverless; then the settings, two data sources with their chunking, parsing and deletion policy in plain English and the data_source= that asks each, the recent syncs and the tags](images/bedrock-kb-info-dark.webp#only-dark){ width="984" height="1215" loading=lazy }
 /// caption
 `ui.kb_info("support-docs")`: the findings come first, each with what to do next. Below them, each data source's chunking, parsing and deletion policy in plain English.
 ///
@@ -171,6 +171,7 @@ ui.search("How long do refunds take?")
 ui.search("How long do refunds take?", n=10)              # up to 100 passages
 ui.search("error E1234", search_type="HYBRID")            # meaning and keywords, where the store supports it
 ui.search("refund window", rerank=True)                   # re-order with a reranking model (Cohere Rerank 3.5)
+ui.search("refund window", data_source="faq")             # one data source only (see below)
 ui.chunk(2)                                               # result #2 in full, with its metadata and IDs
 ```
 
@@ -197,6 +198,7 @@ ui.ask("How long do refunds take?")
 ui.follow_up("And for digital goods?")                     # same session
 ui.ask("How long do refunds take?", model="sonnet", n=10)
 ui.ask("How long do refunds take?", engine="converse")     # exact tokens and cost
+ui.ask("How long do refunds take?", data_source="faq")     # from one data source only
 ui.chunk(1)                                                # source [1] in full
 ```
 
@@ -258,6 +260,21 @@ ui = BedrockKBView(BedrockKBAnalyzer(default_model="sonnet"))   # a different de
 ///
 
 The answer's findings flag an answer that cites nothing (it may be the model's own knowledge), one where less than half is backed by a citation, Bedrock's default “unable to assist” reply (the passages didn't hold the answer: run `search()` on the question), a guardrail stepping in, and an answer cut off at `max_tokens`.
+
+## Ask one data source { #data-source }
+
+A knowledge base can have several data sources: an S3 bucket of policies, a crawled help site, a Confluence space. `data_source=` points a question at one of them. `search`, `ask`, `compare` and `evaluate` take its name (in any case) or its ID, or a list of them, and `follow_up()` keeps it for the rest of the conversation:
+
+```python
+ui.search("refund window", data_source="faq")                   # passages from the faq data source only
+ui.ask("How long do refunds take?", data_source="policies")     # an answer from the policies only
+ui.follow_up("And on the help site?", data_source="help-site")  # the next question searches another one
+ui.follow_up("Anything else?", data_source="all")               # back to every data source
+```
+
+Bedrock tags every chunk with its data source's ID (`x-amz-bedrock-kb-data-source-id`), so this needs no metadata files, and it works together with `where=`: both must match. `kb_info()` lists the data sources, with the `data_source=` for each when there are several. A name that isn't one of them is answered with the names that are.
+
+When the passages of a search or an answer come from several data sources, the report says which each came from and suggests asking the one most of them came from. If a vector store returns passages from another data source anyway, a finding says so: tag the files with your own metadata then, and filter with `where=`.
 
 ## Filter by metadata { #filters }
 
@@ -341,6 +358,8 @@ docs, summary = kb.documents("support-docs", status="FAILED")
 r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
 r.passages[0].text, r.passages[0].source, r.passages[0].metadata
 df = r.to_df()                                    # one row per passage
+r = kb.retrieve("support-docs", "refund window", data_source="faq")   # r.data_sources: {ID: name}
+kb.data_sources("support-docs")                   # [DataSourceInfo]: ID, name, status
 
 a = kb.ask("support-docs", "How long do refunds take?")   # Answer
 a.text, a.citations, a.sources, a.grounded_share
@@ -354,7 +373,7 @@ report = kb.evaluate("support-docs", cases)       # EvalReport
 report.hit_rate, report.mrr, report.to_df()
 ```
 
-The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`).
+The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`).
 
 ## Cost { #cost }
 
@@ -431,7 +450,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | Permission | Used by |
 |---|---|
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase` | `kbs`, `kb_info`, and finding a knowledge base by name |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced` |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
 | `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced` |
 | `bedrock:ListKnowledgeBaseDocuments` | `documents` |
 | `bedrock:ListTagsForResource` | `kb_info` |
@@ -499,12 +518,12 @@ Every `BedrockKBView` command. `ui.help()` prints the same list grouped by task,
 | `syncs(kb=None, data_source=None, n=10)` | Sync history with counts and why syncs failed, and the command to sync again |
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status, the ones that aren't indexed with the reason |
 | `unsynced(kb=None, data_source=None)` | S3 files added or changed since the last successful sync |
-| `search(question, n=5, kb=None, where=None, search_type=None, rerank=None)` | Ranked passages with scores, source and page, highlighted words, metadata and findings |
+| `search(question, n=5, kb=None, data_source=None, where=None, search_type=None, rerank=None)` | Ranked passages with scores, source and page, highlighted words, metadata and findings |
 | `chunk(rank=1)` | The full text and metadata of a result from the last search or ask |
-| `ask(question, kb=None, n=5, where=None, search_type=None, model=None, engine="kb", prompt=None, temperature=None, max_tokens=None)` | The answer with \[1\]\[2\] citations, grounded share, sources, model, tokens, cost and findings |
-| `follow_up(question)` | The next question in the same session or conversation |
-| `compare(question, kb=None, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=None)` | Each passage's rank under each search setting, overlap and findings |
-| `evaluate(cases, kb=None, n=5, search_type=None, where=None)` | Retrieval hit rate and MRR on test questions |
+| `ask(question, kb=None, data_source=None, n=5, where=None, search_type=None, model=None, engine="kb", prompt=None, temperature=None, max_tokens=None)` | The answer with \[1\]\[2\] citations, grounded share, sources, model, tokens, cost and findings |
+| `follow_up(question, data_source=None)` | The next question in the same session or conversation; `data_source=` moves it to another data source |
+| `compare(question, kb=None, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=None, data_source=None)` | Each passage's rank under each search setting, overlap and findings |
+| `evaluate(cases, kb=None, n=5, search_type=None, where=None, data_source=None)` | Retrieval hit rate and MRR on test questions |
 | `models(match=None)` | Models for `ask()`: the ID to pass, how it's called, and its price |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 

@@ -11,6 +11,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `bedrock_kb.py`: `ask()`, `search()`, `compare()` and `evaluate()` take `data_source=`, so a question can be answered
+  from one of a knowledge base's data sources only: `ui.ask("How long do refunds take?", data_source="faq")`, by
+  name (any case) or ID, or a list of them. `follow_up()` keeps it, and `follow_up(..., data_source="policies")` moves
+  the conversation to another one (`"all"` back to every one). It filters on the data source ID Bedrock gives every
+  chunk, so no metadata files are needed, and it works with `where=`. `kb_info()` shows the `data_source=` for each
+  data source, answers and searches whose passages come from several data sources say which each came from, and
+  a finding says when a vector store returned passages from outside the one asked for. ([#39](https://github.com/utkarsh5026/aws-analyzer/pull/39))
+- `bedrock_chat.py`: a **Data source** picker beside the knowledge base, shown when it has more than one, points the
+  next questions at one data source without ending the conversation. From code: `chat("support-docs",
+  data_source="faq")` or `ui.use(data_source="faq")`. **Edit JSON** reads it back from the request's filter. It needs
+  `bedrock:ListDataSources` (by ID it works without). ([#39](https://github.com/utkarsh5026/aws-analyzer/pull/39))
+- `bedrock_chat.py`: **📄 Pick files** in the chat window lists the knowledge base's indexed files; type part of a
+  name and pick one or several, and the next questions search only those files (click a chip to drop one, **All
+  files** to search everything again). `ui.files()` lists them as a report, with failed ones marked, and
+  `ui.use(files=["refund-policy.pdf", "faq/returns.md"])` or `chat(..., files=[...])` picks them from code, by name,
+  path or `s3://` path. It needs `bedrock:ListKnowledgeBaseDocuments` (by `s3://` path it works without). ([#39](https://github.com/utkarsh5026/aws-analyzer/pull/39))
+
 ## [0.7.0] - 2026-10-06
 
 ### Added

@@ -6,7 +6,7 @@
 shots.py renders reports, which are plain HTML. The chat window is ipywidgets, which only draw in a browser
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, adds settings,
-searches for a setting, opens the Request JSON tab and its Python view, edits the JSON. Each figure is the window, 984 CSS px wide at 1.5x like the other
+searches for a setting, opens the Request JSON tab and its Python view, edits the JSON, picks files. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
 
@@ -35,7 +35,7 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit")
+FIGURES = ("chat-window", "chat-settings", "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files")
 
 NOTEBOOK_CODE = f"""import os, sys
 sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
@@ -162,6 +162,24 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     page.wait_for_selector(".kbc-app .note.warn", timeout=10_000)
     scroll_to("[...document.querySelectorAll('.kbc-app .note.warn')].find(el => el.offsetParent)")
     shot("chat-edit")
+    if "chat-files" in wanted:
+        page.locator(".kbc-app button:has-text('Cancel')").click()
+        page.locator(tab.format("Settings")).first.click()
+        for name in ("Temperature", "Reranker", "Metadata filter"):  # back to the settings the window opened with
+            page.locator(".kbc-app .kbc-row", has=page.locator(f".rh b:text-is('{name}')")).locator(
+                "button.kbc-x").first.click()
+            time.sleep(0.4)
+        page.locator(".kbc-app button:has-text('Pick files')").click()
+        files = page.locator(".kbc-app input[placeholder='Type part of a file name']")
+        files.wait_for(state="visible", timeout=10_000)
+        for label in ("policies/refund-policy.pdf", "policies/eu-returns.pdf"):
+            files.fill(label)  # what choosing it from the list does
+            page.wait_for_function(f"document.querySelector('.kbc-app').innerText.includes('{label.split('/')[-1]} ✕')",
+                                   timeout=10_000)
+        box.fill("How long do refunds take?")
+        box.press("Enter")
+        answered(3)
+        shot("chat-files")
     return shots
 
 

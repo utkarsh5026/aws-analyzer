@@ -39,7 +39,12 @@ from bedrock_chat import (
     python_call,
     request_schema,
     settings_findings,
+    describe_files,
+    file_labels,
+    match_files,
+    parse_document,
     settings_from_request,
+    split_data_sources,
     validate_request,
 )
 
@@ -158,10 +163,43 @@ def kb_summary(kb_id=KB_ID, name="support-docs", status="ACTIVE"):
             "updatedAt": NOW - timedelta(days=2)}
 
 
-def fakes(kbs=None, rag=None, stream=None):
-    """bedrock-agent (the knowledge base list), bedrock (models) and bedrock-agent-runtime fakes."""
+DS_ID, DS2_ID = "DSID123456", "DSID654321"
+
+
+def ds_summary(ds_id=DS_ID, name="docs-s3", kb_id=KB_ID):
+    return {"knowledgeBaseId": kb_id, "dataSourceId": ds_id, "name": name, "status": "AVAILABLE",
+            "updatedAt": NOW - timedelta(days=3)}
+
+
+REFUND_PDF, RETURNS_MD, SCAN_PDF = ("s3://docs/policies/refund-policy.pdf", "s3://docs/faq/returns.md",
+                                   "s3://docs/policies/scanned-invoice.pdf")
+
+
+def doc(uri, status="INDEXED", ds_id=DS_ID, kb_id=KB_ID):
+    return {"knowledgeBaseId": kb_id, "dataSourceId": ds_id, "status": status, "updatedAt": NOW - timedelta(days=4),
+            "identifier": {"dataSourceType": "S3", "s3": {"uri": uri}}}
+
+
+def fakes(kbs=None, rag=None, stream=None, sources=None, documents=None):
+    """bedrock-agent (the knowledge base list, each one's data sources and their files), bedrock (models) and
+    bedrock-agent-runtime fakes. sources: {knowledge base ID: [data source summaries]}; one data source each by
+    default. documents: {data source ID: [document details] or an exception}; three files each by default."""
     kbs = [kb_summary()] if kbs is None else kbs
     rag = rag or (lambda **params: rag_resp())
+    sources = sources or {}
+    documents = documents or {}
+
+    def listed(knowledgeBaseId, **_):
+        found = sources.get(knowledgeBaseId, [ds_summary(kb_id=knowledgeBaseId)])
+        return {"dataSourceSummaries": found}
+
+    def files(knowledgeBaseId, dataSourceId, **_):
+        found = documents.get(dataSourceId, [doc(REFUND_PDF, ds_id=dataSourceId, kb_id=knowledgeBaseId),
+                                             doc(RETURNS_MD, ds_id=dataSourceId, kb_id=knowledgeBaseId),
+                                             doc(SCAN_PDF, "FAILED", ds_id=dataSourceId, kb_id=knowledgeBaseId)])
+        if isinstance(found, Exception):
+            raise found
+        return {"documentDetails": found}
 
     def streamed(**params):
         resp = rag(**params)
@@ -171,7 +209,9 @@ def fakes(kbs=None, rag=None, stream=None):
     if stream is not False:
         runtime["retrieve_and_generate_stream"] = stream or streamed
     return {
-        "bedrock-agent": Fake("bedrock-agent", {"list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": kbs}}),
+        "bedrock-agent": Fake("bedrock-agent", {"list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": kbs},
+                                                "list_data_sources": listed,
+                                                "list_knowledge_base_documents": files}),
         "bedrock": Fake("bedrock", {"list_foundation_models": lambda **_: {"modelSummaries": MODEL_LIST},
                                     "list_inference_profiles": lambda **_: {"inferenceProfileSummaries": PROFILES}}),
         "bedrock-agent-runtime": Fake("bedrock-agent-runtime", runtime),
@@ -356,6 +396,70 @@ def test_settings_from_request_names_what_the_chat_cant_send():
     with pytest.raises(ValueError, match="is a JSON object"):
         settings_from_request([], SCHEMA)
 
+
+
+DS_KEY = "x-amz-bedrock-kb-data-source-id"
+
+
+def test_data_sources_go_in_the_filter_and_come_back_out():
+    one = {"equals": {"key": DS_KEY, "value": "DSID123456"}}
+    params = build_request("q", KB_ID, SONNET_PROFILE, {"n": 5}, SCHEMA, data_sources=["DSID123456"])
+    vector = params[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector == {"numberOfResults": 5, "filter": one} and validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)
+    assert picked["dataSources"] == ["DSID123456"] and back == {"n": 5}
+    # with a filter of your own, both must match, and Edit JSON gives each back to where it came from
+    values = normalize_settings({"filter": {"team": "billing", "year": [">=", 2024]}}, SCHEMA)
+    params = build_request("q", KB_ID, SONNET_PROFILE, values, SCHEMA, data_sources=["DSID123456", "DSID654321"])
+    both = params[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]
+    assert both["andAll"][0] == {"in": {"key": DS_KEY, "value": ["DSID123456", "DSID654321"]}}
+    assert both["andAll"][1:] == values["filter"]["andAll"] and validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)
+    assert picked["dataSources"] == ["DSID123456", "DSID654321"] and back == values
+    team = {"equals": {"key": "team", "value": "billing"}}
+    assert split_data_sources({"andAll": [team, one]}) == (["DSID123456"], team)
+    assert split_data_sources(team) == ([], team)
+    assert split_data_sources({"orAll": [one, team]}) == ([], {"orAll": [one, team]})  # either: not a data source pick
+    assert split_data_sources({"in": {"key": DS_KEY, "value": []}}) == ([], {"in": {"key": DS_KEY, "value": []}})
+    assert "filter" not in str(build_request("q", KB_ID, SONNET_PROFILE, {}, SCHEMA, data_sources=[]))
+
+
+URI_KEY = "x-amz-bedrock-kb-source-uri"
+
+
+def test_files_go_in_the_filter_with_the_data_source_and_come_back_out():
+    values = normalize_settings({"filter": {"team": "billing"}}, SCHEMA)
+    params = build_request("q", KB_ID, SONNET_PROFILE, values, SCHEMA, data_sources=[DS_ID],
+                           files=[REFUND_PDF, RETURNS_MD])
+    condition = params[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]
+    assert condition == {"andAll": [{"equals": {"key": DS_KEY, "value": DS_ID}},
+                                    {"in": {"key": URI_KEY, "value": [REFUND_PDF, RETURNS_MD]}},
+                                    {"equals": {"key": "team", "value": "billing"}}]}
+    assert validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)
+    assert (picked["dataSources"], picked["files"], back) == ([DS_ID], [REFUND_PDF, RETURNS_MD], values)
+    params = build_request("q", KB_ID, SONNET_PROFILE, {}, SCHEMA, files=[REFUND_PDF])
+    picked, back = settings_from_request(params, SCHEMA)
+    assert picked["files"] == [REFUND_PDF] and "dataSources" not in picked and back == {}
+
+
+def test_files_are_named_by_path_name_or_s3_path():
+    docs = [parse_document(doc(uri)) for uri in (REFUND_PDF, RETURNS_MD, "s3://docs/old/refund-policy.pdf",
+                                                  "s3://other/faq/returns.md")]
+    assert file_labels(d.uri for d in docs) == {
+        REFUND_PDF: "policies/refund-policy.pdf", RETURNS_MD: "docs/faq/returns.md",
+        "s3://docs/old/refund-policy.pdf": "old/refund-policy.pdf", "s3://other/faq/returns.md": "other/faq/returns.md"}
+    uris, problems = match_files(docs, ["Policies/Refund-Policy.PDF", "s3://docs/new.pdf", "other/faq/returns.md"])
+    assert uris == [REFUND_PDF, "s3://docs/new.pdf", "s3://other/faq/returns.md"] and problems == []
+    uris, problems = match_files(docs, ["refund-policy.pdf", "refund-polcy.pdf"])
+    assert uris == []
+    assert problems[0].startswith("'refund-policy.pdf' names 2 files ('policies/refund-policy.pdf', "
+                                  "'old/refund-policy.pdf'): pass more of its path")
+    assert problems[1] == ("No file 'refund-polcy.pdf' in the knowledge base. Did you mean "
+                           "'policies/refund-policy.pdf' or 'old/refund-policy.pdf'?")
+    assert describe_files([]) == "every file" and describe_files([REFUND_PDF]) == "file 'refund-policy.pdf'"
+    assert describe_files([REFUND_PDF, RETURNS_MD]) == "files 'refund-policy.pdf' and 'returns.md'"
+    assert describe_files([REFUND_PDF] * 4) == "4 files"
 
 def test_validate_request_reports_what_bedrock_would_refuse():
     params = build_request("q", KB_ID, SONNET_PROFILE, {"guardrail_id": "gr-1"}, SCHEMA)
@@ -728,6 +832,82 @@ def test_knowledge_bases_are_listed_once(core, clients):
     assert len(clients["bedrock-agent"].called("list_knowledge_bases")) == 1
 
 
+
+TWO_SOURCES = {KB_ID: [ds_summary(DS_ID, "faq"), ds_summary(DS2_ID, "help-site")]}
+
+
+def test_ask_searches_only_the_data_source_asked_for():
+    clients = fakes(sources=TWO_SOURCES)
+    core = BedrockChatAnalyzer(clients=clients)
+    a = core.ask("support-docs", "q", {"n": 5}, data_source="FAQ")
+    assert a.data_sources == {DS_ID: "faq"}
+    assert a.request[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS_ID}}
+    a = core.ask(KB_ID, "q", data_source=[DS_ID, "help-site"])
+    assert a.data_sources == {DS_ID: "faq", DS2_ID: "help-site"}
+    assert core.ask(KB_ID, "q", data_source="all").data_sources == {}
+    assert len(clients["bedrock-agent"].called("list_data_sources")) == 1  # listed once, then cached
+    assert [ds.name for ds in core.data_sources(KB_ID)] == ["faq", "help-site"]
+    with pytest.raises(ValueError) as err:
+        core.request(KB_ID, "q", data_source="help-sites")
+    assert str(err.value) == ("support-docs has no data source 'help-sites'. Did you mean 'help-site'? Its data "
+                              f"sources: faq ({DS_ID}), help-site ({DS2_ID}).")
+    assert len(clients["bedrock-agent"].called("list_data_sources")) == 2  # looked again: it may be new
+
+
+def test_data_sources_by_id_when_they_cant_be_listed():
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized", "ListDataSources")
+
+    clients = fakes()
+    clients["bedrock-agent"].handlers["list_data_sources"] = denied
+    core = BedrockChatAnalyzer(clients=clients)
+    assert core.resolve_sources(KB_ID, DS_ID) == {DS_ID: ""}
+    with pytest.raises(ClientError):
+        core.resolve_sources(KB_ID, "faq")
+
+
+def test_files_are_listed_from_every_data_source_that_keeps_a_list():
+    web = client_error("ValidationException", "ListKnowledgeBaseDocuments supports S3 and CUSTOM data sources only",
+                       "ListKnowledgeBaseDocuments")
+    clients = fakes(sources=TWO_SOURCES, documents={DS2_ID: web})
+    core = BedrockChatAnalyzer(clients=clients)
+    listing = core.files("support-docs")
+    assert [d.uri for d in listing.documents] == [REFUND_PDF, RETURNS_MD, SCAN_PDF]
+    assert [d.uri for d in listing.searchable] == [REFUND_PDF, RETURNS_MD]
+    assert listing.errors == {DS2_ID: "ValidationException"} and not listing.truncated
+    assert core.files(KB_ID) is listing  # cached
+    assert len(clients["bedrock-agent"].called("list_knowledge_base_documents")) == 2
+    assert core.file_status(KB_ID, SCAN_PDF) == "FAILED" and core.file_status(KB_ID, "s3://x/y") == ""
+    assert core.files(KB_ID, limit=2, refresh=True).truncated
+
+
+def test_ask_searches_only_the_files_asked_for():
+    clients = fakes()
+    core = BedrockChatAnalyzer(clients=clients)
+    assert core.resolve_files(KB_ID, [REFUND_PDF]) == [REFUND_PDF]  # s3:// paths need no list
+    assert clients["bedrock-agent"].called("list_knowledge_base_documents") == []
+    a = core.ask("support-docs", "q", files=["refund-policy.PDF", "faq/returns.md"])
+    assert a.files == [REFUND_PDF, RETURNS_MD]
+    assert a.request[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "in": {"key": URI_KEY, "value": [REFUND_PDF, RETURNS_MD]}}
+    assert core.resolve_files(KB_ID, "all") == [] and core.resolve_files(KB_ID, None) == []
+    with pytest.raises(ValueError, match="No file 'refunds.pdf' in the knowledge base"):
+        core.request(KB_ID, "q", files="refunds.pdf")
+    assert len(clients["bedrock-agent"].called("list_knowledge_base_documents")) == 2  # looked again: it may be new
+    with pytest.raises(ValueError, match="takes file names or s3:// paths"):
+        core.resolve_files(KB_ID, ["a.pdf", " "])
+
+
+def test_files_by_name_when_they_cant_be_listed():
+    denied = client_error("AccessDeniedException", "not authorized", "ListKnowledgeBaseDocuments")
+    core = BedrockChatAnalyzer(clients=fakes(documents={DS_ID: denied}))
+    with pytest.raises(ValueError) as err:
+        core.resolve_files(KB_ID, "refund-policy.pdf")
+    assert ("couldn't be listed (AccessDeniedException; needs bedrock:ListKnowledgeBaseDocuments): pass full s3:// "
+            "paths instead") in str(err.value)
+    assert core.resolve_files(KB_ID, REFUND_PDF) == [REFUND_PDF]
+
 def test_missing_region_is_a_readable_error(monkeypatch):
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     monkeypatch.delenv("AWS_REGION", raising=False)
@@ -841,9 +1021,86 @@ def test_ui_use_kbs_and_models(core, capsys):
     assert "Knowledge base: sales (KBID654321). Model: Claude Sonnet 5 (us.anthropic.claude-sonnet-5)." in out
     out = run(capsys, ui.models)
     assert "us.anthropic.claude-sonnet-5 (in use)" in out and "amazon.nova-pro-v1:0" in out
-    assert "Pass kb= or model=" in run(capsys, ui.use)
+    assert "Pass kb=, model=, data_source= or files=" in run(capsys, ui.use)
     assert "Did you mean 'sales'" in run(capsys, ui.use, "sale")
 
+
+
+def test_ui_use_a_data_source(capsys):
+    clients = fakes(sources=TWO_SOURCES)
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), mode="text", progress="off")
+    out = run(capsys, ui.use, "support-docs")
+    assert "It has 2 data sources (faq, help-site): use(data_source='faq') asks only one." in out
+    out = run(capsys, ui.use, data_source="help-site")
+    assert "Questions search data source 'help-site'." in out
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "question 1 of this conversation · only data source 'help-site'" in out
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS2_ID}}
+    assert "Data source: help-site" in run(capsys, ui.settings)
+    out = run(capsys, ui.request)
+    assert "Data source: help-site" in out and DS2_ID in out
+    assert "chat('support-docs', data_source='help-site'" in ui._setup_call()
+    out = run(capsys, ui.use, data_source="nope")
+    assert "has no data source 'nope'" in out and ui.data_source == {DS2_ID: "help-site"}  # nothing changed
+    out = run(capsys, ui.use, data_source="all")
+    assert "Questions search every data source." in out and ui.data_source == {}
+    assert len(ui.answers) == 1  # the conversation goes on
+    run(capsys, ui.use, data_source="faq")
+    run(capsys, ui.use, "support-docs")  # the same knowledge base: the data source stays
+    assert ui.data_source == {DS_ID: "faq"}
+
+
+def test_ui_answer_says_which_data_source_each_source_came_from(capsys):
+    web = ref("Bank transfers take up to 10 days.", "help/bank.html", page=None)
+    web["metadata"][DS_KEY] = DS2_ID
+    rag = rag_resp(citations=(("Refunds take 5-7 business days.", [REFUND, BANK]),
+                              ("Bank transfers can take up to 10 days.", [web])))
+    clients = fakes(sources=TWO_SOURCES, rag=lambda **_: rag)
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="text", progress="off")
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "#  File               Page  Data source  Passage" in out and "  help-site    " in out
+    assert "use(data_source='faq')" in out and "ask only data source 'faq', where 2 sources came from" in out
+
+
+def test_ui_files_and_use_files(capsys):
+    web = client_error("ValidationException", "S3 and CUSTOM only", "ListKnowledgeBaseDocuments")
+    clients = fakes(sources=TWO_SOURCES, documents={DS2_ID: web})
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="text", progress="off")
+    out = run(capsys, ui.files)
+    for text in ("Files in support-docs (3)", "Files: 3", "Indexed: 2", "Not indexed: 1 (!)", "Questions search: all",
+                 "1 file isn't indexed", "The data source 'help-site' has no file list (ValidationException: only S3 "
+                 "and custom data sources keep one)", "refund-policy.pdf", "policies/", "faq", "failed",
+                 "use(files=['faq/returns.md'])"):
+        assert text in out, text
+    out = run(capsys, ui.use, files=["refund-policy.pdf"])
+    assert "Questions search file 'refund-policy.pdf'." in out
+    run(capsys, ui.ask, "How long do refunds take?")
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": URI_KEY, "value": REFUND_PDF}}
+    assert ui.answers[-1].files == [REFUND_PDF]
+    assert "Files: refund-policy.pdf" in run(capsys, ui.settings)
+    assert "files=['policies/refund-policy.pdf']" in ui._setup_call()
+    out = run(capsys, ui.files)
+    assert "refund-policy.pdf (picked)" in out and "use(files='all')" in out
+    out = run(capsys, ui.use, files=["refund-policy.pdf", "scanned-invoice.pdf"])
+    assert "[!]" in out and "File 'scanned-invoice.pdf' isn't indexed (failed)" in out
+    assert "No file 'nope.pdf'" in run(capsys, ui.use, files="nope.pdf")
+    assert ui.picked_files == [REFUND_PDF, SCAN_PDF]  # nothing changed
+    assert "Questions search every file." in run(capsys, ui.use, files="all") and ui.picked_files == []
+    run(capsys, ui.use, files=RETURNS_MD)
+    run(capsys, ui.use, "support-docs")  # the same knowledge base: the files stay
+    assert ui.picked_files == [RETURNS_MD]
+
+
+def test_ui_answer_from_outside_the_picked_files_is_flagged(capsys):
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=fakes()), kb="support-docs", mode="text", progress="off",
+                         files=[RETURNS_MD])
+    out = run(capsys, ui.ask, "How long do refunds take?")  # the fake ignores the filter: its passages are elsewhere
+    assert "question 1 of this conversation · only file 'returns.md'" in out
+    assert "2 sources ([1], [2]) came from outside file 'returns.md'" in out
 
 def test_ui_explains_aws_errors(capsys):
     def denied(**_):
@@ -873,6 +1130,9 @@ def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, ca
     assert view._notes == ["Not used: No setting 'bogus'. fields() lists every one RetrieveAndGenerate takes in this "
                            f"boto3 (botocore {SCHEMA.boto}); pip install -U boto3 adds fields AWS added since."]
     assert "The chat window needs Jupyter" in capsys.readouterr().out
+    view = chatmod.chat("support-docs", data_source="docs-s3")
+    assert view.values == DEFAULT_SETTINGS and view._setup_call() == ("chat('support-docs', data_source='docs-s3', "
+                                                                     "n=5)")
 
 
 # ----------------------------------------------------------------------------- UI (the chat window)
@@ -1117,6 +1377,128 @@ def test_window_switches_model_and_knowledge_base(core, monkeypatch):
     assert view.kb == KB_ID and view.answers == [] and view.session_id is None
     assert "Now asking support-docs: a new conversation." in texts(app)[-1]
 
+
+
+def test_window_picks_a_data_source(monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")], sources=TWO_SOURCES)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    pick = app.source_pick
+    assert pick.layout.display == "" and pick.value == ""
+    assert list(pick.options) == [("All data sources", ""), ("faq", DS_ID), ("help-site", DS2_ID)]
+    assert "<b>Data source</b> asks only one" in texts(app)[0]
+    app.question.value = "q"
+    app._send()
+    pick.value = DS2_ID
+    assert view.data_source == {DS2_ID: "help-site"} and view.answers  # the conversation goes on
+    assert "The next questions search data source &#x27;help-site&#x27;" in app.status.value
+    assert DS2_ID in app.request_view.value and "data source picker" in app.request_view.value
+    assert "data_source='help-site'" in plain(app.setup.value)
+    app.question.value = "and?"
+    app._send()
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate_stream")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS2_ID}}
+    assert "only data source &#x27;help-site&#x27;" in texts(app)[-1]
+    pick.value = ""
+    assert view.data_source == {} and DS2_ID not in app.request_view.value
+    # Edit JSON: a data source condition in the filter moves the picker
+    app.edit_button.click()
+    request = json.loads(app.editor.value)
+    request[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] = {
+        "andAll": [{"in": {"key": DS_KEY, "value": [DS_ID, DS2_ID]}}, {"equals": {"key": "team", "value": "a"}}]}
+    app.editor.value = json.dumps(request)
+    app._apply()
+    assert view.data_source == {DS_ID: "faq", DS2_ID: "help-site"} and view.values["filter"] == {
+        "equals": {"key": "team", "value": "a"}}
+    assert pick.value == f"{DS_ID},{DS2_ID}" and ("faq + help-site", f"{DS_ID},{DS2_ID}") in pick.options
+    assert "questions search data sources &#x27;faq&#x27; and &#x27;help-site&#x27;" in app.status.value
+    # another knowledge base has its own data sources (one here: nothing to pick)
+    app.kb_pick.value = KB2_ID
+    assert view.data_source is None and pick.value == "" and pick.layout.display == "none"
+    assert "<b>Data source</b>" not in texts(app)[0]
+
+
+def test_window_data_source_from_another_cell_and_one_it_cant_list(window, monkeypatch, capsys):
+    app = window._app
+    assert app.source_pick.layout.display == "none"  # one data source: nothing to pick
+    window.use(data_source="docs-s3")
+    assert app.source_pick.value == DS_ID and app.source_pick.layout.display == ""
+    capsys.readouterr()
+
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized", "ListDataSources")
+
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes()
+    clients["bedrock-agent"].handlers["list_data_sources"] = denied
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb=KB_ID, mode="html", data_source=DS2_ID)
+    view._display = lambda widget: None
+    view.app()
+    pick = view._app.source_pick
+    assert pick.value == DS2_ID and (DS2_ID, DS2_ID) in pick.options  # an ID still works
+    assert "Couldn&#x27;t list the data sources (AccessDeniedException; needs bedrock:ListDataSources)" in (
+        view._app.status.value)
+
+
+def test_window_picks_files(window, monkeypatch):
+    app = window._app
+    assert app.files_box.layout.display == "" and app.file_box.layout.display == "none"
+    assert app.pick_files_button.layout.display == "" and app.all_files_button.layout.display == "none"
+    assert "Pick files</b> asks only the files you pick" in texts(app)[0]
+    app.pick_files_button.click()
+    assert app.file_box.layout.display == "" and app.pick_files_button.layout.display == "none"
+    assert list(app.file_box.options) == ["faq/returns.md", "policies/refund-policy.pdf"]  # indexed ones only
+    assert "2 indexed files to pick from" in app.status.value
+    app.file_box.value = "policies/refund-policy.pdf"  # chosen from the list
+    assert window.picked_files == [REFUND_PDF] and app.file_box.value == ""
+    assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
+    assert app.all_files_button.layout.display == ""
+    assert REFUND_PDF in app.request_view.value and "files picker" in app.request_view.value
+    assert "The next questions search file &#x27;refund-policy.pdf&#x27;" in app.status.value
+    app.file_box.value = "RETURNS"
+    app.file_box._handle_custom_msg({"event": "submit"}, [])  # Enter takes the only match
+    assert window.picked_files == [REFUND_PDF, RETURNS_MD]
+    app.file_box.value = "re"
+    app.file_box._handle_custom_msg({"event": "submit"}, [])
+    assert "2 files contain &#x27;re&#x27;: choose one from the list" in app.status.value
+    app.file_box.value = "nothing-like-it"
+    app.file_box._handle_custom_msg({"event": "submit"}, [])
+    assert "No indexed file&#x27;s path contains &#x27;nothing-like-it&#x27;" in app.status.value
+    app.question.value = "q"
+    app._send()
+    sent = window.core._runtime_client().called("retrieve_and_generate_stream")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "in": {"key": URI_KEY, "value": [REFUND_PDF, RETURNS_MD]}}
+    app.file_chips.children[0].click()  # a chip's click stops asking only that file
+    assert window.picked_files == [RETURNS_MD]
+    app.all_files_button.click()
+    assert window.picked_files == [] and app.file_chips.children == () and URI_KEY not in app.request_view.value
+    window.use(files=["refund-policy.pdf"])  # from another cell
+    assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
+
+
+def test_window_files_reset_with_another_knowledge_base(monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")])
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html",
+                           files=["refund-policy.pdf"])
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
+    app.pick_files_button.click()
+    app.kb_pick.value = KB2_ID
+    assert view.picked_files is None and app.file_chips.children == () and app.file_box.layout.display == "none"
+    assert app.files_kb is None and app.pick_files_button.layout.display == ""
+    bad = BedrockChatView(BedrockChatAnalyzer(clients=fakes()), kb="support-docs", mode="html", files="nope.pdf")
+    bad._display = lambda widget: None
+    bad.app()
+    assert "No file &#x27;nope.pdf&#x27; in the knowledge base. Questions search every file." in bad._app.status.value
+    assert bad.picked_files == []
 
 def test_window_follows_other_cells(window, capsys):
     app = window._app

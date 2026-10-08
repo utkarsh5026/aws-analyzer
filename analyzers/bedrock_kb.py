@@ -31,6 +31,8 @@ Quick start
     ui.search("error E1234", where={"team": "billing", "year": (">=", 2024)}, search_type="HYBRID")
     ui.ask("How long do refunds take?")               # answer with [1][2] citations, sources, grounded %
     ui.follow_up("And for digital goods?")            # same session
+    ui.ask("How long do refunds take?", data_source="faq")   # answer from one data source only (name or ID)
+    ui.follow_up("And in the policies?", data_source="policies")   # move the conversation to another one
     ui.ask("...", engine="converse", model="sonnet")  # exact tokens and cost, your own prompt=
     ui.models()                                       # models you can use here, and their price
     ui.unsynced()                                     # S3 files changed since the last sync
@@ -758,6 +760,9 @@ class Retrieval:
     reranked: str | None = None  # the reranking model, when one re-ordered the results
     seconds: float = 0.0
     guardrail_action: str | None = None  # INTERVENED when a guardrail stepped in
+    data_sources: dict[str, str] = field(
+        default_factory=dict
+    )  # ID -> name of the data sources searched; {} = all of them
 
     def to_df(self):
         """One row per passage: rank, score, source, page, text, IDs and metadata."""
@@ -822,6 +827,9 @@ class Answer:
     kb_id: str = ""
     kb_name: str = ""
     max_tokens: int | None = None
+    data_sources: dict[str, str] = field(
+        default_factory=dict
+    )  # ID -> name of the data sources searched; {} = all of them
 
     @property
     def cited(self) -> list[int]:
@@ -851,6 +859,7 @@ class Answer:
                     "source": source_name(p.uri),
                     "page": p.page,
                     "uri": p.uri,
+                    "data_source_id": p.data_source_id,
                     "score": p.score,
                     "text": p.text,
                     "metadata": p.metadata,
@@ -938,6 +947,9 @@ class SearchComparison:
     errors: dict[str, str] = field(
         default_factory=dict
     )  # label -> why that setting couldn't run
+    data_sources: dict[str, str] = field(
+        default_factory=dict
+    )  # ID -> name of the data sources searched; {} = all of them
 
     def ranks(self) -> list[tuple[Passage, dict[str, int | None]]]:
         """Every passage any setting found, with its rank under each setting (None = not found), best first."""
@@ -988,6 +1000,9 @@ class EvalReport:
     seconds: float = 0.0
     search_type: str | None = None
     where: Any = None
+    data_sources: dict[str, str] = field(
+        default_factory=dict
+    )  # ID -> name of the data sources searched; {} = all of them
 
     @property
     def missed(self) -> list[EvalCase]:
@@ -1697,6 +1712,56 @@ def describe_filter(where: Any) -> str:
     return ", ".join(parts)
 
 
+DATA_SOURCE_KEY = "x-amz-bedrock-kb-data-source-id"  # Bedrock tags every chunk with its data source's ID
+
+
+def data_source_filter(ids: Iterable[str]) -> dict[str, Any] | None:
+    """A RetrievalFilter that keeps only passages from these data sources (by ID): {'equals': ...} for one, {'in':
+    ...} for several, None for none. Bedrock tags every chunk with its data source's ID, so this needs no
+    .metadata.json files."""
+    unique = list(dict.fromkeys(str(i) for i in ids if i))
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return {"equals": {"key": DATA_SOURCE_KEY, "value": unique[0]}}
+    return {"in": {"key": DATA_SOURCE_KEY, "value": unique}}
+
+
+def with_data_sources(
+    condition: dict[str, Any] | None, ids: Iterable[str]
+) -> dict[str, Any] | None:
+    """A RetrievalFilter (build_filter's) narrowed to the data sources with these IDs: both must match."""
+    only = data_source_filter(ids)
+    if only is None:
+        return condition
+    if not condition:
+        return only
+    rest = condition["andAll"] if list(condition) == ["andAll"] else [condition]
+    return {"andAll": [only, *rest]}
+
+
+def describe_sources(sources: dict[str, str]) -> str:
+    """{ID: name} of the data sources searched -> "data source 'faq'" / "data sources 'faq' and 'policies'"."""
+    names = [repr(name or ds_id) for ds_id, name in sources.items()]
+    if not names:
+        return "every data source"
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"data source{'s' if len(names) > 1 else ''} {listed}"
+
+
+def _source_arg(sources: dict[str, str]) -> str | list[str]:
+    """The data_source= to pass for these data sources in a next step: a name, or a list of names."""
+    names = [name or ds_id for ds_id, name in sources.items()]
+    return names[0] if len(names) == 1 else names
+
+
+def _outside(passages: Iterable[Passage], sources: dict[str, str]) -> list[Passage]:
+    """The passages that came from other data sources than the ones asked for."""
+    if not sources:
+        return []
+    return [p for p in passages if p.data_source_id and p.data_source_id not in sources]
+
+
 # ------------------------------------------------------------------ prompting
 
 SYSTEM_PROMPT = (
@@ -2322,6 +2387,17 @@ def retrieval_findings(r: Retrieval) -> list[tuple[str, str]]:
                     "<file>.metadata.json next to each file. Try without where=, then check kb_info().",
                 )
             )
+        elif r.data_sources:
+            only = _source_arg(r.data_sources)
+            check = _call("syncs", data_source=only) if isinstance(only, str) else "syncs()"
+            found.append(
+                (
+                    "warn",
+                    f"Nothing came back from {describe_sources(r.data_sources)}. Check that it's synced "
+                    f"({check}) and holds searchable documents, or search without data_source= to cover "
+                    "every data source.",
+                )
+            )
         else:
             found.append(
                 (
@@ -2331,6 +2407,17 @@ def retrieval_findings(r: Retrieval) -> list[tuple[str, str]]:
                 )
             )
         return found
+    outside = _outside(passages, r.data_sources)
+    if outside:
+        found.append(
+            (
+                "warn",
+                f"{_plural(len(outside), 'passage')} (#{', #'.join(str(p.rank) for p in outside[:5])}) came from "
+                f"outside {describe_sources(r.data_sources)}: this vector store didn't apply the data source "
+                "filter. Tag the files with your own metadata instead (a <file>.metadata.json like "
+                '{"metadataAttributes": {"source": "faq"}}), sync, and filter with where={\'source\': \'faq\'}.',
+            )
+        )
     files = {p.uri or p.source for p in passages}
     if len(passages) >= 3 and len(files) == 1:
         found.append(
@@ -2417,12 +2504,18 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
             )
         )
     if _REFUSAL in a.text.lower():
+        narrowed = (
+            f" Only {describe_sources(a.data_sources)} was searched: ask without data_source= to search "
+            "every data source."
+            if a.data_sources
+            else ""
+        )
         found.append(
             (
                 "warn",
                 'Bedrock gave its default "unable to assist" reply, which usually means the passages it '
                 "retrieved don't hold the answer (or a filter removed them): run search(question) to see "
-                "what was retrieved.",
+                f"what was retrieved.{narrowed}",
             )
         )
     elif not a.text.strip():
@@ -2443,6 +2536,18 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
                 "warn",
                 f"Only {a.grounded_share:.0%} of the answer is backed by a citation; the rest may be the "
                 "model's own knowledge. Check the uncited sentences against the sources.",
+            )
+        )
+    outside = [i for i, p in enumerate(a.sources, 1) if _outside([p], a.data_sources)]
+    if outside:
+        numbers = ", ".join(f"[{i}]" for i in outside[:5])
+        found.append(
+            (
+                "warn",
+                f"{_plural(len(outside), 'source')} ({numbers}) came from outside "
+                f"{describe_sources(a.data_sources)}: this vector store didn't apply the data source filter. "
+                "Tag the files with your own metadata instead (a <file>.metadata.json), sync, and filter with "
+                "where=.",
             )
         )
     if a.stop_reason in ("max_tokens", "model_context_window_exceeded"):
@@ -2604,6 +2709,21 @@ def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
     return hits[0] if hits else None
 
 
+def _match_sources(
+    names: dict[str, str], wanted: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """({ID: name} of the data sources `wanted` names, by ID or by name in any case, [what matched none])."""
+    found: dict[str, str] = {}
+    missing: list[str] = []
+    for w in wanted:
+        hits = [w] if w in names else [i for i, n in names.items() if n.lower() == w.lower()]
+        if not hits:
+            missing.append(w)
+        for ds_id in hits:
+            found[ds_id] = names[ds_id]
+    return found, missing
+
+
 def _question_text(question: Any) -> str:
     text = " ".join(str(question or "").split())
     if not text:
@@ -2696,6 +2816,9 @@ class BedrockKBAnalyzer:
             8  # knowledge bases described in parallel by list_knowledge_bases
         )
         self._names: dict[str, str] | None = None  # knowledge base ID -> name
+        self._source_names: dict[
+            str, dict[str, str]
+        ] = {}  # knowledge base ID -> {data source ID: name}, as last listed
 
     @property
     def client(self) -> Any:
@@ -2826,6 +2949,10 @@ class BedrockKBAnalyzer:
             )
             or []
         )
+        if "data_sources" not in info.errors:
+            self._source_names[kb_id] = {
+                s["dataSourceId"]: s.get("name", "") for s in summaries
+            }
         for summary in summaries:
             ds = DataSourceInfo(
                 id=summary["dataSourceId"],
@@ -2870,7 +2997,7 @@ class BedrockKBAnalyzer:
     def data_sources(self, kb: str) -> list[DataSourceInfo]:
         """The data sources of a knowledge base: ID, name and status (describe() adds their settings and syncs)."""
         kb_id = self.resolve(kb)
-        return [
+        sources = [
             DataSourceInfo(
                 id=s["dataSourceId"],
                 name=s.get("name", ""),
@@ -2883,6 +3010,73 @@ class BedrockKBAnalyzer:
                 "list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id
             )
         ]
+        self._source_names[kb_id] = {ds.id: ds.name for ds in sources}
+        return sources
+
+    def data_source_name(self, kb_id: str, ds_id: str) -> str:
+        """The name of a data source already listed (its ID otherwise). Makes no AWS call."""
+        return self._source_names.get(kb_id, {}).get(ds_id) or ds_id
+
+    def data_source_names(self, kb: str, *, refresh: bool = False) -> dict[str, str]:
+        """{ID: name} of a knowledge base's data sources (one ListDataSources, cached)."""
+        kb_id = self.resolve(kb)
+        if refresh or kb_id not in self._source_names:
+            self.data_sources(kb_id)
+        return dict(self._source_names[kb_id])
+
+    def resolve_sources(self, kb: str, data_source: Any) -> dict[str, str]:
+        """{ID: name} of the data sources a search should cover, from data_source=: a data source's name (any case)
+        or ID, or a list of them. None, [] or 'all' -> {} (every data source). A dict is taken as already resolved
+        (a Retrieval's data_sources). An unknown one raises a ValueError that lists the knowledge base's data
+        sources."""
+        if isinstance(data_source, dict):
+            return {str(k): str(v or "") for k, v in data_source.items()}
+        if data_source is None or (
+            isinstance(data_source, str) and data_source.strip().lower() in ("all", "*")
+        ):
+            return {}
+        items = (
+            list(data_source)
+            if isinstance(data_source, (list, tuple, set, frozenset))
+            else [data_source]
+        )
+        wanted = [
+            str(item.id if isinstance(item, DataSourceInfo) else item).strip()
+            for item in items
+        ]
+        if not wanted:
+            return {}
+        if any(not w for w in wanted):
+            raise ValueError(
+                "data_source= takes a data source's name or ID, or a list of them (kb_info() lists them)"
+            )
+        kb_id = self.resolve(kb)
+        cached = kb_id in self._source_names
+        try:
+            names = self.data_source_names(kb_id)
+        except (ClientError, BotoCoreError):
+            if all(_KB_ID_RE.match(w) for w in wanted):
+                return {w: "" for w in wanted}  # can't list them, but the IDs may still be right
+            raise
+        found, missing = _match_sources(names, wanted)
+        if missing and cached:  # maybe added since they were listed
+            names = self.data_source_names(kb_id, refresh=True)
+            found, missing = _match_sources(names, wanted)
+        if missing:
+            close = difflib.get_close_matches(
+                missing[0].lower(), [n.lower() for n in names.values()], n=2, cutoff=0.6
+            )
+            close_names = [n for n in names.values() if n.lower() in close]
+            text = f"{self.kb_name(kb_id)} has no data source {missing[0]!r}."
+            if close_names:
+                text += f" Did you mean {' or '.join(map(repr, close_names))}?"
+            listed = ", ".join(
+                f"{name} ({ds_id})"
+                for ds_id, name in sorted(names.items(), key=lambda i: i[1].lower())
+            )
+            text += f" Its data sources: {listed}." if names else " It has no data sources."
+            raise ValueError(text + " kb_info() shows them.")
+        return found
 
     def _pick_sources(
         self, kb_id: str, data_source: str | None
@@ -3029,15 +3223,17 @@ class BedrockKBAnalyzer:
         where: Any,
         search_type: str | None,
         rerank_model: str | bool | None = None,
+        sources: Iterable[str] = (),
     ) -> dict[str, Any]:
-        """The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate."""
+        """The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate. sources: the IDs of the only
+        data sources to search."""
         n = _as_int(n, "n")
         if not 1 <= n <= 100:
             raise ValueError(
                 f"n can be 1 to 100 (a search returns at most 100 passages); got {n}"
             )
         config: dict[str, Any] = {"numberOfResults": n}
-        condition = build_filter(where)
+        condition = with_data_sources(build_filter(where), sources)
         if condition:
             config["filter"] = condition
         if search_type:
@@ -3070,13 +3266,16 @@ class BedrockKBAnalyzer:
         where: Any = None,
         search_type: str | None = None,
         rerank_model: str | bool | None = None,
+        data_source: Any = None,
     ) -> Retrieval:
         """The n passages (up to 100) that best match `question`, best first. where= filters on the documents'
         metadata (see build_filter); search_type='HYBRID' adds keyword matching, where the vector store supports it;
-        rerank_model re-orders a wider set of results with a reranking model (True = Cohere Rerank 3.5)."""
+        rerank_model re-orders a wider set of results with a reranking model (True = Cohere Rerank 3.5);
+        data_source= searches only that data source (a name or ID, or a list of them; see resolve_sources)."""
         kb_id = self.resolve(kb)
         question = _question_text(question)
-        config = self._search_config(n, where, search_type, rerank_model)
+        sources = self.resolve_sources(kb_id, data_source)
+        config = self._search_config(n, where, search_type, rerank_model, sources)
         started = time.monotonic()
         resp = self._runtime_client().retrieve(
             knowledgeBaseId=kb_id,
@@ -3102,6 +3301,7 @@ class BedrockKBAnalyzer:
             reranked=reranker,
             seconds=time.monotonic() - started,
             guardrail_action=resp.get("guardrailAction"),
+            data_sources=sources,
         )
 
     # --------------------------------------------------------------- generation
@@ -3221,11 +3421,12 @@ class BedrockKBAnalyzer:
         temperature: float | None = None,
         max_tokens: int | None = None,
         session_id: str | None = None,
+        data_source: Any = None,
     ) -> Answer:
         """An answer from Bedrock's managed RAG (RetrieveAndGenerate): it retrieves n passages and has `model` answer
         from them with citations. Only the settings you pass are sent (newer Claude models reject temperature). A
         custom prompt must contain $search_results$. Tokens are estimated from characters: this API doesn't report
-        them. session_id continues an earlier conversation."""
+        them. session_id continues an earlier conversation; data_source= searches only that data source."""
         kb_id = self.resolve(kb)
         question = _question_text(question)
         if prompt is not None and "$search_results$" not in prompt:
@@ -3234,12 +3435,15 @@ class BedrockKBAnalyzer:
                 "($query$ and $output_format_instructions$ are optional). For a template with {sources} "
                 "and {question}, use engine='converse'."
             )
+        sources = self.resolve_sources(kb_id, data_source)
         invoke_id, arn = self.resolve_model(model)
         config: dict[str, Any] = {
             "knowledgeBaseId": kb_id,
             "modelArn": arn,
             "retrievalConfiguration": {
-                "vectorSearchConfiguration": self._search_config(n, where, search_type)
+                "vectorSearchConfiguration": self._search_config(
+                    n, where, search_type, sources=sources
+                )
             },
         }
         generation: dict[str, Any] = {}
@@ -3277,6 +3481,7 @@ class BedrockKBAnalyzer:
             max_tokens,
             True,
         )
+        answer.data_sources = sources
         answer.input_tokens = (
             estimate_tokens(question)
             + estimate_tokens(prompt)
@@ -3355,10 +3560,12 @@ class BedrockKBAnalyzer:
         max_tokens: int | None = None,
         session_id: str | None = None,
         history: list[dict[str, Any]] | None = None,
+        data_source: Any = None,
     ) -> Answer:
         """An answer with citations. engine='kb' uses Bedrock's RetrieveAndGenerate (session_id= continues a
         conversation); engine='converse' retrieves, then calls the model itself: exact tokens and cost, any model, and
-        your own prompt= template (history= continues a conversation)."""
+        your own prompt= template (history= continues a conversation). data_source= searches only that data source
+        (a name or ID, or a list of them)."""
         engine = str(engine).lower()
         if engine == "kb":
             return self.retrieve_and_generate(
@@ -3372,13 +3579,16 @@ class BedrockKBAnalyzer:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 session_id=session_id,
+                data_source=data_source,
             )
         if engine != "converse":
             raise ValueError(
                 "engine is 'kb' (Bedrock's RetrieveAndGenerate) or 'converse' (retrieve, then your model "
                 "and prompt)"
             )
-        r = self.retrieve(kb, question, n, where=where, search_type=search_type)
+        r = self.retrieve(
+            kb, question, n, where=where, search_type=search_type, data_source=data_source
+        )
         answer = self.generate(
             question,
             r.passages,
@@ -3393,6 +3603,7 @@ class BedrockKBAnalyzer:
             r.kb_name,
             answer.seconds + r.seconds,
         )
+        answer.data_sources = r.data_sources
         return answer
 
     # ------------------------------------------------------------------ deciding
@@ -3494,11 +3705,13 @@ class BedrockKBAnalyzer:
         n: int | Iterable[int] = (5, 10),
         search_types: str | Iterable[str | None] = ("SEMANTIC", "HYBRID"),
         where: Any = None,
+        data_source: Any = None,
         progress: Callable[[int], None] | None = None,
     ) -> SearchComparison:
         """The same question searched with each search type and each n (one Retrieve per combination), and how much
         the results overlap. A setting the vector store rejects (e.g. HYBRID) is recorded in `errors`."""
         kb_id = self.resolve(kb)
+        sources = self.resolve_sources(kb_id, data_source)
         sizes = [n] if isinstance(n, (int, str)) else list(n)
         kinds = (
             [search_types]
@@ -3514,7 +3727,12 @@ class BedrockKBAnalyzer:
                 )
                 try:
                     runs[label] = self.retrieve(
-                        kb_id, question, size, where=where, search_type=kind
+                        kb_id,
+                        question,
+                        size,
+                        where=where,
+                        search_type=kind,
+                        data_source=sources,
                     )
                 except ClientError as exc:
                     if _error_code(exc) != "ValidationException":
@@ -3531,6 +3749,7 @@ class BedrockKBAnalyzer:
             self.kb_name(kb_id),
         )
         comparison.errors = errors
+        comparison.data_sources = sources
         return comparison
 
     def evaluate(
@@ -3541,6 +3760,7 @@ class BedrockKBAnalyzer:
         n: int = 5,
         search_type: str | None = None,
         where: Any = None,
+        data_source: Any = None,
         progress: Callable[[int], None] | None = None,
     ) -> EvalReport:
         """Retrieval hit rate and MRR on test questions: where each question's expected source came up in the top n.
@@ -3549,16 +3769,25 @@ class BedrockKBAnalyzer:
         name or text."""
         kb_id = self.resolve(kb)
         n = _as_int(n, "n")
+        sources = self.resolve_sources(kb_id, data_source)
         report = EvalReport(
             kb_id=kb_id,
             kb_name=self.kb_name(kb_id),
             k=n,
             search_type=search_type,
             where=where,
+            data_sources=sources,
         )
         started = time.monotonic()
         for i, (question, expected) in enumerate(_eval_pairs(cases), 1):
-            r = self.retrieve(kb_id, question, n, where=where, search_type=search_type)
+            r = self.retrieve(
+                kb_id,
+                question,
+                n,
+                where=where,
+                search_type=search_type,
+                data_source=sources,
+            )
             rank = next(
                 (p.rank for p in r.passages if match_expected(p, expected)), None
             )
@@ -4909,15 +5138,30 @@ def _meta_label(metadata: dict[str, Any]) -> str:
 
 
 def _passage_blocks(
-    passages: list[Passage], terms: list[str], width: int = 320
+    passages: list[Passage],
+    terms: list[str],
+    width: int = 320,
+    sources: dict[str, str] | None = None,
 ) -> list[_Passage]:
+    """sources: {data source ID: name}, to say which data source each passage came from ({}: don't)."""
     top = max((p.score for p in passages if p.score is not None), default=None)
+    sources = sources or {}
     return [
         _Passage(
             p.rank,
             None if p.score is None or not top else p.score / top,
             source_name(p.uri) or p.uri or "?",
-            f"p.{p.page}" if p.page is not None else "",
+            " · ".join(
+                filter(
+                    None,
+                    [
+                        f"p.{p.page}" if p.page is not None else "",
+                        f"from {sources[p.data_source_id]}"
+                        if p.data_source_id in sources
+                        else "",
+                    ],
+                )
+            ),
             best_snippet(p.text, terms, width),
             terms,
             p.score,
@@ -5279,6 +5523,31 @@ class BedrockKBView:
         """kb= for a next step's call, unless it's the knowledge base commands already use without one."""
         return {} if self.kb in (kb_id, name) else {"kb": name}
 
+    def _source_names(self, kb_id: str, passages: Iterable[Passage]) -> dict[str, str]:
+        """{ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
+        one cached ListDataSources, or the IDs when it can't be read."""
+        ids = sorted({p.data_source_id for p in passages if p.data_source_id})
+        if len(ids) < 2:
+            return {}
+        try:
+            names = self.core.data_source_names(kb_id)
+        except (ClientError, BotoCoreError):
+            names = {}
+        return {ds_id: names.get(ds_id) or ds_id for ds_id in ids}
+
+    @staticmethod
+    def _top_source(
+        passages: list[Passage], names: dict[str, str]
+    ) -> tuple[str, int] | None:
+        """(name, count) of the data source most of these passages came from, when they came from several."""
+        if not names:
+            return None
+        counts = Counter(p.data_source_id for p in passages if p.data_source_id in names)
+        if not counts:
+            return None
+        ds_id, count = counts.most_common(1)[0]
+        return names[ds_id], count
+
     def _price_basis(self, models: bool = False) -> str:
         default = (
             self.core.model_prices == MODEL_PRICES
@@ -5577,20 +5846,28 @@ class BedrockKBView:
             ]
             for ds in info.data_sources
         ]
+        headers = [
+            "Data source",
+            "Type",
+            "Location",
+            "Chunking",
+            "Parsing",
+            "When deleted",
+            "Last sync",
+        ]
+        several = len(info.data_sources) > 1
+        if several:  # how to ask one of them
+            headers.append("To ask only it")
+            for row, ds in zip(rows, info.data_sources):
+                row.append(f"data_source={ds.name or ds.id!r}")
         blocks.append(
             _Table(
-                [
-                    "Data source",
-                    "Type",
-                    "Location",
-                    "Chunking",
-                    "Parsing",
-                    "When deleted",
-                    "Last sync",
-                ],
+                headers,
                 rows,
-                title="Data sources",
+                title="Data sources"
+                + (" (search() and ask() take data_source= to use one)" if several else ""),
                 max_rows=0,
+                code_cols=(len(headers) - 1,) if several else (),
             )
         )
         jobs = sorted(
@@ -6005,12 +6282,14 @@ class BedrockKBView:
         n: int = 5,
         *,
         kb: str | None = None,
+        data_source: Any = None,
         where: Any = None,
         search_type: str | None = None,
         rerank: str | bool | None = None,
     ) -> None:
         """Ranked passages for a question, with score bars, source and page, highlighted words and metadata.
-        Also findings, time and cost. where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}."""
+        Also findings, time and cost. data_source= searches only one data source (its name or ID, or a list of them);
+        where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}."""
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="passages"):
             r = self.core.retrieve(
@@ -6020,6 +6299,7 @@ class BedrockKBView:
                 where=where,
                 search_type=search_type,
                 rerank_model=rerank,
+                data_source=data_source,
             )
         self._last = r
         terms = question_terms(r.question)
@@ -6028,6 +6308,8 @@ class BedrockKBView:
             f"{len(r.passages)} of up to {r.n} passages",
             _search_label(r.search_type),
         ]
+        if r.data_sources:
+            sub.append(f"only {describe_sources(r.data_sources)}")
         if where is not None:
             sub.append(f"where {describe_filter(where)}")
         if r.reranked:
@@ -6054,30 +6336,53 @@ class BedrockKBView:
             ),
         ]
         blocks.append(_Findings(retrieval_findings(r)))
-        blocks += _passage_blocks(r.passages, terms)
+        names = self._source_names(r.kb_id, r.passages)
+        blocks += _passage_blocks(r.passages, terms, sources=names)
         if r.passages:
+            only = (
+                {"data_source": _source_arg(r.data_sources)} if r.data_sources else {}
+            )
             same = {
                 **self._on(r.kb_id, r.kb_name),
+                **only,
                 **({"where": where} if where is not None else {}),
                 **({"search_type": search_type} if search_type else {}),
             }
-            blocks.append(
-                _Next(
-                    [
-                        ("chunk(1)", "result #1 in full, with its metadata"),
-                        (
-                            _call("ask", r.question, **same),
-                            "an answer from passages like these",
-                        ),
-                        (
-                            _call(
-                                "compare", r.question, **self._on(r.kb_id, r.kb_name)
-                            ),
-                            "how other search settings rank them",
-                        ),
-                    ]
-                )
+            steps = [
+                ("chunk(1)", "result #1 in full, with its metadata"),
+                (
+                    _call("ask", r.question, **same),
+                    "an answer from passages like these",
+                ),
+            ]
+            top_source = (
+                None if r.data_sources else self._top_source(r.passages, names)
             )
+            if top_source:
+                steps.append(
+                    (
+                        _call(
+                            "search",
+                            r.question,
+                            **self._on(r.kb_id, r.kb_name),
+                            data_source=top_source[0],
+                        ),
+                        f"only data source {top_source[0]!r}, where {top_source[1]} of these came from",
+                    )
+                )
+            else:
+                steps.append(
+                    (
+                        _call(
+                            "compare",
+                            r.question,
+                            **self._on(r.kb_id, r.kb_name),
+                            **only,
+                        ),
+                        "how other search settings rank them",
+                    )
+                )
+            blocks.append(_Next(steps))
         self._show(blocks)
 
     @_friendly_errors
@@ -6097,6 +6402,12 @@ class BedrockKBView:
                 f"{_plural(len(passages), 'source' if answer else 'passage')}"
             )
         p = passages[rank - 1]
+        ds_name = self.core.data_source_name(last.kb_id, p.data_source_id)
+        source = (
+            f"{ds_name} ({p.data_source_id})"
+            if ds_name != p.data_source_id
+            else p.data_source_id or "-"
+        )
         blocks: list[Any] = [
             _Title(f"{'Source' if answer else 'Result'} #{rank}: {p.source}", p.uri),
             _Cards(
@@ -6106,7 +6417,7 @@ class BedrockKBView:
                     ("Words", f"{len(p.text.split()):,}"),
                     ("Tokens (estimate)", f"~{estimate_tokens(p.text):,}"),
                     ("Kind", p.content_type.lower()),
-                    ("Data source", p.data_source_id or "-"),
+                    ("Data source", source),
                 ]
             ),
             _Text(p.text, title="Full text", wrap=True),
@@ -6177,7 +6488,11 @@ class BedrockKBView:
             if a.engine == "kb"
             else "Retrieve, then Converse"
         )
-        sub = f"{how} · {_plural(len(a.sources), 'source')} · cost at {self._price_basis(models=True)}"
+        only = f" · only {describe_sources(a.data_sources)}" if a.data_sources else ""
+        sub = (
+            f"{how} · {_plural(len(a.sources), 'source')}{only} · cost at "
+            f"{self._price_basis(models=True)}"
+        )
         used = len(a.cited)
         blocks: list[Any] = [
             _Title(f"{title} {a.kb_name or a.kb_id}: {_clip(a.question, 80)}", sub),
@@ -6200,13 +6515,16 @@ class BedrockKBView:
         blocks.append(_Findings(answer_findings(a)))
         cited = set(a.cited)
         terms = question_terms(a.question)
+        names = self._source_names(a.kb_id, a.sources)
         headers = (
             ["#", "File", "Page"]
+            + (["Data source"] if names else [])
             + ([] if a.engine == "kb" else ["Cited"])
             + ["Passage"]
         )
         rows = [
             [str(i), source_name(p.uri) or p.uri or "-", _count(p.page)]
+            + ([names.get(p.data_source_id, "-")] if names else [])
             + ([] if a.engine == "kb" else ["yes" if i in cited else ""])
             + [f'"{best_snippet(p.text, terms, 90)}"']
             for i, p in enumerate(a.sources, 1)
@@ -6226,7 +6544,23 @@ class BedrockKBView:
         steps.append(
             ("follow_up('...')", "a follow-up question that keeps this conversation")
         )
-        if (
+        top_source = (
+            None if a.data_sources else self._top_source(a.sources, names)
+        )
+        if top_source and title == "Ask":
+            steps.append(
+                (
+                    _call(
+                        "ask",
+                        a.question,
+                        **self._on(a.kb_id, a.kb_name or a.kb_id),
+                        data_source=top_source[0],
+                    ),
+                    f"the answer from data source {top_source[0]!r} only, where "
+                    f"{_plural(top_source[1], 'source')} came from",
+                )
+            )
+        elif (
             a.tokens_estimated and title == "Ask"
         ):  # a follow-up's question alone lacks the earlier turns
             steps.append(
@@ -6236,6 +6570,11 @@ class BedrockKBView:
                         a.question,
                         engine="converse",
                         **self._on(a.kb_id, a.kb_name or a.kb_id),
+                        **(
+                            {"data_source": _source_arg(a.data_sources)}
+                            if a.data_sources
+                            else {}
+                        ),
                     ),
                     "the same question with exact tokens and cost",
                 )
@@ -6249,6 +6588,7 @@ class BedrockKBView:
         question: str,
         *,
         kb: str | None = None,
+        data_source: Any = None,
         n: int = 5,
         where: Any = None,
         search_type: str | None = None,
@@ -6259,13 +6599,15 @@ class BedrockKBView:
         max_tokens: int | None = None,
     ) -> None:
         """The answer with [1][2] citations, grounded %, sources used, model, tokens, cost and time.
-        Also a sources table and findings. engine='converse' gives exact tokens and cost, and takes your prompt=."""
+        Also a sources table and findings. data_source= answers from one data source only (its name or ID, or a list
+        of them), and follow-ups keep it. engine='converse' gives exact tokens and cost, and takes your prompt=."""
         kb_id = self._kb(kb)
         with self._progress("Asking", unit="answers"):
             a = self.core.ask(
                 kb_id,
                 question,
                 engine=engine,
+                data_source=data_source,
                 n=n,
                 where=where,
                 search_type=search_type,
@@ -6283,6 +6625,7 @@ class BedrockKBView:
             "history": _turns(a.question, a),
             "turns": 1,
             "options": {
+                "data_source": a.data_sources,
                 "n": n,
                 "where": where,
                 "search_type": search_type,
@@ -6295,14 +6638,18 @@ class BedrockKBView:
         self._show(self._answer_blocks(a, "Ask"))
 
     @_friendly_errors
-    def follow_up(self, question: str) -> None:
-        """The answer to a follow-up question, in the same session (engine='kb') or conversation as the last ask()."""
+    def follow_up(self, question: str, *, data_source: Any = None) -> None:
+        """The answer to a follow-up question, in the same session (engine='kb') or conversation as the last ask().
+        It searches the data source the conversation does; data_source= moves this and later follow-ups to another
+        one, and data_source='all' back to every data source."""
         conv = self._conversation
         if conv is None:
             raise _Hint(
                 "Nothing to follow up yet: ask('...') first, then follow_up('...')."
             )
         options = conv["options"]
+        if data_source is not None:
+            options["data_source"] = self.core.resolve_sources(conv["kb"], data_source)
         notes: list[Any] = []
         with self._progress("Asking", unit="answers"):
             if conv["engine"] == "kb":
@@ -6327,6 +6674,7 @@ class BedrockKBView:
                     options["n"],
                     where=options["where"],
                     search_type=options["search_type"],
+                    data_source=options["data_source"],
                 )
                 a = self.core.generate(
                     question,
@@ -6344,6 +6692,7 @@ class BedrockKBView:
                     r.kb_name,
                     a.seconds + r.seconds,
                 )
+                a.data_sources = r.data_sources
         conv.update(
             session_id=a.session_id,
             question=question,
@@ -6434,8 +6783,10 @@ class BedrockKBView:
         n: int | Iterable[int] = (5, 10),
         search_types: str | Iterable[str | None] = ("SEMANTIC", "HYBRID"),
         where: Any = None,
+        data_source: Any = None,
     ) -> None:
-        """One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings."""
+        """One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings.
+        data_source= compares searches of one data source only."""
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="searches") as tick:
             c = self.core.compare(
@@ -6444,6 +6795,7 @@ class BedrockKBView:
                 n=n,
                 search_types=search_types,
                 where=where,
+                data_source=data_source,
                 progress=tick,
             )
         labels = list(c.runs)
@@ -6464,8 +6816,10 @@ class BedrockKBView:
                 human_money(query_cost(len(labels), prices=self.core.prices)),
             ),
         ]
-        sub = "overlap = passages both settings found, out of all they found" + (
-            f" · where {describe_filter(where)}" if where is not None else ""
+        sub = (
+            "overlap = passages both settings found, out of all they found"
+            + (f" · only {describe_sources(c.data_sources)}" if c.data_sources else "")
+            + (f" · where {describe_filter(where)}" if where is not None else "")
         )
         blocks: list[Any] = [
             _Title(f"Compare searches in {c.kb_name}: {_clip(c.question, 80)}", sub),
@@ -6489,6 +6843,9 @@ class BedrockKBView:
         if labels:
             kind, size = _setting(labels[-1])
             setting = {"search_type": kind} if kind != "DEFAULT" else {}
+            only = (
+                {"data_source": _source_arg(c.data_sources)} if c.data_sources else {}
+            )
             blocks.append(
                 _Next(
                     [
@@ -6499,6 +6856,7 @@ class BedrockKBView:
                                 int(size),
                                 **setting,
                                 **self._on(c.kb_id, c.kb_name),
+                                **only,
                             ),
                             "one setting's passages in full",
                         )
@@ -6516,19 +6874,28 @@ class BedrockKBView:
         n: int = 5,
         search_type: str | None = None,
         where: Any = None,
+        data_source: Any = None,
     ) -> None:
         """Retrieval hit rate @n and MRR on test questions: where each expected source ranked (or missed), and what
-        came up first instead. cases: [(question, expected file or text), ...]."""
+        came up first instead. cases: [(question, expected file or text), ...]. data_source= checks one data source."""
         kb_id = self._kb(kb)
         with self._progress("Checking questions", unit="questions") as tick:
             report = self.core.evaluate(
-                kb_id, cases, n=n, search_type=search_type, where=where, progress=tick
+                kb_id,
+                cases,
+                n=n,
+                search_type=search_type,
+                where=where,
+                data_source=data_source,
+                progress=tick,
             )
         sub = [
             f"top {report.k}",
             _search_label(report.search_type),
             "retrieval only (no answers generated)",
         ]
+        if report.data_sources:
+            sub.append(f"only {describe_sources(report.data_sources)}")
         if where is not None:
             sub.append(f"where {describe_filter(where)}")
         blocks: list[Any] = [
@@ -6583,7 +6950,9 @@ class BedrockKBView:
         )
         if report.missed:
             question = report.missed[0].question
-            on = self._on(report.kb_id, report.kb_name)
+            on: dict[str, Any] = dict(self._on(report.kb_id, report.kb_name))
+            if report.data_sources:
+                on["data_source"] = _source_arg(report.data_sources)
             blocks.append(
                 _Next(
                     [

@@ -191,8 +191,11 @@ How the View layer works:
   bar), and nothing with `View(progress="off")`. Work spread over threads reports progress from the calling thread
   only (S3's `_run_in_threads`), never from a worker, so notebook widgets aren't touched from other threads.
 - `DynamoDBView` keeps `self._pager` so `more()` continues the last `scan` / `query` / `sql`. `BedrockKBView` keeps
-  `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`), and
-  `self.kb`, the default knowledge base that `use()` sets. `OpenSearchView` keeps `self.target` and `self.index`
+  `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`, with the
+  data sources it searches), and `self.kb`, the default knowledge base that `use()` sets. `data_source=` (a name, ID
+  or list; `resolve_sources` turns it into `{ID: name}` from a cached ListDataSources) narrows a search with a filter
+  on Bedrock's own `x-amz-bedrock-kb-data-source-id` key (`with_data_sources`, ANDed with `where=`'s), the same in
+  `bedrock_chat`. `OpenSearchView` keeps `self.target` and `self.index`
   (what `use()` sets): commands name an index like a path, `"domain/index"` or `"collection/index"`
   (`parse_location`, which also takes collection IDs, ARNs and endpoint URLs), and `_index_ref` falls back to `use()`'s,
   then to the only domain or collection in the region and its only vector index, or raises `_Hint` to ask.
@@ -223,7 +226,13 @@ How the View layer works:
   call in a `<details>`.
   Settings are `{key: value}` (`view.values`); `build_request()` places them in the request and fills required
   one-value enums (`Schema.auto`), `settings_from_request()` reads an edited request back, and `validate_request()`
-  runs botocore's `ParamValidator`. **Add a setting** lists `Schema.search(text)` (names, then paths, then
+  runs botocore's `ParamValidator`. The data source is picked like the knowledge base and model, not a setting:
+  `view.data_source` (`{ID: name}`, reset by another knowledge base) goes into the filter through
+  `build_request(data_sources=)`, `split_data_sources()` takes it back out of an edited request, and the window's
+  Data source picker (`_fill_sources`) shows only when the knowledge base has more than one. Files work the same way
+  on `x-amz-bedrock-kb-source-uri`: `view.picked_files` (s3:// paths; `resolve_files` / `match_files` turn names into
+  paths from `core.files()`, a cached ListKnowledgeBaseDocuments), `build_request(files=)`, `split_condition()`, and
+  **Pick files** (`_open_files` fills a `Combobox` only when clicked; picked files are chips, `_draw_files`). **Add a setting** lists `Schema.search(text)` (names, then paths, then
   descriptions; a near miss falls back to difflib), or every field by group with Browse all. With Edit JSON open, the
   view buttons are disabled, and `_follow_edit` refills an untouched editor when the request changes, or warns what
   Apply would undo in an edited one. Each tab scrolls on its own (the box inside the tab's frame), and `_set` only
