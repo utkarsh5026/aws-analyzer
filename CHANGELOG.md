@@ -37,12 +37,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   the answer cites that file. Findings sum up the run and say which setting to try, and after a change, running the
   list again (`ui.ask_all()`) says which questions did better or worse. The estimated cost shows before you run.
   `ui.results()` shows a run again as a report, `ui.batches[-1].to_df()` gives one row per question, and
-  `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions.
+  `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
 - `bedrock_chat.py`: **📋 Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
   Python script that needs only boto3 and asks your test questions, printing each answer with the files it cites; the
   config as JSON (the request without the question, which `client.retrieve_and_generate(input=..., **config)` or the
   AWS CLI's `--cli-input-json` sends); and the AWS CLI command for one question. It follows every change, and warns
-  when Bedrock would refuse the setup.
+  when Bedrock would refuse the setup. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
 
 ### Changed
 
