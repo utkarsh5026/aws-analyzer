@@ -34,6 +34,7 @@ More
     ui = chat("support-docs")                         # the window; ui is the view behind it
     ui.ask("How long do refunds take?")               # an answer as a report, in the same conversation
     ui.set(temperature=0.2, search_type="hybrid")     # change settings (an open window follows)
+    ui.use(data_source="faq")                         # ask only one of the knowledge base's data sources
     ui.set("generationConfiguration.performanceConfig.latency", "optimized")   # any field, by its path
     ui.unset("temperature")                           # stop sending one
     ui.settings()                                     # what's sent, in plain English, with warnings
@@ -69,6 +70,7 @@ import textwrap
 import time
 import tokenize
 import unicodedata
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -576,6 +578,17 @@ class KnowledgeBase:
 
 
 @dataclass
+class DataSource:
+    """One of a knowledge base's data sources (an S3 bucket, a website, ...): questions can be asked of it alone."""
+
+    id: str
+    name: str = ""
+    status: str = ""  # AVAILABLE | DELETING | DELETE_UNSUCCESSFUL
+    description: str = ""
+    updated: datetime | None = None
+
+
+@dataclass
 class ModelInfo:
     """A model ask() can use, and how to call it."""
 
@@ -759,6 +772,7 @@ class Answer:
     input_tokens: int = 0  # estimated from characters: RetrieveAndGenerate doesn't report tokens
     output_tokens: int = 0
     notes: list[str] = field(default_factory=list)  # what happened on the way (a new session, no streaming)
+    data_sources: dict[str, str] = field(default_factory=dict)  # ID -> name of the only ones searched; {} = all
 
     @property
     def cited(self) -> list[int]:
@@ -1007,6 +1021,7 @@ def collect_stream(events: Iterable[dict[str, Any]], on_text: Callable[[str], No
 
 _KB_CONFIG = ("retrieveAndGenerateConfiguration", "knowledgeBaseConfiguration")
 _VECTOR = "retrievalConfiguration.vectorSearchConfiguration"
+_FILTER_PATH = (*_KB_CONFIG, "retrievalConfiguration", "vectorSearchConfiguration", "filter")
 _RERANKING = f"{_VECTOR}.rerankingConfiguration.bedrockRerankingConfiguration"
 _GENERATION = "generationConfiguration"
 _INFERENCE = f"{_GENERATION}.inferenceConfig.textInferenceConfig"
@@ -1397,6 +1412,73 @@ def describe_filter(condition: Any) -> str:
     return "a filter"
 
 
+DATA_SOURCE_KEY = "x-amz-bedrock-kb-data-source-id"  # Bedrock tags every chunk with its data source's ID
+
+
+def data_source_filter(ids: Iterable[str]) -> dict[str, Any] | None:
+    """A RetrievalFilter that keeps only passages from these data sources (by ID): {'equals': ...} for one, {'in':
+    ...} for several, None for none. Bedrock tags every chunk with its data source's ID, so this needs no
+    .metadata.json files."""
+    unique = list(dict.fromkeys(str(i) for i in ids if i))
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return {"equals": {"key": DATA_SOURCE_KEY, "value": unique[0]}}
+    return {"in": {"key": DATA_SOURCE_KEY, "value": unique}}
+
+
+def with_data_sources(
+    condition: dict[str, Any] | None, ids: Iterable[str]
+) -> dict[str, Any] | None:
+    """A RetrievalFilter (build_filter's) narrowed to the data sources with these IDs: both must match."""
+    only = data_source_filter(ids)
+    if only is None:
+        return condition
+    if not condition:
+        return only
+    rest = condition["andAll"] if list(condition) == ["andAll"] else [condition]
+    return {"andAll": [only, *rest]}
+
+
+def describe_sources(sources: dict[str, str]) -> str:
+    """{ID: name} of the data sources searched -> "data source 'faq'" / "data sources 'faq' and 'policies'"."""
+    names = [repr(name or ds_id) for ds_id, name in sources.items()]
+    if not names:
+        return "every data source"
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"data source{'s' if len(names) > 1 else ''} {listed}"
+
+
+def split_data_sources(condition: Any) -> tuple[list[str], Any]:
+    """The opposite of with_data_sources(): a RetrievalFilter -> ([IDs of the data sources it keeps], the rest of the
+    filter, or None). A filter without a data source condition comes back as it is, with []."""
+
+    def ids_of(part: Any) -> list[str] | None:
+        if not isinstance(part, dict) or len(part) != 1:
+            return None
+        op, body = next(iter(part.items()))
+        if not isinstance(body, dict) or body.get("key") != DATA_SOURCE_KEY:
+            return None
+        value = body.get("value")
+        if op == "equals" and isinstance(value, str):
+            return [value]
+        if op == "in" and isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            return list(value)
+        return None
+
+    found = ids_of(condition)
+    if found is not None:
+        return found, None
+    if isinstance(condition, dict) and list(condition) == ["andAll"] and isinstance(condition["andAll"], list):
+        parts = condition["andAll"]
+        for i, part in enumerate(parts):
+            found = ids_of(part)
+            if found is not None:
+                rest = parts[:i] + parts[i + 1 :]
+                return found, rest[0] if len(rest) == 1 else {"andAll": rest} if rest else None
+    return [], condition
+
+
 def rerank_arn(model: Any, region: str) -> str:
     """'cohere' (or True), 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants."""
     model_id = DEFAULT_RERANK_MODEL if model is True else _RERANK_ALIASES.get(str(model).lower(), str(model))
@@ -1524,10 +1606,12 @@ def build_request(
     *,
     session_id: str | None = None,
     region: str = "",
+    data_sources: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The RetrieveAndGenerate request for a question: the knowledge base, the model, and each setting at its place
-    in the JSON. settings is {key: value} as normalize_settings() returns it. Required fields that can only have
-    one value (rerankingConfiguration.type) are filled in. No AWS call."""
+    in the JSON. settings is {key: value} as normalize_settings() returns it. data_sources: the IDs of the only data
+    sources to search, added to the filter. Required fields that can only have one value
+    (rerankingConfiguration.type) are filled in. No AWS call."""
     params: dict[str, Any] = {"input": {"text": question}}
     if session_id:
         params["sessionId"] = session_id
@@ -1540,6 +1624,9 @@ def build_request(
             continue
         value = rerank_arn(settings[key], region) if key == "reranker" else copy.deepcopy(settings[key])
         _put(params, f.path, value)
+    only = with_data_sources(_get(params, _FILTER_PATH), data_sources)
+    if only is not None:
+        _put(params, _FILTER_PATH, only)
     for path, value in schema.auto:
         parent = _get(params, path[:-1])
         if isinstance(parent, dict) and path[-1] not in parent:
@@ -1549,8 +1636,8 @@ def build_request(
 
 def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[str, Any], dict[str, Any]]:
     """A RetrieveAndGenerate request (one you edited, say) -> (picked, settings): picked holds the 'question',
-    'knowledgeBaseId', 'modelArn' and 'sessionId' it names, and settings is {key: value} like normalize_settings()'s.
-    The opposite of build_request(). A ValueError names anything the chat can't send."""
+    'knowledgeBaseId', 'modelArn', 'sessionId' and 'dataSources' (IDs) it names, and settings is {key: value} like
+    normalize_settings()'s. The opposite of build_request(). A ValueError names anything the chat can't send."""
     if not isinstance(params, dict):
         raise ValueError("The request is a JSON object: {\"input\": ..., \"retrieveAndGenerateConfiguration\": ...}")
     by_path = {f.path: f for f in schema.fields.values()}
@@ -1572,6 +1659,13 @@ def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[
                                     "KNOWLEDGE_BASE")
             elif here in auto:
                 continue
+            elif here == _FILTER_PATH and split_data_sources(value)[0]:
+                picked["dataSources"], rest = split_data_sources(value)
+                if rest is not None:
+                    try:
+                        values[by_path[here].key] = coerce_setting(by_path[here], rest)
+                    except (KeyError, ValueError) as exc:
+                        problems.append(str(exc).rstrip("."))
             elif here in by_path:
                 try:
                     values[by_path[here].key] = coerce_setting(by_path[here], value)
@@ -1829,6 +1923,21 @@ def _session_expired(exc: ClientError) -> bool:
     ) and ("session" in str(error.get("Message", "")).lower())
 
 
+def _match_sources(
+    names: dict[str, str], wanted: list[str]
+) -> tuple[dict[str, str], list[str]]:
+    """({ID: name} of the data sources `wanted` names, by ID or by name in any case, [what matched none])."""
+    found: dict[str, str] = {}
+    missing: list[str] = []
+    for w in wanted:
+        hits = [w] if w in names else [i for i, n in names.items() if n.lower() == w.lower()]
+        if not hits:
+            missing.append(w)
+        for ds_id in hits:
+            found[ds_id] = names[ds_id]
+    return found, missing
+
+
 def _question_text(question: Any) -> str:
     text = str(question if question is not None else "").strip()
     if not text:
@@ -1877,6 +1986,7 @@ class BedrockChatAnalyzer:
         self.model_errors: dict[str, str] = {}  # 'profiles' -> error code, when inference profiles can't be listed
         self._names: dict[str, str] | None = None  # knowledge base ID -> name
         self._kbs: list[KnowledgeBase] | None = None
+        self._sources: dict[str, list[DataSource]] = {}  # knowledge base ID -> its data sources, as last listed
         self._schema: Schema | None = None
         self.stream_problem: str | None = None  # why answers can't stream here, once a streamed call has failed
 
@@ -1967,6 +2077,63 @@ class BedrockChatAnalyzer:
                 for s in self._kb_summaries()
             ]
         return list(self._kbs)
+
+    def data_sources(self, kb: str, *, refresh: bool = False) -> list[DataSource]:
+        """The data sources of a knowledge base (where its documents come from): ID, name, status and description.
+        One ListDataSources, cached. Questions can be asked of one of them alone (data_source=)."""
+        kb_id = self.resolve(kb)
+        if refresh or kb_id not in self._sources:
+            self._sources[kb_id] = [
+                DataSource(s["dataSourceId"], s.get("name", ""), s.get("status", ""), s.get("description", ""),
+                           s.get("updatedAt"))
+                for s in self._paginate("list_data_sources", "dataSourceSummaries", knowledgeBaseId=kb_id)
+            ]
+        return list(self._sources[kb_id])
+
+    def data_source_names(self, kb: str, *, refresh: bool = False) -> dict[str, str]:
+        """{ID: name} of a knowledge base's data sources (one ListDataSources, cached)."""
+        return {ds.id: ds.name for ds in self.data_sources(kb, refresh=refresh)}
+
+    def data_source_name(self, kb_id: str, ds_id: str) -> str:
+        """The name of a data source already listed (its ID otherwise). Makes no AWS call."""
+        return next((ds.name for ds in self._sources.get(kb_id, []) if ds.id == ds_id and ds.name), ds_id)
+
+    def resolve_sources(self, kb: str, data_source: Any) -> dict[str, str]:
+        """{ID: name} of the data sources questions should search, from data_source=: a data source's name (any
+        case) or ID, or a list of them. None, [] or 'all' -> {} (every data source). A dict is taken as already
+        resolved. An unknown one raises a ValueError that lists the knowledge base's data sources."""
+        if isinstance(data_source, dict):
+            return {str(k): str(v or "") for k, v in data_source.items()}
+        if data_source is None or (isinstance(data_source, str) and data_source.strip().lower() in ("all", "*")):
+            return {}
+        items = list(data_source) if isinstance(data_source, (list, tuple, set, frozenset)) else [data_source]
+        wanted = [str(item.id if isinstance(item, DataSource) else item).strip() for item in items]
+        if not wanted:
+            return {}
+        if any(not w for w in wanted):
+            raise ValueError("data_source= takes a data source's name or ID, or a list of them")
+        kb_id = self.resolve(kb)
+        cached = kb_id in self._sources
+        try:
+            names = {ds.id: ds.name for ds in self.data_sources(kb_id)}
+        except (ClientError, BotoCoreError):
+            if all(_KB_ID_RE.match(w) for w in wanted):
+                return {w: "" for w in wanted}  # can't list them, but the IDs may still be right
+            raise
+        found, missing = _match_sources(names, wanted)
+        if missing and cached:  # maybe added since they were listed
+            names = {ds.id: ds.name for ds in self.data_sources(kb_id, refresh=True)}
+            found, missing = _match_sources(names, wanted)
+        if missing:
+            close = difflib.get_close_matches(missing[0].lower(), [n.lower() for n in names.values()], n=2,
+                                              cutoff=0.6)
+            close_names = [n for n in names.values() if n.lower() in close]
+            text = f"{self.kb_name(kb_id)} has no data source {missing[0]!r}."
+            if close_names:
+                text += f" Did you mean {' or '.join(map(repr, close_names))}?"
+            listed = ", ".join(f"{name} ({ds_id})" for ds_id, name in sorted(names.items(), key=lambda i: i[1].lower()))
+            raise ValueError(text + (f" Its data sources: {listed}." if names else " It has no data sources."))
+        return found
 
     def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
         if service not in self._clients:
@@ -2091,15 +2258,17 @@ class BedrockChatAnalyzer:
         *,
         model: str | None = None,
         session_id: str | None = None,
+        data_source: Any = None,
     ) -> dict[str, Any]:
         """The RetrieveAndGenerate request ask() would send, without sending it: the knowledge base and model
-        resolved, and each setting at its place in the JSON."""
+        resolved, each setting at its place in the JSON, and data_source= (a name or ID, or a list) in the filter."""
         schema = self.schema()
         values = normalize_settings(settings, schema)
         kb_id = self.resolve(kb)
+        sources = self.resolve_sources(kb_id, data_source)
         _, arn = self.resolve_model(model)
         return build_request(_question_text(question), kb_id, arn, values, schema, session_id=session_id,
-                             region=self.region)
+                             region=self.region, data_sources=sources)
 
     def send(
         self,
@@ -2178,19 +2347,25 @@ class BedrockChatAnalyzer:
         session_id: str | None = None,
         stream: bool = False,
         on_text: Callable[[str], None] | None = None,
+        data_source: Any = None,
     ) -> Answer:
         """An answer from the knowledge base (RetrieveAndGenerate), with its citations, sources, request and response.
         session_id continues an earlier conversation; if Bedrock has ended it, a new one starts and the Answer says
-        so. stream=True calls on_text with the answer so far as it's written."""
+        so. stream=True calls on_text with the answer so far as it's written. data_source= searches only that data
+        source (a name or ID, or a list of them)."""
         values = normalize_settings(settings, self.schema())
-        params = self.request(kb, question, values, model=model, session_id=session_id)
+        sources = self.resolve_sources(kb, data_source)
+        params = self.request(kb, question, values, model=model, session_id=session_id, data_source=sources)
         try:
-            return self.send(params, values, stream=stream, on_text=on_text)
+            answer = self.send(params, values, stream=stream, on_text=on_text)
+            answer.data_sources = sources
+            return answer
         except ClientError as exc:
             if not session_id or not _session_expired(exc):
                 raise
         params.pop("sessionId", None)
         answer = self.send(params, values, stream=stream, on_text=on_text)
+        answer.data_sources = sources
         answer.notes.append("The earlier conversation had expired (Bedrock ends them after a while), so this question "
                             "started a new one: it was answered without the earlier questions.")
         return answer
@@ -3868,6 +4043,7 @@ class _ChatApp:
         self.editing = False  # Edit JSON is open
         self.edit_base = ""  # the request the editor was filled with, to tell whether it's been changed since
         self.problems: list[str] = []  # why a picker couldn't list its choices
+        self.unlisted: set[str] = set()  # knowledge bases whose data sources couldn't be listed: not tried again
         self._params: dict[str, Any] | None = None
         self.root = self._build()
 
@@ -3882,10 +4058,11 @@ class _ChatApp:
         self.new_button.add_class("kbc-new-chat")
         self.new_button.on_click(self._safely(self._new_chat))
         self.kb_pick = self._kb_picker()
+        self.source_pick = self._source_picker()
         self.model_pick = self._model_picker()
         top = w.HBox([self.title, self.new_button], layout=layout(width="100%", align_items="center"))
-        pickers = w.HBox([self.kb_pick, self.model_pick], layout=layout(width="100%", flex_flow="row wrap",
-                                                                        margin="10px 0 0 0"))
+        pickers = w.HBox([self.kb_pick, self.source_pick, self.model_pick],
+                         layout=layout(width="100%", flex_flow="row wrap", margin="10px 0 0 0"))
         pickers.add_class("kbc-pickers")
         head = w.VBox([top, pickers], layout=layout(width="100%"))
         head.add_class("kbc-head")
@@ -4059,6 +4236,47 @@ class _ChatApp:
         picker.observe(self._safely(self._kb_changed), names="value")
         return picker
 
+    def _source_picker(self) -> Any:
+        w = self.w
+        picker = w.Dropdown(options=[("All data sources", "")], value="", description="Data source",
+                            tooltip="Ask only one of the knowledge base's data sources",
+                            style={"description_width": "initial"}, layout=w.Layout(width="280px"))
+        picker.observe(self._safely(self._source_changed), names="value")
+        self.source_pick = picker
+        problem = self._fill_sources()
+        if problem:
+            self.problems.append(problem)
+        return picker
+
+    def _fill_sources(self) -> str:
+        """Puts the knowledge base's data sources in the picker, and shows it when there's a choice to make (more
+        than one). Returns what went wrong, if anything."""
+        view, picker = self.view, self.source_pick
+        sources: list[DataSource] = []
+        problem = ""
+        if view.kb is not None and view.kb not in self.unlisted:
+            try:
+                sources = view.core.data_sources(view.kb)
+            except (ClientError, BotoCoreError, ValueError) as exc:
+                self.unlisted.add(view.kb)
+                reason = _why(_error_name(exc), "bedrock:ListDataSources") if not isinstance(exc, ValueError) else exc
+                problem = f"Couldn't list the data sources ({reason}), so questions search all of them."
+        current: dict[str, str] = {}
+        if view.kb is not None and view.data_source:
+            try:
+                current = view._sources(view.kb)
+            except (ClientError, BotoCoreError, ValueError) as exc:
+                problem = f"{exc} Questions search all of them."
+                view.data_source = {}
+        options = [("All data sources", "")] + [
+            (ds.name or ds.id, ds.id) for ds in sorted(sources, key=lambda d: (d.name or d.id).lower())]
+        value = ",".join(current)
+        if value and value not in {v for _, v in options}:  # several, or one that couldn't be listed
+            options.insert(1, (" + ".join(name or ds_id for ds_id, name in current.items()), value))
+        self._quietly(picker, options=options, value=value)
+        picker.layout.display = "" if len(options) > 2 or value else "none"
+        return problem
+
     def _model_picker(self) -> Any:
         w, view = self.w, self.view
         models: list[ModelInfo] = []
@@ -4098,7 +4316,9 @@ class _ChatApp:
             f'<div class="hello">{_AVATAR}<div><b>Ask {_esc(name)} a question.</b> Answers cite the passages they come '
             "from <sup>[1]</sup>; click a source to read it, and open <i>Request and response JSON</i> under an answer "
             "to see exactly what was sent and what came back.<ul>"
-            "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
+            + ("<li><b>Data source</b> asks only one of the knowledge base's data sources; by default questions "
+               "search all of them.</li>" if self.source_pick.layout.display != "none" else "")
+            + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
             "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
             "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
@@ -4172,6 +4392,7 @@ class _ChatApp:
             self._quietly(self.model_pick, value=self.view.model)
         if self.stream_box.value != self.view.stream:
             self._quietly(self.stream_box, value=self.view.stream)
+        self._fill_sources()
         self.pending -= set(self.view.values)
         self._sync_rows()
         self._refresh()
@@ -4258,7 +4479,18 @@ class _ChatApp:
         kb_id = self.view.core.resolve(str(change["new"]))
         if kb_id != self.view.kb:
             self.view._use_kb(kb_id)
-            self.cleared(f"Now asking {self.view.core.kb_name(kb_id)}: a new conversation.")
+            problem = self._fill_sources()
+            self.cleared(f"Now asking {self.view.core.kb_name(kb_id)}: a new conversation." + (f" {problem}" if problem
+                                                                                               else ""))
+
+    def _source_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet or self.view.kb is None:
+            return
+        ids = [ds_id for ds_id in str(change["new"] or "").split(",") if ds_id]
+        self.view.data_source = self.view.core.resolve_sources(self.view.kb, ids)
+        self._refresh()
+        self._set_status(f"The next questions search {describe_sources(self.view.data_source)}; the conversation "
+                         "goes on.", "ok")
 
     def _model_changed(self, change: dict[str, Any]) -> None:
         if self.quiet or not change["new"]:
@@ -4714,6 +4946,7 @@ class BedrockChatView:
     `view.core`.
 
     kb: the knowledge base (a name, ID or ARN); without it, the only one in the region, or the window's first.
+    data_source: ask only this one of its data sources (a name or ID, or a list of them); default all of them.
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
     stream: show answers in the window as they're written.
@@ -4743,6 +4976,7 @@ class BedrockChatView:
         model: str | None = None,
         settings: dict[str, Any] | None = None,
         stream: bool = True,
+        data_source: Any = None,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -4753,6 +4987,7 @@ class BedrockChatView:
             raise ValueError("progress must be 'auto', 'plain' or 'off'")
         self.core = core or BedrockChatAnalyzer()
         self.kb = kb  # what kb= named; its ID once resolved
+        self.data_source: Any = data_source  # what data_source= named; {ID: name} once resolved ({} = all of them)
         self.model = model  # what model= named; the ID the window picked once it's open
         self.stream = stream
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
@@ -5008,6 +5243,31 @@ class BedrockChatView:
             found = []
         return found[0] if found else "<profile id>"
 
+    def _source_names(self, kb_id: str, passages: Iterable[Passage]) -> dict[str, str]:
+        """{ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
+        one cached ListDataSources, or the IDs when it can't be read."""
+        ids = sorted({p.data_source_id for p in passages if p.data_source_id})
+        if len(ids) < 2:
+            return {}
+        try:
+            names = self.core.data_source_names(kb_id)
+        except (ClientError, BotoCoreError):
+            names = {}
+        return {ds_id: names.get(ds_id) or ds_id for ds_id in ids}
+
+    @staticmethod
+    def _top_source(
+        passages: list[Passage], names: dict[str, str]
+    ) -> tuple[str, int] | None:
+        """(name, count) of the data source most of these passages came from, when they came from several."""
+        if not names:
+            return None
+        counts = Counter(p.data_source_id for p in passages if p.data_source_id in names)
+        if not counts:
+            return None
+        ds_id, count = counts.most_common(1)[0]
+        return names[ds_id], count
+
     def _price_basis(self, models: bool = False) -> str:
         default = (
             self.core.model_prices == MODEL_PRICES
@@ -5049,7 +5309,27 @@ class BedrockChatView:
 
     def _use_kb(self, kb_id: str) -> None:
         self.kb = kb_id
+        self.data_source = None  # another knowledge base has other data sources
         self._reset()
+
+    def _sources(self, kb_id: str) -> dict[str, str]:
+        """{ID: name} of the data sources questions search ({} = all of them), resolved from data_source=."""
+        self.data_source = self.core.resolve_sources(kb_id, self.data_source)
+        return self.data_source
+
+    def _sources_now(self) -> dict[str, str]:
+        """The data sources questions search, if they can be told yet ({} otherwise)."""
+        if not self.data_source:
+            return {}
+        try:
+            return self._sources(self._kb_id())
+        except (ValueError, ClientError, BotoCoreError):
+            return {}
+
+    def _sources_text(self) -> str:
+        """'all', or the names of the only data sources questions search."""
+        sources = self._sources_now()
+        return ", ".join(name or ds_id for ds_id, name in sources.items()) if sources else "all"
 
     def _reset(self) -> None:
         self.answers, self.session_id = [], None
@@ -5087,7 +5367,7 @@ class BedrockChatView:
         """Asks one question of this conversation and keeps the answer."""
         kb_id = self._kb_id()
         a = self.core.ask(kb_id, question, self.values, model=self.model, session_id=self.session_id,
-                          stream=on_text is not None, on_text=on_text)
+                          stream=on_text is not None, on_text=on_text, data_source=self._sources(kb_id))
         a.kb_name = a.kb_name or self.core.kb_name(kb_id)
         self.session_id = a.session_id
         self.answers.append(a)
@@ -5102,7 +5382,8 @@ class BedrockChatView:
 
     def _meta(self, a: Answer) -> str:
         """'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004'."""
-        parts = [self._model_label(a.model), f"{a.seconds:.1f}s"]
+        parts = [self._model_label(a.model)] + ([f"only {describe_sources(a.data_sources)}"] if a.data_sources
+                                                 else []) + [f"{a.seconds:.1f}s"]
         if a.first_words is not None:
             parts[-1] += f" (first words {a.first_words:.1f}s)"
         if a.text.strip():
@@ -5135,7 +5416,7 @@ class BedrockChatView:
             arn = str(self.model or self.core.default_model or DEFAULT_MODEL)
         schema = self.core.schema()
         params = build_request(question or "<your question>", kb_id, arn, self.values, schema,
-                               session_id=self.session_id, region=self._region())
+                               session_id=self.session_id, region=self._region(), data_sources=self._sources_now())
         problems = [p for p in validate_request(params, schema) if not kb_id.startswith("<") or "knowledgeBaseId"
                     not in p]
         return params, problems
@@ -5148,12 +5429,18 @@ class BedrockChatView:
         notes = {("input", "text"): "your question", ("sessionId",): "continues this conversation",
                  (*_KB_CONFIG, "knowledgeBaseId"): "knowledge base picker", (*_KB_CONFIG, "modelArn"): "model picker"}
         notes.update({path: "required; filled in for you" for path, _ in self.core.schema().auto})
+        if self._sources_now():
+            notes[_FILTER_PATH] = "data source picker" + (" and your filter" if "filter" in self.values else "")
         return notes
 
     def _setup_call(self) -> str:
         """chat(...) with this knowledge base, model and settings, to open the same setup again."""
         args = [self.core.kb_name(self.kb)] if self.kb else []
         kwargs: dict[str, Any] = {"model": self.model} if self.model else {}
+        sources = self._sources_now()
+        if sources:
+            names = [name or ds_id for ds_id, name in sources.items()]
+            kwargs["data_source"] = names[0] if len(names) == 1 else names
         kwargs.update({k: v for k, v in self.values.items() if k.isidentifier()})
         paths = {k: v for k, v in self.values.items() if not k.isidentifier()}
         if paths or any(key not in self.values for key in DEFAULT_SETTINGS):
@@ -5174,13 +5461,17 @@ class BedrockChatView:
                                 "generationConfiguration.additionalModelRequestFields: the model_fields setting.")
             raise ValueError("Bedrock would refuse this request:\n" + "\n".join(f"• {p}" for p in problems))
         picked, settings = settings_from_request(params, schema)
-        changes = []
         kb = picked.get("knowledgeBaseId")
-        if kb and kb != self.kb:
-            kb_id = self.core.resolve(kb)
-            if kb_id != self.kb:
-                changes.append(f"knowledge base {self.core.kb_name(kb_id)} (a new conversation)")
-                self._use_kb(kb_id)
+        kb_id = self.core.resolve(kb) if kb else self._kb_id()
+        sources = self.core.resolve_sources(kb_id, picked.get("dataSources") or [])
+        before = self._sources_now() if kb_id == self.kb else {}
+        changes = []
+        if kb_id != self.kb:
+            changes.append(f"knowledge base {self.core.kb_name(kb_id)} (a new conversation)")
+            self._use_kb(kb_id)
+        if list(sources) != list(before):
+            changes.append(f"questions search {describe_sources(sources)}")
+        self.data_source = sources
         model = picked.get("modelArn")
         if model:
             try:
@@ -5210,9 +5501,10 @@ class BedrockChatView:
         response."""
         kb = a.kb_name or a.kb_id
         tokens = f"~{a.input_tokens + a.output_tokens:,}"
+        only = f" · only {describe_sources(a.data_sources)}" if a.data_sources else ""
         blocks: list[Any] = [
             _Title(f"{kb}: {_clip(a.question, 80)}",
-                   f"Bedrock RetrieveAndGenerate · question {number} of this conversation · cost at "
+                   f"Bedrock RetrieveAndGenerate · question {number} of this conversation{only} · cost at "
                    f"{self._price_basis(models=True)}"),
             _Cards([
                 ("Grounded", f"{a.grounded_share:.0%}", "warn" if a.text.strip() and a.grounded_share < 0.5 else ""),
@@ -5226,12 +5518,15 @@ class BedrockChatView:
             _Findings(answer_findings(a)),
         ]
         terms = question_terms(a.question)
+        names = self._source_names(a.kb_id, a.sources)
         rows = [
-            [str(i), source_name(p.uri) or p.uri or "-", "-" if p.page is None else str(p.page),
-             p.text if full else f'"{best_snippet(p.text, terms, 90)}"']
+            [str(i), source_name(p.uri) or p.uri or "-", "-" if p.page is None else str(p.page)]
+            + ([names.get(p.data_source_id, "-")] if names else [])
+            + [p.text if full else f'"{best_snippet(p.text, terms, 90)}"']
             for i, p in enumerate(a.sources, 1)
         ]
-        blocks.append(_Table(["#", "File", "Page", "Passage"], rows, title="Sources", max_rows=0))
+        headers = ["#", "File", "Page"] + (["Data source"] if names else []) + ["Passage"]
+        blocks.append(_Table(headers, rows, title="Sources", max_rows=0))
         if full:
             fields = self.core.schema().fields
             marks = {fields[k].path: f"set as {k}" for k in a.settings if k in fields}
@@ -5245,7 +5540,12 @@ class BedrockChatView:
         steps = [("ask('a follow-up question')", "continues this conversation")]
         steps.append(("request()", "the JSON the next question sends") if full else
                      ("last()", "this answer's sources in full, its request and response"))
-        steps.append(("app()", "the chat window, with settings and JSON side by side"))
+        top_source = None if a.data_sources else self._top_source(a.sources, names)
+        if top_source:
+            steps.append((_call("use", data_source=top_source[0]), f"ask only data source {top_source[0]!r}, where "
+                          f"{_plural(top_source[1], 'source')} came from"))
+        else:
+            steps.append(("app()", "the chat window, with settings and JSON side by side"))
         blocks.append(_Next(steps))
         return blocks
 
@@ -5341,7 +5641,8 @@ class BedrockChatView:
         blocks: list[Any] = [
             _Title(f"Settings: {_plural(len(self.values), 'setting')} sent with every question",
                    f"{kb} · {model} · fields() lists every one you can add"),
-            _Cards([("Knowledge base", kb), ("Model", model), ("Settings", f"{len(self.values):,}"),
+            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()), ("Model", model),
+                    ("Settings", f"{len(self.values):,}"),
                     ("Conversation", f"{_plural(len(self.answers), 'question')} so far" if self.answers else "new")]),
             _Table(["Setting", "Value", "What it means", "Sent as"], self._settings_rows(), max_rows=0,
                    code_cols=(0,)),
@@ -5432,8 +5733,8 @@ class BedrockChatView:
         self._show([
             _Title("The request " + (f"for: {_clip(question, 70)}" if question else "your next question sends"),
                    "RetrieveAndGenerate · highlighted: your settings · nothing is sent"),
-            _Cards([("Knowledge base", kb), ("Model", self._model_label(self.model or "")),
-                    ("Settings", f"{len(self.values):,}"),
+            _Cards([("Knowledge base", kb), ("Data source", self._sources_text()),
+                    ("Model", self._model_label(self.model or "")), ("Settings", f"{len(self.values):,}"),
                     ("Conversation", "continues this one" if self.session_id else "new")]),
             _Findings(found + settings_findings(self.values, self.model or "")),
             _Json(params, "Request", marks=self._marks(), notes=self._json_notes()),
@@ -5444,22 +5745,39 @@ class BedrockChatView:
     # ------------------------------------------------------ knowledge base, model
 
     @_friendly_errors
-    def use(self, kb: str | None = None, model: str | None = None) -> None:
-        """Switches the knowledge base or the model questions go to. Another knowledge base starts a new
-        conversation; another model keeps it."""
+    def use(self, kb: str | None = None, model: str | None = None, data_source: Any = None) -> None:
+        """Switches the knowledge base, the model or the data source questions go to. Another knowledge base starts a
+        new conversation; another model or data source keeps it. data_source= is one of the knowledge base's data
+        sources (a name or ID, or a list of them), or 'all'."""
         notes = []
         if kb is not None:
             kb_id = self.core.resolve(kb)
+            sources = self.core.resolve_sources(kb_id, data_source)  # checked before anything changes
             if kb_id != self.kb:
                 self._use_kb(kb_id)
                 self._changed(f"Now asking {self.core.kb_name(kb_id)}: a new conversation.")
             notes.append(f"Knowledge base: {self.core.kb_name(kb_id)} ({kb_id}).")
+            if data_source is None:
+                try:
+                    names = [ds.name or ds.id for ds in self.core.data_sources(kb_id)]
+                except (ClientError, BotoCoreError):
+                    names = []
+                if len(names) > 1:
+                    notes.append(f"It has {len(names)} data sources ({', '.join(names[:6])}"
+                                 f"{', …' if len(names) > 6 else ''}): {_call('use', data_source=names[0])} asks only "
+                                 "one.")
+        if data_source is not None:
+            sources = self.core.resolve_sources(self._kb_id(), data_source) if kb is None else sources
+            self.data_source = sources
+            self._changed()
+            notes.append(f"Questions search {describe_sources(sources)}.")
         if model is not None:
             self.model = self.core.resolve_model(model)[0]
             self._changed()
             notes.append(f"Model: {self._model_label(self.model)} ({self.model}).")
         if not notes:
-            raise _Hint("Pass kb= or model=: use('support-docs'), use(model='sonnet'). kbs() and models() list them.")
+            raise _Hint("Pass kb=, model= or data_source=: use('support-docs'), use(model='sonnet'), "
+                        "use(data_source='faq'). kbs() and models() list them.")
         self._show([_Note(" ".join(notes), "ok"), _Next([("ask('...')", "ask it something"),
                                                           ("settings()", "what's sent with every question")])])
 
@@ -5528,12 +5846,14 @@ def chat(
     profile: str | None = None,
     settings: dict[str, Any] | None = None,
     stream: bool = True,
+    data_source: Any = None,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
 
         chat()                                        # pick the knowledge base and the model in the window
         chat("support-docs", model="sonnet")          # by name, ID or ARN; model by ID, profile or short name
+        chat("support-docs", data_source="faq")       # ask only one of its data sources (name or ID)
         chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
         chat("support-docs", settings={"generationConfiguration.performanceConfig.latency": "optimized"})
 
@@ -5541,7 +5861,7 @@ def chat(
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
     region and profile; stream=False shows each answer only when it's complete."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
-                           stream=stream)
+                           stream=stream, data_source=data_source)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
     for name, value in wanted.items():
         try:

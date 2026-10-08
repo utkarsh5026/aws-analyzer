@@ -40,6 +40,7 @@ from bedrock_chat import (
     request_schema,
     settings_findings,
     settings_from_request,
+    split_data_sources,
     validate_request,
 )
 
@@ -158,10 +159,24 @@ def kb_summary(kb_id=KB_ID, name="support-docs", status="ACTIVE"):
             "updatedAt": NOW - timedelta(days=2)}
 
 
-def fakes(kbs=None, rag=None, stream=None):
-    """bedrock-agent (the knowledge base list), bedrock (models) and bedrock-agent-runtime fakes."""
+DS_ID, DS2_ID = "DSID123456", "DSID654321"
+
+
+def ds_summary(ds_id=DS_ID, name="docs-s3", kb_id=KB_ID):
+    return {"knowledgeBaseId": kb_id, "dataSourceId": ds_id, "name": name, "status": "AVAILABLE",
+            "updatedAt": NOW - timedelta(days=3)}
+
+
+def fakes(kbs=None, rag=None, stream=None, sources=None):
+    """bedrock-agent (the knowledge base list and each one's data sources), bedrock (models) and bedrock-agent-runtime
+    fakes. sources: {knowledge base ID: [data source summaries]}; one data source each by default."""
     kbs = [kb_summary()] if kbs is None else kbs
     rag = rag or (lambda **params: rag_resp())
+    sources = sources or {}
+
+    def listed(knowledgeBaseId, **_):
+        found = sources.get(knowledgeBaseId, [ds_summary(kb_id=knowledgeBaseId)])
+        return {"dataSourceSummaries": found}
 
     def streamed(**params):
         resp = rag(**params)
@@ -171,7 +186,8 @@ def fakes(kbs=None, rag=None, stream=None):
     if stream is not False:
         runtime["retrieve_and_generate_stream"] = stream or streamed
     return {
-        "bedrock-agent": Fake("bedrock-agent", {"list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": kbs}}),
+        "bedrock-agent": Fake("bedrock-agent", {"list_knowledge_bases": lambda **_: {"knowledgeBaseSummaries": kbs},
+                                                "list_data_sources": listed}),
         "bedrock": Fake("bedrock", {"list_foundation_models": lambda **_: {"modelSummaries": MODEL_LIST},
                                     "list_inference_profiles": lambda **_: {"inferenceProfileSummaries": PROFILES}}),
         "bedrock-agent-runtime": Fake("bedrock-agent-runtime", runtime),
@@ -356,6 +372,32 @@ def test_settings_from_request_names_what_the_chat_cant_send():
     with pytest.raises(ValueError, match="is a JSON object"):
         settings_from_request([], SCHEMA)
 
+
+
+DS_KEY = "x-amz-bedrock-kb-data-source-id"
+
+
+def test_data_sources_go_in_the_filter_and_come_back_out():
+    one = {"equals": {"key": DS_KEY, "value": "DSID123456"}}
+    params = build_request("q", KB_ID, SONNET_PROFILE, {"n": 5}, SCHEMA, data_sources=["DSID123456"])
+    vector = params[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector == {"numberOfResults": 5, "filter": one} and validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)
+    assert picked["dataSources"] == ["DSID123456"] and back == {"n": 5}
+    # with a filter of your own, both must match, and Edit JSON gives each back to where it came from
+    values = normalize_settings({"filter": {"team": "billing", "year": [">=", 2024]}}, SCHEMA)
+    params = build_request("q", KB_ID, SONNET_PROFILE, values, SCHEMA, data_sources=["DSID123456", "DSID654321"])
+    both = params[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"]
+    assert both["andAll"][0] == {"in": {"key": DS_KEY, "value": ["DSID123456", "DSID654321"]}}
+    assert both["andAll"][1:] == values["filter"]["andAll"] and validate_request(params, SCHEMA) == []
+    picked, back = settings_from_request(params, SCHEMA)
+    assert picked["dataSources"] == ["DSID123456", "DSID654321"] and back == values
+    team = {"equals": {"key": "team", "value": "billing"}}
+    assert split_data_sources({"andAll": [team, one]}) == (["DSID123456"], team)
+    assert split_data_sources(team) == ([], team)
+    assert split_data_sources({"orAll": [one, team]}) == ([], {"orAll": [one, team]})  # either: not a data source pick
+    assert split_data_sources({"in": {"key": DS_KEY, "value": []}}) == ([], {"in": {"key": DS_KEY, "value": []}})
+    assert "filter" not in str(build_request("q", KB_ID, SONNET_PROFILE, {}, SCHEMA, data_sources=[]))
 
 def test_validate_request_reports_what_bedrock_would_refuse():
     params = build_request("q", KB_ID, SONNET_PROFILE, {"guardrail_id": "gr-1"}, SCHEMA)
@@ -728,6 +770,40 @@ def test_knowledge_bases_are_listed_once(core, clients):
     assert len(clients["bedrock-agent"].called("list_knowledge_bases")) == 1
 
 
+
+TWO_SOURCES = {KB_ID: [ds_summary(DS_ID, "faq"), ds_summary(DS2_ID, "help-site")]}
+
+
+def test_ask_searches_only_the_data_source_asked_for():
+    clients = fakes(sources=TWO_SOURCES)
+    core = BedrockChatAnalyzer(clients=clients)
+    a = core.ask("support-docs", "q", {"n": 5}, data_source="FAQ")
+    assert a.data_sources == {DS_ID: "faq"}
+    assert a.request[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS_ID}}
+    a = core.ask(KB_ID, "q", data_source=[DS_ID, "help-site"])
+    assert a.data_sources == {DS_ID: "faq", DS2_ID: "help-site"}
+    assert core.ask(KB_ID, "q", data_source="all").data_sources == {}
+    assert len(clients["bedrock-agent"].called("list_data_sources")) == 1  # listed once, then cached
+    assert [ds.name for ds in core.data_sources(KB_ID)] == ["faq", "help-site"]
+    with pytest.raises(ValueError) as err:
+        core.request(KB_ID, "q", data_source="help-sites")
+    assert str(err.value) == ("support-docs has no data source 'help-sites'. Did you mean 'help-site'? Its data "
+                              f"sources: faq ({DS_ID}), help-site ({DS2_ID}).")
+    assert len(clients["bedrock-agent"].called("list_data_sources")) == 2  # looked again: it may be new
+
+
+def test_data_sources_by_id_when_they_cant_be_listed():
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized", "ListDataSources")
+
+    clients = fakes()
+    clients["bedrock-agent"].handlers["list_data_sources"] = denied
+    core = BedrockChatAnalyzer(clients=clients)
+    assert core.resolve_sources(KB_ID, DS_ID) == {DS_ID: ""}
+    with pytest.raises(ClientError):
+        core.resolve_sources(KB_ID, "faq")
+
 def test_missing_region_is_a_readable_error(monkeypatch):
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     monkeypatch.delenv("AWS_REGION", raising=False)
@@ -841,9 +917,47 @@ def test_ui_use_kbs_and_models(core, capsys):
     assert "Knowledge base: sales (KBID654321). Model: Claude Sonnet 5 (us.anthropic.claude-sonnet-5)." in out
     out = run(capsys, ui.models)
     assert "us.anthropic.claude-sonnet-5 (in use)" in out and "amazon.nova-pro-v1:0" in out
-    assert "Pass kb= or model=" in run(capsys, ui.use)
+    assert "Pass kb=, model= or data_source=" in run(capsys, ui.use)
     assert "Did you mean 'sales'" in run(capsys, ui.use, "sale")
 
+
+
+def test_ui_use_a_data_source(capsys):
+    clients = fakes(sources=TWO_SOURCES)
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), mode="text", progress="off")
+    out = run(capsys, ui.use, "support-docs")
+    assert "It has 2 data sources (faq, help-site): use(data_source='faq') asks only one." in out
+    out = run(capsys, ui.use, data_source="help-site")
+    assert "Questions search data source 'help-site'." in out
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "question 1 of this conversation · only data source 'help-site'" in out
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS2_ID}}
+    assert "Data source: help-site" in run(capsys, ui.settings)
+    out = run(capsys, ui.request)
+    assert "Data source: help-site" in out and DS2_ID in out
+    assert "chat('support-docs', data_source='help-site'" in ui._setup_call()
+    out = run(capsys, ui.use, data_source="nope")
+    assert "has no data source 'nope'" in out and ui.data_source == {DS2_ID: "help-site"}  # nothing changed
+    out = run(capsys, ui.use, data_source="all")
+    assert "Questions search every data source." in out and ui.data_source == {}
+    assert len(ui.answers) == 1  # the conversation goes on
+    run(capsys, ui.use, data_source="faq")
+    run(capsys, ui.use, "support-docs")  # the same knowledge base: the data source stays
+    assert ui.data_source == {DS_ID: "faq"}
+
+
+def test_ui_answer_says_which_data_source_each_source_came_from(capsys):
+    web = ref("Bank transfers take up to 10 days.", "help/bank.html", page=None)
+    web["metadata"][DS_KEY] = DS2_ID
+    rag = rag_resp(citations=(("Refunds take 5-7 business days.", [REFUND, BANK]),
+                              ("Bank transfers can take up to 10 days.", [web])))
+    clients = fakes(sources=TWO_SOURCES, rag=lambda **_: rag)
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="text", progress="off")
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "#  File               Page  Data source  Passage" in out and "  help-site    " in out
+    assert "use(data_source='faq')" in out and "ask only data source 'faq', where 2 sources came from" in out
 
 def test_ui_explains_aws_errors(capsys):
     def denied(**_):
@@ -873,6 +987,9 @@ def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, ca
     assert view._notes == ["Not used: No setting 'bogus'. fields() lists every one RetrieveAndGenerate takes in this "
                            f"boto3 (botocore {SCHEMA.boto}); pip install -U boto3 adds fields AWS added since."]
     assert "The chat window needs Jupyter" in capsys.readouterr().out
+    view = chatmod.chat("support-docs", data_source="docs-s3")
+    assert view.values == DEFAULT_SETTINGS and view._setup_call() == ("chat('support-docs', data_source='docs-s3', "
+                                                                     "n=5)")
 
 
 # ----------------------------------------------------------------------------- UI (the chat window)
@@ -1117,6 +1234,71 @@ def test_window_switches_model_and_knowledge_base(core, monkeypatch):
     assert view.kb == KB_ID and view.answers == [] and view.session_id is None
     assert "Now asking support-docs: a new conversation." in texts(app)[-1]
 
+
+
+def test_window_picks_a_data_source(monkeypatch):
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")], sources=TWO_SOURCES)
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html")
+    view._display = lambda widget: None
+    view.app()
+    app = view._app
+    pick = app.source_pick
+    assert pick.layout.display == "" and pick.value == ""
+    assert list(pick.options) == [("All data sources", ""), ("faq", DS_ID), ("help-site", DS2_ID)]
+    assert "<b>Data source</b> asks only one" in texts(app)[0]
+    app.question.value = "q"
+    app._send()
+    pick.value = DS2_ID
+    assert view.data_source == {DS2_ID: "help-site"} and view.answers  # the conversation goes on
+    assert "The next questions search data source &#x27;help-site&#x27;" in app.status.value
+    assert DS2_ID in app.request_view.value and "data source picker" in app.request_view.value
+    assert "data_source='help-site'" in plain(app.setup.value)
+    app.question.value = "and?"
+    app._send()
+    sent = clients["bedrock-agent-runtime"].called("retrieve_and_generate_stream")[-1]
+    assert sent[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] == {
+        "equals": {"key": DS_KEY, "value": DS2_ID}}
+    assert "only data source &#x27;help-site&#x27;" in texts(app)[-1]
+    pick.value = ""
+    assert view.data_source == {} and DS2_ID not in app.request_view.value
+    # Edit JSON: a data source condition in the filter moves the picker
+    app.edit_button.click()
+    request = json.loads(app.editor.value)
+    request[KB[0]][KB[1]]["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] = {
+        "andAll": [{"in": {"key": DS_KEY, "value": [DS_ID, DS2_ID]}}, {"equals": {"key": "team", "value": "a"}}]}
+    app.editor.value = json.dumps(request)
+    app._apply()
+    assert view.data_source == {DS_ID: "faq", DS2_ID: "help-site"} and view.values["filter"] == {
+        "equals": {"key": "team", "value": "a"}}
+    assert pick.value == f"{DS_ID},{DS2_ID}" and ("faq + help-site", f"{DS_ID},{DS2_ID}") in pick.options
+    assert "questions search data sources &#x27;faq&#x27; and &#x27;help-site&#x27;" in app.status.value
+    # another knowledge base has its own data sources (one here: nothing to pick)
+    app.kb_pick.value = KB2_ID
+    assert view.data_source is None and pick.value == "" and pick.layout.display == "none"
+    assert "<b>Data source</b>" not in texts(app)[0]
+
+
+def test_window_data_source_from_another_cell_and_one_it_cant_list(window, monkeypatch, capsys):
+    app = window._app
+    assert app.source_pick.layout.display == "none"  # one data source: nothing to pick
+    window.use(data_source="docs-s3")
+    assert app.source_pick.value == DS_ID and app.source_pick.layout.display == ""
+    capsys.readouterr()
+
+    def denied(**_):
+        raise client_error("AccessDeniedException", "not authorized", "ListDataSources")
+
+    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    clients = fakes()
+    clients["bedrock-agent"].handlers["list_data_sources"] = denied
+    view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb=KB_ID, mode="html", data_source=DS2_ID)
+    view._display = lambda widget: None
+    view.app()
+    pick = view._app.source_pick
+    assert pick.value == DS2_ID and (DS2_ID, DS2_ID) in pick.options  # an ID still works
+    assert "Couldn&#x27;t list the data sources (AccessDeniedException; needs bedrock:ListDataSources)" in (
+        view._app.status.value)
 
 def test_window_follows_other_cells(window, capsys):
     app = window._app

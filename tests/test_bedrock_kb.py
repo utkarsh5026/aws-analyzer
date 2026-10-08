@@ -4,6 +4,7 @@ from typing import Any
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from moto import mock_aws
 
@@ -31,9 +32,11 @@ from bedrock_kb import (
     changed_since,
     compare_retrievals,
     comparison_findings,
+    data_source_filter,
     describe_chunking,
     describe_filter,
     describe_parsing,
+    describe_sources,
     describe_vector_store,
     estimate_tokens,
     eval_findings,
@@ -64,6 +67,7 @@ from bedrock_kb import (
     sync_command,
     sync_findings,
     vector_store_monthly_cost,
+    with_data_sources,
 )
 
 KB_ID = "KBID123456"
@@ -842,6 +846,31 @@ def test_build_filter_combines_passes_through_and_rejects():
     ) == ("team = 'billing', year >= 2024, y between 1 and 2, r in ['a']")
 
 
+
+def test_data_source_filter_and_with_data_sources():
+    key = "x-amz-bedrock-kb-data-source-id"
+    assert data_source_filter([]) is None
+    one = {"equals": {"key": key, "value": DS_ID}}
+    assert data_source_filter([DS_ID, DS_ID]) == one
+    both = {"in": {"key": key, "value": [DS_ID, DS2_ID]}}
+    assert data_source_filter([DS_ID, "", DS2_ID]) == both
+    team = {"equals": {"key": "team", "value": "billing"}}
+    assert with_data_sources(None, []) is None and with_data_sources(team, []) is team
+    assert with_data_sources(None, [DS_ID]) == one
+    assert with_data_sources(team, [DS_ID]) == {"andAll": [one, team]}
+    year = {"greaterThanOrEquals": {"key": "year", "value": 2024}}
+    assert with_data_sources({"andAll": [team, year]}, [DS_ID, DS2_ID]) == {
+        "andAll": [both, team, year]
+    }
+    either = {"orAll": [team, year]}
+    assert with_data_sources(either, [DS_ID]) == {"andAll": [one, either]}
+    assert describe_sources({}) == "every data source"
+    assert describe_sources({DS_ID: "faq"}) == "data source 'faq'"
+    assert (
+        describe_sources({DS_ID: "faq", DS2_ID: "", "X": "web"})
+        == f"data sources 'faq', '{DS2_ID}' and 'web'"
+    )
+
 def test_parse_retrieve():
     [first, web, row] = parse_retrieve(
         retrieve_resp(
@@ -934,6 +963,20 @@ def test_retrieval_findings():
     assert "E1234" not in messages(retrieval_findings(code))
     blocked = Retrieval(KB_ID, "q", good.passages, guardrail_action="INTERVENED")
     assert "guardrail intervened" in messages(retrieval_findings(blocked), "warn")
+
+    one_source = Retrieval(KB_ID, "q", [], data_sources={DS_ID: "faq"})
+    text = messages(retrieval_findings(one_source), "warn")
+    assert "Nothing came back from data source 'faq'" in text and "syncs(data_source='faq')" in text
+    leaked = Retrieval(
+        KB_ID,
+        "q",
+        parse_retrieve(retrieve_resp(passage(), passage(chunk="c2", ds=DS2_ID))),
+        data_sources={DS_ID: "faq"},
+    )
+    text = messages(retrieval_findings(leaked), "warn")
+    assert "1 passage (#2) came from outside data source 'faq'" in text and "where=" in text
+    leaked.data_sources = {DS_ID: "faq", DS2_ID: "web"}
+    assert "came from outside" not in messages(retrieval_findings(leaked))
 
 
 def test_query_cost():
@@ -1110,6 +1153,18 @@ def test_answer_findings():
         rag_resp("Blocked.", [("Blocked.", [passage()])], guardrail="INTERVENED")
     )
     assert "A guardrail intervened" in messages(answer_findings(guarded), "warn")
+    refusal.data_sources = {DS_ID: "faq"}
+    assert "Only data source 'faq' was searched" in messages(answer_findings(refusal))
+    mixed = parse_rag(
+        rag_resp(
+            "Refunds take 5-7 days.",
+            [("Refunds take 5-7 days.", [passage(), passage(chunk="c2", ds=DS2_ID)])],
+        )
+    )
+    mixed.data_sources = {DS_ID: "faq"}
+    assert "1 source ([2]) came from outside data source 'faq'" in messages(
+        answer_findings(mixed), "warn"
+    )
 
 
 def test_model_prices():
@@ -1734,6 +1789,67 @@ def test_retrieve_sends_only_what_was_asked(aws, core):
         core.retrieve(KB_ID, "  ")
 
 
+
+DS_KEY = "x-amz-bedrock-kb-data-source-id"
+
+
+def test_retrieve_searches_only_the_data_sources_asked_for(aws, core):
+    aws.list_kbs()
+    aws.data_sources(ds_desc(name="faq"), ds_desc(DS2_ID, "help-site", kind="WEB"))
+    only_faq = {"equals": {"key": DS_KEY, "value": DS_ID}}
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(passage()),
+        search_params("refund window", filter=only_faq),
+    )
+    r = core.retrieve("support-docs", "refund window", data_source="FAQ")
+    assert r.data_sources == {DS_ID: "faq"} and r.where is None
+    # the names are cached: a second search, by ID and name with where=, lists nothing
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(passage()),
+        search_params(
+            "refund window",
+            filter={
+                "andAll": [
+                    {"in": {"key": DS_KEY, "value": [DS_ID, DS2_ID]}},
+                    {"equals": {"key": "team", "value": "billing"}},
+                ]
+            },
+        ),
+    )
+    r = core.retrieve(
+        KB_ID, "refund window", where={"team": "billing"}, data_source=[DS_ID, "help-site"]
+    )
+    assert r.data_sources == {DS_ID: "faq", DS2_ID: "help-site"}
+    aws.runtime.add_response(
+        "retrieve", retrieve_resp(passage()), search_params("refund window")
+    )
+    assert core.retrieve(KB_ID, "refund window", data_source="all").data_sources == {}
+    # an unknown one lists again (it may be new), then says which there are
+    aws.data_sources(ds_desc(name="faq"), ds_desc(DS2_ID, "help-site", kind="WEB"))
+    with pytest.raises(ValueError) as exc:
+        core.retrieve(KB_ID, "q", data_source="help-sites")
+    assert (
+        "support-docs has no data source 'help-sites'. Did you mean 'help-site'? Its data sources: "
+        f"faq ({DS_ID}), help-site ({DS2_ID})." in str(exc.value)
+    )
+    with pytest.raises(ValueError, match="takes a data source's name or ID"):
+        core.retrieve(KB_ID, "q", data_source=["faq", " "])
+    assert core.data_source_name(KB_ID, DS2_ID) == "help-site"
+    assert core.data_source_name(KB_ID, "OTHER") == "OTHER"
+
+
+def test_resolve_sources_without_list_permission(aws, core):
+    aws.list_kbs()
+    denied(aws.agent, "list_data_sources")
+    assert core.resolve_sources(KB_ID, DS_ID) == {DS_ID: ""}  # an ID still works
+    denied(aws.agent, "list_data_sources")
+    with pytest.raises(ClientError):
+        core.resolve_sources(KB_ID, "faq")
+    assert core.resolve_sources(KB_ID, {DS_ID: "faq"}) == {DS_ID: "faq"}
+    assert core.resolve_sources(KB_ID, None) == {} and core.resolve_sources(KB_ID, []) == {}
+
 def test_resolve_model_short_names(aws, core):
     aws.models()
     assert core.resolve_model() == (
@@ -2140,6 +2256,22 @@ def test_ui_kb_info(aws, ui, capsys):
         assert expected in out
 
 
+def test_ui_kb_info_shows_how_to_search_each_data_source(aws, ui, capsys):
+    aws.list_kbs()
+    aws.describe(sources=[(ds_desc(name="faq"), [job()]), (ds_desc(DS2_ID, "help-site", kind="WEB"), [])])
+    out = run(capsys, ui.kb_info)
+    assert "Data sources (search() and ask() take data_source= to use one)" in out
+    assert "To ask only it" in out
+    assert "data_source='faq'" in out and "data_source='help-site'" in out
+    # describe() listed them, so a search by name needs no other call
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(passage()),
+        search_params("q", filter={"equals": {"key": DS_KEY, "value": DS2_ID}}),
+    )
+    assert "only data source 'help-site'" in run(capsys, ui.search, "q", data_source="help-site")
+
+
 def test_ui_kb_info_shows_unreadable_sections(aws, ui, capsys):
     aws.list_kbs()
     aws.describe(sources=[(ds_desc(), None)])
@@ -2406,6 +2538,123 @@ def test_ui_follow_up_keeps_the_session(aws, ui, capsys):
     assert "The earlier session had expired" in out and "Follow-up 3" in out
 
 
+
+def two_sources(aws):
+    aws.data_sources(ds_desc(name="faq"), ds_desc(DS2_ID, "help-site", kind="WEB"))
+
+
+def with_source(params, *ids):
+    """rag_params(...) narrowed to these data sources, the way data_source= sends it."""
+    only = (
+        {"equals": {"key": DS_KEY, "value": ids[0]}}
+        if len(ids) == 1
+        else {"in": {"key": DS_KEY, "value": list(ids)}}
+    )
+    config = params["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+    config["retrievalConfiguration"]["vectorSearchConfiguration"]["filter"] = only
+    return params
+
+
+def test_ui_search_one_data_source(aws, ui, capsys):
+    ui.kb = KB_ID  # as use() sets it: next steps need no kb=
+    aws.list_kbs()
+    two_sources(aws)
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(passage()),
+        search_params(
+            "How long do refunds take?",
+            filter={"equals": {"key": DS_KEY, "value": DS_ID}},
+        ),
+    )
+    out = run(capsys, ui.search, "How long do refunds take?", data_source="faq")
+    assert "1 of up to 5 passages · Bedrock's default search · only data source 'faq'" in out
+    assert "ask('How long do refunds take?', data_source='faq')" in out
+    assert f"Data source: faq ({DS_ID})" in run(capsys, ui.chunk, 1)
+    # passages from two data sources say which each came from, and the next step narrows to the main one
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(
+            passage(),
+            passage(EU_TEXT, "eu-returns.pdf", chunk="c2", ds=DS2_ID),
+            passage(chunk="c3", page=5),
+        ),
+    )
+    out = run(capsys, ui.search, "How long do refunds take?")
+    assert "[1] refund-policy.pdf p.3 · from faq (score 0.71)" in out
+    assert "[2] eu-returns.pdf p.3 · from help-site (score 0.71)" in out
+    assert (
+        "search('How long do refunds take?', data_source='faq')" in out
+        and "where 2 of these came from" in out
+    )
+    two_sources(aws)  # listed again: it may be new
+    out = run(capsys, ui.search, "q", data_source="nope")
+    assert "support-docs has no data source 'nope'" in out and "Traceback" not in out
+
+
+def test_ui_ask_and_follow_up_in_one_data_source(aws, ui, capsys):
+    ui.kb = KB_ID
+    aws.list_kbs()
+    aws.models()
+    two_sources(aws)
+    aws.runtime.add_response(
+        "retrieve_and_generate",
+        RAG,
+        with_source(rag_params("How long do refunds take?"), DS2_ID),
+    )
+    out = run(capsys, ui.ask, "How long do refunds take?", data_source="help-site")
+    assert "3 sources · only data source 'help-site'" in out
+    assert "came from outside data source 'help-site'" in out  # RAG's passages are all from DS_ID
+    # follow-ups keep the data source, move to another, or go back to all of them
+    aws.runtime.add_response(
+        "retrieve_and_generate",
+        rag_resp("No.", [], session="session-1"),
+        with_source(rag_params("And digital goods?", session="session-1"), DS2_ID),
+    )
+    assert "only data source 'help-site'" in run(capsys, ui.follow_up, "And digital goods?")
+    aws.runtime.add_response(
+        "retrieve_and_generate",
+        rag_resp("No.", [], session="session-1"),
+        with_source(rag_params("Gift cards?", session="session-1"), DS_ID),
+    )
+    out = run(capsys, ui.follow_up, "Gift cards?", data_source="faq")
+    assert "Follow-up 3" in out and "only data source 'faq'" in out
+    aws.runtime.add_response(
+        "retrieve_and_generate",
+        rag_resp("No.", [], session="session-1"),
+        rag_params("Anything else?", session="session-1"),
+    )
+    out = run(capsys, ui.follow_up, "Anything else?", data_source="all")
+    assert "Follow-up 4" in out and "only data source" not in out
+    two_sources(aws)  # listed again: it may be new
+    assert "has no data source 'faqs'" in run(capsys, ui.follow_up, "x", data_source="faqs")
+
+
+def test_ui_ask_shows_where_sources_came_from(aws, ui, capsys):
+    ui.kb = KB_ID
+    aws.list_kbs()
+    aws.models()
+    mixed = rag_resp(
+        ANSWER,
+        [
+            ("Refunds are issued within 5-7 business days of receiving the item.", [passage()]),
+            (
+                "EU orders can be returned within 14 days.",
+                [
+                    passage(EU_TEXT, "eu-returns.pdf", chunk="c2", page=None, ds=DS2_ID),
+                    passage(chunk="c3", page=4),
+                ],
+            ),
+        ],
+    )
+    aws.runtime.add_response("retrieve_and_generate", mixed)
+    two_sources(aws)
+    out = run(capsys, ui.ask, "How long do refunds take?")
+    assert "#  File               Page  Data source  Passage" in out
+    assert '2  eu-returns.pdf     -     help-site    "' in out
+    assert "ask('How long do refunds take?', data_source='faq')" in out
+    assert "from data source 'faq' only, where 2 sources came from" in out
+
 def test_ui_ask_converse_and_follow_up(aws, ui, capsys):
     aws.list_kbs()
     aws.models()
@@ -2649,6 +2898,28 @@ def test_ui_evaluate(aws, ui, capsys):
     assert "[ok] Every expected source came up first." in run(
         capsys, ui.evaluate, [("refund?", "refund-policy")]
     )
+
+
+def test_ui_compare_and_evaluate_in_one_data_source(aws, ui, capsys):
+    ui.kb = KB_ID
+    aws.list_kbs()
+    two_sources(aws)
+    only = {"equals": {"key": DS_KEY, "value": DS_ID}}
+    for kind in ("SEMANTIC", "HYBRID"):
+        aws.runtime.add_response(
+            "retrieve",
+            retrieve_resp(passage()),
+            search_params("q", overrideSearchType=kind, filter=only),
+        )
+    out = run(capsys, ui.compare, "q", n=5, data_source="faq")
+    assert "only data source 'faq'" in out
+    assert "search('q', 5, search_type='HYBRID', data_source='faq')" in out
+    aws.runtime.add_response(
+        "retrieve", retrieve_resp(passage(EU_TEXT, "eu.pdf")), search_params("refund?", filter=only)
+    )
+    out = run(capsys, ui.evaluate, [("refund?", "refund-policy")], data_source="faq")
+    assert "only data source 'faq'" in out
+    assert "search('refund?', 5, data_source='faq')" in out
 
 
 def test_ui_turns_errors_into_notes(aws, ui, capsys):

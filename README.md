@@ -781,6 +781,7 @@ ui.search("how do refunds work?")  # ranked passages, with the question's words 
 ui.chunk(2)                        # the full text and metadata of result #2
 ui.ask("How long do refunds take?")      # an answer with [1][2] citations and its sources
 ui.follow_up("And for digital goods?")   # same conversation
+ui.ask("How long do refunds take?", data_source="faq")   # answered from one data source only
 ```
 
 > [!NOTE]
@@ -800,7 +801,7 @@ Grouped the way `ui.help()` lists them.
 | :----------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kbs()`            | Every knowledge base in the region: status, type, vector store, embedding model, data sources, documents read by the last sync, last sync, estimated idle cost and warnings                                                                                             |
 | `use(kb)`          | Sets the knowledge base that later commands use when you don't pass `kb=`: a name in any case, the 10-character ID, or the ARN                                                                                                                                          |
-| `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy), recent syncs, tags, and what to try next |
+| `kb_info(kb=None)` | Cards (status, vector store, embedding model and dimensions, data sources, last sync, idle cost), findings, every setting in plain English (vector store, each data source's location, chunking, parsing and deletion policy, and the `data_source=` to ask each one when there are several), recent syncs, tags, and what to try next |
 
 #### What's indexed
 
@@ -814,18 +815,18 @@ Grouped the way `ui.help()` lists them.
 
 | Command                                                                                    | Shows                                                                                                                                                                                                                                                                                                                                                                        |
 | :----------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `search(question, n=5, kb=, where=, search_type=, rerank=)`                                | Ranked passages: a score bar relative to the top result, file and page, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
+| `search(question, n=5, kb=, data_source=, where=, search_type=, rerank=)`                  | Ranked passages: a score bar relative to the top result, file and page, the data source when they come from several, the best part of the text with the question's words highlighted, and the passage's metadata. Findings: nothing found, one file answering everything, duplicate passages, very short chunks, and codes in the question that no passage contains (try `search_type="HYBRID"`). Time and estimated cost |
 | `chunk(rank)`                                                                              | The full text, metadata and IDs of result #rank from the last `search` or `ask`, and the `S3View().preview("s3://...")` call that opens its file                                                                                                                                                                                                                             |
-| `ask(question, kb=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens)                                                                                                                            |
-| `follow_up(question)`                                                                      | The next question in the same RetrieveAndGenerate session (or Converse conversation). If the session has expired, starts a new one and says so                                                                                                                                                                                                                               |
+| `ask(question, kb=, data_source=, n=5, where=, model=, engine="kb", prompt=, temperature=, max_tokens=)` | The answer with `[1][2]` citation markers, cards (grounded share, sources used, model, tokens, cost, time), the sources table (with each source's data source when there are several) and findings (not grounded, mostly uncited, Bedrock's "unable to assist" reply, a guardrail, cut off at max_tokens)                                                                       |
+| `follow_up(question, data_source=None)`                                                    | The next question in the same RetrieveAndGenerate session (or Converse conversation), searching the same data source. `data_source=` moves this and later follow-ups to another one (`"all"` back to every one). If the session has expired, starts a new one and says so                                                                                                   |
 | `models(match=None)`                                                                       | The text models you can use for `ask()` here: the ID to pass as `model=`, provider, on demand or through an inference profile, and $ per 1M tokens in and out                                                                                                                                                                                                                |
 
 #### Measure retrieval
 
 | Command                                                                          | Shows                                                                                                                                                   |
 | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `compare(question, kb=, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=)` | One row per passage and one column per setting with its rank there, how much each pair of settings overlaps, and what each found that the others missed |
-| `evaluate(cases, kb=, n=5, search_type=)`                                        | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes   |
+| `compare(question, kb=, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=, data_source=)` | One row per passage and one column per setting with its rank there, how much each pair of settings overlaps, and what each found that the others missed |
+| `evaluate(cases, kb=, n=5, search_type=, where=, data_source=)`                                | Retrieval hit rate @n and MRR on test questions, where each expected source ranked (or "missed") and what came up first instead, with the usual fixes   |
 
 ### Two ways to generate answers
 
@@ -842,6 +843,25 @@ With `engine="converse"`, the sources are sent as data, never as instructions, a
 `model=` takes a model ID or ARN, an inference profile ID, or a short name: `"opus"`, `"sonnet"`, `"haiku"`,
 `"claude-opus-5"`, `"nova-pro"`. The default is Claude Opus 5 (`bedrock_kb.DEFAULT_MODEL`), through the region's
 inference profile when it needs one; `BedrockKBAnalyzer(default_model="sonnet")` changes it.
+
+### One data source (`data_source=`)
+
+A knowledge base can have several data sources (an S3 bucket of policies, a crawled help site, a Confluence space).
+`data_source=` points a question at one of them: `search`, `ask`, `compare` and `evaluate` take its name (in any case)
+or its ID, or a list of them, and `follow_up()` keeps it for the rest of the conversation.
+
+```python
+ui.search("refund window", data_source="faq")                 # passages from the faq data source only
+ui.ask("How long do refunds take?", data_source="policies")   # an answer from the policies only
+ui.follow_up("And on the help site?", data_source="help-site")   # the next question searches another one
+ui.follow_up("Anything else?", data_source="all")             # back to every data source
+```
+
+Bedrock tags every chunk with its data source's ID (`x-amz-bedrock-kb-data-source-id`), so this needs no metadata
+files, and it combines with `where=` (both must match). `kb_info()` lists the data sources, with the `data_source=` for each.
+When passages come from several data sources, the reports say which each came from and suggest asking the one most of
+them came from. If a vector store returns passages from another data source anyway, a finding says so: tag the files
+with your own metadata then, and filter with `where=`.
 
 ### Filters (`where=`)
 
@@ -885,6 +905,8 @@ kb.unsynced("support-docs")                         # [SyncFreshness]: changed S
 
 r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
 r.passages[0].text, r.passages[0].source, r.passages[0].metadata
+r = kb.retrieve("support-docs", "refund window", data_source="faq")   # one data source: r.data_sources
+kb.data_sources("support-docs")                     # [DataSourceInfo]: ID, name, status
 df = r.to_df()                                      # one row per passage
 
 a = kb.ask("support-docs", "How long do refunds take?")          # Answer (RetrieveAndGenerate)
@@ -901,7 +923,8 @@ kb.models("claude")                                 # [ModelInfo]: what to pass 
 
 The analysis functions are pure (no AWS calls), so they also work on responses and passages you already have:
 `parse_knowledge_base`, `parse_data_source`, `parse_ingestion_job`, `parse_retrieve`, `parse_rag`, `parse_converse`,
-`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`, `build_prompt`
+`describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `describe_filter`,
+`data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`
 (and `DEFAULT_PROMPT`), `parse_citation_markers`, `question_terms`, `best_snippet`, `retrieval_metrics`,
 `match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
 `vector_store_monthly_cost`, `query_cost`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
@@ -940,7 +963,7 @@ Read-only, per command:
 | Permission                                                                                 | Used by                                                            |
 | :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`                                   | `kbs`, `kb_info`, and finding a knowledge base by name             |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`                        |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
 | `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`                              |
 | `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`                                                        |
 | `bedrock:ListTagsForResource`                                                              | `kb_info`                                                          |
@@ -967,7 +990,7 @@ of RetrieveAndGenerate) while you watch the request as JSON.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window: support-docs, All data sources and Claude Sonnet 5 picked at the top; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
 </picture>
 
 <p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
@@ -979,12 +1002,16 @@ from bedrock_chat import chat              # installed with pip: from aws_analyz
 
 chat()                                     # pick the knowledge base and the model in the window
 chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
+chat("support-docs", data_source="faq")    # ask only one of its data sources (a name or ID)
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ```
 
 The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
 browser tab). Without it, or outside Jupyter, every command below still works as a report.
 
+- **The pickers.** The knowledge base, the model and, when the knowledge base has more than one, the **data source**
+  questions search ("All data sources" by default). Another data source or model keeps the conversation; another
+  knowledge base starts a new one.
 - **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
   one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
   and metadata), shows its time, grounded share and estimated cost, and folds away the exact request and response.
@@ -1011,7 +1038,7 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `app()` | The chat window: knowledge base and model pickers, the conversation, and the Settings, Request JSON and Last response tabs |
+| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Request JSON and Last response tabs |
 | `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
 | `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
 | `transcript()` | The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't) |
@@ -1031,7 +1058,7 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `use(kb=None, model=None)` | Switches the knowledge base (a new conversation) or the model (the same one) |
+| `use(kb=None, model=None, data_source=None)` | Switches the knowledge base (a new conversation), the model or the data source questions search (the same one): `use(data_source="faq")`, a list of them, or `"all"` |
 | `kbs()` | The knowledge bases in the region: name, ID, status, description and when each changed |
 | `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
 
@@ -1075,13 +1102,16 @@ core = ui.core                        # or BedrockChatAnalyzer(region="us-west-2
 params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
 a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
 a = core.ask("support-docs", "and for EU orders?", session_id=a.session_id)  # a follow-up
+a = core.ask("support-docs", "refund window?", data_source="faq")       # one data source: a.data_sources
+core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
 core.schema().fields["temperature"]   # Field: path, type, range, what it does
 ```
 
 The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
 `settings_from_request`, `validate_request`, `python_call`, `parse_rag`, `collect_stream`, `as_filter`,
-`describe_filter`, `describe_setting`, `answer_cost`, and the findings: `settings_findings` and `answer_findings`.
+`describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
+`describe_setting`, `answer_cost`, and the findings: `settings_findings` and `answer_findings`.
 
 </details>
 
@@ -1104,6 +1134,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 | Permission | Used by |
 |:---|:---|
 | `bedrock:ListKnowledgeBases` | The knowledge base picker, `kbs`, and finding a knowledge base by name |
+| `bedrock:ListDataSources` | The data source picker, and `data_source=` by name (an ID works without it) |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model picker, `models`, and turning `model="sonnet"` into an ID |
 

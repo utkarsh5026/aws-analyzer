@@ -11,6 +11,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `bedrock_kb.py`: `ask()`, `search()`, `compare()` and `evaluate()` take `data_source=`, so a question can be answered
+  from one of a knowledge base's data sources only: `ui.ask("How long do refunds take?", data_source="faq")`, by
+  name (any case) or ID, or a list of them. `follow_up()` keeps it, and `follow_up(..., data_source="policies")` moves
+  the conversation to another one (`"all"` back to every one). It filters on the data source ID Bedrock gives every
+  chunk, so no metadata files are needed, and it works with `where=`. `kb_info()` shows the `data_source=` for each
+  data source, answers and searches whose passages come from several data sources say which each came from, and
+  a finding says when a vector store returned passages from outside the one asked for.
+- `bedrock_chat.py`: a **Data source** picker beside the knowledge base, shown when it has more than one, points the
+  next questions at one data source without ending the conversation. From code: `chat("support-docs",
+  data_source="faq")` or `ui.use(data_source="faq")`. **Edit JSON** reads it back from the request's filter. It needs
+  `bedrock:ListDataSources` (by ID it works without).
+
 ## [0.7.0] - 2026-10-06
 
 ### Added

@@ -647,7 +647,8 @@ def seed_bedrock_kb() -> dict:
         if knowledgeBaseId != SUPPORT:
             return []
         kind = config.get("overrideSearchType", "SEMANTIC")
-        chunks = [c for c in CHUNKS if _matches(c[2], config.get("filter"))]
+        chunks = [c for c in CHUNKS  # Bedrock filters on its own keys too, like the chunk's data source
+                  if _matches({"x-amz-bedrock-kb-data-source-id": DOCS_S3, **c[2]}, config.get("filter"))]
         ranked = _rank(question, kind, chunks)[: config.get("numberOfResults", 5)]  # Bedrock's default is 5
         rerank = config.get("rerankingConfiguration")
         if rerank:
