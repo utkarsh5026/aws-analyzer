@@ -19,7 +19,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   puts your last question back in the box, so you can ask it both ways: the search tags the passages the answer
   cited, and a finding says when the answer was "unable to assist" although the search found passages, so you can
   tell a retrieval problem from an answer problem. From code: `ui.retrieve("How long do refunds take?")`,
-  `chat(..., retrieve_only=True)` and `ui.request(retrieve_only=True)`. It needs only `bedrock:Retrieve`.
+  `chat(..., retrieve_only=True)` and `ui.request(retrieve_only=True)`. It needs only `bedrock:Retrieve`. ([#41](https://github.com/utkarsh5026/aws-analyzer/pull/41))
 
 ## [0.8.0] - 2026-10-08
 
