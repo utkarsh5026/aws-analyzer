@@ -81,8 +81,8 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
   `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
   and findings are laid out as described under "How the View layer works" (asked for S3 first). Until that's
-  ported (`/sync-helpers`), `drift.py` lists `_CSS`, `_Table`, `_prose` and `_render_html` / `_render_text` for
-  `s3.py`; don't "fix" that drift by reverting `s3.py`.
+  ported (`/sync-helpers`), `drift.py` lists `_CSS`, `_Table`, `_prose`, `_findings_html` and `_render_html` /
+  `_render_text` for `s3.py`; don't "fix" that drift by reverting `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`, so it still imports alone), reuses its helpers instead of copying them, and is
   left out of `drift.py`. Nothing imports a companion.
@@ -150,8 +150,9 @@ How the View layer works:
   `<details>` with coloured tokens, capped and opened breadth-first; not `bedrock_chat`'s `_Json`, which shows a
   request with its settings marked), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
-  cited spans and `[n]` superscripts), and in `bedrock_chat` `_Code` (Python highlighted by `_python_html`, from
-  `tokenize`)) and pass them to
+  cited spans and `[n]` superscripts), and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
+  `_python_html`, from `tokenize`, JSON by `_json_source_html` or an AWS CLI command by `_shell_html`, by its `lang`)
+  and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.
 - The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
@@ -252,6 +253,17 @@ How the View layer works:
   result is an `Answer` with `retrieve_only=True` (no text; `sources` is every passage, ranked, with scores) kept in
   `view.answers` without touching the session. `ask()` always answers and `retrieve()` always searches; `_counterpart`
   pairs a turn with the same question asked the other way, for `cited_ranks` and `compare_findings`.
+  The side tabs are Settings, Test, Code, Request JSON and Last response. **Test** asks a list of questions
+  (`parse_questions`: one per line, `question | expected file`) with the window's setup, each on its own (no session):
+  `BedrockChatAnalyzer.ask_all` is `_prepare_batch` (resolves once, builds every request) then `_run_batch`, which
+  sends one question per free thread (`workers`, so nothing is queued once `stop` is set) and fills each `BatchItem`
+  (answer or error, and cost) on its calling thread, where `progress` and `on_item` run too. In a notebook the tab
+  runs `_run_batch` in the loop's executor (`_run_later`) and draws each line on the event loop as it comes back, from a
+  queue `on_item` fills, so Stop (a `threading.Event`) and the rest of the window keep working; without a loop it runs
+  inline. Runs are kept in `view.batches` (`view.questions` is the list), and `_before` / `batch_changes` compare a run
+  with the last one of the same kind. **Code** shows the setup from `_preview` as `python_script` (boto3 only, asking the
+  test questions), `config_json` (`config_of`: the request without its question and session) or `cli_command`; `code()`
+  shows all three as a report.
   `_ipython_display_` shows the window once per cell, so a cell
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
@@ -416,7 +428,9 @@ does both, a page at a time). How the UI works:
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
   replace `view._display`, and click and type through the widgets in Python (ipywidgets is in
-  `requirements-dev.txt` for this).
+  `requirements-dev.txt` for this). The Test tab's background run is tested inside `asyncio.run`, with a handler held
+  back by a `threading.Event`, as the explorer's tests do; `python_script`'s output is run with `exec` against a `Fake`
+  client put in `sys.modules["boto3"]`.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),

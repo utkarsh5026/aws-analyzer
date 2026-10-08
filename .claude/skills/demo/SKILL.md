@@ -26,7 +26,8 @@ service is given, run a short tour:
 - s3: `ui.overview(); ui.bucket_info("demo-lake"); ui.summary("s3://demo-lake/")`
 - dynamodb: `ui.tables(); ui.table_info("orders"); ui.schema("orders")`
 - bedrock_kb: `ui.kbs(); ui.kb_info("support-docs"); ui.search("How long do refunds take?", kb="support-docs")`
-- bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request()` (the same
+- bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request();
+  ui.ask_all(["How long do refunds take? | refund-policy.pdf", "What does error E1234 mean?"]); ui.code()` (the same
   fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
 - sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
 - opensearch: `ui.overview(); ui.indexes("vectors-prod"); ui.index_info("vectors-prod/support-docs");

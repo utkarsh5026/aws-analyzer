@@ -29,6 +29,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `s3.py`: `pdf_flow(doc)` turns a PDF read with `read_pdf(uri, layout=True)` (or `parse_pdf(..., layout=True)`) into
   headings, paragraphs and list items, ready to read or to send to a model, and `pdf_furniture(doc)` lists the running
   headers and footers it leaves out. `doc.layout` holds each page's lines with where they sit, their size and weight. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
+- `bedrock_chat.py`: **🧪 Test** in the chat window, and `ui.ask_all(questions)`, ask a whole list of test questions
+  with the setup you've built (knowledge base, model, data source, files and settings), each on its own rather than as
+  a follow-up, a few at a time while the window stays usable (**Stop** sends no more). Each question gets a line
+  saying how it did (answered, "unable to assist", no citations, partly grounded, failed) with its grounded share,
+  sources and time, and opens to the full answer; `How long do refunds take? | refund-policy.pdf` also checks that
+  the answer cites that file. Findings sum up the run and say which setting to try, and after a change, running the
+  list again (`ui.ask_all()`) says which questions did better or worse. The estimated cost shows before you run.
+  `ui.results()` shows a run again as a report, `ui.batches[-1].to_df()` gives one row per question, and
+  `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions.
+- `bedrock_chat.py`: **📋 Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
+  Python script that needs only boto3 and asks your test questions, printing each answer with the files it cites; the
+  config as JSON (the request without the question, which `client.retrieve_and_generate(input=..., **config)` or the
+  AWS CLI's `--cli-input-json` sends); and the AWS CLI command for one question. It follows every change, and warns
+  when Bedrock would refuse the setup.
 
 ### Changed
 
