@@ -7628,6 +7628,11 @@ class BedrockChatView:
     def _model_label(self, model: str) -> str:
         """The model's name when the model list has been read ('Claude Sonnet 5'), else its short ID."""
         wanted = model or str(self.core.default_model or DEFAULT_MODEL)
+        if self.core._models:  # read already, so no AWS call: a short name or the default finds the model it calls
+            try:
+                wanted = self.core.resolve_model(wanted)[0]
+            except ValueError:
+                pass
         for m in self.core._models or []:
             if wanted in (m.invoke_id, m.id, m.arn):
                 return m.name or m.id

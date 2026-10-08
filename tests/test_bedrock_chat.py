@@ -1662,13 +1662,14 @@ def test_ui_ask_all_reports_each_question_and_what_changed(capsys):
     out = run(capsys, ui.ask_all, "How long do refunds take? | refund-policy\nDo you ship to the moon?\n"
                                   "And bank transfers? | shipping")
     for text in ("Test run on support-docs: 3 questions", "test run 1 · each question asked on its own, not as a "
-                 "follow-up · Claude Opus 5 · n=5 · cost at us-east-1 list prices", "Questions: 3",
+                 "follow-up · Claude Haiku 4.5 · n=5 · cost at us-east-1 list prices", "Questions: 3",
                  "Answered: 2 of 3 (!)", "Grounded: 69%", "Expected cited: 1 of 2 (!)", "Est. cost: ",
                  "1 of 3 answers is Bedrock's \"unable to assist\" reply or empty ('Do you ship to the moon?')",
                  "The expected source isn't cited in 1 of 2 answers checked ('And bank transfers?' expected "
-                 "'shipping', cited refund-policy.pdf)", "1. How long do refunds take?", "   [answered] Claude Opus 5 · ",
-                 "   Expected 'refund-policy': cited as [1]", "   Refunds take 5-7 business days [1].",
-                 "   [1] refund-policy.pdf p.3", "2. Do you ship to the moon?", "   [unable to assist] Claude Opus 5",
+                 "'shipping', cited refund-policy.pdf)", "1. How long do refunds take?",
+                 "   [answered] Claude Haiku 4.5 · ", "   Expected 'refund-policy': cited as [1]",
+                 "   Refunds take 5-7 business days [1].", "   [1] refund-policy.pdf p.3",
+                 "2. Do you ship to the moon?", "   [unable to assist] Claude Haiku 4.5",
                  "Each question was asked on its own (a new Bedrock session each)",
                  "retrieve('Do you ship to the moon?')", "ask_all()   "):
         assert text in out, text
@@ -1679,7 +1680,7 @@ def test_ui_ask_all_reports_each_question_and_what_changed(capsys):
     assert "test run 2 · " in out and "n=8" in out and "Answered: 3 of 3" in out
     assert ("Since the last run (n 5 → 8): 1 question did better ('Do you ship to the moon?' unable to assist → "
             "answered)") in out
-    assert "   [answered] (↑ was unable to assist) Claude Opus 5" in out
+    assert "   [answered] (↑ was unable to assist) Claude Haiku 4.5" in out
     assert "test run 1 · " in run(capsys, ui.results, 0)
     assert "There are 2 test runs: results(0) is the first and results(-1) the last." in run(capsys, ui.results, 5)
     out = run(capsys, ui.ask_all, ["How long?", "Bank?"], retrieve_only=True)
@@ -1694,7 +1695,7 @@ def test_ui_code_gives_the_setup_to_copy(ui, capsys):
     for text in ("This setup as code: support-docs", "RetrieveAndGenerate · nothing is sent", "Questions: none yet",
                  "-- Python: asks a question (put yours in) with this setup and prints each answer with the files it "
                  "cites (boto3 only) --", "questions = ['<your question>']", "'temperature': 0.2",
-                 "# Knowledge base support-docs (KBID123456), answered by Claude Opus 5.",
+                 "# Knowledge base support-docs (KBID123456), answered by Claude Haiku 4.5.",
                  "-- The config as JSON: the request without the question --", '"retrieveAndGenerateConfiguration": {',
                  "-- AWS CLI: one question from a terminal (bash or zsh) --",
                  "aws bedrock-agent-runtime retrieve-and-generate \\", "--cli-input-json file://bedrock-config.json",
@@ -2308,7 +2309,7 @@ def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys)
     assert "Type or paste questions above." in app.test_note.value
     app.test_box.value = "How long do refunds take? | refund-policy\n2. Do you ship to the moon?\nAnd bank transfers?"
     assert app.run_button.description == "▶ Run 3 questions" and not app.run_button.disabled
-    assert "Claude Opus 5 · about $" in app.test_note.value and "(estimate)" in app.test_note.value
+    assert "Claude Haiku 4.5 · about $" in app.test_note.value and "(estimate)" in app.test_note.value
     app.run_button.click()  # no event loop here, so the questions are asked right away
     batch = view.batches[-1]
     assert [i.question for i in batch.items] == ["How long do refunds take?", "Do you ship to the moon?",
@@ -2319,7 +2320,7 @@ def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys)
     assert "<sup>[1]</sup>" in first and "Request and response JSON" in first  # the answer, as the chat shows it
     assert "unable to assist" in app.batch_rows[1].value and 'class="bq warn"' in app.batch_rows[1].value
     head = app.test_head.value
-    assert 'Test run 1<span class="hint">support-docs · Claude Opus 5 · n=5' in head and "2 of 3" in head
+    assert 'Test run 1<span class="hint">support-docs · Claude Haiku 4.5 · n=5' in head and "2 of 3" in head
     assert "Bedrock&#x27;s &quot;unable to assist&quot; reply" in head
     assert "Test run 1: 3 of 3 questions came back in " in app.status.value and "ui.results()" in app.status.value
     assert app.run_button.description == "▶ Run 3 questions" and app.stop_button.layout.display == "none"
