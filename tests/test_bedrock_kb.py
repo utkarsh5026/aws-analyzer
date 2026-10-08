@@ -1,3 +1,4 @@
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -2429,6 +2430,102 @@ def test_ui_search_and_chunk(aws, ui, capsys):
     assert "rank goes from 1 to 2" in run(capsys, ui.chunk, 3)
 
 
+def test_file_url_signs_s3_files_to_open_in_the_browser():
+    core = BedrockKBAnalyzer(region="eu-west-1")
+    url = core.file_url("s3://docs-bucket/policies/refund policy.pdf", page=3)
+    assert url.startswith("https://") and "/policies/refund%20policy.pdf?" in url
+    assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in url and "eu-west-1" in url  # SigV4, in the knowledge base's region
+    assert "X-Amz-Expires=3600" in url and url.endswith("#page=3")
+    assert "response-content-disposition=inline" in url and "response-content-type=application%2Fpdf" in url
+    word = core.file_url("s3://docs-bucket/guide.docx", page=2, expires="86400")
+    assert "response-content-type" not in word and "#page" not in word  # a browser can't show it: it downloads
+    assert "X-Amz-Expires=86400" in word
+    assert core.file_url("https://example.com/help/refunds") == "https://example.com/help/refunds"
+    for nothing in ("doc-123", "", "s3://docs-bucket", "s3://docs-bucket/"):
+        assert core.file_url(nothing) is None
+    with pytest.raises(ValueError, match="604,800"):
+        core.file_url("s3://docs-bucket/a.pdf", expires=8 * 86400)
+
+
+def test_browser_type():
+    assert kbmod._browser_type("s3://b/policies/refund-policy.pdf") == "application/pdf"
+    assert kbmod._browser_type("notes.MD") == "text/plain; charset=utf-8"  # a browser would save text/markdown
+    assert kbmod._browser_type("prices.csv") == "text/plain; charset=utf-8"
+    assert kbmod._browser_type("page.html") == "text/html; charset=utf-8"
+    assert kbmod._browser_type("diagram.png") == "image/png"
+    for saved in ("report.docx", "sheet.xlsx", "README", "a.csv.gz"):
+        assert kbmod._browser_type(saved) is None
+
+
+def test_ui_links_each_source_to_its_file(aws, ui, capsys):
+    aws.list_kbs()
+    aws.runtime.add_response(
+        "retrieve",
+        retrieve_resp(
+            passage(meta={"team": "billing", "year": 2024}),
+            passage(EU_TEXT, "eu-returns.pdf", chunk="c2", score=0.5, page=None),
+            {
+                "content": {"text": "Refunds for custom orders", "type": "TEXT"},
+                "location": {"type": "CUSTOM", "customDocumentLocation": {"id": "doc-7"}},
+                "metadata": {"x-amz-bedrock-kb-data-source-id": DS_ID},
+                "score": 0.4,
+            },
+        ),
+    )
+    shown: list[Any] = []
+    ui._show = shown.extend
+    ui.search("How long do refunds take?")
+    rendered = kbmod._render_html(shown, 50)
+    links = re.findall(r'<a class="fl" href="([^"]+)" target="_blank" rel="noopener noreferrer"', rendered)
+    assert len(links) == 2  # the custom document has no file to open
+    assert links[0].startswith("https://support-docs-bucket.s3.amazonaws.com/policies/refund-policy.pdf?")
+    assert links[0].endswith("#page=3") and "#page" not in links[1]
+    assert "&amp;" in rendered.split('class="fl" href="')[1].split('"')[0]  # the address is escaped
+    del ui._show
+
+    out = run(capsys, ui.link)
+    assert "Open refund-policy.pdf at page 3 (link valid for 1 hour):" in out
+    assert "https://support-docs-bucket.s3.amazonaws.com/policies/refund-policy.pdf?" in out and "#page=3" in out
+    assert "Anyone with the link can open the file" in out
+    out = run(capsys, ui.link, "eu-returns.pdf", expires=86400)
+    assert "Open eu-returns.pdf (link valid for 1 day):" in out and "X-Amz-Expires=86400" in out
+    out = run(capsys, ui.link, "s3://other-bucket/a/manual.docx")
+    assert "Download manual.docx (link valid for 1 hour):" in out and "https://other-bucket.s3" in out
+    assert "Result #3 has no file to open: it came from a CUSTOM data source. chunk(3)" in run(capsys, ui.link, 3)
+    assert "result goes from 1 to 3" in run(capsys, ui.link, 4)
+    assert "No result of the last search is 'faq.pdf'" in run(capsys, ui.link, "faq.pdf")
+    assert "Nothing to link yet" in run(capsys, BedrockKBView(ui.core, mode="text").link)
+
+    out = run(capsys, ui.chunk, 1)
+    assert "Open refund-policy.pdf at page 3 (link valid for 1 hour):" in out and "link(1) makes a fresh one" in out
+
+
+def test_ui_without_credentials_still_shows_sources(aws, ui, capsys, monkeypatch):
+    def unsigned(*args, **kwargs):
+        raise kbmod.BotoCoreError()
+
+    monkeypatch.setattr(ui.core, "file_url", unsigned)
+    aws.list_kbs()
+    aws.runtime.add_response("retrieve", retrieve_resp(passage()))
+    shown: list[Any] = []
+    ui._show = shown.extend
+    ui.search("How long do refunds take?")
+    rendered = kbmod._render_html(shown, 50)
+    assert "refund-policy.pdf" in rendered and 'class="fl"' not in rendered
+
+
+def test_html_links_open_only_web_addresses():
+    blocks = [
+        kbmod._Link("javascript:alert(1)", "bad"),
+        kbmod._Table(["File"], [[kbmod._Link("https://x.example/a?b=1&c=<2>", "a<b>.pdf")]]),
+    ]
+    rendered = kbmod._render_html(blocks, 50)
+    assert "javascript:" not in rendered and ">bad<" in rendered
+    assert 'href="https://x.example/a?b=1&amp;c=&lt;2&gt;" target="_blank"' in rendered
+    assert ">a&lt;b&gt;.pdf</a>" in rendered
+    assert "a<b>.pdf" in kbmod._render_text(blocks, 50)
+
+
 def test_ui_search_notes(aws, ui, capsys):
     aws.list_kbs()
     aws.runtime.add_response("retrieve", retrieve_resp())
@@ -2505,6 +2602,9 @@ def test_ui_ask(aws, ui, capsys):
     ):
         assert expected in out
     assert "Source #2: eu-returns.pdf" in run(capsys, ui.chunk, 2)
+    out = run(capsys, ui.link, "EU-returns.pdf")  # by name, in any case: the answer's source #2
+    assert "Open eu-returns.pdf (link valid for 1 hour):" in out and "/policies/eu-returns.pdf?" in out
+    assert "No source of the last answer is 'faq.pdf'" in run(capsys, ui.link, "faq.pdf")
 
 
 def test_ui_follow_up_keeps_the_session(aws, ui, capsys):

@@ -13,6 +13,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- `bedrock_kb.py`: every file name in `search`, `ask`, `follow_up`, `chunk`, `compare`, `documents` and `unsynced` is
+  now a link (↗) that opens the file in a new browser tab, a PDF at the passage's page, so you can check a passage
+  in its document with one click. S3 files get a presigned link, signed in the notebook with no AWS call, that works
+  for an hour and needs `s3:GetObject` on the file; web, Confluence, SharePoint and Salesforce sources link to their
+  page. `ui.link(2)` gives the link on its own (also in text mode), and takes a file name, an `s3://` path and
+  `expires=` (up to 7 days).
 - `bedrock_chat.py`: **Answer / Retrieve only**, beside the chat window's question box. On **Retrieve only**, a
   question only searches: the same search an answer makes (Retrieve, with the same passages, search type, filter,
   reranker, data source and files) and no model, showing every passage found, best first, with its score. Switching
