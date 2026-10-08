@@ -1011,8 +1011,8 @@ ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"te
 The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
 browser tab). Without it, or outside Jupyter, every command below still works as a report.
 
-- **The pickers.** The fields at the top: the knowledge base, the model and, when the knowledge base has more than
-  one, the **data source** questions search ("All data sources" by default), and the **files**. Click one to open its
+- **The pickers.** The fields at the top: the knowledge base, the model (Claude Haiku 4.5 unless you pick another or
+  pass `model=`) and, when the knowledge base has more than one, the **data source** questions search ("All data sources" by default), and the **files**. Click one to open its
   list, with a search box that finds a line by name, part of an ID (`K7QJ` finds `K7QJ2M4XNA`), description or
   provider; Enter picks the first, and a whole knowledge base ID or ARN works even when it isn't listed. Tick files
   and the next questions search only them (shown as chips; click one to drop it, or **All files**). Another data

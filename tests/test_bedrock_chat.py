@@ -63,6 +63,7 @@ SCHEMA = request_schema()
 F = SCHEMA.fields
 KB = ("retrieveAndGenerateConfiguration", "knowledgeBaseConfiguration")
 SONNET = "anthropic.claude-sonnet-5"
+HAIKU = "anthropic.claude-haiku-4-5-20251001-v1:0"  # what DEFAULT_MODEL resolves to
 SONNET_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.{SONNET}"
 OPUS_PROFILE = f"arn:aws:bedrock:us-east-1:{ACCOUNT}:inference-profile/us.anthropic.claude-opus-5"
 
@@ -73,8 +74,8 @@ def model(model_id, name, provider="Anthropic", on_demand=False):
             "inferenceTypesSupported": ["ON_DEMAND"] if on_demand else [], "modelLifecycle": {"status": "ACTIVE"}}
 
 
-CLAUDES = ["anthropic.claude-opus-5", SONNET]
-MODEL_LIST = [model(CLAUDES[0], "Claude Opus 5"), model(SONNET, "Claude Sonnet 5"),
+CLAUDES = ["anthropic.claude-opus-5", SONNET, HAIKU]
+MODEL_LIST = [model(CLAUDES[0], "Claude Opus 5"), model(SONNET, "Claude Sonnet 5"), model(HAIKU, "Claude Haiku 4.5"),
               model("amazon.nova-pro-v1:0", "Nova Pro", "Amazon", True)]
 PROFILES = [
     {"inferenceProfileName": f"US {m}", "inferenceProfileId": f"us.{m}", "status": "ACTIVE", "type": "SYSTEM_DEFINED",
@@ -1063,7 +1064,7 @@ def test_ui_help_groups_every_command(ui, capsys):
 def test_ui_ask_and_follow_up(ui, clients, capsys):
     out = run(capsys, ui.ask, "How long do refunds take?")
     for text in ("support-docs: How long do refunds take?", "question 1 of this conversation", "Grounded: 69%",
-                 "Sources cited: 2", "Model: Claude Opus 5", "Refunds take 5-7 business days [1].",
+                 "Sources cited: 2", "Model: Claude Haiku 4.5", "Refunds take 5-7 business days [1].",
                  "refund-policy.pdf     3", "Tokens and cost are estimated", "last()"):
         assert text in out, text
     out = run(capsys, ui.ask, "And bank transfers?")
@@ -1083,7 +1084,7 @@ def test_ui_last_transcript_and_new_chat(ui, capsys):
     assert "client.retrieve_and_generate(**{" in out
     out = run(capsys, ui.transcript)
     assert "Conversation with support-docs (1 question)" in out and "You: How long do refunds take?" in out
-    assert "Bedrock (Claude Opus 5 · " in out and "  [1] refund-policy.pdf p.3" in out
+    assert "Bedrock (Claude Haiku 4.5 · " in out and "  [1] refund-policy.pdf p.3" in out
     out = run(capsys, ui.new_chat)
     assert "New conversation (1 earlier question forgotten)" in out
     assert ui.answers == [] and ui.session_id is None and ui.values == DEFAULT_SETTINGS
@@ -1378,12 +1379,12 @@ def enter(picker, text):
 def test_window_opens_on_the_knowledge_base_and_model(window):
     app = window._app
     assert "kbc-app" in app.root._dom_classes
-    assert (app.kb_pick.value, app.model_pick.value) == (KB_ID, "us.anthropic.claude-opus-5")
+    assert (app.kb_pick.value, app.model_pick.value) == (KB_ID, f"us.{HAIKU}")  # DEFAULT_MODEL, Claude Haiku 4.5
     assert "support-docs" in app.kb_pick.face.value and KB_ID in app.kb_pick.face.value  # the field: name and ID
-    opus = app.model_pick._choice("us.anthropic.claude-opus-5")
-    assert (opus.title, opus.badge) == ("Claude Opus 5", "Anthropic · $5.50 / $27.50")
-    assert opus.note == "Anthropic · inference profile · $5.50 / $27.50 per 1M tokens"
-    assert "Claude Opus 5" in app.model_pick.face.value and "$5.50 / $27.50" in app.model_pick.face.value
+    haiku = app.model_pick._choice(f"us.{HAIKU}")
+    assert (haiku.title, haiku.badge) == ("Claude Haiku 4.5", "Anthropic · $1.10 / $5.50")
+    assert haiku.note == "Anthropic · inference profile · $1.10 / $5.50 per 1M tokens"
+    assert "Claude Haiku 4.5" in app.model_pick.face.value and "$1.10 / $5.50" in app.model_pick.face.value
     assert app.model_pick.choices[0].title == "Nova Pro"  # by provider
     assert not any(picker.is_open for picker in app.pickers)  # the lists open on a click
     assert list(app.rows) == ["n"] and app.inputs["n"].value == 5
@@ -1397,7 +1398,7 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
                                                                          "+ Reranker"]
     assert "Ask support-docs a question." in texts(app)[0]
     assert '<span class="jm" title="set as n">' in app.request_view.value
-    assert "chat('support-docs', model='us.anthropic.claude-opus-5', n=5)" in plain(app.setup.value)
+    assert f"chat('support-docs', model='us.{HAIKU}', n=5)" in plain(app.setup.value)
     assert '<span class="pf">chat</span>' in app.setup.value  # highlighted, like the Python view
     assert app.results.children == ()  # nothing is listed under the search box until you search
     assert "Nothing yet" in app.response_view.value
@@ -1567,7 +1568,7 @@ def test_window_opens_on_retrieve_only(core, monkeypatch):
     assert app.mode_pick.value == "retrieve" and app.model_pick.disabled
     assert app.question.placeholder == "Type a question to search for"
     app.mode_pick.value = "answer"  # no question yet: the box stays empty
-    assert app.question.value == "" and "Answer: the next questions get an answer from Claude Opus 5." in (
+    assert app.question.value == "" and "Answer: the next questions get an answer from Claude Haiku 4.5." in (
         app.status.value)
     assert "kbc-off" not in app.rows["temperature"]._dom_classes
 

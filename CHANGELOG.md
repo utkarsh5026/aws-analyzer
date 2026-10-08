@@ -25,6 +25,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- `bedrock_chat.py`: `chat()` and `ask()` use Claude Haiku 4.5 when you don't pick a model, instead of
+  Claude Opus 5: answers come faster and cost a fifth as much ($1.10 / $5.50 per 1M tokens in us-east-1).
+  To keep Opus, pass `model="opus"` or `BedrockChatAnalyzer(default_model="opus")`. `bedrock_kb.py` still
+  defaults to Opus 5.
 - `bedrock_chat.py`: the chat window's knowledge base, model, data source and files pickers are searchable lists
   instead of drop-downs. Click a field to open its list: each knowledge base shows its ID, a status dot, its
   description and when it changed, and each model its ID, provider and price. Type part of a name, an ID, a
