@@ -389,6 +389,19 @@ def detect_format(key: str) -> tuple[str | None, str | None]:
     return (_FORMAT_BY_EXT.get(parts[-1]) if len(parts) > 1 else None), compression
 
 
+def _browser_type(key: str) -> str | None:
+    """The Content-Type that makes a browser show the file in its tab rather than save it: 'a.pdf' ->
+    'application/pdf', 'a.csv' -> plain text (a browser saves text/csv), 'a.parquet' or 'a.csv.gz' -> None."""
+    fmt, compression = detect_format(key)
+    if compression or fmt is None:
+        return None
+    if fmt in ("image", "audio", "video", "pdf", "json") or file_extension(key) in ("html", "htm"):
+        return mimetypes.guess_type(key.rsplit("/", 1)[-1])[0]
+    if fmt in ("text", "csv", "tsv", "psv", "jsonl", "notebook"):
+        return "text/plain; charset=utf-8"
+    return None
+
+
 _MAGIC_CODECS = [
     (b"\x1f\x8b", "gz"),
     (b"\xfd7zXZ\x00", "xz"),
@@ -7194,11 +7207,19 @@ class S3Analyzer:
         if cut:
             p.info["cut"] = cut
 
-    def presigned_url(self, uri: str, *, expires: int = 3600) -> str:
-        """Temporary HTTPS link to download the object without AWS credentials."""
+    def presigned_url(self, uri: str, *, expires: int = 3600, inline: bool = False) -> str:
+        """Temporary HTTPS link to download the object without AWS credentials. inline=True makes it open in a
+        browser tab instead: S3 sends a PDF, picture, sound, video or text file as a type the browser shows,
+        whatever type it was stored with (other files still download)."""
         bucket, key = parse_s3_uri(uri)
+        params = {"Bucket": bucket, "Key": key}
+        if inline:
+            params["ResponseContentDisposition"] = "inline"
+            shown = _browser_type(key)
+            if shown:
+                params["ResponseContentType"] = shown
         return self._client_for(bucket).generate_presigned_url(
-            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires
+            "get_object", Params=params, ExpiresIn=expires
         )
 
     def download(

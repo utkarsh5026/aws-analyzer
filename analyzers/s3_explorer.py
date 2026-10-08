@@ -906,6 +906,11 @@ body[data-jp-theme-light=false] .s3x,body.vscode-dark .s3x{--s3x-accent-fg:#8ab4
  font-weight:500}
 .s3x button.s3x-act:hover{background:var(--s3x-hover)}
 .s3x button.s3x-act.s3x-on{background:var(--s3x-tint);border-color:var(--s3x-tint-line);color:var(--s3x-accent-fg)}
+.s3x a.s3x-act{display:flex;align-items:center;box-sizing:border-box;height:28px;padding:0 12px;border-radius:8px;
+ border:1px solid var(--s3x-line);font-weight:500;color:inherit;text-decoration:none;white-space:nowrap;
+ transition:background-color .12s ease}
+.s3x a.s3x-act:hover{background:var(--s3x-hover)}
+.s3x a.s3x-act:focus-visible{outline:2px solid var(--s3x-tint-line);outline-offset:-2px}
 .s3x button.s3x-close{display:inline-flex;align-items:center;justify-content:center;margin-left:auto;width:28px;
  min-width:28px;padding:0;border-color:transparent;font-size:0;opacity:.7}
 .s3x button.s3x-close:hover{opacity:1}
@@ -2069,7 +2074,9 @@ class S3Explorer:
                 actions.append(("text", "📄 Text", f"The words of every page, {_TEXT_PAGES} at a time, laid out to read: "
                                 "headings, paragraphs and lists, without the running headers and footers"))
             actions += [("download", "⬇ Download", "Save a copy in this notebook's folder"),
-                        ("link", "🔗 Link", "A download link that works for an hour, without AWS access"),
+                        ("open", "↗ Open in new tab", "The file in a new browser tab: PDFs, pictures, sound, video "
+                         "and text show there, other files download. The link works for an hour after you click the "
+                         "file (right-click to copy it for someone without AWS access)"),
                         ("close", "✕", "Close the file and show this folder")]
         elif bucket:
             actions = [("summary", "📊 What's in here", "Every file below this folder: sizes, types, cost and "
@@ -2083,6 +2090,11 @@ class S3Explorer:
         old = self._actions.children
         self._act_buttons = {}
         for action, label, tip in actions:
+            if action == "open":  # a link, so the browser opens the tab (a button's click only reaches Python)
+                link = self._open_link(label, tip)
+                if link:
+                    self._act_buttons[action] = w.HTML(link, layout=w.Layout(width="auto"))
+                continue
             b = w.Button(description=label, tooltip=tip, layout=w.Layout(width="auto"))
             b.add_class("s3x-act")
             if action == "close":
@@ -2096,6 +2108,17 @@ class S3Explorer:
                 widget.close()
         self._action = "preview" if self.selected else ""
         self._mark_actions()
+
+    def _open_link(self, label: str, tip: str) -> str:
+        """↗ Open in new tab: a link to the chosen file that looks like the buttons beside it, presigned (for an
+        hour) to show the file in the tab rather than save it. Empty when it can't be signed (no credentials)."""
+        try:
+            url = self.core.presigned_url(self.selected, inline=True)
+        except (ClientError, BotoCoreError):
+            return ""
+        esc = html.escape
+        return (f'<a class="s3x-act" href="{esc(url)}" target="_blank" rel="noopener noreferrer" '
+                f'title="{esc(tip)}">{esc(label)}</a>')
 
     def _draw_expand(self, show: bool = True) -> None:
         """▾ Expand all, at the end of the buttons above the right pane (beside ✕), while the pane shows a JSON file
@@ -2116,7 +2139,7 @@ class S3Explorer:
 
     def _mark_actions(self) -> None:
         for action, b in getattr(self, "_act_buttons", {}).items():
-            if action != "close":
+            if action not in ("open", "close"):
                 b._dom_classes = ("s3x-act", "s3x-on") if action == self._action else ("s3x-act",)
 
     def _draw_status(self, folder: Folder) -> None:
@@ -2178,8 +2201,6 @@ class S3Explorer:
             self._report("document", "document", uri)
         elif action == "download":
             self._report("download", "download", uri, cache=False)
-        elif action == "link":
-            self._report("link", "link", uri, cache=False)
         elif action == "summary":
             self._report("summary", "summary", uri)
         elif action == "bucket_info":

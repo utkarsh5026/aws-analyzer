@@ -378,14 +378,16 @@ def test_explorer_opens_folders_and_files_by_clicking(explorer):
     assert "Preview of part-2.csv" in out and "s3://lake/raw/events/part-2.csv" not in out  # the name, not the path
     assert "Next:" not in out  # the S3View's next steps name commands this explorer doesn't have
     assert "s3://lake/raw/events/part-2.csv" in x._status.value
-    assert list(x._act_buttons) == ["preview", "head", "download", "link", "close"]
+    assert list(x._act_buttons) == ["preview", "head", "download", "open", "close"]
     assert x._act_buttons["preview"]._dom_classes == ("s3x-act", "s3x-on")
     assert 'class="s3a"' in x._content.value and "<table" in x._content.value
 
     x._act_buttons["head"].click()
     assert "System metadata" in text(x) and x._act_buttons["head"]._dom_classes == ("s3x-act", "s3x-on")
-    x._act_buttons["link"].click()
-    assert "Download part-2.csv (valid 60 min)" in text(x)
+    link = x._act_buttons["open"].value  # a link the browser opens, not a report
+    assert link.startswith('<a class="s3x-act" href="https://') and 'target="_blank"' in link
+    assert "part-2.csv?" in link and "response-content-disposition=inline" in link and "↗ Open in new tab" in link
+    assert x._act_buttons["head"]._dom_classes == ("s3x-act", "s3x-on")
     x._act_buttons["close"].click()
     assert not x.selected and "File types here" in text(x) and list(x._act_buttons) == ["summary", "zip"]
 

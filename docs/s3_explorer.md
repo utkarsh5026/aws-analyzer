@@ -91,8 +91,8 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
 
 The toolbar is at the top, the folder you're in on the left under a search box, and on the right whatever you clicked. The bar at the bottom counts what's listed and shows where you are.
 
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="587" loading=lazy }
-![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Link buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="587" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="587" loading=lazy }
+![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="587" loading=lazy }
 /// caption
 The folder on the left, the file you clicked on the right. One click on the path at the bottom selects it, ready to copy.
 ///
@@ -138,7 +138,7 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
 | **📄 Text** | For a PDF: its words laid out to read, with headings, paragraphs and lists, [50 pages at a time](#pdf) |
 | **⬇ Download** | Saves a copy in the notebook's folder (the [`download`](s3.md#download) report) |
-| **🔗 Link** | A download link that works for an hour, for someone without AWS access (the `link` report) |
+| **↗ Open in new tab** | Opens the file in a new browser tab: PDFs, pictures, sound, video and text show there, even when they were stored as a generic type, and other files download to your computer. Its link works for an hour: right-click it to copy the link for someone without AWS access, or run `x.ui.link(path)` to see it written out |
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
 | **✕** | Closes the file and shows the folder again |
 
@@ -317,7 +317,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 |---|---|
 | `s3:ListAllMyBuckets` | The list of buckets you start from. Without it, open a bucket by its path |
 | `s3:ListBucket` | Listing folders, **Include subfolders**, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
-| `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **📄 Text**, **⬇ Download** and **⬇ Download .zip**, and the links **🔗 Link** makes |
+| `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **📄 Text**, **⬇ Download** and **⬇ Download .zip**, and the links **↗ Open in new tab** opens |
 | `s3:GetObjectTagging` | The tags in **🏷️ Details**; without it, the rest of **🏷️ Details** still shows |
 | `kms:Decrypt` on the key | Files encrypted with SSE-KMS |
 
