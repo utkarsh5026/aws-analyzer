@@ -23,10 +23,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   The Overview, Syncs (a timeline), Search and Settings tabs are a click away, and like the rest of the file it only
   reads: where a sync would help, it shows the command. Besides what `documents()` and `unsynced()` use, it needs
   `s3:GetObject` to read metadata files, and `bedrock:GetKnowledgeBaseDocuments` for files past the first 10,000.
+  ([#57](https://github.com/utkarsh5026/aws-analyzer/pull/57))
 - `bedrock_kb.py`: `ui.files()`, `ui.file("refund-policy.pdf")` and `ui.search_file("refund-policy.pdf", "a
   question")` show the same as reports: every file and its state (`status="failed"` or `match="refund"` narrows the
   list), how one file was indexed, and where a question ranks it. `ui.core.file_inventory()`, `document_chunks()`,
   `metadata_file()` and `probe_file()` return the data behind them.
+  ([#57](https://github.com/utkarsh5026/aws-analyzer/pull/57))
 
 ### Changed
 
