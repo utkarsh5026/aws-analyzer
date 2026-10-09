@@ -11,6 +11,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- `bedrock_chat.py`: the chat window now opens with a two-line greeting instead of a page of instructions that
+  filled the conversation before you'd asked anything. The tour of the window is still there, shorter, folded under
+  **How this window works**. ([#56](https://github.com/utkarsh5026/aws-analyzer/pull/56))
+
 ## [0.11.0] - 2026-10-09
 
 ### Added

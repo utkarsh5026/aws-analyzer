@@ -2152,6 +2152,7 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
     assert [chip.description for chip in app.chip_box.children][:3] == ["+ Search type", "+ Metadata filter",
                                                                          "+ Reranker"]
     assert "Ask support-docs a question." in texts(app)[0]
+    assert '<details class="tour"><summary>How this window works</summary>' in texts(app)[0]  # folded
     assert '<span class="jm" title="set as n">' in app.request_view.value
     assert f"chat('support-docs', model='us.{HAIKU}', n=5)" in plain(app.setup.value)
     assert '<span class="pf">chat</span>' in app.setup.value  # highlighted, like the Python view
