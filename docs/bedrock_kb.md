@@ -150,14 +150,14 @@ aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-sour
 `ui.syncs("support-docs")`: why a sync failed, in the same row, and the command that starts the next one. You run it; the tool never does.
 ///
 
-![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-light.webp#only-light){ width="984" height="473" loading=lazy }
-![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-dark.webp#only-dark){ width="984" height="473" loading=lazy }
+![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-light.webp#only-light){ width="984" height="481" loading=lazy }
+![documents(): 42 documents read, of which 39 indexed, 2 failed and 1 ignored; a note that the web data source keeps no document status, a warning with the most common reason and the sync command, and a table of the three documents that aren't indexed with Bedrock's reason: an encrypted PDF, a scanned image with no text layer and an unsupported .mp4](images/bedrock-documents-dark.webp#only-dark){ width="984" height="481" loading=lazy }
 /// caption
 `ui.documents("support-docs")`: without `status=` it lists only the documents that aren't indexed, with Bedrock's reason for each.
 ///
 
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="479" loading=lazy }
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="479" loading=lazy }
+![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="481" loading=lazy }
+![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="481" loading=lazy }
 /// caption
 `ui.unsynced("support-docs")`: two files changed after the last sync, so searches and answers don't see those changes yet.
 ///
@@ -173,10 +173,11 @@ ui.search("error E1234", search_type="HYBRID")            # meaning and keywords
 ui.search("refund window", rerank=True)                   # re-order with a reranking model (Cohere Rerank 3.5)
 ui.search("refund window", data_source="faq")             # one data source only (see below)
 ui.chunk(2)                                               # result #2 in full, with its metadata and IDs
+ui.link(2)                                                # a link that opens result #2's file in a new tab
 ```
 
-![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-light.webp#only-light){ width="984" height="675" loading=lazy }
-![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-dark.webp#only-dark){ width="984" height="675" loading=lazy }
+![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-light.webp#only-light){ width="984" height="678" loading=lazy }
+![search(): five passages for How long do refunds take?, each with its file, page, score bar, metadata such as team=billing and year=2024, and the question's words highlighted; cards for passages, top score, files, time and the estimated cost of the question embedding](images/bedrock-search-dark.webp#only-dark){ width="984" height="678" loading=lazy }
 /// caption
 `ui.search("How long do refunds take?")`: two passages from the refund policy, then three weaker ones. The words from the question are highlighted.
 ///
@@ -187,7 +188,9 @@ Scores are relative: compare them with each other, not against a fixed cutoff, s
 - **A code in the question is in no passage** (an error code, a SKU): semantic search matches meaning, not exact strings; try `search_type="HYBRID"`.
 - **Every passage comes from one file**, **passages repeat each other word for word** (duplicate files), or **most passages are very short** (chunking too small).
 
-`chunk(n)` shows result *n* of the last search (or source *n* of the last answer) in full, with its metadata, chunk ID and data source, and the `S3View().preview("s3://…")` call that opens the whole file with [s3.py](s3.md).
+`chunk(n)` shows result *n* of the last search (or source *n* of the last answer) in full, with its metadata, chunk ID and data source, a link that opens its file, and the `S3View().preview("s3://…")` call that previews the whole file in the notebook with [s3.py](s3.md).
+
+**Open a source's file.** Each file name in a search, an answer's sources, `compare()`, `documents()` and `unsynced()` is a link (↗) that opens the file in a new browser tab, a PDF at the passage's page, so you can check what a passage says in context. For a file in S3 it's a presigned link: signed in the notebook with your credentials (no AWS call), it works for an hour and only if those credentials may read the file (`s3:GetObject`). The browser shows PDFs, pictures, text and HTML; Word and Excel files download. Web, Confluence, SharePoint and Salesforce sources link to their page. `link(n)` gives the link on its own: in text mode, where reports don't show links, or for longer than an hour (`link(2, expires=86400)`, up to 7 days). `link("refund-policy.pdf")` and `link("s3://bucket/key")` work too. Anyone you send a link to can open the file until it expires.
 
 ## Ask { #ask }
 
@@ -224,8 +227,8 @@ An answer the model wrote in markdown is laid out as such: lists, **bold**, tabl
 
 </div>
 
-![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-light.webp#only-light){ width="984" height="417" loading=lazy }
-![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-dark.webp#only-dark){ width="984" height="417" loading=lazy }
+![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-light.webp#only-light){ width="984" height="419" loading=lazy }
+![ask() with engine=converse and model=sonnet: the same answer, 100% grounded, with exact input and output tokens, and all five retrieved passages listed with a Cited column showing the model used the first two](images/bedrock-ask-converse-dark.webp#only-dark){ width="984" height="419" loading=lazy }
 /// caption
 `ui.ask("How long do refunds take?", engine="converse", model="sonnet")`: exact token counts, and the Cited column shows which of the passages the model used.
 ///
@@ -314,8 +317,8 @@ ui.compare("refund window for EU orders")                       # SEMANTIC and H
 ui.compare("error E1234", n=10, search_types=("SEMANTIC", "HYBRID"))
 ```
 
-![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-light.webp#only-light){ width="984" height="719" loading=lazy }
-![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-dark.webp#only-dark){ width="984" height="719" loading=lazy }
+![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-light.webp#only-light){ width="984" height="743" loading=lazy }
+![compare(): four settings, SEMANTIC and HYBRID at n=2 and n=5, with their overlap in cards; findings that n=5 adds three passages and that HYBRID ranks the passage about error E1234 first where SEMANTIC ranks it second; a table with each passage's rank under each setting](images/bedrock-compare-dark.webp#only-dark){ width="984" height="743" loading=lazy }
 /// caption
 `ui.compare("what does error E1234 mean?", n=(2, 5))`: both search types find the same passages, but only HYBRID puts the one with the exact error code first.
 ///
@@ -442,6 +445,12 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Effect": "Allow",
       "Action": "s3:ListBucket",
       "Resource": "arn:aws:s3:::support-docs-bucket"
+    },
+    {
+      "Sid": "OpenSourceFiles",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::support-docs-bucket/*"
     }
   ]
 }
@@ -459,6 +468,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | `bedrock:InvokeModel` | `ask(engine="converse")`, `core.generate` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | `models`, and turning `model="sonnet"` into an ID |
 | `s3:ListBucket` on the data source's bucket | `unsynced` |
+| `s3:GetObject` on the data source's files | Opening a file from its link (`link`, and the file names in reports): your browser uses it, the notebook never reads the file |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. To scope the policy down, replace `*` in the first statement with your knowledge bases' ARNs (`ListKnowledgeBases` itself needs `*`).
 
@@ -500,6 +510,10 @@ A model also has to be enabled for the account under **Model access** in the Bed
 
     Bedrock ends RetrieveAndGenerate sessions after a while. The tool starts a new one and says so; that answer doesn't know the earlier questions, so ask the full question again if it needs them.
 
+??? question "A file's link opens “AccessDenied” or “Request has expired”"
+
+    The link is signed with the notebook's credentials, so it opens only if they may read the file (`s3:GetObject` on the bucket, and `kms:Decrypt` when the bucket is encrypted with a KMS key), and only for an hour or until those credentials expire, whichever comes first. Run the cell again, or `link(n)`, for a fresh link; `link(n, expires=86400)` lasts a day.
+
 ??? question "The report lost its formatting after I reopened the notebook"
 
     JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.
@@ -519,7 +533,8 @@ Every `BedrockKBView` command. `ui.help()` prints the same list grouped by task,
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status, the ones that aren't indexed with the reason |
 | `unsynced(kb=None, data_source=None)` | S3 files added or changed since the last successful sync |
 | `search(question, n=5, kb=None, data_source=None, where=None, search_type=None, rerank=None)` | Ranked passages with scores, source and page, highlighted words, metadata and findings |
-| `chunk(rank=1)` | The full text and metadata of a result from the last search or ask |
+| `chunk(rank=1)` | The full text and metadata of a result from the last search or ask, and a link to its file |
+| `link(source=1, expires=3600)` | A link that opens a source's file (or any `s3://` path) in a new browser tab |
 | `ask(question, kb=None, data_source=None, n=5, where=None, search_type=None, model=None, engine="kb", prompt=None, temperature=None, max_tokens=None)` | The answer with \[1\]\[2\] citations, grounded share, sources, model, tokens, cost and findings |
 | `follow_up(question, data_source=None)` | The next question in the same session or conversation; `data_source=` moves it to another data source |
 | `compare(question, kb=None, n=(5, 10), search_types=("SEMANTIC", "HYBRID"), where=None, data_source=None)` | Each passage's rank under each search setting, overlap and findings |

@@ -53,6 +53,7 @@ import html
 import importlib
 import inspect
 import math
+import mimetypes
 import re
 import sys
 import textwrap
@@ -378,6 +379,24 @@ def source_name(uri: str | None) -> str:
     if len(parts) == 1 and scheme not in ("s3", ""):
         return parts[0]  # just a host
     return unquote(parts[-1])
+
+
+# Extensions a browser shows as text only when told so (it would save a .md or .csv sent as its own type).
+_TEXT_EXTENSIONS = {"txt", "md", "markdown", "csv", "tsv", "log", "rst", "yaml", "yml", "xml", "jsonl"}
+
+
+def _browser_type(name: str) -> str | None:
+    """The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
+    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download)."""
+    name = name.rsplit("/", 1)[-1]
+    if "." in name and name.rsplit(".", 1)[-1].lower() in _TEXT_EXTENSIONS:
+        return "text/plain; charset=utf-8"
+    guess = mimetypes.guess_type(name)[0] or ""
+    if guess == "text/html":
+        return "text/html; charset=utf-8"
+    if guess in ("application/pdf", "application/json") or guess.split("/")[0] in ("image", "audio", "video"):
+        return guess
+    return None
 
 
 def sync_command(kb_id: str, data_source_id: str, region: str = "") -> str:
@@ -3609,13 +3628,46 @@ class BedrockKBAnalyzer:
     # ------------------------------------------------------------------ deciding
 
     def _s3_client(self) -> Any:
-        """s3: listing a data source's bucket for unsynced()."""
+        """s3: listing a data source's bucket for unsynced(), and signing links to its files (SigV4, which every
+        region accepts)."""
         return self._cached_client(
             "s3",
             lambda: self.session.client(
-                "s3", region_name=self.region, config=self._config
+                "s3",
+                region_name=self.region,
+                config=self._config.merge(Config(signature_version="s3v4")),
             ),
         )
+
+    def file_url(
+        self, uri: str, *, page: int | None = None, expires: int = 3600
+    ) -> str | None:
+        """A link that opens a source's file in a browser tab, or None when there's no file to open (a custom or
+        SQL data source).
+
+        For an s3:// file it's a presigned GetObject link, signed here with your credentials (no AWS call): it works
+        for `expires` seconds, only while those credentials are valid, and only if they may read the file
+        (s3:GetObject). It makes the browser show a PDF (at `page`), picture, text or HTML file instead of saving it.
+        A web, Confluence, SharePoint or Salesforce source links to its own address."""
+        expires = _as_int(expires, "expires")
+        if not 1 <= expires <= 604_800:
+            raise ValueError(
+                f"expires is in seconds, from 1 to 604,800 (7 days, the longest S3 allows); got {expires:,}"
+            )
+        uri = str(uri or "").strip()
+        if uri.lower().startswith(("https://", "http://")):
+            return uri
+        bucket, _, key = uri[5:].partition("/") if uri.startswith("s3://") else ("", "", "")
+        if not bucket or not key:
+            return None
+        params = {"Bucket": bucket, "Key": key, "ResponseContentDisposition": "inline"}
+        shown = _browser_type(key)
+        if shown:
+            params["ResponseContentType"] = shown
+        url = self._s3_client().generate_presigned_url(
+            "get_object", Params=params, ExpiresIn=expires
+        )
+        return f"{url}#page={page}" if page and shown == "application/pdf" else url
 
     def unsynced(
         self,
@@ -3895,6 +3947,19 @@ class _Passage:
     terms: list[str] = field(default_factory=list)  # words to highlight
     score: float | None = None
     meta: str = ""  # the passage's metadata, e.g. 'team=billing · year=2024'
+    url: str = ""  # opens the source's file in a new tab (file_url); '' = the name stays text
+
+
+@dataclass
+class _Link:
+    """A link that opens in a new tab: a line of its own, or a table cell (the label as a link). Text mode shows
+    the label, then the address on its own line; in a table, the label only."""
+
+    url: str
+    label: str
+
+    def __str__(self) -> str:
+        return self.label
 
 
 @dataclass
@@ -3961,6 +4026,10 @@ _CSS = """<style>
 .kba .psg .ph{font-weight:600;font-size:12px}
 .kba .psg .pm{opacity:.65;font-size:12px}
 .kba .psg .pt{margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere}
+.kba a.fl{color:#3b82f6;text-decoration:none;border-bottom:1px solid rgba(59,130,246,.35)}
+.kba a.fl:hover{border-bottom-color:currentColor}
+.kba a.fl::after{content:"\\2197";font-size:.8em;margin-left:2px;opacity:.7}
+.kba .lnk{margin:6px 0 8px;font-weight:600}
 .kba mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px;padding:0 1px}
 .kba .ans{font-size:14px;line-height:1.6;margin:8px 0 10px;max-width:900px;overflow-wrap:anywhere}
 .kba .ans>:first-child{margin-top:0}
@@ -4049,6 +4118,16 @@ def _call(name: str, *args: Any, **kwargs: Any) -> str:
         return repr(value)
 
     return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
+
+
+def _link_html(url: str, text: str) -> str:
+    """text as a link that opens url in a new tab; only http(s) links, so anything else stays text."""
+    if not url.lower().startswith(("https://", "http://")):
+        return _esc(text)
+    return (
+        f'<a class="fl" href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
+        f'title="Open in a new tab">{_esc(text)}</a>'
+    )
 
 
 def _signature(function: Callable) -> str:
@@ -4163,6 +4242,8 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                     inner = _esc(text)
                     if isinstance(cell, _Tone) and cell.tone in _TONES and text:
                         inner = f'<span class="pill {cell.tone}">{inner}</span>'
+                    elif isinstance(cell, _Link) and text:
+                        inner = _link_html(cell.url, text)
                     if block.tree and j == 0:
                         css = "tree"
                     elif j in block.code_cols and text:
@@ -4231,9 +4312,9 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 filter(
                     None,
                     [
-                        f"#{block.rank}",
-                        block.source,
-                        block.detail,
+                        _esc(f"#{block.rank}"),
+                        _link_html(block.url, block.source),
+                        _esc(block.detail),
                         "" if block.score is None else f"score {block.score:.2f}",
                     ],
                 )
@@ -4244,9 +4325,11 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
             meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
             out.append(
-                f'<div class="psg"><div class="ph">{bar}{_esc(head)}</div>{meta}'
+                f'<div class="psg"><div class="ph">{bar}{head}</div>{meta}'
                 f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>'
             )
+        elif isinstance(block, _Link):
+            out.append(f'<div class="lnk">{_link_html(block.url, block.label)}</div>')
         elif isinstance(block, _Answer):
             out.append(f'<div class="ans">{_answer_html(block)}</div>')
     out.append("</div>")
@@ -4914,6 +4997,8 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             out += textwrap.wrap(
                 block.text, 100, initial_indent="    ", subsequent_indent="    "
             ) or ["    (no text)"]
+        elif isinstance(block, _Link):
+            out += [block.label + ":", block.url]
         elif isinstance(block, _Answer):
             text = (
                 block.text
@@ -5142,8 +5227,10 @@ def _passage_blocks(
     terms: list[str],
     width: int = 320,
     sources: dict[str, str] | None = None,
+    link: Callable[[Passage], str] | None = None,
 ) -> list[_Passage]:
-    """sources: {data source ID: name}, to say which data source each passage came from ({}: don't)."""
+    """sources: {data source ID: name}, to say which data source each passage came from ({}: don't). link: the
+    passage -> the link that opens its file ('' for none)."""
     top = max((p.score for p in passages if p.score is not None), default=None)
     sources = sources or {}
     return [
@@ -5166,9 +5253,24 @@ def _passage_blocks(
             terms,
             p.score,
             _meta_label(p.metadata),
+            link(p) if link else "",
         )
         for p in passages
     ]
+
+
+def _open_label(p: Passage, url: str, expires: int = 3600) -> str:
+    """'Open refund-policy.pdf at page 3 (link valid for 1 hour)', or 'Download ...' for a file a browser saves
+    rather than shows."""
+    name = source_name(p.uri) or p.uri
+    if not p.uri.startswith("s3://"):
+        return f"Open {name}"
+    verb = "Open" if _browser_type(p.uri) else "Download"
+    page = f" at page {p.page}" if "#page=" in url else ""
+    for size, unit in ((86_400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
+        if expires % size == 0:
+            break
+    return f"{verb} {name}{page} (link valid for {_plural(expires // size, unit)})"
 
 
 def _session_expired(exc: ClientError) -> bool:
@@ -5262,7 +5364,7 @@ class BedrockKBView:
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "📚 Knowledge bases": ("kbs", "use", "kb_info"),
         "📥 What's indexed": ("syncs", "documents", "unsynced"),
-        "🔎 Search and answer": ("search", "chunk", "ask", "follow_up", "models"),
+        "🔎 Search and answer": ("search", "chunk", "link", "ask", "follow_up", "models"),
         "📏 Measure retrieval": ("compare", "evaluate"),
         "❓ Help": ("help",),
     }
@@ -5547,6 +5649,17 @@ class BedrockKBView:
             return None
         ds_id, count = counts.most_common(1)[0]
         return names[ds_id], count
+
+    def _url(self, uri: str, page: int | None = None) -> str:
+        """The link that opens a source's file in a new tab, or '' (no file to open, or no credentials to sign the
+        link with: the name then stays text, and the report still renders)."""
+        try:
+            return self.core.file_url(uri, page=page) or ""
+        except (BotoCoreError, ClientError, ValueError):
+            return ""
+
+    def _link(self, p: Passage) -> str:
+        return self._url(p.uri, p.page)
 
     def _price_basis(self, models: bool = False) -> str:
         default = (
@@ -6153,7 +6266,7 @@ class BedrockKBView:
                     if "FAILED" in d.status
                     else "warn",
                 ),
-                d.name or d.uri,
+                _Link(self._url(d.uri), d.name or d.uri),
                 sources[d.data_source_id].name
                 if d.data_source_id in sources
                 else d.data_source_id,
@@ -6232,7 +6345,7 @@ class BedrockKBView:
             if fresh.changed:
                 rows = [
                     [
-                        c.key,
+                        _Link(self._url(c.uri), c.key),
                         _fmt_dt(c.modified),
                         human_age(c.modified),
                         human_size(c.size),
@@ -6337,7 +6450,7 @@ class BedrockKBView:
         ]
         blocks.append(_Findings(retrieval_findings(r)))
         names = self._source_names(r.kb_id, r.passages)
-        blocks += _passage_blocks(r.passages, terms, sources=names)
+        blocks += _passage_blocks(r.passages, terms, sources=names, link=self._link)
         if r.passages:
             only = (
                 {"data_source": _source_arg(r.data_sources)} if r.data_sources else {}
@@ -6387,7 +6500,8 @@ class BedrockKBView:
 
     @_friendly_errors
     def chunk(self, rank: int = 1) -> None:
-        """The full text and metadata of result #rank from the last search or ask, and the call that opens its file."""
+        """The full text and metadata of result #rank from the last search or ask, and a link that opens its file in
+        a new tab."""
         last = self._last
         if last is None:
             raise _Hint(
@@ -6420,8 +6534,11 @@ class BedrockKBView:
                     ("Data source", source),
                 ]
             ),
-            _Text(p.text, title="Full text", wrap=True),
         ]
+        url = self._link(p)
+        if url:
+            blocks.append(_Link(url, _open_label(p, url)))
+        blocks.append(_Text(p.text, title="Full text", wrap=True))
         if p.row:
             blocks.append(
                 _Table(
@@ -6454,13 +6571,80 @@ class BedrockKBView:
         if p.uri.startswith("s3://"):
             blocks.append(
                 _Note(
-                    f"To open the whole file: S3View().preview({p.uri!r}), from s3.py in this repo "
+                    f"The link above works for an hour; link({rank}) makes a fresh one. To preview the file here "
+                    f"instead: S3View().preview({p.uri!r}), from s3.py in this repo (import s3 first)."
+                    if url
+                    else f"To open the whole file: S3View().preview({p.uri!r}), from s3.py in this repo "
                     "(import s3 first)."
                 )
             )
-        elif p.uri.startswith("http"):
-            blocks.append(_Note(f"The page it came from: {p.uri}"))
         self._show(blocks)
+
+    @_friendly_errors
+    def link(self, source: Any = 1, *, expires: int = 3600) -> None:
+        """A link that opens a file in a new browser tab: source #n of the last search or ask (a PDF opens at the
+        passage's page), a file name from it, or any s3:// path.
+
+        An S3 file gets a presigned link, signed here with your credentials (no AWS call). It works for `expires`
+        seconds (an hour unless you say), only while your credentials do, and only if they may read the file
+        (s3:GetObject); anyone you send it to can open the file until then. The browser shows PDFs, pictures, text
+        and HTML in the tab; Word and Excel files download. A web, Confluence, SharePoint or Salesforce source links
+        to its page. search() and ask() already link each source's name; this is the link on its own, for text mode
+        or for longer than an hour: link(2, expires=86400)."""
+        if isinstance(source, str) and "://" in source:
+            p, number, what = Passage(rank=0, text="", uri=source.strip()), 0, repr(source.strip())
+        else:
+            p, number, what = self._pick_source(source)
+        url = self.core.file_url(p.uri, page=p.page, expires=expires)
+        if not url and not number:
+            raise _Hint(f"{what} isn't a file to open: pass an s3://bucket/key path or a web address.")
+        if not url:
+            raise _Hint(
+                f"{what} has no file to open: it came from a {p.location_type or 'non-S3'} data source. "
+                f"chunk({number}) shows its full text."
+            )
+        blocks: list[Any] = [_Link(url, _open_label(p, url, _as_int(expires, "expires")))]
+        if p.uri.startswith("s3://"):
+            blocks.append(
+                _Note(
+                    "Signed with your credentials, so it stops working sooner if they expire first, and opens only "
+                    "if they may read the file (s3:GetObject). Anyone with the link can open the file until then."
+                )
+            )
+        self._show(blocks)
+
+    def _pick_source(self, source: Any) -> tuple[Passage, int, str]:
+        """link()'s source: a number, or a file name, from the last search or answer -> (passage, its number as
+        chunk() takes it, how to name it)."""
+        last = self._last
+        if last is None:
+            raise _Hint(
+                "Nothing to link yet: run search('...') or ask('...') first, then link(1), or pass an s3:// path."
+            )
+        answer = isinstance(last, Answer)
+        passages = last.sources if answer else last.passages
+        kind = "source" if answer else "result"
+        try:
+            rank = _as_int(source, kind)
+        except ValueError:
+            wanted = str(source).strip().lower()
+            found = [p for p in passages if source_name(p.uri).lower() == wanted] or [
+                p for p in passages if wanted and wanted in p.uri.lower()
+            ]
+            if not found:
+                names = ", ".join(sorted({source_name(p.uri) for p in passages if p.uri})[:5]) or "none"
+                raise _Hint(
+                    f"No {kind} of the last {'answer' if answer else 'search'} is {source!r}: pass its number "
+                    f"(link(1)) or one of its files ({names})."
+                ) from None
+            rank = passages.index(found[0]) + 1
+            return found[0], rank, f"{kind.capitalize()} #{rank}"
+        if not 1 <= rank <= len(passages):
+            raise ValueError(
+                f"{kind} goes from 1 to {len(passages)}: the last {'answer' if answer else 'search'} has "
+                f"{_plural(len(passages), kind)}"
+            )
+        return passages[rank - 1], rank, f"{kind.capitalize()} #{rank}"
 
     # --------------------------------------------------------------- generation
 
@@ -6523,7 +6707,7 @@ class BedrockKBView:
             + ["Passage"]
         )
         rows = [
-            [str(i), source_name(p.uri) or p.uri or "-", _count(p.page)]
+            [str(i), _Link(self._link(p), source_name(p.uri) or p.uri or "-"), _count(p.page)]
             + ([names.get(p.data_source_id, "-")] if names else [])
             + ([] if a.engine == "kb" else ["yes" if i in cited else ""])
             + [f'"{best_snippet(p.text, terms, 90)}"']
@@ -6828,7 +7012,7 @@ class BedrockKBView:
         blocks.append(_Findings(comparison_findings(c)))
         terms = question_terms(c.question)
         rows = [
-            [p.source, best_snippet(p.text, terms, 70)]
+            [_Link(self._link(p), p.source), best_snippet(p.text, terms, 70)]
             + ["-" if ranks[label] is None else str(ranks[label]) for label in labels]
             for p, ranks in c.ranks()
         ]
