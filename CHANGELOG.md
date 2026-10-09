@@ -48,7 +48,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   left unfinished, a disk running out of room and downloads over a month old. `ui.clean_downloads()` deletes them to
   free the disk: all of them, the ones named (`ui.clean_downloads("churn.zip")`), or those downloaded before
   `older_than="7d"`; `dry_run=True` shows what would go. It only empties a folder made for downloads, never the
-  notebook's own folder or one that held your files first, and nothing in S3 changes.
+  notebook's own folder or one that held your files first, and nothing in S3 changes. ([#50](https://github.com/utkarsh5026/aws-analyzer/pull/50))
 
 ### Changed
 
@@ -58,7 +58,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   keeps it out of git. A notebook that reads a downloaded file by its bare name (`pd.read_csv("events.csv")`) needs
   `s3-downloads/events.csv`, or `S3View(downloads=".")` for the old place. `S3View(downloads="~/scratch/s3")`,
   `S3Analyzer(downloads=...)` and `S3Explorer(downloads=...)` pick another folder; the explorer's **⚙** edits it as
-  **Downloads in**, and `x.downloads` replaces `x.zip_folder` (which still works).
+  **Downloads in**, and `x.downloads` replaces `x.zip_folder` (which still works). ([#50](https://github.com/utkarsh5026/aws-analyzer/pull/50))
 - `s3_explorer.py` and `bedrock_chat.py`: the S3 explorer and the chat window fill the browser window's height
   instead of a fixed 560 and 540 pixels, so a big screen shows more files, more of a report and more of the
   conversation. They stay at least that tall, and keep those heights in VS Code. `S3Explorer(height=720)` and the new
