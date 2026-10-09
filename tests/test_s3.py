@@ -1,4 +1,5 @@
 import base64
+import dataclasses
 import gzip
 import hashlib
 import io
@@ -36,8 +37,10 @@ from s3 import (
     TB,
     BucketConfig,
     Document,
+    DownloadsFolder,
     FileDetails,
     FileDetailsReport,
+    LocalDownload,
     ObjectInfo,
     PdfLine,
     PdfPage,
@@ -52,6 +55,7 @@ from s3 import (
     compare_objects,
     describe_file,
     detect_format,
+    downloads_findings,
     duplicate_findings,
     duplicate_folders,
     explain_policy,
@@ -651,6 +655,37 @@ def test_zip_checks_and_findings():
         "400MB",
         "4GB",
     ]
+
+
+def download_entry(name, kind="file", size=MB, days_old=1.0):
+    return LocalDownload(name, f"/nb/s3-downloads/{name}", kind, size, 1, NOW - timedelta(days=days_old))
+
+
+def test_downloads_findings():
+    tidy = DownloadsFolder("/nb/s3-downloads", exists=True, managed=True, disk_free=50 * GB,
+                           entries=[download_entry("a.csv"), download_entry("raw", "folder")])
+    assert downloads_findings(tidy, NOW) == [] and (tidy.size, tidy.files) == (2 * MB, 2)
+
+    old = dataclasses.replace(tidy, entries=[download_entry("a.csv", days_old=40), download_entry("b.zip", "zip"),
+                                             download_entry("c.zip.part", "unfinished", 2 * MB, days_old=90)])
+    found = downloads_findings(old, NOW)
+    assert ("info", "1 download (1.0 MB) is over a month old: clean_downloads(older_than='30d') deletes it and "
+                    "keeps the newer ones.") in found  # not counting the unfinished zip, which has its own
+    assert ("warn", "1 unfinished zip (2.0 MB): a download_zip() that stopped (a restarted kernel) left c.zip.part, "
+                    "which won't open. clean_downloads('c.zip.part') deletes it.") in found
+
+    full = dataclasses.replace(tidy, disk_free=500 * MB)
+    assert "The disk is running out of room: 500.0 MB free, and downloads take 2.0 MB" in downloads_findings(full)[0][1]
+    assert "clean_downloads(older_than='7d')" in downloads_findings(full)[0][1]
+
+    theirs = dataclasses.replace(old, managed=False)  # a folder that held other files first: no clean calls
+    said = " ".join(message for _, message in downloads_findings(theirs, NOW))
+    assert "wasn't made for downloads" in said and "S3View(downloads='s3-downloads')" in said
+    assert "clean_downloads(" not in said.replace("clean_downloads() won't", "")
+    here = dataclasses.replace(tidy, path="/nb", protected="the notebook's own folder")
+    assert downloads_findings(here)[0] == (
+        "warn", "Downloads go into /nb, the notebook's own folder: they mix with your own files and clean_downloads() "
+                "can't tidy them up. Give them a folder of their own: S3View(downloads='s3-downloads').")
 
 
 def test_progress_text():
@@ -1808,9 +1843,10 @@ def test_download_zip(core, aws, tmp_path, monkeypatch):
     assert (
         z.written
         and z.plan.uri == f"s3://{BUCKET}/raw/"
-        and z.plan.path == str(tmp_path / "raw.zip")
+        and z.plan.path == str(tmp_path / "s3-downloads" / "raw.zip")  # in the downloads folder
     )
-    with zipfile.ZipFile(tmp_path / "raw.zip") as archive:
+    assert (tmp_path / "s3-downloads" / ".gitignore").read_text().endswith("\n*\n")  # made for downloads
+    with zipfile.ZipFile(z.plan.path) as archive:
         assert sorted(archive.namelist()) == [
             "2024/01/events-copy.csv",
             "2024/01/events.csv",
@@ -1828,11 +1864,11 @@ def test_download_zip(core, aws, tmp_path, monkeypatch):
         4,
         (z.plan.size, z.plan.size),
     ) and z.zip_size > 0
-    assert not (tmp_path / "raw.zip.part").exists()
+    assert not (tmp_path / "s3-downloads" / "raw.zip.part").exists()
 
     one = core.download_zip(
         f"s3://{BUCKET}/docs/readme.md", "readme"
-    )  # '.zip' is added
+    )  # '.zip' is added; a path is from the notebook's folder
     assert one.plan.path == str(tmp_path / "readme.zip") and zipfile.ZipFile(
         one.plan.path
     ).namelist() == ["readme.md"]
@@ -1876,7 +1912,7 @@ def test_download_zip_of_a_list(core, tmp_path, monkeypatch):
     picks = [f"s3://{BUCKET}/raw/2024/01/events.csv", f"s3://{BUCKET}/raw/2024/02/events.csv.gz"]
     z = core.download_zip(picks)
     assert z.written and z.plan.uri == f"s3://{BUCKET}/raw/2024/" and z.plan.picked == picks
-    assert z.plan.path == str(tmp_path / "2024-2-files.zip")  # named after the folder they share
+    assert z.plan.path == str(tmp_path / "s3-downloads" / "2024-2-files.zip")  # named after the folder they share
     with zipfile.ZipFile(z.plan.path) as archive:
         assert sorted(archive.namelist()) == ["01/events.csv", "02/events.csv.gz"]  # laid out as they are
         assert archive.read("01/events.csv") == CSV
@@ -1884,14 +1920,14 @@ def test_download_zip_of_a_list(core, tmp_path, monkeypatch):
     listed = next(o for o in core.iter_objects(f"s3://{BUCKET}/docs/") if o.name == "readme.md")  # from a listing
     mixed = core.plan_zip([f"s3://{BUCKET}/raw/2024/02/", f"s3://{BUCKET}/raw/2024/02/empty.txt",
                            f"s3://{BUCKET}/raw/2024/01", listed, f"s3://{BUCKET}/archive/old.csv"])
-    assert mixed.uri == f"s3://{BUCKET}/" and mixed.path == str(tmp_path / "data-lake-5-items.zip")
+    assert mixed.uri == f"s3://{BUCKET}/" and mixed.path == str(tmp_path / "s3-downloads" / "data-lake-5-items.zip")
     assert mixed.picked[2] == f"s3://{BUCKET}/raw/2024/01/"  # given without its slash: it's a folder
     assert sorted(name for _, name in mixed.files) == [  # the folder raw/2024/01 without its slash, empty.txt once
         "docs/readme.md", "raw/2024/01/events-copy.csv", "raw/2024/01/events.csv", "raw/2024/02/empty.txt",
         "raw/2024/02/events.csv.gz"]
     assert mixed.left_out == {"archive/old.csv": "GLACIER"} and mixed.can_download
     one = core.plan_zip([f"s3://{BUCKET}/docs/readme.md"])
-    assert one.path == str(tmp_path / "readme.md.zip") and [name for _, name in one.files] == ["readme.md"]
+    assert one.path == str(tmp_path / "s3-downloads" / "readme.md.zip") and [n for _, n in one.files] == ["readme.md"]
     with pytest.raises(ValueError, match="one bucket"):
         core.plan_zip([f"s3://{BUCKET}/docs/readme.md", "s3://other/x.csv"])
     with pytest.raises(ValueError, match="Nothing to zip"):
@@ -2397,7 +2433,7 @@ def test_download_folder(core, aws, tmp_path, monkeypatch):
     }
     monkeypatch.chdir(tmp_path)
     loose = core.download_folder(f"s3://{BUCKET}/", limit=100)
-    assert loose.path == str(tmp_path / BUCKET) and loose.skipped == {
+    assert loose.path == str(tmp_path / "s3-downloads" / BUCKET) and loose.skipped == {
         "archive/old.csv": "GLACIER"
     }
     assert core.download_folder(f"s3://{BUCKET}/", "partial", limit=2).truncated
@@ -2407,6 +2443,73 @@ def test_download_folder(core, aws, tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="Not enough disk space"):
         core.download_folder(f"s3://{BUCKET}/big/", "big")
+
+
+def test_downloads_folder_and_cleaning(core, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "s3-downloads"
+    assert core.downloads_folder() == str(home) and not core.list_downloads().exists
+    core.download(f"s3://{BUCKET}/docs/readme.md")
+    core.download_folder(f"s3://{BUCKET}/raw/")
+    core.download_zip(f"s3://{BUCKET}/raw/")
+    (home / "stopped.zip.part").write_bytes(b"x")
+    folder = core.list_downloads()
+    assert folder.exists and folder.managed and not folder.protected and folder.disk_free
+    assert sorted((e.name, e.kind, e.files) for e in folder.entries) == [
+        ("raw", "folder", 4), ("raw.zip", "zip", 1), ("readme.md", "file", 1), ("stopped.zip.part", "unfinished", 1)]
+    assert folder.entries[0].name == "stopped.zip.part"  # newest first, by when it was downloaded, not S3's time
+    assert ".gitignore" not in [e.name for e in folder.entries] and folder.to_df()["kind"].tolist()[0] == "unfinished"
+
+    dry = core.clean_downloads(dry_run=True)
+    assert len(dry.removed) == 4 and dry.freed == folder.size and (home / "raw.zip").exists()
+    one = core.clean_downloads(["raw.zip", "s3-downloads/readme.md"])  # a name, or a path from the notebook's folder
+    assert sorted(e.name for e in one.removed) == ["raw.zip", "readme.md"] and len(one.kept) == 2
+    assert not (home / "raw.zip").exists() and (home / "raw").is_dir()
+    with pytest.raises(ValueError, match="No download named 'raw/2024'"):  # never part of a download
+        core.clean_downloads("raw/2024")
+    with pytest.raises(ValueError, match="Did you mean 'raw'"):
+        core.clean_downloads("rae")
+    assert core.clean_downloads(older_than="7d").removed == []  # all downloaded just now
+    assert core.clean_downloads(older_than=timedelta(0)).freed == folder.size - one.freed
+    assert sorted(p.name for p in home.iterdir()) == [".gitignore"]  # the folder and its mark stay
+
+    def locked(path):
+        raise PermissionError(13, "Permission denied", path)
+
+    core.download(f"s3://{BUCKET}/docs/readme.md")
+    monkeypatch.setattr(s3mod.os, "remove", locked)
+    stuck = core.clean_downloads(core.list_downloads().entries)  # LocalDownloads work too
+    assert stuck.failed == {"readme.md": "Permission denied"} and stuck.freed == 0 and (home / "readme.md").exists()
+    monkeypatch.undo()
+    monkeypatch.chdir(tmp_path)
+
+    mine = tmp_path / "mine"  # a folder with the user's own files: downloads may go there, but it's never emptied
+    mine.mkdir()
+    (mine / "notes.txt").write_text("keep")
+    theirs = S3Analyzer(region="us-east-1", downloads=str(mine))
+    theirs.download(f"s3://{BUCKET}/docs/readme.md")
+    assert not (mine / ".gitignore").exists() and not theirs.list_downloads().managed
+    with pytest.raises(ValueError, match="wasn't made for downloads"):
+        theirs.clean_downloads()
+    assert (mine / "notes.txt").read_text() == "keep"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    for unsafe, why in ((".", "the notebook's own folder"), (str(tmp_path.parent), "holds the notebook's own"),
+                        ("~", "your home folder")):
+        here = S3Analyzer(region="us-east-1", downloads=unsafe)
+        listed = here.list_downloads()
+        assert why in listed.protected and listed.entries == []  # what's there isn't downloads
+        with pytest.raises(ValueError, match="won't empty it"):
+            here.clean_downloads()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.chdir(empty)
+    S3Analyzer(region="us-east-1", downloads=".").download(f"s3://{BUCKET}/docs/readme.md")
+    assert sorted(p.name for p in empty.iterdir()) == ["readme.md"]  # the notebook's folder is never marked
+
+    elsewhere = S3Analyzer(region="us-east-1", downloads="~/dl")  # '~' works; a new folder is made with its mark
+    path = elsewhere.download(f"s3://{BUCKET}/docs/readme.md")
+    assert path == str(tmp_path / "home" / "dl" / "readme.md") and elsewhere.list_downloads().managed
 
 
 # ------------------------------------------------------------------------ formats
@@ -3632,9 +3735,11 @@ def test_ui_download_and_ls_of_a_file(ui, capsys, tmp_path, monkeypatch):
         "Downloaded s3://data-lake/raw/2024/01/events.csv" in one
         and "pd.read_csv('" in one
     )
-    assert (tmp_path / "events.csv").read_bytes() == CSV
+    assert (tmp_path / "s3-downloads" / "events.csv").read_bytes() == CSV  # in the downloads folder
+    assert "clean_downloads('events.csv')" in one and "downloads()" in one
     folder = run(capsys, ui.download, f"s3://{BUCKET}/raw/")
-    assert "Files downloaded: 4" in folder and str(tmp_path / "raw") in folder
+    assert "Files downloaded: 4" in folder and str(tmp_path / "s3-downloads" / "raw") in folder
+    assert "clean_downloads('raw')" in folder
     assert "Already there: 4" in run(capsys, ui.download, f"s3://{BUCKET}/raw")
     archived = run(capsys, ui.download, f"s3://{BUCKET}/archive/")
     assert (
@@ -3668,7 +3773,7 @@ def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
         "Read access",
     ):
         assert expected in out
-    assert (tmp_path / "raw.zip").exists()
+    assert (tmp_path / "s3-downloads" / "raw.zip").exists() and "clean_downloads('raw.zip')" in out
     dry = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1GB", dry_run=True)
     assert (
         "It can be downloaded" in dry
@@ -3677,7 +3782,8 @@ def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
     assert (
         "-- Left out --" in dry
         and "GLACIER" in dry
-        and not (tmp_path / "data-lake.zip").exists()
+        and not (tmp_path / "s3-downloads" / "data-lake.zip").exists()
+        and "clean_downloads" not in dry
     )
     over = run(capsys, ui.download_zip, f"s3://{BUCKET}/", max_size="1KB")
     assert (
@@ -3697,6 +3803,41 @@ def test_ui_download_zip(ui, capsys, tmp_path, monkeypatch):
     assert "ValueError" in run(
         capsys, ui.download_zip, f"s3://{BUCKET}/raw/", max_size="lots"
     )
+
+
+def test_ui_downloads_and_clean_downloads(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    home = tmp_path / "s3-downloads"
+    empty = run(capsys, ui.downloads)
+    assert f"in {home}" in empty and "Nothing downloaded yet" in empty and "made with the first download" in empty
+    ui.download(f"s3://{BUCKET}/docs/readme.md")
+    ui.download_zip(f"s3://{BUCKET}/raw/")
+    capsys.readouterr()
+    out = run(capsys, ui.downloads)
+    for expected in ("Downloads: 2", "Files: 2", "Free disk:", "Nothing to tidy up", "readme.md", "raw.zip", "zip",
+                     "clean_downloads(dry_run=True)", "clean_downloads(older_than='7d')",
+                     "clean_downloads('raw.zip')"):
+        assert expected in out
+    dry = run(capsys, ui.clean_downloads, older_than="0s", dry_run=True)
+    assert "Would delete 2 downloads" in dry and "Would free: " in dry
+    assert "Nothing was deleted (dry_run=True): clean_downloads(older_than='0s') deletes these downloaded" in dry
+    assert (home / "raw.zip").exists()
+    one = run(capsys, ui.clean_downloads, "raw.zip")
+    assert "Deleted 1 download" in one and "Kept: 1" in one and "the files are still in S3" in one
+    assert not (home / "raw.zip").exists() and "downloads()" in one
+    assert "No download named 'raw.zp'" in run(capsys, ui.clean_downloads, "raw.zp")
+    assert "Nothing in the downloads folder was downloaded before" in run(capsys, ui.clean_downloads, older_than="7d")
+    assert "Nothing was named; downloads() lists what's there." in run(capsys, ui.clean_downloads, [])
+    every = run(capsys, ui.clean_downloads)
+    assert "Deleted 1 download" in every and "readme.md" in every and sorted(p.name for p in home.iterdir()) == [
+        ".gitignore"]
+    assert "The downloads folder is empty." in run(capsys, ui.clean_downloads)
+
+    here = S3View(ui.core, mode="text", downloads=".")  # sets core.downloads
+    assert ui.core.downloads == "."
+    out = run(capsys, here.downloads)
+    assert "the notebook's own folder: they mix with your own files" in out and "-- In the downloads" not in out
+    assert "won't empty it" in run(capsys, here.clean_downloads) and (home / ".gitignore").exists()
 
 
 class FakeBar:

@@ -95,7 +95,11 @@ for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
-  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead).
+  `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead). The one exception is
+  `s3.py`'s `clean_downloads()`, which deletes what the user downloaded, and only from a downloads folder s3.py made:
+  `S3Analyzer._make_downloads_folder` writes `_DOWNLOADS_MARK` (a `.gitignore` of `*`) when the folder is new or
+  empty, `_made_for_downloads` checks for it, and `_protected_folder` refuses the notebook's own folder, the home
+  folder and the ones above them, even when marked.
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
   the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
@@ -191,6 +195,12 @@ How the View layer works:
   plain line with the rate and time left otherwise, only one at a time (a nested `_progress` replaces the outer
   bar), and nothing with `View(progress="off")`. Work spread over threads reports progress from the calling thread
   only (S3's `_run_in_threads`), never from a worker, so notebook widgets aren't touched from other threads.
+- Downloads without a path go into one folder, `S3Analyzer.downloads` (`DOWNLOADS`, `s3-downloads` next to the
+  notebook; `S3View(downloads=)` / `S3Explorer(downloads=)` set it, and the explorer's ⚙ edits it), which
+  `downloads_folder()` resolves at call time. A path given to a download is used as is, from the notebook's folder.
+  `list_downloads()` / `downloads()` list its top-level entries (a folder download is one entry; when it was downloaded
+  is the newest change time, since downloads keep S3's modified time) and `clean_downloads()` deletes whole entries
+  only, never part of a folder download.
 - `DynamoDBView` keeps `self._pager` so `more()` continues the last `scan` / `query` / `sql`. `BedrockKBView` keeps
   `self._last` (the last search or answer, for `chunk()`) and `self._conversation` (for `follow_up()`, with the
   data sources it searches), and `self.kb`, the default knowledge base that `use()` sets. `data_source=` (a name, ID
@@ -362,8 +372,9 @@ does both, a page at a time). How the UI works:
   files (`_expand_all`, applied in `_set_pane`) until it's clicked again (`unfold("start")`).
 - "Read all" on a PDF (`_read_pdf`) draws `_MAX_PICTURES` pages from `_first_page`, after counting the pages once per
   file version (`_page_count`); `_draw_pager` puts the buttons for the pages before and after under the report.
-- "⬇ Download .zip" on a folder runs `download_zip` with `zip_max_size` / `zip_max_files` / `zip_folder`, which the
-  ⚙ settings panel edits (Text widgets shown under the report's title; Enter in a box saves, like the path box).
+- "⬇ Download .zip" on a folder runs `download_zip` with `zip_max_size` / `zip_max_files`, which the ⚙ settings panel
+  edits (Text widgets shown under the report's title; Enter in a box saves, like the path box), and saves where
+  "⬇ Download" does: `x.downloads`, a property over `core.downloads` (`zip_folder` is its old name), which ⚙ edits too.
 
 ## The PyPI package
 
