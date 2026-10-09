@@ -8,8 +8,8 @@
 
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
 DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes, Lambda functions and the SageMaker notebook
-itself: what's there, what it costs, and what to do next. And a chat window for asking a knowledge base, with every
-setting in reach.
+itself: what's there, what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
+knowledge base indexed each of its files, and a chat window for asking it, with every setting in reach.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -81,6 +81,7 @@ report still renders.
 | <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
 | <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#explorer)              |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
 | <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
@@ -112,7 +113,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
                        # OpenSearchView from opensearch, LambdaView from lambda_functions
 # installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView,
-# LambdaView, S3Explorer, chat)
+# LambdaView, S3Explorer, KBExplorer, chat)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -126,8 +127,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 >
 > Installed with pip, every `from s3 import ...` in this README and the guides becomes
 > `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env`,
-> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, and `chat`, also come straight
-> from `aws_analyzer`.
+> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, `S3Explorer`, `KBExplorer` and
+> `chat` also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -767,8 +768,9 @@ has a ready-made IAM policy that covers every command.
 
 ## Amazon Bedrock Knowledge Bases
 
-<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **Knowledge bases, what they retrieve, and the answers built on them.** Settings and sync health, search with
-highlighted passages, answers with citations, and retrieval measured on your own questions.
+<img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **Knowledge bases, what they retrieve, and the answers built on them.** Settings and sync health, every file
+and how it was indexed, search with highlighted passages, answers with citations, and retrieval measured on your own
+questions. The [explorer window](#explore-by-clicking) shows it all by clicking.
 
 📄 [`analyzers/bedrock_kb.py`](analyzers/bedrock_kb.py) · 📖 [Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)
 
@@ -809,6 +811,11 @@ ui.link(2)                         # a link that opens result #2's file in a new
 ui.ask("How long do refunds take?")      # an answer with [1][2] citations and its sources
 ui.follow_up("And for digital goods?")   # same conversation
 ui.ask("How long do refunds take?", data_source="faq")   # answered from one data source only
+
+ui.files()                         # every file next to Bedrock's record of it: failed, changed, not synced...
+ui.file("refund-policy.pdf")       # how one file was indexed: its parser, chunks in order, metadata, what to fix
+ui.search_file("refund-policy.pdf", "How long do refunds take?")   # does the question find it, and where it ranks
+ui.explore()                       # all of it in a window, by clicking (below)
 ```
 
 > [!NOTE]
@@ -818,9 +825,61 @@ ui.ask("How long do refunds take?", data_source="faq")   # answered from one dat
 > say how to pick. Nothing in the file changes a knowledge base: where a sync is needed, it shows the
 > `aws bedrock-agent start-ingestion-job ...` command and the boto3 call instead of running them.
 
+### Explore by clicking
+
+`explore()` opens a window on a knowledge base that you use by clicking, with nothing to type but a question. Every
+file of its S3 data sources is listed next to Bedrock's record of it, so you see at once which ones failed and why,
+which changed in S3 since they were indexed, which were added after the last sync, which the sync skipped, and which
+are gone from S3 but still turn up in answers. Click a file to see how it was indexed, step by step: the parser that
+read it, each chunk in document order with the text it shares with the one before, its metadata file next to what its
+chunks carry, and what to fix.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/kb-explorer-file-dark.webp">
+  <img src="docs/images/kb-explorer-file-light.webp" alt="The knowledge base explorer: at the top, the knowledge base support-docs and cards for 44 files, 39 searchable, 2 failed, 2 to sync, the last sync and the idle cost; tabs for Overview, Files, Syncs, Search and Settings; on the left the Files tab's search box with warranty typed in it, chips for each state with their counts and warranty.pdf listed; on the right warranty.pdf's page: its cards, no issues found, and how it was indexed as a line of steps from Stored in S3, Read by the parser and Cut into chunks (5 chunks, about 294 tokens each, from page 1 to 8) to Embedded, Stored as vectors and Now: Indexed">
+</picture>
+
+<p align="center"><sub><code>explore("support-docs")</code>: every file next to Bedrock's record of it, and for warranty.pdf, each step from S3 into the vector store.</sub></p>
+
+```python
+from bedrock_kb import explore             # with pip: from aws_analyzer import KBExplorer
+
+explore()                                  # the only knowledge base here, or the first active one
+explore("support-docs")                    # a name, ID or ARN
+explore("support-docs", file="faq/returns.md")   # straight to one file's page
+explore(region="us-west-2")                # another region (or profile="dev")
+explore("support-docs", height=800)        # 800px pages (else the browser's height)
+ui.explore()                               # from a BedrockKBView, on its knowledge base
+```
+
+The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
+browser tab). Without it, or outside Jupyter, it shows the same as reports: `files()`, `file()` and `search_file()`.
+
+| To                                 | Do this                                                                                                                                                                                                                                                                                                                                                                |
+| :--------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pick a knowledge base              | Click the field at the top left: the region's knowledge bases, with a search box that finds one by name, part of its ID or its description. Enter picks the first, and a whole ID or ARN works too. The cards beside it say how it's doing: its files, how many are searchable, failed or waiting for a sync, the last sync and the idle cost of its vector store |
+| See what's wrong                   | **Overview**: its files by state in one bar, findings that say what's wrong and what to do, the commands that sync the data sources that need it (to copy: the window never syncs), how each data source becomes vectors (its location, parser, chunking, embedding model and vector store), and the recent syncs |
+| Find a file                        | **Files**: type part of a name, a folder or Bedrock's reason in the search box, click a state's chip (**Failed**, **Changed**, **Not synced**, **Skipped**, **Deleted**, **Ignored**, **Indexed**) to see only those, pick a data source, or sort by name, folder, size, last change or last indexed. Problems come first, 40 to a page with **«** **‹** **›** **»** under the list |
+| See how a file was indexed         | Click it. Its page has its state and what to do about it, then each step from S3 into the vector store, the one that failed in red. Its chunks follow as a bar of their sizes (for a .txt or .md file, also where each sits in the file and what no chunk holds), then a line each with its page, size and first words that opens to the chunk's text, the part it repeats from the chunk before marked, and its metadata. Last, its `.metadata.json` next to what its chunks carry, and Bedrock's record of it |
+| Check that a question finds a file | On its page, type a question in **Ask a question…** and press Enter: the file's own best passages for it, and where it ranks among the whole knowledge base's. When an answer, which sees the top 5, wouldn't see it, a finding says what to change |
+| Search the knowledge base          | **Search**: a question's passages with their scores and the question's words highlighted. Pick the number of passages, the search type (**Semantic** or **Hybrid**), a data source and a reranker. **How refund-policy.pdf was indexed ›** under a passage opens its file's page |
+| Read the sync history              | **Syncs**: every sync, newest first, as a timeline: when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed |
+| Read the settings                  | **Settings**: every setting in plain English (the embedding model and its dimensions, the vector store and where it keeps each part of a chunk, each data source's location, chunking, parser and deletion policy, the tags), then GetKnowledgeBase and GetDataSource as AWS returns them, folded |
+
+Everything is read in the background, so a click shows what's known at once and the rest as it arrives, and the
+window keeps answering. Like the rest of the file it only reads: where a sync would help, it shows the command.
+`explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, and `x.ui`
+is a `BedrockKBView` for reports in other cells.
+
 ### Commands (`BedrockKBView`)
 
 Grouped the way `ui.help()` lists them.
+
+#### Explore by clicking
+
+| Command                                         | Shows                                                                                                                                                                                                       |
+| :---------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explore(kb=None, file=None, height=None)`      | The [explorer window](#explore-by-clicking): every file and how it was indexed, the syncs, a search box and every setting, by clicking. `file=` opens one file's page; `view.explorer` is the window      |
 
 #### Knowledge bases
 
@@ -837,6 +896,9 @@ Grouped the way `ui.help()` lists them.
 | `syncs(kb=None, data_source=None, n=10)`                  | Sync history: when, how long, status, scanned / new / modified / deleted / failed counts, **why syncs failed**, and the command to sync again                                   |
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the ones that aren't indexed with Bedrock's reason, and the sync command. `status="INDEXED"` or `"FAILED"` lists only those |
 | `unsynced(kb=None, data_source=None)`                     | S3 files added or changed since each data source's last successful sync, and the command to sync them                                                                           |
+| `files(kb=None, data_source=None, status=None, match=None, n=50)` | Every file next to Bedrock's record of it: indexed, failed (and why), changed in S3 since it was indexed, added after the last sync, skipped by the sync (and the likely reason: a type Bedrock doesn't read, over 50 MB, archived), gone from S3 but still searchable. Problems first, with the commands that sync them. `status="failed"` or `match="refund"` narrows the list |
+| `file(path, kb=None)`                                     | How one file was indexed, step by step (stored in S3, read by the parser, cut into chunks, embedded, stored as vectors, where it stands now), its chunks in document order with their size, page and the text each shares with the one before, its metadata file checked against what its chunks carry, and what to fix. `path`: its name, its path in the bucket or its `s3://` path |
+| `search_file(path, question, kb=None, n=10)`              | Whether a question finds a file: its own best passages for it, and where it ranks among the whole knowledge base's (an answer sees the top 5), with what to change when it ranks too low |
 
 #### Search and answer
 
@@ -931,6 +993,14 @@ kb.ingestion_jobs("support-docs", n=20)             # [IngestionJob], newest fir
 docs, summary = kb.documents("support-docs", status="FAILED")   # [KBDocument], DocumentSummary
 kb.unsynced("support-docs")                         # [SyncFreshness]: changed S3 files per data source
 
+inv = kb.file_inventory("support-docs")             # FileInventory: every file, KBFile.state and why (KBFile.note)
+inv.counts(), inv.to_df()                           # files per state; one row per file
+f = "s3://support-docs-bucket/policies/refund-policy.pdf"
+chunks = kb.document_chunks("support-docs", f)      # DocumentChunks: its chunks in document order, .stats
+kb.metadata_file(f)                                 # MetadataFile: its .metadata.json's attributes and problems
+kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank in the whole knowledge base
+kb.document_status("support-docs", f, "docs-s3")    # KBDocument: Bedrock's record of one file
+
 r = kb.retrieve("support-docs", "refund window", n=10, where={"team": "billing"})   # Retrieval
 r.passages[0].text, r.passages[0].source, r.passages[0].metadata
 r = kb.retrieve("support-docs", "refund window", data_source="faq")   # one data source: r.data_sources
@@ -955,8 +1025,10 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
 `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`
 (and `DEFAULT_PROMPT`), `parse_citation_markers`, `question_terms`, `best_snippet`, `retrieval_metrics`,
 `match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
-`vector_store_monthly_cost`, `query_cost`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
-`answer_findings`, `eval_findings`.
+`vector_store_monthly_cost`, `query_cost`, the file functions: `inventory_files`, `file_state`, `skip_reason`,
+`sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`,
+`find_files`, `sort_files`, `parse_file_state`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
+`answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`.
 
 </details>
 
@@ -980,6 +1052,13 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
   plus reranking when you ask for it.
 - `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects by default; both say
   when they stopped early (`.core.documents(..., limit=None)` reads everything).
+- `files()`, `file()` and the explorer read at most 10,000 of Bedrock's documents and 10,000 S3 files per data
+  source, and say when they stopped (`.core.file_inventory(..., limit=None)` reads everything). A file the document
+  list didn't reach is looked up on its own when you open it.
+- A file's chunks come from one Retrieve limited to the file (a filter on `x-amz-bedrock-kb-source-uri`), which
+  returns at most 100 passages: a file with more says so. Opening a file costs one search and asking it a question
+  two (a question embedding each, well under a cent). A vector store that ignores the filter is caught: passages of
+  other files are counted and left out.
 
 </details>
 
@@ -991,16 +1070,17 @@ Read-only, per command:
 | Permission                                                                                 | Used by                                                            |
 | :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`                                   | `kbs`, `kb_info`, and finding a knowledge base by name             |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`                              |
-| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`                                                        |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `file`, `explore`  |
+| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`, `files`, `file`, `search_file`, `explore`             |
+| `bedrock:GetKnowledgeBaseDocuments`                                                        | `file` and `explore`, for a file the document list stopped before  |
 | `bedrock:ListTagsForResource`                                                              | `kb_info`                                                          |
-| `bedrock:Retrieve`                                                                         | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")` |
+| `bedrock:Retrieve`                                                                         | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")`, and a file's chunks and questions in `file`, `search_file` and `explore` |
 | `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up`                                                 |
 | `bedrock:InvokeModel`                                                                      | `ask(engine="converse")`, `core.generate`                          |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`                            | `models`, and turning `model="sonnet"` into an ID                  |
-| `s3:ListBucket` on the data source's bucket                                                | `unsynced`                                                         |
-| `s3:GetObject` on the data source's files                                                  | Opening a file from its link (`link`, and the file names in reports): your browser uses it, the notebook never reads the file |
+| `s3:ListBucket` on the data source's bucket                                                | `unsynced`, `files`, `file`, `search_file`, `explore`              |
+| `s3:GetObject` on the data source's files                                                  | `file` and `explore` read a file's `<file>.metadata.json`, and a .txt or .md file's text to place its chunks in it. Opening a file from its link (`link`, and the file names in reports) uses it too, in your browser |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. Anything you can't
 read shows up as a note instead of an error. The
@@ -1737,8 +1817,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
 - **Screenshots** are the tool's own output from demo buckets, tables and knowledge bases with synthetic data;
   `.claude/skills/demo/shots.py` remakes them (it needs Pillow and a headless Chrome), and
   `.claude/skills/demo/demo.py` runs any command against the same kind of data. Bedrock's are served by a simulated
-  Bedrock, since moto has none, and OpenSearch's by simulated clusters. The chat window's are taken in a real JupyterLab by
-  `.claude/skills/demo/chat_shots.py` (it needs jupyterlab and playwright too).
+  Bedrock, since moto has none, and OpenSearch's by simulated clusters. The chat window's and the knowledge base
+  explorer's are taken in a real JupyterLab by `.claude/skills/demo/chat_shots.py` and
+  `.claude/skills/demo/kb_explorer_shots.py` (they need jupyterlab and playwright too).
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
   `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes
   and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),

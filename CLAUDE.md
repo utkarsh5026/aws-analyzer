@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
-in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases, `bedrock_chat.py` for a chat
-window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
+in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
+through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
 region or all of them) that a user pastes
 into a notebook cell or uploads next to a notebook and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that
@@ -155,7 +155,11 @@ How the View layer works:
   `<details>` with coloured tokens, capped and opened breadth-first; not `bedrock_chat`'s `_Json`, which shows a
   request with its settings marked), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
-  cited spans and `[n]` superscripts), and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
+  cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was
+  indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
+  document order: a bar of their sizes, and of where each sits in the file when its text was read, then each folded,
+  the text it repeats from the one before in `<mark class="ov">`) and `_Shares` (parts of a whole in one bar: files by
+  state), plus a copy of `bedrock_chat`'s `_Json`, and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
   `_python_html`, from `tokenize`, JSON by `_json_source_html` or an AWS CLI command by `_shell_html`, by its `lang`)
   and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
@@ -300,6 +304,30 @@ How the View layer works:
   `_ipython_display_` shows the window once per cell, so a cell
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
+- `bedrock_kb`'s explorer window, `KBExplorer` (after the View, with `explore()`; `BedrockKBView.explore()` keeps it in
+  `view.explorer`), is the third interactive UI, standalone like `bedrock_chat` and built the same way: ipywidgets
+  styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS` included once in its style widget, so `_html`
+  strips it from each report), no JavaScript, full-row `Button`s under their faces (`_FileRow`, the knowledge base
+  field `_Chooser` with its searchable list and `backdrop`), custom tab buttons over pages (`_EXPLORER_TABS`, icons from
+  `_explorer_rules()`, which also gives each `FILE_STATES` key its colour). Its data is the analyzer's file layer:
+  `file_inventory()` reads Bedrock's document list (ListKnowledgeBaseDocuments) next to the bucket (ListObjectsV2 under
+  the inclusion prefixes, `<file>.metadata.json` attached to its file) and `inventory_files` / `file_state` join them
+  into one state per file (`FILE_STATES`: failed, changed, new, skipped, deleted, partial, ignored, indexing,
+  unchecked, indexed); `document_chunks()` reads a file's chunks with a Retrieve filtered on
+  `x-amz-bedrock-kb-source-uri` (`SOURCE_KEY`, at most `CHUNK_LIMIT` = 100), puts them in document order (`place_chunks`
+  in a .txt / .md file's text, else `order_chunks` by page and `chunk_overlap`) and counts other files' passages in
+  `outside`; `metadata_file()`, `probe_file()` (the file's passages and its rank in the whole knowledge base) and
+  `document_status()` (GetKnowledgeBaseDocuments, for an unchecked file when it's opened: `BedrockKBView._recheck`).
+  The View's `files()` / `file()` / `search_file()` show the same as reports, and the window draws their blocks
+  (`_files_blocks`, `_file_blocks`, `_probe_blocks` with `window=True`) through `_for_window`, which drops `_Next` and
+  rewrites what a sentence tells you to call into where the window shows it (`_window_text`: `syncs()` -> "the Syncs
+  tab", `where=` filters -> metadata filters). AWS is read off the loop: `_later(key, work, done, failed)` runs `work`
+  in `_workers()` through the running loop's executor and `done` on the loop, inline without one; `self._jobs[key]`
+  drops a stale result, `_open_kb` bumps every key so an earlier knowledge base's results are dropped, and `_tasks`
+  holds the asyncio tasks (tests await them). `_renew_pane` puts the file page in a new box so it starts at the top,
+  `_set` only sends HTML that changed, the status line says what each tab holds when nothing's going on (`_said`,
+  `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
+  `_window_errors`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
 - `sagemaker_env` also reads the machine it runs on: SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
   processes and which are Jupyter kernels), the disks and `nvidia-smi`. `SageMakerAnalyzer(root=...)` points all of
@@ -323,7 +351,10 @@ runtime's end of support, block-create and block-update dates from AWS's Lambda 
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 `bedrock_chat.py` carries its own copies of `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL`
-and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ).
+and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ). The two windows
+also share copies: `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_Json` with
+`_json_html` / `_plain_json`, `SEARCHABLE` and `Analyzer._cached_client` (which makes each client once, under a lock,
+since both windows read from threads).
 
 ## The S3 explorer (`s3_explorer.py`)
 
@@ -434,9 +465,13 @@ does both, a page at a time). How the UI works:
   `BedrockKBAnalyzer(client=agent, clients={"bedrock-agent-runtime": ..., "bedrock-runtime": ..., "bedrock": ...})`.
   Stubber answers in the order calls are queued and checks each request against the service model; set
   `core.max_workers = 1` when a test lists several knowledge bases. moto is only used for the S3 bucket behind
-  `unsynced()`. For the same reason the Bedrock seeder in `.claude/skills/demo/demo.py` returns fake clients
-  (`_FakeAWS`, which validates requests and responses against the service model) that `demo.py` passes to the
-  analyzer; only the bucket is moto.
+  `unsynced()` and the file reports. For the same reason the Bedrock seeder in `.claude/skills/demo/demo.py` returns
+  fake clients (`_FakeAWS`, which validates requests and responses against the service model) that `demo.py` passes to
+  the analyzer; only the buckets are moto (support-docs' files match its document records, plus a few in each state the
+  explorer shows, and `file_chunks` answers a Retrieve limited to one file). The explorer window's tests use a `World`:
+  `Fake` bedrock-agent and bedrock-agent-runtime clients (any order, checked against the service model) over a moto
+  bucket, with `holds` (a `threading.Event` per operation) to hold calls back for the background tests inside
+  `asyncio.run`, and `errors` to make one fail.
 - SageMaker: moto covers notebook instances (with an old instance-type list: no `ml.g5`), lifecycle configs,
   domains and STS, so `tests/test_sagemaker_env.py` uses it for notebook instances. moto has no `ListApps`,
   `DescribeApp` or spaces, so the Studio and `running()` tests use `Stubber` on injected clients
@@ -513,10 +548,12 @@ does both, a page at a time). How the UI works:
   an animated WebP of a pointer clicking through it, all in `s3_explorer.md`) come from `explorer_shots.py`, which
   runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
-  Bedrock, types and clicks through it, and sets the heights with `shots.set_height`. Remake the affected figures when
+  Bedrock, types and clicks through it, and sets the heights with `shots.set_height`, and so do the knowledge base
+  explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows ten of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
-  `bedrock-ask`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`) as `<picture>`s that
+  shows eleven of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
+  `bedrock-ask`, `kb-explorer-file`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`)
+  as `<picture>`s that
   switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the

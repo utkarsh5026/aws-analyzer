@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, and a chat window for asking a knowledge base."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, and an explorer and a chat window for a knowledge base."
 hide:
   - toc
 ---
@@ -71,9 +71,9 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     Knowledge bases, what they retrieve, and the answers built on them.
     { .what }
 
-    - Settings in plain English, sync health and failed documents
-    - Search with sources, pages and highlighted passages
-    - Answers with each claim linked to its source
+    - An explorer window: every file, and how it was indexed
+    - Settings in plain English, sync health and failed files
+    - Search with highlighted passages; answers with each claim linked to its source
     - Compare search settings and measure retrieval hit rate
 
     [Open the Knowledge Bases guide →](bedrock_kb.md)

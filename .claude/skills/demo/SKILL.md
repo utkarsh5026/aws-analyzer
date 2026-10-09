@@ -25,7 +25,8 @@ service is given, run a short tour:
 
 - s3: `ui.overview(); ui.bucket_info("demo-lake"); ui.summary("s3://demo-lake/")`
 - dynamodb: `ui.tables(); ui.table_info("orders"); ui.schema("orders")`
-- bedrock_kb: `ui.kbs(); ui.kb_info("support-docs"); ui.search("How long do refunds take?", kb="support-docs")`
+- bedrock_kb: `ui.kbs(); ui.use("support-docs"); ui.kb_info(); ui.search("How long do refunds take?"); ui.files();
+  ui.file("warranty.pdf")` (the explorer window needs a browser: see `kb_explorer_shots.py`)
 - bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request();
   ui.ask_all(["How long do refunds take? | refund-policy.pdf", "What does error E1234 mean?"]); ui.code()` (the same
   fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
@@ -165,6 +166,16 @@ Playwright's).
 ```bash
 .venv/bin/python .claude/skills/demo/chat_shots.py                   # every chat figure, light and dark
 .venv/bin/python .claude/skills/demo/chat_shots.py chat-request      # just this one
+```
+
+The knowledge base explorer (`bedrock_kb.py`'s `explore()`) is ipywidgets too, so its figures (`kb-explorer*`, in
+`docs/bedrock_kb.md`) come from `kb_explorer_shots.py`, which works like `chat_shots.py` and reuses its plumbing: it
+opens the window on support-docs, clicks warranty.pdf and one of its chunks, asks it a question, opens a failed file,
+searches, and opens the Syncs tab. `--out <folder>` writes PNGs there instead, to look at them first.
+
+```bash
+.venv/bin/python .claude/skills/demo/kb_explorer_shots.py                     # every explorer figure, light and dark
+.venv/bin/python .claude/skills/demo/kb_explorer_shots.py kb-explorer-chunks  # just this one
 ```
 
 ## Real AWS

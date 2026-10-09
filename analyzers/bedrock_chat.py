@@ -3609,6 +3609,7 @@ class BedrockChatAnalyzer:
         self.session = session or boto3.Session(profile_name=profile, region_name=region)
         self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
         self._clients: dict[str, Any] = dict(clients or {})
+        self._lock = threading.RLock()  # clients are made once, even when the Test tab asks from threads
         if client is not None:
             self._clients["bedrock-agent"] = client
         self.prices = {**BEDROCK_PRICES, **(prices or {})}
@@ -3833,7 +3834,9 @@ class BedrockChatAnalyzer:
 
     def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
         if service not in self._clients:
-            self._clients[service] = make()
+            with self._lock:  # sessions aren't thread-safe, and the window reads from threads
+                if service not in self._clients:
+                    self._clients[service] = make()
         return self._clients[service]
 
     def _runtime_client(self) -> Any:

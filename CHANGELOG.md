@@ -11,6 +11,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `bedrock_kb.py`: `explore()` (or `ui.explore()`; installed with pip, `KBExplorer`) opens a window on a knowledge
+  base that you use by clicking, with nothing to type but a question. Its Files tab puts every file of the knowledge
+  base's S3 data sources next to Bedrock's record of it: failed and why, changed in S3 since it was indexed, added
+  after the last sync, skipped by the sync (a type Bedrock doesn't read, over 50 MB, archived), gone from S3 but still
+  in answers. Click one to see how it was indexed: each step from S3 into the vector store, its chunks in document
+  order with the text each shares with the one before, its `.metadata.json` next to what its chunks carry, and what to
+  fix; ask it a question to see whether it holds the answer, and whether it ranks high enough for an answer to see it.
+  The Overview, Syncs (a timeline), Search and Settings tabs are a click away, and like the rest of the file it only
+  reads: where a sync would help, it shows the command. Besides what `documents()` and `unsynced()` use, it needs
+  `s3:GetObject` to read metadata files, and `bedrock:GetKnowledgeBaseDocuments` for files past the first 10,000.
+  ([#57](https://github.com/utkarsh5026/aws-analyzer/pull/57))
+- `bedrock_kb.py`: `ui.files()`, `ui.file("refund-policy.pdf")` and `ui.search_file("refund-policy.pdf", "a
+  question")` show the same as reports: every file and its state (`status="failed"` or `match="refund"` narrows the
+  list), how one file was indexed, and where a question ranks it. `ui.core.file_inventory()`, `document_chunks()`,
+  `metadata_file()` and `probe_file()` return the data behind them.
+  ([#57](https://github.com/utkarsh5026/aws-analyzer/pull/57))
+
 ### Changed
 
 - `bedrock_chat.py`: the chat window now opens with a two-line greeting instead of a page of instructions that

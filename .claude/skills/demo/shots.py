@@ -57,7 +57,8 @@ IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
           "bedrock_chat": "bedrock_chat.md", "sagemaker_env": "sagemaker_env.md", "opensearch": "opensearch.md",
           "lambda_functions": "lambda_functions.md"}
-# s3_explorer's figures come from explorer_shots.py and bedrock_chat's from chat_shots.py, which use set_height
+# s3_explorer's figures come from explorer_shots.py, bedrock_chat's from chat_shots.py and the knowledge base
+# explorer's from kb_explorer_shots.py, which use set_height
 WIDTH, SCALE, MARGIN = 984, 1.5, 12  # CSS px wide, device pixels per CSS px, page margin in CSS px
 REGION, ACCOUNT = "us-east-1", "123456789012"
 NOW = datetime.now(timezone.utc)
