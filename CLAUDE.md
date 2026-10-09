@@ -218,7 +218,7 @@ How the View layer works:
 - `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but standalone (not a companion): it
   copies its helpers like the other analyzers. `chat()` (module level) builds a `BedrockChatView` and calls
   `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
-  `column-reverse` box so it stays scrolled to the newest, and the Settings / Request JSON / Last response tabs).
+  `column-reverse` box so it stays scrolled to the newest, and the side tabs).
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
   conversation as an ordinary report that does. Its settings come from botocore's service model:
   `request_schema()` walks RetrieveAndGenerate's input shape into `Field`s (path, kind, range, docs), with the short
@@ -256,7 +256,9 @@ How the View layer works:
   result is an `Answer` with `retrieve_only=True` (no text; `sources` is every passage, ranked, with scores) kept in
   `view.answers` without touching the session. `ask()` always answers and `retrieve()` always searches; `_counterpart`
   pairs a turn with the same question asked the other way, for `cited_ranks` and `compare_findings`.
-  The side tabs are Settings, Test, Runs, Code, Request JSON and Last response (`_ChatApp.TEST_TAB` / `RUNS_TAB`).
+  The side tabs are Settings, Test, Runs, Code, Request and Response, from `_TABS` (each title with its line
+  drawing; `_ChatApp.TEST_TAB` / `RUNS_TAB` are their places): `_tab_rules()` keeps them on one row that never wraps,
+  each icon a mask in the text's colour, shown only while the bar is 480px wide or more (a container query).
   **Test** asks a list of questions
   (`parse_questions`: one per line, `question | expected file`) with the window's setup, each on its own (no session):
   `BedrockChatAnalyzer.ask_all` is `_prepare_batch` (resolves once, builds every request) then `_run_batch`, which

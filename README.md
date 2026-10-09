@@ -1042,25 +1042,25 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   came back "unable to assist" although the search found passages (the answer step, not the search, is what to fix).
   Switching puts your last question back in the box; the settings for the answer (temperature, prompt...) are
   dimmed while they aren't sent.
-- **⚙️ Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
+- **Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
   name for what it does and its path in the request). Change it in place, remove it with ✕, or open **+ Add a
   setting** to add the common ones with one click, search **every** field by
   name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
   the list comes from the installed boto3's description of the API, so nothing is missing. A value that
   can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
   newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
-- **🧾 Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
+- **Request.** The exact request the next question sends, as a folding tree with your settings highlighted, as
   JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
   back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
-  while you were editing without saying so. **📨 Last response** shows what came back.
-- **🧪 Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
+  while you were editing without saying so. **Response** shows what came back.
+- **Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
   model, data source, files and settings, on its own (never as a follow-up), a few at a time, while the window stays
   usable (**Stop** sends no more). Each question gets a line saying how it did (answered, "unable to assist", no
   citations, partly grounded, failed) with its grounded share, sources and time, and opens to the full answer. Add
   `| refund-policy.pdf` after a question to check that the answer cites that file. Cards and findings sum up the run
   and say which setting to try; change it and **Run** again, and each line says whether that question did better or
   worse. Before you run, the estimated cost shows beside the button. On **Retrieve only**, the list is searched instead.
-- **Try variations**, in the 🧪 Test tab, asks the list with every combination of the values you type, one setting
+- **Try variations**, in the Test tab, asks the list with every combination of the values you type, one setting
   per line (`n = 5, 10`, `search_type = SEMANTIC, HYBRID`, `model = haiku, sonnet`, `reranker = none, cohere`, or
   `data_source = all, faq`), or add with one click. **Run** asks each question with every setup before the next one,
   so **Stop** leaves them all with the same questions, then ranks the setups: by the expected files cited, then the
@@ -1069,11 +1069,11 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   of setups that differ only in search_type"; "temperature made no difference"), when the lead is small enough to be
   chance, and which questions no setup could answer. A table shows how each question did with each setup, and
   **Use this setup** switches to the one you pick. A sweep estimated over $2 asks for a second click.
-- **📈 Runs.** Every test run, newest first, ranked against the other runs of the same questions: open one in the
+- **Runs.** Every test run, newest first, ranked against the other runs of the same questions: open one in the
   Test tab, switch to its setup, or compare it with the others side by side. **Save** writes them to a file (one JSON
   line per run, with each answer and its sources) and adds every later run as it finishes; **Load** reads a file
   back after a kernel restart, or a teammate's.
-- **📋 Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
+- **Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
   questions, printing each answer and the files it cites; the config as JSON (the request without the question,
   which `client.retrieve_and_generate(input={"text": question}, **config)` or the AWS CLI's `--cli-input-json` sends);
   or the AWS CLI command for one question. It follows every change to the knowledge base, model, files and settings.
@@ -1087,7 +1087,7 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Runs, Code, Request JSON and Last response tabs |
+| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Runs, Code, Request and Response tabs |
 | `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
 | `retrieve(question)` | Only the search behind an answer (Retrieve, the same settings without the model): every passage found, best first, with its score, and no answer. After `ask()` with the same question, which passages the answer cited, and whether a poor answer comes from the search or the model |
 | `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
@@ -1222,7 +1222,7 @@ the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations
   `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
   in the table shows its cost as unknown.
 - Bedrock takes questions of up to 1,000 characters; the chat says so before sending a longer one.
-- A test run (`ask_all()`, the 🧪 Test tab) costs what its questions would cost asked one by one, and the window shows
+- A test run (`ask_all()`, the Test tab) costs what its questions would cost asked one by one, and the window shows
   an estimate before you run it (about 300 tokens per passage and per answer). It asks up to 50 questions
   (`ask_all(limit=None)` for all of them), four at a time; the client slows down and retries when Bedrock throttles,
   and a question that still fails is listed with the reason while the rest are asked.

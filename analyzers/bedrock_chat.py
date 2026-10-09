@@ -21,8 +21,9 @@ and response) and six tabs on the right:
                    compare them, and save them to a file (or load one) so they outlast a kernel restart.
     Code           this setup to copy and run anywhere: a Python script (boto3 only) that asks your test questions,
                    the config as JSON (the request without the question), or an AWS CLI command.
-    Request JSON   the exact request your next question sends, highlighted. Edit it by hand, or copy it as Python.
-    Last response  what Bedrock sent back, as JSON.
+    Request        the exact request your next question sends, as JSON, highlighted. Edit it by hand, or copy it as
+                   Python.
+    Response       what Bedrock sent back to the last question, as JSON.
 
 Answer / Retrieve only, beside the question box, picks what a question does: an answer from the model
 (RetrieveAndGenerate), or only the search behind it (Retrieve): every passage it finds, best first, with its score,
@@ -114,7 +115,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Generator, Iterable
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import boto3
 import botocore
@@ -4504,11 +4505,64 @@ class _Results:
     rows: list[_ResultRow]
 
 
+# The window's side tabs, in order: each title, and the line drawing (24 x 24) shown before it as a mask in the text's
+# colour, so it follows the theme like the S3 explorer's icons. Under 480px of tab bar the titles stand alone.
+_TABS = (
+    ("Settings", "<path d='M4 7.5h9M17.5 7.5H20M4 16.5h2.5M11 16.5h9'/><circle cx='15' cy='7.5' r='2.5'/>"
+                 "<circle cx='8.5' cy='16.5' r='2.5'/>"),
+    ("Test", "<path d='M9 3h6M10 3v6L4.6 18.4A1.8 1.8 0 0 0 6.2 21h11.6a1.8 1.8 0 0 0 1.6-2.6L14 9V3'/>"
+             "<path d='M7.2 15h9.6'/>"),
+    ("Runs", "<path d='M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5'/><path d='M3.5 3.5v5h5'/><path d='M12 7.5V12l3 2'/>"),
+    ("Code", "<path d='M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14'/>"),
+    ("Request", "<path d='M7 17L17 7M8.5 7H17v8.5'/>"),
+    ("Response", "<path d='M17 7L7 17M15.5 17H7V8.5'/>"),
+)
+_TAB_TITLES = [title for title, _ in _TABS]
+
+
+def _tab_rules() -> str:
+    """The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
+    icon while the bar is 480px wide or more (a container query), tighter under 360px. For both ipywidgets 8's (lm-)
+    and 7's (p-) class names."""
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
+           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+    rules, narrow, tight = [], [], []
+    for x in ("lm", "p"):
+        bar = f".kbc-app.kbc-app .kbc-side>.{x}-TabBar"
+        tab = f"{bar} .{x}-TabBar-tab"
+        rules += [
+            f"{bar}{{container-type:inline-size;padding:3px;border-radius:12px;background:var(--kc-tint-2);"
+            "min-height:0;border:0;overflow:visible;margin:0 0 10px}",
+            f"{bar}>.{x}-TabBar-content{{gap:2px;border:0;align-items:stretch;flex-wrap:nowrap}}",
+            f"{tab}{{flex:1 1 auto;min-width:0;min-height:30px;line-height:30px;margin:0;padding:0 8px;border:0;"
+            "border-radius:9px;font-size:12px;background:transparent;color:inherit;opacity:.72;font-weight:500;"
+            "transform:none;justify-content:center;align-items:center;gap:6px;cursor:pointer;"
+            "transition:background-color .15s,opacity .15s}",
+            f"{tab}:hover:not(.{x}-mod-current){{background:var(--kc-tint);opacity:.95}}",
+            f"{tab}.{x}-mod-current{{background:var(--kc-raised);opacity:1;font-weight:600;min-height:30px;"
+            "transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}",
+            f"{tab}.{x}-mod-current::before{{display:none}}",
+            f"{tab}:focus{{outline:none}}",
+            f"{tab}:focus-visible{{outline:2px solid var(--kc-ring);outline-offset:-2px}}",
+            f"{tab} .{x}-TabBar-tabLabel{{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;"
+            "white-space:nowrap}",
+            f"{tab} .{x}-TabBar-tabIcon{{flex:0 0 auto;width:14px;height:14px;background:currentColor;"
+            "-webkit-mask:var(--kc-icon) center/contain no-repeat;mask:var(--kc-icon) center/contain no-repeat}",
+            f"{tab}.{x}-mod-current .{x}-TabBar-tabIcon{{background:var(--kc-accent)}}",
+        ]
+        rules += [f'{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:url("data:image/svg+xml,'
+                  f'{quote(svg.format(paths))}")}}' for k, (_, paths) in enumerate(_TABS, 1)]
+        narrow.append(f"{tab} .{x}-TabBar-tabIcon{{display:none}}")
+        tight.append(f"{tab}{{padding:0 5px}}")
+    return "\n".join([*rules, f"@container (max-width:479px){{{''.join(narrow)}}}",
+                      f"@container (max-width:359px){{{''.join(tight)}}}"])
+
+
 _CSS = """<style>
-.kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11)}
+.kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11);--kc-raised:var(--kc-surface)}
 .kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8;--kf:#0e7490;--ka:#c2410c;--kw:#be185d}
-body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
+body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
 .kbc{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .kbc h3{margin:10px 0 2px;font-size:16px}
 .kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}
@@ -4822,13 +4876,6 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:hover:enabled{opacity:1;background:var(--kc-tint)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active:hover:enabled{background:var(--kc-surface)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:disabled{opacity:.4}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar,.kbc-app.kbc-app .kbc-side>.p-TabBar{padding:4px;border-radius:14px;background:var(--kc-tint-2);min-height:0;border:0;overflow:visible;margin:0 0 10px}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:2px;border:0;align-items:stretch;flex-wrap:wrap}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 auto;min-width:fit-content;min-height:28px;line-height:28px;margin:0;padding:0 6px;border:0;border-radius:10px;font-size:12px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab:hover:not(.lm-mod-current),.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab:hover:not(.p-mod-current){background:var(--kc-tint);opacity:.95}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:28px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
-.kbc-app.kbc-app .kbc-side .lm-TabBar-tabLabel,.kbc-app.kbc-app .kbc-side .p-TabBar-tabLabel{text-align:center}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:16px;padding:10px 4px 10px 12px;background:var(--kc-surface);overflow:hidden}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:clamp(620px,calc(100vh - 320px),1480px);overflow:hidden auto;padding-right:8px}
 body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px}
@@ -4857,7 +4904,7 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 .kbc-app.kbc-app .kbc-trig>.kbc-trig-b:active:enabled,.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:active:enabled{transform:none}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
-</style>"""
+""" + _tab_rules() + "\n</style>"
 
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
@@ -6361,7 +6408,7 @@ def _setting_marks(keys: Iterable[str], schema: Schema, retrieve_only: bool = Fa
 _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max_tokens", "prompt", "query_decomposition")
 _SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
 _BESIDE = ("integer", "float", "boolean", "choice")  # kinds whose box sits beside the setting's name
-_PYTHON_WIDTH = 64  # where the Request JSON tab's Python breaks lines, so it fits the tab
+_PYTHON_WIDTH = 64  # where the Request tab's Python breaks lines, so it fits the tab
 _PICKER_ROWS = 40  # lines a picker's list shows at once; the search box finds the rest
 
 
@@ -6678,7 +6725,7 @@ class _ChatApp:
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
     log, where nobody looks."""
 
-    TEST_TAB, RUNS_TAB = 1, 2  # where the 🧪 Test and 📈 Runs tabs are among the side tabs
+    TEST_TAB, RUNS_TAB = _TAB_TITLES.index("Test"), _TAB_TITLES.index("Runs")  # where they are among the side tabs
 
     def __init__(self, view: BedrockChatView, widgets: Any):
         self.view, self.w = view, widgets
@@ -6843,7 +6890,7 @@ class _ChatApp:
             self.rows_box, self.add_button, self.adding, window_options,
         ], layout=layout(width="100%"))
 
-        # Request JSON
+        # Request: the JSON the next question sends
         self.request_mode = w.ToggleButtons(options=["Tree", "JSON", "Python"], value="Tree",
                                             tooltips=["Highlighted, folding JSON", "Plain JSON: click it to select "
                                                       "all", "The same call with boto3"],
@@ -6875,7 +6922,7 @@ class _ChatApp:
             margin="0 0 6px 0"))
         request_tab = w.VBox([toolbar, self.request_view, self.edit_box], layout=layout(width="100%"))
 
-        # Last response
+        # Response: what came back to the last question
         self.response_mode = w.ToggleButtons(options=["Response", "Request sent"], value="Response",
                                              style={"button_width": "104px"})
         self.response_mode.observe(self._safely(lambda _change: self._render_response()), names="value")
@@ -6885,8 +6932,7 @@ class _ChatApp:
         tabs = w.Tab(children=[settings_tab, self._test_tab(), self._runs_tab(), self._code_tab(), request_tab,
                                response_tab],
                      layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
-        for i, title in enumerate(("⚙️ Settings", "🧪 Test", "📈 Runs", "📋 Code", "🧾 Request JSON",
-                                   "📨 Last response")):
+        for i, (title, _) in enumerate(_TABS):
             tabs.set_title(i, title)
         tabs.observe(self._safely(self._tab_changed), names="selected_index")
         height = _css_height(self.view.height)
@@ -6897,7 +6943,7 @@ class _ChatApp:
         return tabs
 
     def _test_tab(self) -> Any:
-        """🧪 Test: a list of questions asked with the window's setup, each on its own, and how each did; with Try
+        """Test: a list of questions asked with the window's setup, each on its own, and how each did; with Try
         variations open, with every combination of the values typed there, the setups ranked."""
         w, layout = self.w, self.w.Layout
         self.test_box = w.Textarea(value=format_questions(self.view.questions), rows=7, continuous_update=True,
@@ -6963,7 +7009,7 @@ class _ChatApp:
                        self.sweep_bar, self.test_head, self.test_rows], layout=layout(width="100%"))
 
     def _code_tab(self) -> Any:
-        """📋 Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
+        """Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
         w, layout = self.w, self.w.Layout
         self.code_mode = w.ToggleButtons(options=["Python", "JSON", "AWS CLI"], value="Python",
                                          tooltips=["A script that asks your test questions with this setup (boto3 "
@@ -7230,14 +7276,14 @@ class _ChatApp:
             "and whether a poor answer comes from the search or the model.</li>"
             + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
-            "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
+            "<li><b>Request</b> shows the request your next question sends, as JSON. <b>Edit JSON</b> changes it by "
             "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
-            "<li><b>🧪 Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
+            "<li><b>Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
             "did. Change a setting and run them again: each line says whether it did better. <b>Try variations</b> "
             "asks them with every combination of the settings you list, and ranks the setups.</li>"
-            "<li><b>📈 Runs</b> keeps every test run, ranked against the others of the same questions: switch to the "
+            "<li><b>Runs</b> keeps every test run, ranked against the others of the same questions: switch to the "
             "best one's setup, compare them, and save them to a file that outlasts a restart.</li>"
-            "<li><b>📋 Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
+            "<li><b>Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
             "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div></div>"
         )
 
@@ -8106,7 +8152,7 @@ class _ChatApp:
             return
         cases = parse_questions(self.test_box.value)
         if not cases:
-            self._set_status("Type or paste questions in the 🧪 Test tab first, one per line.")
+            self._set_status("Type or paste questions in the Test tab first, one per line.")
             return
         if self._varying():
             self._run_sweep(cases)
@@ -8239,7 +8285,8 @@ class _ChatApp:
                 f"{_duration(batch.seconds)} · {self.view._batch_cost_text(batch)} (estimated)")
         if batch.stopped:
             line += " · stopped before the rest were asked"
-        line += " · 📈 Runs lists every run, and ui.results() shows this one as a report that stays in the notebook."
+        line += (" · the Runs tab lists every run, and ui.results() shows this one as a report that stays in the "
+                 "notebook.")
         problems = [n.text for n in notes]
         self._set_status(" ".join([line, *problems]), "warn" if batch.failed or problems else "ok")
         self._draw_runs()
@@ -8401,17 +8448,17 @@ class _ChatApp:
                      f"{_findings_html(_Findings(view._batch_findings(batch), empty))}</div>")
         self._set(self.test_head, _wrap(head))
 
-    # ---------------------------------------------------------------- 📈 Runs
+    # ------------------------------------------------------------------- Runs
 
     def _runs_tab(self) -> Any:
-        """📈 Runs: every test run, newest first, ranked against the others of the same questions; any one opened in
+        """Runs: every test run, newest first, ranked against the others of the same questions; any one opened in
         the Test tab, switched to or compared, and all of them saved to a file or read back from one."""
         w, layout = self.w, self.w.Layout
         self.runs_view = w.HTML(layout=layout(width="100%"))
         self.run_pick = w.Dropdown(options=[], layout=layout(flex="1 1 100%", width="auto", min_width="0"))
         buttons = []
         for text, tip, handler in (
-                ("Show", "Open this run in the 🧪 Test tab: each question, opening to its answer", self._show_picked),
+                ("Show", "Open this run in the Test tab: each question, opening to its answer", self._show_picked),
                 ("Use this setup", "Switch the window to this run's settings, model, data source and files",
                  self._use_picked),
                 ("⇄ Compare", "Every run of the same questions side by side, best first", self._compare_picked)):
@@ -8453,12 +8500,12 @@ class _ChatApp:
             self._draw_runs()
 
     def _draw_runs(self) -> None:
-        """📈 Runs: the cards and findings of runs(), then a line per run (newest first) with its rank among the runs
+        """Runs: the cards and findings of runs(), then a line per run (newest first) with its rank among the runs
         of its questions, opening to its setup; the run picker; and where the runs are saved."""
         view = self.view
         if not view.batches:
             self._set(self.runs_view, _wrap('<div class="more" style="margin:10px 0">No test runs yet: ask a list of '
-                                            "questions in the 🧪 Test tab (Try variations asks several setups at once), "
+                                            "questions in the Test tab (Try variations asks several setups at once), "
                                             "or load runs saved before.</div>"))
             self.run_actions.layout.display = "none"
             self._set(self.compare_view, "")
@@ -8525,7 +8572,7 @@ class _ChatApp:
             return
         self._show_run(batch)
         self.tabs.selected_index = self.TEST_TAB
-        self._set_status(f"The 🧪 Test tab shows {self.view._run_name(batch)}.")
+        self._set_status(f"The Test tab shows {self.view._run_name(batch)}.")
 
     def _use_picked(self, *_: Any) -> None:
         self._set_status(self.view._switch_to(self._picked()), "ok")
@@ -8538,7 +8585,7 @@ class _ChatApp:
             self._set(self.compare_view, _wrap(
                 f'<div class="note info">Only run {self.view._run_number(batch)} asked these questions this way, so '
                 "there's nothing to compare it with yet: change a setting and run them again, or open Try variations "
-                "in the 🧪 Test tab.</div>"))
+                "in the Test tab.</div>"))
             return
         shown = [b for b in self.view._compare_blocks(family, memory=False) if not isinstance(b, _Next)]
         self._set(self.compare_view, f'<div class="tests" style="margin-top:10px">'
@@ -9470,7 +9517,7 @@ class BedrockChatView:
         if isinstance(run, Batch):
             return run
         if not self.batches:
-            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's 🧪 "
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's "
                         "Test tab. load_runs() reads runs saved before.")
         try:
             number = int(str(run).strip()) if not isinstance(run, bool) else None
@@ -10163,7 +10210,7 @@ class BedrockChatView:
         expected sources, failures, estimated cost), ranked against the other runs of the same questions, with the
         best setup to switch to. load_runs() brings back runs saved before a restart."""
         if not self.batches:
-            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's 🧪 "
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's "
                         "Test tab. load_runs() reads runs saved to a file before.")
         self._show(self._runs_blocks())
 

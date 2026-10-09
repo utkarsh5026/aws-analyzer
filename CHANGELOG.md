@@ -13,7 +13,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- `bedrock_chat.py`: **Try variations**, in the chat window's 🧪 Test tab, and `ui.sweep(...)`, ask your test questions
+- `bedrock_chat.py`: **Try variations**, in the chat window's Test tab, and `ui.sweep(...)`, ask your test questions
   with every combination of the settings, models, data sources or files you're unsure of, instead of changing one and
   running the list again: `ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"], model=["haiku", "sonnet"])`, or a
   line per setting in the window (`n = 5, 10`), with one-click lines for the common ones. The setups come back ranked
@@ -23,7 +23,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `ui.use_run()` (or **Use this setup**) switches to the best one. A sweep is estimated before it's sent and isn't sent
   over $2 (`max_cost=`; in the window, a second click) or 16 setups (`max_setups=`); with `retrieve_only=True` it costs
   only the questions' embeddings.
-- `bedrock_chat.py`: **📈 Runs**, a new tab in the chat window, and `ui.runs()` list every test run, newest first, each
+- `bedrock_chat.py`: **Runs**, a new tab in the chat window, and `ui.runs()` list every test run, newest first, each
   ranked against the other runs of the same questions, so you can see what each change got you; `ui.compare_runs(2, 5)`
   puts runs side by side, question by question, and `ui.use_run(5)` switches to a run's setup. **Save** (or
   `ui.save_runs()`) keeps the runs in `kb-test-runs.jsonl` beside the notebook, a JSON line per run with each answer and
@@ -46,7 +46,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `s3.py`: `pdf_flow(doc)` turns a PDF read with `read_pdf(uri, layout=True)` (or `parse_pdf(..., layout=True)`) into
   headings, paragraphs and list items, ready to read or to send to a model, and `pdf_furniture(doc)` lists the running
   headers and footers it leaves out. `doc.layout` holds each page's lines with where they sit, their size and weight. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
-- `bedrock_chat.py`: **🧪 Test** in the chat window, and `ui.ask_all(questions)`, ask a whole list of test questions
+- `bedrock_chat.py`: **Test** in the chat window, and `ui.ask_all(questions)`, ask a whole list of test questions
   with the setup you've built (knowledge base, model, data source, files and settings), each on its own rather than as
   a follow-up, a few at a time while the window stays usable (**Stop** sends no more). Each question gets a line
   saying how it did (answered, "unable to assist", no citations, partly grounded, failed) with its grounded share,
@@ -56,7 +56,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `ui.results()` shows a run again as a report (`ui.results(1)` the first), `ui.batches[-1].to_df()` gives one row per
   question, and
   `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
-- `bedrock_chat.py`: **📋 Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
+- `bedrock_chat.py`: **Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
   Python script that needs only boto3 and asks your test questions, printing each answer with the files it cites; the
   config as JSON (the request without the question, which `client.retrieve_and_generate(input=..., **config)` or the
   AWS CLI's `--cli-input-json` sends); and the AWS CLI command for one question. It follows every change, and warns
@@ -64,6 +64,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- `bedrock_chat.py`: the chat window's side tabs stay on one row at any width instead of wrapping onto a second
+  line, and read as plain names, each with a small line icon that follows the theme (shown when there's room).
+  **Request JSON** and **Last response** are now **Request** and **Response**, and the open tab stands out in dark
+  themes too.
 - `s3_explorer.py` and `bedrock_chat.py`: the S3 explorer and the chat window fill the browser window's height
   instead of a fixed 560 and 540 pixels, so a big screen shows more files, more of a report and more of the
   conversation. They stay at least that tall, and keep those heights in VS Code. `S3Explorer(height=720)` and the new

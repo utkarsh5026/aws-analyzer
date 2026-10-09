@@ -2690,9 +2690,8 @@ def code_text(app):
 def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys):
     view = open_window(monkeypatch, fakes(rag=by_question))
     app = view._app
-    assert [app.tabs.get_title(i) for i in range(6)] == ["⚙️ Settings", "🧪 Test", "📈 Runs", "📋 Code",
-                                                         "🧾 Request JSON", "📨 Last response"]
-    assert "<b>🧪 Test</b> asks a list of questions" in texts(app)[0] and "<b>📋 Code</b> gives" in texts(app)[0]
+    assert [app.tabs.get_title(i) for i in range(6)] == ["Settings", "Test", "Runs", "Code", "Request", "Response"]
+    assert "<b>Test</b> asks a list of questions" in texts(app)[0] and "<b>Code</b> gives" in texts(app)[0]
     assert app.run_button.disabled and app.run_button.description == "▶ Run"
     assert "Type or paste questions above." in app.test_note.value
     app.test_box.value = "How long do refunds take? | refund-policy\n2. Do you ship to the moon?\nAnd bank transfers?"
@@ -2719,7 +2718,7 @@ def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys)
     assert "Since the last run (n 5 → 8): 1 question did better" in app.test_head.value
     app.test_box.value = "  "
     app._run_tests()
-    assert "Type or paste questions in the 🧪 Test tab first" in app.status.value and len(view.batches) == 2
+    assert "Type or paste questions in the Test tab first" in app.status.value and len(view.batches) == 2
     capsys.readouterr()
 
 
@@ -2757,6 +2756,19 @@ def test_window_test_tab_runs_in_the_background_and_stops(monkeypatch):
     asyncio.run(main())
 
 
+def test_window_tabs_stay_on_one_row_with_an_icon_each():
+    rules = chatmod._tab_rules()
+    assert rules in chatmod._CSS and len(chatmod._TABS) == 6
+    for x in ("lm", "p"):  # ipywidgets 8 and 7
+        assert f".kbc-side>.{x}-TabBar>.{x}-TabBar-content{{gap:2px;border:0;align-items:stretch;flex-wrap:nowrap}}" \
+            in rules
+        icons = [f".{x}-TabBar-tab:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:url(\"data:image/svg+xml,%3Csvg"
+                 for k in range(1, 7)]
+        assert all(icon in rules for icon in icons)
+    narrow = rules[rules.index("@container (max-width:479px)"):]
+    assert ".lm-TabBar-tabIcon{display:none}" in narrow  # without room for the icons, the titles alone
+
+
 def test_window_shows_a_test_run_from_another_cell(window, capsys):
     app = window._app
     window.ask_all(["How long?", "And bank transfers? | refund-policy"])
@@ -2770,7 +2782,7 @@ def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
     view = open_window(monkeypatch, fakes(rag=by_question))
     app = view._app
     assert app.varying_card.layout.display == "none" and app.vary_button.description == "+ Try variations"
-    assert "<b>Try variations</b>" in texts(app)[0] and "<b>📈 Runs</b> keeps every test run" in texts(app)[0]
+    assert "<b>Try variations</b>" in texts(app)[0] and "<b>Runs</b> keeps every test run" in texts(app)[0]
     app.test_box.value = "How long do refunds take? | refund-policy\nDo you ship to the moon?\nAnd bank transfers?"
     app.vary_button.click()
     assert app.varying_card.layout.display == "" and app.vary_button.layout.display == "none"
@@ -2888,7 +2900,7 @@ def test_window_runs_tab_lists_shows_switches_compares_and_saves(monkeypatch, tm
     app.run_pick.value = 1
     app.show_run_button.click()
     assert app.tabs.selected_index == app.TEST_TAB and "Test run 1 (baseline)" in app.test_head.value
-    assert app.sweep_bar.layout.display == "none" and "The 🧪 Test tab shows run 1 (baseline)." in app.status.value
+    assert app.sweep_bar.layout.display == "none" and "The Test tab shows run 1 (baseline)." in app.status.value
     app.run_pick.value = 2
     app.show_run_button.click()  # a sweep's run: the sweep, with that setup's answers under it
     assert "Sweep 1" in app.sweep_head.value and app.setup_pick.value == 2 and "Test run 2 (n=5)" in app.test_head.value

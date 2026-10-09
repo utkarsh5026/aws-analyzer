@@ -8,7 +8,7 @@ connected to a kernel, so this starts JupyterLab on a notebook that opens the wi
 (support-docs), then uses the window the way a person would: types a question and presses Enter, runs a list of test
 questions in the Test tab and opens the Code tab, asks them with Try variations and opens the Runs tab, opens the
 knowledge base list, adds settings, searches for a setting,
-opens the Request JSON tab and its Python view, edits the JSON, ticks files, and asks the last question again on
+opens the Request tab and its Python view, edits the JSON, ticks files, and asks the last question again on
 Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
 docs/bedrock_chat.md, by shots.py's set_height.
@@ -159,8 +159,11 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         if not page.locator(".kbc-app textarea[placeholder^='How long do refunds take?']").input_value():
             page.locator(".kbc-app textarea[placeholder^='How long do refunds take?']").fill(TEST_QUESTIONS)
         page.locator(".kbc-app button:has-text('Try variations')").click()
-        page.locator(".kbc-app textarea[placeholder^='n = 5, 10']").fill(SWEEP)
-        page.locator(".kbc-app button:has-text('Run 4 setups')").click()  # its label follows the box
+        vary = page.locator(".kbc-app textarea[placeholder^='n = 5, 10']")
+        # the box's starting lines come from the kernel: typing before they arrive would be undone by them
+        page.wait_for_function("el => el.value.trim().length > 0", arg=vary.element_handle(), timeout=30_000)
+        vary.fill(SWEEP)
+        page.locator(".kbc-app button:has-text('Run 4 setups')").click(timeout=60_000)  # its label follows the box
         page.wait_for_function("document.querySelector('.kbc-app .kbc-side').innerText.includes('Answers of') && "
                                "!document.querySelector('.kbc-app .bq.wait')", timeout=180_000)
         scroll_to("[...document.querySelectorAll('.kbc-app .kbc-side .ph')].find(el => el.offsetParent && "
@@ -204,7 +207,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     scroll_to("document.querySelector('.kbc-app .kbc-card')")
     shot("chat-add")
     search.fill("")
-    page.locator(tab.format("Request JSON")).first.click()
+    page.locator(tab.format("Request")).first.click()
     shot("chat-request")
     page.locator(".kbc-app .widget-toggle-button:visible:has-text('Python')").first.click()  # not the Code tab's
     shot("chat-python")
