@@ -9,6 +9,7 @@ import pickle
 import re
 import sys
 import tarfile
+import time
 import types
 import wave
 import zipfile
@@ -2452,6 +2453,7 @@ def test_downloads_folder_and_cleaning(core, tmp_path, monkeypatch):
     core.download(f"s3://{BUCKET}/docs/readme.md")
     core.download_folder(f"s3://{BUCKET}/raw/")
     core.download_zip(f"s3://{BUCKET}/raw/")
+    time.sleep(0.05)  # file times move one kernel tick at a time (10ms on some, WSL's among them): be a tick later
     (home / "stopped.zip.part").write_bytes(b"x")
     folder = core.list_downloads()
     assert folder.exists and folder.managed and not folder.protected and folder.disk_free
