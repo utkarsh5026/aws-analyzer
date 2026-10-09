@@ -4718,9 +4718,12 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 @keyframes kbc-blink{50%{opacity:0}}
 .kbc .spin{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px;border:2px solid rgba(127,127,127,.3);border-top-color:var(--kc-accent);border-radius:50%;animation:kbc-spin .8s linear infinite}
 @keyframes kbc-spin{to{transform:rotate(360deg)}}
-.kbc .hello{display:flex;gap:12px;padding:14px 16px;border:1px solid var(--kc-line);border-radius:16px;margin:4px 0;line-height:1.55;background:var(--kc-surface);box-shadow:var(--kc-shadow)}
-.kbc .hello .av{width:30px;height:30px;border-radius:10px;font-size:15px;margin:1px 0 0}
-.kbc .hello ul{margin:6px 0 0;padding-left:18px}
+.kbc .hello{display:flex;gap:10px;padding:10px 14px;border:1px solid var(--kc-line);border-radius:14px;margin:4px 0;line-height:1.5;background:var(--kc-surface);box-shadow:var(--kc-shadow)}
+.kbc .hello .av{width:26px;height:26px;border-radius:9px;font-size:13px;margin:0}
+.kbc details.tour{margin-top:4px;font-size:12px}
+.kbc details.tour>summary{cursor:pointer;opacity:.65;width:fit-content;padding:2px 8px 2px 4px;border-radius:7px}
+.kbc details.tour>summary:hover{opacity:1;background:var(--kc-tint-2)}
+.kbc details.tour ul{margin:4px 0 2px;padding-left:18px}
 .kbc .hello li{margin:2px 0}
 .kbc .st{font-size:12px;opacity:.7;padding:6px 6px 0;line-height:1.4}
 .kbc .st.warn{opacity:1;color:#d97706}
@@ -7260,31 +7263,30 @@ class _ChatApp:
                                                          else "price unknown") if part))
 
     def _hello(self) -> str:
+        """The first bubble: two lines to start from, with the tour of the window folded under them, so an empty
+        conversation isn't a page of instructions."""
         view = self.view
         name = view.core.kb_name(view.kb) if view.kb else "your knowledge base"
+        tour = [
+            "<b>Knowledge base</b> and <b>Model</b>, above, switch to another: search the list, or paste an ID and "
+            "press Enter.",
+            "<b>Data source</b> asks only one of the knowledge base's data sources." if self.source_pick.visible else "",
+            "<b>Files</b> asks only the files you tick.",
+            "<b>Retrieve only</b>, beside the box, only searches: every passage found, best first, with its score, "
+            "and no answer.",
+            "<b>Settings</b> change what every question sends. <b>Add a setting</b> finds any field the API has.",
+            "<b>Request</b> shows the next request as JSON, to edit by hand or copy as <b>Python</b>; "
+            "<i>Request and response JSON</i>, under an answer, shows what was sent and what came back.",
+            "<b>Test</b> asks a list of questions, each on its own, and shows how each did. <b>Try variations</b> "
+            "ranks every combination of the settings you list.",
+            "<b>Runs</b> keeps every test run, to compare, switch to or save.",
+            "<b>Code</b> gives this setup as Python, JSON or an AWS CLI command.",
+            "Each question follows up on the ones before it. <b>New chat</b> starts over.",
+        ]
         return (
             f'<div class="hello">{_AVATAR}<div><b>Ask {_esc(name)} a question.</b> Answers cite the passages they come '
-            "from <sup>[1]</sup>; click a source to read it, and open <i>Request and response JSON</i> under an answer "
-            "to see exactly what was sent and what came back.<ul>"
-            "<li><b>Knowledge base</b> and <b>Model</b>, above, switch to another: click one and search its list by "
-            "name or ID, or paste an ID and press Enter.</li>"
-            + ("<li><b>Data source</b> asks only one of the knowledge base's data sources; by default questions "
-               "search all of them.</li>" if self.source_pick.visible else "")
-            + "<li><b>Files</b> asks only the files you tick: search them by name or folder.</li>"
-            "<li><b>Retrieve only</b>, beside the box, only searches: every passage a question finds, best first, "
-            "with its score, and no answer. Ask the same question both ways to see which passages the answer cites, "
-            "and whether a poor answer comes from the search or the model.</li>"
-            + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
-            "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
-            "<li><b>Request</b> shows the request your next question sends, as JSON. <b>Edit JSON</b> changes it by "
-            "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
-            "<li><b>Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
-            "did. Change a setting and run them again: each line says whether it did better. <b>Try variations</b> "
-            "asks them with every combination of the settings you list, and ranks the setups.</li>"
-            "<li><b>Runs</b> keeps every test run, ranked against the others of the same questions: switch to the "
-            "best one's setup, compare them, and save them to a file that outlasts a restart.</li>"
-            "<li><b>Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
-            "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div></div>"
+            'from <sup>[1]</sup>. Click a source to read it.<details class="tour"><summary>How this window works'
+            "</summary><ul>" + "".join(f"<li>{line}</li>" for line in tour if line) + "</ul></details></div></div>"
         )
 
     # ---------------------------------------------------------------- plumbing
