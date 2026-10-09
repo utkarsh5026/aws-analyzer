@@ -7,13 +7,14 @@ description: "How to check, search and ask Amazon Bedrock Knowledge Bases from a
 
 # Check, search and ask your Bedrock knowledge bases from a SageMaker notebook
 
-One Python file. Drop it next to your notebook to see whether your knowledge bases are healthy, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it.
+One Python file. Drop it next to your notebook to see whether your knowledge bases are healthy, how each file was indexed, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it. Or open the explorer window and see it all by clicking.
 { .lede }
 
 <ul class="pills">
   <li>One file, boto3 only</li>
   <li>Read-only: never starts a sync</li>
   <li>Any Bedrock model</li>
+  <li>An explorer window: click, don't type</li>
   <li>Plain text outside Jupyter</li>
 </ul>
 
@@ -81,11 +82,114 @@ ui.chunk(1)                                  # the full text and metadata of res
 ui.ask("How long do refunds take?")          # an answer with [1][2] citations
 ui.follow_up("And for digital goods?")       # the next question in the same conversation
 ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find the right file?
+ui.files()                                   # every file next to Bedrock's record of it: failed, changed, not synced...
+ui.file("refund-policy.pdf")                 # how one file was indexed: its parser, chunks in order, metadata
+ui.explore()                                 # all of it in a window, by clicking
 ```
 
 **Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, with status cells such as `FAILED` in colour, and at the bottom a **Next** row of two or three commands with the arguments filled in from this report, such as `chunk(1)`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. `ui.help()` lists every command by task; `ui.help("ask")` shows one in full.
 
 Commands take `kb=`: a name in any case, the 10-character ID, or the ARN. Without it they use the one set by `use()`, else the only knowledge base in the region, else they list the ones there and say how to pick.
+
+## The explorer window { #explorer }
+
+Rather click than type? `explore()` opens a window on a knowledge base with nothing to type but a question. It puts every file of the knowledge base's S3 data sources next to Bedrock's record of it, shows how each one was indexed, and has the syncs, a search box and every setting a click away. Like the commands, it only reads: where a sync would help, it shows the command to run.
+
+```python
+from bedrock_kb import explore        # with pip: from aws_analyzer import KBExplorer
+
+explore()                             # the only knowledge base here, or the first active one
+explore("support-docs")               # a name, ID or ARN
+explore("support-docs", file="warranty.pdf")   # straight to one file's page
+explore(region="us-west-2")           # another region (or profile="dev")
+explore("support-docs", height=800)   # 800px pages (else the browser's height)
+ui.explore()                          # from a BedrockKBView, on its knowledge base
+```
+
+The window needs `ipywidgets`, which SageMaker notebooks already have (elsewhere, `%pip install ipywidgets`, then reload the browser tab). Without it, or outside Jupyter, `explore()` shows the same as reports: [`files()`, `file()` and `search_file()`](#files).
+
+**The top of the window** is the knowledge base field and its cards. Click the field for the region's knowledge bases, with a search box that finds one by its name, part of its ID (`k7qj` finds `K7QJ2M4XNA`) or its description; Enter picks the first, and a whole ID or ARN works too. The cards say how it's doing: how many files it has and how many are searchable, how many failed or are waiting for a sync, when the last sync ran, and what its vector store costs while idle. The tabs below hold the rest, and the line at the bottom says what's going on.
+
+![The Overview tab of the explorer: the knowledge base field showing support-docs, cards for 44 files, 39 searchable, 2 failed, 2 to sync, the last sync done 1d ago and an idle cost of $350.40 a month, the tabs, and the Overview: a bar of the 44 files by state with its legend (37 indexed, 1 ignored, 1 deleted from S3, 1 skipped by the sync, 1 not synced yet, 1 changed since sync, 2 failed), then findings about the failed files and Bedrock's reasons, a changed file, a new one, a skipped .pptx and a file gone from S3 but still in the index](images/kb-explorer-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Overview tab of the explorer: the knowledge base field showing support-docs, cards for 44 files, 39 searchable, 2 failed, 2 to sync, the last sync done 1d ago and an idle cost of $350.40 a month, the tabs, and the Overview: a bar of the 44 files by state with its legend (37 indexed, 1 ignored, 1 deleted from S3, 1 skipped by the sync, 1 not synced yet, 1 changed since sync, 2 failed), then findings about the failed files and Bedrock's reasons, a changed file, a new one, a skipped .pptx and a file gone from S3 but still in the index](images/kb-explorer-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Overview**: the files by state, and what to do about each kind. Below, out of the picture: the commands that sync the data sources that need it, how each data source becomes vectors, and the recent syncs.
+///
+
+### Every file, next to Bedrock's record of it
+
+The **Files** tab lists every file in the data sources' S3 buckets (under their inclusion prefixes) next to Bedrock's own record of it, and puts the two together in one state. Problems come first. Type in the search box to find a file by part of its name, its folder or Bedrock's reason; click a state's chip to see only those files (click it again for all of them), pick a data source when there are several, or sort by name, folder, size, last change or when it was last indexed.
+
+| State | What it means | What to do |
+|---|---|---|
+| **Failed** | Bedrock couldn't index it, for the reason shown: an encrypted PDF, a scan with no text layer, a file too big | The file's page says what usually fixes that reason, then sync |
+| **Changed since sync** | It (or its `.metadata.json`) changed in S3 after it was indexed, so searches still find the old version | Sync |
+| **Not synced yet** | Added after the last sync, so nothing in it is searchable | Sync |
+| **Skipped by the sync** | In S3 before the last sync, yet Bedrock has no record of it: usually a type Bedrock doesn't read, a file over 50 MB, or one in GLACIER | Convert, split or restore it, then sync |
+| **Deleted from S3** | Gone from S3, but still in the index, so answers can cite it | Sync, and the next sync removes it |
+| **Partly indexed** | Only part of it, or of its metadata, was indexed | Its page says what's missing |
+| **Ignored** | Bedrock skipped it on purpose, usually because of its type | Nothing, unless you meant it to be searchable |
+| **Indexing** | Being indexed or removed right now | Wait for the sync to finish |
+| **Not checked** | Past the first 10,000 documents of Bedrock's list | Open it: its own record is looked up |
+| **Indexed** | Indexed, up to date and searchable | |
+
+### How a file was indexed
+
+Click a file to see its page on the right: its state and what to do about it, then each step it took from S3 into the vector store, the one that failed in red. **Stored in S3** (its size, type and when it last changed), **Read by the parser** (the default parser reads the text only; a foundation model or Data Automation parser also reads tables, charts and scans), **Cut into chunks** (how many, how big, from which pages, and the data source's chunking), **Embedded** (the model and its dimensions), **Stored as vectors** (the vector store and its index) and where it stands **Now**.
+
+![The Files tab: on the left, warranty typed in the search box, the state chips with their counts and warranty.pdf in the list; on the right, warranty.pdf's page with cards for its state (Indexed), 5 chunks, 3.9 KB, changed 20 days ago, indexed 3 days ago and 2 metadata attributes, a link that opens the file, no issues found, and How it was indexed as a line of steps: Stored in S3, Read by the parser, Cut into chunks (5 chunks, about 294 tokens each, from page 1 to 8, fixed size: 300 tokens per chunk, 20% overlap), Embedded, Stored as vectors and Now: Indexed](images/kb-explorer-file-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Files tab: on the left, warranty typed in the search box, the state chips with their counts and warranty.pdf in the list; on the right, warranty.pdf's page with cards for its state (Indexed), 5 chunks, 3.9 KB, changed 20 days ago, indexed 3 days ago and 2 metadata attributes, a link that opens the file, no issues found, and How it was indexed as a line of steps: Stored in S3, Read by the parser, Cut into chunks (5 chunks, about 294 tokens each, from page 1 to 8, fixed size: 300 tokens per chunk, 20% overlap), Embedded, Stored as vectors and Now: Indexed](images/kb-explorer-file-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+A file's page: each step from S3 into the vector store, here all of them green.
+///
+
+Below the steps come **its chunks**, read from the vector store itself (a search limited to the file), in the order they come in the document. The bar shows one block per chunk, as wide as its text, with tiny ones in amber; for a `.txt` or `.md` file, a second bar shows where each chunk sits in the file, and what no chunk holds. Each chunk is a line with its page, its size in tokens and words, and its first words; click it for its full text and its metadata. With fixed-size or hierarchical chunking, each chunk starts with the end of the one before it: that overlap is marked in green, and the line says how many characters it repeats.
+
+![warranty.pdf's five chunks: a bar of five blocks of about the same width, then a line per chunk with its page, about 300 tokens and 210 words and its first words; chunk 2 is open, starting with four lines highlighted in green, the text it repeats from chunk 1 (270 characters shared), then the rest of its text and its metadata team=legal, year=2024](images/kb-explorer-chunks-light.webp#only-light){ width="984" height="860" loading=lazy }
+![warranty.pdf's five chunks: a bar of five blocks of about the same width, then a line per chunk with its page, about 300 tokens and 210 words and its first words; chunk 2 is open, starting with four lines highlighted in green, the text it repeats from chunk 1 (270 characters shared), then the rest of its text and its metadata team=legal, year=2024](images/kb-explorer-chunks-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+Its chunks in document order, one of them open: the green start is the text it shares with the chunk before it.
+///
+
+Last comes **its metadata**: the attributes in its `.metadata.json` next to the ones its chunks carry (what `where=` filters match), with what's wrong with the file when there is something: JSON that doesn't parse, a name Bedrock keeps for itself, an attribute its chunks don't have yet because the file changed after the last sync. The JSON as written, and Bedrock's record and the S3 object, are folded underneath.
+
+A file that **failed** shows the step that failed in red, and the finding at the top says what usually fixes Bedrock's reason.
+
+![The Failed chip picked, with catalogue-2019.pdf and scanned-invoice.pdf listed, and scanned-invoice.pdf's page: its state Failed, no chunks, a warning that Bedrock couldn't index it because it's a scanned image with no text layer, that a data source with a foundation model or Data Automation parser reads it, and the sync command; How it was indexed with Read by the parser in red](images/kb-explorer-failed-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Failed chip picked, with catalogue-2019.pdf and scanned-invoice.pdf listed, and scanned-invoice.pdf's page: its state Failed, no chunks, a warning that Bedrock couldn't index it because it's a scanned image with no text layer, that a data source with a foundation model or Data Automation parser reads it, and the sync command; How it was indexed with Read by the parser in red](images/kb-explorer-failed-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+A failed file: Bedrock's reason, what usually fixes it, and the step that failed.
+///
+
+### Does a question find this file?
+
+On a file's page, type a question in **Ask a question…** and press Enter. The window searches the file on its own, and the whole knowledge base, and shows the file's best passages for the question and where its best one ranks among every file's. An answer only sees the top 5 passages, so a file that holds the answer but ranks #6 is never used: a finding says so, and what to change.
+
+![warranty.pdf asked How long is the warranty?: cards for its 5 passages, a best score of 0.84, rank #6 in the knowledge base in amber, the time and the estimated cost of the two searches; a warning that its best passage ranks #6, so an answer that gets 5 passages won't see it because refund-policy.pdf and shipping-times.pdf rank higher, and to ask for 6 passages or narrow the search; then the file's passages with the word warranty highlighted](images/kb-explorer-ask-light.webp#only-light){ width="984" height="860" loading=lazy }
+![warranty.pdf asked How long is the warranty?: cards for its 5 passages, a best score of 0.84, rank #6 in the knowledge base in amber, the time and the estimated cost of the two searches; a warning that its best passage ranks #6, so an answer that gets 5 passages won't see it because refund-policy.pdf and shipping-times.pdf rank higher, and to ask for 6 passages or narrow the search; then the file's passages with the word warranty highlighted](images/kb-explorer-ask-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+The file holds the answer, but five passages of other files rank above it.
+///
+
+### Search, syncs and settings
+
+- **Search** asks the knowledge base a question: its passages, best first, with their scores and the question's words highlighted. Pick how many passages, the search type (**Semantic** matches meaning, **Hybrid** also exact words such as error codes), a data source and a reranker. **How payment-errors.md was indexed ›** under a passage opens its file's page in the Files tab.
+- **Syncs** is the sync history as a timeline, newest first: which data source, when it ran and how long it took, what it read, added, changed, deleted and couldn't index, and why a sync failed.
+- **Settings** has every setting in plain English: the embedding model and its dimensions, the vector store and which of its fields holds each part of a chunk, each data source's location, chunking, parser and deletion policy, and the tags. GetKnowledgeBase and GetDataSource as AWS returns them are folded at the end, with the AWS CLI commands that read them.
+
+![The Search tab: What does error E1234 mean? in the search box, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Search tab: What does error E1234 mean? in the search box, the options (5 passages, Default, Semantic or Hybrid search, every data source, no reranker), cards for 5 passages, the top score, 4 files, the time and the cost, a note that scores are relative, and the passages: payment-errors.md twice with Error, E1234 and means highlighted, then digital-goods.pdf, each with a How it was indexed button](images/kb-explorer-search-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Search**: each passage's **How … was indexed ›** opens its file's page.
+///
+
+![The Syncs tab: cards for 6 syncs, 1 failed, the last successful one a day ago and documents failed; a warning that the last sync of docs-s3 couldn't index 2 documents and that the Files tab's Failed filter shows them; then a timeline of the six syncs, green for done, amber for the one that couldn't parse 2 documents, red for the one that failed because the role wasn't allowed s3:GetObject; and the sync commands to copy](images/kb-explorer-syncs-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Syncs tab: cards for 6 syncs, 1 failed, the last successful one a day ago and documents failed; a warning that the last sync of docs-s3 couldn't index 2 documents and that the Files tab's Failed filter shows them; then a timeline of the six syncs, green for done, amber for the one that couldn't parse 2 documents, red for the one that failed because the role wasn't allowed s3:GetObject; and the sync commands to copy](images/kb-explorer-syncs-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Syncs**: the history as a timeline, with why a sync failed.
+///
+
+Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.inventory`, `x.info` and `x.chunks` hold the data behind what's shown, `x.file("faq.md")`, `x.search("...")` and `x.open("another-kb")` do what the clicks do, and `x.ui` is a `BedrockKBView` for reports in other cells.
 
 ## Your knowledge bases { #kbs }
 
@@ -156,11 +260,26 @@ aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-sour
 `ui.documents("support-docs")`: without `status=` it lists only the documents that aren't indexed, with Bedrock's reason for each.
 ///
 
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="481" loading=lazy }
-![unsynced(): 12 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="481" loading=lazy }
+![unsynced(): 43 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-light.webp#only-light){ width="984" height="481" loading=lazy }
+![unsynced(): 43 files checked, 2 changed since the last sync: refund-policy.pdf changed 5 hours ago and holiday-shipping.md a day ago, a note that the web data source can't be listed, and the sync command](images/bedrock-unsynced-dark.webp#only-dark){ width="984" height="481" loading=lazy }
 /// caption
 `ui.unsynced("support-docs")`: two files changed after the last sync, so searches and answers don't see those changes yet.
 ///
+
+### Every file, as reports { #files }
+
+The explorer's Files tab is three commands underneath, which print the same as reports:
+
+```python
+ui.files()                                   # every file next to Bedrock's record of it, problems first
+ui.files(status="failed")                    # only these: failed, changed, new (not synced yet), skipped, deleted...
+ui.files(match="refund")                     # files whose name, path or reason holds this
+ui.file("refund-policy.pdf")                 # how one file was indexed: steps, chunks in order, metadata, what to fix
+ui.file("s3://support-docs-bucket/policies/refund-policy.pdf")   # a name, its path in the bucket, or its s3:// path
+ui.search_file("refund-policy.pdf", "How long do refunds take?")  # does the question find it, and where it ranks
+```
+
+`files()` reads Bedrock's document list next to the bucket's files, so it also catches what `documents()` alone can't: files added after the last sync, files the sync skipped without a record, and files deleted from S3 that answers can still cite. It ends with the command that syncs each data source a sync would change. A name that several files share asks which one you mean, with their paths.
 
 ## Search { #search }
 
@@ -374,9 +493,17 @@ a.input_tokens, a.output_tokens
 
 report = kb.evaluate("support-docs", cases)       # EvalReport
 report.hit_rate, report.mrr, report.to_df()
+
+inv = kb.file_inventory("support-docs")           # FileInventory: every file, KBFile.state and why (KBFile.note)
+inv.counts(), inv.to_df()                         # files per state; one row per file
+f = "s3://support-docs-bucket/policies/refund-policy.pdf"
+chunks = kb.document_chunks("support-docs", f)    # DocumentChunks: its chunks in document order
+chunks.chunks, chunks.stats.overlaps, chunks.stats.coverage
+kb.metadata_file(f)                               # MetadataFile: the .metadata.json's attributes and problems
+kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank across the knowledge base
 ```
 
-The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`).
+The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
 
 ## Cost { #cost }
 
@@ -392,11 +519,11 @@ The analysis functions don't call AWS, so they work on responses and passages yo
 
 - **Searches**
 
-    A search embeds the question (a fraction of a cent) and, with `rerank=`, pays for reranking (about $2 per 1,000 searches for Cohere Rerank 3.5, $1 for Amazon Rerank). `compare` and `evaluate` only search.
+    A search embeds the question (a fraction of a cent) and, with `rerank=`, pays for reranking (about $2 per 1,000 searches for Cohere Rerank 3.5, $1 for Amazon Rerank). `compare` and `evaluate` only search. Opening a file in the explorer (or `file()`) is one search, asking it a question two.
 
 - **Listing stops early**
 
-    `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects, and they say when they stopped.
+    `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects; `files()` and the explorer read 10,000 documents and 10,000 S3 files per data source. A file shows at most 100 chunks, the most one search returns. They all say when they stopped.
 
 </div>
 
@@ -423,7 +550,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Action": [
         "bedrock:ListKnowledgeBases", "bedrock:GetKnowledgeBase", "bedrock:ListDataSources",
         "bedrock:GetDataSource", "bedrock:ListIngestionJobs", "bedrock:GetIngestionJob",
-        "bedrock:ListKnowledgeBaseDocuments", "bedrock:ListTagsForResource",
+        "bedrock:ListKnowledgeBaseDocuments", "bedrock:GetKnowledgeBaseDocuments", "bedrock:ListTagsForResource",
         "bedrock:Retrieve", "bedrock:RetrieveAndGenerate"
       ],
       "Resource": "*"
@@ -447,7 +574,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
       "Resource": "arn:aws:s3:::support-docs-bucket"
     },
     {
-      "Sid": "OpenSourceFiles",
+      "Sid": "ReadSourceFiles",
       "Effect": "Allow",
       "Action": "s3:GetObject",
       "Resource": "arn:aws:s3:::support-docs-bucket/*"
@@ -459,16 +586,17 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | Permission | Used by |
 |---|---|
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase` | `kbs`, `kb_info`, and finding a knowledge base by name |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced` |
-| `bedrock:ListKnowledgeBaseDocuments` | `documents` |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `file`, `explore` |
+| `bedrock:ListKnowledgeBaseDocuments` | `documents`, `files`, `file`, `search_file`, `explore` |
+| `bedrock:GetKnowledgeBaseDocuments` | `file` and `explore`, for a file past the first 10,000 of Bedrock's list |
 | `bedrock:ListTagsForResource` | `kb_info` |
-| `bedrock:Retrieve` | `search`, `compare`, `evaluate`, `ask(engine="converse")` |
+| `bedrock:Retrieve` | `search`, `compare`, `evaluate`, `ask(engine="converse")`, and a file's chunks and questions in `file`, `search_file` and `explore` |
 | `bedrock:RetrieveAndGenerate` and `bedrock:InvokeModel` | `ask`, `follow_up` |
 | `bedrock:InvokeModel` | `ask(engine="converse")`, `core.generate` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | `models`, and turning `model="sonnet"` into an ID |
-| `s3:ListBucket` on the data source's bucket | `unsynced` |
-| `s3:GetObject` on the data source's files | Opening a file from its link (`link`, and the file names in reports): your browser uses it, the notebook never reads the file |
+| `s3:ListBucket` on the data source's bucket | `unsynced`, `files`, `file`, `search_file`, `explore` |
+| `s3:GetObject` on the data source's files | `file` and `explore` read a file's `.metadata.json`, and a `.txt` or `.md` file's text to place its chunks in it. Opening a file from its link (`link`, and the file names in reports) uses it too, in your browser |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. To scope the policy down, replace `*` in the first statement with your knowledge bases' ARNs (`ListKnowledgeBases` itself needs `*`).
 
@@ -514,6 +642,22 @@ A model also has to be enabled for the account under **Model access** in the Bed
 
     The link is signed with the notebook's credentials, so it opens only if they may read the file (`s3:GetObject` on the bucket, and `kms:Decrypt` when the bucket is encrypted with a KMS key), and only for an hour or until those credentials expire, whichever comes first. Run the cell again, or `link(n)`, for a fresh link; `link(n, expires=86400)` lasts a day.
 
+??? question "explore() shows a report instead of the window"
+
+    The window needs Jupyter and `ipywidgets`. SageMaker has both; elsewhere, `%pip install ipywidgets`, then restart the kernel and reload the browser tab. In a terminal or a script, `explore()` shows the same as reports: `files()`, `file()` and `search_file()`.
+
+??? question "A file says “Not checked”"
+
+    Bedrock's document list was read up to 10,000 documents per data source, and the file came after. Open it: its own record is looked up then (`bedrock:GetKnowledgeBaseDocuments`). To read every record at once, `ui.core.file_inventory("support-docs", limit=None)`.
+
+??? question "A file's page says “passages of other files came back”"
+
+    Its chunks are read with a search limited to the file (a filter on `x-amz-bedrock-kb-source-uri`). A vector store that ignores the filter returns other files' passages too: they're counted and left out, but the chunks shown may not be all of the file's.
+
+??? question "The explorer window went blank after I reopened the notebook"
+
+    Widgets live in the running kernel, so a saved notebook doesn't keep the window. Run the cell again.
+
 ??? question "The report lost its formatting after I reopened the notebook"
 
     JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.
@@ -526,12 +670,16 @@ Every `BedrockKBView` command. `ui.help()` prints the same list grouped by task,
 
 | Command | What it shows |
 |---|---|
+| `explore(kb=None, file=None, height=None)` | [The explorer window](#explorer): every file and how it was indexed, syncs, search and settings, by clicking |
 | `use(kb)` | Sets the knowledge base later commands use |
 | `kbs()` | Every knowledge base in the region: status, type, vector store, embedding model, sources, documents, last sync, idle cost, warnings |
 | `kb_info(kb=None)` | Settings in plain English, data sources, recent syncs, findings, cost and tags |
 | `syncs(kb=None, data_source=None, n=10)` | Sync history with counts and why syncs failed, and the command to sync again |
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status, the ones that aren't indexed with the reason |
 | `unsynced(kb=None, data_source=None)` | S3 files added or changed since the last successful sync |
+| `files(kb=None, data_source=None, status=None, match=None, n=50)` | Every file next to Bedrock's record of it: failed, changed, not synced, skipped, deleted; problems first, with the sync commands |
+| `file(path, kb=None)` | How one file was indexed: each step, its chunks in document order, its metadata file, and what to fix |
+| `search_file(path, question, kb=None, n=10)` | Whether a question finds a file, and where it ranks among the whole knowledge base's passages |
 | `search(question, n=5, kb=None, data_source=None, where=None, search_type=None, rerank=None)` | Ranked passages with scores, source and page, highlighted words, metadata and findings |
 | `chunk(rank=1)` | The full text and metadata of a result from the last search or ask, and a link to its file |
 | `link(source=1, expires=3600)` | A link that opens a source's file (or any `s3://` path) in a new browser tab |

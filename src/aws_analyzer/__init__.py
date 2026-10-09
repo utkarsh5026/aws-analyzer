@@ -17,6 +17,9 @@ Quick start
     from aws_analyzer import chat            # a chat window on a Bedrock knowledge base
     chat("support-docs", model="sonnet")
 
+    from aws_analyzer import KBExplorer      # a window to look through a knowledge base: every file, how it was
+    KBExplorer("support-docs")               # indexed, its syncs, search and settings, by clicking
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions. Importing
@@ -33,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 # pyright: reportMissingImports=false
 if TYPE_CHECKING:
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
-    from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView
+    from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
     from .lambda_functions import LambdaAnalyzer, LambdaView
     from .opensearch import OpenSearchAnalyzer, OpenSearchView
@@ -53,6 +56,7 @@ __all__ = [
     "DynamoDBView",
     "BedrockKBAnalyzer",
     "BedrockKBView",
+    "KBExplorer",
     "BedrockChatAnalyzer",
     "BedrockChatView",
     "chat",
@@ -72,6 +76,7 @@ _EXPORTS = {  # name -> the module it comes from
     "DynamoDBView": "dynamodb",
     "BedrockKBAnalyzer": "bedrock_kb",
     "BedrockKBView": "bedrock_kb",
+    "KBExplorer": "bedrock_kb",
     "BedrockChatAnalyzer": "bedrock_chat",
     "BedrockChatView": "bedrock_chat",
     "chat": "bedrock_chat",

@@ -1,12 +1,19 @@
+import asyncio
+import html
+import json
 import re
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import boto3
 import pytest
+from botocore import xform_name
 from botocore.exceptions import ClientError
 from botocore.stub import Stubber
+from botocore.validate import ParamValidator
 from moto import mock_aws
 
 import bedrock_kb as kbmod
@@ -19,11 +26,17 @@ from bedrock_kb import (
     BedrockKBView,
     Citation,
     DataSourceInfo,
+    DocumentChunks,
     EvalCase,
     EvalReport,
     FileChange,
+    FileInventory,
+    FileProbe,
     IngestionJob,
     KBDocument,
+    KBExplorer,
+    KBFile,
+    MetadataFile,
     Passage,
     Retrieval,
     answer_findings,
@@ -31,6 +44,8 @@ from bedrock_kb import (
     build_filter,
     build_prompt,
     changed_since,
+    chunk_overlap,
+    chunk_stats,
     compare_retrievals,
     comparison_findings,
     data_source_filter,
@@ -41,32 +56,46 @@ from bedrock_kb import (
     describe_vector_store,
     estimate_tokens,
     eval_findings,
+    file_findings,
+    file_state,
+    file_steps,
     generation_cost,
     human_duration,
     human_tokens,
+    inventory_files,
+    inventory_findings,
     kb_findings,
     match_expected,
+    find_files,
     model_price,
+    order_chunks,
     parse_citation_markers,
     parse_converse,
     parse_data_source,
+    parse_file_state,
     parse_ingestion_job,
     parse_kb_ref,
     parse_knowledge_base,
+    parse_metadata_file,
     parse_models,
     parse_rag,
     parse_retrieve,
+    place_chunks,
+    probe_findings,
     query_cost,
     question_terms,
     retrieval_findings,
     retrieval_metrics,
     short_model,
+    skip_reason,
+    sort_files,
     source_name,
     split_metadata,
     summarize_documents,
     sync_call,
     sync_command,
     sync_findings,
+    sync_needed,
     vector_store_monthly_cost,
     with_data_sources,
 )
@@ -3220,3 +3249,1062 @@ def test_ui_help_groups_every_command(ui, capsys):
     }
     assert "Start here:" in out and "-- 🔎 Search and answer --" in out
     assert "engine='converse' gives exact tokens" in run(capsys, ui.help, "ask")
+
+
+# ----------------------------------------------------------------------------- files: what's indexed (pure)
+
+FOLDER = "s3://support-docs-bucket/policies/"
+
+
+def kbfile(name, status="INDEXED", *, size=2048, modified=None, indexed=None, ds_id=DS_ID, **kwargs):
+    """A file of the S3 data source: in S3 since 10 days ago, indexed a day ago (when it has a status)."""
+    return KBFile(FOLDER + name, ds_id, status=status, size=size, modified=modified or ago(days=10),
+                  indexed=indexed or (ago(days=1) if status else None), **kwargs)
+
+
+@pytest.mark.parametrize(
+    "made, opts, state, words",
+    [
+        ({"status": "FAILED", "reason": "The file is encrypted."}, {}, "failed",
+         "Bedrock couldn't index it: The file is encrypted."),
+        ({"size": None}, {}, "deleted", "gone from S3, but searches still find it until the next sync removes it"),
+        ({"status": "NOT_FOUND", "size": None}, {}, "deleted", "couldn't find it in the data source, and the next sync"),
+        ({"size": None}, {"listed": False}, "indexed", "Indexed and searchable."),  # the bucket wasn't listed in full
+        ({"size": None}, {"in_scope": False}, "indexed", "Indexed and searchable."),  # outside its prefixes
+        ({"status": "PARTIALLY_INDEXED", "reason": "Page 3 timed out"}, {}, "partial",
+         "Only part of it was indexed: Page 3 timed out."),
+        ({"status": "METADATA_UPDATE_FAILED"}, {}, "partial", "its metadata couldn't be indexed, so where= filters"),
+        ({"status": "IGNORED", "reason": "Unsupported type"}, {}, "ignored", "Bedrock ignored it: Unsupported type."),
+        ({"status": "IN_PROGRESS"}, {}, "indexing", "Bedrock is indexing it now (IN_PROGRESS)."),
+        ({"status": "DELETE_IN_PROGRESS"}, {}, "indexing", "removing it from the index"),
+        ({"modified": ago(hours=5)}, {}, "changed", "changed in S3 5h ago, after it was indexed"),
+        ({"metadata_modified": ago(hours=5), "metadata_size": 40}, {}, "changed", "Its metadata file changed"),
+        ({}, {}, "indexed", "Indexed and searchable."),
+        ({"status": ""}, {"recorded": False}, "unchecked", "stopped at the limit before this file"),
+        ({"status": ""}, {"sync_known": False}, "new", "Bedrock has no record of it"),
+        ({"status": ""}, {"synced": None}, "new", "never finished a sync"),
+        ({"status": "", "modified": ago(days=1)}, {}, "new", "Added after the last sync"),
+        ({"status": "", "name": "video.mp4"}, {}, "skipped", "didn't index it: .mp4 isn't a type Bedrock reads."),
+        ({"status": "", "size": 60 * 1024**2}, {}, "skipped", "it's 60.0 MB, over the 50.0 MB Bedrock reads"),
+        ({"status": ""}, {}, "skipped", "Bedrock kept no record of why."),
+    ],
+)
+def test_file_state(made, opts, state, words):
+    made, opts = dict(made), dict(opts)
+    f = kbfile(made.pop("name", "refund-policy.pdf"), **made)
+    got, note = file_state(f, opts.pop("synced", ago(days=3)), **opts)
+    assert (got, words in note) == (state, True), note
+
+
+def test_skip_reason_says_why_a_sync_left_a_file_out():
+    assert "the GLACIER storage class" in skip_reason(kbfile("a.pdf", "", storage_class="GLACIER"))
+    assert skip_reason(kbfile("a.pdf", "", size=0)) == "it's empty"
+    assert "picture" in skip_reason(kbfile("scan.png", ""))
+    assert "no file extension" in skip_reason(kbfile("README", ""))
+    assert skip_reason(kbfile("notes.MD", "")) == ""
+
+
+def objects(*entries):
+    """ListObjectsV2 'Contents' entries: (key, size, modified)."""
+    return [{"Key": key, "Size": size, "LastModified": when, "StorageClass": "STANDARD"} for key, size, when in entries]
+
+
+def test_inventory_files_puts_the_bucket_next_to_bedrocks_records():
+    docs = [
+        KBDocument(DS_ID, FOLDER + "refund-policy.pdf", "INDEXED", updated=ago(days=1)),
+        KBDocument(DS_ID, FOLDER + "gone.pdf", "INDEXED", updated=ago(days=1)),
+        KBDocument(DS_ID, FOLDER + "scan.pdf", "FAILED", "No text layer", ago(days=1)),
+        KBDocument(DS_ID, "s3://support-docs-bucket/archive/old.pdf", "INDEXED", updated=ago(days=1)),
+    ]
+    listed = objects(
+        ("policies/", 0, ago(days=30)),  # a folder marker
+        ("policies/refund-policy.pdf", 5000, ago(days=10)),
+        ("policies/refund-policy.pdf.metadata.json", 60, ago(days=10)),
+        ("policies/scan.pdf", 4000, ago(days=10)),
+        ("policies/added.md", 900, ago(hours=2)),
+        ("policies/deck.pptx", 4400, ago(days=10)),
+    )
+    last = IngestionJob("JOB1", DS_ID, "COMPLETE", started=ago(days=3))
+    files = inventory_files(docs, listed, data_source_id=DS_ID, bucket="support-docs-bucket", prefixes=["policies/"],
+                            last_sync=last)
+    states = {f.name: f.state for f in files}
+    assert states == {"added.md": "new", "deck.pptx": "skipped", "gone.pdf": "deleted", "old.pdf": "indexed",
+                      "refund-policy.pdf": "indexed", "scan.pdf": "failed"}
+    assert [f.key for f in files] == sorted(f.key for f in files)  # by path; the folder and metadata file aren't files
+    refund = next(f for f in files if f.name == "refund-policy.pdf")
+    assert (refund.size, refund.metadata_size, refund.indexed, refund.storage_class) == (
+        5000, 60, docs[0].updated, "STANDARD")
+    assert refund.folder == "policies/" and refund.metadata_uri == FOLDER + "refund-policy.pdf.metadata.json"
+    assert refund.searchable and not next(f for f in files if f.name == "scan.pdf").searchable
+    # a bucket listed in part can't tell a deleted file, and a document list read in part can't tell a skipped one
+    cut = inventory_files(docs, listed, data_source_id=DS_ID, bucket="support-docs-bucket", prefixes=["policies/"],
+                          last_sync=last, complete=False, recorded=False)
+    assert {f.name: f.state for f in cut}["gone.pdf"] == "indexed"
+    assert {f.name: f.state for f in cut}["deck.pptx"] == "unchecked"
+    custom = inventory_files([KBDocument("DSCUSTOM01", "doc-17", "INDEXED")], None, data_source_id="DSCUSTOM01")
+    assert [(f.key, f.state, f.size) for f in custom] == [("doc-17", "indexed", None)]
+
+
+def inventory(*files, **kwargs):
+    return FileInventory(KB_ID, "support-docs", list(files),
+                         sources=kwargs.pop("sources", {DS_ID: "docs-s3"}), kinds=kwargs.pop("kinds", {DS_ID: "S3"}),
+                         **kwargs)
+
+
+def state(f, value, note="", **changes):
+    f.state, f.note = value, note
+    for name, changed in changes.items():
+        setattr(f, name, changed)
+    return f
+
+
+def test_inventory_findings_say_what_to_do_about_each_state():
+    inv = inventory(
+        state(kbfile("scan-1.pdf", "FAILED", reason="No text layer."), "failed"),
+        state(kbfile("scan-2.pdf", "FAILED", reason="No text layer"), "failed"),
+        state(kbfile("locked.pdf", "FAILED", reason="Encrypted"), "failed"),
+        state(kbfile("refund-policy.pdf"), "changed"),
+        state(kbfile("added.md", ""), "new"),
+        state(kbfile("deck.pptx", ""), "skipped"),
+        state(kbfile("video.mp4", ""), "skipped"),
+        state(kbfile("gone.pdf", size=None), "deleted"),
+        state(kbfile("forgotten.pdf", "NOT_FOUND", size=None), "deleted"),
+        state(kbfile("tables.xlsx", "PARTIALLY_INDEXED"), "partial"),
+        state(kbfile("clip.mov", "IGNORED"), "ignored"),
+        state(kbfile("busy.pdf", "IN_PROGRESS"), "indexing"),
+        state(kbfile("later.pdf", ""), "unchecked"),
+        state(kbfile("help.pdf", ds_id=DS2_ID), "indexed"),
+        sources={DS_ID: "docs-s3", DS2_ID: "manuals", "WEBSRC0001": "help-site"},
+        kinds={DS_ID: "S3", DS2_ID: "S3", "WEBSRC0001": "WEB"},
+        truncated={DS_ID: ["documents"], DS2_ID: ["files"]},
+        errors={DS2_ID: {"syncs": "AccessDeniedException"}},
+    )
+    found = inventory_findings(inv)
+    text = "\n".join(message for _, message in found)
+    levels = {message.split(" (")[0]: level for level, message in found}
+    assert "3 files failed to index (scan-1.pdf, scan-2.pdf and locked.pdf), so nothing in them is searchable." in text
+    assert "The most common reason: No text layer (2 of them). Fix or replace them, then sync." in text
+    assert "1 file changed in S3 after it was indexed (refund-policy.pdf): searches and answers use the old " \
+           "version until the next sync." in text
+    assert "1 file was added after the last sync (added.md)" in text
+    assert "2 files were in S3 before the last sync, yet Bedrock has no record of them (deck.pptx and video.mp4): " \
+           ".pptx isn't a type Bedrock reads; .mp4 isn't a type Bedrock reads." in text
+    assert "1 file is gone from S3 but still in the index (gone.pdf)" in text
+    assert "1 file Bedrock has a record of is gone from S3 (forgotten.pdf); the next sync forgets it." in text
+    assert "only partly indexed (tables.xlsx)" in text and "Bedrock ignored 1 file (clip.mov)" in text
+    assert "being indexed or removed now" in text and "1 file in S3 weren't checked" in text
+    assert "Listing the bucket's files for manuals stopped at 10,000" in text  # docs-s3's cut is the unchecked file
+    assert "Listing Bedrock's document list for docs-s3" not in text
+    assert "Couldn't read its sync history for manuals (" in text and "bedrock:ListIngestionJobs" in text
+    assert "help-site is a WEB data source: Bedrock keeps no list of its documents" in text
+    assert levels["3 files failed to index"] == "warn" and levels["Bedrock ignored 1 file"] == "info"
+    assert "start-ingestion-job" not in text  # the sync commands are a block of their own (sync_needed)
+    assert sync_needed(inv) == [DS_ID]
+
+
+def test_inventory_findings_quote_bedrocks_reasons():
+    def reasons(*why):
+        return inventory_findings(inventory(*(state(kbfile(f"f{i}.pdf", "FAILED", reason=r), "failed")
+                                              for i, r in enumerate(why))))[0][1]
+
+    assert "Bedrock's reason: Encrypted. Fix or replace them" in reasons("Encrypted.", "Encrypted")
+    assert "Bedrock's reasons: Encrypted; Too big; …." in reasons("Encrypted", "Too big", "Corrupt")
+    assert "reason" not in reasons("")
+    assert inventory_findings(inventory()) == [("info", "No files yet: the data sources are empty, or have never "
+                                                        "been synced.")]
+
+
+def test_parse_metadata_file_reads_both_forms_and_says_whats_wrong():
+    plain = parse_metadata_file('{"metadataAttributes": {"team": "billing", "year": 2024, "tags": ["a", "b"], '
+                                '"public": true}}', FOLDER + "a.pdf.metadata.json")
+    assert plain.found and not plain.problems and plain.size == len(plain.text)
+    assert plain.attributes == {"team": "billing", "year": 2024, "tags": ["a", "b"], "public": True}
+    assert plain.types == {"team": "STRING", "year": "NUMBER", "tags": "STRING_LIST", "public": "BOOLEAN"}
+    typed = parse_metadata_file(json.dumps({"metadataAttributes": {
+        "team": {"value": {"type": "STRING", "stringValue": "legal"}, "includeForEmbedding": True},
+        "year": {"value": {"type": "NUMBER", "numberValue": 2023}, "includeForEmbedding": False},
+        "bad": {"value": {"type": "DATE", "stringValue": "2024-01-01"}},
+        "empty": {"value": {"type": "STRING"}},
+    }}).encode("utf-8-sig"))  # a BOM is fine
+    assert typed.attributes == {"team": "legal", "year": 2023} and typed.embedded == ["team"]
+    assert typed.problems == ["'bad' has type 'DATE'; Bedrock takes STRING, NUMBER, BOOLEAN or STRING_LIST.",
+                              "'empty' is a STRING without its stringValue."]
+
+    def problems(text, size=None):
+        return parse_metadata_file(text, size=size).problems
+
+    assert "It isn't valid JSON (Expecting ',' delimiter at line 1, column 20)" in problems('{"team": "billing" "x": 1}')[0]
+    assert problems("[1, 2]") == ["It holds a list; Bedrock reads an object like " + kbmod._METADATA_EXAMPLE + "."]
+    assert "put 'team' under metadataAttributes" in problems('{"team": "billing"}')[0]
+    assert "metadataAttributes holds a list" in problems('{"metadataAttributes": []}')[0]
+    assert "a name Bedrock keeps for its own metadata" in problems(
+        '{"metadataAttributes": {"x-amz-bedrock-kb-source-uri": "s3://x"}}')[0]
+    assert "'when' holds an object" in problems('{"metadataAttributes": {"when": {"day": 1}}}')[0]
+    assert "over the 10.0 KB Bedrock reads" in problems('{"metadataAttributes": {}}', size=11 * 1024)[0]
+    assert problems(b"\xff\xfe\x00{") == ["It isn't UTF-8 text, so Bedrock can't read it."]
+
+
+WORDS = [f"word{i:03d}" for i in range(300)]  # a file's text, cut into chunks that overlap by 20 words
+TEXT = " ".join(WORDS)
+
+
+def chunk(start, end, page=None, n=0):
+    return Passage(n, " ".join(WORDS[start:end]), uri=FOLDER + "notes.md", page=page, chunk_id=f"c{start}")
+
+
+def test_chunks_are_put_in_document_order():
+    chunks = [chunk(0, 100), chunk(80, 180), chunk(160, 260), chunk(240, 300)]
+    shuffled = [chunks[2], chunks[0], chunks[3], chunks[1], chunks[0]]  # a repeat too
+    assert chunk_overlap(chunks[0].text, chunks[1].text) == len(" ".join(WORDS[80:100]))
+    assert chunk_overlap(chunks[1].text, chunks[0].text) == 0 and chunk_overlap("short", "short") == 0
+    spans = place_chunks(TEXT, shuffled)
+    assert spans["c0"] == (0, len(chunks[0].text)) and spans["c80"][0] == TEXT.index("word080")
+    assert order_chunks(shuffled, spans) == chunks  # by where each one sits in the text, each once
+    assert order_chunks(shuffled) == chunks  # without the text: by the text each repeats from the one before
+    paged = [chunk(160, 260, page=2), chunk(0, 100, page=1), chunk(80, 180, page=1)]
+    assert [p.chunk_id for p in order_chunks(paged)] == ["c0", "c80", "c160"]  # by page, then overlap
+    stats = chunk_stats(chunks, spans, len(TEXT))
+    assert (stats.count, stats.words, stats.tiny, stats.repeats, stats.placed) == (4, [100, 100, 100, 60], 0, 0, 4)
+    assert stats.overlaps[0] == 0 and all(stats.overlaps[1:]) and stats.coverage == 1.0
+    gap = chunk_stats([chunks[0], chunks[3]], place_chunks(TEXT, [chunks[0], chunks[3]]), len(TEXT))
+    assert gap.coverage < 0.6 and gap.overlaps == [0, 0]
+    tiny = chunk_stats([Passage(1, "Page 1", chunk_id="a"), Passage(2, "Page 2", chunk_id="b"),
+                        Passage(3, "x " * 30, chunk_id="c"), Passage(4, "x " * 30, chunk_id="d")])
+    assert (tiny.tiny, tiny.repeats, tiny.coverage) == (2, 1, None)
+
+
+def chunks_of(*passages, **kwargs):
+    found = DocumentChunks(KB_ID, FOLDER + "notes.md", list(passages), **kwargs)
+    found.stats = chunk_stats(found.chunks, found.spans, found.text_length)
+    return found
+
+
+def test_file_findings_name_the_fix():
+    ds = parse_data_source(ds_desc(chunking=FIXED_20))
+    on = {"kb_id": KB_ID, "region": "us-east-1"}
+
+    def said(f, chunks=None, meta=None, **kwargs):
+        return [(level, message) for level, message in file_findings(f, chunks, meta, ds, **{**on, **kwargs})]
+
+    [(level, failed)] = said(state(kbfile("scan.pdf", "FAILED", reason="The file is a scanned image"), "failed"))
+    assert level == "warn" and "foundation model or Data Automation parser reads it. Then sync: aws bedrock-agent " \
+                                "start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456" in failed
+    [(_, locked)] = said(state(kbfile("locked.pdf", "FAILED", reason="Password protected"), "failed"))
+    assert "Save it without a password." in locked
+    [(_, changed)] = said(state(kbfile("a.pdf"), "changed", "It changed."))
+    assert changed.startswith("It changed. Sync to index the new version: aws bedrock-agent")
+    assert "found none of its chunks" in said(state(kbfile("a.pdf"), "indexed"), chunks_of())[0][1]
+    outside = said(state(kbfile("a.pdf"), "indexed"), chunks_of(chunk(0, 100), outside=2, truncated=True))
+    assert "2 passages of other files came back" in outside[0][1] and "at most 100 passages" in outside[1][1]
+    big = DocumentChunks(KB_ID, FOLDER + "a.pdf", [Passage(1, "word " * 7000, chunk_id="a")])
+    big.stats = chunk_stats(big.chunks)
+    none = parse_data_source(ds_desc(chunking={"chunkingStrategy": "NONE"}))
+    assert "one chunk of about" in file_findings(state(kbfile("a.pdf"), "indexed"), big, None, none)[0][1]
+    tiny = said(state(kbfile("a.pdf"), "indexed"), chunks_of(*(Passage(i, f"Page {i}", chunk_id=str(i))
+                                                              for i in range(1, 4))))
+    assert "3 of its 3 chunks are under 20 words" in tiny[0][1]
+    low = chunks_of(chunk(0, 100), spans={"c0": (0, 900)}, text_length=len(TEXT))
+    assert "Only about" in said(state(kbfile("notes.md"), "indexed"), low)[0][1]
+    meta = MetadataFile(FOLDER + "a.pdf.metadata.json", found=True, attributes={"team": "billing"})
+    unsynced = said(state(kbfile("a.pdf"), "indexed"), chunks_of(chunk(0, 100)), meta)
+    assert "sets 'team', which its chunks don't have yet" in unsynced[0][1]
+    broken = MetadataFile(meta.uri, found=True, problems=["It isn't valid JSON (x).", "Another."])
+    assert said(state(kbfile("a.pdf"), "indexed"), None, broken) == [
+        ("warn", "Its metadata file has a problem: It isn't valid JSON (x). (1 more problems below)")]
+    assert "Couldn't read its metadata file" in said(state(kbfile("a.pdf"), "indexed"), None, MetadataFile(
+        meta.uri, error="AccessDenied"))[0][1]
+    missing = said(state(kbfile("a.pdf"), "indexed"), None, MetadataFile(meta.uri), others_have_metadata=True)
+    assert "add a.pdf.metadata.json holding" in missing[0][1]
+    assert said(state(kbfile("a.pdf"), "indexed"), chunks_of(chunk(0, 100), chunk(80, 180))) == []
+
+
+def test_file_steps_follow_a_file_into_the_vector_store():
+    info = parse_knowledge_base(kb_desc())
+    ds = parse_data_source(ds_desc(chunking=FIXED_20))
+    found = chunks_of(Passage(1, "x " * 40, page=2, chunk_id="a"), Passage(2, "y " * 40, page=5, chunk_id="b"))
+    steps = file_steps(state(kbfile("refund-policy.pdf"), "indexed", "Indexed and searchable."), ds, info, found)
+    assert [s[0] for s in steps] == ["Stored in S3", "Read by the parser", "Cut into chunks", "Embedded",
+                                     "Stored as vectors", "Now"]
+    assert steps[0][1] == "2.0 KB · PDF · changed 10d ago" and steps[2][1].startswith("2 chunks, about")
+    assert "from page 2 to 5" in steps[2][1] and steps[2][2] == "Fixed size: 300 tokens per chunk, 20% overlap"
+    assert steps[3][1] == "amazon.titan-embed-text-v2:0, 1,024 dimensions" and steps[4][1] == "OpenSearch Serverless"
+    assert "kb-index" in steps[4][2] and not steps[4][2].startswith("OpenSearch")
+    assert all(s[3] == "ok" for s in steps)
+    failed = file_steps(state(kbfile("scan.pdf", "FAILED", reason="Couldn't parse the file"), "failed"), ds, info)
+    assert failed[1][3] == "bad" and failed[-1][1] == "Failed" and failed[-1][3] == "bad"
+    gone = file_steps(state(kbfile("gone.pdf", size=None), "deleted"), ds, info)
+    assert gone[0][1:] == ("not in the bucket any more", FOLDER + "gone.pdf", "warn")
+    custom = file_steps(state(KBFile("doc-17", "DSCUSTOM01", status="INDEXED"), "indexed"))
+    assert custom[0][:2] == ("Sent through the API", "a custom document") and len(custom) == 4
+
+
+def test_match_files_finds_a_file_by_name_or_path():
+    files = [kbfile("refund-policy.pdf"), kbfile("faq/refund-policy.pdf"), kbfile("Shipping Times.pdf"),
+             KBFile("s3://support-docs-bucket/other/terms.md")]
+    assert find_files(files, FOLDER + "Shipping%20Times.pdf") == [files[2]]  # URL-encoded like Retrieve's
+    assert find_files(files, "policies/refund-policy.pdf") == [files[0]]
+    assert find_files(files, "/faq/refund-policy.pdf") == [files[1]]
+    assert find_files(files, "REFUND-POLICY.PDF") == files[:2]  # the name, in any case: both
+    assert find_files(files, "terms") == [files[3]] and find_files(files, " ") == []
+
+
+def probe(rank, *, inside=1, codes="", search_type=None):
+    mine = [Passage(i + 1, f"Refunds take 5-7 days {i}", 0.8 - i / 10, FOLDER + "refund-policy.pdf", page=i + 1)
+            for i in range(inside)]
+    others = [Passage(i + 1, "other", 0.9 - i / 50, FOLDER + f"other-{i}.pdf") for i in range(20)]
+    whole = others[:]
+    if rank:
+        whole.insert(rank - 1, Passage(rank, mine[0].text, 0.5, mine[0].uri, page=1))
+        for i, p in enumerate(whole):
+            p.rank = i + 1
+    question = f"How long do refunds take {codes}".strip()
+    return FileProbe(mine[0].uri if mine else FOLDER + "refund-policy.pdf", question,
+                     Retrieval(KB_ID, question, mine, search_type=search_type), Retrieval(KB_ID, question, whole),
+                     rank)
+
+
+def test_probe_findings_say_whether_an_answer_sees_the_file():
+    assert probe_findings(probe(1)) == [("info", "refund-policy.pdf's best passage for this question is the "
+                                                 "knowledge base's best too, so answers start from it.")]
+    assert "ranks #4 across the whole knowledge base: within the 5 passages" in probe_findings(probe(4))[0][1]
+    [(level, far)] = probe_findings(probe(9))
+    assert level == "warn" and "won't see it (other-0.pdf, other-1.pdf, other-2.pdf rank higher). Ask for n=9" in far
+    assert "none ranks in the knowledge base's top 20" in probe_findings(probe(None))[0][1]
+    assert probe_findings(probe(None, inside=0)) == [("warn", "No chunk of refund-policy.pdf came back for this "
+                                                              "question. The file isn't indexed (or has no text), "
+                                                              "or this vector store can't filter on one file.")]
+    assert "'E1234' from the question appear in none" in probe_findings(probe(1, codes="E1234"))[1][1]
+    assert len(probe_findings(probe(1, codes="E1234", search_type="HYBRID"))) == 1
+
+
+def test_parse_file_state_and_sort_files():
+    assert [parse_file_state(s) for s in ("failed", "Not synced yet", "PARTIALLY_INDEXED", "not-synced", "Stale")] == [
+        "failed", "new", "partial", "new", "changed"]
+    with pytest.raises(ValueError, match="status= is one of 'failed'"):
+        parse_file_state("broken")
+    files = [state(kbfile("b.pdf", size=10, modified=ago(days=2)), "indexed"),
+             state(kbfile("a/z.pdf", size=30, modified=ago(days=5)), "failed"),
+             state(kbfile("c.pdf", size=None, modified=ago(days=1)), "new")]
+    assert [f.name for f in sort_files(files)] == ["z.pdf", "c.pdf", "b.pdf"]
+    assert [f.name for f in sort_files(files, "name")] == ["b.pdf", "c.pdf", "z.pdf"]
+    assert [f.name for f in sort_files(files, "folder")] == ["z.pdf", "b.pdf", "c.pdf"]
+    assert [f.name for f in sort_files(files, "size")] == ["z.pdf", "b.pdf", "c.pdf"]
+    assert [f.name for f in sort_files(files, "modified")] == ["c.pdf", "b.pdf", "z.pdf"]
+    with pytest.raises(ValueError, match="by= is one of"):
+        sort_files(files, "age")
+
+
+def test_window_text_points_at_the_windows_tabs():
+    assert kbmod._window_text("documents(status='FAILED') shows which; syncs() the history.") == (
+        "the Files tab's Failed filter shows which; the Syncs tab the history.")
+    assert kbmod._window_text("Ask for n=6 passages, or narrow the search with data_source= or where=.") == (
+        "Ask for 6 passages, or narrow the search with a data source or metadata filter.")
+    assert kbmod._window_text("so where= filters see old values; try search_type='HYBRID'") == (
+        "so metadata filters see old values; try hybrid search")
+    assert kbmod._window_text("ask(q, n=10) and .core.file_inventory(...)") == "ask(q, n=10) and .core.file_inventory(...)"
+    blocks = kbmod._for_window([
+        kbmod._Title("t", "see kbs()"), kbmod._Findings([("warn", "run documents()")], empty="all fine: syncs()"),
+        kbmod._Note("files() lists them"), kbmod._Next([("file('a.pdf')", "how it was indexed")]),
+    ])
+    assert [type(b).__name__ for b in blocks] == ["_Title", "_Findings", "_Note"]
+    assert blocks[0].sub == "see the knowledge base list" and blocks[1].items == [("warn", "run the Files tab")]
+    assert blocks[1].empty == "all fine: the Syncs tab" and blocks[2].text == "the Files tab lists them"
+
+
+def test_file_report_blocks_render_and_escape():
+    steps = kbmod._Steps([("Read by the <b>parser</b>", "Default <i>", "s3://x/<script>.pdf", "bad"),
+                          ("Now", "Indexed", "", "ok")], title="How it was indexed")
+    pipeline = kbmod._Pipeline([("docs-<s3>", [("Parser", "Default", "", "ok"), ("Chunking", "Fixed", "300", "")])],
+                               title="Pipeline")
+    chunks = kbmod._Chunks([(1, chunk(0, 100, page=1), 0), (2, chunk(80, 180, page=1), 159)], title="Chunks",
+                           spans=[(0.0, 0.4), (0.3, 0.7)], coverage=0.7, terms=["word090"])
+    chunks.items.append((3, Passage(3, "<img src=x onerror=alert(1)>", chunk_id="z"), 0))
+    shares = kbmod._Shares([("Indexed", 3, "indexed"), ("Failed <x>", 1, "failed")], title="Files")
+    blocks = [steps, pipeline, chunks, shares, kbmod._Json({"name": "<b>x</b>", "n": [1, 2]}, "Raw", open_depth=1)]
+    html = kbmod._render_html(blocks, 50)
+    assert "<script>" not in html and "<img" not in html and "<b>parser" not in html and "<b>x</b>" not in html
+    assert '<div class="st bad">' in html and "&lt;script&gt;.pdf" in html and "docs-&lt;s3&gt;" in html
+    assert '<mark class="ov">' in html and "↩ 159 chars shared" in html and "<mark>word090</mark>" in html
+    assert "70% covered" in html and 'class="s-failed"' in html
+    text = kbmod._render_text(blocks, 50)
+    assert "Read by the <b>parser</b>" in text and "Now" in text and "docs-<s3>" in text
+    assert "#2 p.1 ~" in text and "159 characters shared with #1" in text and "Failed <x>" in text
+
+
+# ----------------------------------------------------------------------------- files: what's indexed (AWS)
+
+FILE_DOCS = [doc("old.pdf"), doc("gone.pdf"), doc("broken.pdf", "FAILED", "The file is encrypted")]
+
+
+def stub_inventory(aws, docs=None, *, web=False, kb="support-docs", last=None):
+    """Queue what file_inventory() reads without describe(): the knowledge base list (for the name), its data
+    sources, each one's settings and last successful sync, and Bedrock's documents. The bucket is moto's."""
+    if kb != KB_ARN:
+        aws.list_kbs()
+    aws.data_sources(ds_desc(), *([ds_desc(DS2_ID, "help-site", kind="WEB")] if web else []))
+    aws.agent.add_response("get_data_source", {"dataSource": ds_desc(chunking=FIXED_20)},
+                           {"knowledgeBaseId": KB_ID, "dataSourceId": DS_ID})
+    aws.agent.add_response(
+        "list_ingestion_jobs", {"ingestionJobSummaries": [last or job(started=ago(days=3))]},
+        {"knowledgeBaseId": KB_ID, "dataSourceId": DS_ID, "maxResults": 1,
+         "sortBy": {"attribute": "STARTED_AT", "order": "DESCENDING"},
+         "filters": [{"attribute": "STATUS", "operator": "EQ", "values": ["COMPLETE"]}]})
+    stub_documents(aws, FILE_DOCS if docs is None else docs)
+    if web:
+        aws.agent.add_response("get_data_source", {"dataSource": ds_desc(DS2_ID, "help-site", kind="WEB")})
+
+
+def stub_documents(aws, docs, ds_id=DS_ID):
+    if isinstance(docs, str):
+        denied(aws.agent, "list_knowledge_base_documents", docs)
+        return
+    aws.agent.add_response("list_knowledge_base_documents", {"documentDetails": docs},
+                           {"knowledgeBaseId": KB_ID, "dataSourceId": ds_id})
+
+
+def test_file_inventory_puts_bedrocks_documents_next_to_the_bucket(aws, bucket):
+    stub_inventory(aws, web=True)
+    counted = []
+    inv = aws.analyzer().file_inventory("support-docs", progress=counted.append)
+    assert {f.name: f.state for f in inv.files} == {"broken.pdf": "failed", "gone.pdf": "deleted",
+                                                     "new.pdf": "new", "old.pdf": "indexed"}  # only under policies/
+    old = next(f for f in inv.files if f.name == "old.pdf")
+    assert (old.size, old.metadata_size, old.data_source_id) == (2048, 2048, DS_ID)
+    assert inv.sources == {DS_ID: "docs-s3", DS2_ID: "help-site"} and inv.kinds == {DS_ID: "S3", DS2_ID: "WEB"}
+    assert inv.last_sync[DS_ID].id == "JOB0000001" and not inv.errors and not inv.truncated
+    assert counted == [3, 6] and inv.counts() == {"failed": 1, "new": 1, "deleted": 1, "indexed": 1}
+    assert list(inv.to_df().columns)[:4] == ["uri", "name", "data_source", "state"]
+
+
+def test_file_inventory_takes_what_describe_read(aws, bucket):
+    aws.list_kbs()
+    aws.describe()
+    core = aws.analyzer()
+    info = core.describe(KB_ID)
+    stub_documents(aws, FILE_DOCS)
+    inv = core.file_inventory(KB_ID, info=info)  # no second GetDataSource or ListIngestionJobs
+    assert len(inv.files) == 4 and inv.last_sync[DS_ID].id == "JOB0000001"
+
+
+def test_file_inventory_records_what_it_cant_read_and_where_it_stopped(aws, bucket):
+    stub_inventory(aws, "AccessDeniedException")
+    inv = aws.analyzer().file_inventory("support-docs")
+    assert inv.errors == {DS_ID: {"documents": "AccessDeniedException"}}
+    assert {f.name: f.state for f in inv.files} == {"new.pdf": "unchecked", "old.pdf": "unchecked"}
+    assert "Couldn't read Bedrock's document list for docs-s3" in inventory_findings(inv)[-1][1]
+    stub_inventory(aws, [doc("old.pdf"), doc("gone.pdf")])
+    cut = aws.analyzer().file_inventory("support-docs", limit=1)
+    assert cut.truncated == {DS_ID: ["documents", "files"]} and cut.limit == 1
+    # the bucket's first file is new.pdf, and the document list stopped after old.pdf: neither side is whole
+    assert {f.name: f.state for f in cut.files} == {"new.pdf": "unchecked", "old.pdf": "indexed"}
+    with pytest.raises(ValueError, match="has no data source 'nope'"):
+        aws.list_kbs()
+        aws.data_sources(ds_desc())
+        aws.analyzer().file_inventory("support-docs", "nope")
+
+
+def test_file_inventory_without_the_bucket(aws, bucket):
+    bucket.delete_objects(Bucket="support-docs-bucket", Delete={"Objects": [
+        {"Key": k["Key"]} for k in bucket.list_objects_v2(Bucket="support-docs-bucket")["Contents"]]})
+    bucket.delete_bucket(Bucket="support-docs-bucket")
+    stub_inventory(aws)
+    inv = aws.analyzer().file_inventory("support-docs")
+    assert inv.errors == {DS_ID: {"files": "NoSuchBucket"}}
+    assert {f.name: f.state for f in inv.files} == {"broken.pdf": "failed", "gone.pdf": "indexed", "old.pdf": "indexed"}
+
+
+def test_metadata_file_reads_and_checks_a_files_metadata(aws, bucket):
+    core = aws.analyzer()
+    broken = core.metadata_file("s3://support-docs-bucket/policies/old.pdf")  # the fixture's is 2 KB of x
+    assert broken.found and broken.size == 2048 and "isn't valid JSON" in broken.problems[0]
+    bucket.put_object(Bucket="support-docs-bucket", Key="policies/new.pdf.metadata.json",
+                      Body=b'{"metadataAttributes": {"team": "billing", "year": 2024}}')
+    good = core.metadata_file("s3://support-docs-bucket/policies/new.pdf.metadata.json")
+    assert good.attributes == {"team": "billing", "year": 2024} and good.modified is not None
+    assert core.metadata_file("s3://support-docs-bucket/policies/none.pdf") == MetadataFile(
+        "s3://support-docs-bucket/policies/none.pdf.metadata.json")
+    assert core.metadata_file("s3://no-such-bucket/a.pdf").error == "NoSuchBucket"
+    with pytest.raises(ValueError, match="isn't an s3:// path"):
+        core.metadata_file("doc-17")
+
+
+NOTES = "s3://support-docs-bucket/policies/notes.md"
+
+
+def chunk_result(text, uri=NOTES, *, page=None, chunk_id="", score=0.5):
+    md = {"x-amz-bedrock-kb-source-uri": uri, "x-amz-bedrock-kb-data-source-id": DS_ID, "team": "billing"}
+    if chunk_id:
+        md["x-amz-bedrock-kb-chunk-id"] = chunk_id
+    if page is not None:
+        md["x-amz-bedrock-kb-document-page-number"] = float(page)
+    return {"content": {"text": text, "type": "TEXT"}, "location": {"type": "S3", "s3Location": {"uri": uri}},
+            "metadata": md, "score": score}
+
+
+def file_filter(uri):
+    return {"equals": {"key": "x-amz-bedrock-kb-source-uri", "value": uri}}
+
+
+def test_document_chunks_reads_one_files_chunks_in_document_order(aws, bucket):
+    bucket.put_object(Bucket="support-docs-bucket", Key="policies/notes.md", Body=TEXT.encode())
+    aws.list_kbs()
+    parts = [(0, 100), (80, 180), (160, 260), (240, 300)]
+    results = [chunk_result(" ".join(WORDS[a:b]), chunk_id=f"c{a}") for a, b in parts]
+    aws.runtime.add_response(
+        "retrieve", retrieve_resp(results[2], results[0], chunk_result("elsewhere", FOLDER + "other.pdf"),
+                                  results[3], results[1]),
+        search_params("notes", n=100, filter=file_filter(NOTES)))
+    found = aws.analyzer().document_chunks(KB_ID, NOTES)
+    assert [p.chunk_id for p in found.chunks] == ["c0", "c80", "c160", "c240"]
+    assert (found.outside, found.truncated, found.query, found.text_length) == (1, False, "notes", len(TEXT))
+    assert found.stats.coverage == 1.0 and found.stats.placed == 4 and found.chunks[0].metadata == {"team": "billing"}
+    assert found.spans["c80"][0] == TEXT.index("word080") and found.seconds >= 0
+
+
+def test_document_chunks_of_a_pdf_go_by_page(aws):
+    pdf = FOLDER + "Refund Policy.pdf"
+    aws.runtime.add_response(
+        "retrieve", retrieve_resp(chunk_result("Page two text " * 5, pdf, page=2, chunk_id="b"),
+                                  chunk_result("Page one text " * 5, pdf, page=1, chunk_id="a")),
+        search_params("Refund Policy", n=3, filter=file_filter(pdf), kb_id=KB_ID))
+    found = aws.analyzer().document_chunks(KB_ARN, pdf, n=3)
+    assert [p.page for p in found.chunks] == [1, 2] and not found.spans and found.stats.coverage is None
+    assert not found.truncated and found.text_length == 0
+    with pytest.raises(ValueError, match="takes a file's s3:// path"):
+        aws.analyzer().document_chunks(KB_ARN, "doc-17")
+    with pytest.raises(ValueError, match="n can be 1 to 100"):
+        aws.analyzer().document_chunks(KB_ARN, pdf, n=101)
+
+
+def test_document_chunks_says_why_it_couldnt_place_them(aws, bucket):
+    aws.runtime.add_response("retrieve", retrieve_resp(chunk_result("Some words " * 10, chunk_id="a")),
+                             search_params("notes", n=100, filter=file_filter(NOTES)))
+    found = aws.analyzer().document_chunks(KB_ARN, NOTES)  # notes.md isn't in the bucket
+    assert "couldn't read the file to place its chunks (NoSuchKey" in found.text_note
+    assert len(found.chunks) == 1 and found.stats.coverage is None
+
+
+def test_probe_file_asks_the_file_and_the_whole_knowledge_base(aws):
+    refund = FOLDER + "refund-policy.pdf"
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(score=0.8), passage(EU_TEXT, score=0.6, chunk="c2")),
+                             search_params("refund window", n=10, filter=file_filter(refund)))
+    aws.runtime.add_response("retrieve", retrieve_resp(passage(EU_TEXT, "eu-returns.pdf", score=0.9), passage()),
+                             search_params("refund window", n=20))
+    probe = aws.analyzer().probe_file(KB_ARN, refund, "refund window")
+    assert probe.rank == 2 and len(probe.inside.passages) == 2 and len(probe.across.passages) == 2
+    assert "ranks #2 across the whole knowledge base: within the 5 passages" in probe_findings(probe)[0][1]
+
+
+def test_document_status_reads_one_files_record(aws):
+    aws.data_sources(ds_desc())
+    aws.agent.add_response(
+        "get_knowledge_base_documents", {"documentDetails": [doc("old.pdf", "FAILED", "Too big")]},
+        {"knowledgeBaseId": KB_ID, "dataSourceId": DS_ID,
+         "documentIdentifiers": [{"dataSourceType": "S3", "s3": {"uri": FOLDER + "old.pdf"}}]})
+    record = aws.analyzer().document_status(KB_ARN, FOLDER + "old.pdf", "docs-s3")
+    assert (record.status, record.reason) == ("FAILED", "Too big")
+
+
+# ----------------------------------------------------------------------------- files: reports
+
+
+def test_ui_files(aws, bucket, ui, capsys):
+    stub_inventory(aws)
+    out = run(capsys, ui.files, "support-docs")
+    assert "Files of support-docs" in out and "4 files from 1 data source" in out
+    assert "Failed: 1 (!)" in out and "1 file failed to index (broken.pdf)" in out
+    assert out.index("broken.pdf") < out.index("old.pdf")  # problems first
+    assert "aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456" in out
+    assert "file('policies/broken.pdf'" in out
+    stub_inventory(aws, kb=KB_ARN)
+    narrowed = run(capsys, ui.files, "support-docs", status="not synced")
+    assert "Files that are not synced yet" in narrowed and "new.pdf" in narrowed.split("Files that are")[1]
+    assert "old.pdf" not in narrowed.split("Files that are")[1].split("To sync")[0]
+
+
+def stub_file_page(aws, chunks=None):
+    """What file() reads after the files are listed: the file's chunks (the metadata file is moto's)."""
+    old = FOLDER + "old.pdf"
+    aws.runtime.add_response("retrieve", retrieve_resp(*(chunks if chunks is not None else [
+        chunk_result("The old policy, page one. " * 4, old, page=1, chunk_id="o1"),
+        chunk_result("The old policy, page two. " * 4, old, page=2, chunk_id="o2")])),
+        search_params("old", n=100, filter=file_filter(old)))
+
+
+def test_ui_file_shows_how_it_was_indexed(aws, bucket, ui, capsys):
+    aws.list_kbs()
+    aws.describe()
+    stub_documents(aws, FILE_DOCS)
+    stub_file_page(aws)
+    out = run(capsys, ui.file, "old.pdf")
+    assert "old.pdf" in out and "State: Indexed" in out and "Chunks: 2" in out
+    assert "-- How it was indexed --" in out and "[ok] Cut into chunks: 2 chunks" in out
+    assert "#1 p.1 ~" in out and "The old policy, page two." in out
+    assert "Its metadata file has a problem: It isn't valid JSON" in out  # the fixture's is 2 KB of x
+    aws.describe()
+    gone = run(capsys, ui.file, "nothing.pdf")
+    assert "No file of support-docs matches 'nothing.pdf'" in gone and "files() shows them" in gone
+    aws.describe()
+    failed = run(capsys, ui.file, "s3://support-docs-bucket/policies/broken.pdf")
+    assert "State: Failed (!)" in failed and "Save it without a password." in failed and "[x] Now: Failed" in failed
+
+
+def test_ui_file_asks_which_file_when_several_match(aws, bucket, ui, capsys):
+    bucket.put_object(Bucket="support-docs-bucket", Key="policies/2023/old.pdf", Body=b"x")
+    aws.list_kbs()
+    aws.describe()
+    stub_documents(aws, FILE_DOCS)
+    out = run(capsys, ui.file, "old.pdf")
+    assert "2 files match 'old.pdf': pass one's path, like file('policies/2023/old.pdf')" in out
+
+
+def test_ui_search_file(aws, bucket, ui, capsys):
+    stub_inventory(aws)
+    old = FOLDER + "old.pdf"
+    aws.runtime.add_response("retrieve", retrieve_resp(chunk_result("Old refunds took 30 days.", old, page=1)),
+                             search_params("refund days", n=10, filter=file_filter(old)))
+    aws.runtime.add_response("retrieve", retrieve_resp(*(passage(key=f"other-{i}.pdf", score=0.9 - i / 100)
+                                                         for i in range(8)), chunk_result("Old refunds.", old)),
+                             search_params("refund days", n=20))
+    out = run(capsys, ui.search_file, "old.pdf", "refund days", kb="support-docs")
+    assert "Searching old.pdf: refund days" in out and "Rank in the knowledge base: #9 (!)" in out
+    assert "an answer that gets 5 passages won't see it" in out and "Old refunds took 30 days." in out
+    assert "search('refund days', n=9)" in out
+
+
+def test_ui_explore_needs_jupyter(ui, capsys):
+    out = run(capsys, ui.explore)
+    assert "The explorer window needs Jupyter" in out and "files() lists every file" in out
+
+
+# ----------------------------------------------------------------------------- the explorer window
+
+
+class Fake:
+    """A boto3 client stand-in answering from functions in any order (the window reads in its own order, some of it
+    on other threads). Every request and response is checked against the service model, and calls are recorded.
+    Operations without a handler don't exist on it."""
+
+    def __init__(self, service, handlers):
+        model = boto3.client(service, region_name="us-east-1").meta.service_model
+        self.meta = SimpleNamespace(region_name="us-east-1", service_model=model)
+        self.ops = {xform_name(op): model.operation_model(op) for op in model.operation_names}
+        self.handlers, self.calls = dict(handlers), []
+
+    def _call(self, name, params):
+        op = self.ops[name]
+        report = ParamValidator().validate(params, op.input_shape)
+        assert not report.has_errors(), report.generate_report()
+        self.calls.append((name, params))
+        resp = self.handlers[name](**params)
+        report = ParamValidator().validate(resp, op.output_shape)
+        assert not report.has_errors(), report.generate_report()
+        return resp
+
+    def __getattr__(self, name):
+        if name.startswith("_") or name not in self.handlers:
+            raise AttributeError(name)
+        return lambda **params: self._call(name, params)
+
+    def get_paginator(self, name):
+        return SimpleNamespace(paginate=lambda **params: iter([self._call(name, params)]))
+
+    def called(self, name):
+        return [params for op, params in self.calls if op == name]
+
+
+def plain(value):
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", value)).split())
+
+
+REFUND = FOLDER + "refund-policy.pdf"
+FAQ = FOLDER + "faq.md"
+
+
+class World:
+    """support-docs (an S3 data source over moto's bucket, and a web one) and sales (no data sources), as fake
+    bedrock-agent and bedrock-agent-runtime clients. Put a threading.Event in `holds` under an operation's name to
+    hold its calls back until it's set, or an exception in `errors` to make them fail."""
+
+    def __init__(self, s3, *, bulk=0):
+        self.s3, self.holds, self.errors = s3, {}, {}
+        self.kbs = [(KB_ID, "support-docs"), (KB2_ID, "sales")]
+        self.documents = [doc("refund-policy.pdf"), doc("faq.md"),
+                          doc("scanned.pdf", "FAILED", "The file is a scanned image with no text layer"),
+                          doc("gone.pdf")] + [doc(f"bulk/f-{i:02d}.txt") for i in range(bulk)]
+        self.agent = Fake("bedrock-agent", {name: self._failing(name, handler) for name, handler in {
+            "list_knowledge_bases": self.list_kbs, "get_knowledge_base": self.get_kb,
+            "list_data_sources": self.list_sources, "get_data_source": self.get_source,
+            "list_ingestion_jobs": self.list_jobs, "list_tags_for_resource": lambda **_: {"tags": {"team": "support"}},
+            "list_knowledge_base_documents": self.list_documents, "get_ingestion_job": self.get_job,
+            "get_knowledge_base_documents": self.get_documents,
+        }.items()})
+        self.runtime = Fake("bedrock-agent-runtime", {"retrieve": self._failing("retrieve", self.retrieve)})
+
+    def _failing(self, name, handler):
+        def run(**params):
+            if name in self.holds:
+                assert self.holds[name].wait(10)
+            if name in self.errors:
+                raise self.errors[name]
+            return handler(**params)
+        return run
+
+    def core(self):
+        return BedrockKBAnalyzer(client=self.agent, clients={"bedrock-agent-runtime": self.runtime, "s3": self.s3})
+
+    def list_kbs(self, **_):
+        return {"knowledgeBaseSummaries": [{"knowledgeBaseId": kb_id, "name": name, "status": "ACTIVE",
+                                            "description": f"{name} answers", "updatedAt": ago(days=2)}
+                                           for kb_id, name in self.kbs]}
+
+    def get_kb(self, knowledgeBaseId):
+        return {"knowledgeBase": kb_desc(knowledgeBaseId, dict(self.kbs)[knowledgeBaseId])}
+
+    def list_sources(self, knowledgeBaseId, **_):
+        found = [ds_desc(), ds_desc(DS2_ID, "help-site", kind="WEB")] if knowledgeBaseId == KB_ID else []
+        return {"dataSourceSummaries": [{"knowledgeBaseId": knowledgeBaseId, "dataSourceId": d["dataSourceId"],
+                                         "name": d["name"], "status": d["status"], "updatedAt": d["updatedAt"]}
+                                        for d in found]}
+
+    def get_source(self, knowledgeBaseId, dataSourceId):
+        if dataSourceId == DS2_ID:
+            return {"dataSource": ds_desc(DS2_ID, "help-site", kind="WEB")}
+        return {"dataSource": ds_desc(chunking=FIXED_20)}
+
+    def list_jobs(self, knowledgeBaseId, dataSourceId, maxResults, sortBy, filters=None):
+        if dataSourceId == DS2_ID:
+            return {"ingestionJobSummaries": [job("JOB0000002", ds_id=DS2_ID, started=ago(days=2), scanned=40)]}
+        return {"ingestionJobSummaries": [job(started=ago(days=3), failed=1),
+                                          job("JOB0000003", started=ago(days=9), new=40)][:maxResults]}
+
+    def get_job(self, knowledgeBaseId, dataSourceId, ingestionJobId):
+        found = next(j for j in self.list_jobs(knowledgeBaseId, dataSourceId, 5, {})["ingestionJobSummaries"]
+                     if j["ingestionJobId"] == ingestionJobId)
+        return {"ingestionJob": {**found, "failureReasons": ["1 document couldn't be parsed: " + FOLDER + "scanned.pdf"]}}
+
+    def list_documents(self, knowledgeBaseId, dataSourceId, **_):
+        return {"documentDetails": [{**d, "dataSourceId": dataSourceId} for d in self.documents]
+                if dataSourceId == DS_ID else []}
+
+    def get_documents(self, knowledgeBaseId, dataSourceId, documentIdentifiers):
+        wanted = {d["s3"]["uri"] for d in documentIdentifiers}
+        return {"documentDetails": [d for d in self.documents if d["identifier"]["s3"]["uri"] in wanted]}
+
+    def retrieve(self, knowledgeBaseId, retrievalQuery, retrievalConfiguration, **_):
+        config = retrievalConfiguration["vectorSearchConfiguration"]
+        uri = ((config.get("filter") or {}).get("equals") or {}).get("value")
+        if uri == FAQ:
+            parts = [(160, 260), (0, 100), (240, 300), (80, 180)]
+            return {"retrievalResults": [chunk_result(" ".join(WORDS[a:b]), FAQ, chunk_id=f"faq-{a}")
+                                         for a, b in parts]}
+        if uri == REFUND:
+            return {"retrievalResults": [
+                chunk_result("Refunds are issued within 5-7 business days. " * 3, REFUND, page=3, chunk_id="r1",
+                             score=0.8)]}
+        if uri:
+            return {"retrievalResults": []}
+        found = [chunk_result("Other text about refunds " * 3, FOLDER + f"other-{i}.pdf", score=0.9 - i / 50)
+                 for i in range(3)]
+        found.append(chunk_result("Refunds are issued within 5-7 business days. " * 3, REFUND, page=3, chunk_id="r1",
+                                  score=0.5))
+        return {"retrievalResults": found[:config["numberOfResults"]]}
+
+
+@pytest.fixture
+def world():
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="support-docs-bucket")
+        for key, body, days in [
+            ("policies/refund-policy.pdf", b"%PDF " * 400, 10),
+            ("policies/refund-policy.pdf.metadata.json", b'{"metadataAttributes": {"team": "billing"}}', 10),
+            ("policies/faq.md", TEXT.encode(), 10),
+            ("policies/scanned.pdf", b"%PDF " * 300, 10),
+            ("policies/added.pdf", b"%PDF " * 100, 0),
+            ("policies/video.mp4", b"\0" * 900, 10),
+        ]:
+            s3.put_object(Bucket="support-docs-bucket", Key=key, Body=body)
+            if days:
+                backdate("support-docs-bucket", key, ago(days=days))
+        yield World(s3)
+
+
+def explorer(world, kb="support-docs", **kwargs):
+    return KBExplorer(kb, core=world.core(), mode="widgets", **kwargs)
+
+
+def row(x, name):
+    return next(r for r in x._rows[:len(x._visible)] if r.file.name == name)
+
+
+def enter(text_box):
+    text_box._handle_custom_msg({"event": "submit"}, [])
+
+
+def test_explorer_opens_the_knowledge_base_and_lists_its_files(world):
+    x = explorer(world)
+    assert x.kb == KB_ID and x.info.name == "support-docs" and len(x.inventory.files) == 6
+    assert "Knowledge base explorer us-east-1 support-docs · vector search · OpenSearch Serverless" in plain(
+        x.title.value)
+    assert plain(x.stats.value) == "Files 6 Searchable 3 Failed 1 To sync 1 Last sync done 2d ago Idle cost / mo $350.40"
+    assert [c.description for c in x.chips.children] == ["All 6", "Failed 1", "Not synced 1", "Skipped 1",
+                                                         "Deleted 1", "Indexed 2"]
+    assert [f.name for f in x._visible] == ["scanned.pdf", "added.pdf", "video.mp4", "gone.pdf", "faq.md",
+                                            "refund-policy.pdf"]
+    assert "Failed" in plain(x._rows[0].face.value) and "kbx-alarm" in x.tab_buttons["files"]._dom_classes
+    assert plain(x.status.value) == "6 files listed in 0.0s · 4 files to look at: the Files tab lists them first"
+    overview = plain(x.overview.value)
+    assert "Its 6 files, by state" in overview and "1 file failed to index (scanned.pdf)" in overview
+    assert "help-site is a WEB data source" in overview and "the Syncs tab shows how many each sync read" in overview
+    assert "aws bedrock-agent start-ingestion-job" in overview and "docs-s3" in overview
+    assert not any(isinstance(b, kbmod._Next) for b in x.shown["overview"])  # no calls to copy into a cell
+    assert repr(x) == "KBExplorer(support-docs) · help(KBExplorer) says what it shows"
+
+
+def test_explorer_shows_how_a_file_was_indexed(world):
+    x = explorer(world)
+    x.tab_buttons["files"].click()
+    assert "Click a file on the left" in plain(x.file_view.value) and "Files of support-docs" in plain(
+        x.file_view.value)
+    row(x, "faq.md").button.click()
+    assert x.selected.name == "faq.md" and "kbx-on" in row(x, "faq.md").box._dom_classes
+    assert [p.chunk_id for p in x.chunks.chunks] == ["faq-0", "faq-80", "faq-160", "faq-240"]
+    assert x.chunks.stats.coverage == 1.0 and not x.metadata.found
+    page = plain(x.file_view.value)
+    assert "How it was indexed" in page and "Its 4 chunks, in document order" in page and "100% covered" in page
+    assert "Other files of its data source have a metadata file and this one doesn't" in page
+    assert plain(x.status.value) == "faq.md: indexed, 4 chunks (0.0s)"
+    assert x.ask_row.layout.display == "" and x.back_button.layout.display == ""
+    x.ask_box.value = "word120 word121"
+    enter(x.ask_box)
+    assert x.probe.uri == FAQ and "Searching faq.md: word120 word121" in plain(x.probe_view.value)
+    assert x.ask_button.description == "Ask" and not x.ask_button.disabled
+    row(x, "refund-policy.pdf").button.click()  # another file: the question's answer goes
+    assert x.probe is None and x.probe_view.value == "" and x.metadata.attributes == {"team": "billing"}
+    assert "Its metadata: refund-policy.pdf.metadata.json next to what its chunks carry" in plain(x.file_view.value)
+    row(x, "scanned.pdf").button.click()
+    assert x.ask_row.layout.display == "none" and x.chunks is None  # nothing of it is searchable
+    assert "Bedrock couldn't index this file (The file is a scanned image with no text layer)" in plain(
+        x.file_view.value)
+    x.back_button.click()
+    assert x.selected is None and "Files of support-docs" in plain(x.file_view.value)
+    x.file("policies/faq.md")
+    assert x.selected.name == "faq.md" and x._tab == "files"
+
+
+def test_explorer_looks_up_a_file_the_document_list_didnt_reach(world):
+    x = explorer(world)
+    faq = next(f for f in x.inventory.files if f.name == "faq.md")
+    faq.status, faq.indexed = "", None
+    faq.state, faq.note = "unchecked", "Bedrock's document list stopped at the limit before this file"
+    x._draw_chips()
+    x._refilter()
+    assert "Not checked 1" in [c.description for c in x.chips.children]
+    row(x, "faq.md").button.click()
+    assert world.agent.called("get_knowledge_base_documents")[-1]["documentIdentifiers"] == [
+        {"dataSourceType": "S3", "s3": {"uri": FAQ}}]
+    assert faq.state == "indexed" and faq.status == "INDEXED" and x.chunks.stats.count == 4
+    assert "Not checked 1" not in [c.description for c in x.chips.children] and x.ask_row.layout.display == ""
+    assert "Indexed" in plain(row(x, "faq.md").face.value)
+
+
+def test_explorer_filters_sorts_and_pages_the_files(world):
+    world.documents += [doc(f"bulk/f-{i:02d}.txt") for i in range(45)]
+    x = explorer(world)
+    assert len(x._visible) == 51 and len(x.rows_box.children) == 40
+    assert plain(x.pager_text.value) == "1–40 of 51" and x.page_buttons["first"].disabled
+    x.page_buttons["next"].click()
+    assert len(x.rows_box.children) == 11 and plain(x.pager_text.value) == "41–51 of 51"
+    assert x.page_buttons["last"].disabled
+    x.page_buttons["first"].click()
+    failed = next(c for c in x.chips.children if c.description.startswith("Failed"))
+    failed.click()
+    assert [f.name for f in x._visible] == ["scanned.pdf"] and plain(x.pager_text.value) == "1–1 of 1 (of 51)"
+    assert x.page_buttons["next"].layout.display == "none"
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()  # again: every file
+    assert len(x._visible) == 51
+    x.find.value = "f-4"
+    assert [f.name for f in x._visible] == [f"f-{i}.txt" for i in range(40, 45)]
+    assert "<mark>f-4</mark>" in x._rows[0].face.value
+    x.find.value = "no such file"
+    assert "No file matches. Clear the search, or pick All above." in plain(x.rows_box.children[0].value)
+    x.find.value = ""
+    x.sort_pick.value = "name"
+    assert [f.name for f in x._visible][:3] == ["added.pdf", "f-00.txt", "f-01.txt"]
+    x.sort_pick.value = "size"
+    assert x._visible[0].name == "faq.md"
+
+
+def test_explorer_switches_knowledge_bases(world):
+    x = explorer(world)
+    x.chooser.button.click()
+    assert x.chooser.is_open and x.backdrop.layout.display == "" and x.chooser.shown == [KB2_ID, KB_ID]
+    x.chooser.search.value = "sal"
+    assert x.chooser.shown == [KB2_ID] and "<mark>sal</mark>" in x.chooser.rows[KB2_ID][2].value
+    enter(x.chooser.search)
+    assert not x.chooser.is_open and x.kb == KB2_ID and x.inventory.files == []
+    assert "sales" in plain(x.chooser.face.value) and plain(x.stats.value).startswith("Files 0 Searchable 0")
+    assert "No files yet" in plain(x.overview.value)
+    x.chooser.open()
+    x.chooser.search.value = "KBIDXXXXXX"
+    enter(x.chooser.search)
+    assert x.chooser.is_open and "No knowledge base 'KBIDXXXXXX' in us-east-1" in plain(x.chooser.foot.value)
+    x.backdrop.click()
+    assert not x.chooser.is_open
+    x.chooser.open()
+    x.chooser.rows[KB_ID][1].click()
+    assert x.kb == KB_ID and len(x.inventory.files) == 6
+    x.open("nope")
+    assert "No knowledge base 'nope' in us-east-1" in plain(x.status.value) and x.kb == KB_ID
+
+
+def test_explorer_search_tab_opens_each_passages_file(world):
+    x = explorer(world)
+    x.tab_buttons["search"].click()
+    assert "Type a question and press Enter" in plain(x.status.value)
+    enter(x.question)
+    assert plain(x.status.value) == "Type a question first, then press Enter."
+    x.question.value = "How long do refunds take?"
+    x.n_pick.value, x.kind_pick.value = 10, "HYBRID"
+    enter(x.question)
+    sent = world.runtime.called("retrieve")[-1]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert sent == {"numberOfResults": 10, "overrideSearchType": "HYBRID"}
+    assert len(x.found.passages) == 4 and len(x.hits.children) == 4
+    assert [len(h.children) for h in x.hits.children] == [1, 1, 1, 2]  # only files the knowledge base lists open
+    assert "Found 4 passages in" in plain(x.status.value)
+    x.hits.children[3].children[1].click()
+    assert x._tab == "files" and x.selected.name == "refund-policy.pdf" and x.chunks.chunks[0].chunk_id == "r1"
+    x.search("refund window")  # from code, as typing it does
+    assert x._tab == "search" and x.found.question == "refund window"
+
+
+def test_explorer_syncs_and_settings_tabs(world):
+    x = explorer(world)
+    assert world.agent.called("list_ingestion_jobs")[-1]["maxResults"] == 5  # describe's: the history isn't read yet
+    x.tab_buttons["syncs"].click()
+    assert [j.id for j in x.jobs] == ["JOB0000002", "JOB0000001", "JOB0000003"]
+    syncs = plain(x.syncs_view.value)
+    assert "Syncs of support-docs newest first · 3 syncs of 2 data sources" in syncs
+    assert "Documents failed 1" in syncs and "Every sync, newest first" in syncs and "help-site done ·" in syncs
+    assert "To sync (this tool never starts a sync: it changes the index)" in syncs
+    assert plain(x.status.value) == "3 syncs, newest first"
+    calls = len(world.agent.called("list_ingestion_jobs"))
+    x.tab_buttons["overview"].click()
+    x.tab_buttons["syncs"].click()
+    assert len(world.agent.called("list_ingestion_jobs")) == calls  # read once
+    x.tab_buttons["settings"].click()
+    settings = plain(x.settings_view.value)
+    assert "Settings of support-docs in plain English, then as AWS returns them" in settings
+    assert "Dimensions 1,024 numbers in each vector" in settings and "Its vector vec vectorField" in settings
+    assert "Data source docs-s3" in settings and "Chunking Fixed size: 300 tokens per chunk, 20% overlap" in settings
+    assert "GetKnowledgeBase, as AWS returns it" in settings and "aws bedrock-agent get-data-source" in settings
+
+
+def test_explorer_says_what_went_wrong_in_its_status_line(world):
+    world.errors["get_knowledge_base"] = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform: "
+                                                               "bedrock:GetKnowledgeBase"}}, "GetKnowledgeBase")
+    x = explorer(world)
+    assert "AccessDeniedException" in plain(x.status.value) and x.info is None
+    assert "AccessDeniedException" in plain(x.overview.value) and "AccessDeniedException" in plain(x.file_view.value)
+    del world.errors["get_knowledge_base"]
+    world.errors["list_knowledge_base_documents"] = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "slow down"}}, "ListKnowledgeBaseDocuments")
+    x.refresh_button.click()
+    assert x.info is not None and x.inventory.errors == {DS_ID: {"documents": "ThrottlingException"}}
+    assert "Couldn't read Bedrock's document list for docs-s3" in plain(x.overview.value)
+    x.file("nothing.pdf")
+    assert "No file of support-docs matches 'nothing.pdf'" in plain(x.status.value)
+    world.errors["retrieve"] = ClientError({"Error": {"Code": "ValidationException", "Message": "bad filter"}},
+                                           "Retrieve")
+    x.search("refunds")
+    assert "ValidationException" in plain(x.search_head.value) and x.search_button.description == "Search"
+
+
+def test_explorer_without_the_knowledge_base_list(world):
+    world.errors["list_knowledge_bases"] = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "ListKnowledgeBases")
+    x = explorer(world, KB_ID)
+    assert x.kb == KB_ID and len(x.inventory.files) == 6  # an ID still opens
+    assert "Couldn't list the knowledge bases" in x.chooser.problem
+    world.errors.clear()
+    world.kbs = []
+    empty = explorer(world, None)
+    assert empty.kb is None and "There are no knowledge bases in us-east-1 to show" in plain(empty.overview.value)
+
+
+def test_explorer_reads_in_the_background(world):
+    listing = world.holds["list_knowledge_base_documents"] = threading.Event()
+
+    async def settle(x, *keys):
+        while any(key in x._tasks for key in keys or list(x._tasks)):
+            await asyncio.gather(*[task for key, task in x._tasks.items() if not keys or key in keys])
+
+    async def main():
+        x = explorer(world, file="faq.md")
+        assert list(x._tasks) == ["kb"] and x._said[2] and x.info is None  # the click returned at once
+        await settle(x, "kb")
+        assert x.info is not None and x.inventory is None and list(x._tasks) == ["files"]
+        assert "Listing support-docs's files" in x._said[0] and "skw" in x.file_view.value
+        x.tab_buttons["settings"].click()  # the window answers while the files are listed
+        assert "Settings of support-docs" in plain(x.settings_view.value)
+        listing.set()
+        await settle(x)
+        assert len(x.inventory.files) == 6 and x._tab == "files" and x.selected.name == "faq.md"
+        assert x.chunks is not None and "Its 4 chunks" in plain(x.file_view.value)
+        listing.clear()
+        x.refresh()
+        await settle(x, "kb")
+        reading = world.holds["get_knowledge_base"] = threading.Event()
+        x.open("sales")  # while support-docs' files are still being listed
+        listing.set()
+        await settle(x, "files")
+        assert x.kb == KB2_ID and x.inventory is None  # support-docs' files came back, and were dropped
+        reading.set()
+        await settle(x)
+        assert x.inventory.kb_id == KB2_ID and x.inventory.files == [] and x.selected is None
+
+    asyncio.run(main())
+
+
+def test_explorer_shows_its_window_once_per_cell(world, monkeypatch):
+    import IPython.display
+
+    shown, cell = [], [1]
+    monkeypatch.setattr(kbmod, "_cell_number", lambda: cell[0])
+    monkeypatch.setattr(IPython.display, "display", lambda obj: shown.append(obj))
+    x = explorer(world)
+    x._ipython_display_()  # a cell ending in explore() shows it once
+    assert shown == [x.root]
+    cell[0] = 2
+    x._ipython_display_()
+    assert shown == [x.root, x.root]
+
+
+def test_explorer_without_jupyter_shows_reports(world, capsys, monkeypatch):
+    x = KBExplorer("support-docs", core=world.core(), mode="text")
+    out = capsys.readouterr().out
+    assert x._w is None and "Files of support-docs" in out and "1 file failed to index (scanned.pdf)" in out
+    assert x.kb == KB_ID
+    x.file("faq.md")
+    assert "-- How it was indexed --" in capsys.readouterr().out
+    x.search("refund window")
+    assert "refund window" in capsys.readouterr().out
+    x.file("nothing.pdf")
+    assert "No file of support-docs matches 'nothing.pdf'" in capsys.readouterr().out
+    monkeypatch.setitem(sys.modules, "ipywidgets", None)
+    KBExplorer("support-docs", core=world.core(), mode="widgets")
+    out = capsys.readouterr().out
+    assert "needs `ipywidgets` (pip install ipywidgets), which SageMaker notebooks normally have" in out
+    assert "Files of support-docs" in out
+    with pytest.raises(ValueError, match="mode must be"):
+        KBExplorer(core=world.core(), mode="html")
+
+
+def test_view_explore_opens_the_window(world):
+    view = BedrockKBView(world.core(), mode="html")
+    view.explore("support-docs", file="faq.md", height=700)
+    x = view.explorer
+    assert isinstance(x, KBExplorer) and x.ui is view and x.selected.name == "faq.md"
+    assert x.pages["files"].layout.height == "700px" and view.kb == KB_ID

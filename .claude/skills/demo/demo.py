@@ -357,6 +357,144 @@ _SYNONYMS = {"refund": "refund", "refunded": "refund", "refunds": "refund", "mon
 _STOP = set("a an and are be by can do does for from how i in is it my of on or our the to what when with you your "
             "they this that there".split())
 
+# The files the explorer opens, beyond the corpus above: what a search limited to one file finds (a filter on its
+# x-amz-bedrock-kb-source-uri). They never come up in searches of the whole knowledge base, so the other reports
+# read as before. warranty.pdf is the long one: fixed-size chunks with 20% overlap, over 8 pages.
+WARRANTY_PAGES = [
+    "Warranty policy. This policy explains what our warranty covers, how long it lasts and how to make a claim. It "
+    "applies to every hardware product sold in our online store and in our shops, including refurbished products, "
+    "and it is in addition to your rights under consumer law, which it never limits. Accessories bought separately, "
+    "such as cables, cases and chargers, have their own one-year warranty described in section 7. Software, digital "
+    "content and gift cards are not covered by this policy: the refund policy describes what happens to them.",
+    "What the warranty covers. Every hardware product comes with a warranty against faults in materials and "
+    "workmanship that appear under normal use. A fault is anything that stops the product from working as described "
+    "in its manual: a screen that stays dark, a battery that no longer charges, a button that does not respond, a "
+    "hinge that breaks without being forced. Cosmetic wear such as scratches, dents and fading is not a fault unless "
+    "it stops the product from working. The warranty follows the product, so a gift recipient can claim with the "
+    "original order number.",
+    "What the warranty does not cover. Damage caused by accidents, drops, liquids, power surges, unauthorised "
+    "repairs or modifications is not covered, and neither is normal wear of parts that are meant to be replaced, "
+    "such as batteries after 500 charge cycles, ear tips and filters. Products used commercially, rented out or used "
+    "outside the specifications in their manual are covered for six months only. Lost or stolen products are never "
+    "covered; contact your insurer instead. Data on a device is not covered either: back it up before you send a "
+    "device in, because a repair can erase it.",
+    "How to make a claim. Start a claim from your order history, or contact support with the order number, the "
+    "product's serial number and a short description of the fault. Support may ask for photos or a video and will "
+    "suggest simple fixes first, such as a reset or a software update, since many faults are solved in a few "
+    "minutes. If the fault remains, support issues a returns label and a claim number. Pack the product securely, "
+    "include the claim number and send it within 14 days of the label being issued, or the claim is closed.",
+    "Repairs. When a claim is accepted, the product is repaired at one of our service centres with new or "
+    "refurbished parts that perform like new. Repairs usually take 5 to 7 business days from the day the product "
+    "arrives, and you can follow them from your order history. A repaired product keeps the rest of its original "
+    "warranty, or gets 90 days of warranty on the repair, whichever is longer. If a repair isn't possible, or the "
+    "same fault comes back three times, the product is replaced instead.",
+    "Replacements and refunds. Hardware comes with a two-year warranty. A faulty item is repaired or replaced; if "
+    "neither is possible, it is refunded under the refund policy. A replacement is a new or refurbished product of the "
+    "same model, or of a newer model with the same features when the original is no longer made. A refund under "
+    "warranty is the price you paid, less any discount, and goes back to the original payment method within 5 to 7 "
+    "business days of the decision, as described in the refund policy.",
+    "Shipping for warranty claims. We pay for shipping both ways within the EU and the UK, with tracking and "
+    "insurance. Customers elsewhere pay to send the product in, and we pay to send it back. A product sent without a "
+    "claim number may be returned unopened, at your cost. Express replacement, available for an extra fee in some "
+    "countries, sends the replacement before the faulty product arrives, against a deposit that is refunded when it "
+    "does; if the faulty product isn't received within 14 days, the deposit is kept.",
+    "Extended warranty and business customers. An extended warranty adds one or two years to this warranty and "
+    "covers accidental damage twice a year, with an excess of 49 euros per claim. It can be bought with the product "
+    "or within 60 days of delivery, and cancelled within 30 days for a full refund. Business customers buying more "
+    "than 20 products a year can ask for advance replacement and a named account manager. Contact the business "
+    "team for terms. Questions about this policy go to support, who answer within one business day.",
+]
+FAQ_ANSWERS = [
+    ("How do I track my order?", "Open your order history and choose Track: the carrier's tracking page opens with "
+     "the latest scan. Tracking starts a few hours after the order ships."),
+    ("Can I change my delivery address?", "Yes, until the order ships: open the order and choose Change address. "
+     "After it ships, ask the carrier to redirect the parcel."),
+    ("Can I cancel an order?", "Orders can be cancelled until they ship, from the order page. A cancelled order is "
+     "refunded to the original payment method within 5-7 business days."),
+    ("Do you ship to Switzerland and Norway?", "Yes. Shipping takes 4-7 business days, and import duties are "
+     "collected by the carrier on delivery."),
+    ("Why was my card charged twice?", "The second charge is usually a pending authorisation that disappears within "
+     "3 business days. If it doesn't, contact support with both amounts."),
+    ("Can I pay by invoice?", "Business customers can pay by invoice with 30-day terms after a credit check. "
+     "Consumers can pay by card, PayPal or bank transfer."),
+    ("How do I update my billing details?", "Open Account, then Payment methods, and add the new card before "
+     "removing the old one. Subscriptions move to the new card automatically."),
+    ("How do I close my account?", "Choose Close account under Account settings. Open orders must be delivered or "
+     "cancelled first, and order history is kept for 7 years for tax reasons."),
+    ("I didn't get the verification email", "Check the spam folder, then ask for a new email from the login page. "
+     "Company email filters sometimes hold it for up to an hour."),
+    ("Can two people share an account?", "No: each account is for one person. Families can link up to five "
+     "accounts under one household to share delivery addresses."),
+    ("How do I change my email address?", "Open Account settings and choose Change email. We send a link to the new "
+     "address, and the change is made when you open it."),
+    ("Do you price match?", "We match the price of an identical product sold new by a store in the same country, "
+     "within 14 days of your order. Marketplace sellers don't count."),
+    ("What is the student discount?", "Students get 10% off hardware with a verified student email. The discount "
+     "can't be combined with other offers."),
+    ("Can I return a gift?", "Yes, with the gift receipt or the order number. The refund goes to a gift card in the "
+     "recipient's name, not to the buyer's card."),
+    ("How do I return an item bought in a shop?", "Bring it back to any of our shops with the receipt, or start an "
+     "online return with the receipt number printed on it."),
+    ("What does error E3001 mean?", "Error E3001 means the delivery address couldn't be verified. Check the postcode "
+     "and house number, then place the order again."),
+    ("What does error E4100 mean?", "Error E4100 means the promotion code has expired or doesn't apply to the items "
+     "in your basket."),
+    ("Is my data shared with third parties?", "Only with the carrier and the payment provider, as the privacy "
+     "policy describes. We never sell personal data."),
+    ("How do I download an invoice?", "Open the order and choose Invoice: a PDF downloads with the VAT breakdown. "
+     "Invoices for business accounts are also emailed."),
+    ("Can I add a VAT number to an order?", "Yes, before you pay: add it under Billing details at checkout. It "
+     "can't be added to an invoice afterwards."),
+    ("How long is a gift card valid?", "Gift cards never expire, and their balance can be used over several orders."),
+    ("What happens if a product is out of stock?", "You can order it and it ships when it's back, or choose Notify "
+     "me to get an email. Pre-orders are only charged when they ship."),
+    ("Do you offer installation?", "Installation is available for large appliances in the EU, booked at checkout "
+     "for a fixed fee per item."),
+    ("How do I report a damaged delivery?", "Take photos of the parcel and the item, then report it from the order "
+     "page within 48 hours of delivery."),
+    ("Can I collect my order from a shop?", "Yes, choose Click and collect at checkout. Orders are ready within two "
+     "hours and kept for 7 days."),
+    ("Why can't I use two promotion codes?", "Only one code can be used per order, but it can be combined with "
+     "student or business discounts."),
+    ("How do I recycle an old device?", "Bring it to any shop, or print a free recycling label from the website. "
+     "Devices in working condition earn store credit."),
+    ("Do you deliver on Saturdays?", "Saturday delivery is available in most cities for an extra fee, when the "
+     "order is placed before 2 pm on Friday."),
+    ("How do I contact support?", "By chat from the help centre, every day from 8 am to 8 pm, or by email, with an "
+     "answer within one business day."),
+    ("What is the returns address?", "Returns go to our returns centre in Utrecht, but always use the label from "
+     "your return request, which tracks the parcel."),
+]
+HR_FILES = {  # hr-docs (no chunking): each file is one chunk; the benefits guide is far too long for one
+    "leave-policy.pdf": "Leave policy. Full-time employees get 25 days of paid leave a year, plus public holidays. "
+                        "Leave is booked in the HR portal at least two weeks ahead for more than three days.",
+    "benefits-guide.pdf": " ".join(
+        f"Section {n}. Benefits are reviewed every January. Health insurance covers employees and their families "
+        "from the first day, dental after three months, and the pension plan matches contributions up to 5% of "
+        "salary. Gym, cycling and learning budgets are paid each quarter against receipts submitted in the HR portal."
+        for n in range(1, 121)),
+    "expenses.docx": "Expenses. Claim travel, meals and equipment within 30 days in the expenses tool, with a "
+                     "receipt for anything over 25 euros. Approvals take up to five business days.",
+    "travel-policy.pdf": "Travel policy. Book trains for journeys under four hours and economy flights for longer "
+                         "ones, through the travel portal. Hotels up to 150 euros a night are approved automatically.",
+}
+SALES_FILES = ["playbooks/discovery-calls.pdf", "playbooks/objection-handling.pdf", "playbooks/pricing-2026.xlsx",
+               "playbooks/enterprise-pitch.pptx", "playbooks/renewals.docx"]
+
+
+def _warranty_chunks(words: int = 210, overlap: int = 42) -> list[tuple[int, str]]:
+    """warranty.pdf cut like Bedrock's fixed-size chunking with 20% overlap: (page, text) for each chunk, the page
+    being where it starts."""
+    tokens = [(page, word) for page, text in enumerate(WARRANTY_PAGES, 1) for word in text.split()]
+    found, start = [], 0
+    while start < len(tokens):
+        piece = tokens[start:start + words]
+        found.append((piece[0][0], " ".join(word for _, word in piece)))
+        if start + words >= len(tokens):
+            break
+        start += words - overlap
+    return found
+
 
 def _words(text: str) -> list[str]:
     import re
@@ -410,11 +548,12 @@ def _matches(md: dict, condition: dict | None) -> bool:
     return tests[op]()
 
 
-def _reference(score: float | None, chunk: tuple, i: int) -> dict:
+def _reference(score: float | None, chunk: tuple, i: int, *, uri: str = "", chunk_id: str = "",
+               data_source: str = DOCS_S3) -> dict:
     key, page, md, text = chunk
-    uri = f"s3://support-docs-bucket/{key}"
-    meta = {"x-amz-bedrock-kb-source-uri": uri, "x-amz-bedrock-kb-chunk-id": f"chunk-{CHUNKS.index(chunk):03d}",
-            "x-amz-bedrock-kb-data-source-id": DOCS_S3, **md}
+    uri = uri or f"s3://support-docs-bucket/{key}"
+    meta = {"x-amz-bedrock-kb-source-uri": uri, "x-amz-bedrock-kb-chunk-id": chunk_id or f"chunk-{CHUNKS.index(chunk):03d}",
+            "x-amz-bedrock-kb-data-source-id": data_source, **md}
     if page is not None:
         meta["x-amz-bedrock-kb-document-page-number"] = float(page)
     ref = {"content": {"type": "TEXT", "text": text}, "location": {"type": "S3", "s3Location": {"uri": uri}},
@@ -422,6 +561,18 @@ def _reference(score: float | None, chunk: tuple, i: int) -> dict:
     if score is not None:
         ref["score"] = score
     return ref
+
+
+def _file_filter(condition: dict | None) -> str | None:
+    """The file a Retrieve filter limits a search to (an equals on x-amz-bedrock-kb-source-uri), if it does."""
+    if not condition:
+        return None
+    (op, arg), = condition.items()
+    if op == "equals" and arg.get("key") == "x-amz-bedrock-kb-source-uri":
+        return arg.get("value")
+    if op == "andAll":
+        return next(filter(None, map(_file_filter, arg)), None)
+    return None
 
 
 class _FakeAWS:
@@ -493,20 +644,48 @@ def seed_bedrock_kb() -> dict:
     """moto S3 for the files behind support-docs, and fake Bedrock clients for everything else."""
     import boto3
 
-    # The bucket behind docs-s3: most files are older than the last sync; two changed after it.
+    # The bucket behind docs-s3: most files are older than the last sync; two changed after it. Each file's metadata
+    # file holds what its chunks carry, but digital-goods.pdf's forgot its "metadataAttributes". The FAQ answers are
+    # one chunk each (answer-29.md is gone from S3, still in the index), the Markdown files hold their chunks' words,
+    # and onboarding-deck.pptx is a type the sync skipped.
     s3 = boto3.client("s3", region_name=REGION)
     s3.create_bucket(Bucket="support-docs-bucket")
-    for key in sorted({c[0] for c in CHUNKS}) + ["policies/scanned-invoice.pdf", "policies/catalogue-2019.pdf",
-                                                 "other/not-in-the-knowledge-base.pdf"]:
-        s3.put_object(Bucket="support-docs-bucket", Key=key, Body=b"%PDF demo " * 400)
-        s3.put_object(Bucket="support-docs-bucket", Key=key + ".metadata.json",
-                      Body=b'{"metadataAttributes": {"team": "billing", "year": 2024}}')
-        _backdate("support-docs-bucket", key, NOW - timedelta(days=20))
-        _backdate("support-docs-bucket", key + ".metadata.json", NOW - timedelta(days=20))
-    s3.put_object(Bucket="support-docs-bucket", Key="faq/holiday-shipping.md", Body=b"# Holiday shipping\n" * 50)
-    _backdate("support-docs-bucket", "faq/holiday-shipping.md", NOW - timedelta(hours=26))
-    s3.put_object(Bucket="support-docs-bucket", Key="policies/refund-policy.pdf", Body=b"%PDF updated " * 420)
-    _backdate("support-docs-bucket", "policies/refund-policy.pdf", NOW - timedelta(hours=5))
+
+    def put(key: str, body: bytes | str, *, age: timedelta = timedelta(days=20), bucket: str = "support-docs-bucket",
+            metadata: dict | None = None) -> None:
+        s3.put_object(Bucket=bucket, Key=key, Body=body.encode() if isinstance(body, str) else body)
+        _backdate(bucket, key, NOW - age)
+        if metadata is not None:
+            put(key + ".metadata.json", json.dumps(metadata), age=age, bucket=bucket)
+
+    tags = {c[0]: c[2] for c in CHUNKS}
+    for key in sorted(tags) + ["policies/scanned-invoice.pdf", "policies/catalogue-2019.pdf",
+                               "other/not-in-the-knowledge-base.pdf"]:
+        words = "\n\n".join(c[3] for c in CHUNKS if c[0] == key)
+        body = words if key.endswith(".md") else b"%PDF demo " * 400
+        attributes = tags.get(key, {"team": "billing", "year": 2024})
+        put(key, body, metadata=attributes if key == "policies/digital-goods.pdf" else {"metadataAttributes": attributes})
+    for i, (question, answer) in enumerate(FAQ_ANSWERS[:29]):
+        put(f"faq/answer-{i:02d}.md", f"{question}\n\n{answer}", metadata={"metadataAttributes": {
+            "team": "support", "year": 2025}})
+    put("faq/training-video.mp4", b"\x00\x00\x00\x18ftypmp42" * 2000)
+    put("policies/onboarding-deck.pptx", b"PK\x03\x04 demo deck " * 300, age=timedelta(days=10))
+    put("faq/holiday-shipping.md", "# Holiday shipping\n" * 50, age=timedelta(hours=26))
+    put("policies/refund-policy.pdf", b"%PDF updated " * 420, age=timedelta(hours=5))
+    s3.create_bucket(Bucket="hr-policies-bucket")
+    for name, text in HR_FILES.items():
+        put(name, b"%PDF hr " * (len(text) // 8 + 50), bucket="hr-policies-bucket", age=timedelta(days=45))
+    s3.create_bucket(Bucket="sales-playbooks-bucket")
+    for key in SALES_FILES:
+        put(key, b"%PDF sales " * 300, bucket="sales-playbooks-bucket", age=timedelta(days=30))
+    file_chunks = {  # file -> (knowledge base, data source, [(page, metadata, text)]): what a search of it alone finds
+        "s3://support-docs-bucket/policies/warranty.pdf": (SUPPORT, DOCS_S3, [
+            (page, tags["policies/warranty.pdf"], text) for page, text in _warranty_chunks()]),
+        **{f"s3://support-docs-bucket/faq/answer-{i:02d}.md": (SUPPORT, DOCS_S3, [
+            (None, {"team": "support", "year": 2025}, f"{question}\n\n{answer}")])
+           for i, (question, answer) in enumerate(FAQ_ANSWERS)},
+        **{f"s3://hr-policies-bucket/{name}": (HR, HR_S3, [(None, {}, text)]) for name, text in HR_FILES.items()},
+    }
 
     now = datetime.now(timezone.utc)
     kb_arn = {kb: f"arn:aws:bedrock:{REGION}:{ACCOUNT}:knowledge-base/{kb}" for kb in (SUPPORT, SALES, HR, LEGACY)}
@@ -628,6 +807,14 @@ def seed_bedrock_kb() -> dict:
         if by_source[dataSourceId]["dataSourceConfiguration"]["type"] != "S3":
             raise _client_error("ValidationException", "ListKnowledgeBaseDocuments supports S3 and CUSTOM data sources "
                                 "only", "ListKnowledgeBaseDocuments")
+        if dataSourceId == HR_S3:
+            return {"documentDetails": [
+                {"knowledgeBaseId": knowledgeBaseId, "dataSourceId": dataSourceId, "status": "INDEXED",
+                 "updatedAt": now - timedelta(days=40),
+                 "identifier": {"dataSourceType": "S3", "s3": {"uri": f"s3://hr-policies-bucket/{name}"}}}
+                for name in HR_FILES]}
+        if dataSourceId != DOCS_S3:  # sales was never synced; the legacy one's index is gone with its cluster
+            return {"documentDetails": []}
         keys = sorted({c[0] for c in CHUNKS}) + [f"faq/answer-{i:02d}.md" for i in range(30)]
         details = [{"knowledgeBaseId": knowledgeBaseId, "dataSourceId": dataSourceId, "status": "INDEXED",
                     "updatedAt": now - timedelta(days=3),
@@ -660,7 +847,17 @@ def seed_bedrock_kb() -> dict:
         return ranked
 
     def retrieve(knowledgeBaseId, retrievalQuery, retrievalConfiguration, **_):
-        found = search(knowledgeBaseId, retrievalQuery["text"], retrievalConfiguration["vectorSearchConfiguration"])
+        config = retrievalConfiguration["vectorSearchConfiguration"]
+        target = _file_filter(config.get("filter"))
+        if target in file_chunks and file_chunks[target][0] == knowledgeBaseId:  # one file the explorer opens
+            _, ds_id, chunks = file_chunks[target]
+            listed = [(target, page, md, text) for page, md, text in chunks]
+            ranked = _rank(retrievalQuery["text"], config.get("overrideSearchType", "SEMANTIC"), listed)
+            ids = {chunk[3]: f"{target.rsplit('/', 1)[-1].split('.')[0]}-{i:02d}" for i, chunk in enumerate(listed)}
+            return {"retrievalResults": [
+                _reference(score, chunk, 0, uri=target, chunk_id=ids[chunk[3]], data_source=ds_id)
+                for score, chunk in ranked[: config.get("numberOfResults", 5)]]}
+        found = search(knowledgeBaseId, retrievalQuery["text"], config)
         return {"retrievalResults": [_reference(score, chunk, i) for i, (score, chunk) in enumerate(found)]}
 
     def first_sentence(text):
