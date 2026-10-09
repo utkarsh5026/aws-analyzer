@@ -11,8 +11,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-09
+
 ### Added
 
+- `bedrock_kb.py`: every file name in `search`, `ask`, `follow_up`, `chunk`, `compare`, `documents` and `unsynced` is
+  now a link (↗) that opens the file in a new browser tab, a PDF at the passage's page, so you can check a passage
+  in its document with one click. S3 files get a presigned link, signed in the notebook with no AWS call, that works
+  for an hour and needs `s3:GetObject` on the file; web, Confluence, SharePoint and Salesforce sources link to their
+  page. `ui.link(2)` gives the link on its own (also in text mode), and takes a file name, an `s3://` path and
+  `expires=` (up to 7 days). ([#55](https://github.com/utkarsh5026/aws-analyzer/pull/55))
 - `bedrock_kb.py`: `explore()` (or `ui.explore()`; installed with pip, `KBExplorer`) opens a window on a knowledge
   base that you use by clicking, with nothing to type but a question. Its Files tab puts every file of the knowledge
   base's S3 data sources next to Bedrock's record of it: failed and why, changed in S3 since it was indexed, added
@@ -94,12 +102,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- `bedrock_kb.py`: every file name in `search`, `ask`, `follow_up`, `chunk`, `compare`, `documents` and `unsynced` is
-  now a link (↗) that opens the file in a new browser tab, a PDF at the passage's page, so you can check a passage
-  in its document with one click. S3 files get a presigned link, signed in the notebook with no AWS call, that works
-  for an hour and needs `s3:GetObject` on the file; web, Confluence, SharePoint and Salesforce sources link to their
-  page. `ui.link(2)` gives the link on its own (also in text mode), and takes a file name, an `s3://` path and
-  `expires=` (up to 7 days). ([#55](https://github.com/utkarsh5026/aws-analyzer/pull/55))
 - `bedrock_chat.py`: **Answer / Retrieve only**, beside the chat window's question box. On **Retrieve only**, a
   question only searches: the same search an answer makes (Retrieve, with the same passages, search type, filter,
   reranker, data source and files) and no model, showing every passage found, best first, with its score. Switching
@@ -426,7 +428,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.8.0...v0.9.0
