@@ -9,17 +9,21 @@ from this repo is needed.
     chat("support-docs", model="sonnet", n=8, temperature=0.2)
 
 The window has the conversation on the left (each answer with its [1] citations, its sources, and the exact request
-and response) and five tabs on the right:
+and response) and six tabs on the right:
 
     Settings       what's sent with every question: passages, search type, filter, reranker, temperature, prompt...
                    Change a value in place, remove it with x, or add any field RetrieveAndGenerate takes.
     Test           a list of questions, one per line, asked with these settings, each on its own: how each did
                    (answered, "unable to assist", grounded, the file it should cite), and what changed since the last
-                   run. Change a setting, run them again, and each line says whether it did better.
+                   run. Change a setting, run them again, and each line says whether it did better. Try variations
+                   asks them with every combination of the settings, models or data sources you list, ranked.
+    Runs           every test run, ranked against the others of the same questions: open one, switch to its setup,
+                   compare them, and save them to a file (or load one) so they outlast a kernel restart.
     Code           this setup to copy and run anywhere: a Python script (boto3 only) that asks your test questions,
                    the config as JSON (the request without the question), or an AWS CLI command.
-    Request JSON   the exact request your next question sends, highlighted. Edit it by hand, or copy it as Python.
-    Last response  what Bedrock sent back, as JSON.
+    Request        the exact request your next question sends, as JSON, highlighted. Edit it by hand, or copy it as
+                   Python.
+    Response       what Bedrock sent back to the last question, as JSON.
 
 Answer / Retrieve only, beside the question box, picks what a question does: an answer from the model
 (RetrieveAndGenerate), or only the search behind it (Retrieve): every passage it finds, best first, with its score,
@@ -56,6 +60,13 @@ More
     ui.last()                                         # the last answer: sources in full, request and response
     ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a list, each answered
     ui.set(n=10); ui.ask_all()                        # the same list again: which questions did better or worse
+    ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])   # every combination of these, the setups ranked
+    ui.sweep(model=["haiku", "sonnet"], reranker=[None, "cohere"])    # models, data sources and files too
+    ui.runs()                                         # every test run so far, ranked against the others
+    ui.use_run()                                      # switch to the best run's setup (use_run(7): run 7's)
+    ui.compare_runs(2, 5)                             # two runs side by side, question by question
+    ui.save_runs()                                    # keep every run in kb-test-runs.jsonl, and every later one
+    ui.load_runs()                                    # after a restart: the runs back, to compare and reuse
     ui.results()                                      # the last test run again, as a report
     ui.code()                                         # this setup as a Python script, JSON and an AWS CLI command
     ui.new_chat()                                     # forget the conversation
@@ -63,6 +74,7 @@ More
 
     a = ui.answers[-1]                                # Answer: a.text, a.citations, a.sources, a.request, a.response
     df = ui.batches[-1].to_df()                       # the last test run: one row per question
+    df = ui.sweeps[-1].to_df()                        # the last sweep: one row per setup, best first
     core = ui.core                                    # BedrockChatAnalyzer
     params = core.request("support-docs", "refund window?", {"n": 8})        # the request, without sending it
     a = core.ask("support-docs", "refund window?", {"n": 8, "temperature": 0.2}, model="sonnet")
@@ -75,12 +87,14 @@ from __future__ import annotations
 import ast
 import asyncio
 import copy
+import dataclasses
 import difflib
 import functools
 import html
 import importlib
 import inspect
 import io
+import itertools
 import json
 import keyword
 import math
@@ -93,13 +107,15 @@ import threading
 import time
 import tokenize
 import unicodedata
+import uuid
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Generator, Iterable
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import boto3
 import botocore
@@ -203,6 +219,10 @@ SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "MET
 MAX_QUESTION_CHARS = 1000  # RetrieveAndGenerate takes questions (input.text) of up to 1,000 characters
 BATCH_LIMIT = 50  # test questions ask_all() and the window's Test tab ask at most, unless limit= says otherwise
 BATCH_WORKERS = 4  # test questions in flight at once; the client's adaptive retries slow down when Bedrock throttles
+SWEEP_LIMIT = 16  # setups sweep() and the window's Try variations ask at most, unless max_setups= says otherwise
+SWEEP_MAX_COST = 2.00  # USD: a sweep estimated to cost more isn't sent unless max_cost= (or a second Run) allows it
+RUNS_FILE = "kb-test-runs.jsonl"  # where save_runs() and load_runs() keep test runs when given no path
+RUNS_FORMAT = "aws-analyzer/bedrock-chat-run/1"  # the 'format' of each line save_runs() writes
 
 # A prompt template to start from when you add the `prompt` setting. $search_results$ is where Bedrock puts the
 # passages, and $output_format_instructions$ where it asks the model to cite them.
@@ -902,6 +922,10 @@ class Batch:
     seconds: float = 0.0  # from the first question sent to the last answer back
     skipped: int = 0  # questions past limit=, not asked
     stopped: bool = False  # stopped (Stop, or an interrupt) before every question was asked
+    id: str = ""  # unique, so save_runs() and load_runs() keep each run once
+    label: str = ""  # what you called it (label=), or for a sweep's run its setup: 'n=10 · search_type=HYBRID'
+    sweep: str = ""  # the ID of the sweep it's part of; '' when it was asked on its own
+    started: datetime | None = None  # when it was sent
 
     @property
     def asked(self) -> list[BatchItem]:
@@ -939,6 +963,69 @@ class Batch:
                 "cost": item.cost,
                 "error": item.error or None,
             })
+        return pd.DataFrame(rows)
+
+
+@dataclass
+class RunScore:
+    """How a test run did, in numbers, on the questions it's compared on: what ranks the setups of a sweep and the runs
+    of the same questions. rank_runs() makes them."""
+
+    questions: int = 0  # questions counted: they came back, or Bedrock refused them
+    answered: int = 0  # answers that say something (not "unable to assist"); for a search, searches that found passages
+    grounded: float | None = None  # the average grounded share of those answers
+    checked: int = 0  # questions with an expected source
+    hits: int = 0  # ... whose answer cited it (for a search: that found it)
+    mrr: float | None = None  # a search: the mean of 1 / the expected source's rank (None when nothing was expected)
+    failed: int = 0  # questions Bedrock refused
+    cost: float | None = None  # estimated USD; None when a model's price is unknown
+    seconds: float | None = None  # the average time a question took
+
+    def per_question(self) -> float | None:
+        """The estimated cost of one question."""
+        return None if self.cost is None or not self.questions else self.cost / self.questions
+
+
+@dataclass
+class Sweep:
+    """The same test questions asked with several setups (every combination of the settings, models, data sources or
+    files given), each setup a Batch of its own. sweep() returns one, and the view keeps each setup's run in
+    view.batches like any other test run."""
+
+    batches: list[Batch] = field(default_factory=list)  # one per setup, in the order the combinations were made
+    varied: dict[str, list[Any]] = field(default_factory=dict)  # what differs between the setups -> its values
+    retrieve_only: bool = False  # every setup only searched (Retrieve)
+    id: str = ""
+    label: str = ""  # what you called it (label=)
+    seconds: float = 0.0  # from the first question sent to the last answer back
+    stopped: bool = False  # stopped before every question was asked with every setup
+
+    @property
+    def ranked(self) -> list[tuple[Batch, RunScore]]:
+        """The setups best first, each with its score (rank_runs())."""
+        return rank_runs(self.batches)
+
+    @property
+    def best(self) -> Batch | None:
+        ranked = self.ranked
+        return ranked[0][0] if ranked else None
+
+    @property
+    def cost(self) -> float:
+        """Estimated USD for every question asked, as far as each model's price is known."""
+        return sum(b.cost for b in self.batches)
+
+    def to_df(self):
+        """One row per setup, best first: its rank, what it varies, and how it did: answered (or found), grounded,
+        expected sources, MRR (searches), failures, average time and estimated cost."""
+        pd = _require("pandas", "Sweep.to_df")
+        rows = []
+        for rank, (b, s) in enumerate(self.ranked, 1):
+            setup = run_setup(b)
+            rows.append({"rank": rank, **{key: setup.get(key) for key in self.varied},
+                         "answered": s.answered, "questions": s.questions, "grounded": s.grounded,
+                         "expected_hits": s.hits, "expected_checked": s.checked, "mrr": s.mrr, "failed": s.failed,
+                         "seconds": s.seconds, "cost": s.cost})
         return pd.DataFrame(rows)
 
 
@@ -2717,6 +2804,577 @@ def batch_estimate(questions: Iterable[str], settings: dict[str, Any], model: st
     return None if generation is None else generation + search
 
 
+# --------------------------------------------- sweeps: many setups at once, and test runs compared and kept
+
+_PICKED = ("model", "data_source", "files")  # what a sweep can vary besides the settings: picked, not sent as a setting
+# settings that, left out, mean "none of it" (no reranking, no guardrail); any other one left out means Bedrock's default
+_OFF_WHEN_UNSET = {"reranker", "rerank_n", "guardrail_id", "guardrail_version", "query_decomposition", "stop", "kms_key",
+                   "filter"}
+_NONE_WORDS = {"none", "off", "-", "default", "null", "unset"}  # in Try variations: leave the setting out
+
+
+def _sweep_name(name: Any) -> str:
+    """'Model', 'data source', 'dataSources' -> 'model', 'data_source'; a setting's name stays as it is."""
+    text = str(name).strip()
+    wanted = _norm(text)
+    for key, names in (("model", ("model", "models")), ("data_source", ("datasource", "datasources")),
+                       ("files", ("files", "file"))):
+        if wanted in names:
+            return key
+    return text
+
+
+def _alternatives(value: Any) -> list[Any]:
+    """A sweep's values for one name: a list, tuple, set or range is the values to try; anything else is one value."""
+    if isinstance(value, (list, tuple, range)):
+        return list(value)
+    if isinstance(value, (set, frozenset)):
+        try:
+            return sorted(value)
+        except TypeError:
+            return sorted(value, key=repr)
+    return [value]
+
+
+def _setup_key(setup: Any) -> str:
+    """What tells two setups (or two values) apart: the same JSON, keys in any order."""
+    return json.dumps(_plain_json(setup), sort_keys=True, ensure_ascii=False)
+
+
+def sweep_setups(grid: dict[str, Any] | None = None, setups: Iterable[dict[str, Any]] | None = None, *,
+                 limit: int | None = SWEEP_LIMIT) -> list[dict[str, Any]]:
+    """Every combination to try -> [{name: value}], each one setup's changes to the settings it starts from.
+
+    grid: {name: values}. A list means each of its values (n=[5, 10]); anything else is one value every setup uses.
+    None (or 'none' in the window) leaves a setting out, so Bedrock's default applies. Names are settings (fields()
+    lists them), 'model', 'data_source' and 'files'; a setting that takes a list goes in a list of its own
+    (stop=[['END'], ['###']]). setups: whole setups to start from, each combined with the grid: [{'n': 5}, {'n': 10,
+    'reranker': 'cohere'}]. Duplicates are dropped. A ValueError says when that's one setup (nothing to compare) or
+    more than `limit`."""
+    bases = [{} if s is None else s for s in (setups if setups is not None else [{}])]
+    if not bases or not all(isinstance(s, dict) for s in bases):
+        raise ValueError("setups takes a list of dicts, each one setup's settings, like [{'n': 5}, {'n': 10, "
+                         "'reranker': 'cohere'}]")
+    choices = []
+    for name, value in (grid or {}).items():
+        values = _alternatives(value)
+        if not values:
+            raise ValueError(f"{name} has no values to try: give it a list, like {name}=[...]")
+        choices.append([(_sweep_name(name), v) for v in values])
+    found: dict[str, dict[str, Any]] = {}
+    for base in bases:
+        for combo in itertools.product(*choices):
+            setup = {_sweep_name(k): v for k, v in base.items()}
+            setup.update(combo)
+            found.setdefault(_setup_key(setup), setup)
+    out = list(found.values())
+    if len(out) < 2:
+        raise ValueError("That's one setup, so there's nothing to compare: give lists of values to try, like "
+                         "sweep(n=[5, 10], search_type=['SEMANTIC', 'HYBRID']). ask_all() asks with one setup.")
+    if limit and len(out) > limit:
+        sizes = [f"{len(c)} {c[0][0]}" for c in choices if len(c) > 1]
+        sizes += [f"{len(bases)} setups"] if len(bases) > 1 else []
+        raise ValueError(f"That's {len(out)} setups ({' × '.join(sizes)}), and a sweep asks up to {limit}: try fewer "
+                         f"values, or pass max_setups={len(out)}.")
+    return out
+
+
+def apply_setup(settings: dict[str, Any], changes: dict[str, Any], schema: Schema) -> dict[str, Any]:
+    """Settings with one setup's changes made: each change checked and converted (coerce_setting()), None leaving the
+    setting out; 'model', 'data_source' and 'files' aren't settings, so they're skipped. A ValueError says what a
+    change can't be."""
+    values = dict(settings)
+    for name, value in changes.items():
+        if _sweep_name(name) in _PICKED:
+            continue
+        f = schema.find(name)
+        if value is None:
+            values.pop(f.key, None)
+        else:
+            values[f.key] = coerce_setting(f, value)
+    return {key: values[key] for key in schema.fields if key in values}
+
+
+def _split_values(text: str) -> list[str]:
+    """'5, 10' -> ['5', '10']. A comma inside brackets, braces or a quoted value stays ('{"a": 1, "b": 2}, none')."""
+    parts, depth, quote, start = [], 0, "", 0
+    for i, ch in enumerate(text):
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "\"'" and not text[start:i].strip():  # a quote only opens at the start of a value ("don't")
+            quote = ch
+        elif ch in "[{(":
+            depth += 1
+        elif ch in "]})":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts]
+
+
+def _variation_value(text: str) -> Any:
+    """One value typed in Try variations: quotes taken off, 'none' -> None (leave the setting out)."""
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return None if text.lower() in _NONE_WORDS else text
+
+
+def parse_variations(text: str) -> dict[str, list[Any]]:
+    """What to try, as typed in the window's Try variations box -> {name: [values]} for sweep_setups(). One setting
+    (or model, data_source, files) per line, then = (or :) and the values to try, separated by commas; 'none' leaves
+    the setting out. Blank lines and lines starting with # are skipped. A ValueError names the line it can't read.
+
+        n = 5, 10, 20
+        search_type = SEMANTIC, HYBRID
+        reranker = none, cohere
+        model = haiku, sonnet"""
+    grid: dict[str, list[Any]] = {}
+    lines: dict[str, int] = {}
+    for number, line in enumerate(str(text or "").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, rest = line.partition("=") if "=" in line.split(":", 1)[0] else line.partition(":")
+        name = name.strip()
+        if not sep or not name:
+            raise ValueError(f"Line {number}: write a setting, =, then the values to try, like n = 5, 10")
+        values = [_variation_value(v) for v in _split_values(rest) if v]
+        if not values:
+            raise ValueError(f"Line {number}: {name} has no values: put them after the =, like {name} = 5, 10")
+        key = _sweep_name(name)
+        if _norm(key) in lines:
+            raise ValueError(f"Line {number}: {name} is on line {lines[_norm(key)]} already: put its values on one "
+                             "line")
+        lines[_norm(key)] = number
+        grid[key] = values
+    return grid
+
+
+def format_variations(grid: dict[str, Any]) -> str:
+    """The opposite of parse_variations(): 'n = 5, 10' lines, None as 'none'."""
+    def text(v: Any) -> str:
+        if v is None:
+            return "none"
+        shown = v if isinstance(v, str) else json.dumps(_plain_json(v), ensure_ascii=False)
+        return f'"{shown}"' if isinstance(v, str) and ("," in v or v.lower() in _NONE_WORDS) else shown
+
+    return "\n".join(f"{name} = {', '.join(text(v) for v in _alternatives(values))}" for name, values in grid.items())
+
+
+def run_setup(batch: Batch) -> dict[str, Any]:
+    """What a test run was asked with, flat, to compare runs by: 'kb' (the knowledge base's name), 'model' (unless it
+    only searched), 'data_source' and 'files' (when it asked only some), and its settings."""
+    setup: dict[str, Any] = {"kb": batch.kb_name or batch.kb_id}
+    if not batch.retrieve_only:
+        setup["model"] = batch.model
+    if batch.data_sources:
+        setup["data_source"] = sorted(name or ds_id for ds_id, name in batch.data_sources.items())
+    if batch.files:
+        setup["files"] = sorted(batch.files)
+    setup.update(batch.settings)
+    return setup
+
+
+def varied_setups(batches: Iterable[Batch]) -> dict[str, list[Any]]:
+    """What differs between test runs' setups (run_setup()) -> {name: [each value, in the order first seen]}: None
+    where a run didn't send that setting, or asked every data source or file."""
+    setups = [run_setup(b) for b in batches]
+    out: dict[str, list[Any]] = {}
+    for key in dict.fromkeys(k for s in setups for k in s):
+        values: dict[str, Any] = {}
+        for s in setups:
+            values.setdefault(_setup_key(s.get(key)), s.get(key))
+        if len(values) > 1:
+            out[key] = list(values.values())
+    return out
+
+
+def _setup_value(key: str, value: Any, values: list[Any], label: Callable[[str], str] | None = None) -> str:
+    """One value of what differs between setups, short: 10, HYBRID, Claude Sonnet 5, all (data sources), #2 (a
+    prompt)."""
+    if key in ("data_source", "files"):
+        names = [source_name(v) or v for v in value or []] if key == "files" else list(value or [])
+        return _clip(", ".join(map(str, names)), 40) if names else "all"
+    if value is None:
+        return "none" if key in _OFF_WHEN_UNSET else "default"
+    if key == "model":
+        return (label or short_model)(str(value))
+    if key == "filter":
+        return describe_filter(value)
+    if isinstance(value, str) and len(value) > 40:
+        index = next((k for k, v in enumerate(values) if v == value), 0)
+        return f"#{index + 1} ({len(value):,} characters)"
+    return value if isinstance(value, str) else _short(value, 30)
+
+
+def setup_label(batch: Batch, varied: dict[str, list[Any]], label: Callable[[str], str] | None = None) -> str:
+    """What sets a run apart from those it's compared with: 'n=10 · search_type=HYBRID', from the names `varied`
+    holds (varied_setups()); 'the same setup' when nothing differs. label(model) names a model (its short ID by
+    default)."""
+    setup = run_setup(batch)
+    parts = []
+    for key, values in varied.items():
+        value = setup.get(key)
+        text = _setup_value(key, value, values, label)
+        if key == "filter":
+            parts.append(f"where {text}" if value is not None else "no filter")
+        else:
+            parts.append(f"{key}={text}")
+    return " · ".join(parts) or "the same setup"
+
+
+def _came_back(item: BatchItem) -> bool:
+    """A question that was answered (or searched), or that Bedrock refused: one that counts in a comparison."""
+    return item.answer is not None or bool(item.error_code)
+
+
+def shared_questions(batches: Iterable[Batch]) -> set[str]:
+    """The questions every one of these runs came back with (an answer, or Bedrock's refusal), as compared: in any
+    case and spacing."""
+    sets = [{_key(i.question) for i in b.items if _came_back(i)} for b in batches]
+    return set.intersection(*sets) if sets else set()
+
+
+def run_score(batch: Batch, questions: Iterable[str] | None = None) -> RunScore:
+    """How a test run did, in numbers -> RunScore, counting `questions` only (their text, in any case; default every
+    question that came back)."""
+    keep = None if questions is None else {_key(q) for q in questions}
+    items = [i for i in batch.items if _came_back(i) and (keep is None or _key(i.question) in keep)]
+    asked = [i for i in items if i.answer is not None]
+    s = RunScore(questions=len(items), failed=len(items) - len(asked),
+                 checked=sum(_filled(i.expected) for i in items),
+                 hits=sum(i.found is not None for i in asked if _filled(i.expected)))
+    if batch.retrieve_only:
+        s.answered = sum(bool(i.answer.sources) for i in asked)
+        if s.checked:
+            s.mrr = sum(1 / i.found for i in asked if _filled(i.expected) and i.found) / s.checked
+    else:
+        spoke = [i for i in asked if not _unhelpful(i.answer) and i.answer.guardrail_action != "INTERVENED"]
+        s.answered = len(spoke)
+        s.grounded = sum(i.answer.grounded_share for i in spoke) / len(spoke) if spoke else None
+    costs = [i.cost for i in asked]
+    s.cost = None if any(c is None for c in costs) else sum(costs)
+    s.seconds = sum(i.answer.seconds for i in asked) / len(asked) if asked else None
+    return s
+
+
+def _quality(s: RunScore, retrieve_only: bool) -> tuple[int, ...]:
+    """What ranks a run, best highest: expected sources cited (or found), then answers that say something, then the
+    grounded share in steps of 5 points; for searches, expected sources found, then MRR, then searches that found
+    passages."""
+    if retrieve_only:
+        return s.hits, round((s.mrr or 0) * 20), s.answered
+    return s.hits, s.answered, round((s.grounded or 0) * 20)
+
+
+def rank_runs(batches: Iterable[Batch]) -> list[tuple[Batch, RunScore]]:
+    """Test runs of the same questions, best first, each with its score (run_score()) on the questions every one of
+    them came back with: by how many answers cite the expected source (searches: find it), then how many say
+    something (searches: their MRR, then how many found passages), then the grounded share; when two are as good,
+    the cheaper first, then the order given."""
+    runs = list(batches)
+    common = shared_questions(runs)
+    scored = [(b, run_score(b, common)) for b in runs]
+
+    def order(k: int) -> tuple[Any, ...]:
+        b, s = scored[k]
+        return tuple(-x for x in _quality(s, b.retrieve_only)), s.cost if s.cost is not None else math.inf, k
+
+    return [scored[k] for k in sorted(range(len(scored)), key=order)]
+
+
+def _index_of(runs: list[Batch], batch: Batch) -> int:
+    return next(k for k, b in enumerate(runs) if b is batch)
+
+
+def _score_text(s: RunScore, retrieve_only: bool) -> str:
+    """The number a run is ranked by, in words: 'cites the expected source in 5 of 6 questions', 'answers 6 of 6
+    questions (81% grounded)', 'finds the expected source for 5 of 6 questions (MRR 0.83)'."""
+    if retrieve_only:
+        if s.checked:
+            return f"finds the expected source for {_out_of(s.hits, s.checked, 'question')} (MRR {s.mrr or 0:.2f})"
+        return f"finds passages for {_out_of(s.answered, s.questions, 'question')}"
+    if s.checked:
+        return f"cites the expected source in {_out_of(s.hits, s.checked, 'question')}"
+    grounded = f" ({s.grounded:.0%} grounded)" if s.grounded is not None else ""
+    return f"answers {_out_of(s.answered, s.questions, 'question')}{grounded}"
+
+
+def _versus(best: RunScore, other: RunScore, retrieve_only: bool) -> str:
+    """Where `best` does better than `other`, the first thing they're ranked by that differs: 'cites the expected
+    source in 5 of 6 questions, against 3 of 6'."""
+    if best.hits != other.hits:
+        verb = "finds the expected source for" if retrieve_only else "cites the expected source in"
+        return f"{verb} {_out_of(best.hits, best.checked, 'question')}, against {other.hits} of {other.checked}"
+    if retrieve_only and round((best.mrr or 0) * 20) != round((other.mrr or 0) * 20):
+        return f"ranks the expected source higher (MRR {best.mrr or 0:.2f}, against {other.mrr or 0:.2f})"
+    if best.answered != other.answered:
+        verb = "finds passages for" if retrieve_only else "answers"
+        return f"{verb} {_out_of(best.answered, best.questions, 'question')}, against {other.answered} of " \
+               f"{other.questions}"
+    return f"is {best.grounded or 0:.0%} grounded on average, against {other.grounded or 0:.0%}"
+
+
+def _cost_gap(a: RunScore, b: RunScore) -> str:
+    """How much more or less a's setup costs than b's: 'about $0.21 more per 100 questions' ('' if unknown)."""
+    pa, pb = a.per_question(), b.per_question()
+    if pa is None or pb is None:
+        return ""
+    gap = (pa - pb) * 100
+    if abs(gap) < 0.005:
+        return "about the same cost"
+    return f"about {human_money(abs(gap))} {'more' if gap > 0 else 'less'} per 100 questions (estimate)"
+
+
+def ranking_findings(batches: Iterable[Batch], *, now: Batch | None = None,
+                     number: Callable[[Batch], int] | None = None, label: Callable[[str], str] | None = None,
+                     explain: Callable[[str, str], str] | None = None, brief: bool = False) -> list[tuple[str, str]]:
+    """What a comparison of test runs of the same questions (a sweep's setups, or compare_runs()) says to do ->
+    [(level, message)]: which setup did best and how it beats yours (`now`: the run whose setup is in use, one of
+    them or an earlier run of the same questions), whether its lead could be chance, setups Bedrock refused, questions
+    no setup handled, and with two or more things varied, what each one changed. brief=True keeps the setups Bedrock
+    refused and which setup to use, as a list of runs wants. number(run) gives a run's number for use_run() (default:
+    its place in the list, from 1); label(model) names a model; explain(code, message) adds what to do about an AWS
+    error."""
+    runs = list(batches)
+    if len(runs) < 2:
+        return []
+    numbered = runs + ([now] if now is not None and not any(b is now for b in runs) else [])
+    num = number or (lambda b: _index_of(numbered, b) + 1)
+    retrieve = runs[0].retrieve_only
+    varied = varied_setups(runs)
+
+    def name(b: Batch) -> str:
+        return setup_label(b, varied, label)
+
+    found: list[tuple[str, str]] = []
+    refused = [b for b in runs if any(i.error_code for i in b.items)]
+    for b in refused[:3]:
+        failed = [i for i in b.items if i.error_code]
+        top = Counter(i.error_code for i in failed).most_common(1)[0][0]
+        first = next(i for i in failed if i.error_code == top)
+        message = (explain(top, first.error) if explain else first.error).strip().rstrip(".")
+        found.append(("warn", f"{name(b)} (run {num(b)}): {_out_of(len(failed), len(b.items), 'question')} failed "
+                              f"({top}): {message}."))
+    if len(refused) > 3:
+        found.append(("warn", f"{len(refused) - 3} more setups had questions Bedrock refused: results(run) shows "
+                              "each one's errors."))
+    common = shared_questions(runs)
+    if not common:
+        return found + [("warn", "These runs have no question in common that came back, so they can't be ranked: "
+                                 "compare runs of the same questions.")]
+    ranked = rank_runs(runs)
+    best, top = ranked[0]
+    score = {id(b): s for b, s in ranked}
+
+    def quality(b: Batch) -> tuple[int, ...]:
+        return _quality(score[id(b)], retrieve)
+
+    switch = f"{_call('use_run', num(best))} switches to it"
+    current = next((b for b in runs if b is now), None)
+    even = all(quality(b) == quality(best) for b in runs)
+    if current is None and now is not None and not shared_questions([best, now]):
+        now = None  # nothing to compare it on: rank the runs alone
+    if current is None and now is not None:  # the setup in use is an earlier run's: the best against it
+        pair = {id(b): s for b, s in rank_runs([best, now])}
+        theirs, mine = pair[id(best)], pair[id(now)]
+        yours = f"your setup now (run {num(now)}: {setup_label(now, varied_setups([*runs, now]), label)})"
+        gap = _cost_gap(theirs, mine)
+        if _quality(theirs, retrieve) > _quality(mine, retrieve):
+            cost = f", for {gap}" if gap else ""
+            found.append(("warn", f"{name(best)} did better than {yours}: it {_versus(theirs, mine, retrieve)}{cost}. "
+                                  f"{switch}."))
+        elif _quality(theirs, retrieve) == _quality(mine, retrieve):
+            cheaper = " less " in gap
+            found.append(("info", f"{name(best)}, the best here, did as well as {yours}"
+                                  + (f", for {gap}" if gap and gap != "about the same cost" else "")
+                                  + (f": {switch}." if cheaper else ".")))
+        else:
+            found.append(("info", f"{yours[:1].upper()}{yours[1:]} did better than every setup tried here: it "
+                                  f"{_versus(mine, theirs, retrieve)} for the best of them ({name(best)})."))
+    elif current is None:
+        if even:
+            dearest, high = ranked[-1]
+            gap = _cost_gap(top, high)
+            cheaper = (f" The cheapest is {name(best)}, {gap} than {name(dearest)}: {switch}."
+                       if gap not in ("", "about the same cost") else "")
+            found.append(("info", f"Every setup did as well as the others on these {_plural(len(common), 'question')} "
+                                  f"(each {_score_text(top, retrieve)}), so what was tried made no difference here."
+                                  + cheaper))
+        else:
+            worst, low = ranked[-1]
+            found.append(("info", f"{name(best)} did best: it {_versus(top, low, retrieve)} for the worst setup "
+                                  f"({name(worst)}). {switch}."))
+    else:
+        mine = score[id(current)]
+        gap = _cost_gap(top, mine)
+        if current is best or (quality(best) == quality(current) and gap in ("", "about the same cost")):
+            runner = next((s for b, s in ranked if b is not current), None)
+            if runner is not None and _quality(runner, retrieve) == quality(current):
+                found.append(("info", f"Your setup now ({name(current)}) did as well as any setup tried "
+                                      f"({_score_text(mine, retrieve)}): nothing here beats it on these questions."))
+            else:
+                beaten = runner if runner is not None else mine
+                found.append(("info", f"Your setup now ({name(current)}) did best: it "
+                                      f"{_versus(mine, beaten, retrieve)} for the next best. Nothing tried here beats "
+                                      "it on these questions."))
+        elif quality(best) == quality(current):
+            found.append(("info", f"{name(best)} did as well as your setup now ({name(current)}), for {gap}: "
+                                  f"{switch}."))
+        else:
+            cost = f", for {gap}" if gap else ""
+            found.append(("warn", f"{name(best)} did better than your setup now ({name(current)}): it "
+                                  f"{_versus(top, mine, retrieve)}{cost}. {switch}."))
+    if brief:
+        return found
+    items = {id(b): {_key(i.question): i for i in b.items} for b in runs}
+    order = [i.question for i in runs[0].items if _key(i.question) in common]
+    if not even and not retrieve and len(ranked) > 1:  # a search finds the same passages every time; a model varies
+        second, low = ranked[1]
+        lead = [x - y for x, y in zip(_quality(top, retrieve), _quality(low, retrieve))]
+        at = next((k for k, d in enumerate(lead) if d), None)
+        if at is not None and ((at < 2 and lead[at] == 1) or (at == 2 and lead[at] <= 2)):
+            by = "one question" if at < 2 else "a few points of grounded share"
+            found.append(("info", f"{name(best)} leads {name(second)} by {by}, which can be chance: a model doesn't "
+                                  "answer the same way every time. Ask more questions, or run them again, before you "
+                                  "switch."))
+    stuck = [items[id(runs[0])][_key(q)] for q in order
+             if all(item_verdict(items[id(b)][_key(q)])[1] != "ok" for b in runs)]
+    if stuck:
+        one = len(stuck) == 1
+        how = item_verdict(items[id(best)][_key(stuck[0].question)])[0]
+        found.append(("warn", f"{_plural(len(stuck), 'question')} didn't work with any setup ({_examples(stuck)}; "
+                              f"{'' if one else 'the first: '}{how} with the best one): nothing tried here fixes "
+                              f"{'it' if one else 'them'}, so the documents may not hold the answer, or a file isn't "
+                              f"indexed. {_call('retrieve', stuck[0].question)} shows what the search finds"
+                              f"{'' if one else ' for the first'}, and files() whether a file is indexed."))
+    if len(varied) >= 2:
+        for key in varied:
+            groups: dict[str, list[Batch]] = {}
+            for b, _ in ranked:  # each group keeps the ranking's order: its best first
+                setup = run_setup(b)
+                rest = {k: setup.get(k) for k in varied if k != key}
+                groups.setdefault(_setup_key(rest), []).append(b)
+            pairs = [g for g in groups.values() if len(g) > 1]
+            if not pairs:
+                continue
+            winners = [_setup_key(run_setup(g[0]).get(key)) for g in pairs if quality(g[0]) != quality(g[1])]
+            values = {_setup_key(v): v for v in varied[key]}
+            shown = ((f"{len(pairs)} groups" if len(pairs) > 1 else "the one pair")
+                     + f" of setups that differ only in {key}")
+            if not winners:
+                found.append(("info", f"{key} made no difference: {'each of the ' if len(pairs) > 1 else ''}"
+                                      f"{shown} did the same on these questions."))
+                continue
+            value, wins = Counter(winners).most_common(1)[0]
+            text = f"{key}={_setup_value(key, values[value], varied[key], label)}"
+            if wins == len(pairs):
+                found.append(("info", f"{text} did best in {'each of the ' if len(pairs) > 1 else ''}{shown}."))
+            else:
+                ties = len(pairs) - len(winners)
+                found.append(("info", f"{key} has no clear effect: {text} did best in {wins} of the {shown}"
+                                      + (f", and {ties} {'was a tie' if ties == 1 else 'were ties'}" if ties else "")
+                                      + "."))
+    asked = {_key(i.question) for b in runs for i in b.items if i.request}
+    if len(common) < len(asked):
+        missing = len(asked) - len(common)
+        found.append(("info", f"Ranked on the {_plural(len(common), 'question')} every setup came back with: "
+                              f"{_plural(missing, 'question')} {'was' if missing == 1 else 'were'}n't asked with every "
+                              "setup (the run stopped first, or Bedrock refused them)."))
+    return found
+
+
+def sweep_estimate(sweep: Sweep, *, model_prices: dict[str, tuple[float, float]] | None = None,
+                   prices: dict[str, float] | None = None) -> float | None:
+    """Roughly what asking a prepared sweep costs in USD, before it's asked (batch_estimate() for each setup's
+    questions): None when a model's price isn't known. An estimate: label it as one."""
+    total = 0.0
+    for b in sweep.batches:
+        cost = batch_estimate([i.question for i in b.items if i.request and i.answer is None and not i.error],
+                              b.settings, b.model, retrieve_only=b.retrieve_only, model_prices=model_prices,
+                              prices=prices)
+        if cost is None:
+            return None
+        total += cost
+    return total
+
+
+def run_record(batch: Batch) -> dict[str, Any]:
+    """A test run as plain JSON data, one line of save_runs()'s file: when it ran, its setup, and each question with
+    its answer (text, citations and sources) or why it failed, its cost and the request sent. Bedrock's raw responses
+    are left out, to keep the file small."""
+    def answer(a: Answer | None) -> dict[str, Any] | None:
+        if a is None:
+            return None
+        data = dataclasses.asdict(a)
+        data.pop("response", None)
+        return data
+
+    record = {
+        "format": RUNS_FORMAT, "id": batch.id, "label": batch.label, "sweep": batch.sweep,
+        "started": batch.started.isoformat() if batch.started else None,
+        "kb_id": batch.kb_id, "kb_name": batch.kb_name, "model": batch.model, "settings": batch.settings,
+        "data_sources": batch.data_sources, "files": batch.files, "retrieve_only": batch.retrieve_only,
+        "request": batch.request, "seconds": batch.seconds, "skipped": batch.skipped, "stopped": batch.stopped,
+        "items": [{"question": i.question, "expected": i.expected, "error": i.error, "error_code": i.error_code,
+                   "cost": i.cost, "request": i.request, "answer": answer(i.answer)} for i in batch.items],
+    }
+    return _plain_json(record)
+
+
+def _known(cls: Any, data: dict[str, Any]) -> dict[str, Any]:
+    """The keys of `data` that are fields of the dataclass `cls`: what a newer file adds is left out."""
+    names = {f.name for f in dataclasses.fields(cls)}
+    return {k: v for k, v in data.items() if k in names}
+
+
+def run_from_record(record: Any) -> Batch:
+    """The opposite of run_record(): a test run read back from save_runs()'s file. A ValueError says what's wrong
+    with a record it can't read."""
+    if not isinstance(record, dict) or record.get("format") != RUNS_FORMAT:
+        what = record.get("format") if isinstance(record, dict) else type(record).__name__
+        raise ValueError(f"not a test run saved by save_runs() (format {what!r}, not {RUNS_FORMAT!r})")
+
+    def answer(data: Any) -> Answer | None:
+        if data is None:
+            return None
+        a = Answer(**{k: v for k, v in _known(Answer, data).items() if k not in ("citations", "sources")})
+        a.citations = [Citation(**_known(Citation, c)) for c in data.get("citations") or []]
+        a.sources = [Passage(**_known(Passage, p)) for p in data.get("sources") or []]
+        return a
+
+    try:
+        batch = Batch(**{k: v for k, v in _known(Batch, record).items() if k not in ("items", "started")})
+        started = record.get("started")
+        batch.started = datetime.fromisoformat(started) if started else None
+        batch.items = [BatchItem(**{**_known(BatchItem, item), "answer": answer(item.get("answer"))})
+                       for item in record.get("items") or []]
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(f"a test run that can't be read back ({type(exc).__name__}: {exc})") from None
+    if not batch.id:
+        raise ValueError("a test run without an id")
+    return batch
+
+
+def read_runs(lines: Iterable[str]) -> tuple[list[Batch], list[str]]:
+    """The test runs in save_runs()'s file, JSON Lines with one run per line -> (runs, [why a line couldn't be
+    read, with its number]). Blank lines are skipped."""
+    runs: list[Batch] = []
+    problems: list[str] = []
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            runs.append(run_from_record(json.loads(line)))
+        except json.JSONDecodeError as exc:
+            problems.append(f"line {number} isn't JSON ({exc.msg})")
+        except ValueError as exc:
+            problems.append(f"line {number} is {exc}")
+    return runs, problems
+
+
 def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | None = None) -> str:
     """A JSON value as Python source, one key per line once it's too long for one line. column is where the value
     starts on its line (after its key), when that's further than indent."""
@@ -2902,6 +3560,14 @@ def _match_sources(
         for ds_id in hits:
             found[ds_id] = names[ds_id]
     return found, missing
+
+
+def _question_cap(limit: Any) -> int | None:
+    """How many test questions limit= lets a run ask (None: every one, as 0 does too); a ValueError for anything else."""
+    cap = None if limit is None else _as_int(limit, "limit", hint=", or None for every question")
+    if cap is not None and cap < 0:
+        raise ValueError(f"limit takes a number of questions, like 50, or None for every question; got {limit!r}")
+    return cap or None
 
 
 def _question_text(question: Any) -> str:
@@ -3467,6 +4133,7 @@ class BedrockChatAnalyzer:
         limit: int | None = BATCH_LIMIT,
         progress: Callable[..., None] | None = None,
         stop: threading.Event | None = None,
+        label: str = "",
     ) -> Batch:
         """Asks a list of test questions with one setup (knowledge base, model, settings, data sources and files),
         each on its own, never as a follow-up, `workers` at a time, and returns a Batch: each question's Answer (or why
@@ -3474,10 +4141,102 @@ class BedrockChatAnalyzer:
         line ('question | expected file'), a list of questions or of (question, expected) pairs, a DataFrame with
         'question' and 'expected' columns, or an earlier Batch. retrieve_only=True only searches (Retrieve). Up to
         `limit` questions are asked (None for all). A question Bedrock refuses is recorded, not raised, and the rest
-        are still asked; setting `stop` (a threading.Event) asks no more."""
+        are still asked; setting `stop` (a threading.Event) asks no more. label names the run."""
         batch = self._prepare_batch(kb, questions, settings, model=model, data_source=data_source, files=files,
-                                    retrieve_only=retrieve_only, limit=limit)
+                                    retrieve_only=retrieve_only, limit=limit, label=label)
         return self._run_batch(batch, workers=workers, progress=progress, stop=stop)
+
+    def sweep(
+        self,
+        kb: str,
+        questions: Any,
+        setups: Iterable[dict[str, Any]],
+        settings: dict[str, Any] | None = None,
+        *,
+        model: str | None = None,
+        data_source: Any = None,
+        files: Any = None,
+        retrieve_only: bool = False,
+        workers: int = BATCH_WORKERS,
+        limit: int | None = BATCH_LIMIT,
+        progress: Callable[..., None] | None = None,
+        stop: threading.Event | None = None,
+        label: str = "",
+    ) -> Sweep:
+        """Asks the same test questions with several setups and returns a Sweep: a Batch per setup, each question
+        asked on its own with each one, `workers` at a time across them all (the first question with every setup,
+        then the second...). setups: each setup's changes to `settings`, {name: value}, where None leaves a setting
+        out and 'model', 'data_source' or 'files' pick those instead of model=, data_source= and files=;
+        sweep_setups() makes them from lists of values to try. Every setup is checked before anything is sent, and
+        two that come out the same are asked once. A question Bedrock refuses is recorded, not raised; setting `stop`
+        asks no more."""
+        sweep = self._prepare_sweep(kb, questions, setups, settings, model=model, data_source=data_source,
+                                    files=files, retrieve_only=retrieve_only, limit=limit, label=label)
+        return self._run_sweep(sweep, workers=workers, progress=progress, stop=stop)
+
+    def _prepare_sweep(
+        self,
+        kb: str,
+        questions: Any,
+        setups: Iterable[dict[str, Any]],
+        settings: dict[str, Any] | None = None,
+        *,
+        model: str | None = None,
+        data_source: Any = None,
+        files: Any = None,
+        retrieve_only: bool = False,
+        limit: int | None = BATCH_LIMIT,
+        label: str = "",
+    ) -> Sweep:
+        """A sweep ready to send: each setup's run prepared like _prepare_batch()'s, with setups that come out the same
+        dropped. Sends no question; a ValueError says which setup can't be sent."""
+        schema = self.schema()
+        base = normalize_settings(settings, schema)
+        cases, kb_id = question_list(questions), self.resolve(kb)  # said once, not as one setup's problem
+        _question_cap(limit)
+        sweep = Sweep(retrieve_only=retrieve_only, id=uuid.uuid4().hex[:12], label=str(label or ""))
+        seen: set[str] = set()
+        for changes in setups:
+            changes = {_sweep_name(k): v for k, v in dict(changes).items()}
+            try:
+                values = apply_setup(base, changes, schema)
+                batch = self._prepare_batch(
+                    kb_id, cases, values, model=changes["model"] if "model" in changes else model,
+                    data_source=changes["data_source"] if "data_source" in changes else data_source,
+                    files=changes["files"] if "files" in changes else files, retrieve_only=retrieve_only, limit=limit)
+            except ValueError as exc:
+                shown = ", ".join(f"{k}={_short(v, 40)}" for k, v in changes.items()) or "no changes"
+                raise ValueError(f"The setup with {shown} can't be sent: {exc}") from None
+            key = _setup_key(run_setup(batch))
+            if key not in seen:
+                seen.add(key)
+                batch.sweep = sweep.id
+                sweep.batches.append(batch)
+        if len(sweep.batches) < 2:
+            raise ValueError("Those setups come out the same, so there's nothing to compare: give values that "
+                             "differ, like n=[5, 10].")
+        sweep.varied = varied_setups(sweep.batches)
+        for batch in sweep.batches:
+            batch.label = " · ".join(filter(None, [sweep.label, setup_label(batch, sweep.varied)]))
+        return sweep
+
+    def _run_sweep(
+        self,
+        sweep: Sweep,
+        *,
+        workers: int = BATCH_WORKERS,
+        progress: Callable[..., None] | None = None,
+        stop: threading.Event | None = None,
+        on_item: Callable[[BatchItem], None] | None = None,
+    ) -> Sweep:
+        """Sends a prepared sweep's questions through one pool (_run_batches())."""
+        started = time.monotonic()
+        try:
+            self._run_batches(sweep.batches, workers=workers, progress=progress, stop=stop, on_item=on_item)
+        finally:
+            sweep.seconds += time.monotonic() - started
+            sweep.stopped = any(b.stopped for b in sweep.batches)
+        return sweep
 
     def _prepare_batch(
         self,
@@ -3490,23 +4249,22 @@ class BedrockChatAnalyzer:
         files: Any = None,
         retrieve_only: bool = False,
         limit: int | None = BATCH_LIMIT,
+        label: str = "",
     ) -> Batch:
         """A test run, ready to send: the knowledge base, model, data sources and files resolved once, and each
         question's request built, every question on its own (no session). Sends no question."""
         schema = self.schema()
         values = normalize_settings(settings, schema)
         cases = question_list(questions)
-        cap = None if limit is None else _as_int(limit, "limit", hint=", or None for every question")
-        if cap is not None and cap < 0:
-            raise ValueError(f"limit takes a number of questions, like 50, or None for every question; got {limit!r}")
-        cap = cap or None  # 0, like None, asks every question
+        cap = _question_cap(limit)
         kb_id = self.resolve(kb)
         sources = self.resolve_sources(kb_id, data_source)
         uris = self.resolve_files(kb_id, files)
         arn = "" if retrieve_only else self.resolve_model(model)[1]
         batch = Batch(kb_id=kb_id, kb_name=self.kb_name(kb_id), model=_model_id(arn), data_sources=sources, files=uris,
                       settings=retrieve_settings(values, schema) if retrieve_only else values,
-                      retrieve_only=retrieve_only)
+                      retrieve_only=retrieve_only, id=uuid.uuid4().hex[:12], label=str(label or ""),
+                      started=_utcnow())
 
         def built(question: str) -> dict[str, Any]:
             if retrieve_only:
@@ -3536,33 +4294,50 @@ class BedrockChatAnalyzer:
         stop: threading.Event | None = None,
         on_item: Callable[[BatchItem], None] | None = None,
     ) -> Batch:
-        """Sends a prepared test run's questions, `workers` at a time. Each answer (or error) and its cost are filled
-        in on the calling thread, which also calls progress(done, total) and on_item(item) as each comes back: nothing
-        else is touched from the worker threads. Once `stop` is set, or the run is interrupted, no more questions are
-        sent and what came back is kept; batch.stopped says so."""
-        todo = [i for i in batch.items if i.request and i.answer is None and not i.error]
+        """Sends a prepared test run's questions, `workers` at a time (_run_batches())."""
+        return self._run_batches([batch], workers=workers, progress=progress, stop=stop, on_item=on_item)[0]
+
+    def _run_batches(
+        self,
+        batches: list[Batch],
+        *,
+        workers: int = BATCH_WORKERS,
+        progress: Callable[..., None] | None = None,
+        stop: threading.Event | None = None,
+        on_item: Callable[[BatchItem], None] | None = None,
+    ) -> list[Batch]:
+        """Sends prepared test runs' questions through one pool, `workers` at a time: the first question of every run,
+        then the second, and so on, so runs stopped early have asked the same questions. Each answer (or error) and
+        its cost are filled in on the calling thread, which also calls progress(done, total) and on_item(item) as each
+        comes back: nothing else is touched from the worker threads. Once `stop` is set, or the run is interrupted, no
+        more questions are sent and what came back is kept; each batch's `stopped` says so."""
+        rows = max((len(b.items) for b in batches), default=0)
+        todo = [(b, b.items[k]) for k in range(rows) for b in batches
+                if k < len(b.items) and b.items[k].request and b.items[k].answer is None and not b.items[k].error]
         if not todo:
-            return batch
+            return batches
         count = max(1, min(_as_int(workers, "workers"), len(todo)))
         self._runtime_client()  # made before the threads start: a boto3 session isn't thread-safe
-        started = time.monotonic()
         pool = ThreadPoolExecutor(max_workers=count, thread_name_prefix="bedrock-chat")
-        waiting: list[BatchItem] = list(todo)
-        running: dict[Any, BatchItem] = {}  # the questions being asked, by their future
+        waiting = list(todo)
+        running: dict[Any, tuple[Batch, BatchItem]] = {}  # the questions being asked, by their future
+        spans: dict[int, list[float]] = {}  # id(batch) -> [its first question sent, its last answer back]
         done, interrupted = 0, False
 
         def send_more() -> None:  # one question per free thread, so nothing waits to be sent once stop is set
             while waiting and len(running) < count and not (stop is not None and stop.is_set()):
-                item = waiting.pop(0)
-                running[pool.submit(self.send, item.request, batch.settings)] = item
+                batch, item = waiting.pop(0)
+                spans.setdefault(id(batch), [time.monotonic()] * 2)
+                running[pool.submit(self.send, item.request, batch.settings)] = (batch, item)
 
         try:
             send_more()
             while running:
                 finished, _ = wait(running, timeout=0.25, return_when=FIRST_COMPLETED)
                 for future in finished:
-                    item = running.pop(future)
+                    batch, item = running.pop(future)
                     self._fill(item, future, batch)
+                    spans[id(batch)][1] = time.monotonic()
                     done += 1
                     if progress is not None:
                         progress(done, len(todo))
@@ -3573,9 +4348,13 @@ class BedrockChatAnalyzer:
             interrupted = True
         finally:
             pool.shutdown(wait=not interrupted, cancel_futures=True)
-            batch.seconds += time.monotonic() - started
-            batch.stopped = any(i.answer is None and not i.error for i in batch.items if i.request)
-        return batch
+            ended = time.monotonic()
+            for batch in batches:
+                span = spans.get(id(batch))
+                if span is not None:
+                    batch.seconds += (ended if interrupted else span[1]) - span[0]
+                batch.stopped = any(i.answer is None and not i.error for i in batch.items if i.request)
+        return batches
 
     def _fill(self, item: BatchItem, future: Any, batch: Batch) -> None:
         """A test question's answer and its cost, or why Bedrock refused it, from its finished future."""
@@ -3726,11 +4505,64 @@ class _Results:
     rows: list[_ResultRow]
 
 
+# The window's side tabs, in order: each title, and the line drawing (24 x 24) shown before it as a mask in the text's
+# colour, so it follows the theme like the S3 explorer's icons. Under 480px of tab bar the titles stand alone.
+_TABS = (
+    ("Settings", "<path d='M4 7.5h9M17.5 7.5H20M4 16.5h2.5M11 16.5h9'/><circle cx='15' cy='7.5' r='2.5'/>"
+                 "<circle cx='8.5' cy='16.5' r='2.5'/>"),
+    ("Test", "<path d='M9 3h6M10 3v6L4.6 18.4A1.8 1.8 0 0 0 6.2 21h11.6a1.8 1.8 0 0 0 1.6-2.6L14 9V3'/>"
+             "<path d='M7.2 15h9.6'/>"),
+    ("Runs", "<path d='M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5'/><path d='M3.5 3.5v5h5'/><path d='M12 7.5V12l3 2'/>"),
+    ("Code", "<path d='M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14'/>"),
+    ("Request", "<path d='M7 17L17 7M8.5 7H17v8.5'/>"),
+    ("Response", "<path d='M17 7L7 17M15.5 17H7V8.5'/>"),
+)
+_TAB_TITLES = [title for title, _ in _TABS]
+
+
+def _tab_rules() -> str:
+    """The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
+    icon while the bar is 480px wide or more (a container query), tighter under 360px. For both ipywidgets 8's (lm-)
+    and 7's (p-) class names."""
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
+           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+    rules, narrow, tight = [], [], []
+    for x in ("lm", "p"):
+        bar = f".kbc-app.kbc-app .kbc-side>.{x}-TabBar"
+        tab = f"{bar} .{x}-TabBar-tab"
+        rules += [
+            f"{bar}{{container-type:inline-size;padding:3px;border-radius:12px;background:var(--kc-tint-2);"
+            "min-height:0;border:0;overflow:visible;margin:0 0 10px}",
+            f"{bar}>.{x}-TabBar-content{{gap:2px;border:0;align-items:stretch;flex-wrap:nowrap}}",
+            f"{tab}{{flex:1 1 auto;min-width:0;min-height:30px;line-height:30px;margin:0;padding:0 8px;border:0;"
+            "border-radius:9px;font-size:12px;background:transparent;color:inherit;opacity:.72;font-weight:500;"
+            "transform:none;justify-content:center;align-items:center;gap:6px;cursor:pointer;"
+            "transition:background-color .15s,opacity .15s}",
+            f"{tab}:hover:not(.{x}-mod-current){{background:var(--kc-tint);opacity:.95}}",
+            f"{tab}.{x}-mod-current{{background:var(--kc-raised);opacity:1;font-weight:600;min-height:30px;"
+            "transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}",
+            f"{tab}.{x}-mod-current::before{{display:none}}",
+            f"{tab}:focus{{outline:none}}",
+            f"{tab}:focus-visible{{outline:2px solid var(--kc-ring);outline-offset:-2px}}",
+            f"{tab} .{x}-TabBar-tabLabel{{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;"
+            "white-space:nowrap}",
+            f"{tab} .{x}-TabBar-tabIcon{{flex:0 0 auto;width:14px;height:14px;background:currentColor;"
+            "-webkit-mask:var(--kc-icon) center/contain no-repeat;mask:var(--kc-icon) center/contain no-repeat}",
+            f"{tab}.{x}-mod-current .{x}-TabBar-tabIcon{{background:var(--kc-accent)}}",
+        ]
+        rules += [f'{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:url("data:image/svg+xml,'
+                  f'{quote(svg.format(paths))}")}}' for k, (_, paths) in enumerate(_TABS, 1)]
+        narrow.append(f"{tab} .{x}-TabBar-tabIcon{{display:none}}")
+        tight.append(f"{tab}{{padding:0 5px}}")
+    return "\n".join([*rules, f"@container (max-width:479px){{{''.join(narrow)}}}",
+                      f"@container (max-width:359px){{{''.join(tight)}}}"])
+
+
 _CSS = """<style>
-.kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11)}
+.kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11);--kc-raised:var(--kc-surface)}
 .kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8;--kf:#0e7490;--ka:#c2410c;--kw:#be185d}
-body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
+body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
 .kbc{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .kbc h3{margin:10px 0 2px;font-size:16px}
 .kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}
@@ -3980,6 +4812,7 @@ body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-ap
 .kbc .tests .cards{gap:6px;margin:8px 0 6px}
 .kbc .tests .card{padding:5px 10px;min-width:64px;border-radius:10px}
 .kbc .tests .card .v{font-size:13.5px}
+.kbc .tests table.t td:first-child:not(.s):not(.n){min-width:170px}
 .kbc-app{position:relative;isolation:isolate;box-sizing:border-box;border:1px solid var(--kc-line);border-radius:20px;padding:14px 16px 12px;background:var(--kc-bg);box-shadow:var(--kc-shadow);gap:0}
 .kbc-app *{box-sizing:border-box}
 .kbc-app .widget-html-content,.kbc-app .jupyter-widget-html-content{min-width:0}
@@ -4043,13 +4876,6 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:hover:enabled{opacity:1;background:var(--kc-tint)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button.mod-active:hover:enabled{background:var(--kc-surface)}
 .kbc-app.kbc-app .widget-toggle-buttons .widget-toggle-button:disabled{opacity:.4}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar,.kbc-app.kbc-app .kbc-side>.p-TabBar{padding:4px;border-radius:14px;background:var(--kc-tint-2);min-height:0;border:0;overflow:visible;margin:0 0 10px}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar>.lm-TabBar-content,.kbc-app.kbc-app .kbc-side>.p-TabBar>.p-TabBar-content{gap:2px;border:0;align-items:stretch;flex-wrap:wrap}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab{flex:1 1 auto;min-width:fit-content;min-height:28px;line-height:28px;margin:0;padding:0 6px;border:0;border-radius:10px;font-size:12px;background:transparent;color:inherit;opacity:.68;font-weight:500;transform:none;text-align:center;cursor:pointer;transition:background-color .15s,opacity .15s}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab:hover:not(.lm-mod-current),.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab:hover:not(.p-mod-current){background:var(--kc-tint);opacity:.95}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current{background:var(--kc-surface);opacity:1;font-weight:600;min-height:28px;transform:none;box-shadow:0 1px 3px rgba(15,23,42,.16)}
-.kbc-app.kbc-app .kbc-side>.lm-TabBar .lm-TabBar-tab.lm-mod-current::before,.kbc-app.kbc-app .kbc-side>.p-TabBar .p-TabBar-tab.p-mod-current::before{display:none}
-.kbc-app.kbc-app .kbc-side .lm-TabBar-tabLabel,.kbc-app.kbc-app .kbc-side .p-TabBar-tabLabel{text-align:center}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents{border:1px solid var(--kc-line);border-radius:16px;padding:10px 4px 10px 12px;background:var(--kc-surface);overflow:hidden}
 .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,.kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:clamp(620px,calc(100vh - 320px),1480px);overflow:hidden auto;padding-right:8px}
 body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box,body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.jupyter-widget-tab-contents>.jupyter-widget-box{max-height:620px}
@@ -4078,7 +4904,7 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 .kbc-app.kbc-app .kbc-trig>.kbc-trig-b:active:enabled,.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:active:enabled{transform:none}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
-</style>"""
+""" + _tab_rules() + "\n</style>"
 
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
@@ -5582,7 +6408,7 @@ def _setting_marks(keys: Iterable[str], schema: Schema, retrieve_only: bool = Fa
 _QUICK = ("n", "search_type", "filter", "reranker", "temperature", "top_p", "max_tokens", "prompt", "query_decomposition")
 _SHOWN_MATCHES = 6  # settings listed under the search box; Browse all lists every one
 _BESIDE = ("integer", "float", "boolean", "choice")  # kinds whose box sits beside the setting's name
-_PYTHON_WIDTH = 64  # where the Request JSON tab's Python breaks lines, so it fits the tab
+_PYTHON_WIDTH = 64  # where the Request tab's Python breaks lines, so it fits the tab
 _PICKER_ROWS = 40  # lines a picker's list shows at once; the search box finds the rest
 
 
@@ -5899,6 +6725,8 @@ class _ChatApp:
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
     log, where nobody looks."""
 
+    TEST_TAB, RUNS_TAB = _TAB_TITLES.index("Test"), _TAB_TITLES.index("Runs")  # where they are among the side tabs
+
     def __init__(self, view: BedrockChatView, widgets: Any):
         self.view, self.w = view, widgets
         self.schema = view.core.schema()
@@ -5929,6 +6757,9 @@ class _ChatApp:
         self.batch_task: Any = None  # the run going on in the background, in a notebook
         self.batch_stop: threading.Event | None = None  # Stop sets it: no more questions are sent
         self.running = False  # a test run is going on
+        self.sweep: Sweep | None = None  # the sweep the Test tab shows (self.batch is the setup shown under it)
+        self.confirm = ""  # a sweep over SWEEP_MAX_COST that Run was clicked for once: the next click asks it
+        self.vary_chips: dict[str, Any] = {}  # Try variations' one-click lines, by setting
         self.root = self._build()
 
     # ------------------------------------------------------------------ layout
@@ -5994,9 +6825,8 @@ class _ChatApp:
         self._refresh()
         self._render_response()
         if self.view.batches:  # test runs from before the window opened: the last one shows in the Test tab
-            self.batch = self.view.batches[-1]
-            self.batch_old = self.view._old_items(self.batch)
-            self._draw_batch(self.batch)
+            self._show_run(self.view.batches[-1])
+        self._draw_runs()
         notes = list(self.problems) + list(self.view._notes)
         self.view._notes = []
         if notes:
@@ -6060,7 +6890,7 @@ class _ChatApp:
             self.rows_box, self.add_button, self.adding, window_options,
         ], layout=layout(width="100%"))
 
-        # Request JSON
+        # Request: the JSON the next question sends
         self.request_mode = w.ToggleButtons(options=["Tree", "JSON", "Python"], value="Tree",
                                             tooltips=["Highlighted, folding JSON", "Plain JSON: click it to select "
                                                       "all", "The same call with boto3"],
@@ -6092,17 +6922,19 @@ class _ChatApp:
             margin="0 0 6px 0"))
         request_tab = w.VBox([toolbar, self.request_view, self.edit_box], layout=layout(width="100%"))
 
-        # Last response
+        # Response: what came back to the last question
         self.response_mode = w.ToggleButtons(options=["Response", "Request sent"], value="Response",
                                              style={"button_width": "104px"})
         self.response_mode.observe(self._safely(lambda _change: self._render_response()), names="value")
         self.response_view = w.HTML(layout=layout(width="100%"))
         response_tab = w.VBox([self.response_mode, self.response_view], layout=layout(width="100%"))
 
-        tabs = w.Tab(children=[settings_tab, self._test_tab(), self._code_tab(), request_tab, response_tab],
+        tabs = w.Tab(children=[settings_tab, self._test_tab(), self._runs_tab(), self._code_tab(), request_tab,
+                               response_tab],
                      layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
-        for i, title in enumerate(("⚙️ Settings", "🧪 Test", "📋 Code", "🧾 Request JSON", "📨 Last response")):
+        for i, (title, _) in enumerate(_TABS):
             tabs.set_title(i, title)
+        tabs.observe(self._safely(self._tab_changed), names="selected_index")
         height = _css_height(self.view.height)
         for tab in tabs.children if height else ():  # as tall as the conversation and the question box under it
             tab.layout.max_height = f"calc({height} + 80px)"
@@ -6111,12 +6943,38 @@ class _ChatApp:
         return tabs
 
     def _test_tab(self) -> Any:
-        """🧪 Test: a list of questions asked with the window's setup, each on its own, and how each did."""
+        """Test: a list of questions asked with the window's setup, each on its own, and how each did; with Try
+        variations open, with every combination of the values typed there, the setups ranked."""
         w, layout = self.w, self.w.Layout
         self.test_box = w.Textarea(value=format_questions(self.view.questions), rows=7, continuous_update=True,
                                    placeholder="How long do refunds take? | refund-policy.pdf\nCan I return a digital "
                                                "product?\nWhat does error E1234 mean?", layout=layout(width="100%"))
         self.test_box.observe(self._safely(self._tests_typed), names="value")
+        # Try variations stays folded under one button until it's wanted, like Add a setting
+        self.vary_button = w.Button(description="+ Try variations", tooltip="Ask the questions with several "
+                                    "settings, models or data sources at once, and see which setup does best",
+                                    layout=layout(width="100%", margin="6px 0 0 0"))
+        self.vary_button.add_class("kbc-add")
+        self.vary_button.on_click(self._safely(lambda _button: self._show_varying(True)))
+        self.close_vary = close = w.Button(description="✕", tooltip="Close Try variations: Run asks with one setup "
+                                           "again", layout=layout(width="22px", flex="0 0 auto"))
+        close.add_class("kbc-x")
+        close.on_click(self._safely(lambda _button: self._show_varying(False)))
+        self.vary_chip_box = w.HBox(layout=layout(width="100%", flex_flow="row wrap", margin="6px 0 2px 0"))
+        self.vary_box = w.Textarea(rows=4, continuous_update=True, layout=layout(width="100%"),
+                                   placeholder="n = 5, 10\nsearch_type = SEMANTIC, HYBRID\nmodel = haiku, sonnet")
+        self.vary_box.add_class("kbc-mono")
+        self.vary_box.observe(self._safely(self._tests_typed), names="value")
+        self.vary_note = w.HTML(layout=layout(width="100%"))
+        self.varying_card = w.VBox([
+            w.HBox([w.HTML(_wrap('<div class="ph">Try variations</div>'), layout=layout(flex="1 1 auto")), close],
+                   layout=layout(width="100%", align_items="center")),
+            w.HTML(_wrap('<div class="pd">A setting per line, then = and the values to try, separated by commas: Run '
+                         "asks the questions with every combination and ranks the setups. <b>none</b> leaves a "
+                         "setting out; <b>model</b>, <b>data_source</b> and <b>files</b> work too.</div>")),
+            self.vary_chip_box, self.vary_box, self.vary_note,
+        ], layout=layout(width="100%", display="none"))
+        self.varying_card.add_class("kbc-card")
         self.run_button = w.Button(description="▶ Run", button_style="primary", tooltip="Ask every question with "
                                    "these settings, each on its own (not as a follow-up)",
                                    layout=layout(width="auto", flex="0 0 auto"))
@@ -6128,17 +6986,30 @@ class _ChatApp:
         self.test_note = w.HTML(layout=layout(flex="1 1 auto", min_width="0", margin="0 0 0 10px"))
         actions = w.HBox([self.run_button, self.stop_button, self.test_note],
                          layout=layout(width="100%", align_items="center", margin="6px 0 4px 0"))
+        # a sweep: its ranking, then which setup's answers show under it
+        self.sweep_head = w.HTML(layout=layout(width="100%"))
+        self.setup_pick = w.Dropdown(options=[], layout=layout(flex="1 1 auto", width="auto", min_width="0"))
+        self.setup_pick.observe(self._safely(self._setup_picked), names="value")
+        self.use_setup_button = use = w.Button(description="Use this setup", tooltip="Switch the window to this "
+                                               "setup: its settings, model, data source and files",
+                                               layout=layout(width="auto", flex="0 0 auto", margin="0 0 0 6px"))
+        use.add_class("kbc-small")
+        use.on_click(self._safely(self._use_shown))
+        self.sweep_bar = w.HBox([w.HTML(_wrap('<div class="pd" style="margin:0 8px 0 0">Answers of</div>'),
+                                        layout=layout(flex="0 0 auto")), self.setup_pick, use],
+                                layout=layout(width="100%", align_items="center", margin="10px 0 0 0", display="none"))
         self.test_head = w.HTML(layout=layout(width="100%"))
         self.test_rows = w.VBox(layout=layout(width="100%"))
         intro = w.HTML(_wrap(
             '<div class="ph">Test a list of questions<span class="hint">each asked on its own</span></div>'
             '<div class="pd">One question per line, asked with the knowledge base, model and settings above. Add '
             "<b>|</b> and a file name to check that the answer cites it. Change a setting and run them again to see "
-            "which did better.</div>"))
-        return w.VBox([intro, self.test_box, actions, self.test_head, self.test_rows], layout=layout(width="100%"))
+            "which did better, or open <b>Try variations</b> to ask with several settings at once.</div>"))
+        return w.VBox([intro, self.test_box, self.vary_button, self.varying_card, actions, self.sweep_head,
+                       self.sweep_bar, self.test_head, self.test_rows], layout=layout(width="100%"))
 
     def _code_tab(self) -> Any:
-        """📋 Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
+        """Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
         w, layout = self.w, self.w.Layout
         self.code_mode = w.ToggleButtons(options=["Python", "JSON", "AWS CLI"], value="Python",
                                          tooltips=["A script that asks your test questions with this setup (boto3 "
@@ -6405,11 +7276,14 @@ class _ChatApp:
             "and whether a poor answer comes from the search or the model.</li>"
             + "<li><b>Settings</b> change what every question sends: how many passages, the search type, a metadata "
             "filter, a reranker, temperature, your own prompt. <b>Add a setting</b> finds any field the API has.</li>"
-            "<li><b>Request JSON</b> shows the request your next question sends. <b>Edit JSON</b> changes it by "
+            "<li><b>Request</b> shows the request your next question sends, as JSON. <b>Edit JSON</b> changes it by "
             "hand, and <b>Python</b> gives the same call to paste into your code.</li>"
-            "<li><b>🧪 Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
-            "did. Change a setting and run them again: each line says whether it did better.</li>"
-            "<li><b>📋 Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
+            "<li><b>Test</b> asks a list of questions with these settings, each on its own, and shows how each one "
+            "did. Change a setting and run them again: each line says whether it did better. <b>Try variations</b> "
+            "asks them with every combination of the settings you list, and ranks the setups.</li>"
+            "<li><b>Runs</b> keeps every test run, ranked against the others of the same questions: switch to the "
+            "best one's setup, compare them, and save them to a file that outlasts a restart.</li>"
+            "<li><b>Code</b> gives this setup as a Python script, JSON or an AWS CLI command, to run anywhere.</li>"
             "<li>Each question follows up on the ones before it. <b>New chat</b> starts over.</li></ul></div></div>"
         )
 
@@ -6983,6 +7857,8 @@ class _ChatApp:
         self._render_request()
         if self.editing:
             self._follow_edit()
+        if self.varying_card.layout.display != "none":  # the chips follow Answer / Retrieve only
+            self._draw_vary_chips()
         self._draw_test_note()
         self._render_code()
 
@@ -7098,91 +7974,282 @@ class _ChatApp:
     def _tests_typed(self, change: dict[str, Any]) -> None:
         if self.quiet:
             return
+        self.confirm = ""  # a sweep confirmed for its cost was another one
         self._draw_test_note()
         self._render_code()  # the script asks the test questions
 
+    # ------------------------------------------------------------ Try variations
+
+    def _show_varying(self, show: bool) -> None:
+        """Opens Try variations in place of its button (a starting pair of lines in an empty box), or folds it away:
+        Run then asks with one setup again. What's in the box stays for next time."""
+        self.varying_card.layout.display = "" if show else "none"
+        self.vary_button.layout.display = "none" if show else ""
+        if show:
+            self._draw_vary_chips()
+            if not self.vary_box.value.strip():
+                self._quietly(self.vary_box, value="\n".join([self._variation_line("n"),
+                                                               self._variation_line("search_type")]))
+            if hasattr(self.vary_box, "focus"):  # ipywidgets 8
+                self.vary_box.focus()
+        self.confirm = ""
+        self._draw_test_note()
+
+    def _varying(self) -> bool:
+        """Run asks every combination: Try variations is open and has something in it."""
+        return self.varying_card.layout.display != "none" and bool(self.vary_box.value.strip())
+
+    def _vary_key(self, name: str) -> str:
+        """The name a variation line's setting goes by: 'Passages' and 'numberOfResults' -> 'n'."""
+        key = _sweep_name(name)
+        if key in _PICKED:
+            return key
+        try:
+            return self.schema.find(key).key
+        except ValueError:
+            return key
+
+    def _variation_line(self, key: str) -> str:
+        """A line to start from, for a chip: 'n = 5, 10', 'model = haiku, sonnet', 'data_source = all, faq, manuals'."""
+        view = self.view
+        if key == "n":
+            n = int(view.values.get("n") or 5)
+            return f"n = {n}, {min(100, n * 2)}" if n < 100 else "n = 50, 100"
+        if key == "model":
+            wanted = str(view.model or view.core.default_model or DEFAULT_MODEL).lower()
+            now = next((alias for alias, family in _MODEL_ALIASES.items() if family in wanted), "haiku")
+            return f"model = {now}, {'sonnet' if now != 'sonnet' else 'haiku'}"
+        if key == "data_source":
+            names = [s.name or s.id for s in self._data_sources()]
+            return "data_source = " + ", ".join(["all", *(f'"{n}"' if "," in n else n for n in names[:4])])
+        return {"search_type": "search_type = SEMANTIC, HYBRID", "reranker": "reranker = none, cohere",
+                "temperature": "temperature = 0, 0.5"}.get(key, f"{key} = ")
+
+    def _data_sources(self) -> list[DataSource]:
+        try:
+            return self.view.core.data_sources(self.view._kb_id())
+        except (ValueError, ClientError, BotoCoreError):
+            return []
+
+    def _draw_vary_chips(self) -> None:
+        """One click adds a line of values to try: passages, search type, reranker, model and temperature (answers
+        only), and the data source when the knowledge base has more than one."""
+        chips = [("n", "Passages", "How many passages to retrieve"), ("search_type", "Search type", "SEMANTIC "
+                 "(meaning) or HYBRID (meaning and exact words)"), ("reranker", "Reranker", "Without and with "
+                 "reranking the passages")]
+        if not self.view.retrieve_only:
+            chips += [("model", "Model", "The model that answers"), ("temperature", "Temperature", "How much the "
+                      "answers vary")]
+        if len(self._data_sources()) > 1:
+            chips.append(("data_source", "Data source", "Every data source, then each one alone"))
+        shown = []
+        for key, label, tip in chips:
+            if key not in self.vary_chips:
+                chip = self.w.Button(description=f"+ {label}", tooltip=tip, layout=self.w.Layout(width="auto"))
+                chip.add_class("kbc-chip")
+                chip.on_click(self._safely(lambda _button, key=key: self._add_variation(key)))
+                self.vary_chips[key] = chip
+            shown.append(self.vary_chips[key])
+        self.vary_chip_box.children = shown
+
+    def _add_variation(self, key: str) -> None:
+        """A chip's line: it takes the place of the line for the same setting, or goes at the end."""
+        line = self._variation_line(key)
+        lines = [text for text in self.vary_box.value.splitlines() if text.strip()]
+        same = [k for k, text in enumerate(lines) if self._vary_key(re.split(r"[=:]", text, maxsplit=1)[0]) == key]
+        if same:
+            lines[same[0]] = line
+        else:
+            lines.append(line)
+        self.vary_box.value = "\n".join(lines)  # its observer redraws the note
+
+    def _plan(self, cases: list[tuple[str, Any]]) -> tuple[int, float | None, bool]:
+        """What Try variations asks, without building a request: (how many different setups, roughly what asking the
+        questions with each costs, whether the model varies). A ValueError says what's wrong with a line."""
+        view = self.view
+        retrieve = view.retrieve_only
+        grid = parse_variations(self.vary_box.value)
+        count = math.prod(len(values) for values in grid.values())
+        if count > SWEEP_LIMIT:
+            raise ValueError(f"That's {count} setups, and Try variations asks up to {SWEEP_LIMIT} at a time: try fewer "
+                             "values.")
+        setups = sweep_setups(grid, limit=None) if count > 1 else []
+        questions = [q for q, _ in cases[:BATCH_LIMIT]]
+        seen: set[str] = set()
+        models: set[str] = set()
+        total: float | None = 0.0
+        for changes in setups:
+            sent = apply_setup(view.values, changes, self.schema)
+            sent = retrieve_settings(sent, self.schema) if retrieve else sent
+            model = "" if retrieve else str((changes["model"] if "model" in changes else view.model)
+                                            or view.core.default_model or DEFAULT_MODEL)
+            model = _MODEL_ALIASES.get(model.lower(), model)  # 'sonnet' -> 'claude-sonnet-5', which has a price
+            key = _setup_key([sent, model, changes.get("data_source"), changes.get("files")])
+            if key in seen:
+                continue
+            seen.add(key)
+            models.add(model)
+            cost = batch_estimate(questions, sent, model, retrieve_only=retrieve, model_prices=view.core.model_prices,
+                                  prices=view.core.prices)
+            total = None if total is None or cost is None else total + cost
+        if len(seen) < 2:
+            raise ValueError("Those come out as one setup" + (" (Retrieve only sends the search settings alone)"
+                                                              if retrieve else "")
+                             + ": give two or more values to try, like n = 5, 10.")
+        return len(seen), total, len(models) > 1
+
     def _draw_test_note(self) -> None:
-        """Beside Run: how many questions it asks, how (answers from which model, or searches only), and roughly what
-        that costs."""
+        """Beside Run: how many questions it asks (with how many setups), how (answers from which model, or searches
+        only), and roughly what that costs."""
         if self.running:
             return
         cases = parse_questions(self.test_box.value)
         count = min(len(cases), BATCH_LIMIT)
         self.run_button.description = f"▶ Run {_plural(count, 'question')}" if count else "▶ Run"
         self.run_button.disabled = not count
+        self._set(self.vary_note, "")
         if not cases:
             self._set(self.test_note, _wrap('<div class="pd" style="margin:0">Type or paste questions above.</div>'))
             return
         view = self.view
         retrieve = view.retrieve_only
         model = str(view.model or view.core.default_model or DEFAULT_MODEL)
-        cost = batch_estimate([q for q, _ in cases[:count]],
-                              retrieve_settings(view.values, self.schema) if retrieve else view.values, model,
-                              retrieve_only=retrieve, model_prices=view.core.model_prices, prices=view.core.prices)
-        parts = [f"the first {count} of {len(cases)}" if len(cases) > count else "",
-                 "searches only (Retrieve only)" if retrieve else view._model_label(model),
-                 f"about {human_money(cost)} (estimate)" if cost is not None else "cost unknown"]
+        first = f"the first {count} of {len(cases)}" if len(cases) > count else ""
+        if self._varying():
+            try:
+                setups, cost, models = self._plan(cases)
+            except ValueError as exc:
+                self.run_button.disabled = True
+                self._set(self.vary_note, _wrap(f'<div class="note warn">{_prose(str(exc))}</div>'))
+                self._set(self.test_note, _wrap('<div class="pd" style="margin:0">Fix the line above, or close Try '
+                                                "variations to ask with one setup.</div>"))
+                return
+            self.run_button.description = f"▶ Run {setups} setups × {_plural(count, 'question')}"
+            if self.confirm:
+                self.run_button.description = "▶ Run anyway" + (f" (about {human_money(cost)})" if cost else "")
+            parts = [first, f"{setups * count:,} calls",
+                     "searches only (Retrieve only)" if retrieve else "" if models else view._model_label(model),
+                     f"about {human_money(cost)} (estimate)" if cost is not None else "cost unknown"]
+            self._set(self.vary_note, _wrap(f'<div class="pd" style="margin:4px 0 0">{setups} setups: every '
+                                            "combination of these values, each starting from the settings in use."
+                                            "</div>"))
+        else:
+            cost = batch_estimate([q for q, _ in cases[:count]],
+                                  retrieve_settings(view.values, self.schema) if retrieve else view.values, model,
+                                  retrieve_only=retrieve, model_prices=view.core.model_prices, prices=view.core.prices)
+            parts = [first, "searches only (Retrieve only)" if retrieve else view._model_label(model),
+                     f"about {human_money(cost)} (estimate)" if cost is not None else "cost unknown"]
         self._set(self.test_note, _wrap(f'<div class="pd" style="margin:0">{_esc(" · ".join(filter(None, parts)))}'
                                         "</div>"))
 
+    # ------------------------------------------------------------ running them
+
     def _run_tests(self, *_: Any) -> None:
-        """Run: every question in the box, asked with the window's setup, each on its own. In a notebook the
-        questions are asked on worker threads while the window stays usable, and each line fills in as its answer
-        comes back; elsewhere (a script, the tests) right away."""
+        """Run: every question in the box, asked with the window's setup (with Try variations open, with every
+        combination), each on its own. In a notebook the questions are asked on worker threads while the window stays
+        usable, and each line fills in as its answer comes back; elsewhere (a script, the tests) right away."""
         if self.running:
             return
         cases = parse_questions(self.test_box.value)
         if not cases:
-            self._set_status("Type or paste questions in the 🧪 Test tab first, one per line.")
+            self._set_status("Type or paste questions in the Test tab first, one per line.")
+            return
+        if self._varying():
+            self._run_sweep(cases)
             return
         view = self.view
         batch = view._prepare(cases, view.retrieve_only, BATCH_LIMIT)
+        self.sweep = None
+        self._hide_sweep()
         self.batch, self.batch_old, self.running = batch, view._old_items(batch), True
         self.batch_stop = stop = threading.Event()
-        self.stop_button.disabled, self.stop_button.description = False, "■ Stop"
-        self.stop_button.layout.display = ""
+        self._show_stop()
         self._show_progress(batch)
         self._draw_batch(batch)
         self._render_code()
+
+        def work(on_item: Callable[[BatchItem], None]) -> Any:
+            return view.core._run_batch(batch, stop=stop, on_item=on_item)
+
+        self._start(work, self._tested, lambda: self._tests_done(batch, view._log_runs([batch])))
+
+    def _run_sweep(self, cases: list[tuple[str, Any]]) -> None:
+        """Run with Try variations open: the sweep checked (a costly one asks for a second click), then asked."""
+        view = self.view
+        sweep = view._prepare_sweep(cases, parse_variations(self.vary_box.value), retrieve_only=view.retrieve_only,
+                                    limit=BATCH_LIMIT)
+        cost = view._sweep_cost(sweep)
+        plan = _setup_key([[run_setup(b) for b in sweep.batches], [i.question for i in sweep.batches[0].items]])
+        over = view._too_costly(sweep, cost, SWEEP_MAX_COST)
+        if over and self.confirm != plan:
+            self.confirm = plan
+            self._draw_test_note()
+            self._set_status(f"{over}, more than the ${SWEEP_MAX_COST:.2f} the window asks without checking: click Run "
+                             "again to ask them, or try fewer values or questions.", "warn")
+            return
+        self.confirm = ""
+        view._keep(sweep, cases)
+        self.sweep, self.batch, self.batch_old, self.running = sweep, None, {}, True
+        self.batch_stop = stop = threading.Event()
+        self._show_stop()
+        self._draw_sweep(sweep)
+        self._render_code()
+
+        def work(on_item: Callable[[BatchItem], None]) -> Any:
+            return view.core._run_sweep(sweep, stop=stop, on_item=on_item)
+
+        self._start(work, self._swept_item, lambda: self._sweep_done(sweep, view._log_runs(sweep.batches)))
+
+    def _show_stop(self) -> None:
+        self.stop_button.disabled, self.stop_button.description = False, "■ Stop"
+        self.stop_button.layout.display = ""
+
+    def _start(self, work: Callable[[Callable[[BatchItem], None]], Any], tested: Callable[[BatchItem], None],
+               done: Callable[[], None]) -> None:
+        """Runs `work` (which takes the on_item callback): in a notebook on a worker thread, drawing each question on
+        the kernel's event loop as it comes back; without a running loop, right away."""
         loop = _running_loop()
         if loop is None:
             try:
-                view.core._run_batch(batch, stop=stop, on_item=self._tested)
+                work(tested)
             finally:
-                self._tests_done(batch)
+                done()
             return
-        self.batch_task = loop.create_task(self._run_later(batch, stop))
+        self.batch_task = loop.create_task(self._run_later(work, tested, done))
 
-    async def _run_later(self, batch: Batch, stop: threading.Event) -> None:
+    async def _run_later(self, work: Callable[[Callable[[BatchItem], None]], Any],
+                         tested: Callable[[BatchItem], None], done: Callable[[], None]) -> None:
         """A test run on a worker thread: each question's line is drawn on the kernel's event loop, where the clicks
         run, as its answer comes back, so Stop and the rest of the window keep working meanwhile."""
         finished: queue.SimpleQueue = queue.SimpleQueue()
-        work = asyncio.get_running_loop().run_in_executor(
-            None, functools.partial(self.view.core._run_batch, batch, stop=stop, on_item=finished.put))
+        job = asyncio.get_running_loop().run_in_executor(None, functools.partial(work, finished.put))
         try:
-            while not work.done():
-                await asyncio.wait([work], timeout=0.2)
-                self._drain(finished)
-            await work
+            while not job.done():
+                await asyncio.wait([job], timeout=0.2)
+                self._drain(finished, tested)
+            await job
         except Exception as exc:  # a bug: still said in the window, and not in the kernel's log
             self._set_status(self._error_text(exc), "warn")
         finally:
-            self._drain(finished)
-            self._tests_done(batch)
+            self._drain(finished, tested)
+            self._safely(done)()
 
-    def _drain(self, finished: queue.SimpleQueue) -> None:
+    def _drain(self, finished: queue.SimpleQueue, tested: Callable[[BatchItem], None]) -> None:
         while True:
             try:
                 item = finished.get_nowait()
             except queue.Empty:
                 return
-            self._safely(self._tested)(item)
+            self._safely(tested)(item)
 
     def _show_progress(self, batch: Batch) -> None:
-        sent = [i for i in batch.items if i.request]
-        back = sum(i.answer is not None or bool(i.error_code) for i in sent)
+        self._show_count([batch], batch.retrieve_only)
+
+    def _show_count(self, batches: list[Batch], retrieve_only: bool) -> None:
+        sent = [i for b in batches for i in b.items if i.request]
+        back = sum(_came_back(i) for i in sent)
         self.run_button.disabled = True
-        self.run_button.description = f"{'Searching' if batch.retrieve_only else 'Asking'}… {back} of {len(sent)}"
+        self.run_button.description = f"{'Searching' if retrieve_only else 'Asking'}… {back} of {len(sent)}"
 
     def _tested(self, item: BatchItem) -> None:
         """A test question came back: its line shows how it did, and Run how many are back."""
@@ -7194,13 +8261,18 @@ class _ChatApp:
         self._set(self.batch_rows[index], _wrap(f'<div class="bqs narrow">{_result_html(row)}</div>'))
         self._show_progress(batch)
 
+    def _swept_item(self, item: BatchItem) -> None:
+        """A question of the sweep came back: its setup's line counts it, and Run how many are back."""
+        if self.sweep is not None and self.running:
+            self._draw_sweep(self.sweep)
+
     def _stop_tests(self, *_: Any) -> None:
         if self.running and self.batch_stop is not None:
             self.batch_stop.set()
             self.stop_button.disabled, self.stop_button.description = True, "Stopping…"
             self._set_status("Stopping: no more questions are sent, and the ones already sent finish first.")
 
-    def _tests_done(self, batch: Batch) -> None:
+    def _tests_done(self, batch: Batch, notes: Iterable[_Note] = ()) -> None:
         """The run is over, or stopped: every line, the summary and findings, and Run again."""
         if batch is not self.batch:  # another run took the tab meanwhile (ask_all() in another cell)
             return
@@ -7208,20 +8280,144 @@ class _ChatApp:
         self.stop_button.layout.display = "none"
         self._draw_batch(batch)
         self._draw_test_note()
-        number = next((k for k, b in enumerate(self.view.batches, 1) if b is batch), len(self.view.batches))
+        number = self.view._run_number(batch)
         line = (f"Test run {number}: {len(batch.asked)} of {_plural(len(batch.items), 'question')} came back in "
                 f"{_duration(batch.seconds)} · {self.view._batch_cost_text(batch)} (estimated)")
         if batch.stopped:
             line += " · stopped before the rest were asked"
-        line += " · ui.results() shows it as a report that stays in the saved notebook."
-        self._set_status(line, "warn" if batch.failed else "ok")
+        line += (" · the Runs tab lists every run, and ui.results() shows this one as a report that stays in the "
+                 "notebook.")
+        problems = [n.text for n in notes]
+        self._set_status(" ".join([line, *problems]), "warn" if batch.failed or problems else "ok")
+        self._draw_runs()
+
+    def _sweep_done(self, sweep: Sweep, notes: Iterable[_Note] = ()) -> None:
+        """The sweep is over, or stopped: the setups ranked, the best one's answers under them, and Run again."""
+        if sweep is not self.sweep:
+            return
+        self.running, self.batch_stop, self.batch_task = False, None, None
+        self.stop_button.layout.display = "none"
+        self._draw_sweep(sweep)
+        self._draw_test_note()
+        best = sweep.best
+        view = self.view
+        questions = len(sweep.batches[0].items)
+        line = (f"Sweep {self._sweep_index(sweep)}: {len(sweep.batches)} setups × {_plural(questions, 'question')} in "
+                f"{_duration(sweep.seconds)} · {view._money(sweep.cost)} (estimated)")
+        if sweep.stopped:
+            line += " · stopped before every setup was asked every question"
+        if best is not None:
+            line += f" · best: run {view._run_number(best)} ({best.label}), whose answers are below"
+        problems = [n.text for n in notes]
+        self._set_status(" ".join([line + ".", *problems]), "warn" if problems else "ok")
+        self._draw_runs()
 
     def ran(self, batch: Batch) -> None:
         """A test run from another cell (ask_all()) shows in the Test tab."""
         self._quietly(self.test_box, value=format_questions(self.view.questions))
+        self.sweep = None
+        self._hide_sweep()
         self.batch, self.batch_old = batch, self.view._old_items(batch)
         self._tests_done(batch)
         self._render_code()
+
+    def swept(self, sweep: Sweep) -> None:
+        """A sweep from another cell (sweep()) shows in the Test tab."""
+        self._quietly(self.test_box, value=format_questions(self.view.questions))
+        self.sweep = sweep
+        self._sweep_done(sweep)
+        self._render_code()
+
+    def loaded(self) -> None:
+        """Runs read back from a file (load_runs(), or the Runs tab's Load): the last one shows in the Test tab."""
+        self._quietly(self.test_box, value=format_questions(self.view.questions))
+        if self.view.batches and not self.running:
+            self._show_run(self.view.batches[-1])
+        self._draw_test_note()
+        self._render_code()
+        self._draw_runs()
+
+    def runs_changed(self) -> None:
+        """The runs were saved (save_runs()): the Runs tab says where."""
+        self._draw_runs()
+
+    # ------------------------------------------------------------ drawing them
+
+    def _sweep_index(self, sweep: Sweep) -> int:
+        return next((k for k, sw in enumerate(self.view.sweeps, 1) if sw is sweep), len(self.view.sweeps))
+
+    def _show_run(self, batch: Batch) -> None:
+        """A run in the Test tab: a sweep's run shows its sweep, with that setup's answers under the ranking."""
+        sweep = next((sw for sw in self.view.sweeps if batch.sweep and sw.id == batch.sweep), None)
+        if sweep is not None:
+            self.sweep = sweep
+            self._draw_sweep(sweep, batch)
+            return
+        self.sweep = None
+        self._hide_sweep()
+        self.batch, self.batch_old = batch, self.view._old_items(batch)
+        self._draw_batch(batch)
+
+    def _hide_sweep(self) -> None:
+        self._set(self.sweep_head, "")
+        self.sweep_bar.layout.display = "none"
+
+    def _draw_sweep(self, sweep: Sweep, pick: Batch | None = None) -> None:
+        """The Test tab's sweep: while it's asked, a line per setup with how many questions are back; then the setups
+        ranked, what to do, how each question did with each, and a picker for the setup whose answers show below
+        (`pick`, else the one shown, else the best)."""
+        view = self.view
+        questions = len(sweep.batches[0].items)
+        how = "searches only (Retrieve)" if sweep.retrieve_only else (
+            "" if "model" in sweep.varied else view._model_label(sweep.batches[0].model))
+        what = " · ".join(filter(None, [sweep.batches[0].kb_name or sweep.batches[0].kb_id, how,
+                                        f"{len(sweep.batches)} setups × {_plural(questions, 'question')}"]))
+        head = (f'<div class="ph" style="margin-top:12px">Sweep {self._sweep_index(sweep)}'
+                f'<span class="hint">{_esc(what)}</span></div>')
+        if self.running:
+            lines = []
+            for k, b in enumerate(sweep.batches, 1):
+                sent = [i for i in b.items if i.request]
+                back = sum(_came_back(i) for i in sent)
+                spin = "" if back == len(sent) else '<span class="spin"></span>'
+                state = f"{back} of {len(sent)} back" + (f" · {run_score(b).answered} "
+                                                          f"{'found passages' if b.retrieve_only else 'answered'}"
+                                                          if back else "")
+                lines.append(f'<div class="bq wait"><span class="bn">{k}</span><span class="bt">{_esc(b.label)}</span>'
+                             f'<span class="bx">{spin}<span class="bm">{_esc(state)}</span></span></div>')
+            body = ('<div class="pd">Each question is asked with every setup before the next one, so Stop leaves '
+                    "every setup with the same questions to compare.</div>"
+                    f'<div class="bqs narrow">{"".join(lines)}</div>')
+            self._set(self.sweep_head, _wrap(head + body))
+            self.sweep_bar.layout.display = "none"
+            self._set(self.test_head, "")
+            self.test_rows.children = ()
+            self._show_count(sweep.batches, sweep.retrieve_only)
+            return
+        shown = [b for b in view._compare_blocks(sweep.batches, sweep=sweep, memory=False)
+                 if not isinstance(b, (_Title, _Next))]
+        self._set(self.sweep_head, _wrap(head + f'<div class="tests">{_render_html(shown, 0).removeprefix(_CSS)}</div>'))
+        ranked = sweep.ranked
+        options = [(f"#{rank} · run {view._run_number(b)} · {b.label}", view._run_number(b))
+                   for rank, (b, _) in enumerate(ranked, 1)]
+        chosen = pick or (self.batch if any(self.batch is b for b in sweep.batches) else ranked[0][0])
+        self._quietly(self.setup_pick, options=options, value=view._run_number(chosen))
+        self.sweep_bar.layout.display = ""
+        self.batch, self.batch_old = chosen, view._old_items(chosen)
+        self._draw_batch(chosen)
+
+    def _setup_picked(self, change: dict[str, Any]) -> None:
+        """Another setup of the sweep picked: its answers show under the ranking."""
+        if self.quiet or self.sweep is None or change.get("new") is None:
+            return
+        batch = self.view._run(change["new"])
+        self.batch, self.batch_old = batch, self.view._old_items(batch)
+        self._draw_batch(batch)
+
+    def _use_shown(self, *_: Any) -> None:
+        """Use this setup, under a sweep: the window switches to the setup picked."""
+        if self.batch is not None:
+            self._set_status(self.view._switch_to(self.batch), "ok")
 
     def _draw_batch(self, batch: Batch) -> None:
         """The Test tab's results: the run's summary and findings, then a line per question, which opens to its
@@ -7236,10 +8432,11 @@ class _ChatApp:
                 inner = _waiting_html(k + 1, item.question, sending=self.running)
             self._set(self.batch_rows[k], _wrap(f'<div class="bqs narrow">{inner}</div>'))
         self.test_rows.children = tuple(self.batch_rows[:len(batch.items)])
-        number = next((k for k, b in enumerate(view.batches, 1) if b is batch), len(view.batches))
+        number = view._run_number(batch)
         how = "searches only (Retrieve)" if batch.retrieve_only else view._model_label(batch.model)
         what = " · ".join(filter(None, [batch.kb_name or batch.kb_id, how, _settings_text(batch.settings)]))
-        head = f'<div class="ph" style="margin-top:12px">Test run {number}<span class="hint">{_esc(what)}</span></div>'
+        title = f"Test run {number}" + (f" ({batch.label})" if batch.label else "")
+        head = f'<div class="ph" style="margin-top:12px">{_esc(title)}<span class="hint">{_esc(what)}</span></div>'
         if self.running:
             head += ('<div class="pd">Each question is asked on its own, not as a follow-up. Each line fills in as its '
                      "answer comes back; click one to read it.</div>")
@@ -7250,6 +8447,158 @@ class _ChatApp:
             head += (f'<div class="tests">{_cards_html(view._batch_cards(batch))}'
                      f"{_findings_html(_Findings(view._batch_findings(batch), empty))}</div>")
         self._set(self.test_head, _wrap(head))
+
+    # ------------------------------------------------------------------- Runs
+
+    def _runs_tab(self) -> Any:
+        """Runs: every test run, newest first, ranked against the others of the same questions; any one opened in
+        the Test tab, switched to or compared, and all of them saved to a file or read back from one."""
+        w, layout = self.w, self.w.Layout
+        self.runs_view = w.HTML(layout=layout(width="100%"))
+        self.run_pick = w.Dropdown(options=[], layout=layout(flex="1 1 100%", width="auto", min_width="0"))
+        buttons = []
+        for text, tip, handler in (
+                ("Show", "Open this run in the Test tab: each question, opening to its answer", self._show_picked),
+                ("Use this setup", "Switch the window to this run's settings, model, data source and files",
+                 self._use_picked),
+                ("⇄ Compare", "Every run of the same questions side by side, best first", self._compare_picked)):
+            button = w.Button(description=text, tooltip=tip, layout=layout(width="auto", flex="0 0 auto",
+                                                                          margin="6px 6px 0 0"))
+            button.add_class("kbc-small")
+            button.on_click(self._safely(handler))
+            buttons.append(button)
+        self.show_run_button, self.use_run_button, self.compare_button = buttons
+        self.run_actions = w.VBox([self.run_pick, w.HBox(buttons, layout=layout(flex_flow="row wrap"))],
+                                  layout=layout(width="100%", margin="8px 0 0 0"))
+        self.compare_view = w.HTML(layout=layout(width="100%"))
+        self.runs_file = w.Text(value=self.view.log or RUNS_FILE, placeholder=RUNS_FILE,
+                                layout=layout(flex="1 1 auto", width="auto", min_width="0"))
+        self.save_runs_button = save = w.Button(description="💾 Save", tooltip="Add every run to this file, a line "
+                                                "each, and every later run as it finishes",
+                                                layout=layout(width="auto", flex="0 0 auto", margin="0 0 0 6px"))
+        save.add_class("kbc-small")
+        save.on_click(self._safely(self._save_runs))
+        self.load_runs_button = load = w.Button(description="📂 Load", tooltip="Read the runs in this file back in",
+                                                layout=layout(width="auto", flex="0 0 auto", margin="0 0 0 6px"))
+        load.add_class("kbc-small")
+        load.on_click(self._safely(self._load_runs))
+        self.runs_note = w.HTML(layout=layout(width="100%"))
+        files = w.VBox([
+            w.HTML(_wrap('<div class="ph">Keep them in a file<span class="hint">so they outlast a restart</span>'
+                         '</div><div class="pd">One line per run: its setup, and each answer with its sources. '
+                         "Load reads a file back in, yours from before or a teammate's.</div>")),
+            w.HBox([self.runs_file, save, load], layout=layout(width="100%", align_items="center")),
+            self.runs_note,
+        ], layout=layout(width="100%"))
+        files.add_class("kbc-card")
+        head = w.HTML(_wrap('<div class="ph">Every test run<span class="hint">newest first · ranked against the other '
+                            "runs of the same questions</span></div>"))
+        return w.VBox([head, self.runs_view, self.run_actions, self.compare_view, files], layout=layout(width="100%"))
+
+    def _tab_changed(self, change: dict[str, Any]) -> None:
+        if change.get("new") == self.RUNS_TAB:  # drawn when it's looked at: "your setup now" follows the settings
+            self._draw_runs()
+
+    def _draw_runs(self) -> None:
+        """Runs: the cards and findings of runs(), then a line per run (newest first) with its rank among the runs
+        of its questions, opening to its setup; the run picker; and where the runs are saved."""
+        view = self.view
+        if not view.batches:
+            self._set(self.runs_view, _wrap('<div class="more" style="margin:10px 0">No test runs yet: ask a list of '
+                                            "questions in the Test tab (Try variations asks several setups at once), "
+                                            "or load runs saved before.</div>"))
+            self.run_actions.layout.display = "none"
+            self._set(self.compare_view, "")
+        else:
+            blocks = view._runs_blocks(memory=False)  # the file card under the list says what isn't saved
+            cards = next(b for b in blocks if isinstance(b, _Cards))
+            findings = next(b for b in blocks if isinstance(b, _Findings))
+            places = view._places()
+            lines = [self._run_line(b, places.get(id(b))) for b in reversed(view.batches)]
+            self._set(self.runs_view, _wrap(f'<div class="tests">{_cards_html(cards.items)}{_findings_html(findings)}'
+                                            f'</div><div class="bqs narrow">{"".join(lines)}</div>'))
+            options = [(self._run_option(b), view._run_number(b)) for b in reversed(view.batches)]
+            numbers = [number for _, number in options]
+            self._quietly(self.run_pick, options=options,
+                          value=self.run_pick.value if self.run_pick.value in numbers else numbers[0])
+            self.run_actions.layout.display = ""
+        if view.log and self.runs_file.value != view.log:
+            self._quietly(self.runs_file, value=view.log)
+        unsaved = len(view._unsaved(view.batches))
+        if view.log:
+            text = f"Every run is added to {view.log} as it finishes" + (
+                f" ({unsaved:,} not saved yet: Save adds {'it' if unsaved == 1 else 'them'})." if unsaved else ".")
+        elif view.batches:
+            text = (f"{'This run is' if len(view.batches) == 1 else 'These runs are'} in this notebook's memory only: "
+                    "Save keeps them, and every later run.")
+        else:
+            text = ""
+        self._set(self.runs_note, _wrap(f'<div class="pd" style="margin:6px 0 0">{_esc(text)}</div>') if text else "")
+
+    def _run_line(self, batch: Batch, place: tuple[int, int] | None) -> str:
+        """One run in the Runs tab: number, name, rank among the runs of its questions, result, and opening to its
+        whole setup."""
+        view = self.view
+        result, expected = view._result_text(batch)
+        name = (f"sweep {view._sweep_number(batch)}: {batch.label}" if batch.sweep else batch.label) or \
+            view._setup_text(batch)
+        failed = sum(bool(i.error_code) for i in batch.items)
+        tone = "bad" if failed else "ok" if place and place[0] == 1 else ""
+        rank = f'<span class="pill{" " + tone if tone else ""}">{place[0]} of {place[1]}</span>' if place else ""
+        stats = " · ".join(filter(None, [result, expected if expected != "-" else "",
+                                         f"{failed} failed" if failed else "", view._money(run_score(batch).cost),
+                                         human_age(batch.started)]))
+        body = (f'<div class="be">{_esc(view._setup_text(batch))}</div>'
+                f'<div class="pd">{_esc(_plural(len(batch.items), "question"))} · '
+                f"{_prose(_call('results', view._run_number(batch)))} shows it as a report.</div>")
+        css = f"bq {tone}" if tone else "bq"
+        return (f'<details class="{css}"><summary><span class="bn">{view._run_number(batch)}</span>'
+                f'<span class="bt">{_esc(name)}</span><span class="bx">{rank}<span class="bm">{_esc(stats)}</span>'
+                f'</span></summary><div class="bb">{body}</div></details>')
+
+    def _run_option(self, batch: Batch) -> str:
+        view = self.view
+        name = (f"sweep {view._sweep_number(batch)}: {batch.label}" if batch.sweep else batch.label) or \
+            view._setup_text(batch)
+        return f"Run {view._run_number(batch)} · {_clip(name, 60)} · {view._result_text(batch)[0]}"
+
+    def _picked(self) -> Batch:
+        return self.view._run(self.run_pick.value)
+
+    def _show_picked(self, *_: Any) -> None:
+        batch = self._picked()
+        if self.running:
+            self._set_status("A test run is going on: Show opens another one once it's done.")
+            return
+        self._show_run(batch)
+        self.tabs.selected_index = self.TEST_TAB
+        self._set_status(f"The Test tab shows {self.view._run_name(batch)}.")
+
+    def _use_picked(self, *_: Any) -> None:
+        self._set_status(self.view._switch_to(self._picked()), "ok")
+        self._draw_runs()
+
+    def _compare_picked(self, *_: Any) -> None:
+        batch = self._picked()
+        family = self.view._family(batch)
+        if len(family) < 2:
+            self._set(self.compare_view, _wrap(
+                f'<div class="note info">Only run {self.view._run_number(batch)} asked these questions this way, so '
+                "there's nothing to compare it with yet: change a setting and run them again, or open Try variations "
+                "in the Test tab.</div>"))
+            return
+        shown = [b for b in self.view._compare_blocks(family, memory=False) if not isinstance(b, _Next)]
+        self._set(self.compare_view, f'<div class="tests" style="margin-top:10px">'
+                                     f'{_render_html(shown, 0).removeprefix(_CSS)}</div>')
+
+    def _save_runs(self, *_: Any) -> None:
+        note = self.view._save(self.runs_file.value)
+        self._draw_runs()
+        self._set(self.runs_note, _wrap(f'<div class="note {note.level}">{_prose(note.text)}</div>'))
+
+    def _load_runs(self, *_: Any) -> None:
+        notes = self.view._load(self.runs_file.value)
+        self._set(self.runs_note, _wrap("".join(f'<div class="note {n.level}">{_prose(n.text)}</div>' for n in notes)))
 
     def _render_code(self) -> None:
         """The Code tab: the setup as a Python script that asks the test questions, its JSON, or an AWS CLI command."""
@@ -7292,7 +8641,9 @@ class BedrockChatView:
     files: ask only these files (names, paths in the bucket or s3:// paths); default all of them.
     model: an ID, inference profile, ARN or short name ('opus', 'sonnet', 'haiku', 'nova'...); default DEFAULT_MODEL.
     settings: what's sent with every question, {name: value} (default DEFAULT_SETTINGS); fields() lists the names.
-    questions: test questions for ask_all() and the window's Test tab: a list, or text with one per line.
+    questions: test questions for ask_all(), sweep() and the window's Test tab: a list, or text with one per line.
+    log: a file every test run is added to as it finishes (JSON Lines), so runs outlast a kernel restart:
+    load_runs() reads them back. save_runs('file.jsonl') sets it too.
     stream: show answers in the window as they're written. height: the height of the window's conversation. It
     fills the browser window (at least 540 pixels); a number of pixels (800) or CSS ('70vh') sets it instead.
     retrieve_only: the window's Send only searches (Retrieve): every passage found, with no answer. The window's
@@ -7305,7 +8656,8 @@ class BedrockChatView:
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💬 Chat": ("app", "ask", "retrieve", "new_chat", "transcript", "last"),
-        "🧪 Test a list of questions": ("ask_all", "results"),
+        "🧪 Test a list of questions": ("ask_all", "sweep", "results"),
+        "📈 Keep and compare test runs": ("runs", "compare_runs", "use_run", "save_runs", "load_runs"),
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request", "code"),
         "📚 Knowledge base, files and model": ("use", "kbs", "files", "models"),
         "❓ Help": ("help",),
@@ -7314,6 +8666,7 @@ class BedrockChatView:
         ("app()", "the chat window: pick a model, change settings, see the JSON"),
         ("ask('a question')", "an answer with citations, as a report"),
         ("ask_all(['a question', 'another'])", "a list of test questions, each answered and checked"),
+        ("sweep(n=[5, 10], search_type=['SEMANTIC', 'HYBRID'])", "every combination on the test questions, best first"),
         ("code()", "this setup as Python, JSON or an AWS CLI command, to copy"),
     )
 
@@ -7330,6 +8683,7 @@ class BedrockChatView:
         retrieve_only: bool = False,
         questions: Any = None,
         height: int | str | None = None,
+        log: str | None = None,
         mode: str = "auto",
         max_rows: int = 50,
         progress: str = "auto",
@@ -7357,6 +8711,9 @@ class BedrockChatView:
         # the test questions (the window's Test tab), and every test run of them, oldest first
         self.questions: list[tuple[str, Any]] = question_list(questions) if _filled(questions) else []
         self.batches: list[Batch] = []
+        self.sweeps: list[Sweep] = []  # the sweeps among them, oldest first
+        self.log = str(log) if log else None  # the file every finished run is added to (save_runs() sets it)
+        self._in_file: dict[str, set[str]] = {}  # file -> the IDs of the runs in it, so none is written twice
         self._app: _ChatApp | None = None
         self._shown_in: Any = None  # the cell that last showed the window
         self._notes: list[str] = []  # problems with chat()'s arguments, shown when the window opens
@@ -8110,25 +9467,190 @@ class BedrockChatView:
 
     # ------------------------------------------------------ test runs and code
 
-    def _prepare(self, questions: Any, retrieve_only: bool, limit: Any = BATCH_LIMIT) -> Batch:
+    def _prepare(self, questions: Any, retrieve_only: bool, limit: Any = BATCH_LIMIT, label: Any = None) -> Batch:
         """A test run of these questions with this setup (knowledge base, model, settings, data source and files), ready
         to send and kept in self.batches. The questions become the Test tab's list."""
         cases = question_list(questions)
         kb_id = self._kb_id()
         batch = self.core._prepare_batch(kb_id, cases, self.values, model=self.model, data_source=self._sources(kb_id),
-                                         files=self._files_for(kb_id), retrieve_only=retrieve_only, limit=limit)
+                                         files=self._files_for(kb_id), retrieve_only=retrieve_only, limit=limit,
+                                         label=str(label or ""))
         self.questions = cases
         self.batches.append(batch)
         return batch
 
+    def _prepare_sweep(self, questions: Any, grid: dict[str, Any] | None, *, setups: Any = None,
+                       retrieve_only: bool, limit: Any = BATCH_LIMIT, max_setups: Any = SWEEP_LIMIT,
+                       label: Any = None) -> Sweep:
+        """A sweep of these questions over every combination in `grid` (and `setups`), each starting from this setup,
+        ready to send, and not kept yet (_keep() does that). A ValueError says what's wrong before anything is
+        sent."""
+        cap = None if max_setups is None else _as_int(max_setups, "max_setups", hint=", or None for no limit")
+        combos = sweep_setups(grid, setups, limit=cap or None)
+        cases = question_list(questions)
+        kb_id = self._kb_id()
+        sweep = self.core._prepare_sweep(kb_id, cases, combos, self.values, model=self.model,
+                                         data_source=self._sources(kb_id), files=self._files_for(kb_id),
+                                         retrieve_only=retrieve_only, limit=limit, label=str(label or ""))
+        for batch in sweep.batches:  # models by their names, as the reports show them
+            batch.label = " · ".join(filter(None, [sweep.label, setup_label(batch, sweep.varied, self._model_label)]))
+        return sweep
+
+    def _sweep_cost(self, sweep: Sweep) -> float | None:
+        return sweep_estimate(sweep, model_prices=self.core.model_prices, prices=self.core.prices)
+
+    def _too_costly(self, sweep: Sweep, cost: float | None, max_cost: Any) -> str:
+        """What a sweep estimated over max_cost USD asks, and costs ('' when it isn't over)."""
+        if max_cost is None or cost is None or cost <= float(max_cost):
+            return ""
+        calls = sum(1 for b in sweep.batches for i in b.items if i.request)
+        questions = len(sweep.batches[0].items)
+        return (f"That's {len(sweep.batches)} setups × {_plural(questions, 'question')} = {calls:,} calls, about "
+                f"{human_money(cost)} (estimate, {self._price_basis(models=not sweep.retrieve_only)})")
+
+    def _run_number(self, batch: Batch) -> int:
+        """A run's number, as the reports show it and results(), use_run() and compare_runs() take it: from 1."""
+        return next((k for k, b in enumerate(self.batches, 1) if b is batch), len(self.batches))
+
+    def _run(self, run: Any) -> Batch:
+        """The test run `run` names: its number (1 the first, -1 the last) or the Batch; a _Hint says what there is."""
+        if isinstance(run, Batch):
+            return run
+        if not self.batches:
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's "
+                        "Test tab. load_runs() reads runs saved before.")
+        try:
+            number = int(str(run).strip()) if not isinstance(run, bool) else None
+        except ValueError:
+            number = None
+        count = len(self.batches)
+        if number is None or not (1 <= number <= count or -count <= number <= -1):
+            raise _Hint(f"There {'is' if count == 1 else 'are'} {_plural(count, 'test run')}, numbered from 1: "
+                        f"{'1' if count == 1 else f'1 to {count}'} (-1 is the last). runs() lists them.")
+        return self.batches[number - 1 if number > 0 else number]
+
+    def _sweep_number(self, batch: Batch) -> int:
+        """Which sweep a run was part of, counted from 1 in the order they ran (0: none)."""
+        ids = list(dict.fromkeys(b.sweep for b in self.batches if b.sweep))
+        return ids.index(batch.sweep) + 1 if batch.sweep in ids else 0
+
+    def _run_name(self, batch: Batch) -> str:
+        """'run 7', 'run 7 (baseline)', 'run 7 (sweep 2: n=10 · search_type=HYBRID)'."""
+        name = f"run {self._run_number(batch)}"
+        if batch.sweep:
+            return f"{name} (sweep {self._sweep_number(batch)}: {batch.label})" if batch.label else name
+        return f"{name} ({batch.label})" if batch.label else name
+
+    def _family(self, batch: Batch) -> list[Batch]:
+        """The runs asked the same way (answers, or searches) with the same questions as this one, in order."""
+        keys = {_key(i.question) for i in batch.items}
+        return [b for b in self.batches if b.retrieve_only == batch.retrieve_only
+                and {_key(i.question) for i in b.items} == keys]
+
     def _before(self, batch: Batch) -> Batch | None:
-        """The last run before this one that asked some of the same questions the same way (answers, or searches)."""
+        """The run to compare this one with: the last one before it that asked some of the same questions the same way
+        (answers, or searches), apart from the rest of its own sweep. When that was a sweep, its setup that's the same
+        as this run's, else its best."""
         keys = {_key(i.question) for i in batch.items}
         at = next((k for k, b in enumerate(self.batches) if b is batch), len(self.batches))
         for earlier in reversed(self.batches[:at]):
+            if batch.sweep and earlier.sweep == batch.sweep:
+                continue
             if earlier.retrieve_only == batch.retrieve_only and keys & {_key(i.question) for i in earlier.items}:
-                return earlier
+                if not earlier.sweep:
+                    return earlier
+                group = [b for b in self.batches[:at] if b.sweep == earlier.sweep]
+                mine = _setup_key(run_setup(batch))
+                same = next((b for b in group if _setup_key(run_setup(b)) == mine), None)
+                return same or rank_runs(group)[0][0]
         return None
+
+    def _setup_now(self, retrieve_only: bool) -> str | None:
+        """The setup questions are asked with now, as _setup_key(run_setup()) gives a run's, to tell which run that is;
+        None when it can't be told (no knowledge base picked, or a model that can't be resolved)."""
+        try:
+            kb_id = self._kb_id()
+            model = "" if retrieve_only else _model_id(self.core.resolve_model(self.model)[1])
+            settings = retrieve_settings(self.values, self.core.schema()) if retrieve_only else self.values
+            now = Batch(kb_id=kb_id, kb_name=self.core.kb_name(kb_id), model=model, data_sources=self._sources(kb_id),
+                        files=self._files_for(kb_id), settings=settings, retrieve_only=retrieve_only)
+        except (ValueError, ClientError, BotoCoreError):
+            return None
+        return _setup_key(run_setup(now))
+
+    def _now_in(self, batches: list[Batch]) -> Batch | None:
+        """The run among these whose setup is the one in use now (the newest, if several)."""
+        if not batches:
+            return None
+        now = self._setup_now(batches[0].retrieve_only)
+        return next((b for b in reversed(batches) if _setup_key(run_setup(b)) == now), None) if now else None
+
+    def _saved_ids(self, path: Path) -> set[str]:
+        """The IDs of the runs already in a file save_runs() writes, read once per file."""
+        key = str(path.resolve())
+        if key not in self._in_file:
+            ids: set[str] = set()
+            if path.exists():
+                with path.open(encoding="utf-8") as lines:
+                    for line in lines:
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(record, dict) and record.get("id"):
+                            ids.add(str(record["id"]))
+            self._in_file[key] = ids
+        return self._in_file[key]
+
+    def _append_runs(self, path: Path, batches: list[Batch]) -> int:
+        """Adds the runs that aren't in the file yet to its end, one JSON line each -> how many. Nothing in it is
+        changed. An OSError says why it couldn't be written."""
+        saved = self._saved_ids(path)
+        new = [b for b in batches if b.id and b.id not in saved]
+        if new:
+            with path.open("a", encoding="utf-8") as out:
+                for b in new:
+                    out.write(json.dumps(run_record(b), ensure_ascii=False) + "\n")
+            saved.update(b.id for b in new)
+        return len(new)
+
+    def _unsaved(self, batches: Iterable[Batch]) -> list[Batch]:
+        """The runs that aren't in a file yet (saved, logged as they finished, or loaded from one)."""
+        kept = set().union(*self._in_file.values()) if self._in_file else set()
+        return [b for b in batches if b.id not in kept]
+
+    def _memory_findings(self, batches: list[Batch]) -> list[tuple[str, str]]:
+        """A note when some of these runs would be lost with the kernel: what keeps them."""
+        unsaved = self._unsaved(batches)
+        if not unsaved:
+            return []
+        one = len(unsaved) == 1
+        who = ("These runs are" if len(unsaved) == len(batches) and not one else "This run is" if len(batches) == 1
+               else f"{_out_of(len(unsaved), len(batches), 'run')} {'is' if one else 'are'}")
+        return [("info", f"{who} kept in this notebook's memory only, so a kernel restart loses "
+                         f"{'it' if one else 'them'}: {_call('save_runs')} keeps every run in "
+                         f"{self.log or RUNS_FILE} (and every later one), and load_runs() reads them back.")]
+
+    def _saved_text(self) -> str:
+        """Where the runs are kept: the log file, else the file they were loaded from, and how many aren't."""
+        files = [Path(key).name for key, ids in self._in_file.items() if any(b.id in ids for b in self.batches)]
+        where = self.log or ", ".join(files)
+        unsaved = len(self._unsaved(self.batches))
+        if not where:
+            return "not saved"
+        return f"{where} ({unsaved:,} not yet)" if unsaved else where
+
+    def _log_runs(self, batches: list[Batch]) -> list[_Note]:
+        """Adds finished runs to the file log= names (save_runs() sets it): [] when it worked or there's no log, else
+        a note saying why it didn't."""
+        if not self.log:
+            return []
+        try:
+            self._append_runs(Path(self.log), [b for b in batches if b.asked or b.failed])
+        except OSError as exc:
+            return [_Note(f"This run wasn't saved to {self.log}: {exc.strerror or exc}. save_runs('another/path.jsonl') "
+                          "saves every run somewhere else.", "warn")]
+        return []
 
     def _item_error(self, item: BatchItem) -> str:
         """Why a test question failed, with what to do about it."""
@@ -8194,17 +9716,16 @@ class BedrockChatView:
         return batch_findings(batch, self._explain) + (batch_changes(before, batch, self._model_label) if before
                                                        else [])
 
-    def _batch_blocks(self, batch: Batch) -> list[Any]:
+    def _batch_blocks(self, batch: Batch, notes: Iterable[_Note] = ()) -> list[Any]:
         """A test run as a report: title, cards, findings across every question and since the run before, then each
         question with how it did, opening to its answer."""
         kb = batch.kb_name or batch.kb_id
-        number = next((k for k, b in enumerate(self.batches, 1) if b is batch), len(self.batches))
         narrowed = [f"only {describe_sources(batch.data_sources)}" if batch.data_sources else "",
                     f"only {describe_files(batch.files)}" if batch.files else ""]
         sent = _settings_text(batch.settings) or "no settings (Bedrock's defaults)"
         how = "Retrieve: the search only, no answers" if batch.retrieve_only else self._model_label(batch.model)
-        sub = " · ".join(filter(None, [f"test run {number}", "each question asked on its own, not as a follow-up", how,
-                                       *narrowed, sent,
+        sub = " · ".join(filter(None, [f"test {self._run_name(batch)}", "each question asked on its own, not as a "
+                                       "follow-up", how, *narrowed, sent,
                                        f"cost at {self._price_basis(models=not batch.retrieve_only)}"]))
         checked = any(_filled(i.expected) for i in batch.items)
         if batch.retrieve_only:
@@ -8222,25 +9743,276 @@ class BedrockChatView:
             _Title(f"Test run on {kb}: {_plural(len(batch.items), 'question')}", sub),
             _Cards(self._batch_cards(batch)),
             _Findings(self._batch_findings(batch), empty=empty),
+            *notes,
             _Results(self._result_rows(batch)),
             _Note(note),
             _Next(self._batch_steps(batch)),
         ]
 
     def _batch_steps(self, batch: Batch) -> list[tuple[str, str]]:
-        """What to run after a test run: the search behind the first question that didn't work, a setting to try,
-        and the same questions again."""
+        """What to run after a test run: the search behind the first question that didn't work, several settings at
+        once (or for a sweep's run, switching to it), and the same questions again."""
         steps: list[tuple[str, str]] = []
         weak = next((i for i in batch.asked if item_verdict(i)[1] == "warn"), None)
         if weak is not None and not batch.retrieve_only:
             steps.append((_call("retrieve", weak.question), "the search behind the first answer that didn't work"))
         elif weak is not None:
             steps.append(("files()", "whether the files those questions need are indexed"))
-        steps.append((self._next_set(), "change a setting"))
+        if batch.sweep:
+            steps.append((_call("use_run", self._run_number(batch)), "switch to this setup"))
+            steps.append(("runs()", "every test run, ranked against the others of the same questions"))
+            return steps
+        steps.append((self._next_sweep(batch.retrieve_only), "try several settings at once: every combination, "
+                                                             "best first"))
         steps.append(("ask_all()", "the same questions again: the report says what changed"))
         if weak is None:
             steps.append(("code()", "this setup as Python, JSON or an AWS CLI command"))
         return steps
+
+    def _next_sweep(self, retrieve_only: bool = False) -> str:
+        """A sweep() call worth trying: the passages now and twice as many, with both search types."""
+        try:
+            n = int(self.values.get("n") or 5)
+        except (TypeError, ValueError):
+            n = 5
+        values = [n, min(100, n * 2)] if n < 100 else [50, 100]
+        kwargs: dict[str, Any] = {"n": values, "search_type": ["SEMANTIC", "HYBRID"]}
+        if retrieve_only:
+            kwargs["retrieve_only"] = True
+        return _call("sweep", **kwargs)
+
+    # ------------------------------------------------- test runs: compared, listed
+
+    def _money(self, cost: float | None) -> str:
+        if cost is None:
+            return "unknown"
+        text = human_money(cost)
+        return text if text.startswith("<") else "~" + text
+
+    def _ranked_by(self, batches: list[Batch]) -> str:
+        """How the runs are ranked, in words, for a report's subtitle."""
+        checked = any(_filled(i.expected) for b in batches for i in b.items)
+        if batches[0].retrieve_only:
+            first = "expected sources found, then MRR, then searches that found passages" if checked else \
+                "searches that found passages"
+        else:
+            first = ("expected sources cited, then answers, then grounded share (in 5-point steps)" if checked
+                     else "answers that say something, then grounded share (in 5-point steps)")
+        return f"ranked by {first}; the cheaper first when as good"
+
+    def _compare_blocks(self, batches: list[Batch], *, sweep: Sweep | None = None, notes: Iterable[_Note] = (),
+                        memory: bool = True) -> list[Any]:
+        """Test runs of the same questions side by side (a sweep's setups, or compare_runs()'s runs): cards, what to
+        do, the runs best first, then how each question did in each. memory=False leaves out the note on runs that
+        aren't saved (the window's Runs tab says it)."""
+        ranked = rank_runs(batches)
+        retrieve = batches[0].retrieve_only
+        varied = varied_setups(batches)
+        now = self._now_in(batches)
+        earlier = None if now is not None else self._now_in(  # the setup in use, as an earlier run of these questions
+            [b for b in self._family(batches[0]) if not any(b is x for x in batches)
+             and self._run_number(b) < self._run_number(batches[0])])
+        common = shared_questions(batches)
+        best, top = ranked[0]
+        kb = batches[0].kb_name or batches[0].kb_id
+        numbers = sorted(self._run_number(b) for b in batches)
+        if numbers == list(range(numbers[0], numbers[-1] + 1)):
+            which = f"runs {numbers[0]}–{numbers[-1]}"
+        else:
+            which = "runs " + ", ".join(map(str, numbers))
+        how = "Retrieve: the search only, no answers" if retrieve else (
+            "" if "model" in varied else self._model_label(batches[0].model))
+        fixed = {k: v for k, v in batches[0].settings.items() if k not in varied}
+        legend = ("default: not sent, so Bedrock's own applies"
+                  if any(v is None for k, vs in varied.items() if k not in (*_PICKED, *_OFF_WHEN_UNSET) for v in vs)
+                  else "")
+        sub = " · ".join(filter(None, [
+            which, "each question asked on its own with each setup", how,
+            f"the same in each: {_settings_text(fixed)}" if fixed else "", legend, self._ranked_by(batches),
+            f"cost at {self._price_basis(models=not retrieve)}"]))
+        calls = sum(_came_back(i) for b in batches for i in b.items)
+        if sweep is not None:
+            title = (f"Sweep on {kb}: {len(batches)} setups × {_plural(len(batches[0].items), 'question')}"
+                     + (f" ({sweep.label})" if sweep.label else ""))
+            cards: list[tuple[str, ...]] = [("Setups", f"{len(batches):,}"),
+                                            ("Questions", f"{len(batches[0].items):,}"), ("Calls", f"{calls:,}")]
+        else:
+            title = f"{len(batches)} test runs on {kb} compared: {_plural(len(common), 'question')}"
+            cards = [("Runs", f"{len(batches):,}"), ("Questions", f"{len(common):,}")]
+        cards.append(("Best", f"run {self._run_number(best)}"))
+        if top.checked:
+            cards.append((f"Expected {'found' if retrieve else 'cited'} (best)", f"{top.hits} of {top.checked}"))
+        else:
+            cards.append((f"{'Found passages' if retrieve else 'Answered'} (best)", f"{top.answered} of "
+                                                                                    f"{top.questions}"))
+        failed = sum(s.failed for _, s in ranked)
+        if failed:
+            cards.append(("Failed", f"{failed:,}", "bad"))
+        costs = [s.cost for _, s in ranked]
+        cards.append(("Est. cost", self._money(None if any(c is None for c in costs) else sum(costs))))
+        if sweep is not None:
+            cards.append(("Time", _duration(sweep.seconds)))
+        findings = ranking_findings(batches, now=now or earlier, number=self._run_number, label=self._model_label,
+                                    explain=self._explain) + (self._memory_findings(batches) if memory else [])
+        blocks: list[Any] = [_Title(title, sub), _Cards(cards), _Findings(findings), *notes,
+                             self._ranking_table(ranked, varied, now, sweep is not None), self._matrix_table(ranked)]
+        if retrieve:
+            blocks.append(_Note("Each question only searched (Retrieve) with each setup, so no model was called. A "
+                                "search finds the same passages every time it's asked the same way, so the "
+                                "differences come from the setups."))
+        else:
+            blocks.append(_Note("Each question was asked on its own with each setup (a new Bedrock session each). A "
+                                "model doesn't answer the same way every time, so a difference of one question can be "
+                                "chance. Tokens and cost are estimated from characters."))
+        steps: list[tuple[str, str]] = []
+        better = any(_quality(s, retrieve) != _quality(top, retrieve) for _, s in ranked)
+        cheaper = _cost_gap(top, ranked[-1][1]) not in ("", "about the same cost")
+        if best is not now and (better or cheaper):
+            steps.append((_call("use_run", self._run_number(best)), "switch to the best setup"))
+        steps.append((_call("results", self._run_number(best)), "the best setup's answers, question by question"))
+        steps.append(("runs()", "every test run so far"))
+        blocks.append(_Next(steps))
+        return blocks
+
+    def _ranking_table(self, ranked: list[tuple[Batch, RunScore]], varied: dict[str, list[Any]],
+                       now: Batch | None, sweep: bool = False) -> _Table:
+        """The runs best first: rank, run number, what differs between them, and how each did."""
+        retrieve = ranked[0][0].retrieve_only
+        checked = any(s.checked for _, s in ranked)
+        headers = ["Rank", "Run", *varied]
+        if retrieve:
+            headers += ["Found passages"] + (["Expected found", "MRR"] if checked else [])
+        else:
+            headers += ["Answered", "Grounded"] + (["Expected cited"] if checked else [])
+        headers += ["Failed", "Avg time", "Est. cost"]
+        rows = []
+        for rank, (b, s) in enumerate(ranked, 1):
+            setup = run_setup(b)
+            mark = f"{rank} (now)" if b is now else str(rank)
+            row: list[Any] = [_Tone(mark, "ok") if rank == 1 else mark, str(self._run_number(b))]
+            row += [_setup_value(key, setup.get(key), values, self._model_label) for key, values in varied.items()]
+            row.append(f"{s.answered} of {s.questions}")
+            if retrieve:
+                row += [f"{s.hits} of {s.checked}", f"{s.mrr or 0:.2f}"] if checked else []
+            else:
+                row.append(f"{s.grounded:.0%}" if s.grounded is not None else "-")
+                row += [f"{s.hits} of {s.checked}"] if checked else []
+            row += [_Tone(f"{s.failed:,}", "bad") if s.failed else "0",
+                    f"{s.seconds:.1f}s" if s.seconds is not None else "-", self._money(s.cost)]
+            rows.append(row)
+        return _Table(headers, rows, title="Setups, best first" if sweep else "Runs, best first", max_rows=0)
+
+    def _matrix_table(self, ranked: list[tuple[Batch, RunScore]]) -> _Table:
+        """How each question did with each setup: a column per run, in the ranking's order; the questions whose result
+        changes with the setup first."""
+        items = [{_key(i.question): i for i in b.items} for b, _ in ranked]
+        changes, same = [], []
+        for question in dict.fromkeys(i.question for b, _ in ranked for i in b.items):
+            cells: list[Any] = []
+            seen = set()
+            for found in items:
+                item = found.get(_key(question))
+                verdict, tone = item_verdict(item) if item is not None else ("not asked", "")
+                cells.append(_Tone(verdict, tone) if tone in _TONES else verdict)
+                seen.add(verdict)
+            (changes if len(seen) > 1 else same).append([question, *cells])
+        title = "How each question did with each setup (#1 is the best, as above)"
+        if changes and same:
+            title += f": the {_plural(len(changes), 'question')} the setup changes first"
+        return _Table(["Question", *[f"#{k}" for k in range(1, len(ranked) + 1)]], changes + same, title=title,
+                      max_rows=0)
+
+    def _families(self) -> list[list[Batch]]:
+        """The runs grouped by what they asked: the same questions, asked the same way (answers, or searches)."""
+        families: dict[str, list[Batch]] = {}
+        for b in self.batches:
+            key = _setup_key([b.retrieve_only, sorted({_key(i.question) for i in b.items})])
+            families.setdefault(key, []).append(b)
+        return list(families.values())
+
+    def _places(self) -> dict[int, tuple[int, int]]:
+        """id(run) -> (its rank, how many runs asked its questions), for the runs that have others to rank against."""
+        place: dict[int, tuple[int, int]] = {}
+        for family in self._families():
+            if len(family) > 1:
+                for rank, (b, _) in enumerate(rank_runs(family), 1):
+                    place[id(b)] = (rank, len(family))
+        return place
+
+    def _result_text(self, batch: Batch) -> tuple[str, str]:
+        """How a run did, short: ('5 of 6 answered · 81% grounded', '4 of 6 cited'), the second '-' when nothing was
+        expected."""
+        s = run_score(batch)
+        if batch.retrieve_only:
+            result = f"{s.answered} of {s.questions} found passages" + (f" · MRR {s.mrr:.2f}" if s.mrr is not None
+                                                                        else "")
+        else:
+            result = f"{s.answered} of {s.questions} answered" + (f" · {s.grounded:.0%} grounded"
+                                                                  if s.grounded is not None else "")
+        expected = f"{s.hits} of {s.checked} {'found' if batch.retrieve_only else 'cited'}" if s.checked else "-"
+        return result, expected
+
+    def _runs_blocks(self, memory: bool = True) -> list[Any]:
+        """Every test run, newest first, each ranked against the others of the same questions, under which setup of
+        the last list to use (compare_runs() says the rest). memory=False leaves out the note on runs that aren't
+        saved."""
+        families = self._families()
+        place = self._places()
+        latest = self.batches[-1]
+        family = self._family(latest)
+        best = rank_runs(family)[0][0] if len(family) > 1 else None
+        rows = []
+        for b in reversed(self.batches):
+            s = run_score(b)
+            result, expected = self._result_text(b)
+            rank, of = place.get(id(b), (0, 0))
+            ranked: Any = "-" if not of else _Tone(f"1 of {of}", "ok") if rank == 1 else f"{rank} of {of}"
+            name = (f"sweep {self._sweep_number(b)}: {b.label}" if b.sweep else b.label) or "-"
+            rows.append([str(self._run_number(b)), human_age(b.started), name, self._setup_text(b),
+                         f"{len(b.items):,}", result, expected, _Tone(f"{s.failed:,}", "bad") if s.failed else "0",
+                         self._money(s.cost), ranked])
+        sweeps = len({b.sweep for b in self.batches if b.sweep})
+        cards: list[tuple[str, ...]] = [("Runs", f"{len(self.batches):,}")]
+        cards += [("Sweeps", f"{sweeps:,}")] if sweeps else []
+        cards += [("Question lists", f"{len(families):,}")]
+        if best is not None:
+            cards.append(("Best of the last list", f"run {self._run_number(best)}"))
+        costs = [run_score(b).cost for b in self.batches]
+        cards.append(("Est. cost", self._money(None if any(c is None for c in costs) else sum(costs))))
+        cards.append(("Saved to", self._saved_text()))
+        findings: list[tuple[str, str]] = []
+        if len(family) > 1:
+            findings += ranking_findings(family, now=self._now_in(family), number=self._run_number,
+                                         label=self._model_label, explain=self._explain, brief=True)
+        findings += self._memory_findings(self.batches) if memory else []
+        subtitle = (f"newest first · rank: against the other runs of the same questions, "
+                    f"{self._ranked_by(family).replace('ranked by ', 'by ')}")
+        blocks: list[Any] = [
+            _Title(f"Test runs: {len(self.batches):,} so far", subtitle),
+            _Cards(cards),
+            _Findings(findings),
+            _Table(["Run", "When", "Name", "Setup", "Questions", "Result", "Expected", "Failed", "Est. cost", "Rank"],
+                   rows, title="Every test run, newest first"),
+        ]
+        steps: list[tuple[str, str]] = [(_call("results", self._run_number(latest)), "the last run's answers")]
+        if len(family) > 1:
+            steps.insert(0, ("compare_runs()", "the runs of the last list side by side, question by question"))
+            if best is not None and best is not self._now_in(family):
+                steps.append((_call("use_run", self._run_number(best)), "switch to the best setup"))
+        if self._unsaved(self.batches):
+            steps.append(("save_runs()", "keep them in a file, to read back after a restart"))
+        blocks.append(_Next(steps))
+        return blocks
+
+    def _setup_text(self, batch: Batch) -> str:
+        """A run's whole setup on one line: 'Claude Haiku 4.5 · only faq · n=10, search_type=HYBRID'."""
+        parts = ["Retrieve only" if batch.retrieve_only else self._model_label(batch.model)]
+        if batch.data_sources:
+            parts.append(f"only {describe_sources(batch.data_sources)}")
+        if batch.files:
+            parts.append(f"only {describe_files(batch.files)}")
+        parts.append(_settings_text(batch.settings) or "Bedrock's defaults")
+        return " · ".join(parts)
 
     def _code_questions(self, questions: Any = None) -> list[str]:
         """The questions the code asks: these, else the test questions, else this conversation's (each once)."""
@@ -8350,7 +10122,7 @@ class BedrockChatView:
 
     @_friendly_errors
     def ask_all(self, questions: Any = None, *, retrieve_only: bool | None = None, workers: int = BATCH_WORKERS,
-                limit: int | None = BATCH_LIMIT) -> None:
+                limit: int | None = BATCH_LIMIT, label: str | None = None) -> None:
         """Asks a list of test questions with these settings and shows how each did: answered or "unable to assist",
         grounded share, sources cited, time and estimated cost, with findings across them all and what changed since
         the last run. Each question is asked on its own, not as a follow-up.
@@ -8359,7 +10131,7 @@ class BedrockChatView:
         that file (a piece of its name, path or text). ask_all() with no questions asks the last list again: change a
         setting, run it, and the report says which questions did better or worse. retrieve_only=True only searches
         (default: the window's Answer / Retrieve only). workers questions are asked at a time, and up to limit of them
-        (None for all). ui.batches[-1].to_df() has the answers as a table."""
+        (None for all). label names the run in runs(). ui.batches[-1].to_df() has the answers as a table."""
         if questions is None:
             if not self.questions:
                 raise _Hint("Pass the questions to ask: ask_all(['How long do refunds take?', 'Can I return a digital "
@@ -8367,25 +10139,256 @@ class BedrockChatView:
                             "it: 'How long do refunds take? | refund-policy.pdf'.")
             questions = self.questions
         retrieve = self._retrieving(retrieve_only)
-        batch = self._prepare(questions, retrieve, limit)
+        batch = self._prepare(questions, retrieve, limit, label)
         with self._progress("Searching" if retrieve else "Asking", unit="questions") as tick:
             self.core._run_batch(batch, workers=workers, progress=tick)
+        notes = self._log_runs([batch])
         if self._app is not None:
             self._app.ran(batch)
-        self._show(self._batch_blocks(batch))
+        self._show(self._batch_blocks(batch, notes))
+
+    @_friendly_errors
+    def sweep(self, questions: Any = None, *, setups: Any = None, retrieve_only: bool | None = None,
+              workers: int = BATCH_WORKERS, limit: int | None = BATCH_LIMIT, max_setups: int | None = SWEEP_LIMIT,
+              max_cost: float | None = SWEEP_MAX_COST, label: str | None = None, **grid: Any) -> None:
+        """Asks the test questions with every combination of the settings, models, data sources or files you list, and
+        ranks the setups best first (expected sources cited, answers, grounded share, failures, time and estimated
+        cost), with which setup to use, what each setting changed, and how each question did with each setup.
+
+        sweep(n=[5, 10], search_type=['SEMANTIC', 'HYBRID']) asks 4 setups, each starting from the settings in use.
+        model=['haiku', 'sonnet'], data_source=['faq', 'manuals'] and files=[...] vary those too; None leaves a
+        setting out (reranker=[None, 'cohere']). setups=[{'n': 5}, {'n': 10, 'reranker': 'cohere'}] lists whole setups
+        instead (combined with any lists given). questions: as ask_all() takes them (default: the last list).
+        retrieve_only=True only searches, for the embedding's cost alone: a cheap way to pick the search settings
+        before trying models. Nothing is sent when it's more than max_setups setups or estimated over max_cost USD
+        (raise them, or None for no limit). Each setup becomes a test run: use_run() switches to the best,
+        results(n) shows one's answers, and runs() lists them all."""
+        if questions is None:
+            if not self.questions:
+                raise _Hint("Pass the questions to ask: sweep(['How long do refunds take? | refund-policy.pdf', 'Can I "
+                            "return a gift?'], n=[5, 10]), or ask_all() a list first.")
+            questions = self.questions
+        if not grid and setups is None:
+            raise _Hint("Pass what to try, a list of values each: sweep(n=[5, 10], search_type=['SEMANTIC', "
+                        "'HYBRID']), sweep(model=['haiku', 'sonnet']), or sweep(setups=[{'n': 5}, {'n': 10, "
+                        "'reranker': 'cohere'}]). fields() lists every setting.")
+        retrieve = self._retrieving(retrieve_only)
+        sweep = self._prepare_sweep(questions, grid, setups=setups, retrieve_only=retrieve, limit=limit,
+                                    max_setups=max_setups, label=label)
+        cost = self._sweep_cost(sweep)
+        refused = self._too_costly(sweep, cost, max_cost)
+        if refused:
+            raise _Hint(f"{refused}, more than max_cost={float(max_cost):g}, so nothing was sent. Pass "
+                        f"max_cost={math.ceil(cost or 0)} to ask them anyway, or try fewer values or questions "
+                        "(limit=10).")
+        self._keep(sweep, questions)
+        with self._progress(f"Asking {len(sweep.batches)} setups", unit="questions") as tick:
+            self.core._run_sweep(sweep, workers=workers, progress=tick)
+        notes = self._log_runs(sweep.batches)
+        if cost is None and not retrieve:
+            notes.append(_Note("A model's price isn't known, so the cost wasn't estimated before asking: pass "
+                               "model_prices= to the analyzer to add it.", "warn"))
+        if self._app is not None:
+            self._app.swept(sweep)
+        self._show(self._compare_blocks(sweep.batches, sweep=sweep, notes=notes))
+
+    def _keep(self, sweep: Sweep, questions: Any) -> None:
+        """A sweep about to be sent: its runs join self.batches, and its questions become the Test tab's list."""
+        self.questions = question_list(questions)
+        self.batches += sweep.batches
+        self.sweeps.append(sweep)
 
     @_friendly_errors
     def results(self, run: int = -1) -> None:
         """A test run again, as a report that stays in the notebook when it's saved (the window doesn't): the last
-        run, or results(0) for the first. Nothing is asked again."""
+        run, or results(1) for the first, as runs() numbers them. Nothing is asked again."""
+        self._show(self._batch_blocks(self._run(run)))
+
+    @_friendly_errors
+    def runs(self) -> None:
+        """Every test run so far, newest first: when it ran, its setup, and how it did (answered or found, grounded,
+        expected sources, failures, estimated cost), ranked against the other runs of the same questions, with the
+        best setup to switch to. load_runs() brings back runs saved before a restart."""
         if not self.batches:
-            raise _Hint("No test runs yet: ask_all(['a question', 'another']), or the window's 🧪 Test tab.")
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's "
+                        "Test tab. load_runs() reads runs saved to a file before.")
+        self._show(self._runs_blocks())
+
+    @_friendly_errors
+    def compare_runs(self, *runs: Any) -> None:
+        """Test runs of the same questions side by side, best first: how each did, how each question did in each, which
+        setup to use and what the differences between them changed. compare_runs(2, 5) compares runs 2 and 5 (as
+        runs() numbers them); compare_runs() every run of the last run's questions."""
+        if not self.batches:
+            raise _Hint("No test runs yet: ask_all(['a question', 'another']), then change a setting and ask_all() "
+                        "again, or sweep(n=[5, 10]).")
+        if runs:
+            chosen: list[Batch] = []
+            for run in runs:
+                batch = self._run(run)
+                if not any(b is batch for b in chosen):
+                    chosen.append(batch)
+        else:
+            chosen = self._family(self.batches[-1])
+        if len(chosen) < 2:
+            only = self._run_number(chosen[0])
+            raise _Hint(f"Only run {only} asked {'these' if not runs else 'its'} questions this way, so there's nothing "
+                        "to compare it with: change a setting and ask_all() again, or sweep(n=[5, 10]), then "
+                        "compare_runs().")
+        kinds = {b.retrieve_only for b in chosen}
+        if len(kinds) > 1:
+            searched = next(b for b in chosen if b.retrieve_only)
+            answered = next(b for b in chosen if not b.retrieve_only)
+            raise _Hint(f"Run {self._run_number(searched)} only searched and run {self._run_number(answered)} "
+                        "answered: compare runs of one kind.")
+        if not shared_questions(chosen):
+            raise _Hint("Those runs have no question in common that came back: compare runs of the same questions.")
+        self._show(self._compare_blocks(chosen))
+
+    @_friendly_errors
+    def use_run(self, run: Any = None) -> None:
+        """Switches to a test run's setup, so the chat, ask_all() and the window use it from now on: its settings,
+        model, data source and files (and knowledge base). use_run() picks the best run of the last run's questions,
+        use_run(7) run 7, as runs() numbers them. A search-only run sets the search settings and keeps the rest."""
+        if run is None:
+            if not self.batches:
+                raise _Hint("No test runs yet: sweep(n=[5, 10]) or ask_all([...]) first, then use_run() switches to the "
+                            "best one.")
+            batch = rank_runs(self._family(self.batches[-1]))[0][0]
+        else:
+            batch = self._run(run)
+        self._show([_Note(self._switch_to(batch), "ok"),
+                    _Next([("ask_all()", "the test questions with it: the report says what changed"),
+                           ("settings()", "every setting, in plain English"),
+                           ("code()", "this setup as Python, JSON or an AWS CLI command")])])
+
+    def _switch_to(self, batch: Batch) -> str:
+        """Makes a run's setup the one in use (use_run() and the window's Use this setup) -> what changed, in words."""
+        schema = self.core.schema()
+        if batch.retrieve_only:  # its search settings; the answer's stay as they are
+            searched = retrieve_settings(self.values, schema)
+            values = {**{k: v for k, v in self.values.items() if k not in searched}, **batch.settings}
+        else:
+            values = dict(batch.settings)
+        values = {key: values[key] for key in schema.fields if key in values}
+        note = ""
+        if batch.kb_id and batch.kb_id != self.kb:
+            self._use_kb(batch.kb_id)
+            note = f"Now asking {batch.kb_name or batch.kb_id}: a new conversation."
+        sources, uris = self._sources_now(), self._files_now()
+        changes = [f"knowledge base {batch.kb_name or batch.kb_id}"] if note else []
+        changes += _diff(self.values, values)
+        self.values = values
+        if not batch.retrieve_only and batch.model:
+            try:
+                before = _model_id(self.core.resolve_model(self.model)[1])
+            except (ValueError, ClientError, BotoCoreError):
+                before = str(self.model or "")
+            if before != batch.model:
+                changes.append(f"model {self._model_label(before)} → {self._model_label(batch.model)}")
+            self.model = batch.model
+        if sources != batch.data_sources:
+            changes.append(f"{describe_sources(sources) if sources else 'every data source'} → "
+                           f"{describe_sources(batch.data_sources) if batch.data_sources else 'every data source'}")
+        if uris != batch.files:
+            changes.append(f"{describe_files(uris) if uris else 'every file'} → "
+                           f"{describe_files(batch.files) if batch.files else 'every file'}")
+        self.data_source, self.picked_files = dict(batch.data_sources), list(batch.files)
+        self._changed(note)
+        name = self._run_name(batch)
+        return (f"Now using the setup of {name}: " + "; ".join(changes) + "." if changes
+                else f"The setup of {name} is the one in use already.")
+
+    @_friendly_errors
+    def save_runs(self, path: str | None = None) -> None:
+        """Saves every test run to a file, so they outlast a kernel restart and can be shared: a line per run (JSON
+        Lines) with its setup, and each question's answer, sources, cost and request. Runs already in the file aren't
+        written again, and nothing in it is changed. Every later run is added as it finishes (ui.log holds the file;
+        None stops that). load_runs() reads them back, and pandas.read_json(path, lines=True) reads the file too.
+        path: default kb-test-runs.jsonl, beside the notebook."""
+        note = self._save(path)
+        steps = [(_call("load_runs", self.log), "read them back after a restart")] if note.level == "ok" else []
+        self._show([note, _Next(steps + [("runs()", "every test run, ranked")])])
+
+    def _save(self, path: Any = None) -> _Note:
+        """save_runs() and the window's Save: the runs added to the file, and from then on every run -> what happened."""
+        target = Path(str(path or self.log or RUNS_FILE).strip())
+        if target.is_dir():
+            raise _Hint(f"{target} is a folder: pass a file in it, like save_runs('{target / RUNS_FILE}').")
         try:
-            batch = self.batches[_as_int(run, "run")]
-        except IndexError:
-            raise _Hint(f"There {'is' if len(self.batches) == 1 else 'are'} {_plural(len(self.batches), 'test run')}: "
-                        f"results(0) is the first and results(-1) the last.") from None
-        self._show(self._batch_blocks(batch))
+            written = self._append_runs(target, self.batches)
+        except OSError as exc:
+            return _Note(f"Couldn't save to {target}: {exc.strerror or exc}. Pass another path: "
+                         "save_runs('runs/kb-test-runs.jsonl').", "warn")
+        self.log = str(target)
+        total = len(self._saved_ids(target))
+        where = f"{target} (in {target.resolve().parent})"
+        later = "Every run from now on is added as it finishes (ui.log = None stops that)."
+        if not self.batches:
+            text = f"No test runs yet, so nothing was written: every run from now on is added to {where} as it finishes."
+        elif written:
+            text = f"Saved {_plural(written, 'test run')} to {where}: {total:,} in the file now. {later}"
+        else:
+            text = f"Every run here is in {where} already ({total:,} in the file). {later}"
+        if self._app is not None:
+            self._app.runs_changed()
+        return _Note(text, "ok")
+
+    @_friendly_errors
+    def load_runs(self, path: str | None = None) -> None:
+        """Reads test runs saved with save_runs() (or log=) back in, after a kernel restart or from someone else's
+        file, and lists them as runs() does: results(), compare_runs() and use_run() work on them like on new runs, and
+        the window's Test tab shows the last one. Runs already here are skipped. path: default kb-test-runs.jsonl."""
+        notes = self._load(path)
+        self._show(notes + (self._runs_blocks() if self.batches else []))
+
+    def _load(self, path: Any = None) -> list[_Note]:
+        """load_runs() and the window's Load: the runs in the file that aren't here yet, added in the order they ran
+        -> what happened."""
+        target = Path(str(path or self.log or RUNS_FILE).strip())
+        if not target.is_file():
+            raise _Hint(f"There's no file {target} in {target.resolve().parent}: save_runs() writes one, or pass the "
+                        f"path of yours: load_runs('folder/{RUNS_FILE}').")
+        try:
+            text = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            return [_Note(f"Couldn't read {target}: {getattr(exc, 'strerror', None) or exc}.", "warn")]
+        runs, problems = read_runs(text.splitlines())
+        known = {b.id for b in self.batches}
+        new = []
+        for b in runs:
+            if b.id not in known:
+                known.add(b.id)
+                new.append(b)
+        self._saved_ids(target).update(b.id for b in runs)
+        self.batches = sorted(self.batches + new, key=lambda b: b.started.timestamp() if b.started else 0.0)
+        for sweep_id in dict.fromkeys(b.sweep for b in new if b.sweep):
+            if not any(sw.id == sweep_id for sw in self.sweeps):
+                members = [b for b in self.batches if b.sweep == sweep_id]
+                self.sweeps.append(Sweep(batches=members, varied=varied_setups(members),
+                                         retrieve_only=members[0].retrieve_only, id=sweep_id,
+                                         seconds=max(b.seconds for b in members),
+                                         stopped=any(b.stopped for b in members)))
+        self.sweeps.sort(key=lambda sw: self._run_number(sw.batches[0]))
+        if new and not self.questions:
+            last = max(new, key=lambda b: b.started.timestamp() if b.started else 0.0)
+            self.questions = [(i.question, i.expected) for i in last.items]
+        skipped = len(runs) - len(new)
+        if new:
+            text = (f"Loaded {_plural(len(new), 'test run')} from {target}"
+                    + (f" ({skipped:,} {'was' if skipped == 1 else 'were'} here already)" if skipped else "") + ".")
+        elif runs:
+            text = f"Every run in {target} is here already ({len(runs):,})."
+        else:
+            text = f"There are no test runs in {target}."
+        notes = [_Note(text, "ok" if new else "info")]
+        if problems:
+            more = "; …" if len(problems) > 3 else ""
+            notes.append(_Note(f"{_plural(len(problems), 'line')} couldn't be read: {'; '.join(problems[:3])}{more}. "
+                               "The rest were loaded.", "warn"))
+        if self._app is not None:
+            self._app.loaded()
+        return notes
 
     # ------------------------------------------------------------------ settings
 
@@ -8768,6 +10771,7 @@ def chat(
     retrieve_only: bool = False,
     questions: Any = None,
     height: int | str | None = None,
+    log: str | None = None,
     **values: Any,
 ) -> BedrockChatView:
     """Opens the chat window on a knowledge base and returns the view behind it.
@@ -8780,16 +10784,19 @@ def chat(
         chat("support-docs", settings={"generationConfiguration.performanceConfig.latency": "optimized"})
         chat("support-docs", retrieve_only=True)      # questions only search: every passage found, no answer
         chat("support-docs", questions=["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])
+        chat("support-docs", log="kb-test-runs.jsonl")   # every test run saved as it finishes: load_runs() reads them
 
     Settings passed as keywords (or settings=, for paths) are added to DEFAULT_SETTINGS; settings={} starts from none.
     A setting that can't be used is named in the window instead of stopping it. region / profile pick the AWS
     region and profile; stream=False shows each answer only when it's complete. retrieve_only=True opens the window
     on Retrieve only: questions show every passage the search finds, and no answer. questions= fills the Test tab
-    with a list of test questions to ask with the window's settings (a list, or text with one per line). The window
-    fills the browser's height; height= sets the conversation's instead (800 pixels, or CSS such as '70vh')."""
+    with a list of test questions to ask with the window's settings (a list, or text with one per line). log= names a
+    file every test run is added to as it finishes, so runs outlast a kernel restart (load_runs() reads them back).
+    The window fills the browser's height; height= sets the conversation's instead (800 pixels, or CSS such as
+    '70vh')."""
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
                            stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only,
-                           height=height)
+                           height=height, log=log)
     wanted = {**(DEFAULT_SETTINGS if settings is None else settings), **values}
     for name, value in wanted.items():
         try:

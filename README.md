@@ -1011,7 +1011,8 @@ policy that covers every command.
 <img src="docs/images/aws/bedrock.svg" width="22" height="22" alt="" align="absmiddle"> **A chat window on a knowledge base, with every setting in reach.** Pick the knowledge base and the model, ask
 questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field
 of RetrieveAndGenerate) while you watch the request as JSON. Then ask a whole list of test questions with that setup,
-see how each one did, and copy the setup as a Python script, JSON or an AWS CLI command.
+see how each one did, try every combination of the settings you're unsure of at once and see which setup does best,
+keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
 
 📄 [`analyzers/bedrock_chat.py`](analyzers/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
 
@@ -1035,6 +1036,9 @@ chat("support-docs", retrieve_only=True)   # questions only search: every passag
 chat("support-docs", height=800)           # an 800px conversation (else the window fills the browser's height)
 ui = chat("support-docs", n=8, temperature=0.2, search_type="hybrid", where={"team": "billing"})
 ui.ask_all(["How long do refunds take? | refund-policy.pdf", "Can I return a gift?"])   # a test list, each answered
+ui.sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])   # every combination on that list, the setups ranked
+ui.use_run()                               # switch to the best setup
+ui.save_runs()                             # keep every run (and every later one) in kb-test-runs.jsonl
 ui.code()                                  # this setup as a Python script, JSON and an AWS CLI command
 ```
 
@@ -1059,25 +1063,38 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   came back "unable to assist" although the search found passages (the answer step, not the search, is what to fix).
   Switching puts your last question back in the box; the settings for the answer (temperature, prompt...) are
   dimmed while they aren't sent.
-- **⚙️ Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
+- **Settings.** Everything sent with every question, one line each, its value explained in a sentence (hover a
   name for what it does and its path in the request). Change it in place, remove it with ✕, or open **+ Add a
   setting** to add the common ones with one click, search **every** field by
   name, path or what it does (`rerank`, `latency`, `encrypts`) and add it from the list, or browse them all by group:
   the list comes from the installed boto3's description of the API, so nothing is missing. A value that
   can't be sent turns red and says why, and warnings catch what Bedrock would refuse (`temperature` with `top_p` on a
   newer Claude model, a guardrail ID without its version, a prompt that drops the citation instructions).
-- **🧾 Request JSON.** The exact request the next question sends, as a folding tree with your settings highlighted, as
+- **Request.** The exact request the next question sends, as a folding tree with your settings highlighted, as
   JSON text, or as the boto3 call to paste into your code, both highlighted. **Edit JSON** takes a hand-edited request
   back into the settings, after checking it the way boto3 does before sending, and never undoes a setting changed
-  while you were editing without saying so. **📨 Last response** shows what came back.
-- **🧪 Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
+  while you were editing without saying so. **Response** shows what came back.
+- **Test.** Paste a list of questions, one per line, and **Run**: each is asked with the window's knowledge base,
   model, data source, files and settings, on its own (never as a follow-up), a few at a time, while the window stays
   usable (**Stop** sends no more). Each question gets a line saying how it did (answered, "unable to assist", no
   citations, partly grounded, failed) with its grounded share, sources and time, and opens to the full answer. Add
   `| refund-policy.pdf` after a question to check that the answer cites that file. Cards and findings sum up the run
   and say which setting to try; change it and **Run** again, and each line says whether that question did better or
   worse. Before you run, the estimated cost shows beside the button. On **Retrieve only**, the list is searched instead.
-- **📋 Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
+- **Try variations**, in the Test tab, asks the list with every combination of the values you type, one setting
+  per line (`n = 5, 10`, `search_type = SEMANTIC, HYBRID`, `model = haiku, sonnet`, `reranker = none, cohere`, or
+  `data_source = all, faq`), or add with one click. **Run** asks each question with every setup before the next one,
+  so **Stop** leaves them all with the same questions, then ranks the setups: by the expected files cited, then the
+  answers that say something, then the grounded share, the cheaper first when two are as good. Findings say which
+  setup beats yours and by how much, what each setting changed ("search_type=HYBRID did best in each of the 2 groups
+  of setups that differ only in search_type"; "temperature made no difference"), when the lead is small enough to be
+  chance, and which questions no setup could answer. A table shows how each question did with each setup, and
+  **Use this setup** switches to the one you pick. A sweep estimated over $2 asks for a second click.
+- **Runs.** Every test run, newest first, ranked against the other runs of the same questions: open one in the
+  Test tab, switch to its setup, or compare it with the others side by side. **Save** writes them to a file (one JSON
+  line per run, with each answer and its sources) and adds every later run as it finishes; **Load** reads a file
+  back after a kernel restart, or a teammate's.
+- **Code.** The setup as it is now, to run anywhere: a Python script that needs only boto3 and asks your test
   questions, printing each answer and the files it cites; the config as JSON (the request without the question,
   which `client.retrieve_and_generate(input={"text": question}, **config)` or the AWS CLI's `--cli-input-json` sends);
   or the AWS CLI command for one question. It follows every change to the knowledge base, model, files and settings.
@@ -1091,7 +1108,7 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Code, Request JSON and Last response tabs |
+| `app()` | The chat window: knowledge base, data source and model pickers, the conversation, and the Settings, Test, Runs, Code, Request and Response tabs |
 | `ask(question)` | An answer as a report: `[1][2]` citations, cards (grounded share, sources cited, model, estimated tokens and cost, time), findings and the sources table. Each question follows up on the ones before it |
 | `retrieve(question)` | Only the search behind an answer (Retrieve, the same settings without the model): every passage found, best first, with its score, and no answer. After `ask()` with the same question, which passages the answer cited, and whether a poor answer comes from the search or the model |
 | `new_chat()` | Forgets the conversation: the next question starts a new Bedrock session. The settings stay |
@@ -1102,8 +1119,19 @@ window follows them.
 
 | Command | What it shows |
 |:---|:---|
-| `ask_all(questions=None, *, retrieve_only=None, workers=4, limit=50)` | Asks a list of test questions with these settings, each on its own (not as a follow-up), and shows how each did: answered or "unable to assist", grounded share, sources, the file it should cite (`"question \| file"`), time and estimated cost, with findings across them all. `ask_all()` asks the last list again and says which questions did better or worse since the last run. `questions` is a list, text with one per line, or a DataFrame with `question` and `expected` columns |
-| `results(run=-1)` | A test run again, as a report that stays in the saved notebook: the last one, or `results(0)` for the first. Nothing is asked again |
+| `ask_all(questions=None, *, retrieve_only=None, workers=4, limit=50, label=None)` | Asks a list of test questions with these settings, each on its own (not as a follow-up), and shows how each did: answered or "unable to assist", grounded share, sources, the file it should cite (`"question \| file"`), time and estimated cost, with findings across them all. `ask_all()` asks the last list again and says which questions did better or worse since the last run. `questions` is a list, text with one per line, or a DataFrame with `question` and `expected` columns; `label=` names the run |
+| `sweep(questions=None, *, setups=None, retrieve_only=None, workers=4, limit=50, max_setups=16, max_cost=2.0, label=None, **values)` | Asks the test questions with every combination of the values listed: `sweep(n=[5, 10], search_type=["SEMANTIC", "HYBRID"])`, and `model=`, `data_source=` and `files=` lists too (`None` leaves a setting out), or whole `setups=[{...}, {...}]`. Ranks the setups best first, says which one beats yours, what each setting changed and which questions no setup handled, and shows how each question did with each setup. Each setup becomes a test run. Nothing is sent when it's more than `max_setups` setups or estimated over `max_cost` USD. `retrieve_only=True` sweeps the search alone, for the embedding's cost |
+| `results(run=-1)` | A test run again, as a report that stays in the saved notebook: the last one, or `results(1)` for the first, as `runs()` numbers them. Nothing is asked again |
+
+#### Keep and compare test runs
+
+| Command | What it shows |
+|:---|:---|
+| `runs()` | Every test run so far, newest first: when, its setup, how it did and its estimated cost, ranked against the other runs of the same questions, with the best setup to switch to |
+| `compare_runs(*runs)` | Runs of the same questions side by side, best first, and how each question did in each: `compare_runs(2, 5)`, or `compare_runs()` for every run of the last run's questions |
+| `use_run(run=None)` | Switches to a run's settings, model, data source and files: `use_run()` the best run of the last list, `use_run(7)` run 7 |
+| `save_runs(path=None)` | Adds every test run to a file (JSON Lines, `kb-test-runs.jsonl` by default) and every later run as it finishes, so they outlast a kernel restart. Nothing in the file is changed |
+| `load_runs(path=None)` | Reads saved runs back, after a restart or from a teammate, and lists them as `runs()` does |
 
 #### Settings
 
@@ -1180,6 +1208,13 @@ batch = core.ask_all("support-docs", ["refund window? | refund-policy.pdf", "gif
 batch.items[0].answer, batch.items[0].found, batch.items[0].cost   # its Answer, where the file came up ([n]), USD
 batch.failed, batch.cost, batch.to_df()                           # what Bedrock refused, the total, one row each
 ui.batches                            # every test run of the view, oldest first; ui.questions: the Test tab's list
+
+from bedrock_chat import sweep_setups   # with pip: from aws_analyzer.bedrock_chat import sweep_setups
+setups = sweep_setups({"n": [5, 10], "model": ["haiku", "sonnet"]})   # [{'n': 5, 'model': 'haiku'}, ...]
+sweep = core.sweep("support-docs", ["refund window? | refund-policy.pdf"], setups, {"n": 5})   # Sweep: a Batch each
+sweep.ranked                          # [(Batch, RunScore)], best first: answered, grounded, hits, MRR, failed, cost
+sweep.best, sweep.to_df()             # the best setup's run; one row per setup
+ui.sweeps                             # every sweep of the view; ui.log: the file every run is added to
 ```
 
 The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `coerce_setting`, `build_request`,
@@ -1190,7 +1225,10 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 `answer_cost`, `cited_ranks`, and the findings: `settings_findings`, `answer_findings` and `compare_findings` (a
 search and an answer to the same question). For test runs: `parse_questions`, `format_questions`, `question_list`,
 `match_expected`, `expected_at`, `item_verdict`, `batch_estimate`, `batch_findings` and `batch_changes` (two runs of
-the same questions). For the code: `config_of`, `config_json`, `python_script` and `cli_command`.
+the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations`, `format_variations`, `apply_setup`,
+`sweep_estimate`, `run_setup`, `varied_setups`, `setup_label`, `shared_questions`, `run_score`, `rank_runs`,
+`ranking_findings`, and `run_record`, `run_from_record` and `read_runs` (the file `save_runs()` writes). For the code:
+`config_of`, `config_json`, `python_script` and `cli_command`.
 
 </details>
 
@@ -1205,10 +1243,15 @@ the same questions). For the code: `config_of`, `config_json`, `python_script` a
   `BEDROCK_PRICES`); pass your own with `BedrockChatAnalyzer(model_prices={...}, prices={...})`. A model that isn't
   in the table shows its cost as unknown.
 - Bedrock takes questions of up to 1,000 characters; the chat says so before sending a longer one.
-- A test run (`ask_all()`, the 🧪 Test tab) costs what its questions would cost asked one by one, and the window shows
+- A test run (`ask_all()`, the Test tab) costs what its questions would cost asked one by one, and the window shows
   an estimate before you run it (about 300 tokens per passage and per answer). It asks up to 50 questions
   (`ask_all(limit=None)` for all of them), four at a time; the client slows down and retries when Bedrock throttles,
   and a question that still fails is listed with the reason while the rest are asked.
+- A sweep costs its setups' runs added up: 4 setups × 20 questions is 80 answers. It's estimated before anything is
+  sent and refused over $2 (`max_cost=`; the window asks for a second click), and up to 16 setups are asked at a time
+  (`max_setups=`). Sweeping search settings with `retrieve_only=True` costs only the questions' embeddings (and
+  reranking), so it's the cheap way to pick them before trying models.
+- `save_runs()` writes a local file next to the notebook; it only ever adds lines to it, and nothing goes to AWS.
 
 </details>
 
