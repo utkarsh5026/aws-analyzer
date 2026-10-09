@@ -33,6 +33,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- **Breaking**: `bedrock_chat.py`: `ui.results(n)` counts test runs from 1, the way the Runs tab, `ui.runs()`,
+  `ui.use_run()` and `ui.compare_runs()` number them, so `ui.results(1)` is now the first run (it was
+  `ui.results(0)`, which now says how the runs are numbered). `ui.results()` still shows the last run.
+  ([#51](https://github.com/utkarsh5026/aws-analyzer/pull/51))
 - `bedrock_chat.py`: the chat window's side tabs stay on one row at any width instead of wrapping onto a second
   line. The emoji before their names are now small line icons that follow the theme (shown when there's room),
   **Request JSON** and **Last response** are now **Request** and **Response**, and the open tab stands out in dark
