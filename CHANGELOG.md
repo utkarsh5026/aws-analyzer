@@ -22,14 +22,26 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   is small enough to be chance, and which questions no setup could answer, plus how each question did with each setup.
   `ui.use_run()` (or **Use this setup**) switches to the best one. A sweep is estimated before it's sent and isn't sent
   over $2 (`max_cost=`; in the window, a second click) or 16 setups (`max_setups=`); with `retrieve_only=True` it costs
-  only the questions' embeddings.
+  only the questions' embeddings. ([#51](https://github.com/utkarsh5026/aws-analyzer/pull/51))
 - `bedrock_chat.py`: **Runs**, a new tab in the chat window, and `ui.runs()` list every test run, newest first, each
   ranked against the other runs of the same questions, so you can see what each change got you; `ui.compare_runs(2, 5)`
   puts runs side by side, question by question, and `ui.use_run(5)` switches to a run's setup. **Save** (or
   `ui.save_runs()`) keeps the runs in `kb-test-runs.jsonl` beside the notebook, a JSON line per run with each answer and
   its sources, and adds every later run as it finishes; **Load** (`ui.load_runs()`) reads them back after a kernel
   restart, or from a teammate. `chat(..., log="kb-test-runs.jsonl")` saves from the start, and `ask_all(label=...)`
-  names a run.
+  names a run. ([#51](https://github.com/utkarsh5026/aws-analyzer/pull/51))
+
+### Changed
+
+- `bedrock_chat.py`: the chat window's side tabs stay on one row at any width instead of wrapping onto a second
+  line. The emoji before their names are now small line icons that follow the theme (shown when there's room),
+  **Request JSON** and **Last response** are now **Request** and **Response**, and the open tab stands out in dark
+  themes too. ([#51](https://github.com/utkarsh5026/aws-analyzer/pull/51))
+
+## [0.9.0] - 2026-10-09
+
+### Added
+
 - `bedrock_chat.py`: **Answer / Retrieve only**, beside the chat window's question box. On **Retrieve only**, a
   question only searches: the same search an answer makes (Retrieve, with the same passages, search type, filter,
   reranker, data source and files) and no model, showing every passage found, best first, with its score. Switching
@@ -46,28 +58,36 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `s3.py`: `pdf_flow(doc)` turns a PDF read with `read_pdf(uri, layout=True)` (or `parse_pdf(..., layout=True)`) into
   headings, paragraphs and list items, ready to read or to send to a model, and `pdf_furniture(doc)` lists the running
   headers and footers it leaves out. `doc.layout` holds each page's lines with where they sit, their size and weight. ([#43](https://github.com/utkarsh5026/aws-analyzer/pull/43))
-- `bedrock_chat.py`: **Test** in the chat window, and `ui.ask_all(questions)`, ask a whole list of test questions
+- `bedrock_chat.py`: **🧪 Test** in the chat window, and `ui.ask_all(questions)`, ask a whole list of test questions
   with the setup you've built (knowledge base, model, data source, files and settings), each on its own rather than as
   a follow-up, a few at a time while the window stays usable (**Stop** sends no more). Each question gets a line
   saying how it did (answered, "unable to assist", no citations, partly grounded, failed) with its grounded share,
   sources and time, and opens to the full answer; `How long do refunds take? | refund-policy.pdf` also checks that
   the answer cites that file. Findings sum up the run and say which setting to try, and after a change, running the
   list again (`ui.ask_all()`) says which questions did better or worse. The estimated cost shows before you run.
-  `ui.results()` shows a run again as a report (`ui.results(1)` the first), `ui.batches[-1].to_df()` gives one row per
-  question, and
+  `ui.results()` shows a run again as a report, `ui.batches[-1].to_df()` gives one row per question, and
   `chat(..., questions=[...])` opens the window with the list ready. It needs no new permissions. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
-- `bedrock_chat.py`: **Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
+- `bedrock_chat.py`: **📋 Code** in the chat window, and `ui.code()`, give the setup as it is now, to run anywhere: a
   Python script that needs only boto3 and asks your test questions, printing each answer with the files it cites; the
   config as JSON (the request without the question, which `client.retrieve_and_generate(input=..., **config)` or the
   AWS CLI's `--cli-input-json` sends); and the AWS CLI command for one question. It follows every change, and warns
   when Bedrock would refuse the setup. ([#45](https://github.com/utkarsh5026/aws-analyzer/pull/45))
+- `s3.py`: `ui.downloads()` shows what you've downloaded: each file, folder and zip in the downloads folder with its
+  size and when it was downloaded, how much of the disk they take, and findings for zips a stopped `download_zip()`
+  left unfinished, a disk running out of room and downloads over a month old. `ui.clean_downloads()` deletes them to
+  free the disk: all of them, the ones named (`ui.clean_downloads("churn.zip")`), or those downloaded before
+  `older_than="7d"`; `dry_run=True` shows what would go. It only empties a folder made for downloads, never the
+  notebook's own folder or one that held your files first, and nothing in S3 changes. ([#50](https://github.com/utkarsh5026/aws-analyzer/pull/50))
 
 ### Changed
 
-- `bedrock_chat.py`: the chat window's side tabs stay on one row at any width instead of wrapping onto a second
-  line, and read as plain names, each with a small line icon that follows the theme (shown when there's room).
-  **Request JSON** and **Last response** are now **Request** and **Response**, and the open tab stands out in dark
-  themes too.
+- **Breaking**: `s3.py` and `s3_explorer.py`: `download()`, `download_zip()`, and the explorer's **⬇ Download** and
+  zips, save into one folder, `s3-downloads` next to the notebook, when they're given no path, instead of the
+  notebook's own folder, so downloads no longer mix with your notebooks and code. The folder gets a `.gitignore` that
+  keeps it out of git. A notebook that reads a downloaded file by its bare name (`pd.read_csv("events.csv")`) needs
+  `s3-downloads/events.csv`, or `S3View(downloads=".")` for the old place. `S3View(downloads="~/scratch/s3")`,
+  `S3Analyzer(downloads=...)` and `S3Explorer(downloads=...)` pick another folder; the explorer's **⚙** edits it as
+  **Downloads in**, and `x.downloads` replaces `x.zip_folder` (which still works). ([#50](https://github.com/utkarsh5026/aws-analyzer/pull/50))
 - `s3_explorer.py` and `bedrock_chat.py`: the S3 explorer and the chat window fill the browser window's height
   instead of a fixed 560 and 540 pixels, so a big screen shows more files, more of a report and more of the
   conversation. They stay at least that tall, and keep those heights in VS Code. `S3Explorer(height=720)` and the new
@@ -361,7 +381,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.5.0...v0.6.0

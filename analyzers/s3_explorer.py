@@ -16,7 +16,9 @@ checkbox shows when you point at a row) and "Download selected" zips just those,
 This file builds on s3.py (the previews, the formatting and the AWS calls all come from it): upload both files
 next to your notebook, or paste s3.py into a cell and then this file into the next one. Clicking needs
 ipywidgets, which SageMaker notebooks already have. Without it you get a plain listing and a note on what to
-install. Like s3.py, it only reads from AWS; "Download" and "Download .zip" save a copy on the notebook's disk.
+install. Like s3.py, it only reads from AWS; "Download" and "Download .zip" save a copy on the notebook's disk, in
+s3.py's downloads folder (s3-downloads, next to the notebook), where x.ui.downloads() lists them and
+x.ui.clean_downloads() deletes them.
 
 Quick start
 -----------
@@ -26,6 +28,7 @@ Quick start
     S3Explorer("s3://my-bucket/data/report.pdf")    # open the folder with that file shown
     S3Explorer("s3://my-bucket/", profile="dev")    # another AWS profile (or core=S3Analyzer(...))
     S3Explorer(zip_max_size="2GB")                  # zip folders up to 2 GB (100 MB unless ⚙ changes it)
+    S3Explorer(downloads="~/s3")                    # save downloads and zips there, not in s3-downloads
 
     x = S3Explorer("s3://my-bucket/")
     x.open("s3://my-bucket/raw/")                   # drive it from code: open, back, forward, up, refresh
@@ -1011,7 +1014,9 @@ class S3Explorer:
     height: the height of the two panes. They fill the browser window (at least 560 pixels); a number of pixels
     (720) or CSS ('80vh') sets it instead. page_size: rows on each page of the list.
     zip_max_size: the biggest folder "Download .zip" packs ('100MB', '2GB'); ⚙ Settings changes it, and the most
-    files in a zip (zip_max_files, 10,000) and where zips go (zip_folder, the notebook's folder).
+    files in a zip (zip_max_files, 10,000).
+    downloads: the folder "Download" and the zips save into (s3.py's downloads folder: 's3-downloads', next to the
+    notebook); ⚙ Settings changes it too. x.ui.downloads() lists what's there and x.ui.clean_downloads() deletes it.
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
@@ -1027,6 +1032,7 @@ class S3Explorer:
         height: int | str | None = None,
         page_size: int = 100,
         zip_max_size: int | str = "100MB",
+        downloads: str | None = None,
         mode: str = "auto",
         progress: str = "auto",
     ):
@@ -1036,7 +1042,6 @@ class S3Explorer:
         self.page_size = max(10, int(page_size))
         self.zip_max_size = zip_max_size  # "Download .zip" zips a folder up to this size (⚙ Settings changes it)
         self.zip_max_files = 10_000  # and up to this many files
-        self.zip_folder = "."  # where the .zip goes: the notebook's folder
         self.selected = ""  # the uri of the file shown on the right ('' = the folder's overview)
         self.shown: list[list[Any]] = []  # the blocks of the last report on the right, for tests and curious users
         self._action = ""
@@ -1067,6 +1072,8 @@ class S3Explorer:
             core = self.s3.S3Analyzer(profile=profile, region=region)
         self.nav = S3Navigator(core)
         self.core = self.nav.core
+        if downloads is not None:
+            self.core.downloads = downloads
         self.ui = self.s3.S3View(self.core, progress=progress)  # for your own cells; reports show where you call them
         self._pane = self.s3.S3View(self.core, mode="text" if mode == "text" else "auto", progress=progress)
         self._pane._show = self._capture  # its reports land in the right-hand pane, not in a new output
@@ -1104,6 +1111,23 @@ class S3Explorer:
     def location(self) -> str:
         """The folder you're in ('s3://bucket/prefix/'), or '' for the list of buckets."""
         return self.nav.location if self.s3 is not None else ""
+
+    @property
+    def downloads(self) -> str:
+        """Where "Download" and the zips save: s3.py's downloads folder (core.downloads, 's3-downloads' next to the
+        notebook unless set), which ⚙ Settings changes."""
+        return self.core.downloads
+
+    @downloads.setter
+    def downloads(self, folder: str) -> None:
+        self.core.downloads = folder
+
+    zip_folder = downloads  # its name before downloads went in one folder
+
+    def _where(self) -> str:
+        """The downloads folder in words: 's3-downloads', or "the notebook's folder" for '.'."""
+        folder = str(self.downloads).strip() or "."
+        return "the notebook's folder" if os.path.abspath(os.path.expanduser(folder)) == os.getcwd() else folder
 
     @property
     def picked(self) -> list[str]:
@@ -1778,12 +1802,12 @@ class S3Explorer:
         w = self._widgets
         self._set_size = w.Text(placeholder="100MB", layout=w.Layout(width="140px"))
         self._set_files = w.Text(placeholder="10,000", layout=w.Layout(width="140px"))
-        self._set_folder = w.Text(placeholder=".", layout=w.Layout(width="200px"))
+        self._set_folder = w.Text(placeholder=self.s3.DOWNLOADS, layout=w.Layout(width="200px"))
         rows = []
         for label, box, hint in (
             ("Biggest zip", self._set_size, "500MB, 2GB, …: a bigger folder isn't zipped"),
             ("Most files", self._set_files, "files in one zip"),
-            ("Save zips in", self._set_folder, ". is the notebook's folder"),
+            ("Downloads in", self._set_folder, "downloads and zips; from the notebook's folder"),
         ):
             box.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._save_settings))
             hint_label = w.HTML(f'<span class="s3x-hint">{html.escape(hint)}</span>')
@@ -2085,7 +2109,7 @@ class S3Explorer:
             if kind == "pdf":
                 actions.append(("text", "📄 Text", f"The words of every page, {_TEXT_PAGES} at a time, laid out to read: "
                                 "headings, paragraphs and lists, without the running headers and footers"))
-            actions += [("download", "⬇ Download", "Save a copy in this notebook's folder"),
+            actions += [("download", "⬇ Download", f"Save a copy in {self._where()} (⚙ changes the folder)"),
                         ("open", "↗ Open in new tab", "The file in a new browser tab: PDFs, pictures, sound, video "
                          "and text show there, other files download. The link works for an hour after you click the "
                          "file (right-click to copy it for someone without AWS access)"),
@@ -2095,7 +2119,7 @@ class S3Explorer:
                         "findings (reads the whole listing, so big folders take a while)")]
             if not prefix:
                 actions.append(("bucket_info", "🛡️ Bucket settings", "Versioning, encryption, lifecycle, policy, risks"))
-            actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip on the notebook's disk, "
+            actions.append(("zip", "⬇ Download .zip", f"Everything below this folder as one .zip in {self._where()}, "
                             f"if it's no bigger than {self._zip_limit()} (⚙ changes that)"))
         else:
             actions = [("overview", "🪣 Every bucket", "Each bucket's size, cost and security warnings")]
@@ -2236,14 +2260,7 @@ class S3Explorer:
         """⬇ Download .zip, for a folder (`target` is its uri) or what's selected (a list, and the path it goes to):
         s3's download_zip with the limits from ⚙ Settings. It checks the size, file count, disk space, memory and
         read access first, and writes nothing when one fails."""
-        if not path:
-            bucket, prefix = parse_location(target)
-            name = (prefix.rstrip("/").rsplit("/", 1)[-1] or bucket) + ".zip"
-            path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), name)
-        folder = os.path.dirname(path)
-        if folder and folder != ".":
-            os.makedirs(folder, exist_ok=True)
-        self._pane.download_zip(target, os.path.normpath(path),
+        self._pane.download_zip(target, os.path.normpath(path) if path else None,  # None: in the downloads folder
                                 max_size=self.zip_max_size, max_files=self.zip_max_files)
         report = self._captured[-1] if self._captured else []
         refused = any(card[:2] == ("Can download", "no") for block in report if isinstance(block, self.s3._Cards)
@@ -2335,7 +2352,7 @@ class S3Explorer:
     def _picks_default(self) -> str:
         """The zip's name: download_zip's ('churn-12-files.zip'), with -2, -3, ... when that file is already there."""
         name = self._picks_layout()[2]
-        folder = os.path.expanduser(self.zip_folder.strip() or ".")
+        folder = self.core.downloads_folder()
         number, candidate = 1, f"{name}.zip"
         while os.path.exists(os.path.join(folder, candidate)):
             number += 1
@@ -2384,9 +2401,7 @@ class S3Explorer:
             0)
         if not keep_name or self._picks_name.value == self._picks_auto:
             self._picks_name.value = self._picks_auto = self._picks_default()
-        where = self.zip_folder.strip() or "."
-        where = "the notebook's folder" if where == "." else html.escape(where)
-        self._picks_where.value = f'<span class="s3x-hint">in {where}</span>'
+        self._picks_where.value = f'<span class="s3x-hint">in {html.escape(self._where())}</span>'
         self._picks_msg.value = ""
         self._picks_go.disabled = over  # the note above says what to do instead
         self._picks_panel.layout.display = None
@@ -2408,7 +2423,7 @@ class S3Explorer:
             return
         if not name.lower().endswith(".zip"):
             name += ".zip"
-        path = os.path.join(os.path.expanduser(self.zip_folder.strip() or "."), os.path.expanduser(name))
+        path = os.path.join(self.core.downloads_folder(), os.path.expanduser(name))
         if os.path.exists(path):
             self._picks_msg.value = s3._render_html([s3._Note(
                 f"{name} is already there, and the explorer doesn't replace files: type another name.", "warn")], 0)
@@ -2433,13 +2448,16 @@ class S3Explorer:
         except (TypeError, ValueError):
             self._set_size.value = str(self.zip_max_size)
         self._set_files.value = f"{self.zip_max_files:,}"
-        self._set_folder.value = self.zip_folder
+        self._set_folder.value = self.downloads
         self._set_note.value = ""
         self._set_pane([[s3._Title("Settings", "for this explorer, until the kernel restarts"),
                          s3._Note("“⬇ Download .zip” on a folder packs everything below it into one .zip on the "
                                   "notebook's disk, if it's within these limits. It also checks the disk space, memory "
                                   "and read access, and writes nothing when a check fails. To start with another "
-                                  "limit, use S3Explorer(zip_max_size='2GB').")]], keep=False)
+                                  "limit, use S3Explorer(zip_max_size='2GB')."),
+                         s3._Note(f"“⬇ Download” and the zips save into {self._where()}, so they don't mix with your "
+                                  "notebooks. In a cell, x.ui.downloads() lists what's there and how much disk it "
+                                  "takes, and x.ui.clean_downloads() deletes it.")]], keep=False)
         self._settings.layout.display = None
 
     def _close_settings(self) -> None:
@@ -2466,15 +2484,16 @@ class S3Explorer:
         files_text = self._set_files.value.replace(",", "").replace("_", "").strip() or "10000"
         if not files_text.isdigit() or int(files_text) < 1:
             return say(f"“{self._set_files.value}” isn't a number of files; try 10,000.", "warn")
-        folder = self._set_folder.value.strip() or "."
+        folder = self._set_folder.value.strip() or s3.DOWNLOADS
         if os.path.exists(os.path.expanduser(folder)) and not os.path.isdir(os.path.expanduser(folder)):
             return say(f"{folder} is a file, not a folder.", "warn")
-        self.zip_max_size, self.zip_max_files, self.zip_folder = size, int(files_text), folder
+        self.zip_max_size, self.zip_max_files, self.downloads = size, int(files_text), folder
         self._set_size.value = s3.human_size(size).replace(".0 ", " ")
         self._set_files.value = f"{self.zip_max_files:,}"
-        where = "the notebook's folder" if folder == "." else folder + (
-            "" if os.path.isdir(os.path.expanduser(folder)) else " (made when the first zip is saved)")
-        say(f"Saved: “⬇ Download .zip” now packs folders up to {self._zip_limit()}, into {where}.", "ok")
+        self._set_folder.value = folder
+        where = self._where() + ("" if os.path.isdir(os.path.expanduser(folder)) else " (made with the first download)")
+        say(f"Saved: “⬇ Download .zip” now packs folders up to {self._zip_limit()}, and downloads go into {where}.",
+            "ok")
 
     # ------------------------------------------------------------------ a PDF, page by page: as it looks, or its text
 

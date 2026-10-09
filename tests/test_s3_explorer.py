@@ -1015,6 +1015,19 @@ def test_explorer_loads_previews_in_the_background(explorer, core, monkeypatch):
     asyncio.run(main())
 
 
+def test_explorer_saves_downloads_in_the_downloads_folder(explorer, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    x = explorer("s3://lake/raw/readme.md", downloads="data/s3")
+    assert x.downloads == x.core.downloads == "data/s3"
+    assert x._act_buttons["download"].tooltip == "Save a copy in data/s3 (⚙ changes the folder)"
+    x._act_buttons["download"].click()
+    assert (tmp_path / "data" / "s3" / "readme.md").read_bytes().startswith(b"# Raw data")
+    assert (tmp_path / "data" / "s3" / ".gitignore").exists() and "Downloaded readme.md" in text(x)
+    x.downloads = "."  # the notebook's folder, as before there was a downloads folder
+    x.refresh()
+    assert x._act_buttons["download"].tooltip == "Save a copy in the notebook's folder (⚙ changes the folder)"
+
+
 def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     x = explorer("s3://lake/raw/", zip_max_size="20B")
@@ -1023,23 +1036,26 @@ def test_explorer_zips_a_folder_within_the_limits_in_settings(explorer, tmp_path
     out = text(x)
     assert "Can't zip this here yet" in out and "⚙ at the top right raises them (now 20 B and 10,000 files)" in out
     assert out.index("Can't zip this here yet") < out.index("⚙ at the top right")  # after the line that says why
-    assert not (tmp_path / "raw.zip").exists()
+    assert not (tmp_path / "s3-downloads" / "raw.zip").exists()
 
     x._gear.click()
     assert x._settings.layout.display is None and "Settings" in x._content.value and x._set_size.value == "20 B"
+    assert x._set_folder.value == "s3-downloads" and "x.ui.clean_downloads()" in x._content.value
     x._set_size.value = "lots"
     x._set_size._handle_custom_msg({"event": "submit"}, [])  # Enter saves
     assert "“lots” isn&#x27;t a size" in x._set_note.value and x.zip_max_size == "20B"
     x._set_size.value, x._set_files.value, x._set_folder.value = "1MB", "5,000", "zips"
     x._set_folder._handle_custom_msg({"event": "submit"}, [])
-    assert (x.zip_max_size, x.zip_max_files, x.zip_folder) == (1024 ** 2, 5000, "zips")
-    assert "up to 1.0 MB and 5,000 files, into zips (made when the first zip is saved)" in x._set_note.value
+    assert (x.zip_max_size, x.zip_max_files, x.downloads, x.zip_folder) == (1024 ** 2, 5000, "zips", "zips")
+    assert x.ui.core.downloads == "zips"  # the same folder for x.ui.download() in a cell
+    assert "up to 1.0 MB and 5,000 files, and downloads go into zips (made with the first download)" in x._set_note.value
     x._gear.click()  # closes the settings
     assert x._settings.layout.display == "none" and "File types here" in text(x)
 
     x._act_buttons["zip"].click()
     with zipfile.ZipFile(tmp_path / "zips" / "raw.zip") as made:
         assert sorted(made.namelist()) == ["events/part-10.csv", "events/part-2.csv", "readme.md"]
+    assert (tmp_path / "zips" / ".gitignore").exists()  # made for downloads: clean_downloads may empty it
     assert f"Saved {tmp_path / 'zips' / 'raw.zip'} (" in text(x) and "choose Download" in text(x)
     assert "⚙" not in text(x)  # the limits only come up when they stop a zip
 
@@ -1097,25 +1113,26 @@ def test_explorer_downloads_the_selection_as_one_zip(explorer, tmp_path, monkeyp
     assert x._picks_panel.layout.display is None and x._picks_name.value == "events-2-files.zip"
     out = text(x)
     assert "Download 2 files as one .zip" in out and "from s3://lake/raw/events/" in out
-    assert "part-10.csv" in x._picks_list.value and "in the notebook's folder" in x._picks_where.value
+    assert "part-10.csv" in x._picks_list.value and "in s3-downloads" in x._picks_where.value
     check(x, "part-10.csv")  # the panel follows the selection, and the name it suggested
     assert "Download 1 file as one .zip" in text(x) and x._picks_name.value == "part-2.csv.zip"
     check(x, "part-10.csv")
     x._picks_name.value = "my events"
     x._picks_name._handle_custom_msg({"event": "submit"}, [])  # Enter downloads
-    with zipfile.ZipFile(tmp_path / "my events.zip") as made:
+    with zipfile.ZipFile(tmp_path / "s3-downloads" / "my events.zip") as made:
         assert sorted(made.namelist()) == ["part-10.csv", "part-2.csv"]
     assert "Zip of 2 files from s3://lake/raw/events/" in text(x) and x._picks_panel.layout.display == "none"
     assert x.picked  # still selected
 
     x._open_picks()
     assert x._picks_name.value == "events-2-files.zip"
-    (tmp_path / "events-2-files.zip").write_bytes(b"mine")
+    (tmp_path / "s3-downloads" / "events-2-files.zip").write_bytes(b"mine")
     x._open_picks()
     assert x._picks_name.value == "events-2-files-2.zip"  # never a file that's already there
     x._picks_name.value = "events-2-files.zip"
     x._picks_go.click()
-    assert "already there" in x._picks_msg.value and (tmp_path / "events-2-files.zip").read_bytes() == b"mine"
+    assert "already there" in x._picks_msg.value
+    assert (tmp_path / "s3-downloads" / "events-2-files.zip").read_bytes() == b"mine"
     [b for b in x._picks_panel.children[1].children if b.description == "Cancel"][0].click()
     assert x._picks_panel.layout.display == "none" and "File types here" in text(x)
     x._open_picks()
@@ -1136,7 +1153,7 @@ def test_explorer_zips_selected_files_and_folders(explorer, tmp_path, monkeypatc
     x._open_picks()
     assert not x._picks_go.disabled and x._picks_name.value == "raw-2-items.zip"
     x._picks_go.click()
-    with zipfile.ZipFile(tmp_path / "raw-2-items.zip") as made:
+    with zipfile.ZipFile(tmp_path / "s3-downloads" / "raw-2-items.zip") as made:
         assert sorted(made.namelist()) == ["events/part-10.csv", "events/part-2.csv", "readme.md"]
     assert "Zip of 1 file and 1 folder from s3://lake/raw/" in text(x)
 
@@ -1146,4 +1163,4 @@ def test_explorer_zips_selected_files_and_folders(explorer, tmp_path, monkeypatc
     x._picks_go.click()
     out = text(x)
     assert "Can't zip this here yet" in out and "untick some files, or raise the limits with ⚙" in out
-    assert "click ⬇ Download selected again" in out and not (tmp_path / "again.zip").exists()
+    assert "click ⬇ Download selected again" in out and not (tmp_path / "s3-downloads" / "again.zip").exists()

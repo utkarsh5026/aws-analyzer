@@ -25,7 +25,8 @@ Examples of what we want to hear about:
 - **Leaked secrets.** Credentials, session tokens or presigned URLs ending up somewhere they shouldn't, such as in
   a report that's kept when the notebook is saved, in a log or in an error note.
 - **Unsafe file handling.** A download or zip that writes outside the folder it was given (path traversal through
-  object keys), or a file parser that can be made to use unbounded memory or disk.
+  object keys), a `clean_downloads()` that deletes anything but what's in the downloads folder `s3.py` made, or a
+  file parser that can be made to use unbounded memory or disk.
 
 Not security bugs: the findings the tool reports about your own AWS account (a public bucket, missing encryption),
 and problems in boto3 or in the optional packages it uses, which belong with those projects.

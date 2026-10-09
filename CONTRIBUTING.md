@@ -36,6 +36,7 @@ just as well for people. The rules that matter most:
   says what to install.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base, or stops or deletes anything.
   Reports show the command to run instead. A new AWS call needs its read-only IAM permission listed in README.md.
+  On the notebook's disk, the only thing deleted is what `clean_downloads()` removes from `s3.py`'s downloads folder.
 - **Python 3.10 and up**, with pandas 2 and 3 both supported.
 - **Reports help someone decide what to do.** The answer comes first, findings say what's wrong, what it costs and
   what to run next, and errors become a short note instead of a traceback. CLAUDE.md's "Product goal" section has
