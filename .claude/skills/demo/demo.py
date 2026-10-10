@@ -54,9 +54,10 @@ Demo data (moto, us-east-1, everything synthetic):
             3 days, runs near its 60 s timeout, KeyError / AccessDenied / timeouts in the last 24 hours of logs,
             logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package),
             churn-scoring (arm64, EventBridge, 4 copies of provisioned concurrency it never needs), report-api
-            (nodejs20.x, a public function URL, throttled by reserved concurrency 10), feature-backfill (python3.10,
-            never called, no triggers) and support-agent-actions (a Bedrock agent's action group). eu-west-1:
-            gdpr-export (SQS). The run c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
+            (nodejs20.x, a public function URL, throttled by reserved concurrency 10, JSON logs for its last three
+            hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
+            and support-agent-actions (a Bedrock agent's action group). eu-west-1: gdpr-export (SQS). The run
+            c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
 """
 
 from __future__ import annotations
@@ -1422,6 +1423,68 @@ def handler(event, context):
 '''
 
 
+def _epoch_ms(moment: datetime) -> int:
+    """A naive UTC time (NOW's kind) as CloudWatch Logs' epoch milliseconds, whatever the machine's time zone."""
+    return int(moment.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def _report_api_logs(logs) -> None:
+    """report-api logs JSON (its LoggingConfig says so): Lambda's platform.* records and the app's own lines with a
+    level and a message, over the last three hours: a WARN now and then, and unhandled TypeErrors."""
+    rng = random.Random(23)
+    streams = [f"2026/10/06/[$LATEST]{i:032x}" for i in (0xD4, 0xE5)]
+    events: dict[str, list[dict]] = {stream: [] for stream in streams}
+    for stream in streams:
+        logs.create_log_stream(logGroupName="/aws/lambda/report-api", logStreamName=stream)
+
+    def stamp(moment: datetime) -> str:
+        return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+    for i in range(48):
+        start = NOW - timedelta(minutes=4 * i + rng.uniform(0, 2))
+        rid = f"{rng.getrandbits(32):08x}-{rng.getrandbits(16):04x}-4{rng.getrandbits(12):03x}-b{rng.getrandbits(12):03x}-{rng.getrandbits(48):012x}"
+        failed, slow, cold = i in (3, 17, 30), i % 7 == 5, i % 16 == 0
+        took = rng.uniform(900, 2100) if slow else rng.uniform(40, 140)
+        region = rng.choice(["EMEA", "AMER", "APAC"])
+
+        def at(seconds: float) -> datetime:
+            return start + timedelta(seconds=seconds)
+
+        def app(seconds: float, level: str, message, **fields) -> tuple[datetime, str]:
+            return at(seconds), json.dumps({"timestamp": stamp(at(seconds)), "level": level, "requestId": rid,
+                                            "message": message, **fields})
+
+        lines = [(at(0), json.dumps({"time": stamp(at(0)), "type": "platform.start",
+                                      "record": {"requestId": rid, "version": "$LATEST"}})),
+                 app(0.004, "INFO", f"GET /reports/weekly?region={region}", path="/reports/weekly",
+                     query={"region": region})]
+        if slow:
+            lines.append(app(0.01, "WARN", f"cache miss for weekly-2026-41-{region.lower()}: rebuilding it from "
+                                           "the warehouse", cacheKey=f"weekly-2026-41-{region.lower()}"))
+        if failed:
+            lines.append(app(took / 1000 - 0.002, "ERROR", {
+                "errorType": "TypeError", "errorMessage": "Cannot read properties of undefined (reading 'total')",
+                "stack": ["TypeError: Cannot read properties of undefined (reading 'total')",
+                          "    at buildReport (file:///var/task/index.mjs:42:31)",
+                          "    at Runtime.handler (file:///var/task/index.mjs:12:18)"]}))
+        else:
+            lines.append(app(took / 1000 - 0.001, "INFO", f"200 in {took:.0f} ms", statusCode=200,
+                             rows=rng.randint(120, 900)))
+        metrics = {"durationMs": round(took, 2), "billedDurationMs": int(took) + 1, "memorySizeMB": 512,
+                   "maxMemoryUsedMB": rng.randint(88, 131)}
+        if cold:
+            metrics["initDurationMs"] = round(rng.uniform(180, 320), 2)
+        record = {"requestId": rid, "metrics": metrics, "status": "error" if failed else "success"}
+        if failed:
+            record["errorType"] = "TypeError"
+        lines.append((at(took / 1000), json.dumps({"time": stamp(at(took / 1000)), "type": "platform.report",
+                                                   "record": record})))
+        events[streams[i % 2]] += [{"timestamp": _epoch_ms(moment), "message": message} for moment, message in lines]
+    for stream, batch in events.items():
+        logs.put_log_events(logGroupName="/aws/lambda/report-api", logStreamName=stream,
+                            logEvents=sorted(batch, key=lambda e: e["timestamp"]))
+
+
 def seed_lambda_functions() -> dict:
     """moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
     ListProvisionedConcurrencyConfigs or GetRuntimeManagementConfig, leaves reserved concurrency out of GetFunction
@@ -1566,9 +1629,12 @@ def seed_lambda_functions() -> dict:
         kind = "timeout" if i in (5, 31, 47) else "key" if i in (2, 9, 14, 22, 40, 51, 58, 66) else (
             "denied" if i in (18, 37) else "ok")
         seconds = 60.0 if kind == "timeout" else rng.uniform(1.5, 9.0) if kind == "ok" else rng.uniform(0.4, 2.0)
-        ms = lambda offset: int((start + timedelta(seconds=offset)).timestamp() * 1000)  # noqa: E731
+        ms = lambda offset: _epoch_ms(start + timedelta(seconds=offset))  # noqa: E731
         lines = [(0, f"START RequestId: {rid} Version: $LATEST"),
                  (0.05, f"reading s3://acme-uploads/orders/2026-10-06/batch-{i:03d}.json")]
+        if cold:  # the runtime starting, just before a cold start's first line
+            lines.insert(0, (-1.2, "INIT_START Runtime Version: python:3.9.v68\tRuntime Version ARN: "
+                                   "arn:aws:lambda:us-east-1::runtime:5ad8c1e3b3f0b7e2a1f9d4c6e8b0a2f4c6d8e0b2"))
         if kind == "key":
             lines.append((seconds - 0.01, "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n  "
                                           "File \"/var/task/etl.py\", line 23, in handler\n    table.put_item(Item="
@@ -1595,6 +1661,7 @@ def seed_lambda_functions() -> dict:
     for stream, batch in events.items():
         logs.put_log_events(logGroupName="/aws/lambda/orders-etl", logStreamName=stream,
                             logEvents=sorted(batch, key=lambda e: e["timestamp"]))
+    _report_api_logs(logs)
     stored = {"/aws/lambda/orders-etl": int(24.5 * 1024**3), "/aws/lambda/report-api": int(1.2 * 1024**3),
               "/aws/lambda/churn-scoring": 40 * 1024**2, "/aws/lambda/support-agent-actions": 180 * 1024**2}
 
@@ -1634,6 +1701,8 @@ def seed_lambda_functions() -> dict:
                                           f"{name}.zip")
             if name == "report-api":
                 answer["Concurrency"] = {"ReservedConcurrentExecutions": 10}
+                answer["Configuration"]["LoggingConfig"] = {"LogFormat": "JSON", "ApplicationLogLevel": "INFO",
+                                                            "SystemLogLevel": "INFO", "LogGroup": "/aws/lambda/report-api"}
             return answer
 
         def get_policy(FunctionName, **params):

@@ -1,19 +1,20 @@
 ---
 title: Lambda Functions Guide
-description: "How to see every AWS Lambda function, in one region or all of them, from a SageMaker notebook with aws-analyzer's lambda_functions.py: runtimes and their end of support, triggers and public access, calls, errors and cost, errors grouped by cause, logs, memory and cold starts, and the code, with examples."
+description: "How to see every AWS Lambda function, in one region or all of them, from a SageMaker notebook with aws-analyzer's lambda_functions.py: runtimes and their end of support, triggers and public access, calls, errors and cost, errors grouped by cause, logs run by run, memory and cold starts, and the code, in reports or in an explorer window you click through, with examples."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · lambda_functions.py</p>
 
 # See every Lambda function from a SageMaker notebook
 
-One Python file. Drop it next to your notebook and see your Lambda functions, in one region or every one your account uses: what each one runs and when its runtime loses support, what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it fails, read from its own logs, without leaving Jupyter.
+One Python file. Drop it next to your notebook and see your Lambda functions, in one region or every one your account uses: what each one runs and when its runtime loses support, what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it fails, read from its own logs, without leaving Jupyter. Or open the explorer window and see it all by clicking, its logs run by run.
 { .lede }
 
 <ul class="pills">
   <li>One file, boto3 only</li>
   <li>Read-only: never invokes or changes a function</li>
   <li>Every region at once</li>
+  <li>An explorer window: click, don't type</li>
   <li>Plain text outside Jupyter</li>
 </ul>
 
@@ -82,11 +83,110 @@ ui.errors("orders-etl")                     # its errors in the last 24 hours, g
 ui.logs("orders-etl", search="KeyError")    # the newest lines it logged
 ui.performance("orders-etl")                # run times, memory used and cold starts, and the memory it needs
 ui.code("orders-etl")                       # the files in its package, and the handler's source
+ui.explore()                                # all of it in a window, by clicking: functions, logs run by run
 ```
 
 **Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, and at the bottom a **Next** row of two or three commands with the arguments filled in from this report, such as `errors('orders-etl')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
 
 **Naming a function.** Commands that work on one function take its name, `"name:alias"` or `"name:version"`, its ARN, or a link to it in the Lambda console, so you can paste what you have. Functions are regional: pass `region="eu-west-1"` for one outside the view's region (an ARN or a link already says where it is), and after `functions(regions="all")`, a name found in only one other region is looked for there.
+
+## The explorer window { #explorer }
+
+Rather click than type? `explore()` opens a window on your functions that you use by clicking, with nothing to type but a search. Every function in the region is listed with how it's doing. Click one to see what's wrong with it, what calls it and where its results go, and, a click away, its logs run by run, its errors grouped by cause, its run times, the code in its package and every setting. Like the commands, it only reads: where a change would help, it shows the command to run.
+
+```python
+from lambda_functions import explore     # with pip: from aws_analyzer import LambdaExplorer
+
+explore()                                # every function in the notebook's region
+explore("orders-etl")                    # straight to one function: a name, an ARN or a console link
+explore("orders-etl", tab="logs")        # ...on its logs (or "errors", "performance", "code", "settings")
+explore(region="all")                    # every region your account has turned on
+explore(region="eu-west-1", profile="dev")   # another region or AWS profile
+explore(height=800)                      # 800px pages (else the browser's height)
+ui.explore("orders-etl")                 # from a LambdaView
+```
+
+The window needs `ipywidgets`, which SageMaker notebooks already have (elsewhere, `%pip install ipywidgets`, then reload the browser tab). Without it, or outside Jupyter, `explore()` shows the same as reports: [`functions()`](#functions), or for one function [`function_info()`](#function-info) or the report of the tab you asked for.
+
+**The top of the window** is the region field, the function field and their cards. The region field switches to another region, or to every region at once. Click the function field for every function, with a search box that finds one by its name, description, runtime or region; Enter picks the first, and a function's ARN or console link works too, even one in another region. With no function picked, the cards sum up the region: its functions, their calls and error rate over 30 days, the estimated monthly cost, and how many need attention. With one picked, they're its own. The line at the bottom of the window says what's going on.
+
+![The Functions tab of the explorer: the region field, the function field and cards for 5 functions, 192,496 calls in 30 days, a 0.3% error rate, $93.68 a month and 4 that need attention; chips for the functions that need attention, have errors, run an old runtime, are public or weren't called; and the list, problems first: orders-etl on python3.9 (ended) with a 0.6% error rate in red and 3 warnings, report-api on nodejs20.x (ended) and public, churn-scoring, feature-backfill not called in 30 days, and support-agent-actions, each with its calls, error rate, average run time, monthly cost and when it was last called](images/lambda-explorer-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Functions tab of the explorer: the region field, the function field and cards for 5 functions, 192,496 calls in 30 days, a 0.3% error rate, $93.68 a month and 4 that need attention; chips for the functions that need attention, have errors, run an old runtime, are public or weren't called; and the list, problems first: orders-etl on python3.9 (ended) with a 0.6% error rate in red and 3 warnings, report-api on nodejs20.x (ended) and public, churn-scoring, feature-backfill not called in 30 days, and support-agent-actions, each with its calls, error rate, average run time, monthly cost and when it was last called](images/lambda-explorer-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Functions**: every function with its runtime, calls, error rate, run time, cost and warnings, the ones that need attention first.
+///
+
+### Every function { #explorer-functions }
+
+The **Functions** tab lists every function with what CloudWatch counted for it over the last 30 days: its runtime (marked once AWS stops patching it, or when that's close), what triggers it, its calls, error rate, average run time, estimated monthly cost, when it was last called, and how many warnings it has. The ones that need attention come first, and a dot says how each is doing: red when its calls fail often enough to act on, amber when it has a warning, green when all is well, hollow when nothing called it in 30 days.
+
+Type in the search box to find a function by part of its name, its description, runtime, region or trigger (`sqs`). Click a chip to see only the functions that need attention, have errors, run an old runtime, are public or weren't called (click it again for all of them), and click a column's header to sort by it (again for the other way). Click a function to open it, or **Logs** on its line, which shows when you point at it, to go straight to its logs. The list shows at once, and fills in as CloudWatch answers with the calls and errors, then with the triggers each function's resource policy allows.
+
+### Logs, run by run { #explorer-logs }
+
+The **Logs** tab is what CloudWatch would show you, grouped the way you think about it: by run. Each line is one call, newest first: when it started (in UTC), whether it ran (✓), failed (✕), timed out (⏱) or only logged an error (!), how long it ran against the timeout, the memory it used, a cold start, and what made it fail or the first thing it logged. Click a run to see every line it logged, with how far into the run each came and its level. Lambda's START and END lines are folded into the run, and its REPORT line becomes the summary under the lines, with the request ID to copy.
+
+![The Logs tab of orders-etl over the last 24 hours: the time range, the search box, Live and ↻; chips for all 70 runs, 13 failed, 3 timed out and 8 cold starts; a line saying 70 runs, 13 failed (18.6%), a median of 4.87 s, the slowest 60.0 s of 60 s, memory up to 182 of 1,024 MB and 8 cold starts; then the runs, newest first, each with its time, a ✓ or ✕, a bar of its run time against the timeout, its memory and its first line; a failed run is open, showing reading s3://acme-uploads/orders/2026-10-06/batch-002.json at +0.050s, then KeyError: 'customer_id' and its traceback in red, then Ran 1.73 s, billed 1.73 s, used 151 of 1,024 MB and its request ID; under it a run that timed out after 60.0 s with a full red bar](images/lambda-explorer-logs-light.webp#only-light){ width="984" height="860" loading=lazy }
+![The Logs tab of orders-etl over the last 24 hours: the time range, the search box, Live and ↻; chips for all 70 runs, 13 failed, 3 timed out and 8 cold starts; a line saying 70 runs, 13 failed (18.6%), a median of 4.87 s, the slowest 60.0 s of 60 s, memory up to 182 of 1,024 MB and 8 cold starts; then the runs, newest first, each with its time, a ✓ or ✕, a bar of its run time against the timeout, its memory and its first line; a failed run is open, showing reading s3://acme-uploads/orders/2026-10-06/batch-002.json at +0.050s, then KeyError: 'customer_id' and its traceback in red, then Ran 1.73 s, billed 1.73 s, used 151 of 1,024 MB and its request ID; under it a run that timed out after 60.0 s with a full red bar](images/lambda-explorer-logs-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Logs**: orders-etl's last 24 hours, run by run, with a failed run open: its traceback, and its REPORT line summed up.
+///
+
+Above the runs:
+
+- **The time range**, from the last 15 minutes to the last 30 days (the last hour at first). The newest 3,000 lines are read; when the range holds more, **Older runs** under the list reads further back. A range with nothing in it says when the function last logged, and a button picks a range that reaches it.
+- **The search box** finds runs as you type: an order ID, `KeyError`, a request ID, in any case, among the runs read. **Enter** asks CloudWatch to search the whole time range, and brings back each run with a matching line whole, the matching lines marked. A CloudWatch Logs filter pattern (`?ERROR ?WARN`, `{ $.level = "ERROR" }`) works too, with Enter. ✕ shows every run again.
+- **The chips** show only the runs that failed, timed out, logged an error (and may have handled it) or were cold starts.
+- **Live** looks for new lines every 5 seconds and puts the new runs at the top, to watch a function while you test it. It stops when you leave the tab, and after 15 minutes.
+
+The line over the runs sums up the ones shown: how many, how many failed, the median and slowest run time against the timeout, the most memory used, and the cold starts.
+
+![Searching orders-etl's last 24 hours for AccessDenied: 2 runs, both failed, both open; each shows its lines with AccessDenied highlighted in the ClientError that says the role acme-lambda-role isn't authorized to perform dynamodb:PutItem on the orders table, the line marked with a blue bar at its left; the first run was a cold start and starts with its INIT_START line](images/lambda-explorer-search-light.webp#only-light){ width="984" height="860" loading=lazy }
+![Searching orders-etl's last 24 hours for AccessDenied: 2 runs, both failed, both open; each shows its lines with AccessDenied highlighted in the ClientError that says the role acme-lambda-role isn't authorized to perform dynamodb:PutItem on the orders table, the line marked with a blue bar at its left; the first run was a cold start and starts with its INIT_START line](images/lambda-explorer-search-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**AccessDenied**, searched in CloudWatch: two runs in the last 24 hours, each brought back whole, the matching line marked.
+///
+
+Logs in JSON (a function whose log format is JSON) show each line's message, with its other fields a click away. An error the runtime logged in JSON reads like a traceback: its type, its message, then its stack.
+
+![report-api's Logs tab over the last 3 hours: 45 runs, 3 failed; a good run open, its lines GET /reports/weekly?region=AMER and 200 in 99 ms marked INFO, each with {…} fields to open; a failed run open, its ERROR line reading TypeError: Cannot read properties of undefined (reading 'total') then the stack, and its summary saying status error (TypeError)](images/lambda-explorer-json-light.webp#only-light){ width="984" height="860" loading=lazy }
+![report-api's Logs tab over the last 3 hours: 45 runs, 3 failed; a good run open, its lines GET /reports/weekly?region=AMER and 200 in 99 ms marked INFO, each with {…} fields to open; a failed run open, its ERROR line reading TypeError: Cannot read properties of undefined (reading 'total') then the stack, and its summary saying status error (TypeError)](images/lambda-explorer-json-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+report-api logs JSON: each line's message, its level, and its other fields a click away.
+///
+
+### How it's doing { #explorer-overview }
+
+The **Overview** tab has `function_info()`'s findings, each with what to do. Under them, **how it's wired**: what calls the function (the queues and streams Lambda reads for it, the services and accounts its resource policy allows, its function URL), the function, and where its results, failed events and logs go, a failure destination it doesn't have in amber. Then its calls a day over 30 days, the failed part in red, its run time a day against the timeout, and what it costs, by part.
+
+![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and its run time a day, the average under the longest, against a dashed line at its 60 s timeout](images/lambda-explorer-overview-light.webp#only-light){ width="984" height="860" loading=lazy }
+![orders-etl's Overview below its findings: How it's wired, with its SQS queue orders-queue (batches of up to 10) and S3 bucket acme-uploads on the left, the function in the middle (python3.9, 1,024 MB, 60 s timeout, x86_64), and on the right On failure: nowhere: dropped in amber, its log group kept forever with 24.5 GB stored, and the role it may use; then a column per day of the last 30 days for its calls, a thin red top where calls failed, and its run time a day, the average under the longest, against a dashed line at its 60 s timeout](images/lambda-explorer-overview-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Overview**, under the findings: failed S3 events go nowhere, its logs are kept forever, and its longest runs come close to the 60 s timeout.
+///
+
+### Errors, run times, code and settings { #explorer-more }
+
+- **Errors** is [`errors()`](#errors): the errors in its logs grouped by cause, with what to do about each, then the newest failed runs. Click one to read every line of it in the Logs tab.
+- **Performance** is [`performance()`](#performance): run times against the timeout, the memory used against what it has and the size that would do, cold starts, and the slowest runs, each a click from its lines.
+- **Code** downloads the deployment package once and lists its files, the handler's first; click one to see its source, with line numbers, and Python and JSON in colour. A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
+- **Settings** has every setting in plain English, then the configuration as Lambda returns it, folded, and the AWS CLI commands that read it. Environment variable values never appear.
+
+The Errors and Performance tabs read the last 24 hours, and have their own time range.
+
+![orders-etl's Errors tab over the last 24 hours: cards for 35 failed calls, 1,177 calls, a 3.0% error rate, 13 error lines, 3 causes and 3 timeouts; warnings that 3 runs timed out at the 60 s limit, that its role acme-lambda-role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times, each naming the run to read in the Logs tab; then the errors by cause with their share, and the newest failed runs](images/lambda-explorer-errors-light.webp#only-light){ width="984" height="860" loading=lazy }
+![orders-etl's Errors tab over the last 24 hours: cards for 35 failed calls, 1,177 calls, a 3.0% error rate, 13 error lines, 3 causes and 3 timeouts; warnings that 3 runs timed out at the 60 s limit, that its role acme-lambda-role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times, each naming the run to read in the Logs tab; then the errors by cause with their share, and the newest failed runs](images/lambda-explorer-errors-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Errors**: three causes, each with what to do; the failed runs under them open in the Logs tab.
+///
+
+![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; on the left its files, etl.py marked HANDLER, then .env marked KEY, db.py, requirements.txt and the bundled boto3, botocore and psycopg2 files; on the right etl.py with line numbers, its keywords, strings and calls in colour](images/lambda-explorer-code-light.webp#only-light){ width="984" height="860" loading=lazy }
+![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; on the left its files, etl.py marked HANDLER, then .env marked KEY, db.py, requirements.txt and the bundled boto3, botocore and psycopg2 files; on the right etl.py with line numbers, its keywords, strings and calls in colour](images/lambda-explorer-code-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+/// caption
+**Code**: the handler's source, and a `.env` file that shouldn't be in the package.
+///
+
+Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page` and `x.package` hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
 
 ## Every function { #functions }
 
@@ -254,10 +354,12 @@ detail.metrics.daily                              # DailyUsage per day: invocati
 lam.errors("orders-etl", since="7d").groups       # ErrorGroup: kind, message, count, first, last, request_ids
 lam.performance("orders-etl").to_df()             # one row per run: duration, billed, memory used, cold start
 lam.log_events("orders-etl", since="1h", pattern='"KeyError"').to_df()
+runs = lam.log_runs("orders-etl", since="24h").runs   # LogRun per call: .status, .duration, .cold, .events
+lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                      # CodeFile: path, size, compressed
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `percentile`, `suggest_memory`, `handler_file`, `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
 
 ```python
 from lambda_functions import parse_report, runtime_status, suggest_memory
@@ -332,7 +434,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()` downloads the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()` and `code()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`.
+`lambda:GetFunction` also returns the link `code()` downloads the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()` and `code()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -360,6 +462,18 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 
     The estimate is before the free tier, which covers small accounts entirely, and leaves out what other services charge for the same calls (API Gateway, SQS, data transfer). It scales the last 30 days to a month, so a function whose traffic changed lately is estimated from its old traffic too.
 
+??? question "explore() shows a report instead of the window"
+
+    The window needs Jupyter and `ipywidgets`. SageMaker has both; elsewhere, `%pip install ipywidgets`, then restart the kernel and reload the browser tab. In a terminal or a script, `explore()` shows the same as reports: `functions()`, or `function_info()` and the other reports for one function.
+
+??? question "A run in the Logs tab says “no REPORT line yet”"
+
+    Lambda writes a run's REPORT line when the run ends, so the run is still going, or it ended after the time range read. Click ↻ to read the range again, or turn on Live. A run whose START was before the range shows the lines the range holds.
+
+??? question "The explorer window went blank after I reopened the notebook"
+
+    Widgets live in the running kernel, so a saved notebook doesn't keep the window. Run the cell again.
+
 ??? question "The report lost its formatting after I reopened the notebook"
 
     JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.
@@ -372,6 +486,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 
 | Command | What it shows |
 |---|---|
+| `explore(name=None, tab=None, region=None, height=None)` | [The explorer window](#explorer): every function, and for the one you click its health, logs run by run, errors, run times, code and settings, by clicking |
 | `functions(match=None, regions=None, days=30, metrics=True, details=True)` | Every function in the region (or regions, `"all"`): runtime and its support, memory, timeout, triggers, calls, error rate, run time, last called, estimated cost, warnings |
 | `function_info(name, region=None, days=30)` | One function: what it runs, what triggers it and who may call it, failed asynchronous events, what it can reach, versions and aliases, its last 30 days, cost, findings |
 | `errors(name, since="24h", region=None, limit=10000)` | Its errors grouped by cause, with what to do about each and the run to look at |

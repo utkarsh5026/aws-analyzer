@@ -36,27 +36,42 @@ EXPECTED = ["human_size", "human_money", "_require", "_in_notebook", "_esc", "_T
             "_progress_bar", "_progress_text", "_duration", "View.help", "View._show"]
 
 
+def _segment(lines: list[str], node: ast.AST) -> str:
+    """ast.get_source_segment(source, node), from the source split into lines once: get_source_segment splits the
+    whole file again on every call, which takes minutes for the biggest analyzers on Python 3.10."""
+    lineno, end = getattr(node, "lineno", None), getattr(node, "end_lineno", None)
+    col, end_col = getattr(node, "col_offset", None), getattr(node, "end_col_offset", None)
+    if lineno is None or end is None or col is None or end_col is None:
+        return ""
+    if lineno == end:
+        return lines[lineno - 1].encode()[col:end_col].decode()
+    first = lines[lineno - 1].encode()[col:].decode()
+    last = lines[end - 1].encode()[:end_col].decode()
+    return "".join([first, *lines[lineno:end - 1], last])
+
+
 def _definitions(path: Path) -> tuple[dict[str, tuple[int, str]], dict[str, str]]:
     """name -> (line, source) for top-level defs and private View / Analyzer methods, plus the file's
     service-specific tokens (View / Analyzer class names, price table, CSS root class)."""
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+\Z", source)  # line endings kept, as ast counts lines
     defs: dict[str, tuple[int, str]] = {}
     tokens: dict[str, str] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            defs[node.name] = (node.lineno, ast.get_source_segment(source, node) or "")
+            defs[node.name] = (node.lineno, _segment(lines, node))
             if isinstance(node, ast.ClassDef) and node.name.endswith(("View", "Analyzer")):
                 role = "View" if node.name.endswith("View") else "Analyzer"
                 tokens[role] = node.name
                 for member in node.body:
                     if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
                             member.name.startswith("_") or member.name == "help"):
-                        segment = ast.get_source_segment(source, member) or ""
+                        segment = _segment(lines, member)
                         defs[f"{role}.{member.name}"] = (member.lineno, textwrap.dedent("    " + segment))
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
-            defs[name] = (node.lineno, ast.get_source_segment(source, node) or "")
+            defs[name] = (node.lineno, _segment(lines, node))
             if name.endswith("_PRICES"):
                 tokens["PRICES"] = name
     css = re.search(r"""<div class="([\w-]+)">""", defs.get("_render_html", (0, ""))[1])

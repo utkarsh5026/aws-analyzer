@@ -15,6 +15,10 @@ The file has two layers:
     LambdaView       Notebook UI. Calls LambdaAnalyzer and renders readable
                      cards and tables (HTML in Jupyter, plain text in a terminal).
 
+and a window on top of them, LambdaExplorer (explore()): every function to click
+through, and for the one you pick its logs run by run, errors, run times, code and
+settings (ipywidgets, which SageMaker notebooks have).
+
 Functions and their settings come from Lambda, how often they ran, failed and were
 throttled from CloudWatch, and what they logged from CloudWatch Logs. Nothing in this
 file invokes, changes or deletes a function: where a change would help, the report
@@ -31,14 +35,20 @@ Quick start
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
+    ui.explore()                                      # all of it in a window, by clicking: functions, logs, errors
+
+    explore("etl-nightly", tab="logs")                # the window, straight to one function's logs
 
     lam = ui.core                                     # same analyzer, raw data
     df = lam.overview(regions="all").to_df()          # one row per function
     detail = lam.describe("etl-nightly")              # FunctionDetail: .function, .triggers, .aliases, .metrics
+    runs = lam.log_runs("etl-nightly").runs           # LogRun per call: its lines, status, run time, memory
 """
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import difflib
 import fnmatch
 import functools
@@ -47,12 +57,14 @@ import importlib
 import inspect
 import io
 import json
+import keyword
 import math
 import posixpath
 import re
 import sys
 import threading
 import time
+import tokenize
 import unicodedata
 import urllib.request
 import zipfile
@@ -62,7 +74,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Generator, Iterable
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import boto3
 from botocore.config import Config
@@ -446,6 +458,32 @@ def _in_days(days: int) -> str:
     return f"in {days:,} days" if days > 0 else f"{-days:,} days ago"
 
 
+def _css_height(height: int | str | None) -> str | None:
+    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
+    text = "" if height is None else str(height).strip()
+    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
+
+
+def _running_loop() -> asyncio.AbstractEventLoop | None:
+    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
+    where a test run asks its questions while the click waits."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def _cell_number() -> Any:
+    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
+    once, not twice."""
+    try:
+        from IPython.core.getipython import get_ipython
+    except ImportError:
+        return None
+    shell = get_ipython()
+    return getattr(shell, "execution_count", None) if shell is not None else None
+
+
 # =============================================================================
 # 2. Data models (what LambdaAnalyzer returns)
 # =============================================================================
@@ -753,6 +791,29 @@ class Overview:
     metrics_read: int = 0  # metrics requested from CloudWatch, for the cost of this report
     prices: dict[str, float] = field(default_factory=lambda: dict(LAMBDA_PRICES), repr=False)
 
+    def add_extras(self, found: dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]]) -> None:
+        """Adds the reads made per function (LambdaAnalyzer._extras: the callers its resource policy allows, its
+        provisioned concurrency, and what couldn't be read), by function ARN."""
+        for fn in self.functions:
+            if fn.arn in found:
+                triggers, provisioned, errors = found[fn.arn]
+                self.triggers.setdefault(fn.arn, []).extend(triggers)
+                if provisioned:
+                    self.provisioned[fn.arn] = provisioned
+                fn.errors.update(errors)
+        self.details = True
+
+    def add_numbers(self, metrics: dict[str, FunctionMetrics], read: int, peaks: dict[str, float | None],
+                    errors: dict[str, str]) -> None:
+        """Adds CloudWatch's numbers (LambdaAnalyzer._numbers): each function's by ARN, how many metrics that read,
+        each region's most runs at once, and 'region:metrics' -> the error code of a region that couldn't be read."""
+        self.metrics.update(metrics)
+        self.metrics_read += read
+        for region, peak in peaks.items():
+            if region in self.accounts:
+                self.accounts[region].peak_concurrency = peak
+        self.errors.update(errors)
+
     def detail(self, fn: Function) -> FunctionDetail:
         """What the overview knows about one function, shaped like describe()'s answer (fewer sections). Its errors
         name what wasn't read, so findings don't claim, say, that nothing triggers a function whose policy is unread."""
@@ -808,6 +869,84 @@ class LogEvent:
     message: str
     stream: str = ""
     request_id: str | None = None
+    matched: bool = False  # it matched the search that found its run (log_runs(search=...))
+
+
+@dataclass
+class LogRun:
+    """One run (a call) as its log stream recorded it: its lines from START to REPORT, oldest first, with the start-up
+    lines just before START on a cold start. request_id is None for lines that belong to no run in the window."""
+
+    request_id: str | None
+    stream: str = ""
+    events: list[LogEvent] = field(default_factory=list)
+    report: Invocation | None = None  # its REPORT line: run time, memory used, cold start; None until it ends
+
+    @property
+    def start(self) -> datetime:
+        return self.events[0].time
+
+    @property
+    def end(self) -> datetime:
+        return self.events[-1].time
+
+    @property
+    def key(self) -> str:
+        """What tells it apart from the window's other runs, for the window to remember which ones are open."""
+        return f"{self.stream}|{self.request_id or self.start.isoformat()}"
+
+    @functools.cached_property
+    def failures(self) -> list[tuple[LogEvent, str, str]]:
+        """(line, kind, summary) for each line classify_error() says reports an error."""
+        found = []
+        for event in self.events:
+            kind = classify_error(event.message)
+            if kind:
+                found.append((event, *kind))
+        return found
+
+    @property
+    def status(self) -> str:
+        """'timeout'; 'failed' (an error it didn't handle, running out of memory, the runtime exiting); 'logged' (it
+        logged an error, which it may have handled); 'running' (no REPORT line yet: still running, or it ends after
+        the window); 'ok'; or 'outside' (lines that belong to no run)."""
+        if self.request_id is None:
+            return "outside"
+        report = self.report
+        kinds = {kind for _, kind, _ in self.failures}
+        if (report is not None and report.status == "timeout") or "Timeout" in kinds:
+            return "timeout"
+        if (report is not None and (report.status in ("error", "failure") or report.error_type)) or (
+                kinds - {"Logged error"}):
+            return "failed"
+        if kinds:
+            return "logged"
+        return "running" if report is None else "ok"
+
+    @property
+    def error(self) -> tuple[str, str] | None:
+        """(kind, summary) of what made it fail, else of the first error it logged; None when it logged none."""
+        if not self.failures and self.report is not None and self.report.error_type:
+            return self.report.error_type, f"{self.report.error_type} ({self.report.status or 'error'})"
+        serious = [(kind, summary) for _, kind, summary in self.failures if kind != "Logged error"]
+        return (serious or [(kind, summary) for _, kind, summary in self.failures] or [None])[0]
+
+    @property
+    def cold(self) -> bool:
+        """Whether it was a cold start: its REPORT line has a start-up (or SnapStart restore) time, or its stream logged
+        the runtime starting just before it."""
+        if self.report is not None and (self.report.init is not None or self.report.restore is not None):
+            return True
+        return any((_marker(e.message) or ("",))[0] == "init" for e in self.events)
+
+    @property
+    def duration(self) -> float | None:
+        """How long it ran, in ms, from its REPORT line."""
+        return self.report.duration if self.report is not None else None
+
+    @property
+    def matched(self) -> bool:
+        return any(e.matched for e in self.events)
 
 
 @dataclass
@@ -824,6 +963,13 @@ class LogPage:
     covered_from: datetime | None = None  # how far back the events read reach (when truncated)
     latest: datetime | None = None  # the newest event in the log group, when the window had none
     errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def runs(self) -> list[LogRun]:
+        """The events grouped into the runs they belong to, newest first (split_runs). After a search
+        (log_runs(search=...)), only the runs with a line that matched it."""
+        runs = split_runs(self.events)
+        return [run for run in runs if run.matched] if any(e.matched for e in self.events) else runs
 
     def to_df(self):
         pd = _require("pandas", "LogPage.to_df()")
@@ -875,6 +1021,7 @@ class Invocation:
     restore: float | None = None  # ms to restore a SnapStart snapshot
     status: str | None = None  # 'timeout' or 'error' when it didn't succeed (newer runtimes say)
     error_type: str | None = None  # 'Runtime.OutOfMemory', ...
+    stream: str = ""  # the log stream it ran in (performance() fills it in), where the rest of its lines are
 
 
 @dataclass
@@ -1809,6 +1956,26 @@ def classify_error(message: str) -> tuple[str, str] | None:
     return None
 
 
+def _phrase(search: str | None) -> str | None:
+    """The exact text a plain search= looks for (None for a filter pattern with its own syntax), so lines can be
+    checked again here."""
+    text = str(search or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"' and '"' not in text[1:-1]:
+        return text[1:-1]
+    return text if text and not (text.startswith(("{", "[", "?", "-")) or " ?" in text) else None
+
+
+def _filter_pattern(search: str | None) -> str | None:
+    """search= as a CloudWatch Logs filter pattern: plain text becomes an exact, case-sensitive phrase; a pattern
+    ('?ERROR ?WARN', '{ $.level = "ERROR" }') passes through as it is."""
+    if not search:
+        return None
+    text = str(search).strip()
+    if text.startswith(("{", "[", "?", "-", '"')) or " ?" in text:
+        return text
+    return '"' + text.replace('"', '\\"') + '"'
+
+
 def _error_key(text: str) -> str:
     """A message with what changes between occurrences blanked out (IDs, numbers), so repeats group together."""
     text = _REQUEST_ID_RE.sub("<id>", text)
@@ -1967,6 +2134,124 @@ def parse_report(message: str, time: datetime | None = None) -> Invocation | Non
     )
 
 
+_PLATFORM_KINDS = {"platform.start": "start", "platform.runtimeDone": "end", "platform.report": "report",
+                   "platform.initStart": "init", "platform.initRuntimeDone": "init", "platform.initReport": "init",
+                   "platform.restoreStart": "init", "platform.restoreRuntimeDone": "init",
+                   "platform.restoreReport": "init", "platform.extension": "init", "platform.telemetrySubscription":
+                   "init"}  # Lambda's own JSON records -> where they sit in a run
+_STARTING = ("INIT_START", "INIT_REPORT", "INIT_RUNTIME_DONE", "RESTORE_START", "RESTORE_REPORT", "EXTENSION",
+             "TELEMETRY")  # the text lines Lambda writes while an execution environment starts
+
+
+def _marker(message: str) -> tuple[str, str | None] | None:
+    """('start' | 'end' | 'report' | 'init', request ID) for the lines Lambda itself writes around a run (START, END,
+    REPORT and the start-up lines), in text or JSON format; None for any other line."""
+    text = message.lstrip()
+    for kind, prefix in (("start", "START RequestId:"), ("end", "END RequestId:"), ("report", "REPORT RequestId:")):
+        if text.startswith(prefix):
+            words = text[len(prefix):].split()
+            return kind, words[0] if words else None
+    if text.startswith(_STARTING):
+        return "init", None
+    if text.startswith("{") and '"platform.' in text:
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            return None
+        kind = _PLATFORM_KINDS.get(str(doc.get("type"))) if isinstance(doc, dict) else None
+        if kind:
+            record = doc.get("record") if isinstance(doc.get("record"), dict) else {}
+            return kind, str(record["requestId"]) if record.get("requestId") else None
+    return None
+
+
+def split_runs(events: Iterable[LogEvent]) -> list[LogRun]:
+    """Log lines grouped into the runs they belong to, newest run first. An execution environment (a log stream) runs
+    one call at a time, so a run is what its stream recorded from its START line to its REPORT line, with the start-up
+    lines just before START on a cold start; a line that names an open run's request ID goes to that run. A run the
+    window cuts off keeps the lines the window has (no START, or no REPORT yet), and lines that belong to no run come
+    back as a LogRun with request_id None, one per stream."""
+    streams: dict[str, list[LogEvent]] = defaultdict(list)
+    for event in events:
+        streams[event.stream].append(event)
+    runs: list[LogRun] = []
+    for stream, items in streams.items():
+        items.sort(key=lambda e: e.time)
+        running: dict[str, LogRun] = {}  # request ID -> its run, in the order they started
+        ended: dict[str, LogRun] = {}  # request ID -> its run, once its REPORT line came
+        pending: list[LogEvent] = []  # lines no run has claimed yet: a cold start's start-up, or a run's cut-off start
+
+        def begin(request_id: str) -> LogRun:
+            nonlocal pending
+            run = LogRun(request_id, stream, [] if running else pending)
+            if not running:
+                pending = []
+            running[request_id] = run
+            return run
+
+        for event in items:
+            kind, request_id = _marker(event.message) or ("", None)
+            if kind == "start" and request_id:
+                if request_id in running:  # a second START for the same ID: the first never reported
+                    runs.append(running.pop(request_id))
+                begin(request_id).events.append(event)
+            elif kind == "end" and request_id in ended and request_id not in running:
+                ended[request_id].events.append(event)  # its REPORT line came first (the same millisecond)
+            elif kind in ("end", "report") and request_id:
+                run = running.get(request_id) or begin(request_id)  # started before the window
+                run.events.append(event)
+                if kind == "report":
+                    run.report = parse_report(event.message, event.time)
+                    if run.report is not None:
+                        run.report.stream = stream
+                    runs.append(running.pop(request_id))
+                    ended[request_id] = run
+            else:
+                run = running.get(event.request_id or "")
+                if run is None and running:
+                    run = next(reversed(running.values()))  # the run that started last (one at a time, usually)
+                if run is not None:
+                    run.events.append(event)
+                else:
+                    pending.append(event)
+        runs.extend(running.values())  # no REPORT yet: still running, or it ended after the window
+        if pending:
+            runs.append(LogRun(None, stream, pending))
+    return sorted(runs, key=lambda r: (r.start, r.end), reverse=True)
+
+
+_LEVEL_TAG_RE = re.compile(r"^\[(ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\]")
+_LEVELS = {"ERROR": "error", "CRITICAL": "error", "FATAL": "error", "WARNING": "warn", "WARN": "warn",
+           "INFO": "info", "DEBUG": "debug", "TRACE": "debug"}
+
+
+def line_level(message: str) -> str:
+    """What kind of line a log line is: 'report' (the REPORT line that ends a run), 'platform' (Lambda's START, END and
+    start-up lines), 'error', 'warn', 'info', 'debug', or '' when it doesn't say. Reads Lambda's text formats (Python's
+    '[ERROR]', Node's '<time>\\t<request>\\tWARN\\t...') and JSON logs (their "level")."""
+    text = message.lstrip()
+    mark = _marker(text)
+    if mark is not None:
+        return "report" if mark[0] == "report" else "platform"
+    if classify_error(text):
+        return "error"
+    if text.startswith("{"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            doc = None
+        if isinstance(doc, dict):
+            return _LEVELS.get(str(doc.get("level") or doc.get("levelname") or doc.get("severity") or "").upper(), "")
+    tag = _LEVEL_TAG_RE.match(text)
+    if tag:
+        return _LEVELS[tag.group(1)]
+    parts = text.split("\t", 3)
+    if len(parts) >= 3 and _TIMESTAMP_RE.match(parts[0].strip()) and parts[2].strip() in _LEVELS:
+        return _LEVELS[parts[2].strip()]
+    word = re.match(r"^(WARNING|WARN|INFO|DEBUG)\b", text)
+    return _LEVELS[word.group(1)] if word else ""
+
+
 def percentile(values: Iterable[float], q: float) -> float | None:
     """The nearest-rank percentile (q from 0 to 100) of the values; None when there are none."""
     ordered = sorted(values)
@@ -2050,6 +2335,7 @@ def performance_findings(perf: Performance, prices: dict[str, float] | None = No
 
 
 _HANDLER_EXTENSIONS = {"python": (".py",), "nodejs": (".js", ".mjs", ".cjs"), "ruby": (".rb",)}
+_SOURCE_LIMIT = 200 * KB  # the most of one file code() reads and shows
 _SECRET_FILE_RE = re.compile(
     r"(^|/)(\.env(\.[\w-]+)?|credentials|[\w.-]+\.pem|id_rsa|id_ed25519|\.npmrc|\.pypirc|\.netrc)$", re.I
 )
@@ -2079,6 +2365,71 @@ def handler_file(handler: str | None, runtime: str | None, names: Iterable[str])
 def _top_folder(path: str) -> str:
     head, _, rest = path.partition("/")
     return f"{head}/" if rest else "(top level)"
+
+
+def _pick_file(wanted: str, names: list[str]) -> str:
+    """A file in the package from what the user typed: its path, its name, the end of its path, or a glob."""
+    wanted = wanted.strip().lstrip("/")
+    if wanted in names:
+        return wanted
+    for test in (
+        lambda n: n.endswith("/" + wanted),
+        lambda n: posixpath.basename(n) == wanted,
+        lambda n: fnmatch.fnmatchcase(n, wanted) or fnmatch.fnmatchcase(posixpath.basename(n), wanted),
+    ):
+        hits = sorted((n for n in names if test(n)), key=lambda n: (n.count("/"), n))
+        if hits:
+            return hits[0]
+    close = difflib.get_close_matches(wanted, names, n=3) or difflib.get_close_matches(
+        wanted, [posixpath.basename(n) for n in names], n=3)
+    hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+    raise ValueError(f"No file {wanted!r} in the package.{hint} code() without file= lists them")
+
+
+def read_package(fn: Function, data: bytes | None, file: str | None = None) -> CodePackage:
+    """A deployment package (the .zip as code() downloads it) as the files in it, the file that holds the handler, and
+    the text of that file, or of file= (a path, a file name or a glob like '*.py'). No AWS calls, and nothing in it is
+    run. A secrets file (.env, keys, credentials) is named but its text isn't read. data=None means there's nothing to
+    read: a container image, or no link to the code (the note says which)."""
+    package = CodePackage(fn)
+    if fn.package_type == "Image":
+        package.note = (
+            f"It's a container image ({fn.image_uri or 'image URI not shown'}): its code is in the image, which "
+            "this doesn't pull. docker pull it from ECR to look inside."
+        )
+        return package
+    if data is None:
+        package.note = "Lambda gave no link to download its code."
+        return package
+    package.size = len(data)
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError(f"The package ({human_size(len(data))}) isn't a readable .zip file") from None
+    with archive:
+        entries = [info for info in archive.infolist() if not info.is_dir()]
+        package.files = [CodeFile(info.filename, info.file_size, info.compress_size) for info in entries]
+        names = [info.filename for info in entries]
+        package.handler_file = handler_file(fn.handler, fn.runtime, names)
+        wanted = _pick_file(file, names) if file else package.handler_file
+        if wanted and _SECRET_FILE_RE.search(wanted):
+            package.shown_file = wanted
+            package.note = (
+                f"{wanted} looks like a secrets file, so its text isn't shown: a notebook's output is easy to "
+                f"share. To read it anyway, aws lambda get-function {_cli(fn)} --query Code.Location --output "
+                "text prints a link to the package that works for 10 minutes."
+            )
+        elif wanted:
+            with archive.open(wanted) as handle:
+                raw = handle.read(_SOURCE_LIMIT + 1)
+            package.source_truncated = len(raw) > _SOURCE_LIMIT
+            raw = raw[:_SOURCE_LIMIT]
+            package.shown_file = wanted
+            if b"\x00" in raw[:8192]:
+                package.note = f"{wanted} is a binary file, so its text isn't shown."
+            else:
+                package.source = raw.decode("utf-8", errors="replace")
+    return package
 
 
 def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
@@ -2129,6 +2480,26 @@ def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
     return found
 
 
+def search_rank(text: str, fields: Iterable[Any]) -> int | None:
+    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
+    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
+    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
+    empty search finds everything, at 3."""
+    wanted = " ".join(str(text or "").lower().split())
+    if not wanted:
+        return 3
+    values = [" ".join(str(f).lower().split()) for f in fields if f]
+    if wanted in values:
+        return 0
+    if any(v.startswith(wanted) for v in values):
+        return 1
+    if any(wanted in v for v in values):
+        return 2
+    if all(any(word in v for v in values) for word in wanted.split()):
+        return 3
+    return None
+
+
 # =============================================================================
 # 4. LambdaAnalyzer - pure logic layer (talks to AWS, returns data)
 # =============================================================================
@@ -2143,7 +2514,8 @@ _ERROR_PATTERN = (
     '?timeout ?"Runtime exited" ?"signal: killed"'
 )
 _REPORT_PATTERN = '?"REPORT RequestId" ?"platform.report"'
-_SOURCE_LIMIT = 200 * KB  # the most of one file code() reads and shows
+_SEARCH_HITS = 500  # log_runs(search=...) reads at most this many matching lines (the newest)...
+_SEARCH_WINDOWS = 30  # ...and the whole runs around the newest this many of them (a read each)
 
 
 def _to_ms(moment: datetime) -> int:
@@ -2559,52 +2931,72 @@ class LambdaAnalyzer:
             if out.get("account") is not None:
                 ov.accounts[region] = out["account"]
         if details and ov.functions:
-            for region in found:  # make each region's client before the threads start using it
-                self._service("lambda", region)
-
-            def extra(fn: Function) -> tuple[Function, list[Trigger], list[ProvisionedConcurrency]]:
-                triggers: list[Trigger] = []
-                provisioned: list[ProvisionedConcurrency] = []
-                try:
-                    triggers = parse_policy(self.policy(fn.name, fn.region))
-                except ClientError as exc:
-                    fn.errors["policy"] = _error_code(exc)
-                except BotoCoreError as exc:
-                    fn.errors["policy"] = type(exc).__name__
-                try:
-                    provisioned = self.provisioned(fn.name, fn.region)
-                except ClientError as exc:
-                    fn.errors["provisioned"] = _error_code(exc)
-                except BotoCoreError as exc:
-                    fn.errors["provisioned"] = type(exc).__name__
-                return fn, triggers, provisioned
-
-            pending = list(ov.functions)
-            done = 0
-            for start in range(0, len(pending), 50):  # in batches, so progress moves as they finish
-                for fn, triggers, provisioned in self._map(extra, pending[start : start + 50]):
-                    ov.triggers.setdefault(fn.arn, []).extend(triggers)
-                    if provisioned:
-                        ov.provisioned[fn.arn] = provisioned
-                done = min(start + 50, len(pending))
-                if progress:
-                    progress(done, len(pending))
+            ov.add_extras(self._all_extras(ov.functions, progress=progress))
         if metrics:
-            for region, functions in found.items():
-                if not functions:
-                    continue
-                try:  # concurrency too: what provisioned concurrency is weighed against
-                    numbers, read = self.metrics(functions, since=since, until=until, concurrency=True)
-                    ov.metrics.update(numbers)
-                    ov.metrics_read += read
-                    if region in ov.accounts:
-                        ov.accounts[region].peak_concurrency = self.peak_concurrency(region, since=since, until=until)
-                        ov.metrics_read += 1
-                except ClientError as exc:
-                    ov.errors[f"{region}:metrics"] = _error_code(exc)
-                except BotoCoreError as exc:
-                    ov.errors[f"{region}:metrics"] = type(exc).__name__
+            ov.add_numbers(*self._numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
         return ov
+
+    def _extras(self, fn: Function) -> tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]:
+        """The reads overview() makes per function: the callers its resource policy allows, and its provisioned
+        concurrency, with section -> error code for what couldn't be read."""
+        triggers: list[Trigger] = []
+        provisioned: list[ProvisionedConcurrency] = []
+        errors: dict[str, str] = {}
+        try:
+            triggers = parse_policy(self.policy(fn.name, fn.region))
+        except ClientError as exc:
+            errors["policy"] = _error_code(exc)
+        except BotoCoreError as exc:
+            errors["policy"] = type(exc).__name__
+        try:
+            provisioned = self.provisioned(fn.name, fn.region)
+        except ClientError as exc:
+            errors["provisioned"] = _error_code(exc)
+        except BotoCoreError as exc:
+            errors["provisioned"] = type(exc).__name__
+        return triggers, provisioned, errors
+
+    def _all_extras(
+        self, functions: list[Function], *, progress: Callable[..., None] | None = None
+    ) -> dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]]:
+        """_extras() for each function, in parallel, by function ARN (Overview.add_extras adds them)."""
+        for region in dict.fromkeys(fn.region for fn in functions):  # each region's client before the threads use it
+            self._service("lambda", region or None)
+        found: dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]] = {}
+        for start in range(0, len(functions), 50):  # in batches, so progress moves as they finish
+            batch = functions[start : start + 50]
+            found.update({fn.arn: extras for fn, extras in zip(batch, self._map(self._extras, batch))})
+            if progress:
+                progress(min(start + 50, len(functions)), len(functions))
+        return found
+
+    def _numbers(
+        self, functions: list[Function], *, since: datetime, until: datetime, limits: set[str] | None = None
+    ) -> tuple[dict[str, FunctionMetrics], int, dict[str, float | None], dict[str, str]]:
+        """CloudWatch's numbers for overview() (Overview.add_numbers adds them): each function's from `since` to `until`
+        by ARN, concurrency included (what provisioned concurrency is weighed against); how many metrics that read;
+        the most runs at once in each region of `limits`; and 'region:metrics' -> the error code of a region that
+        couldn't be read."""
+        found: dict[str, FunctionMetrics] = {}
+        read = 0
+        peaks: dict[str, float | None] = {}
+        errors: dict[str, str] = {}
+        by_region: dict[str, list[Function]] = defaultdict(list)
+        for fn in functions:
+            by_region[fn.region or self.region].append(fn)
+        for region, group in by_region.items():
+            try:
+                numbers, count = self.metrics(group, since=since, until=until, concurrency=True)
+                found.update(numbers)
+                read += count
+                if region in (limits or ()):
+                    peaks[region] = self.peak_concurrency(region, since=since, until=until)
+                    read += 1
+            except ClientError as exc:
+                errors[f"{region}:metrics"] = _error_code(exc)
+            except BotoCoreError as exc:
+                errors[f"{region}:metrics"] = type(exc).__name__
+        return found, read, peaks, errors
 
     # ------------------------------------------------------------------ one function
 
@@ -2821,6 +3213,20 @@ class LambdaAnalyzer:
         run, the lines it printed without the ID included."""
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
+        return self._log_page(fn, start, end, pattern=pattern, request_id=request_id, limit=limit, progress=progress)
+
+    def _log_page(
+        self,
+        fn: Function,
+        start: datetime,
+        end: datetime,
+        *,
+        pattern: str | None = None,
+        request_id: str | None = None,
+        limit: int | None = 10_000,
+        progress: Callable[..., None] | None = None,
+    ) -> LogPage:
+        """log_events() for a function already read (no GetFunction)."""
         page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
         try:
             if request_id:
@@ -2845,6 +3251,106 @@ class LambdaAnalyzer:
             page.latest = self._latest(fn.log_group, fn.region)
         return page
 
+    def log_runs(
+        self,
+        ref: str,
+        *,
+        since: Any = "1h",
+        until: Any = None,
+        search: str | None = None,
+        limit: int | None = 3_000,
+        region: str | None = None,
+        progress: Callable[..., None] | None = None,
+    ) -> LogPage:
+        """What a function logged from `since` to `until`, as runs: .runs is a LogRun per call, newest first, each with
+        every line it logged, its status (ok, failed, timeout...), run time, memory and cold start. Reads the newest
+        `limit` lines. search= ('KeyError', an order ID, a request ID, or a CloudWatch Logs filter pattern) keeps the
+        runs with a matching line, each with all of its lines (the matching ones are marked)."""
+        fn = self.function(ref, region=region)
+        start, end = self._window(since, until)
+        return self._log_runs(fn, start, end, search=search, limit=limit, progress=progress)
+
+    def _log_runs(
+        self,
+        fn: Function,
+        start: datetime,
+        end: datetime,
+        *,
+        search: str | None = None,
+        limit: int | None = 3_000,
+        progress: Callable[..., None] | None = None,
+    ) -> LogPage:
+        """log_runs() for a function already read (no GetFunction)."""
+        pattern = _filter_pattern(search)
+        if not pattern:
+            return self._log_page(fn, start, end, limit=limit, progress=progress)
+        page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
+        try:
+            hits, page.truncated, page.covered_from = self._filter(
+                fn.log_group, fn.region, start, end, pattern, _SEARCH_HITS, progress=progress)
+            phrase = _phrase(search)
+            if phrase:  # the same check here, for log stores that only roughly apply patterns
+                hits = [e for e in hits if phrase in e.message]
+            page.events = self._around(fn, hits, limit)
+        except ClientError as exc:
+            page.errors["logs"] = _error_code(exc)
+            return page
+        except BotoCoreError as exc:
+            page.errors["logs"] = type(exc).__name__
+            return page
+        if not page.events:
+            page.latest = self._latest(fn.log_group, fn.region)
+        return page
+
+    def _around(self, fn: Function, hits: list[LogEvent], limit: int | None = 3_000) -> list[LogEvent]:
+        """Every line of the runs that `hits` (lines a search found) belong to, oldest first, the hits marked: each
+        stream's lines from a timeout before a hit to a timeout after it (no run lasts longer), windows that overlap
+        read once, the newest _SEARCH_WINDOWS of them."""
+        pad = timedelta(seconds=fn.timeout + 10)
+        spans: dict[str, list[list[datetime]]] = {}
+        for hit in sorted(hits, key=lambda e: e.time):
+            hit.matched = True
+            windows = spans.setdefault(hit.stream, [])
+            if windows and hit.time - pad <= windows[-1][1]:
+                windows[-1][1] = hit.time + pad
+            else:
+                windows.append([hit.time - pad, hit.time + pad])
+        reads = sorted(((stream, a, b) for stream, windows in spans.items() for a, b in windows if stream),
+                       key=lambda job: job[2], reverse=True)[:_SEARCH_WINDOWS]
+        wanted = {(e.stream, e.time, e.message) for e in hits}
+
+        def read(job: tuple[str, datetime, datetime]) -> list[LogEvent]:
+            stream, a, b = job
+            return self._filter(fn.log_group, fn.region, a, b, None, limit, stream=stream)[0]
+
+        found: dict[tuple[str, datetime, str], LogEvent] = {}
+        for events in self._map(read, reads):
+            for event in events:
+                key = (event.stream, event.time, event.message)
+                event.matched = key in wanted
+                found.setdefault(key, event)
+        for hit in hits:  # a hit whose window wasn't read still shows, on its own
+            found.setdefault((hit.stream, hit.time, hit.message), hit)
+        return sorted(found.values(), key=lambda e: e.time)
+
+    def _run_around(
+        self, fn: Function, moment: datetime, *, stream: str = "", request_id: str | None = None
+    ) -> LogRun | None:
+        """The whole run that logged a line at `moment` in `stream` (the one with request_id, when given): its stream's
+        lines from a timeout before to a timeout after. Without a stream, a search for the request ID finds it."""
+        pad = timedelta(seconds=fn.timeout + 10)
+        if stream:
+            events = self._filter(fn.log_group, fn.region, moment - pad, moment + pad, None, 10_000, stream=stream)[0]
+        elif request_id:
+            events = self._around(fn, self._filter(fn.log_group, fn.region, moment - pad, moment + pad,
+                                                   f'"{request_id}"', _SEARCH_HITS)[0], 10_000)
+        else:
+            return None
+        runs = [run for run in split_runs(events) if run.request_id]
+        if request_id:
+            return next((run for run in runs if run.request_id == request_id), None)
+        return next((run for run in runs if run.start <= moment <= run.end), None)
+
     def errors(
         self,
         ref: str,
@@ -2859,6 +3365,18 @@ class LambdaAnalyzer:
         CloudWatch's count of failed and throttled calls over the same window."""
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
+        return self._errors(fn, start, end, limit=limit, progress=progress)
+
+    def _errors(
+        self,
+        fn: Function,
+        start: datetime,
+        end: datetime,
+        *,
+        limit: int | None = 10_000,
+        progress: Callable[..., None] | None = None,
+    ) -> ErrorReport:
+        """errors() for a function already read (no GetFunction)."""
         report = ErrorReport(fn, fn.log_group, start, end)
         events: list[LogEvent] = []
         try:
@@ -2897,6 +3415,18 @@ class LambdaAnalyzer:
         logs after each: run time, billed time, memory used, and the start-up time of cold starts."""
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
+        return self._performance(fn, start, end, limit=limit, progress=progress)
+
+    def _performance(
+        self,
+        fn: Function,
+        start: datetime,
+        end: datetime,
+        *,
+        limit: int | None = 5_000,
+        progress: Callable[..., None] | None = None,
+    ) -> Performance:
+        """performance() for a function already read (no GetFunction)."""
         perf = Performance(fn, fn.log_group, start, end)
         try:
             events, perf.truncated, perf.covered_from = self._filter(
@@ -2907,7 +3437,12 @@ class LambdaAnalyzer:
         except BotoCoreError as exc:
             perf.errors["logs"] = type(exc).__name__
             return perf
-        runs = [run for run in (parse_report(e.message, e.time) for e in events) if run is not None]
+        runs = []
+        for event in events:
+            run = parse_report(event.message, event.time)
+            if run is not None:
+                run.stream = event.stream
+                runs.append(run)
         perf.invocations = sorted(runs, key=lambda r: r.time or start, reverse=True)
         return perf
 
@@ -2937,6 +3472,13 @@ class LambdaAnalyzer:
                                             more=f"{math.ceil(max_bytes * 2 / MB)}MB"))
         return data
 
+    def _package(self, fn: Function, max_size: Any = "50MB") -> bytes | None:
+        """A function's deployment package (fn as function() returns it, with the link GetFunction gives), downloaded up
+        to max_size; None for a container image, or when Lambda gave no link."""
+        if fn.package_type == "Image" or not fn.code_location:
+            return None
+        return self._download(fn.code_location, parse_size(max_size))
+
     def code(
         self, ref: str, *, file: str | None = None, max_size: Any = "50MB", region: str | None = None
     ) -> CodePackage:
@@ -2945,65 +3487,7 @@ class LambdaAnalyzer:
         package (up to max_size) from the link Lambda gives; nothing in it is run. A secrets file (.env, keys,
         credentials) is named but its text isn't read, and a container image is named, not pulled."""
         fn = self.function(ref, region=region)
-        package = CodePackage(fn)
-        if fn.package_type == "Image":
-            package.note = (
-                f"It's a container image ({fn.image_uri or 'image URI not shown'}): its code is in the image, which "
-                "this doesn't pull. docker pull it from ECR to look inside."
-            )
-            return package
-        if not fn.code_location:
-            package.note = "Lambda gave no link to download its code."
-            return package
-        data = self._download(fn.code_location, parse_size(max_size))
-        package.size = len(data)
-        try:
-            archive = zipfile.ZipFile(io.BytesIO(data))
-        except zipfile.BadZipFile:
-            raise ValueError(f"The package ({human_size(len(data))}) isn't a readable .zip file") from None
-        with archive:
-            entries = [info for info in archive.infolist() if not info.is_dir()]
-            package.files = [CodeFile(info.filename, info.file_size, info.compress_size) for info in entries]
-            names = [info.filename for info in entries]
-            package.handler_file = handler_file(fn.handler, fn.runtime, names)
-            wanted = _pick_file(file, names) if file else package.handler_file
-            if wanted and _SECRET_FILE_RE.search(wanted):
-                package.shown_file = wanted
-                package.note = (
-                    f"{wanted} looks like a secrets file, so its text isn't shown: a notebook's output is easy to "
-                    f"share. To read it anyway, aws lambda get-function {_cli(fn)} --query Code.Location --output "
-                    "text prints a link to the package that works for 10 minutes."
-                )
-            elif wanted:
-                with archive.open(wanted) as handle:
-                    raw = handle.read(_SOURCE_LIMIT + 1)
-                package.source_truncated = len(raw) > _SOURCE_LIMIT
-                raw = raw[:_SOURCE_LIMIT]
-                package.shown_file = wanted
-                if b"\x00" in raw[:8192]:
-                    package.note = f"{wanted} is a binary file, so its text isn't shown."
-                else:
-                    package.source = raw.decode("utf-8", errors="replace")
-        return package
-
-
-def _pick_file(wanted: str, names: list[str]) -> str:
-    """A file in the package from what the user typed: its path, its name, the end of its path, or a glob."""
-    wanted = wanted.strip().lstrip("/")
-    if wanted in names:
-        return wanted
-    for test in (
-        lambda n: n.endswith("/" + wanted),
-        lambda n: posixpath.basename(n) == wanted,
-        lambda n: fnmatch.fnmatchcase(n, wanted) or fnmatch.fnmatchcase(posixpath.basename(n), wanted),
-    ):
-        hits = sorted((n for n in names if test(n)), key=lambda n: (n.count("/"), n))
-        if hits:
-            return hits[0]
-    close = difflib.get_close_matches(wanted, names, n=3) or difflib.get_close_matches(
-        wanted, [posixpath.basename(n) for n in names], n=3)
-    hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
-    raise ValueError(f"No file {wanted!r} in the package.{hint} code() without file= lists them")
+        return read_package(fn, self._package(fn, max_size), file=file)
 
 
 # =============================================================================
@@ -3082,6 +3566,31 @@ class _Tone:
         return self.text
 
 
+@dataclass
+class _Wiring:
+    """How a function is wired, left to right: what calls it, the function, and where its results, failed events and
+    logs go. A diagram in HTML, a line for each side in text."""
+
+    inputs: list[tuple[str, str, str, str]]  # (kind, name, detail, tone 'warn' | 'bad' | '')
+    center: tuple[str, str]  # (the function's name, what it runs)
+    outputs: list[tuple[str, str, str, str]]  # (what goes there, where, detail, tone)
+    title: str = ""
+    empty: str = "Nothing calls it on its own"  # said in the inputs column when there are none
+
+
+@dataclass
+class _Columns:
+    """Numbers over time, a column each (a day, or an hour), with part of each column in a second colour: errors in
+    red, or a column's average under its longest. A row of columns in HTML, a sparkline in text."""
+
+    items: list[tuple[str, float, float, str]]  # (label, the column's value, the part in the second colour, tooltip)
+    title: str = ""
+    part: str = "bad"  # the part's colour: 'bad' (red: errors) or 'dim' (the average under the longest)
+    limit: float | None = None  # a dashed line at this value (a timeout), drawn when the columns come near it
+    limit_label: str = ""
+    unit: str = ""  # 'ms' shows the scale as run times; '' as counts
+
+
 _CSS = """<style>
 .lmb{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .lmb h3{margin:10px 0 2px;font-size:16px}
@@ -3135,6 +3644,29 @@ _CSS = """<style>
 .lmb .next{border-top:1px dashed rgba(127,127,127,.35)}
 .lmb .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
 .lmb .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+.lmb .wire{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,.9fr) 26px minmax(0,1fr);align-items:center;margin:6px 0 10px;max-width:980px}
+.lmb .wire .wc{display:flex;flex-direction:column;gap:6px;min-width:0}
+.lmb .wire .wa{text-align:center;font-size:18px;opacity:.45}
+.lmb .wire .wn{border:1px solid rgba(127,127,127,.3);border-radius:8px;padding:5px 10px;line-height:1.35;min-width:0}
+.lmb .wire .wn.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
+.lmb .wire .wn.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
+.lmb .wire .wn.none{border-style:dashed;opacity:.7}
+.lmb .wire .wk{display:block;font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.6}
+.lmb .wire .wn b{display:block;font-weight:600;overflow-wrap:anywhere}
+.lmb .wire .wd{display:block;font-size:11.5px;opacity:.7;overflow-wrap:anywhere}
+.lmb .wire .wf{border:1px solid rgba(234,88,12,.55);border-radius:10px;padding:10px 12px;background:rgba(234,88,12,.06);text-align:center}
+.lmb .wire .wf .wl{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;margin-bottom:4px;color:#fff;font-weight:700;background:linear-gradient(135deg,#f97316,#ea580c)}
+.lmb .wire .wf b{display:block;font-size:14px;overflow-wrap:anywhere}
+.lmb .cols{display:flex;align-items:flex-end;gap:2px;height:120px;padding:0 0 0 2px;position:relative;border-bottom:1px solid rgba(127,127,127,.35);max-width:980px}
+.lmb .cols i{flex:1 1 0;min-width:2px;max-width:34px;border-radius:2px 2px 0 0;background:rgba(59,130,246,.55);position:relative;display:flex;flex-direction:column;justify-content:flex-start}
+.lmb .cols i:hover{background:rgba(59,130,246,.8)}
+.lmb .cols i b{display:block;width:100%;border-radius:2px 2px 0 0;background:#ef4444}
+.lmb .cols.dim i{background:rgba(59,130,246,.22);justify-content:flex-end}
+.lmb .cols.dim i b{background:rgba(59,130,246,.75);border-radius:0}
+.lmb .cols .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
+.lmb .cols .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
+.lmb .cols .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
+.lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}
 </style>"""
 
 
@@ -3378,8 +3910,51 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
                 if block.title or hint:
                     out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
                 out.append(pre)
+        elif isinstance(block, _Wiring):
+            out.append(_wiring_html(block))
+        elif isinstance(block, _Columns):
+            out.append(_columns_html(block))
     out.append("</div>")
     return "".join(out)
+
+
+def _wiring_html(block: _Wiring) -> str:
+    def node(kind: str, name: str, detail: str, tone: str) -> str:
+        return (f'<div class="wn {tone if tone in _TONES else ""}"><span class="wk">{_esc(kind)}</span>'
+                f"<b>{_esc(name or '-')}</b>" + (f'<span class="wd">{_prose(detail)}</span>' if detail else "") + "</div>")
+
+    inputs = "".join(node(*item) for item in block.inputs) or f'<div class="wn none">{_esc(block.empty)}</div>'
+    outputs = "".join(node(*item) for item in block.outputs)
+    name, detail = block.center
+    center = (f'<div class="wf"><span class="wl">λ</span><b>{_esc(name)}</b>'
+              + (f'<span class="wd">{_esc(detail)}</span>' if detail else "") + "</div>")
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    return (f'{title}<div class="wire"><div class="wc">{inputs}</div><div class="wa">→</div><div class="wc">{center}'
+            f'</div><div class="wa">→</div><div class="wc">{outputs}</div></div>')
+
+
+def _columns_html(block: _Columns) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    if not block.items:
+        return title + '<div class="more">(none)</div>'
+    tallest = max(value for _, value, _, _ in block.items)
+    shown_limit = block.limit is not None and tallest >= 0.5 * block.limit
+    top = max(tallest, block.limit or 0) if shown_limit else tallest
+    top = top or 1
+    bars = "".join(
+        f'<i style="height:{max(value / top * 100, 1.5 if value else 0):.1f}%" title="{_esc(tip)}">'
+        + (f'<b style="height:{min(100.0, part / value * 100):.1f}%"></b>' if value and part else "") + "</i>"
+        for _, value, part, tip in block.items
+    )
+    scale = human_ms(tallest) if block.unit == "ms" else f"{tallest:,.0f}"
+    limit = ""
+    if shown_limit and block.limit is not None:
+        limit = (f'<span class="lim" style="bottom:{block.limit / top * 100:.1f}%"><span>'
+                 f"{_esc(block.limit_label)}</span></span>")
+    labels = [block.items[0][0], block.items[len(block.items) // 2][0], block.items[-1][0]]
+    axis = "".join(f"<span>{_esc(label)}</span>" for label in (labels if len(block.items) > 2 else labels[::2]))
+    return (f'{title}<div class="cols{" dim" if block.part == "dim" else ""}"><span class="top">{_esc(scale)}</span>'
+            f'{limit}{bars}</div><div class="colx">{axis}</div>')
 
 
 def _text_bar(fraction: float, width: int = 20) -> str:
@@ -3459,6 +4034,25 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
             if block.title:
                 out += ["", f"-- {block.title} --"]
             out.append(block.text)
+        elif isinstance(block, _Wiring):
+            out += ["", f"-- {block.title} --"] if block.title else [""]
+            calls = "; ".join(f"{kind} {name}".strip() + (" (!)" if tone in ("warn", "bad") else "")
+                              for kind, name, _, tone in block.inputs) or block.empty
+            name, detail = block.center
+            goes = "; ".join(f"{what}: {where}" + (" (!)" if tone in ("warn", "bad") else "")
+                             for what, where, _, tone in block.outputs)
+            out += [f"  Called by: {calls}", f"  Runs:      {name}" + (f" ({detail})" if detail else ""),
+                    f"  Then:      {goes}"]
+        elif isinstance(block, _Columns):
+            out += ["", f"-- {block.title} --"] if block.title else [""]
+            if block.items:
+                tallest = max(value for _, value, _, _ in block.items) or 1
+                spark = "".join(" ▁▂▃▄▅▆▇█"[min(8, round(value / tallest * 8))] for _, value, _, _ in block.items)
+                label, value = max(((label, value) for label, value, _, _ in block.items), key=lambda lv: lv[1])
+                most = human_ms(value) if block.unit == "ms" else f"{value:,.0f}"
+                out.append(f"  {block.items[0][0]} {spark} {block.items[-1][0]}   (the most: {most}, {label})")
+            else:
+                out.append("(none)")
     return "\n".join(out)
 
 
@@ -3606,6 +4200,9 @@ _DURATION_BANDS = (  # performance()'s table of how long runs take
 )
 
 
+_INFO_ORDER = ("head", "runs", "triggers", "async", "access", "versions", "days", "cost", "tags", "raw", "next")  # function_info()'s parts
+
+
 def _unread(errors: dict[str, str], owner: str) -> _Note | None:
     """One note naming the sections that couldn't be read ('its versions', "us-east-1's limits"), each with the
     permission it needs."""
@@ -3728,26 +4325,6 @@ def _lifecycle(message: str) -> bool:
         f'"type":"platform.{kind}"' in text.replace(" ", "") for kind in ("start", "runtimeDone", "initStart"))
 
 
-def _phrase(search: str | None) -> str | None:
-    """The exact text a plain search= looks for (None for a filter pattern with its own syntax), so lines can be
-    checked again here."""
-    text = str(search or "").strip()
-    if len(text) >= 2 and text[0] == text[-1] == '"' and '"' not in text[1:-1]:
-        return text[1:-1]
-    return text if text and not (text.startswith(("{", "[", "?", "-")) or " ?" in text) else None
-
-
-def _filter_pattern(search: str | None) -> str | None:
-    """search= as a CloudWatch Logs filter pattern: plain text becomes an exact, case-sensitive phrase; a pattern
-    ('?ERROR ?WARN', '{ $.level = "ERROR" }') passes through as it is."""
-    if not search:
-        return None
-    text = str(search).strip()
-    if text.startswith(("{", "[", "?", "-", '"')) or " ?" in text:
-        return text
-    return '"' + text.replace('"', '\\"') + '"'
-
-
 def _since_arg(since: Any, default: str) -> dict[str, Any]:
     """since= for a next step: carried over when the user chose one (as text), left out when it's the default."""
     return {"since": since} if isinstance(since, str) and since != default else {}
@@ -3800,12 +4377,14 @@ class LambdaView:
 
     _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
     _GROUPS = {  # help() lists the commands in these groups, in this order
+        "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
         "📦 Code": ("code",),
         "❓ Help": ("help",),
     }
     _START = (
+        ("explore()", "the explorer window: every function, its logs run by run, errors and code, by clicking"),
         ("functions()", "every function: runtime, triggers, calls, errors, cost and warnings"),
         ("functions(regions='all')", "the same in every region your account has turned on"),
         ("function_info('name')", "one function in plain English, and its last 30 days"),
@@ -3827,6 +4406,7 @@ class LambdaView:
         self.use_html = _in_notebook() if mode == "auto" else mode == "html"
         self.max_rows = max_rows
         self.progress = progress
+        self.explorer: LambdaExplorer | None = None  # the window explore() opened last
 
     # ------------------------------------------------------------------ plumbing
 
@@ -4257,6 +4837,14 @@ class LambdaView:
         each. name can also be 'name:alias', an ARN or a console link."""
         with self._progress("Reading the function", unit="parts") as tick, self._named(name, region):
             detail = self.core.describe(name, region=region, days=days, progress=tick)
+        sections = self._function_sections(detail, name=name, days=days)
+        self._show([block for part in _INFO_ORDER for block in sections[part]])
+
+    def _function_sections(self, detail: FunctionDetail, *, name: str | None = None, days: int = 30,
+                           ) -> dict[str, list[Any]]:
+        """function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
+        on different tabs: 'head' (title, cards, findings), 'runs', 'triggers', 'async', 'access', 'versions', 'days',
+        'cost', 'tags', 'raw' and 'next'."""
         fn, m = detail.function, detail.metrics
         now = _utcnow()
         prices = self.core.prices
@@ -4266,7 +4854,8 @@ class LambdaView:
         level = _errors_level(m, now)
         near_timeout = bool(m and m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
         public = any(t.public for t in detail.triggers)
-        _, qualifier, _ = parse_function_ref(name)
+        _, qualifier, _ = parse_function_ref(name or fn.name)
+        sections: dict[str, list[Any]] = {part: [] for part in _INFO_ORDER}
         cards: list[tuple[str, ...]] = [
             ("Runtime", status.label, status.tone),
             ("Memory", _mb(fn.memory)),
@@ -4288,12 +4877,12 @@ class LambdaView:
             _clip(fn.description, 120),
             f"changed {human_age(fn.last_modified, now)}" if fn.last_modified else "",
         ]))
-        blocks: list[Any] = [_Title(f"Function {fn.name}" + (f" ({qualifier})" if qualifier else ""), sub),
-                             _Cards(cards)]
+        head = sections["head"]
+        head += [_Title(f"Function {fn.name}" + (f" ({qualifier})" if qualifier else ""), sub), _Cards(cards)]
         note = _unread(detail.errors, "its ")
         if note:
-            blocks.append(note)
-        blocks.append(_Findings(found, empty=f"No problems found in its settings or its last {days} days."))
+            head.append(note)
+        head.append(_Findings(found, empty=f"No problems found in its settings or its last {days} days."))
 
         package = (f"{fn.package_type}, {human_size(fn.code_size)}" if fn.package_type == "Zip"
                    else f"container image {fn.image_uri or ''}".strip())
@@ -4332,8 +4921,8 @@ class LambdaView:
         if fn.snapstart or runtime_family(fn.runtime) in ("java", "python", "dotnet"):
             runs.append(["SnapStart", "on" if fn.snapstart else "off",
                          "New copies start from a snapshot, for faster cold starts (published versions)"])
-        blocks.append(_Table(["Setting", "Value", "What it means"], runs, title="What it runs", max_rows=0,
-                             prose_cols=(2,)))
+        sections["runs"].append(_Table(["Setting", "Value", "What it means"], runs, title="What it runs", max_rows=0,
+                                       prose_cols=(2,)))
 
         trigger_rows = []
         for t in detail.triggers:
@@ -4343,10 +4932,11 @@ class LambdaView:
             trigger_rows.append([t.kind, t.source or "-", _VIA.get(t.via, t.via), state_cell,
                                  "; ".join(filter(None, [t.detail, t.last_result])) or "-"])
         if trigger_rows:
-            blocks.append(_Table(["Trigger", "Source", "How", "State", "Details"], trigger_rows, max_rows=0,
-                                 title="What triggers it (event source mappings, its resource policy and URL)"))
+            sections["triggers"].append(_Table(
+                ["Trigger", "Source", "How", "State", "Details"], trigger_rows, max_rows=0,
+                title="What triggers it (event source mappings, its resource policy and URL)"))
         elif not {"policy", "triggers"} & set(detail.errors):
-            blocks.append(_Note(
+            sections["triggers"].append(_Note(
                 "Nothing in its resource policy or event source mappings calls it: it's called directly (an SDK, "
                 "aws lambda invoke, Step Functions, or a service that uses its own role), or not at all."
             ))
@@ -4354,7 +4944,7 @@ class LambdaView:
         asynchronous = [t for t in detail.triggers if t.asynchronous]
         if async_config is not None and (asynchronous or async_config.on_failure or async_config.on_success
                                          or fn.dead_letter):
-            blocks.append(_Table(["Setting", "Value"], [
+            sections["async"].append(_Table(["Setting", "Value"], [
                 ["Retries after a failure", _times(async_config.retries) if async_config.retries else "none"],
                 ["Oldest event kept", _window(async_config.max_age)],
                 ["When it succeeds, the result goes to", async_config.on_success or "-"],
@@ -4385,8 +4975,8 @@ class LambdaView:
         if fn.env_names:
             access.append(["Encryption", fn.kms_key.split("/")[-1] if fn.kms_key else "AWS-managed key",
                            "The key that encrypts its environment variables"])
-        blocks.append(_Table(["Setting", "Value", "What it means"], access, title="What it can reach", max_rows=0,
-                             prose_cols=(2,)))
+        sections["access"].append(_Table(["Setting", "Value", "What it means"], access, title="What it can reach",
+                                         max_rows=0, prose_cols=(2,)))
 
         version_rows: list[list[Any]] = []
         for alias in detail.aliases:
@@ -4405,8 +4995,8 @@ class LambdaView:
                                  f"{pc.allocated:,} of {pc.requested:,} ready ({pc.status or '-'})",
                                  f"{human_money(provisioned_monthly_cost(fn, copies, prices))}/month, used or not"])
         if version_rows:
-            blocks.append(_Table(["What", "Value", "Notes"], version_rows, max_rows=0,
-                                 title="Versions, aliases and provisioned concurrency"))
+            sections["versions"].append(_Table(["What", "Value", "Notes"], version_rows, max_rows=0,
+                                               title="Versions, aliases and provisioned concurrency"))
 
         if m is not None and m.invocations:
             day_rows, bars = [], []
@@ -4415,7 +5005,7 @@ class LambdaView:
                 day_rows.append([d.start.strftime("%Y-%m-%d %a"), _count(round(d.invocations)), _count(round(d.errors)),
                                  _count(round(d.throttles)), _ms(d.avg_duration), _ms(d.duration_max)])
                 bars.append(_share(d.invocations, busiest))
-            blocks.append(_Table(
+            sections["days"].append(_Table(
                 ["Day (UTC)", "Calls", "Errors", "Throttles", "Avg run time", "Longest"], day_rows, bars=bars,
                 bar_label="Calls vs. the busiest day", max_rows=0,
                 title=f"The last {days} days (CloudWatch; days without data are left out)",
@@ -4423,16 +5013,16 @@ class LambdaView:
         if cost:
             basis = (f"{self._price_basis()}; usage over the last {days} days scaled to a month" if m is not None
                      else self._price_basis())
-            blocks.append(_Table(
+            sections["cost"].append(_Table(
                 ["Part", "Est. $/month"], [[_PARTS.get(part, part), human_money(value)] for part, value in cost.items()],
                 title=f"Estimated monthly cost: {human_money(_total(cost))} ({basis}, before the free tier)",
                 max_rows=0,
             ))
         if fn.tags:
-            blocks.append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())], title="Tags",
-                                 collapsed=True, max_rows=0))
-        blocks.append(_Text(json.dumps(fn.raw, indent=2, default=str), collapsed=True,
-                            title="Configuration, as Lambda returns it (environment values hidden)"))
+            sections["tags"].append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())],
+                                           title="Tags", collapsed=True, max_rows=0))
+        sections["raw"].append(_Text(json.dumps(fn.raw, indent=2, default=str), collapsed=True,
+                                     title="Configuration, as Lambda returns it (environment values hidden)"))
         steps = []
         if m is not None and m.errors:
             steps.append((self._call_for("errors", fn), "its errors, grouped by cause"))
@@ -4441,8 +5031,8 @@ class LambdaView:
             steps.append((self._call_for("code", fn), "the files in its package, and the handler's source"))
         if len(steps) < 3:
             steps.append((self._call_for("logs", fn), "the newest lines it logged"))
-        blocks.append(_Next(steps))
-        self._show(blocks)
+        sections["next"].append(_Next(steps))
+        return sections
 
     # ------------------------------------------------------------------ when something goes wrong
 
@@ -4455,6 +5045,12 @@ class LambdaView:
         limit = _as_count(limit, "limit")
         with self._progress("Reading error lines", unit="lines") as tick, self._named(name, region):
             report = self.core.errors(name, since=since, region=region, limit=limit, progress=tick)
+        self._show(self._errors_blocks(report, since=since, limit=limit))
+
+    def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
+                       for_window: bool = False) -> list[Any]:
+        """errors()'s report, as blocks; for_window=True leaves out the newest error lines (the explorer lists them as
+        runs to click)."""
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
         found = error_findings(report)
@@ -4497,12 +5093,13 @@ class LambdaView:
                 bars=[_share(g.count, lines) for g in report.groups], bar_label="Share",
                 title="Errors by cause (from its log lines: a failed call can log more than one)",
             ))
-            blocks.append(_Table(
-                ["Time (UTC)", "Request ID", "Line"],
-                [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
-                 for e in report.newest],
-                title="The newest error lines", max_rows=0,
-            ))
+            if not for_window:
+                blocks.append(_Table(
+                    ["Time (UTC)", "Request ID", "Line"],
+                    [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
+                     for e in report.newest],
+                    title="The newest error lines", max_rows=0,
+                ))
         steps = []
         newest = next((e for e in report.newest if e.request_id), None)
         if newest is not None:
@@ -4513,7 +5110,7 @@ class LambdaView:
                           "run times and memory: how close runs come to the limits"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
 
     def _log_notes(self, errors: dict[str, str], fn: Function, group: str) -> list[Any]:
         """Notes for what couldn't be read: no log group yet, logs that can't be read, or CloudWatch's numbers."""
@@ -4643,6 +5240,12 @@ class LambdaView:
         limit = _as_count(limit, "limit")
         with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
             perf = self.core.performance(name, since=since, region=region, limit=limit, progress=tick)
+        self._show(self._performance_blocks(perf, since=since, limit=limit))
+
+    def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
+                            for_window: bool = False) -> list[Any]:
+        """performance()'s report, as blocks; for_window=True leaves out the slowest runs (the explorer lists them as runs
+        to click)."""
         fn, runs = perf.function, perf.invocations
         window = _window((perf.until - perf.since).total_seconds())
         found = performance_findings(perf, prices=self.core.prices)
@@ -4658,8 +5261,7 @@ class LambdaView:
                     f"No REPORT lines in the last {window}: it wasn't called, or its logs go somewhere else. "
                     f"{self._call_for('function_info', fn)} shows when it was last called."
                 ))
-            self._show(blocks)
-            return
+            return blocks
         durations = [r.duration for r in runs]
         billed = [r.billed for r in runs]
         used = [float(r.max_memory) for r in runs if r.max_memory]
@@ -4716,21 +5318,22 @@ class LambdaView:
         blocks.append(_Table(["Run time", "Runs"], bands, bars=[_share(c, len(runs)) for c in counts],
                              title="How long runs take", max_rows=0))
         slowest = sorted(runs, key=lambda r: r.duration, reverse=True)[:10]
-        blocks.append(_Table(
-            ["Time (UTC)", "Request ID", "Run time", "Billed", "Memory used", "Cold start", "Status"],
-            [[_stamp(r.time), r.request_id, _ms(r.duration), _ms(r.billed), _mb(r.max_memory),
-              _ms(r.init) if r.init is not None else "-",
-              _Tone(r.status + (f" ({r.error_type})" if r.error_type else ""), "bad") if r.status else "ok"]
-             for r in slowest],
-            title="The slowest runs", max_rows=0,
-        ))
+        if not for_window:
+            blocks.append(_Table(
+                ["Time (UTC)", "Request ID", "Run time", "Billed", "Memory used", "Cold start", "Status"],
+                [[_stamp(r.time), r.request_id, _ms(r.duration), _ms(r.billed), _mb(r.max_memory),
+                  _ms(r.init) if r.init is not None else "-",
+                  _Tone(r.status + (f" ({r.error_type})" if r.error_type else ""), "bad") if r.status else "ok"]
+                 for r in slowest],
+                title="The slowest runs", max_rows=0,
+            ))
         steps = [(self._call_for("logs", fn, request_id=slowest[0].request_id, **_since_arg(since, "24h")),
                   "everything the slowest run logged")]
         if timeouts:
             steps.append((self._call_for("errors", fn, **_since_arg(since, "24h")), "every error, grouped by cause"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
 
     # ------------------------------------------------------------------ code
 
@@ -4743,6 +5346,11 @@ class LambdaView:
         pulled."""
         with self._named(name, region):
             package = self.core.code(name, file=file, max_size=max_size, region=region)
+        self._show(self._code_blocks(package))
+
+    def _code_blocks(self, package: CodePackage, *, source: bool = True) -> list[Any]:
+        """code()'s report, as blocks; source=False leaves out the shown file's text (the explorer shows it on its
+        own)."""
         fn = package.function
         found = package_findings(package)
         blocks: list[Any] = [_Title(
@@ -4755,8 +5363,7 @@ class LambdaView:
         )]
         if package.note and not package.files:
             blocks += [_Note(package.note), _Next([(self._call_for("function_info", fn), "its settings")])]
-            self._show(blocks)
-            return
+            return blocks
         # the same checks package_findings() warns about, so a card is amber only when a warning is about it
         handler_missing = bool(fn.handler) and runtime_family(fn.runtime) in _HANDLER_EXTENSIONS and not (
             package.handler_file)
@@ -4784,9 +5391,9 @@ class LambdaView:
             ["File", "Size"], [[f.path, human_size(f.size)] for f in sorted(package.files, key=lambda f: f.path)],
             title="Every file", collapsed=True,
         ))
-        if package.note:
+        if package.note and source:
             blocks.append(_Note(package.note))
-        if package.source is not None:
+        if package.source is not None and source:
             label = "the handler's file" if package.shown_file == package.handler_file else "the file you asked for"
             blocks.append(_Text(package.source, title=f"{package.shown_file} ({label})"))
             if package.source_truncated:
@@ -4798,4 +5405,3122 @@ class LambdaView:
             steps.append((self._call_for("code", fn, file=others[0]), "another of its own files"))
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
-        self._show(blocks)
+        return blocks
+
+    # ------------------------------------------------------------------ the window
+
+    @_friendly_errors
+    def explore(self, name: str | None = None, *, tab: str | None = None, region: str | None = None,
+                height: int | str | None = None) -> None:
+        """The explorer window: every function in the region to click through, and for the one you pick, how it's
+        doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
+        in), its errors grouped by cause, its run times, the code in its package and every setting. Needs Jupyter and
+        ipywidgets; view.explorer is the window. name opens one function, on tab= 'logs', 'errors', 'performance',
+        'code' or 'settings'; region='all' lists every region."""
+        if not self.use_html:
+            raise _Hint(
+                "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, functions() lists every "
+                "function, logs('name') shows what one logged, and errors('name') why it fails."
+            )
+        _require("ipywidgets", "The explorer window")
+        self.explorer = LambdaExplorer(name, tab=tab, region=region, view=self, height=height, mode="widgets")
+
+
+# ----------------------------------------------------------------------------- the explorer window
+
+# The window's tabs, in order: (key, title, what it holds, the line drawing (24 x 24) shown before the title as a mask
+# in the text's colour, so it follows the theme).
+_EXPLORER_TABS = (
+    ("functions", "Functions", "Every function in the region: search, filter, sort, and click one to open it",
+     "<path d='M9.5 6.5h10.5M9.5 12h10.5M9.5 17.5h10.5'/><path d='M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01' "
+     "stroke-width='3.2'/>"),
+    ("overview", "Overview", "How the function is doing: what to fix, what calls it, its last 30 days and its cost",
+     "<path d='M3.5 12.5h3.8l2.4-6.5 4.6 12 2.4-5.5h3.8'/>"),
+    ("logs", "Logs", "What it logged, run by run: click a run for its lines, search them, or watch new runs live",
+     "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/><path d='M7.5 9.5l3 2.5-3 2.5M12.5 15h4'/>"),
+    ("errors", "Errors", "Its errors grouped by cause, with what to do, and the runs that failed",
+     "<path d='M12 4.2 20.8 19.5H3.2z'/><path d='M12 10v4.2M12 17h.01'/>"),
+    ("performance", "Performance", "Run times, memory used and cold starts, and the slowest runs",
+     "<circle cx='12' cy='13.5' r='7'/><path d='M12 13.5V9.8M9.8 3.5h4.4M18.4 7.1l1.4-1.4'/>"),
+    ("code", "Code", "The files in its deployment package, and the source of the one you click",
+     "<path d='M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5'/>"),
+    ("settings", "Settings", "Every setting in plain English, and as Lambda returns it",
+     "<path d='M4 7.5h9M17.5 7.5H20M4 16.5h2.5M11 16.5h9'/><circle cx='15' cy='7.5' r='2.5'/>"
+     "<circle cx='8.5' cy='16.5' r='2.5'/>"),
+)
+_FUNCTION_TABS = ("overview", "logs", "errors", "performance", "code", "settings")  # the tabs about one function
+_LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
+         'stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h2.3c.9 0 1.6.5 2 1.3l6.7 13.7"/>'
+         '<path d="M12.3 10.6 6.4 19.5"/></svg>')
+_RANGES = (("Last 15 minutes", "15m"), ("Last hour", "1h"), ("Last 3 hours", "3h"), ("Last 12 hours", "12h"),
+           ("Last 24 hours", "24h"), ("Last 3 days", "3d"), ("Last 7 days", "7d"), ("Last 30 days", "30d"))
+_FUNCTION_PAGE = 40  # functions on a page of the list; « ‹ › » move between pages
+_RUN_PAGE = 25  # runs on a page of the Logs tab
+_CODE_PAGE = 60  # files on a page of the Code tab's list
+_RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
+_BODY_LINES = 500  # lines an open run shows; the rest are counted
+_LIVE_SECONDS = 5  # how often Live looks for new lines...
+_LIVE_MINUTES = 15  # ...and for how long, before it stops by itself
+_COLUMNS = (  # the function list's columns: (sort key, header, tooltip, width); a header sorts, again reverses
+    ("name", "Function", "Sort by name", ""),
+    ("calls", "Calls · 30d", "Sort by calls in the last 30 days", "86px"),
+    ("errors", "Errors", "Sort by the share of calls that failed", "64px"),
+    ("duration", "Avg run", "Sort by the average run time", "72px"),
+    ("cost", "$ / month", "Sort by the estimated monthly cost", "76px"),
+    ("called", "Last called", "Sort by when it was last called", "92px"),
+    ("problems", "⚠", "Problems first: the most warnings, then the most failed calls", "38px"),
+)
+_FUNCTION_CHIPS = (  # (key, label, tone): a chip shows only the functions it names; again shows every function
+    ("", "All", "all"), ("attention", "Needs attention", "warn"), ("errors", "With errors", "bad"),
+    ("runtime", "Old runtime", "warn"), ("public", "Public", "warn"), ("idle", "Not called", "idle"),
+)
+_RUN_CHIPS = (("", "All runs", "all"), ("failed", "Failed", "bad"), ("timeout", "Timed out", "bad"),
+              ("logged", "Logged an error", "warn"), ("cold", "Cold starts", "cold"))
+_RUN_STATES = {  # LogRun.status -> (icon, tone, what it means)
+    "ok": ("✓", "ok", "ran"), "failed": ("✕", "bad", "failed"), "timeout": ("⏱", "bad", "timed out"),
+    "logged": ("!", "warn", "logged an error"), "running": ("•", "run", "no REPORT line yet: still running, or it "
+                                                                         "ends after the time range"),
+    "outside": ("·", "", "lines that belong to no run in the time range"),
+}
+_SETUP_CARDS = {"Runtime", "Memory", "Timeout", "Architecture", "Triggers"}  # function_info()'s cards the Overview
+# keeps: the window's header already shows the calls, errors, run times and cost
+_DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda function", "events": "EventBridge bus",
+                 "s3": "S3 bucket"}  # an on-success / on-failure destination's service -> what it is
+
+
+def _explorer_rules() -> str:
+    """The explorer's tab icons: .lmx-i-<key> sets --lx-icon, which a tab's ::before draws."""
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
+           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+    return "\n".join(f'.lmx-app .lmx-i-{key}{{--lx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
+                     for key, _, _, paths in _EXPLORER_TABS)
+
+
+_EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,165,250,.15);--lx-ring:rgba(96,165,250,"
+                  ".38);--lx-raised:rgba(255,255,255,.11);--lx-shadow:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,"
+                  ".28);--lx-ink-bad:#f87171;--lx-ink-warn:#fbbf24;--lx-ink-ok:#34d399;--lx-code:rgba(255,255,255,.035);"
+                  "--lx-tok-k:#c792ea;--lx-tok-s:#a5d6a7;--lx-tok-n:#f78c6c;--lx-tok-f:#82aaff;--lx-tok-c:#7f8c98")
+_EXPLORER_CSS = """<style>
+.lmx-app{--lx-accent:#2563eb;--lx-button:#2563eb;--lx-accent-2:#7c3aed;--lx-soft:rgba(37,99,235,.10);--lx-ring:rgba(37,99,235,.28);--lx-line:rgba(127,127,127,.22);--lx-line-2:rgba(127,127,127,.36);--lx-tint:rgba(127,127,127,.06);--lx-tint-2:rgba(127,127,127,.11);--lx-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--lx-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--lx-raised:var(--lx-surface);--lx-shadow:0 1px 2px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.07);--lx-ok:#10b981;--lx-warn:#f59e0b;--lx-bad:#ef4444;--lx-ink-bad:#dc2626;--lx-ink-warn:#b45309;--lx-ink-ok:#047857;--lx-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--lx-code:rgba(127,127,127,.05);--lx-tok-k:#7c3aed;--lx-tok-s:#047857;--lx-tok-n:#c2410c;--lx-tok-f:#2563eb;--lx-tok-c:#64748b}
+body[data-jp-theme-light="false"] .lmx-app,body.vscode-dark .lmx-app,body.vscode-high-contrast .lmx-app{""" + _EXPLORER_DARK + """}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .lmx-app{""" + _EXPLORER_DARK + """}}
+.lmx-app{position:relative;isolation:isolate;box-sizing:border-box;border:1px solid var(--lx-line);border-radius:18px;padding:14px 16px 10px;background:var(--lx-bg);box-shadow:var(--lx-shadow);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
+.lmx-app *{box-sizing:border-box}
+.lmx-app .widget-html-content,.lmx-app .jupyter-widget-html-content{min-width:0;line-height:1.45}
+.lmx-app.lmx-app .lmx-flat>*{margin:0}
+.lmx-app.lmx-app button.jupyter-button{color:inherit;background:var(--lx-tint);border:1px solid var(--lx-line);border-radius:9px;box-shadow:none;outline:none;font-family:inherit;font-weight:500;transition:background-color .15s,border-color .15s,color .15s,opacity .15s,box-shadow .15s}
+.lmx-app.lmx-app button.jupyter-button:hover:enabled{background:var(--lx-tint-2);border-color:var(--lx-line-2);box-shadow:none}
+.lmx-app.lmx-app button.jupyter-button:focus{box-shadow:none;outline:none}
+.lmx-app.lmx-app button.jupyter-button:focus-visible{outline:2px solid var(--lx-ring);outline-offset:-1px}
+.lmx-app.lmx-app button.jupyter-button:active:enabled{transform:translateY(1px)}
+.lmx-app.lmx-app button.jupyter-button.mod-primary{background:var(--lx-button);border-color:transparent;color:#fff;font-weight:600}
+.lmx-app.lmx-app button.jupyter-button.mod-primary:hover:enabled{background:var(--lx-button);filter:brightness(1.08)}
+.lmx-app.lmx-app button.jupyter-button:disabled{opacity:.45;cursor:default}
+.lmx-app.lmx-app .widget-text input,.lmx-app.lmx-app .jupyter-widget-text input,.lmx-app.lmx-app .widget-dropdown>select,.lmx-app.lmx-app .jupyter-widget-dropdown>select{height:32px;border:1px solid var(--lx-line-2);border-radius:9px;background-color:var(--lx-surface);color:inherit;padding:0 11px;transition:border-color .15s,box-shadow .15s}
+.lmx-app.lmx-app .widget-dropdown>select,.lmx-app.lmx-app .jupyter-widget-dropdown>select{padding-right:26px;cursor:pointer}
+.lmx-app.lmx-app .widget-text input:focus,.lmx-app.lmx-app .jupyter-widget-text input:focus,.lmx-app.lmx-app .widget-dropdown>select:focus,.lmx-app.lmx-app .jupyter-widget-dropdown>select:focus{outline:none;border-color:var(--lx-accent);box-shadow:0 0 0 3px var(--lx-soft)}
+.lmx-app.lmx-app .widget-text,.lmx-app.lmx-app .widget-dropdown,.lmx-app.lmx-app .jupyter-widget-text,.lmx-app.lmx-app .jupyter-widget-dropdown{margin:0;height:auto}
+.lmx-app.lmx-app .lmx-head{gap:12px;padding:0 0 12px;margin:0 0 12px;border-bottom:1px solid var(--lx-line);overflow:visible}
+.lmx-app.lmx-app .lmx-top{align-items:center;gap:10px;overflow:visible}
+.lmx-app.lmx-app .lmx-meta{align-items:flex-start;gap:10px 14px;flex-wrap:wrap;overflow:visible}
+.lmx-app .lmx-brand{display:flex;align-items:center;gap:12px;min-width:0}
+.lmx-app .lmx-logo{width:38px;height:38px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;color:#fff;background:linear-gradient(135deg,#fb923c,#ea580c);box-shadow:0 2px 8px rgba(234,88,12,.32);flex:0 0 auto}
+.lmx-app .lmx-name{font-size:17px;font-weight:650;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .lmx-name span{font-weight:500;opacity:.55;margin-left:6px;font-size:13px}
+.lmx-app .lmx-sub{font-size:12px;opacity:.62;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app.lmx-app .lmx-region{flex:0 0 auto;width:auto;min-width:170px}
+.lmx-app.lmx-app button.lmx-small{width:auto;height:30px;padding:0 13px;border-radius:999px;font-size:12px;flex:0 0 auto}
+.lmx-app.lmx-app button.lmx-ghost{background:transparent;border-color:transparent}
+.lmx-app.lmx-app button.lmx-ghost:hover:enabled{background:var(--lx-tint-2)}
+.lmx-app.lmx-app button.lmx-x{padding:0;width:26px;min-width:26px;height:26px;border-radius:999px;background:transparent;border-color:transparent;opacity:.6;flex:0 0 auto}
+.lmx-app.lmx-app button.lmx-x:hover:enabled{opacity:1;background:rgba(239,68,68,.12);color:var(--lx-ink-bad)}
+.lmx-app .lmx-stats{display:flex;flex-wrap:wrap;gap:8px}
+.lmx-app .lmx-stat{border:1px solid var(--lx-line);border-radius:12px;padding:6px 12px;min-width:84px;background:var(--lx-tint)}
+.lmx-app .lmx-stat .l{display:block;font-size:10px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;opacity:.58;white-space:nowrap}
+.lmx-app .lmx-stat b{display:block;font-size:15px;font-weight:650;margin-top:1px;white-space:nowrap}
+.lmx-app .lmx-stat.warn{border-color:rgba(245,158,11,.7);background:rgba(245,158,11,.08)}
+.lmx-app .lmx-stat.bad{border-color:rgba(239,68,68,.7);background:rgba(239,68,68,.08)}
+.lmx-app .lmx-stat.ok{border-color:rgba(16,185,129,.55)}
+.lmx-app .lmx-stat.sk-on b{color:transparent;border-radius:6px;background-size:300% 100%;background-image:linear-gradient(90deg,var(--lx-tint-2) 30%,var(--lx-line) 50%,var(--lx-tint-2) 70%);animation:lmx-glow 1.3s ease-in-out infinite}
+.lmx-app.lmx-app .lmx-field{position:relative;overflow:visible;flex:0 0 320px;max-width:100%}
+.lmx-app.lmx-app .lmx-field.lmx-open{z-index:41}
+.lmx-app.lmx-app .lmx-trig{position:relative;min-height:52px;overflow:visible}
+.lmx-app.lmx-app .lmx-trig>.lmx-trig-b,.lmx-app.lmx-app .lmx-opt>.lmx-opt-b,.lmx-app.lmx-app .lmx-row>.lmx-row-b,.lmx-app.lmx-app .lmx-run-h>.lmx-run-b{position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:0;border:1px solid transparent;background:transparent;box-shadow:none}
+.lmx-app.lmx-app .lmx-trig>.lmx-trig-b{border-color:var(--lx-line-2);border-radius:12px;background:var(--lx-surface);box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.lmx-app.lmx-app .lmx-trig>.lmx-trig-b:hover:enabled{border-color:var(--lx-accent);background:var(--lx-surface)}
+.lmx-app.lmx-app .lmx-open .lmx-trig>.lmx-trig-b{border-color:var(--lx-accent);box-shadow:0 0 0 3px var(--lx-soft)}
+.lmx-app.lmx-app .lmx-trig>.lmx-trig-b:active:enabled,.lmx-app.lmx-app .lmx-opt>.lmx-opt-b:active:enabled,.lmx-app.lmx-app .lmx-row>.lmx-row-b:active:enabled,.lmx-app.lmx-app .lmx-run-h>.lmx-run-b:active:enabled{transform:none}
+.lmx-app.lmx-app .lmx-trig>.lmx-face,.lmx-app.lmx-app .lmx-opt>.lmx-opt-t,.lmx-app.lmx-app .lmx-row>.lmx-row-t,.lmx-app.lmx-app .lmx-run-h>.lmx-run-t{position:relative;z-index:1;pointer-events:none;margin:0;min-width:0;width:100%}
+.lmx-app .fx{position:relative;padding:8px 34px 8px 13px;line-height:1.3}
+.lmx-app .fxl{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.55}
+.lmx-app .fxv{display:flex;align-items:center;gap:7px;margin-top:3px;font-size:13.5px;white-space:nowrap;min-width:0}
+.lmx-app .fxv b{font-weight:650;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lmx-app .fxi,.lmx-app .opi{font-family:var(--lx-mono);font-size:11px;opacity:.55;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 10 auto}
+.lmx-app .chev{position:absolute;right:14px;top:50%;width:7px;height:7px;margin-top:-6px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(45deg);opacity:.5;transition:transform .15s,margin-top .15s}
+.lmx-app .lmx-open .chev{transform:rotate(225deg);margin-top:-2px;opacity:.9;color:var(--lx-accent)}
+.lmx-app .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:rgba(127,127,127,.45)}
+.lmx-app .dot.ok{background:var(--lx-ok)}
+.lmx-app .dot.warn{background:var(--lx-warn)}
+.lmx-app .dot.bad{background:var(--lx-bad)}
+.lmx-app .dot.idle{background:transparent;box-shadow:inset 0 0 0 1.5px rgba(127,127,127,.55)}
+.lmx-app.lmx-app .lmx-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:40;width:min(500px,calc(100vw - 48px));padding:8px;border:1px solid var(--lx-line-2);border-radius:14px;background:var(--lx-bg);box-shadow:0 14px 36px rgba(15,23,42,.22),0 3px 8px rgba(15,23,42,.08);overflow:visible}
+.lmx-app.lmx-app .lmx-pop>*{margin:0}
+.lmx-app.lmx-app .lmx-opts{max-height:360px;overflow:hidden auto;margin:6px 0 0}
+.lmx-app.lmx-app .lmx-opts>*{flex:0 0 auto}
+.lmx-app.lmx-app .lmx-opt{position:relative;margin:0 0 2px;overflow:visible}
+.lmx-app.lmx-app .lmx-opt>.lmx-opt-b{border-radius:10px}
+.lmx-app.lmx-app .lmx-opt>.lmx-opt-b:hover:enabled{background:var(--lx-tint-2)}
+.lmx-app.lmx-app .lmx-opt.lmx-on>.lmx-opt-b{background:var(--lx-soft);border-color:var(--lx-ring)}
+.lmx-app .op{display:flex;align-items:flex-start;gap:10px;padding:7px 10px;line-height:1.35;min-width:0}
+.lmx-app .op .dot{margin-top:6px}
+.lmx-app .opb{flex:1 1 auto;min-width:0}
+.lmx-app .opt{display:flex;align-items:baseline;gap:8px;white-space:nowrap;min-width:0}
+.lmx-app .opt b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.lmx-app .opn{font-size:11.5px;opacity:.62;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .opf{font-size:11px;opacity:.65;padding:7px 8px 0;margin-top:4px;border-top:1px solid var(--lx-line);line-height:1.4}
+.lmx-app .opf.warn{opacity:1;color:var(--lx-ink-warn)}
+.lmx-app mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
+.lmx-app.lmx-app .lmx-backdrop,.lmx-app.lmx-app .lmx-backdrop:hover:enabled,.lmx-app.lmx-app .lmx-backdrop:active:enabled,.lmx-app.lmx-app .lmx-backdrop:focus-visible{position:absolute;top:0;left:0;z-index:30;width:100%;height:100%;margin:0;padding:0;border:0;border-radius:inherit;background:transparent;box-shadow:none;outline:none;transform:none;cursor:default}
+.lmx-app.lmx-app .lmx-tabs{flex-wrap:nowrap;gap:2px;padding:3px;border-radius:12px;background:var(--lx-tint-2);margin:0 0 10px;overflow:hidden;container-type:inline-size}
+.lmx-app.lmx-app button.lmx-tab{flex:1 1 0;min-width:0;height:32px;margin:0;padding:0 8px;border:0;border-radius:9px;background:transparent;opacity:.72;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;overflow:hidden}
+.lmx-app.lmx-app button.lmx-tab::before{content:"";width:15px;height:15px;flex:0 0 auto;background:currentColor;-webkit-mask:var(--lx-icon) center/contain no-repeat;mask:var(--lx-icon) center/contain no-repeat}
+.lmx-app.lmx-app button.lmx-tab:hover:enabled{background:var(--lx-tint);opacity:.95}
+.lmx-app.lmx-app button.lmx-tab.lmx-on,.lmx-app.lmx-app button.lmx-tab.lmx-on:hover:enabled{background:var(--lx-raised);opacity:1;font-weight:650;box-shadow:0 1px 3px rgba(15,23,42,.16)}
+.lmx-app.lmx-app button.lmx-tab.lmx-on::before{background:var(--lx-accent)}
+.lmx-app.lmx-app button.lmx-tab.lmx-dim{opacity:.42}
+.lmx-app.lmx-app button.lmx-tab.lmx-alert::after,.lmx-app.lmx-app button.lmx-tab.lmx-alarm::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--lx-warn);flex:0 0 auto}
+.lmx-app.lmx-app button.lmx-tab.lmx-alarm::after{background:var(--lx-bad)}
+@container (max-width:640px){.lmx-app.lmx-app button.lmx-tab::before{display:none}}
+.lmx-app.lmx-app .lmx-page{height:clamp(560px,calc(100vh - 330px),1400px);overflow:hidden;padding:0}
+body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
+.lmx-app.lmx-app .lmx-page>*{flex:0 0 auto;margin:0}
+.lmx-app.lmx-app .lmx-page>.lmx-scroll,.lmx-app.lmx-app .lmx-page>.lmx-split{flex:1 1 auto;min-height:0}
+.lmx-app.lmx-app .lmx-scroll{overflow:hidden auto;padding:2px 6px 2px 2px}
+.lmx-app.lmx-app .lmx-codehead{max-height:45%;overflow:hidden auto;padding:2px 6px 6px 2px}
+.lmx-app.lmx-app .lmx-codehead>*{flex:0 0 auto;margin:0}
+.lmx-app.lmx-app .lmx-scroll>*{flex:0 0 auto;margin:0}
+.lmx-app.lmx-app .lmx-find{position:relative;align-items:center}
+.lmx-app.lmx-app .lmx-find input,.lmx-app.lmx-app .lmx-find input:focus{padding-left:32px;background:var(--lx-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E") no-repeat 11px center/14px}
+.lmx-app.lmx-app .lmx-bar{gap:8px;align-items:center;padding:0 0 8px;flex-wrap:wrap;overflow:visible}
+.lmx-app.lmx-app .lmx-bar>*{margin:0}
+.lmx-app.lmx-app .lmx-chips{flex-wrap:wrap;gap:6px;margin:0 0 8px}
+.lmx-app.lmx-app .lmx-chips>*{margin:0}
+.lmx-app.lmx-app button.lmx-chip{width:auto;height:26px;padding:0 10px;border-radius:999px;font-size:12px;background:transparent;border:1px solid var(--lx-line);display:inline-flex;align-items:center;gap:6px}
+.lmx-app.lmx-app button.lmx-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:rgba(127,127,127,.5)}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-all::before{display:none}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-bad::before{background:var(--lx-bad)}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-warn::before{background:var(--lx-warn)}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-ok::before{background:var(--lx-ok)}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-cold::before{background:#38bdf8}
+.lmx-app.lmx-app button.lmx-chip.lmx-t-idle::before{background:transparent;box-shadow:inset 0 0 0 1.5px rgba(127,127,127,.6)}
+.lmx-app.lmx-app button.lmx-chip.lmx-on,.lmx-app.lmx-app button.lmx-chip.lmx-on:hover:enabled{background:var(--lx-soft);border-color:var(--lx-ring);color:var(--lx-accent);font-weight:650}
+.lmx-app.lmx-app .lmx-rows,.lmx-app.lmx-app .lmx-runs{overflow:hidden auto;padding:0 4px 4px 0;border:1px solid var(--lx-line);border-radius:14px;background:var(--lx-surface)}
+.lmx-app.lmx-app .lmx-rows>*,.lmx-app.lmx-app .lmx-runs>*{flex:0 0 auto;margin:0}
+.lmx-app.lmx-app .lmx-lhead{position:sticky;top:0;z-index:3;gap:10px;padding:6px 10px 6px 12px;background:var(--lx-surface);border-bottom:1px solid var(--lx-line);align-items:center}
+.lmx-app.lmx-app .lmx-lhead>*{margin:0}
+.lmx-app.lmx-app button.lmx-col{height:24px;padding:0 4px;border:0;background:transparent;font-size:10.5px;font-weight:650;letter-spacing:.03em;text-transform:uppercase;opacity:.6;text-align:right;justify-content:flex-end;flex:0 0 auto}
+.lmx-app.lmx-app button.lmx-col.lmx-c-name{flex:1 1 auto;text-align:left;padding-left:18px}
+.lmx-app.lmx-app button.lmx-col:hover:enabled{opacity:1;background:var(--lx-tint-2)}
+.lmx-app.lmx-app button.lmx-col.lmx-on{opacity:1;color:var(--lx-accent)}
+.lmx-app.lmx-app .lmx-row{position:relative;height:54px;margin:0 0 1px;overflow:visible}
+.lmx-app.lmx-app .lmx-row.lmx-short{height:42px}
+.lmx-app.lmx-app .lmx-row>.lmx-row-b{border-radius:10px}
+.lmx-app.lmx-app .lmx-row>.lmx-row-b:hover:enabled{background:var(--lx-tint-2)}
+.lmx-app.lmx-app .lmx-row.lmx-on>.lmx-row-b,.lmx-app.lmx-app .lmx-row.lmx-on>.lmx-row-b:hover:enabled{background:var(--lx-soft);border-color:var(--lx-ring)}
+.lmx-app.lmx-app button.lmx-act{position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:2;display:none;width:auto;height:26px;padding:0 11px;border-radius:999px;font-size:12px;background:var(--lx-raised);border-color:var(--lx-line-2);color:var(--lx-accent);box-shadow:0 1px 3px rgba(15,23,42,.12)}
+.lmx-app.lmx-app .lmx-row:hover>button.lmx-act,.lmx-app.lmx-app .lmx-row.lmx-on>button.lmx-act{display:inline-flex;align-items:center}
+.lmx-app.lmx-app button.lmx-act:active:enabled{transform:translateY(-50%)}
+.lmx-app .fr{display:grid;grid-template-columns:8px minmax(0,1fr) 86px 64px 72px 76px 92px 38px 52px;align-items:center;gap:0 10px;height:54px;padding:0 10px 0 12px;min-width:0}
+.lmx-app .fm{min-width:0;line-height:1.3}
+.lmx-app .fn{display:flex;align-items:baseline;gap:8px;min-width:0;white-space:nowrap}
+.lmx-app .fn b{font-weight:600;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.lmx-app .rt{flex:0 0 auto;font-size:11px;padding:0 7px;border-radius:999px;background:var(--lx-tint-2);font-weight:500}
+.lmx-app .rt.warn{background:rgba(245,158,11,.16);color:var(--lx-ink-warn)}
+.lmx-app .rt.bad{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
+.lmx-app .rg{flex:0 0 auto;font-size:11px;opacity:.6;font-family:var(--lx-mono)}
+.lmx-app .ff{font-size:11.5px;opacity:.68;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.lmx-app .fc{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .fc.dim{opacity:.55}
+.lmx-app .fc .pill{display:inline-block;padding:0 7px;border-radius:999px;font-weight:600;font-size:11.5px}
+.lmx-app .fc .pill.warn{background:rgba(245,158,11,.18);color:var(--lx-ink-warn)}
+.lmx-app .fc .pill.bad{background:rgba(239,68,68,.15);color:var(--lx-ink-bad)}
+.lmx-app .wb{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;padding:0 6px;border-radius:999px;font-size:11.5px;font-weight:700;background:rgba(245,158,11,.18);color:var(--lx-ink-warn)}
+.lmx-app .sk{display:inline-block;width:42px;height:10px;border-radius:5px;vertical-align:middle;background-size:300% 100%;background-image:linear-gradient(90deg,var(--lx-tint) 30%,var(--lx-tint-2) 50%,var(--lx-tint) 70%);animation:lmx-glow 1.3s ease-in-out infinite}
+@container (max-width:900px){.lmx-app .fr{grid-template-columns:8px minmax(0,1fr) 80px 60px 70px 38px 52px}.lmx-app .fr .c-dur,.lmx-app .fr .c-called{display:none}.lmx-app.lmx-app .lmx-lhead .lmx-c-duration,.lmx-app.lmx-app .lmx-lhead .lmx-c-called{display:none}}
+.lmx-app.lmx-app .lmx-listpage{container-type:inline-size}
+.lmx-app .lmx-empty{padding:26px 10px;text-align:center;opacity:.62;font-size:12.5px;line-height:1.5}
+.lmx-app.lmx-app .lmx-pager{align-items:center;gap:2px;padding:6px 2px 0;margin-top:2px}
+.lmx-app.lmx-app .lmx-pager>*{margin:0}
+.lmx-app.lmx-app button.lmx-pg{width:30px;min-width:30px;height:26px;padding:0;border:0;background:transparent;font-size:15px;line-height:1}
+.lmx-app .lmx-pager .widget-html-content,.lmx-app .lmx-pager .jupyter-widget-html-content{font-size:12px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app.lmx-app .lmx-ask{flex:1 1 300px;align-items:center;gap:4px;padding:3px 3px 3px 6px;border:1px solid var(--lx-line-2);border-radius:999px;background:var(--lx-surface);transition:border-color .15s,box-shadow .15s;min-width:0}
+.lmx-app.lmx-app .lmx-ask>*{margin:0}
+.lmx-app.lmx-app .lmx-ask:focus-within{border-color:var(--lx-accent);box-shadow:0 0 0 3px var(--lx-soft)}
+.lmx-app.lmx-app .lmx-ask .widget-text input,.lmx-app.lmx-app .lmx-ask .jupyter-widget-text input,.lmx-app.lmx-app .lmx-ask .widget-text input:focus,.lmx-app.lmx-app .lmx-ask .jupyter-widget-text input:focus{border:0;box-shadow:none;background-color:transparent;height:28px;font-size:13px}
+.lmx-app.lmx-app .lmx-range{flex:0 0 auto;width:150px}
+.lmx-app.lmx-app button.lmx-live{width:auto;height:32px;padding:0 14px;border-radius:999px;font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:7px;flex:0 0 auto}
+.lmx-app.lmx-app button.lmx-live::before{content:"";width:8px;height:8px;border-radius:50%;background:rgba(127,127,127,.55)}
+.lmx-app.lmx-app button.lmx-live.lmx-on,.lmx-app.lmx-app button.lmx-live.lmx-on:hover:enabled{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.55);color:var(--lx-ink-bad)}
+.lmx-app.lmx-app button.lmx-live.lmx-on::before{background:#ef4444;animation:lmx-pulse 1.4s ease-in-out infinite}
+@keyframes lmx-pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}50%{box-shadow:0 0 0 5px rgba(239,68,68,0)}}
+.lmx-app .lmx-sum{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;font-size:12px;padding:0 2px 8px}
+.lmx-app .lmx-sum span{white-space:nowrap;opacity:.78}
+.lmx-app .lmx-sum b{font-weight:650;opacity:1}
+.lmx-app .lmx-sum .bad{color:var(--lx-ink-bad);opacity:1}
+.lmx-app .lmx-sum .warn{color:var(--lx-ink-warn);opacity:1}
+.lmx-app .lmx-sum .lmx-note{flex:1 1 100%;white-space:normal;opacity:.75}
+.lmx-app.lmx-app .lmx-run{margin:0;border-bottom:1px solid var(--lx-line);overflow:visible}
+.lmx-app.lmx-app .lmx-run:last-child{border-bottom:0}
+.lmx-app.lmx-app .lmx-run-h{position:relative;height:42px;margin:0;overflow:visible}
+.lmx-app.lmx-app .lmx-run-h>.lmx-run-b{border-radius:0}
+.lmx-app.lmx-app .lmx-run-h>.lmx-run-b:hover:enabled{background:var(--lx-tint-2)}
+.lmx-app.lmx-app .lmx-run.lmx-open>.lmx-run-h>.lmx-run-b{background:var(--lx-tint)}
+.lmx-app .rr{display:grid;grid-template-columns:12px 18px 92px 136px 104px 64px minmax(0,1fr) 76px;align-items:center;gap:0 10px;height:42px;padding:0 12px 0 10px;font-size:12.5px;min-width:0;white-space:nowrap}
+.lmx-app .rr .rv{width:7px;height:7px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.45;transition:transform .15s}
+.lmx-app .lmx-open .rr .rv{transform:rotate(45deg);opacity:.8}
+.lmx-app .rr .ri{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;background:var(--lx-tint-2)}
+.lmx-app .rr.ok .ri{background:rgba(16,185,129,.16);color:var(--lx-ink-ok)}
+.lmx-app .rr.bad .ri{background:rgba(239,68,68,.16);color:var(--lx-ink-bad)}
+.lmx-app .rr.warn .ri{background:rgba(245,158,11,.2);color:var(--lx-ink-warn)}
+.lmx-app .rr.run .ri{background:rgba(59,130,246,.16);color:var(--lx-accent)}
+.lmx-app .rr .rw{font-variant-numeric:tabular-nums;opacity:.8}
+.lmx-app .rr .rd{display:flex;align-items:center;gap:7px;font-variant-numeric:tabular-nums}
+.lmx-app .rr .rb{display:inline-block;width:44px;height:6px;border-radius:3px;background:var(--lx-tint-2);overflow:hidden;flex:0 0 auto}
+.lmx-app .rr .rb i{display:block;height:100%;border-radius:3px;background:rgba(59,130,246,.7)}
+.lmx-app .rr .rb i.warn{background:var(--lx-warn)}
+.lmx-app .rr .rb i.bad{background:var(--lx-bad)}
+.lmx-app .rr .rm{font-variant-numeric:tabular-nums;opacity:.75;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .rr .rc{font-size:11px;font-weight:600;color:#0284c7;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .rr .rs{overflow:hidden;text-overflow:ellipsis;opacity:.75;min-width:0}
+.lmx-app .rr .rs.bad{color:var(--lx-ink-bad);opacity:1;font-weight:500}
+.lmx-app .rr .rs.warn{color:var(--lx-ink-warn);opacity:1}
+.lmx-app .rr .rq{font-family:var(--lx-mono);font-size:11px;opacity:.5;text-align:right;overflow:hidden;text-overflow:ellipsis}
+@container (max-width:820px){.lmx-app .rr{grid-template-columns:12px 18px 80px 120px minmax(0,1fr)}.lmx-app .rr .rm,.lmx-app .rr .rc,.lmx-app .rr .rq{display:none}}
+.lmx-app.lmx-app .lmx-logpage{container-type:inline-size}
+.lmx-app .rbody{padding:4px 0 10px;background:var(--lx-code);border-top:1px solid var(--lx-line)}
+.lmx-app .rl{display:grid;grid-template-columns:70px 50px minmax(0,1fr);gap:0 10px;padding:1px 14px 1px 40px;font-family:var(--lx-mono);font-size:12px;line-height:1.55}
+.lmx-app .rl:hover{background:var(--lx-tint)}
+.lmx-app .rl .lt{opacity:.48;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lmx-app .rl .lv{align-self:start;margin-top:2px;justify-self:start;font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:0 5px;border-radius:4px;line-height:15px;opacity:.85}
+.lmx-app .rl .lv.error{background:rgba(239,68,68,.16);color:var(--lx-ink-bad)}
+.lmx-app .rl .lv.warn{background:rgba(245,158,11,.2);color:var(--lx-ink-warn)}
+.lmx-app .rl .lv.info{background:rgba(59,130,246,.13);color:var(--lx-accent)}
+.lmx-app .rl .lv.debug{background:var(--lx-tint-2)}
+.lmx-app .rl .lm{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+.lmx-app .rl.error{background:rgba(239,68,68,.06)}
+.lmx-app .rl.error .lm{color:var(--lx-ink-bad)}
+.lmx-app .rl.warn .lm{color:var(--lx-ink-warn)}
+.lmx-app .rl.platform{opacity:.55}
+.lmx-app .rl.hit{box-shadow:inset 3px 0 var(--lx-accent)}
+.lmx-app .rl details{display:inline}
+.lmx-app .rl summary{display:inline;cursor:pointer;font-size:11px;opacity:.6;margin-left:8px;list-style:none}
+.lmx-app .rl summary::-webkit-details-marker{display:none}
+.lmx-app .rl details[open] summary{opacity:.9}
+.lmx-app .rl .jf{display:block;margin:3px 0 4px;padding:6px 9px;border-radius:7px;border:1px solid var(--lx-line);background:var(--lx-bg);white-space:pre-wrap;font-size:11.5px;color:var(--jp-content-font-color1,inherit)}
+.lmx-app .rf{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:8px 14px 2px 40px;font-size:11.5px}
+.lmx-app .rf span{white-space:nowrap;opacity:.75}
+.lmx-app .rf b{font-weight:650}
+.lmx-app .rf code{font-family:var(--lx-mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--lx-tint-2);user-select:all;-webkit-user-select:all;cursor:text;opacity:1}
+.lmx-app .rf .warn{color:var(--lx-ink-warn);opacity:1}
+.lmx-app .rf .bad{color:var(--lx-ink-bad);opacity:1}
+.lmx-app .rmore{padding:4px 14px 0 40px;font-size:11.5px;opacity:.6}
+.lmx-app .er{display:grid;grid-template-columns:18px 112px 150px minmax(0,1fr) 84px;align-items:center;gap:0 10px;height:42px;padding:0 12px 0 10px;font-size:12.5px;white-space:nowrap;min-width:0}
+.lmx-app .er .ri{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:800;background:rgba(239,68,68,.16);color:var(--lx-ink-bad)}
+.lmx-app .er.slow .ri{background:rgba(245,158,11,.2);color:var(--lx-ink-warn)}
+.lmx-app .er .ew{font-variant-numeric:tabular-nums;opacity:.8}
+.lmx-app .er .ek{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .er .es{overflow:hidden;text-overflow:ellipsis;opacity:.8}
+.lmx-app .er .eq{font-family:var(--lx-mono);font-size:11px;opacity:.5;text-align:right}
+.lmx-app .er .eo{color:var(--lx-accent);font-size:12px;text-align:right;opacity:0;transition:opacity .15s}
+.lmx-app .lmx-row:hover .er .eo{opacity:1}
+.lmx-app .lmx-h{font-size:13px;font-weight:650;margin:14px 0 6px}
+.lmx-app .lmx-h span{font-weight:400;opacity:.6;font-size:12px;margin-left:6px}
+.lmx-app.lmx-app .lmx-split{gap:12px;align-items:stretch;overflow:hidden}
+.lmx-app.lmx-app .lmx-left{flex:0 0 300px;min-width:240px;max-width:40%;border:1px solid var(--lx-line);border-radius:14px;padding:8px 8px 6px;background:var(--lx-surface);overflow:hidden}
+.lmx-app.lmx-app .lmx-left>*{margin:0;flex:0 0 auto}
+.lmx-app.lmx-app .lmx-left>.lmx-files{flex:1 1 auto;min-height:0;overflow:hidden auto;margin:6px -2px 0;padding:0 2px}
+.lmx-app.lmx-app .lmx-files>*{flex:0 0 auto;margin:0}
+.lmx-app.lmx-app .lmx-right{flex:1 1 300px;min-width:0;overflow:hidden auto;padding:0 6px 0 2px}
+.lmx-app.lmx-app .lmx-right>*{flex:0 0 auto;margin:0}
+@media (max-width:900px){.lmx-app.lmx-app .lmx-split{flex-wrap:wrap;overflow:hidden auto}.lmx-app.lmx-app .lmx-left{flex:1 1 100%;max-width:100%;height:360px}.lmx-app.lmx-app .lmx-right{flex:1 1 100%;overflow:visible}}
+.lmx-app .cf{display:flex;align-items:center;gap:9px;height:42px;padding:0 8px;min-width:0}
+.lmx-app .cf .ct{flex:0 0 auto;width:34px;height:20px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:750;letter-spacing:.03em;background:var(--lx-tint-2)}
+.lmx-app .cf .ct.py{background:rgba(59,130,246,.14);color:var(--lx-accent)}
+.lmx-app .cf .ct.js{background:rgba(234,179,8,.18);color:#a16207}
+.lmx-app .cf .ct.cfg{background:rgba(16,185,129,.14);color:var(--lx-ink-ok)}
+.lmx-app .cf .ct.key{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
+.lmx-app .cf .cm{flex:1 1 auto;min-width:0;line-height:1.25}
+.lmx-app .cf .cn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .cf .cd{font-size:11px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .cf .cz{flex:0 0 auto;font-size:11px;opacity:.6;font-variant-numeric:tabular-nums}
+.lmx-app .cf.junk{opacity:.55}
+.lmx-app .cf .hb{font-size:9.5px;font-weight:700;padding:0 5px;border-radius:4px;background:rgba(234,88,12,.14);color:#c2410c;margin-left:6px}
+.lmx-app .srch{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 8px}
+.lmx-app .srch b{font-size:14px;font-family:var(--lx-mono)}
+.lmx-app .srch span{font-size:12px;opacity:.65}
+.lmx-app .src{display:flex;border:1px solid var(--lx-line);border-radius:10px;background:var(--lx-code);overflow:auto;max-height:none;font-family:var(--lx-mono);font-size:12px;line-height:1.55}
+.lmx-app .src pre{margin:0;padding:8px 12px;border:0;background:transparent;white-space:pre;overflow:visible;max-height:none;font-size:inherit;line-height:inherit;font-family:inherit}
+.lmx-app .src pre.gut{flex:0 0 auto;text-align:right;opacity:.38;user-select:none;-webkit-user-select:none;border-right:1px solid var(--lx-line);padding-right:10px}
+.lmx-app .src pre.txt{flex:1 1 auto;user-select:text}
+.lmx-app .src .pk{color:var(--lx-tok-k)}
+.lmx-app .src .js,.lmx-app .src .jk{color:var(--lx-tok-s)}
+.lmx-app .src .jk{font-weight:600}
+.lmx-app .src .jn,.lmx-app .src .jl{color:var(--lx-tok-n)}
+.lmx-app .src .pf{color:var(--lx-tok-f)}
+.lmx-app .src .pa{color:var(--lx-tok-n);font-style:italic}
+.lmx-app .src .pc{color:var(--lx-tok-c);font-style:italic}
+.lmx-app .lmx-status{font-size:12px;padding:8px 4px 0;min-height:26px;line-height:1.4}
+.lmx-app .lmx-status .st{opacity:.72}
+.lmx-app .lmx-status .st.warn{opacity:1;color:var(--lx-ink-warn)}
+.lmx-app .lmx-status .st.warn::before{content:"\\26A0\\FE0E";margin-right:6px}
+.lmx-app .lmx-status .st.ok::before{content:"\\2713";margin-right:6px;color:var(--lx-ok)}
+.lmx-app .lmx-status .st.live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;background:#ef4444;animation:lmx-pulse 1.4s ease-in-out infinite}
+.lmx-app .lmx-status code,.lmx-app .lmx-hint code{font-family:var(--lx-mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--lx-tint-2);user-select:all;-webkit-user-select:all}
+.lmx-app .spin{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px;border:2px solid rgba(127,127,127,.3);border-top-color:var(--lx-accent);border-radius:50%;animation:lmx-spin .8s linear infinite}
+@keyframes lmx-spin{to{transform:rotate(360deg)}}
+.lmx-app .skw{padding:6px 2px}
+.lmx-app .skw .skl{display:flex;align-items:center;opacity:.75;margin:4px 0 14px}
+.lmx-app .skw .sk{display:block;width:auto;height:12px;margin:10px 0;border-radius:6px}
+.lmx-app .skw .sk.t{height:18px;width:42%;margin-bottom:16px}
+.lmx-app .skc{display:flex;gap:8px;margin:0 0 18px}
+.lmx-app .skc .sk{flex:1;height:52px;margin:0;border-radius:12px}
+@keyframes lmx-glow{from{background-position:100% 0}to{background-position:0 0}}
+.lmx-app .lmx-hint{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;margin:6px 0 10px;border:1px dashed var(--lx-line-2);border-radius:12px;opacity:.85;line-height:1.5}
+.lmx-app .lmx-hint b{font-weight:650}
+.lmx-app .lmb h3{font-size:17px;margin:6px 0 2px}
+.lmx-app .lmb h3 .badge{display:none}
+.lmx-app .lmb .card{border-radius:12px;background:var(--lx-tint);border-color:var(--lx-line)}
+.lmx-app .lmb .card.warn{border-color:rgba(245,158,11,.75);background:rgba(245,158,11,.08)}
+.lmx-app .lmb .card.bad{border-color:rgba(239,68,68,.75);background:rgba(239,68,68,.08)}
+.lmx-app .lmb .card.ok{border-color:rgba(16,185,129,.55)}
+.lmx-app .lmb .note{border-radius:4px 10px 10px 4px}
+.lmx-app .lmb pre{border-radius:10px}
+.lmx-app .lmb .wire .wn,.lmx-app .lmb .wire .wf{border-radius:12px;background-color:var(--lx-surface)}
+@media (prefers-reduced-motion:reduce){.lmx-app *,.lmx-app *::before{transition:none!important;animation-duration:2.5s!important}}
+""" + _explorer_rules() + "\n</style>"
+
+
+_IN_WINDOW = {  # a command a report names -> where the explorer window shows the same
+    "functions": "the Functions tab",
+    "function_info": "the Settings tab",
+    "errors": "the Errors tab",
+    "logs": "the Logs tab",
+    "performance": "the Performance tab",
+    "code": "the Code tab",
+}
+
+
+_WINDOW_WORDS = [(re.compile(pattern), plain) for pattern, plain in (  # a command's arguments -> what they do
+    (r"\bfunctions\(regions='all'\)", "All regions in the region field"),
+    (r"\bfunction_info\([^()]*\) shows when it was last called", "the Overview tab shows when it was last called"),
+    (r"\bpass limit= to read more, or a shorter since=", "pick a shorter time range"),
+    (r"\bpass limit= to read more", "pick a shorter time range"),
+)]
+
+
+def _window_text(text: str) -> str:
+    """A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab
+    (errors('etl') -> "the Errors tab", logs('etl', request_id='8f5c...') -> "the Logs tab (run 8f5ce35b)"), and the
+    arguments it names become what they do; other calls and AWS CLI commands stay."""
+
+    def swap(match: re.Match[str]) -> str:
+        call = match.group(0)
+        name = call.split("(", 1)[0].lstrip(".")
+        run = re.search(r"request_id='([\w-]+)'", call)
+        if name == "logs" and run:
+            return f"run {run.group(1)[:8]} in the Logs tab"
+        return _IN_WINDOW.get(name, call)
+
+    text = str(text or "")
+    for pattern, plain in _WINDOW_WORDS:
+        text = pattern.sub(plain, text)
+    text = _CALL_RE.sub(swap, text)
+    return _SENTENCE_START_RE.sub(lambda m: m.group(1) + m.group(2)[0].upper() + m.group(2)[1:], text)
+
+
+_SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(the [A-Z]\w* tab|the region field|run [0-9a-f]{8} in the Logs tab)")
+
+
+def _for_window(blocks: list[Any]) -> list[Any]:
+    """A report's blocks for the explorer window: no Next block (its calls are for a cell), and the commands its
+    sentences name changed into the tabs that show the same (_window_text)."""
+    out = []
+    for block in blocks:
+        if isinstance(block, _Next):
+            continue
+        if isinstance(block, _Findings):
+            block = dataclasses.replace(block, items=[(level, _window_text(m)) for level, m in block.items],
+                                        empty=_window_text(block.empty))
+        elif isinstance(block, _Note):
+            block = dataclasses.replace(block, text=_window_text(block.text))
+        elif isinstance(block, _Title):
+            block = dataclasses.replace(block, sub=_window_text(block.sub))
+        elif isinstance(block, _Table):
+            rows = [[_window_text(cell) if j in block.prose_cols and isinstance(cell, str) else cell
+                     for j, cell in enumerate(row)] for row in block.rows]
+            block = dataclasses.replace(block, rows=rows, title=_window_text(block.title))
+        out.append(block)
+    return out
+
+
+def _skeleton(text: str) -> str:
+    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
+    return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
+            '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
+            '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
+            "</div></div>")
+
+
+def _class_if(widget: Any, name: str, on: bool) -> None:
+    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
+    if on and name not in widget._dom_classes:
+        widget.add_class(name)
+    elif not on and name in widget._dom_classes:
+        widget.remove_class(name)
+
+
+def _marked(text: str, words: Iterable[str]) -> str:
+    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
+    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
+    unique = sorted({w for w in words if w}, key=len, reverse=True)
+    if not unique:
+        return _esc(text)
+    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
+    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
+
+
+_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
+
+
+def _json_source_html(text: str) -> str:
+    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
+    out, last = [], 0
+    for m in _JSON_TOKEN_RE.finditer(text):
+        out.append(_esc(text[last:m.start()]))
+        if m.group(1):
+            css = "jk" if m.group(2) else "js"
+            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
+        else:
+            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
+        last = m.end()
+    return "".join(out) + _esc(text[last:])
+
+
+_PY_LITERALS = frozenset({"True", "False", "None"})
+
+
+def _python_html(code: str) -> str:
+    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
+    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
+    try:
+        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
+                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
+    except (tokenize.TokenError, SyntaxError):
+        return _esc(code)
+    starts = [0]
+    for line in code.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
+    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
+    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
+    out, last = [], 0
+    for t in tokens:
+        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
+        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
+        if a < last or b <= a:
+            continue
+        css = ""
+        if t.type == tokenize.COMMENT:
+            css = "pc"
+        elif t.type == tokenize.STRING:
+            css = "jk" if after.get(id(t)) == ":" else "js"
+        elif t.type == tokenize.NUMBER:
+            css = "jn"
+        elif t.type == tokenize.NAME:
+            if t.string in _PY_LITERALS:
+                css = "jl"
+            elif keyword.iskeyword(t.string):
+                css = "pk"
+            elif after.get(id(t)) == "(":
+                css = "pf"
+            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
+                css = "pa"
+        out.append(_esc(code[last:a]))
+        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
+        last = b
+    return "".join(out) + _esc(code[last:])
+
+
+@dataclass
+class _Facts:
+    """What the explorer's list says about one function, worked out once each time more is read."""
+
+    fn: Function
+    metrics: FunctionMetrics | None
+    status: RuntimeStatus
+    findings: list[tuple[str, str]]
+    triggers: list[Trigger]
+    cost: float | None
+    tone: str  # its dot: 'bad' (failing), 'warn' (a warning), 'ok', 'idle' (not called), '' (not read yet)
+
+    @property
+    def warnings(self) -> list[str]:
+        return [message for level, message in self.findings if level == "warn"]
+
+
+def _function_facts(fn: Function, ov: Overview, prices: dict[str, float], now: datetime) -> _Facts:
+    detail = ov.detail(fn)
+    m = detail.metrics
+    found = function_findings(fn, m, detail, prices=prices, now=now)
+    status = runtime_status(fn.runtime, package_type=fn.package_type, today=now.date())
+    cost = _total(function_monthly_cost(fn, m, detail.provisioned, detail.log_group, prices=prices))
+    if _errors_level(m, now) == "warn" or fn.state == "Failed" or fn.last_update == "Failed" or (
+            fn.reserved_concurrency == 0):
+        tone = "bad"
+    elif any(level == "warn" for level, _ in found):
+        tone = "warn"
+    elif m is not None:
+        tone = "ok" if m.invocations else "idle"
+    else:
+        tone = ""
+    return _Facts(fn, m, status, found, detail.triggers, cost, tone)
+
+
+def _seconds(since: str) -> float:
+    """How far back a time range reaches, in seconds: '1h' -> 3600, '7d' -> 604800, a date -> the time since it."""
+    start = parse_time(since)
+    return (_utcnow() - start).total_seconds() if start is not None else 0.0
+
+
+def _retries(count: int) -> str:
+    return "no retries" if not count else "1 retry" if count == 1 else f"{count} retries"
+
+
+def _short_day(moment: datetime) -> str:
+    return f"{moment:%b} {moment.day}"
+
+
+def _run_clock(moment: datetime, today: date) -> str:
+    """A run's start in UTC: '14:02:31' today, 'Oct 5 14:02' another day."""
+    moment = moment.astimezone(timezone.utc)
+    return moment.strftime("%H:%M:%S") if moment.date() == today else f"{_short_day(moment)} {moment:%H:%M}"
+
+
+def _offset(seconds: float) -> str:
+    """How far into a run a line came: '+0.052s', '+12.4s', '+184s'."""
+    if seconds < 10:
+        return f"+{seconds:.3f}s"
+    return f"+{seconds:.1f}s" if seconds < 100 else f"+{seconds:,.0f}s"
+
+
+def _line_parts(message: str) -> tuple[str, str]:
+    """A log line as the window shows it: (its text, without what Lambda writes before it (the time, request ID and
+    level, which the window shows in its own columns), and its other fields as indented JSON when it's a JSON line)."""
+    text = message.rstrip()
+    if text.startswith("{"):
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            doc = None
+        if isinstance(doc, dict):
+            if str(doc.get("type", "")).startswith("platform."):
+                record = doc.get("record")
+                return f"{doc['type']} {json.dumps(record, default=str)}" if record else str(doc["type"]), ""
+            inner = doc.get("message", doc.get("msg"))
+            rest = {k: v for k, v in doc.items() if k not in ("message", "msg", "level", "timestamp", "time",
+                                                                "requestId", "AWSRequestId")}
+            if isinstance(inner, dict) and (inner.get("errorType") or inner.get("errorMessage")):
+                body = _error_text_of(inner)  # an error Lambda's runtime logged: its type, message and stack
+                rest.update({k: v for k, v in inner.items() if k not in ("errorType", "errorMessage", "stack",
+                                                                         "stackTrace", "trace")})
+            elif inner is None:
+                if not (doc.get("errorType") or doc.get("errorMessage")):
+                    return text, ""
+                body = _error_text_of(doc)
+                rest = {k: v for k, v in rest.items() if k not in ("errorType", "errorMessage", "stack",
+                                                                   "stackTrace", "trace")}
+            else:
+                body = inner if isinstance(inner, str) else json.dumps(inner, default=str)
+            for key in ("exception", "stack_trace", "stackTrace"):  # a logger's traceback (Powertools: exception)
+                if isinstance(rest.get(key), str) and rest[key].strip():
+                    body = f"{body}\n{rest.pop(key).rstrip()}"
+            return body, json.dumps(rest, indent=2, default=str, ensure_ascii=False) if rest else ""
+    text = _LINE_PREFIX_RE.sub("", text, count=1)  # '[INFO]\t<time>\t<request ID>\t', '<time>\t<request ID>\t'
+    return _LEVEL_PREFIX_RE.sub("", text, count=1), ""  # then '[ERROR] ' (Python), 'INFO\t' (Node.js)
+
+
+_LEVEL_PREFIX_RE = re.compile(r"^(?:\[(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\]\s*|"
+                              r"(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|DEBUG|TRACE)\t)")
+
+
+def _error_text_of(doc: dict[str, Any]) -> str:
+    """An error as JSON logs carry it ({"errorType", "errorMessage", "stack"}) as a traceback reads: 'TypeError:
+    Cannot read ...' and then the stack's lines."""
+    head = ": ".join(str(doc[k]) for k in ("errorType", "errorMessage") if doc.get(k))
+    stack = doc.get("stack") or doc.get("stackTrace") or doc.get("trace") or []
+    lines = stack.splitlines() if isinstance(stack, str) else [str(line) for line in stack]
+    if lines and head and lines[0].strip().startswith(head.split(":")[0]):
+        lines = lines[1:]  # Node.js puts the message first in its stack too
+    return "\n".join([head, *lines]) if lines else head
+
+
+def _run_summary(run: LogRun) -> tuple[str, str]:
+    """(what a run's line says after its time and numbers, its tone): what made it fail, else the first thing it
+    logged."""
+    error = run.error
+    if error is not None:
+        return error[1].splitlines()[0][:300], "bad" if run.status in ("failed", "timeout") else "warn"
+    for event in run.events:
+        if _marker(event.message) is None:
+            text = _line_parts(event.message)[0].strip()
+            if text:
+                return text.splitlines()[0][:300], ""
+    if run.status == "outside":
+        return f"{_plural(len(run.events), 'line')} outside a run", ""
+    return "(it logged nothing of its own)", ""
+
+
+def _run_tip(run: LogRun, opened: bool) -> str:
+    """A run's tooltip: what happened, when, its request ID, and what a click does."""
+    label = _RUN_STATES.get(run.status, ("", "", run.status))[2]
+    return " · ".join(filter(None, [label[:1].upper() + label[1:], f"started {_stamp(run.start)} UTC",
+                                    f"request {run.request_id}" if run.request_id else "",
+                                    "click to fold its lines" if opened else "click to see its lines"]))
+
+
+def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
+    """A run's line in the Logs tab: its status, when it started, its run time against the timeout, the memory it
+    used, a cold start, what failed or the first thing it logged, and its request ID."""
+    icon, tone, _ = _RUN_STATES.get(run.status, ("?", "", run.status))
+    report = run.report
+    took = ""
+    if report is not None:
+        share = min(1.0, report.duration / (timeout * 1000)) if timeout else 0.0
+        fill = "bad" if share >= 0.9 else "warn" if share >= 0.7 else ""
+        took = (f'<span class="rb"><i class="{fill}" style="width:{max(share * 100, 2):.1f}%"></i></span>'
+                f"{_esc(human_ms(report.duration))}")
+    memory = f"{report.max_memory:,} of {report.memory:,} MB" if report is not None and report.memory else ""
+    cold = ""
+    if report is not None and (report.init is not None or report.restore is not None):
+        cold = f"cold {human_ms(report.init if report.init is not None else report.restore)}"
+    elif run.cold:
+        cold = "cold start"
+    summary, summary_tone = _run_summary(run)
+    request = run.request_id or ""
+    return (f'<div class="rr {tone}"><span class="rv"></span><span class="ri">{_esc(icon)}'
+            f'</span><span class="rw">{_esc(_run_clock(run.start, today))}</span><span class="rd">{took}</span>'
+            f'<span class="rm">{_esc(memory)}</span><span class="rc">{_esc(cold)}</span>'
+            f'<span class="rs {summary_tone}">{_marked(summary, words)}</span>'
+            f'<span class="rq">{_esc(request[:8])}</span></div>')
+
+
+def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
+    """An open run's lines: how far into the run each came, its level, and its text (JSON lines as their message, with
+    their other fields a click away), then what its REPORT line says and its request ID to copy."""
+    started = next((e.time for e in run.events if (_marker(e.message) or ("",))[0] == "start"), run.start)
+    lines = [e for e in run.events if (_marker(e.message) or ("",))[0] not in ("start", "end", "report")]
+    rows = []
+    for event in lines[:limit]:
+        level = line_level(event.message)
+        text, fields = _line_parts(event.message)
+        seconds = (event.time - started).total_seconds()
+        when = "init" if seconds < 0 else _offset(seconds)
+        badge = {"error": "ERROR", "warn": "WARN", "info": "INFO", "debug": "DEBUG"}.get(level, "")
+        extra = (f'<details><summary>{{…}} fields</summary><span class="jf">{_json_source_html(fields)}</span>'
+                 "</details>" if fields else "")
+        rows.append(f'<div class="rl {level}{" hit" if event.matched else ""}"><span class="lt" title="'
+                    f'{_esc(_stamp(event.time))} UTC">{_esc(when)}</span><span class="lv {level}">{badge}</span>'
+                    f'<span class="lm">{_marked(text, words) or "&nbsp;"}{extra}</span></div>')
+    if not lines:
+        rows.append('<div class="rmore">It logged nothing of its own: only Lambda\'s START and REPORT lines.</div>')
+    elif len(lines) > limit:
+        rows.append(f'<div class="rmore">… {len(lines) - limit:,} more lines. x.ui.logs(name, request_id=...) shows '
+                    "all of them.</div>")
+    facts = []
+    report = run.report
+    if report is not None:
+        facts.append(f"<span>Ran <b>{_esc(human_ms(report.duration))}</b></span>")
+        facts.append(f"<span>billed {_esc(human_ms(report.billed))}</span>")
+        if report.memory:
+            tight = report.max_memory >= 0.9 * report.memory
+            facts.append(f'<span class="{"warn" if tight else ""}">used <b>{report.max_memory:,}</b> of '
+                         f"{report.memory:,} MB</span>")
+        if report.init is not None:
+            facts.append(f"<span>cold start {_esc(human_ms(report.init))}</span>")
+        if report.restore is not None:
+            facts.append(f"<span>SnapStart restore {_esc(human_ms(report.restore))}</span>")
+        if report.status:
+            facts.append(f'<span class="bad">status {_esc(report.status)}'
+                         + (f" ({_esc(report.error_type)})" if report.error_type else "") + "</span>")
+    elif run.request_id:
+        facts.append("<span>No REPORT line yet: still running, or it ended after the time range</span>")
+    if run.request_id:
+        facts.append(f'<span>request <code title="Click to select, then copy">{_esc(run.request_id)}</code></span>')
+    if run.stream:
+        facts.append(f'<span title="The log stream: one execution environment">{_esc(_clip(run.stream, 70))}</span>')
+    return f'<div class="rbody">{"".join(rows)}<div class="rf">{"".join(facts)}</div></div>'
+
+
+def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now: datetime) -> str:
+    """A function's line in the list: its health dot, name, runtime and description, then its numbers in columns."""
+    fn, m = f.fn, f.metrics
+    runtime = f.status.label
+    parts = [fn.description, _triggers_text(f.triggers), f"{fn.memory:,} MB", f"{fn.timeout} s"]
+    line = " · ".join(p for p in parts if p)
+    loading = '<span class="sk"></span>'
+
+    def cell(css: str, value: str, tone: str = "") -> str:
+        inner = f'<span class="pill {tone}">{_esc(value)}</span>' if tone else _esc(value)
+        return f'<div class="fc {css}">{inner}</div>'
+
+    if m is None:
+        dash = loading if numbers else "-"
+        cells = "".join(f'<div class="fc {css}">{dash}</div>' for css in ("", "", "c-dur", "", "c-called"))
+    else:
+        level = _errors_level(m, now)
+        rate = _pct(m.error_rate) if m.invocations else "-"
+        cells = (cell("", _count(round(m.invocations)) if m.invocations else "0")
+                 + cell("" if m.invocations else "dim", rate, "bad" if level == "warn" else "warn" if level else "")
+                 + cell("c-dur" + ("" if m.invocations else " dim"), human_ms(m.avg_duration) if m.invocations
+                        else "-")
+                 + cell("" if f.cost is not None else "dim", human_money(f.cost) if f.cost is not None else "-")
+                 + cell("c-called" + ("" if m.invocations else " dim"),
+                        _day_age(m.last_invoked, now) if m.invocations else "not in 30d"))
+    warnings = len(f.warnings)
+    badge = f'<span class="wb">{warnings}</span>' if warnings else ""
+    region = f'<span class="rg">{_esc(fn.region)}</span>' if multi else ""
+    return (f'<div class="fr"><span class="dot {f.tone}"></span><div class="fm"><div class="fn">'
+            f"<b>{_marked(fn.name, words)}</b>"
+            f'<span class="rt {f.status.tone}">{_esc(runtime)}</span>{region}</div>'
+            f'<div class="ff">{_marked(line, words)}</div></div>{cells}<div class="fc">{badge}</div><div></div></div>')
+
+
+def _triggers_text(triggers: list[Trigger]) -> str:
+    labels = list(dict.fromkeys(t.short for t in triggers))
+    return ", ".join(labels[:3]) + (f" +{len(labels) - 3}" if len(labels) > 3 else "")
+
+
+def _destination(arn: str | None) -> tuple[str, str]:
+    """(what it is, its name) for an on-success / on-failure destination or a dead-letter queue: an SQS queue, an SNS
+    topic, another function..."""
+    parts = (arn or "").split(":")
+    kind = _DESTINATIONS.get(parts[2], parts[2]) if len(parts) > 5 else ""
+    return kind or "destination", _source_name(arn)[0] or (arn or "-")
+
+
+def _code_file_face(f: CodeFile, words: list[str], handler: str | None) -> str:
+    """A file's line in the Code tab: its type, name and folder, and its size."""
+    folder, _, name = f.path.rpartition("/")
+    kind = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    badge, tone = {"py": ("PY", "py"), "js": ("JS", "js"), "mjs": ("JS", "js"), "cjs": ("JS", "js"),
+                   "ts": ("TS", "js"), "rb": ("RB", "py"), "json": ("JSON", "cfg"), "yaml": ("YAML", "cfg"),
+                   "yml": ("YAML", "cfg"), "toml": ("TOML", "cfg"), "txt": ("TXT", ""), "md": ("MD", "")}.get(
+        kind, ((kind or "file")[:4].upper(), ""))
+    if _SECRET_FILE_RE.search(f.path):
+        badge, tone = "KEY", "key"
+    junk = " junk" if _JUNK_RE.search(f.path) else ""
+    hb = '<span class="hb">HANDLER</span>' if f.path == handler else ""
+    return (f'<div class="cf{junk}"><span class="ct {tone}">{_esc(badge)}</span><div class="cm"><div class="cn">'
+            f'{_marked(name, words)}{hb}</div><div class="cd">{_marked(folder + "/" if folder else "top level", words)}'
+            f'</div></div><span class="cz">{_esc(human_size(f.size))}</span></div>')
+
+
+def _source_html(path: str, text: str) -> str:
+    """A file's text with line numbers, Python and JSON in colour (every piece escaped)."""
+    lines = text.count("\n") + (0 if text.endswith("\n") else 1)
+    body = (_python_html(text) if path.endswith(".py") else _json_source_html(text) if path.endswith(".json")
+            else _esc(text))
+    gutter = "\n".join(str(i) for i in range(1, lines + 1))
+    return f'<div class="src"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
+
+
+def _window_errors(method: Callable) -> Callable:
+    """For the explorer's own commands: an AWS or input error is said in the window's status line (or, without the
+    window, as a note) instead of a traceback."""
+
+    @functools.wraps(method)
+    def wrapper(self: LambdaExplorer, *args: Any, **kwargs: Any) -> None:
+        try:
+            return method(self, *args, **kwargs)
+        except (ClientError, BotoCoreError, ValueError, TypeError) as exc:
+            if self._w is None:
+                self.ui._show([_Note(self._error_text(exc), "warn")])
+            else:
+                self._status(self._error_text(exc), "warn")
+        return None
+
+    return wrapper
+
+
+class _FunctionField:
+    """The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
+    a list over the window, with a search box that finds a function by any part of its name, description, runtime or
+    region. Enter picks the first line, or hands what's typed to on_text when no line has it (an ARN, or a function the
+    list doesn't hold). Plain widgets and CSS: each line is a button under its text, so the whole line is the click
+    target. While the list is open, the window's backdrop takes a click anywhere else and closes it."""
+
+    def __init__(self, app: LambdaExplorer, *, on_pick: Callable[[Function], None], on_text: Callable[[str], None]):
+        w, layout = app._w, app._w.Layout
+        self.app, self.on_pick, self.on_text = app, on_pick, on_text
+        self.choices: list[Function] = []
+        self.value = ""  # the ARN shown
+        self.problem = ""  # why there's nothing to list
+        self.message = ""  # what went wrong with the last Enter
+        self.shown: list[str] = []  # the ARNs the list shows, top to bottom
+        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # ARN -> (its line, the line's button, its text)
+        self.button = w.Button(tooltip="Pick another function", layout=layout(width="100%", height="100%"))
+        self.button.add_class("lmx-trig-b")
+        self.button.on_click(app._safely(lambda _button: self.toggle()))
+        self.face = w.HTML(layout=layout(width="100%"))
+        self.face.add_class("lmx-face")
+        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
+        trigger.add_class("lmx-trig")
+        self.search = w.Text(placeholder="Search by name, description, runtime or region", continuous_update=True,
+                             layout=layout(flex="1 1 auto", width="auto"))
+        self.search.add_class("lmx-find")
+        self.search.observe(app._safely(lambda _change: self._draw_list()), names="value")
+        self.search.on_msg(app._on_enter(self._entered))
+        close = w.Button(description="✕", tooltip="Close the list", layout=layout(flex="0 0 auto"))
+        close.add_class("lmx-x")
+        close.on_click(app._safely(lambda _button: self.close()))
+        self.list = w.VBox(layout=layout(width="100%"))
+        self.list.add_class("lmx-opts")
+        self.foot = w.HTML(layout=layout(width="100%"))
+        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
+                             self.list, self.foot], layout=layout(display="none"))
+        self.panel.add_class("lmx-pop")
+        self.box = w.VBox([trigger, self.panel])
+        self.box.add_class("lmx-field")
+        self.draw()
+
+    @property
+    def is_open(self) -> bool:
+        return self.panel.layout.display != "none"
+
+    def set_choices(self, functions: Iterable[Function]) -> None:
+        self.choices = sorted(functions, key=lambda f: (f.name.lower(), f.region))
+        self.draw()
+
+    def _choice(self, arn: str) -> Function | None:
+        return next((f for f in self.choices if f.arn == arn), None)
+
+    def draw(self) -> None:
+        fn = self._choice(self.value) or self.app.function
+        if fn is not None and fn.arn != self.value:
+            fn = None
+        facts = self.app._facts.get(fn.arn) if fn is not None else None
+        tone = facts.tone if facts is not None else ""
+        shown = (f"<b>{_esc(fn.name)}</b>" if fn is not None
+                 else '<b style="opacity:.55;font-weight:500">Pick a function</b>')
+        runtime = (f'<span class="fxi">{_esc(fn.runtime or "container image")}'
+                   + (f" · {_esc(fn.region)}" if self.app.multi else "") + "</span>") if fn is not None else ""
+        self.app._set(self.face, '<div class="fx"><div class="fxl">Function</div><div class="fxv">'
+                                 + (f'<span class="dot {tone}"></span>' if fn is not None else "") + shown + runtime
+                                 + '</div><span class="chev"></span></div>')
+        if self.is_open:
+            self._draw_list()
+
+    def open(self) -> None:
+        if self.is_open:
+            return
+        self.message = ""
+        self.panel.layout.display = ""
+        self.app.backdrop.layout.display = ""
+        _class_if(self.box, "lmx-open", True)
+        self._draw_list()
+        if hasattr(self.search, "focus"):  # ipywidgets 8
+            self.search.focus()
+
+    def close(self) -> None:
+        if not self.is_open:
+            return
+        self.panel.layout.display = "none"
+        self.app.backdrop.layout.display = "none"
+        _class_if(self.box, "lmx-open", False)
+        self.app._quietly(self.search, value="")
+        self.message = ""
+
+    def toggle(self) -> None:
+        self.close() if self.is_open else self.open()
+
+    def matches(self) -> list[Function]:
+        text = str(self.search.value or "")
+        try:
+            name, _, _ = parse_function_ref(text)
+            text = name if text.strip().startswith(("arn:", "http")) else text
+        except ValueError:
+            pass
+        ranked = [(rank, i, f) for i, f in enumerate(self.choices)
+                  if (rank := search_rank(text, (f.name, f.description, f.runtime, f.region, f.arn))) is not None]
+        return [f for _, _, f in sorted(ranked, key=lambda r: r[:2])]
+
+    def _row(self, fn: Function, words: list[str]) -> Any:
+        if fn.arn not in self.rows:
+            w, layout = self.app._w, self.app._w.Layout
+            button = w.Button(layout=layout(width="100%", height="100%"))
+            button.add_class("lmx-opt-b")
+            button.on_click(self.app._safely(lambda _button, arn=fn.arn: self._clicked(arn)))
+            text = w.HTML(layout=layout(width="100%"))
+            text.add_class("lmx-opt-t")
+            row = w.Box([button, text], layout=layout(width="100%"))
+            row.add_class("lmx-opt")
+            self.rows[fn.arn] = (row, button, text)
+        row, button, text = self.rows[fn.arn]
+        _class_if(row, "lmx-on", fn.arn == self.value)
+        facts = self.app._facts.get(fn.arn)
+        m = facts.metrics if facts is not None else None
+        numbers = (f"{_count(round(m.invocations))} calls" + (f", {_pct(m.error_rate)} failed" if m.errors else "")
+                   if m is not None and m.invocations else "not called in 30 days" if m is not None else "")
+        note = " · ".join(p for p in (fn.description, fn.region if self.app.multi else "", numbers) if p)
+        tip = " · ".join(p for p in (fn.name, fn.runtime or "container image", note) if p)
+        if button.tooltip != tip:
+            button.tooltip = tip
+        self.app._set(text, f'<div class="op"><span class="dot {facts.tone if facts else ""}"></span><div class="opb">'
+                            f'<div class="opt"><b>{_marked(fn.name, words)}</b><span class="opi">'
+                            f'{_marked(fn.runtime or "container image", words)}</span></div>'
+                            + (f'<div class="opn">{_marked(note, words)}</div>' if note else "") + "</div></div>")
+        return row
+
+    def _draw_list(self) -> None:
+        text = str(self.search.value or "").strip()
+        found = self.matches()
+        words = text.split()
+        self.list.children = [self._row(f, words) for f in found[:80]]
+        self.shown = [f.arn for f in found[:80]]
+        level, line = "", ""
+        where = self.app._where()
+        if self.message:
+            level, line = "warn", self.message
+        elif not self.choices:
+            level, line = ("warn" if self.problem else ""), self.problem or f"There are no functions in {where}."
+        elif text and not found:
+            level, line = "warn", f"No function in {where} matches {text!r}. Enter looks it up by name or ARN."
+        else:
+            line = (f"{len(found):,} of {len(self.choices):,}" if text else _plural(len(self.choices), "function"))
+            line += f" in {where}" + (" · Enter picks the first" if text else "")
+            if len(found) > 80:
+                line += " · type to narrow the list"
+        self.app._set(self.foot, f'<div class="opf {level}">{_prose(line)}</div>')
+
+    def _clicked(self, arn: str) -> None:
+        self.close()
+        fn = self._choice(arn)
+        if fn is not None and arn != self.value:
+            self.on_pick(fn)
+
+    def _entered(self) -> None:
+        text = str(self.search.value or "").strip()
+        if not text:
+            self.close()
+            return
+        found = self.matches()
+        try:
+            if found:
+                self._clicked(found[0].arn)
+            else:
+                self.on_text(text)
+                self.close()
+        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
+            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
+            self._draw_list()
+
+
+class _Row:
+    """One reusable line of a list: a full-width button under its face (HTML), so the whole line is the click target,
+    with an optional small action button on its right (the function list's Logs). `item` is what it shows."""
+
+    def __init__(self, app: LambdaExplorer, on_click: Callable[[Any], None], *, short: bool = False,
+                 action: tuple[str, str, Callable[[Any], None]] | None = None):
+        w, layout = app._w, app._w.Layout
+        self.item: Any = None
+        self.button = w.Button(layout=layout(width="100%", height="100%"))
+        self.button.add_class("lmx-row-b")
+        self.button.on_click(app._safely(lambda _button: on_click(self.item) if self.item is not None else None))
+        self.face = w.HTML(layout=layout(width="100%"))
+        self.face.add_class("lmx-row-t")
+        children = [self.button, self.face]
+        self.action = None
+        if action is not None:
+            label, tip, act = action
+            self.action = w.Button(description=label, tooltip=tip, layout=layout(width="auto"))
+            self.action.add_class("lmx-act")
+            self.action.on_click(app._safely(lambda _button: act(self.item) if self.item is not None else None))
+            children.append(self.action)
+        self.box = w.Box(children, layout=layout(width="100%"))
+        self.box.add_class("lmx-row")
+        if short:
+            self.box.add_class("lmx-short")
+
+
+class _RunRow:
+    """One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
+    memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again."""
+
+    def __init__(self, app: LambdaExplorer):
+        w, layout = app._w, app._w.Layout
+        self.run: LogRun | None = None
+        self.button = w.Button(tooltip="Click to see its lines", layout=layout(width="100%", height="100%"))
+        self.button.add_class("lmx-run-b")
+        self.button.on_click(app._safely(lambda _button: app._toggle_run(self)))
+        self.face = w.HTML(layout=layout(width="100%"))
+        self.face.add_class("lmx-run-t")
+        head = w.Box([self.button, self.face], layout=layout(width="100%"))
+        head.add_class("lmx-run-h")
+        self.body = w.HTML(layout=layout(width="100%", display="none"))
+        self.box = w.VBox([head, self.body], layout=layout(width="100%"))
+        self.box.add_class("lmx-run")
+
+
+class LambdaExplorer:
+    """The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
+    The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
+
+        Functions    every function in the region (or in every region): runtime, calls, errors, run time, cost and
+                     warnings, the ones that need attention first. Search, filter, sort by a column, and click one to
+                     open it (or Logs on its line, to go straight to its logs)
+        Overview     how the picked function is doing: what's wrong and what to do, what calls it and where its
+                     results, failed events and logs go, calls and run time day by day, and what it costs
+        Logs         what it logged, run by run, newest first: each run's start, status, run time, memory and cold
+                     start, the failed ones in red; click a run for its lines. Type to find runs with some text (an
+                     order ID, KeyError, a request ID), Enter to search CloudWatch for the whole time range, pick the
+                     time range, show only failed runs or cold starts, and turn on Live to see new runs as they come
+        Errors       its errors grouped by cause, with what to do about each, and the runs that failed: click one to
+                     read every line of it
+        Performance  run times against the timeout, memory used against what it has, cold starts, and the slowest
+                     runs (click one to read it)
+        Code         the files in its deployment package, and the source of the one you click (secrets files held
+                     back)
+        Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
+
+    name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
+    'errors', 'performance', 'code' or 'settings'). region: the region to list, or 'all' for every region your account
+    has turned on (the region field switches it). view / core: a LambdaView or LambdaAnalyzer to use (else one is made
+    from region / profile). height: the height of the tabs' pages, which fill the browser window unless set (pixels, or
+    CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports elsewhere), 'widgets' or 'text'.
+
+    Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
+    command. x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail,
+    x.logs_page and x.package hold the data behind what's shown."""
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        tab: str | None = None,
+        view: LambdaView | None = None,
+        core: LambdaAnalyzer | None = None,
+        region: str | None = None,
+        profile: str | None = None,
+        height: int | str | None = None,
+        mode: str = "auto",
+        progress: str = "auto",
+    ):
+        if mode not in ("auto", "widgets", "text"):
+            raise ValueError("mode must be 'auto', 'widgets' or 'text'")
+        if tab is not None and tab not in {key for key, *_ in _EXPLORER_TABS}:
+            raise ValueError(f"tab= is one of {', '.join(repr(key) for key, *_ in _EXPLORER_TABS)}; got {tab!r}")
+        every = isinstance(region, str) and region.strip().lower() == "all"
+        if view is None:
+            view = LambdaView(core or LambdaAnalyzer(region=None if every else region, profile=profile),
+                              mode="text" if mode == "text" else "auto", progress=progress)
+        self.ui = view
+        self.core = view.core
+        self.height = height
+        self.region: str | None = "all" if every else region  # the region field: a region, or 'all'
+        self.overview: Overview | None = None  # the functions listed
+        self.function: Function | None = None  # the one picked
+        self.detail: FunctionDetail | None = None  # describe() of it: the Overview and Settings tabs
+        self.logs_page: LogPage | None = None  # the Logs tab's read of the time range
+        self.found: LogPage | None = None  # the Logs tab's CloudWatch search, or the one run opened
+        self.error_report: ErrorReport | None = None  # the Errors tab
+        self.perf: Performance | None = None  # the Performance tab
+        self.package: CodePackage | None = None  # the Code tab
+        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
+        self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
+        self._w: Any = None
+        self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
+        self._numbers_pending = False  # CloudWatch's numbers are being read for the list
+        self._want, self._want_tab = name, tab  # opened once the functions are listed...
+        self._want_search: str | None = None  # ...and searched for in its logs
+        self._tab = "functions"
+        self._asked: set[str] = set()  # the function's tabs whose data was asked for
+        self._listing_started = 0.0
+        self._query, self._chip, self._sort, self._descending, self._offset = "", "", "problems", True, 0
+        self._rows: list[_Row] = []
+        self._visible: list[_Facts] = []  # the functions the list's search and chip let through, in order
+        self._range, self._log_query, self._run_chip, self._run_offset = "1h", "", "", 0
+        self._runs: list[LogRun] = []  # logs_page's runs, newest first
+        self._found_runs: list[LogRun] = []  # found's
+        self._searched = ""  # what the CloudWatch search (or the run opened) looked for
+        self._open_runs: set[str] = set()  # LogRun.key of the runs opened to show their lines
+        self._run_rows: list[_RunRow] = []
+        self._live, self._live_token, self._live_started, self._live_new = False, 0, 0.0, 0
+        self._errors_range, self._perf_range = "24h", "24h"
+        self._error_rows: list[_Row] = []
+        self._slow_rows: list[_Row] = []
+        self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package
+        self._package_data: bytes | None = None
+        self._code_query, self._code_offset, self._code_file = "", 0, None
+        self._code_rows: list[_Row] = []
+        self._pagers: dict[str, tuple[Any, dict[str, Any]]] = {}
+        self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
+        self._run_chip_buttons: dict[str, Any] = {}
+        self._empties: dict[str, Any] = {}  # list -> the line it shows when it's empty
+        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
+        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
+        self._pool: ThreadPoolExecutor | None = None
+        self._counted = 0  # what the background read has read so far
+        self._said: tuple[str, str, bool, str] = ("", "", False, "")  # the status line: text, level, busy, whose
+        self._listing = False  # the functions are being listed
+        self._shown_at: Any = object()
+        note = ""
+        if mode != "text" and (mode == "widgets" or _in_notebook()):
+            try:
+                self._w = _require("ipywidgets", "The explorer window")
+            except ImportError as exc:
+                note = (f"{exc}, which SageMaker notebooks normally have: install it and restart the kernel. Until "
+                        "then, the same in reports:")
+        if self._w is None:
+            self._reports(note, mode)
+            return
+        self._build()
+        self._begin()
+        self._display()
+
+    # ------------------------------------------------------------------ public commands
+
+    def __repr__(self) -> str:
+        name = self.function.name if self.function is not None else "no function picked"
+        return f"LambdaExplorer({name}) · help(LambdaExplorer) says what it shows"
+
+    @_window_errors
+    def open(self, name: str, *, tab: str | None = None) -> None:
+        """Opens a function (its name, 'name:alias', an ARN or a console link), as picking it in the function field
+        does: its Overview, or tab= ('logs', 'errors', 'performance', 'code', 'settings')."""
+        if tab is not None and tab not in _FUNCTION_TABS:
+            raise ValueError(f"tab= is one of {', '.join(map(repr, _FUNCTION_TABS))}; got {tab!r}")
+        parse_function_ref(name)  # says what a name looks like, before anything is read
+        if self._w is None:
+            self._report_for(name, tab)
+            return
+        if self._listing:
+            self._want, self._want_tab, self._want_search = name, tab, None
+            self._status(f"{name} opens once the functions are listed.")
+            return
+        self._open_named(name, tab)
+
+    @_window_errors
+    def logs(self, name: str | None = None, *, search: str | None = None, since: str | None = None) -> None:
+        """Shows a function's logs in the Logs tab (the one picked, or name=), as clicking the tab does. since= picks
+        the time range ('15m', '1h', '24h', '7d', a date...), and search= finds the runs with a line that has the text
+        (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole time range."""
+        if since is not None:
+            LambdaAnalyzer._window(since)  # a time it can't read is said before anything changes
+        if self._w is None:
+            target = name or (self.function.name if self.function is not None else None)
+            if target is None:
+                raise _Hint("Name the function: x.logs('my-function').")
+            self.ui.logs(target, search=search, since=since)
+            return
+        if since is not None:
+            self._set_range(str(since))
+        if name is not None:
+            if self._listing:
+                self._want, self._want_tab, self._want_search = name, "logs", search
+                self._status(f"{name}'s logs open once the functions are listed.")
+                return
+            self._open_named(name, "logs", search=search)
+            return
+        if self.function is None:
+            raise _Hint("Pick a function first: click one in the Functions tab, or x.logs('my-function').")
+        if search:
+            self._show_tab("logs", load=False)
+            self._quietly(self.log_find, value=search)
+            self._log_query = search
+            self._log_search()
+        else:
+            self._show_tab("logs", load=False)
+            self._load_logs()
+
+    @_window_errors
+    def run(self, request_id: str) -> None:
+        """Shows one run of the picked function in the Logs tab, every line of it, by its request ID (from an error, a
+        REPORT line or your own logs), looking back at least 24 hours."""
+        if self.function is None:
+            raise _Hint("Pick a function first: click one in the Functions tab, or x.open('my-function').")
+        if self._w is None:
+            self.ui.logs(self.function.name, request_id=request_id)
+            return
+        if _seconds(self._range) < 86400:
+            self._set_range("24h")
+        self._show_tab("logs", load=False)
+        self._quietly(self.log_find, value=request_id)
+        self._log_query = request_id.strip()
+        self._log_search()
+
+    @_window_errors
+    def refresh(self) -> None:
+        """Reads everything again: the functions, and the picked function's tabs (the ↻ button)."""
+        keep = self.function
+        self._load_list(reopen=keep)
+
+    # ------------------------------------------------------------------ plumbing
+
+    def _ipython_display_(self) -> None:
+        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
+        its reports were shown when it was made)."""
+        if self._w is not None and _cell_number() != self._shown_at:
+            self._display()
+
+    def _display(self) -> None:
+        self._shown_at = _cell_number()
+        if self._shown_at is None:
+            return  # outside IPython there's nowhere to show widgets
+        from IPython.display import display
+
+        display(self.root)
+
+    def _reports(self, note: str, mode: str) -> None:
+        """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
+        if note:
+            self.ui._show([_Note(note, "warn")])
+        elif mode != "text":
+            self.ui._show([_Note("The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, the same "
+                                 "in reports: function_info('name') explains one function, logs('name') shows what it "
+                                 "logged and errors('name') why it fails.")])
+        if self._want:
+            self._report_for(self._want, self._want_tab)
+        else:
+            regions = "all" if self.region == "all" else [self.region] if self.region else None
+            self.ui.functions(regions=regions)
+
+    def _report_for(self, name: str, tab: str | None) -> None:
+        """A function's tab, as a report (without the window)."""
+        region = None if self.region in (None, "all") else self.region
+        command = {"logs": self.ui.logs, "errors": self.ui.errors, "performance": self.ui.performance,
+                   "code": self.ui.code}.get(tab or "", self.ui.function_info)
+        command(name, region=region)
+
+    @property
+    def multi(self) -> bool:
+        """Whether the list holds more than one region's functions."""
+        return self.region == "all" or bool(self.overview is not None and len(self.overview.regions) > 1)
+
+    def _where(self) -> str:
+        return "every region" if self.region == "all" else str(self.region or "this region")
+
+    def _full(self) -> Function:
+        """The picked function as GetFunction gave it, once describe() has read it (else as the list has it)."""
+        assert self.function is not None
+        return self.detail.function if self.detail is not None else self.function
+
+    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(handler)
+        def run(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return handler(*args, **kwargs)
+            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
+                self._status(self._error_text(exc), "warn")
+                return None
+
+        return run
+
+    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
+        doesn't trigger it."""
+        safe = self._safely(handler)
+        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
+
+    def _error_text(self, exc: BaseException) -> str:
+        if isinstance(exc, ClientError):
+            error = exc.response.get("Error", {})
+            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
+            return f"{code}: {_window_text(self.ui._explain(code, message))}"
+        if isinstance(exc, _Hint):
+            return _window_text(str(exc))
+        return f"{type(exc).__name__}: {exc}"
+
+    def _status(self, text: str, level: str = "", busy: bool = False, owner: str = "") -> None:
+        """The line under the tabs. owner: the background job a busy line is about (it says the job's last word)."""
+        self._said = (text, level, busy, owner)
+        spin = '<span class="spin"></span>' if busy else ""
+        self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
+
+    def _finish(self, owner: str, text: str, level: str = "", *, tabs: Iterable[str] = (), busy: bool = False) -> None:
+        """A background job's word in the status line (its last, unless busy= says it goes on): said while the line is
+        still that job's (busy), or while one of its tabs is open; otherwise the line stays as it is."""
+        if (self._said[2] and self._said[3] == owner) or self._tab in tabs:
+            self._status(text, level, busy=busy, owner=owner if busy else "")
+
+    def _quietly(self, widget: Any, **values: Any) -> None:
+        self.quiet = True
+        try:
+            for name, value in values.items():
+                setattr(widget, name, value)
+        finally:
+            self.quiet = False
+
+    @staticmethod
+    def _set(widget: Any, value: str) -> None:
+        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
+        run and table the user opened."""
+        if widget.value != value:
+            widget.value = value
+
+    def _html(self, blocks: list[Any]) -> str:
+        """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
+        report CSS each one carries (the window's style holds it)."""
+        return _render_html(_for_window(blocks), self.ui.max_rows).replace(_CSS, "", 1)
+
+    def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
+        self.shown[page] = blocks
+        self._set(widget, self._html(blocks))
+
+    def _workers(self) -> ThreadPoolExecutor:
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lambda-explorer")
+        return self._pool
+
+    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
+               failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
+        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
+        window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
+        A newer job of the same key makes this one's result go unused. counting: the status line to show while it runs
+        and the line is still owner's, {n} standing for the count read so far."""
+        self._jobs[key] = job = self._jobs.get(key, 0) + 1
+        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
+
+        def finish(handler: Callable[[Any], None], value: Any) -> None:
+            if self._jobs.get(key) != job:
+                return
+            try:
+                handler(value)
+            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
+                self._status(self._error_text(exc), "warn")
+
+        loop = _running_loop()
+        if loop is None:
+            try:
+                result = work()
+            except Exception as exc:
+                finish(failed, exc)
+            else:
+                finish(done, result)
+            return
+
+        async def run() -> None:
+            future = loop.run_in_executor(self._workers(), work)
+            while counting and not future.done():
+                await asyncio.wait([future], timeout=0.4)
+                if self._jobs.get(key) == job and not future.done() and self._counted and self._said[3] == owner:
+                    self._status(counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=owner)
+            try:
+                result = await future
+            except Exception as exc:
+                finish(failed, exc)
+            else:
+                finish(done, result)
+            finally:
+                if self._tasks.get(key) is task:
+                    del self._tasks[key]
+
+        task = loop.create_task(run())
+        self._tasks[key] = task
+
+    def _empty(self, key: str, text: str) -> Any:
+        """The line an empty list shows, one widget per list, kept."""
+        if key not in self._empties:
+            self._empties[key] = self._w.HTML(layout=self._w.Layout(width="100%"))
+        self._set(self._empties[key], f'<div class="lmx-empty">{_esc(text)}</div>')
+        return self._empties[key]
+
+    def _drop(self, *keys: str) -> None:
+        """Makes what's still being read for these jobs go unused when it comes back."""
+        for key in keys:
+            self._jobs[key] = self._jobs.get(key, 0) + 1
+
+    # ------------------------------------------------------------------ layout
+
+    def _build(self) -> None:
+        w, layout = self._w, self._w.Layout
+        style = w.HTML(_CSS + _EXPLORER_CSS, layout=layout(display="none"))
+        self.backdrop = w.Button(layout=layout(display="none"))
+        self.backdrop.add_class("lmx-backdrop")
+        self.backdrop.on_click(self._safely(lambda _button: self.field.close()))
+        self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
+        self.region_pick = w.Dropdown(options=[("Region: …", "")], value="", layout=layout(width="auto"))
+        self.region_pick.add_class("lmx-region")
+        self.region_pick.observe(self._safely(self._region_changed), names="value")
+        self.refresh_button = w.Button(description="↻ Refresh", tooltip="Read everything again: the functions, and "
+                                       "the picked function's tabs", layout=layout(width="auto"))
+        self.refresh_button.add_class("lmx-small")
+        self.refresh_button.on_click(self._safely(lambda _button: self.refresh()))
+        top = w.HBox([self.title, self.region_pick, self.refresh_button], layout=layout(width="100%"))
+        top.add_class("lmx-top")
+        self.field = _FunctionField(self, on_pick=self._picked, on_text=self._typed)
+        self.stats = w.HTML(layout=layout(flex="1 1 360px", min_width="0"))
+        meta = w.HBox([self.field.box, self.stats], layout=layout(width="100%"))
+        meta.add_class("lmx-meta")
+        head = w.VBox([top, meta], layout=layout(width="100%"))
+        head.add_class("lmx-head")
+
+        self.tab_buttons: dict[str, Any] = {}
+        for key, title, tip, _ in _EXPLORER_TABS:
+            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
+            for name in ("lmx-tab", f"lmx-i-{key}"):
+                button.add_class(name)
+            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
+            self.tab_buttons[key] = button
+        tabs = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
+        tabs.add_class("lmx-tabs")
+
+        self.overview_view = w.HTML(layout=layout(width="100%"))
+        self.settings_view = w.HTML(layout=layout(width="100%"))
+        self.pages = {
+            "functions": self._functions_page(),
+            "overview": self._scroll_page([self.overview_view]),
+            "logs": self._logs_page(),
+            "errors": self._errors_page(),
+            "performance": self._performance_page(),
+            "code": self._code_page(),
+            "settings": self._scroll_page([self.settings_view]),
+        }
+        height = _css_height(self.height)
+        for key, page in self.pages.items():
+            page.add_class("lmx-page")
+            page.layout.width = "100%"
+            if height:
+                page.layout.height = height
+            if key != self._tab:
+                page.layout.display = "none"
+        self.status = w.HTML(layout=layout(width="100%"))
+        self.status.add_class("lmx-status")
+        self.root = w.VBox([style, head, tabs, *self.pages.values(), self.status, self.backdrop],
+                           layout=layout(width="100%"))
+        self.root.add_class("lmx-app")
+        self._show_tab(self._tab)
+
+    def _scroll_page(self, children: list[Any], above: list[Any] | None = None) -> Any:
+        """A tab's page: what stays at its top (`above`), then a box that scrolls (`children`)."""
+        w = self._w
+        scroller = w.VBox(children, layout=w.Layout(width="100%"))
+        scroller.add_class("lmx-scroll")
+        return w.VBox([*(above or []), scroller])
+
+    def _renew(self, key: str) -> None:
+        """A new scrolling box for a tab's page, which starts at the top (widgets can't be scrolled from Python)."""
+        page = self.pages[key]
+        old = page.children[-1]
+        scroller = self._w.VBox(list(old.children), layout=self._w.Layout(width="100%"))
+        scroller.add_class("lmx-scroll")
+        page.children = [*page.children[:-1], scroller]
+
+    def _make_pager(self, key: str) -> Any:
+        w, layout = self._w, self._w.Layout
+        text = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
+        buttons = {}
+        for where, glyph, tip in (("first", "«", "The first page"), ("previous", "‹", "The page before"),
+                                  ("next", "›", "The next page"), ("last", "»", "The last page")):
+            button = w.Button(description=glyph, tooltip=tip, layout=layout(flex="0 0 auto"))
+            button.add_class("lmx-pg")
+            button.on_click(self._safely(lambda _button, where=where: self._page(key, where)))
+            buttons[where] = button
+        self._pagers[key] = (text, buttons)
+        return [text, *buttons.values()]
+
+    def _draw_pager(self, key: str, offset: int, total: int, size: int, noun: str, whole: int | None = None) -> None:
+        text, buttons = self._pagers[key]
+        first, last = offset + 1, min(offset + size, total)
+        shown = f"<b>{first:,}–{last:,}</b> of {total:,} {noun}" if total else f"0 {noun}"
+        self._set(text, shown + (f" (of {whole:,})" if whole is not None and whole != total else ""))
+        more = total > size
+        for where, button in buttons.items():
+            button.layout.display = "" if more else "none"
+            button.disabled = (offset == 0) if where in ("first", "previous") else (last >= total)
+
+    def _page(self, key: str, where: str) -> None:
+        size = {"functions": _FUNCTION_PAGE, "runs": _RUN_PAGE, "files": _CODE_PAGE}[key]
+        total = {"functions": len(self._visible), "runs": len(self._visible_runs()),
+                 "files": len(self._code_files())}[key]
+        offset = {"functions": self._offset, "runs": self._run_offset, "files": self._code_offset}[key]
+        end = max(0, (total - 1) // size * size)
+        offset = {"first": 0, "previous": max(0, offset - size), "next": min(end, offset + size), "last": end}[where]
+        if key == "functions":
+            self._offset = offset
+            self._draw_rows(renew=True)
+        elif key == "runs":
+            self._run_offset = offset
+            self._draw_runs(renew=True)
+        else:
+            self._code_offset = offset
+            self._draw_code_rows(renew=True)
+
+    def _functions_page(self) -> Any:
+        w, layout = self._w, self._w.Layout
+        self.find = w.Text(placeholder="Search functions: name, description, runtime, trigger…",
+                           continuous_update=True, layout=layout(flex="1 1 auto", width="auto"))
+        self.find.add_class("lmx-find")
+        self.find.observe(self._safely(self._found_typed), names="value")
+        clear = w.Button(description="✕", tooltip="Clear the search", layout=layout(flex="0 0 auto"))
+        clear.add_class("lmx-x")
+        clear.on_click(self._safely(lambda _button: setattr(self.find, "value", "")))
+        finder = w.HBox([self.find, clear], layout=layout(width="100%", align_items="center"))
+        finder.add_class("lmx-bar")
+        self.chips = w.HBox(layout=layout(width="100%"))
+        self.chips.add_class("lmx-chips")
+        self.list_note = w.HTML(layout=layout(width="100%"))
+        self.column_buttons: dict[str, Any] = {}
+        for key, label, tip, width in _COLUMNS:
+            button = w.Button(description=label, tooltip=tip, layout=layout(width=width or "auto"))
+            for name in ("lmx-col", f"lmx-c-{key}"):
+                button.add_class(name)
+            button.on_click(self._safely(lambda _button, key=key: self._sort_by(key)))
+            self.column_buttons[key] = button
+        spacer = w.HTML(layout=layout(width="52px", flex="0 0 auto"))
+        self.list_head = w.HBox([*self.column_buttons.values(), spacer], layout=layout(width="100%"))
+        self.list_head.add_class("lmx-lhead")
+        self.rows_box = w.VBox([self.list_head], layout=layout(width="100%", flex="1 1 auto"))
+        self.rows_box.add_class("lmx-rows")
+        pager = w.HBox(self._make_pager("functions"), layout=layout(width="100%"))
+        pager.add_class("lmx-pager")
+        page = w.VBox([finder, self.chips, self.list_note, self.rows_box, pager])
+        page.add_class("lmx-listpage")
+        return page
+
+    def _logs_page(self) -> Any:
+        w, layout = self._w, self._w.Layout
+        self.range_pick = w.Dropdown(options=list(_RANGES), value="1h", layout=layout(width="auto"))
+        self.range_pick.add_class("lmx-range")
+        self.range_pick.observe(self._safely(self._range_changed), names="value")
+        self.log_find = w.Text(placeholder="Find runs with: an order ID, KeyError, a request ID… (Enter searches "
+                                           "CloudWatch)", continuous_update=True,
+                               layout=layout(flex="1 1 auto", width="auto"))
+        self.log_find.observe(self._safely(self._log_typed), names="value")
+        self.log_find.on_msg(self._on_enter(self._log_search))
+        clear = w.Button(description="✕", tooltip="Clear the search: every run again", layout=layout(flex="0 0 auto"))
+        clear.add_class("lmx-x")
+        clear.on_click(self._safely(lambda _button: setattr(self.log_find, "value", "")))
+        ask = w.HBox([self.log_find, clear], layout=layout(width="auto"))
+        for name in ("lmx-ask", "lmx-find"):
+            ask.add_class(name)
+        self.live_button = w.Button(description="Live", tooltip=f"Look for new lines every {_LIVE_SECONDS} seconds "
+                                    f"and show new runs as they come (stops after {_LIVE_MINUTES} minutes)",
+                                    layout=layout(width="auto"))
+        self.live_button.add_class("lmx-live")
+        self.live_button.on_click(self._safely(lambda _button: self._toggle_live()))
+        again = w.Button(description="↻", tooltip="Read the time range again", layout=layout(width="auto"))
+        again.add_class("lmx-small")
+        again.on_click(self._safely(lambda _button: self._reload_logs()))
+        bar = w.HBox([self.range_pick, ask, self.live_button, again], layout=layout(width="100%"))
+        bar.add_class("lmx-bar")
+        self.run_chips = w.HBox(layout=layout(width="100%"))
+        self.run_chips.add_class("lmx-chips")
+        self.run_head = w.HTML(layout=layout(width="100%"))
+        self.jump_button = w.Button(layout=layout(width="auto", display="none"))
+        self.jump_button.add_class("lmx-small")
+        self.jump_button.on_click(self._safely(lambda _button: self._jump()))
+        self.runs_box = w.VBox(layout=layout(width="100%", flex="1 1 auto"))
+        self.runs_box.add_class("lmx-runs")
+        self.older_button = w.Button(description="Older runs ›", tooltip="Read the lines before the oldest one read",
+                                     layout=layout(width="auto", display="none"))
+        self.older_button.add_class("lmx-small")
+        self.older_button.on_click(self._safely(lambda _button: self._older()))
+        pager = w.HBox([*self._make_pager("runs"), self.older_button], layout=layout(width="100%"))
+        pager.add_class("lmx-pager")
+        page = w.VBox([bar, self.run_chips, self.run_head, self.jump_button, self.runs_box, pager])
+        page.add_class("lmx-logpage")
+        return page
+
+    def _range_bar(self, value: str, on_change: Callable[[dict[str, Any]], None], label: str) -> tuple[Any, Any]:
+        """A time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs."""
+        w, layout = self._w, self._w.Layout
+        pick = w.Dropdown(options=[option for option in _RANGES if option[1] != "15m"], value=value,
+                          layout=layout(width="auto"))
+        pick.add_class("lmx-range")
+        pick.observe(self._safely(on_change), names="value")
+        again = w.Button(description="↻", tooltip=f"Read {label} again", layout=layout(width="auto"))
+        again.add_class("lmx-small")
+        bar = w.HBox([pick, again], layout=layout(width="100%"))
+        bar.add_class("lmx-bar")
+        return bar, (pick, again)
+
+    def _errors_page(self) -> Any:
+        w, layout = self._w, self._w.Layout
+        bar, (self.errors_pick, again) = self._range_bar("24h", self._errors_range_changed, "its errors")
+        again.on_click(self._safely(lambda _button: self._load_errors()))
+        self.errors_view = w.HTML(layout=layout(width="100%"))
+        self.error_head = w.HTML(layout=layout(width="100%"))
+        self.error_rows_box = w.VBox(layout=layout(width="100%"))
+        return self._scroll_page([self.errors_view, self.error_head, self.error_rows_box], above=[bar])
+
+    def _performance_page(self) -> Any:
+        w, layout = self._w, self._w.Layout
+        bar, (self.perf_pick, again) = self._range_bar("24h", self._perf_range_changed, "its runs")
+        again.on_click(self._safely(lambda _button: self._load_perf()))
+        self.perf_view = w.HTML(layout=layout(width="100%"))
+        self.slow_head = w.HTML(layout=layout(width="100%"))
+        self.slow_rows_box = w.VBox(layout=layout(width="100%"))
+        return self._scroll_page([self.perf_view, self.slow_head, self.slow_rows_box], above=[bar])
+
+    def _code_page(self) -> Any:
+        w, layout = self._w, self._w.Layout
+        self.code_view = w.HTML(layout=layout(width="100%"))
+        self.code_more = w.Button(layout=layout(width="auto", display="none"), button_style="primary")
+        self.code_more.on_click(self._safely(lambda _button: self._load_code(unlimited=True)))
+        self.code_find = w.Text(placeholder="Find a file", continuous_update=True,
+                                layout=layout(flex="1 1 auto", width="auto"))
+        self.code_find.add_class("lmx-find")
+        self.code_find.observe(self._safely(self._code_typed), names="value")
+        self.files_box = w.VBox(layout=layout(width="100%"))
+        self.files_box.add_class("lmx-files")
+        pager = w.HBox(self._make_pager("files"), layout=layout(width="100%"))
+        pager.add_class("lmx-pager")
+        self.code_left = w.VBox([self.code_find, self.files_box, pager])
+        self.code_left.add_class("lmx-left")
+        self.source_view = w.HTML(layout=layout(width="100%"))
+        self.code_right = w.VBox([self.source_view])
+        self.code_right.add_class("lmx-right")
+        self.code_split = w.HBox([self.code_left, self.code_right], layout=layout(display="none"))
+        self.code_split.add_class("lmx-split")
+        head = w.VBox([self.code_view, self.code_more], layout=layout(width="100%"))
+        head.add_class("lmx-codehead")
+        return w.VBox([head, self.code_split])
+
+    def _show_tab(self, key: str, *, load: bool = True) -> None:
+        if key != "logs" and self._live:
+            self._stop_live("Live stopped: it runs while the Logs tab is open.")
+        self._tab = key
+        for name, button in self.tab_buttons.items():
+            _class_if(button, "lmx-on", name == key)
+            _class_if(button, "lmx-dim", name in _FUNCTION_TABS and self.function is None and name != key)
+            self.pages[name].layout.display = "" if name == key else "none"
+        if key in _FUNCTION_TABS and self.function is None:
+            self._need_function(key)
+        elif load and key in _FUNCTION_TABS and key not in self._asked:
+            {"logs": self._load_logs, "errors": self._load_errors, "performance": self._load_perf,
+             "code": self._load_code}.get(key, lambda: None)()
+        if not self._said[2] and self._said[1] != "warn":  # the line under the tabs says what this one does
+            self._status(self._tab_line(key))
+
+    def _need_function(self, key: str) -> None:
+        """A function's tab before one is picked: how to pick one."""
+        hint = ('<div class="lmx-hint">👆 <div><b>Pick a function first.</b> Click one in the <b>Functions</b> tab, or '
+                "in the function field above (it searches as you type).</div></div>")
+        widget = {"overview": self.overview_view, "settings": self.settings_view, "errors": self.errors_view,
+                  "performance": self.perf_view, "code": self.code_view, "logs": self.run_head}[key]
+        self._set(widget, hint)
+
+    def _tab_line(self, key: str) -> str:
+        """The status line for a tab: what's in it, or how to use it."""
+        fn, ov = self.function, self.overview
+        if key == "functions":
+            if ov is None:
+                return ""
+            attention = sum(1 for f in self._facts.values() if f.warnings)
+            return (f"{_plural(len(ov.functions), 'function')} in {self._where()}"
+                    + (f" · {attention:,} need attention, listed first" if attention else "")
+                    + " · click one to open it, or Logs on its line for its logs")
+        if fn is None:
+            return "Pick a function: click one in the Functions tab, or in the field above."
+        if key == "logs":
+            return self._logs_line()
+        if key == "overview" and self.detail is not None:
+            warnings = sum(level == "warn" for level, _ in function_findings(
+                self.detail.function, self.detail.metrics, self.detail, prices=self.core.prices))
+            return (f"{fn.name}: " + (_plural(warnings, "warning") if warnings else "no warnings")
+                    + " · the Logs tab shows what it logged, run by run")
+        if key == "errors" and self.error_report is not None:
+            report = self.error_report
+            return (f"{_plural(report.errors_found, 'error line')} in the last "
+                    f"{_window((report.until - report.since).total_seconds())}, "
+                    f"{_plural(len(report.groups), 'cause')} · click a failed run to read it")
+        if key == "performance" and self.perf is not None:
+            return (f"{_plural(len(self.perf.invocations), 'run')} in the last "
+                    f"{_window((self.perf.until - self.perf.since).total_seconds())} · click a slow run to read it")
+        if key == "code" and self.package is not None:
+            return (f"{_plural(len(self.package.files), 'file')} in its package · click one to see its source"
+                    if self.package.files else "")
+        if key == "settings" and self.detail is not None:
+            return "Every setting in plain English, then as Lambda returns it (folded, at the end)."
+        return ""
+
+    # ------------------------------------------------------------------ the functions
+
+    def _begin(self) -> None:
+        try:
+            if self.region != "all":
+                self.region = self.region or self.core.region
+        except ValueError as exc:  # no region set anywhere
+            self._status(str(exc), "warn")
+            self._set(self.list_note, self._html([_Note(str(exc), "warn")]))
+            self._draw_title()
+            return
+        self._fill_regions()
+        self._load_list()
+
+    def _fill_regions(self) -> None:
+        here = self.core.region
+        try:
+            others = sorted(set(self.core.session.get_available_regions("lambda")) - {here})
+        except Exception:  # an odd session: the field still offers this region and every region
+            others = []
+        options = [(f"Region: {here}", here), ("Region: every region", "all")]
+        if self.region not in (here, "all", None) and self.region not in others:
+            options.append((f"Region: {self.region}", self.region))
+        options += [(f"Region: {name}", name) for name in others]
+        self._quietly(self.region_pick, options=options, value=self.region or here)
+
+    def _region_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet or not change.get("new"):
+            return
+        self.region = str(change["new"])
+        self._load_list(reopen=self.function, elsewhere=False)
+
+    def _load_list(self, reopen: Function | None = None, elsewhere: bool = True) -> None:
+        """Lists the region's functions (in the background); then CloudWatch's numbers, then who may call each.
+        reopen: the function to show again once they're listed; elsewhere=False closes it if the list doesn't hold it
+        (another region was picked)."""
+        self._drop("list", "numbers", "extras")
+        self.overview, self._facts, self._numbers_pending = None, {}, False
+        self._offset = 0
+        self.field.problem = ""
+        self.field.set_choices([])
+        self._listing_started = time.monotonic()
+        self._listing = True
+        self._draw_title()
+        self._draw_stats()
+        self._draw_chips()
+        self._set(self.list_note, "")
+        self._refilter()
+        where = self._where()
+        regions = None if self.region == self.core.region else "all" if self.region == "all" else [self.region]
+        self._counted = 0
+        self._status(f"Listing the functions in {where}…", busy=True, owner="list")
+
+        def progress(done: int, total: int | None = None) -> None:
+            self._counted = done
+
+        self._later("list", lambda: self.core.overview(regions=regions, metrics=False, details=False,
+                                                       progress=progress),
+                    lambda ov: self._listed(ov, reopen, elsewhere), self._list_failed,
+                    counting="Listing the functions in every region… {n} regions read so far" if self.region == "all"
+                    else "",
+                    owner="list")
+
+    def _list_failed(self, exc: BaseException) -> None:
+        self._listing = False
+        text = self._error_text(exc)
+        self._status(text, "warn")
+        self.field.problem = f"Couldn't list the functions ({text}). Type a function's name or ARN and press Enter."
+        self.field.draw()
+        self._set(self.list_note, self._html([_Note(f"Couldn't list the functions: {text}", "warn")]))
+        self._draw_rows()
+        self._open_wanted()
+
+    def _listed(self, ov: Overview, reopen: Function | None = None, elsewhere: bool = True) -> None:
+        self.overview = ov
+        self._listing = False
+        self._compute_facts()
+        denied = sorted({code for key, code in ov.errors.items() if key.endswith(":list")})
+        self.field.problem = (f"Couldn't list the functions ({', '.join(denied)}; needs lambda:ListFunctions). Type "
+                              "a function's name or ARN and press Enter." if denied and not ov.functions else "")
+        self.field.set_choices(ov.functions)
+        self._draw_title()
+        self._draw_stats()
+        self._draw_chips()
+        self._draw_list_note()
+        self._refilter()
+        if ov.functions:
+            self._numbers_pending = True
+            self._draw_rows()
+            until = _utcnow()
+            since = _midnight(until) - timedelta(days=ov.days - 1)
+            functions, limits = list(ov.functions), set(ov.accounts)
+            self._finish("list", f"{_plural(len(ov.functions), 'function')} in {self._where()} · reading their calls, "
+                         "errors and run times from CloudWatch…", tabs=("functions",), busy=True)
+            self._later("numbers", lambda: self.core._numbers(functions, since=since, until=until, limits=limits),
+                        self._got_numbers, self._numbers_failed)
+        elif not any(key.endswith(":list") for key in ov.errors):
+            self._finish("list", f"No Lambda functions in {self._where()}"
+                         + ("." if self.region == "all" else ": pick every region in the region field to look in "
+                                                              "all of them."), tabs=("functions",))
+        same = next((f for f in ov.functions if f.arn == reopen.arn), None) if reopen is not None else None
+        if reopen is not None and (same is not None or elsewhere):
+            self._open_function(same or reopen, self._tab if self._tab in _FUNCTION_TABS else None)
+        elif reopen is not None:
+            self._close_function()
+        else:
+            self._open_wanted()
+
+    def _open_wanted(self) -> None:
+        want, tab, search = self._want, self._want_tab, self._want_search
+        self._want, self._want_tab, self._want_search = None, None, None
+        if want:
+            self._open_named(want, tab, search=search)
+        elif tab and tab not in _FUNCTION_TABS:
+            self._show_tab(tab)
+
+    def _numbers_failed(self, exc: BaseException) -> None:
+        self._numbers_pending = False
+        self._draw_rows()
+        self._status(f"Couldn't read CloudWatch's numbers: {self._error_text(exc)}", "warn")
+
+    def _got_numbers(self, got: tuple[dict[str, FunctionMetrics], int, dict[str, float | None], dict[str, str]]
+                     ) -> None:
+        ov = self.overview
+        if ov is None:
+            return
+        ov.add_numbers(*got)
+        self._numbers_pending = False
+        self._redraw_list()
+        functions = list(ov.functions)
+        self._finish("list", f"{_plural(len(functions), 'function')} in {self._where()} · reading who may call each one…",
+                     tabs=("functions",), busy=True)
+        self._later("extras", lambda: self.core._all_extras(functions), self._got_extras, self._extras_failed)
+
+    def _extras_failed(self, exc: BaseException) -> None:
+        self._status(f"Couldn't read the functions' resource policies: {self._error_text(exc)}", "warn")
+
+    def _got_extras(self, found: dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]]) -> None:
+        ov = self.overview
+        if ov is None:
+            return
+        ov.add_extras(found)
+        self._redraw_list()
+        attention = sum(1 for f in self._facts.values() if f.warnings)
+        took = time.monotonic() - self._listing_started
+        cost = ov.metrics_read / 1000 * self.core.prices["metric_request"]
+        read = f" ({ov.metrics_read:,} CloudWatch metrics, about {human_money(cost)})" if ov.metrics_read else ""
+        self._finish("list", f"{_plural(len(ov.functions), 'function')} in {self._where()}, read in {took:.1f}s{read}"
+                     + (f" · {attention:,} need attention: the Functions tab lists them first" if attention
+                        else " · none needs attention"), "" if attention else "ok", tabs=("functions",))
+
+    def _redraw_list(self) -> None:
+        self._compute_facts()
+        self.field.draw()
+        self._draw_title()
+        self._draw_stats()
+        self._draw_chips()
+        self._draw_list_note()
+        self._refilter()
+        self._draw_alerts()
+
+    def _compute_facts(self) -> None:
+        ov = self.overview
+        now = _utcnow()
+        self._facts = {fn.arn: _function_facts(fn, ov, self.core.prices, now) for fn in ov.functions} if ov else {}
+
+    def _draw_list_note(self) -> None:
+        """Notes above the list: regions whose functions couldn't be listed, sections that couldn't be read, regions
+        left out, and limits that are close to running out."""
+        ov = self.overview
+        if ov is None:
+            return
+        notes: list[Any] = []
+        for key, code in sorted(ov.errors.items()):
+            region, _, section = key.partition(":")
+            if section == "list":
+                notes.append(_Note(f"Couldn't list the functions in {region} ({_why(code, 'lambda:ListFunctions')}).",
+                                   "warn"))
+        unread: dict[str, dict[str, str]] = defaultdict(dict)
+        for key, code in ov.errors.items():
+            region, _, section = key.partition(":")
+            if section != "list":
+                unread[region][section] = code
+        for region, errors in sorted(unread.items()):
+            note = _unread(errors, f"{region}'s ")
+            if note:
+                notes.append(note)
+        if ov.skipped and self.region == "all":
+            notes.append(_Note(f"Left out {_plural(len(ov.skipped), 'region')} not turned on for this account: "
+                               f"{', '.join(sorted(ov.skipped))}."))
+        for region, limits in sorted(ov.accounts.items()):
+            notes += [_Note(f"{message}", "warn") for level, message in account_findings(limits, ov.days)
+                      if level == "warn"]
+        self._set(self.list_note, self._html(notes) if notes else "")
+
+    def _found_typed(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        self._query = str(self.find.value or "").strip()
+        self._offset = 0
+        self._refilter()
+
+    def _pick_chip(self, key: str) -> None:
+        self._chip = "" if key == self._chip else key
+        self._offset = 0
+        self._draw_chips()
+        self._refilter(renew=True)
+
+    def _sort_by(self, key: str) -> None:
+        if key == self._sort:
+            self._descending = not self._descending
+        else:
+            self._sort, self._descending = key, key != "name"
+        self._offset = 0
+        self._refilter(renew=True)
+
+    def _in_chip(self, f: _Facts, key: str) -> bool:
+        m = f.metrics
+        return {"": True, "attention": bool(f.warnings), "errors": bool(m and m.errors >= 1),
+                "runtime": f.status.state in ("deprecated", "blocked", "ending"),
+                "public": any(t.public for t in f.triggers), "idle": bool(m is not None and not m.invocations)}[key]
+
+    def _chip_button(self, store: dict[str, Any], key: str, tone: str, on_click: Callable[[str], None]) -> Any:
+        """The chip button for `key`, made once and kept: redrawing changes its label, not the widget (Live redraws
+        the run chips every few seconds, and a widget is never freed unless it's closed)."""
+        if key not in store:
+            chip = self._w.Button(layout=self._w.Layout(width="auto"))
+            for name in ("lmx-chip", f"lmx-t-{tone}"):
+                chip.add_class(name)
+            chip.on_click(self._safely(lambda _button: on_click(key)))
+            store[key] = chip
+        return store[key]
+
+    def _show_chips(self, box: Any, chips: list[tuple[Any, str, str, bool]]) -> None:
+        """Puts chips (button, label, tooltip, picked) in their row, changing only what changed."""
+        for chip, label, tip, picked in chips:
+            if chip.description != label:
+                chip.description = label
+            if chip.tooltip != tip:
+                chip.tooltip = tip
+            _class_if(chip, "lmx-on", picked)
+        shown = tuple(chip for chip, _, _, _ in chips)
+        if tuple(box.children) != shown:
+            box.children = shown
+
+    def _draw_chips(self) -> None:
+        """A chip per kind of function there is, with how many: a click shows only those (again shows all)."""
+        facts = list(self._facts.values())
+        chips = []
+        for key, label, tone in _FUNCTION_CHIPS:
+            n = sum(1 for f in facts if self._in_chip(f, key))
+            if key and not n:
+                continue
+            tip = ("Show every function" if not key
+                   else f"Show only the functions that are {label.lower()} (click again for all)")
+            chips.append((self._chip_button(self._function_chips, key, tone, self._pick_chip), f"{label} {n:,}", tip,
+                          key == self._chip))
+        self._show_chips(self.chips, chips if facts else [])
+
+    def _sort_key(self, f: _Facts) -> Any:
+        m = f.metrics
+        calls = m.invocations if m is not None else -1.0
+        if self._sort == "name":
+            return (f.fn.name.lower(), f.fn.region)
+        if self._sort == "calls":
+            return (calls,)
+        if self._sort == "errors":
+            return ((m.error_rate or 0.0) if m is not None else -1.0, m.errors if m is not None else -1.0)
+        if self._sort == "duration":
+            return ((m.avg_duration or 0.0) if m is not None else -1.0,)
+        if self._sort == "cost":
+            return (f.cost if f.cost is not None else -1.0,)
+        if self._sort == "called":
+            return ((m.last_invoked.timestamp() if m is not None and m.last_invoked else 0.0),)
+        return ({"bad": 3, "warn": 2}.get(f.tone, 0), len(f.warnings), m.errors if m is not None else 0.0, calls)
+
+    def _refilter(self, renew: bool = False) -> None:
+        facts = [f for f in self._facts.values() if self._in_chip(f, self._chip)] if self._chip else list(
+            self._facts.values())
+        if self._query:
+            ranked = []
+            for i, f in enumerate(facts):
+                fn = f.fn
+                rank = search_rank(self._query, (fn.name, fn.description, fn.runtime, fn.region, fn.handler,
+                                                 _triggers_text(f.triggers), " ".join(t.source for t in f.triggers),
+                                                 (fn.role or "").split("/")[-1]))
+                if rank is not None:
+                    ranked.append((rank, i, f))
+            facts = [f for _, _, f in sorted(ranked, key=lambda r: r[:2])]
+        if not self._query or self._sort != "problems":  # a search ranks its best match first, unless a column sorts
+            facts = sorted(facts, key=lambda f: (f.fn.name.lower(), f.fn.region))
+            facts = sorted(facts, key=self._sort_key, reverse=self._descending)
+        self._visible = facts
+        self._offset = min(self._offset, max(0, (len(facts) - 1) // _FUNCTION_PAGE * _FUNCTION_PAGE))
+        for key, button in self.column_buttons.items():
+            _class_if(button, "lmx-on", key == self._sort)
+            label = next(label for k, label, _, _ in _COLUMNS if k == key)
+            arrow = (" ▾" if self._descending else " ▴") if key == self._sort and key != "problems" else ""
+            if button.description != label + arrow:
+                button.description = label + arrow
+        self._draw_rows(renew=renew)
+
+    def _draw_rows(self, renew: bool = False) -> None:
+        page = self._visible[self._offset:self._offset + _FUNCTION_PAGE]
+        while len(self._rows) < len(page):
+            self._rows.append(_Row(self, self._clicked_function,
+                                   action=("Logs", "Open its logs", self._clicked_logs)))
+        words = self._query.split()
+        now = _utcnow()
+        for row, f in zip(self._rows, page):
+            row.item = f.fn
+            self._set(row.face, _function_face(f, words, self.multi, self._numbers_pending, now))
+            warns = f.warnings
+            tip = (f"{f.fn.name}" + (f": {f.fn.description}" if f.fn.description else "")
+                   + (f" · {_plural(len(warns), 'warning')}" if warns else "") + " · click to open it")
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+            _class_if(row.box, "lmx-on", self.function is not None and f.fn.arn == self.function.arn)
+        children: list[Any] = [self.list_head, *(row.box for row in self._rows[:len(page)])]
+        if not page:
+            if self.overview is None:
+                text = "Listing the functions…" if self._listing else "No functions listed."
+            elif not self.overview.functions:
+                text = (f"No Lambda functions in {self._where()}."
+                        + ("" if self.region == "all" else " Functions are regional: pick every region in the region "
+                                                           "field above to look in all of them."))
+            else:
+                text = "No function matches." + (" Clear the search, or pick All above." if self._query or self._chip
+                                                 else "")
+            children = [self.list_head, self._empty("functions", text)]
+        if renew:
+            box = self._w.VBox(children, layout=self._w.Layout(width="100%", flex="1 1 auto"))
+            box.add_class("lmx-rows")
+            page_box = self.pages["functions"] if hasattr(self, "pages") else None
+            if page_box is not None:
+                page_box.children = [box if child is self.rows_box else child for child in page_box.children]
+            self.rows_box = box
+        else:
+            self.rows_box.children = children
+        whole = len(self._facts) if self._facts else None
+        self._draw_pager("functions", self._offset, len(self._visible), _FUNCTION_PAGE, "functions", whole)
+
+    def _mark_rows(self) -> None:
+        for row in self._rows:
+            _class_if(row.box, "lmx-on", self.function is not None and row.item is not None
+                      and row.item.arn == self.function.arn)
+
+    def _clicked_function(self, fn: Function) -> None:
+        self._open_function(fn, "overview")
+
+    def _clicked_logs(self, fn: Function) -> None:
+        self._open_function(fn, "logs")
+
+    # ------------------------------------------------------------------ header
+
+    def _draw_title(self) -> None:
+        fn, ov = self.function, self.overview
+        if fn is None:
+            sub = [_plural(len(ov.functions), "function") if ov is not None else "",
+                   "every function, its logs run by run, its errors and code", "read-only"]
+        else:
+            sub = [fn.name, fn.runtime or "container image", fn.region if self.multi else "",
+                   _clip(fn.description, 90) if fn.description else ""]
+        where = "every region" if self.region == "all" else (self.region or "")
+        self._set(self.title, f'<div class="lmx-brand"><span class="lmx-logo">{_LOGO}</span><div style="min-width:0">'
+                              f'<div class="lmx-name">Lambda explorer<span>{_esc(where)}</span></div>'
+                              f'<div class="lmx-sub">{_esc(" · ".join(p for p in sub if p))}</div></div></div>')
+
+    def _draw_stats(self) -> None:
+        """The cards beside the function field: the region at a glance, or the picked function."""
+        now = _utcnow()
+        cards: list[tuple[str, str, str]] = []
+        loading = self._numbers_pending or (self.overview is None and self._listing)
+        if self.function is None:
+            facts = list(self._facts.values())
+            if self.overview is None:
+                cards = [("Functions", "…", "sk-on"), ("Calls · 30d", "…", "sk-on"), ("Error rate", "…", "sk-on")]
+            else:
+                read = [f.metrics for f in facts if f.metrics is not None]
+                calls = sum(m.invocations for m in read)
+                failed = sum(m.errors for m in read)
+                costs = [f.cost for f in facts if f.cost is not None]
+                warn = any(_errors_level(f.metrics, now) == "warn" for f in facts)
+                attention = sum(1 for f in facts if f.warnings)
+                cards.append(("Functions", f"{len(facts):,}", ""))
+                cards.append(("Calls · 30d", "…" if loading else _count(round(calls)), "sk-on" if loading else ""))
+                cards.append(("Error rate", "…" if loading else (_pct(failed / calls) if calls else "-"),
+                              "sk-on" if loading else "warn" if warn else ""))
+                cards.append(("Est. $ / month", "…" if loading else (human_money(sum(costs)) if costs else "-"),
+                              "sk-on" if loading else ""))
+                cards.append(("Need attention", f"{attention:,}", "warn" if attention else "ok" if facts else ""))
+        else:
+            fn = self._full()
+            f = self._facts.get(self.function.arn)
+            m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
+                f.metrics if f is not None else None)
+            if m is None:
+                waiting = loading or self.detail is None
+                cards += [(label, "…" if waiting else "-", "sk-on" if waiting else "")
+                          for label in ("Calls · 30d", "Error rate", "Avg / longest run")]
+            else:
+                level = _errors_level(m, now)
+                near = bool(m.duration_max and fn.timeout and m.duration_max >= 0.9 * fn.timeout * 1000)
+                cards.append(("Calls · 30d", _count(round(m.invocations)), ""))
+                cards.append(("Error rate", _pct(m.error_rate) if m.invocations else "-",
+                              "bad" if level == "warn" else "warn" if level else ""))
+                cards.append(("Avg / longest run", f"{human_ms(m.avg_duration)} / {human_ms(m.duration_max)}"
+                              if m.invocations else "not called in 30 days", "warn" if near else ""))
+            if self.detail is not None:
+                cost = _total(function_monthly_cost(fn, self.detail.metrics, self.detail.provisioned,
+                                                    self.detail.log_group, prices=self.core.prices))
+                warnings = sum(level == "warn" for level, _ in function_findings(
+                    fn, self.detail.metrics, self.detail, prices=self.core.prices, now=now))
+            else:
+                cost = f.cost if f is not None else None
+                warnings = len(f.warnings) if f is not None else 0
+            cards.append(("Est. $ / month", human_money(cost) if cost is not None else "-", ""))
+            cards.append(("Warnings", f"{warnings:,}", "warn" if warnings else "ok"))
+        html_cards = "".join(f'<div class="lmx-stat {tone}"><span class="l">{_esc(label)}</span><b>{_esc(value)}</b>'
+                             "</div>" for label, value, tone in cards)
+        self._set(self.stats, f'<div class="lmx-stats">{html_cards}</div>')
+
+    def _draw_alerts(self) -> None:
+        """A dot on a tab that holds something to look at: amber on Overview for warnings, red on Errors when calls
+        fail often enough to act on."""
+        fn = self.function
+        f = self._facts.get(fn.arn) if fn is not None else None
+        m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
+            f.metrics if f is not None else None)
+        warned = bool(f.warnings) if f is not None else False
+        if self.detail is not None:
+            warned = any(level == "warn" for level, _ in function_findings(
+                self.detail.function, self.detail.metrics, self.detail, prices=self.core.prices))
+        _class_if(self.tab_buttons["overview"], "lmx-alert", fn is not None and warned)
+        _class_if(self.tab_buttons["errors"], "lmx-alarm", fn is not None and _errors_level(m, _utcnow()) == "warn")
+
+    # ------------------------------------------------------------------ one function
+
+    def _close_function(self) -> None:
+        """Back to no function picked: the Functions tab, the header showing the region."""
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "lookup")
+        self._stop_live()
+        self.function = self.detail = None
+        self.logs_page = self.found = self.error_report = self.perf = self.package = None
+        self._asked = set()
+        self.field.value = ""
+        self.field.draw()
+        self._draw_title()
+        self._draw_stats()
+        self._draw_alerts()
+        self._mark_rows()
+        self._show_tab("functions")
+
+    def _picked(self, fn: Function) -> None:
+        self._open_function(fn)
+
+    def _typed(self, text: str) -> None:
+        self._open_named(text, None)
+
+    def _open_named(self, name: str, tab: str | None, *, search: str | None = None) -> None:
+        """Opens a function named the way you'd paste it: from the list when it's there, else read with GetFunction
+        (an ARN in another region, a function the list doesn't hold)."""
+        wanted, _, region = parse_function_ref(name)
+        listed = self.overview.functions if self.overview is not None else []
+        fn = next((f for f in listed if f.name == wanted and (region is None or f.region == region)), None)
+        if fn is not None:
+            self._open_function(fn, tab, search=search)
+            return
+        where = region or (self.region if self.region not in (None, "all") else None)
+        self._status(f"Looking up {wanted}…", busy=True, owner="lookup")
+
+        def failed(exc: BaseException) -> None:
+            if isinstance(exc, ClientError) and _error_code(exc) == "ResourceNotFoundException":
+                close = difflib.get_close_matches(wanted, [f.name for f in listed], n=3, cutoff=0.6)
+                hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+                if self.region == "all" and not region:
+                    self._status(f"No function {wanted!r} in any region listed.{hint} Names are case-sensitive.",
+                                 "warn")
+                else:
+                    self._status(f"No function {wanted!r} in {where or self.core.region}.{hint} Names are "
+                                 "case-sensitive; pick every region in the region field to look in all of them.",
+                                 "warn")
+            else:
+                self._status(self._error_text(exc), "warn")
+
+        self._later("lookup", lambda: self.core.function(name, region=where),
+                    lambda got: self._open_function(got, tab, search=search), failed)
+
+    def _open_function(self, fn: Function, tab: str | None = None, *, search: str | None = None) -> None:
+        """Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened."""
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "lookup")
+        self._stop_live()
+        self.function, self.detail = fn, None
+        self.logs_page = self.found = self.error_report = self.perf = self.package = None
+        self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
+        self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
+        self._code_fn = self._package_data = self._code_file = None
+        self._code_query, self._code_offset = "", 0
+        self._asked = set()
+        self._quietly(self.log_find, value="")
+        self._quietly(self.code_find, value="")
+        self.field.value = fn.arn
+        self.field.draw()
+        self._draw_title()
+        self._draw_stats()
+        self._draw_alerts()
+        self._mark_rows()
+        name = fn.name
+        self._set(self.overview_view, _skeleton(f"Reading {name}: its settings, what calls it, its last 30 days…"))
+        self._set(self.settings_view, _skeleton(f"Reading {name}'s settings…"))
+        for widget in (self.errors_view, self.perf_view, self.code_view, self.source_view, self.error_head,
+                       self.slow_head, self.run_head):
+            self._set(widget, "")
+        self.error_rows_box.children = self.slow_rows_box.children = self.files_box.children = []
+        self.runs_box.children = []
+        self.run_chips.children = []
+        self.code_split.layout.display = "none"
+        self.code_more.layout.display = self.jump_button.layout.display = self.older_button.layout.display = "none"
+        for key in ("overview", "settings", "errors", "performance"):
+            self._renew(key)
+        target = tab or (self._tab if self._tab in _FUNCTION_TABS else "overview")
+        self._show_tab(target, load=not search)
+        if search:
+            self._quietly(self.log_find, value=search)
+            self._log_query = search
+            self._asked.add("logs")
+            self._log_search()
+        if target in ("overview", "settings"):
+            self._status(f"Reading {name}: its settings, what calls it, its last 30 days…", busy=True,
+                         owner="describe")
+        self._later("describe", lambda: self.core.describe(name, region=fn.region or None, days=30), self._described,
+                    self._describe_failed)
+
+    def _describe_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._status(text, "warn")
+        for widget in (self.overview_view, self.settings_view):
+            self._set(widget, self._html([_Note(text, "warn")]))
+
+    def _described(self, detail: FunctionDetail) -> None:
+        self.detail = detail
+        self._draw_stats()
+        self._draw_alerts()
+        self._draw_overview()
+        self._draw_settings()
+        self._finish("describe", self._tab_line(self._tab), tabs=("overview", "settings"))
+
+    def _draw_overview(self) -> None:
+        detail = self.detail
+        if detail is None:
+            return
+        sections = self.ui._function_sections(detail, days=30)
+        head = [dataclasses.replace(block, items=[item for item in block.items if item[0] in _SETUP_CARDS])
+                if isinstance(block, _Cards) else block for block in sections["head"]]  # the header has the numbers
+        blocks = [*head, self._wiring(detail), *self._charts(detail), *sections["cost"]]
+        self._draw("overview", self.overview_view, blocks)
+
+    def _wiring(self, detail: FunctionDetail) -> _Wiring:
+        """What calls the function, and where its results, failed events and logs go."""
+        fn = detail.function
+        inputs = []
+        for t in detail.triggers:
+            disabled = (t.state or "").lower() == "disabled"
+            problem = bool(t.last_result and t.last_result.upper().startswith("PROBLEM"))
+            detail_text = "; ".join(filter(None, ["anyone on the internet can call it" if t.public else "",
+                                                  "disabled" if disabled else "", t.detail, t.last_result]))
+            inputs.append((t.kind, t.source or ("anyone" if t.public else "-"), detail_text,
+                           "warn" if t.public or disabled or problem else ""))
+        outputs = []
+        config = detail.async_config
+        if config is not None and config.on_success:
+            kind, name = _destination(config.on_success)
+            outputs.append(("On success", name, f"{kind}: each asynchronous call's result", ""))
+        failure = (config.on_failure if config is not None else None) or fn.dead_letter
+        asynchronous = list(dict.fromkeys(t.kind for t in detail.triggers if t.asynchronous))
+        if failure:
+            kind, name = _destination(failure)
+            retries = f"after {_retries(config.retries)}" if config is not None else ""
+            outputs.append(("On failure", name, f"{kind}, {retries}".rstrip(", "), ""))
+        elif asynchronous and config is not None:
+            outputs.append(("On failure", "nowhere: dropped",
+                            f"events from {', '.join(asynchronous)} that still fail after {_retries(config.retries)} "
+                            "are lost", "warn"))
+        group = detail.log_group
+        kept = ("kept forever" if group is not None and group.retention_days is None
+                else f"kept {_plural(group.retention_days, 'day')}" if group is not None and group.retention_days
+                else "no log group yet" if group is None and "log_group" not in detail.errors else "")
+        stored = f", {human_size(group.stored_bytes)} stored" if group is not None and group.stored_bytes else ""
+        forever_and_big = group is not None and group.retention_days is None and (group.stored_bytes or 0) >= 100 * MB
+        outputs.append(("Logs", fn.log_group, (kept + stored).strip(", "), "warn" if forever_and_big else ""))
+        if fn.role:
+            outputs.append(("Allowed to use", fn.role.split("/")[-1],
+                            f"its execution role{' · in VPC ' + fn.vpc_id if fn.vpc_id else ''}", ""))
+        center = (fn.name, " · ".join(filter(None, [fn.runtime or "container image", f"{fn.memory:,} MB",
+                                                    f"{fn.timeout} s timeout", fn.architecture])))
+        return _Wiring(inputs, center, outputs, title="How it's wired: what calls it, and where its results and logs go",
+                       empty="Nothing calls it on its own: it's called directly (an SDK, Step Functions...)")
+
+    def _charts(self, detail: FunctionDetail) -> list[Any]:
+        """Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days."""
+        m, fn = detail.metrics, detail.function
+        if m is None or not m.invocations or m.period < 86400:
+            return []
+        today = _midnight(_utcnow())
+        by_day = {d.start.astimezone(timezone.utc).date(): d for d in m.daily}
+        days = [today - timedelta(days=30 - 1 - i) for i in range(30)]
+        calls, times = [], []
+        for day in days:
+            d = by_day.get(day.date())
+            label = _short_day(day)
+            if d is None:
+                calls.append((label, 0.0, 0.0, f"{day:%a} {label}: no calls"))
+                times.append((label, 0.0, 0.0, f"{day:%a} {label}: no calls"))
+                continue
+            failed = f", {_count(round(d.errors))} failed ({_pct(d.errors / d.invocations)})" if d.errors and (
+                d.invocations) else ""
+            calls.append((label, d.invocations, d.errors, f"{day:%a} {label}: {_count(round(d.invocations))} calls"
+                          + failed + (f", {_count(round(d.throttles))} throttled" if d.throttles else "")))
+            times.append((label, d.duration_max or d.avg_duration or 0.0, d.avg_duration or 0.0,
+                          f"{day:%a} {label}: average {human_ms(d.avg_duration)}, longest {human_ms(d.duration_max)}"))
+        return [
+            _Columns(calls, title="Calls a day, the failed part in red (CloudWatch, the last 30 days, UTC days)"),
+            _Columns(times, title=f"Run time a day: the average (dark) under the longest (light), against its "
+                                  f"{fn.timeout} s timeout", part="dim", limit=fn.timeout * 1000,
+                     limit_label=f"timeout {fn.timeout} s", unit="ms"),
+        ]
+
+    def _draw_settings(self) -> None:
+        detail = self.detail
+        if detail is None:
+            return
+        fn = detail.function
+        sections = self.ui._function_sections(detail, days=30)
+        blocks: list[Any] = [_Title(f"Settings of {fn.name}", "in plain English, then as Lambda returns them")]
+        for part in ("runs", "triggers", "async", "access", "versions", "tags", "raw"):
+            blocks += sections[part]
+        flag = f" --region {fn.region}" if fn.region else ""
+        commands = [f"aws lambda get-function-configuration --function-name {fn.name}{flag}",
+                    f"aws lambda get-policy --function-name {fn.name}{flag}",
+                    f"aws lambda list-event-source-mappings --function-name {fn.name}{flag}",
+                    f"aws lambda get-function-event-invoke-config --function-name {fn.name}{flag}"]
+        blocks.append(_Text("\n".join(commands), title="The same from a terminal (read-only)", code=True))
+        self._draw("settings", self.settings_view, blocks)
+
+    # ------------------------------------------------------------------ logs
+
+    def _set_range(self, since: str) -> None:
+        """Picks a time range in the Logs tab's field, adding it to the list when it isn't one of the presets."""
+        options = list(_RANGES)
+        if since not in {value for _, value in options}:
+            options.append((f"Since {since}", since))
+        self._range = since
+        self._quietly(self.range_pick, options=options, value=since)
+
+    def _range_text(self, value: str | None = None) -> str:
+        """'the last hour', 'the last 3 days', 'since 2026-10-01'."""
+        value = value or self._range
+        label = next((label for label, v in _RANGES if v == value), None)
+        return f"the {label.lower()}" if label else f"since {value}"
+
+    def _range_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet or not change.get("new"):
+            return
+        self._range = str(change["new"])
+        if self.found is not None and self._searched and self._searched == self._log_query:
+            self._log_search()
+        else:
+            self._load_logs()
+
+    def _reload_logs(self) -> None:
+        if self.found is not None and self._searched and self._searched == self._log_query:
+            self._log_search()
+        else:
+            self._load_logs()
+
+    def _load_logs(self) -> None:
+        """Reads the time range's newest lines, as runs (in the background)."""
+        fn = self.function
+        if fn is None:
+            return
+        self._asked.add("logs")
+        self._stop_live()
+        start, end = LambdaAnalyzer._window(self._range)
+        self.logs_page, self._runs, self._run_offset = None, [], 0
+        self.jump_button.layout.display = self.older_button.layout.display = "none"
+        self._set(self.run_head, _skeleton(f"Reading what {fn.name} logged in {self._range_text()}…"))
+        self.runs_box.children = []
+        self._counted = 0
+        self._status(f"Reading {fn.name}'s logs from {self._range_text()}…", busy=True, owner="logs")
+        self._later("logs", lambda: self.core._log_runs(fn, start, end, limit=_RUN_LINES,
+                                                        progress=lambda n: setattr(self, "_counted", n)),
+                    self._got_logs, self._logs_failed, counting=f"Reading {fn.name}'s logs… {{n}} lines read so far",
+                    owner="logs")
+
+    def _logs_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._set(self.run_head, self._html([_Note(f"Couldn't read the logs: {text}", "warn")]))
+        if self._tab == "logs":
+            self._status(text, "warn")
+
+    def _got_logs(self, page: LogPage) -> None:
+        self.logs_page = page
+        self._runs = page.runs
+        self._run_offset = 0
+        self._draw_run_chips()
+        self._draw_runs(renew=True)
+        self._finish("logs", self._logs_line(), "warn" if page.errors else "", tabs=("logs",))
+
+    def _logs_line(self) -> str:
+        """The status line for the Logs tab."""
+        fn, page = self.function, self.found if self.found is not None else self.logs_page
+        if fn is None or page is None:
+            return "Reading the logs…" if fn is not None else ""
+        if page.errors:
+            code = page.errors.get("logs", "")
+            return (f"{fn.name} has no log group yet: it hasn't logged anything" if code == "ResourceNotFoundException"
+                    else f"Couldn't read its logs ({_why(code, 'logs:FilterLogEvents')})")
+        runs = self._found_runs if self.found is not None else self._runs
+        failed = sum(1 for r in runs if r.status in ("failed", "timeout"))
+        if self.found is not None:
+            return (f"{_plural(len(runs), 'run')} with {self._searched!r} in {self._range_text()}"
+                    + (f", {failed:,} failed" if failed else "") + " · ✕ shows every run again")
+        return (f"{_plural(len(runs), 'run')} in {self._range_text()}" + (f", {failed:,} failed" if failed else "")
+                + " · click a run to see its lines" + (" · Older runs reads further back" if page.truncated else ""))
+
+    def _words(self) -> list[str]:
+        phrase = _phrase(self._log_query) if self._log_query else None
+        return [phrase] if phrase else []
+
+    def _log_typed(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        self._log_query = str(self.log_find.value or "").strip()
+        if self.found is not None and self._log_query != self._searched:
+            self.found, self._found_runs = None, []
+            self._draw_run_chips()
+            if self.logs_page is None and "logs" not in self._tasks:  # it opened on a search: read the range now
+                self._load_logs()
+                return
+        self._run_offset = 0
+        self._draw_runs()
+        if self._log_query and _phrase(self._log_query) is None:
+            self._status("That's a CloudWatch Logs filter pattern: press Enter to search the time range with it.")
+        elif self._log_query:
+            shown = len(self._visible_runs())
+            truncated = self.logs_page is not None and self.logs_page.truncated
+            self._status(f"{shown:,} of {len(self._runs):,} runs read have {self._log_query!r}"
+                         + (" · press Enter to search the whole time range in CloudWatch" if truncated
+                            else " · Enter searches CloudWatch too"))
+        else:
+            self._status(self._logs_line())
+
+    def _log_search(self) -> None:
+        """Enter in the search box: CloudWatch searches the whole time range, and the runs with a matching line come
+        back whole (in the background)."""
+        fn = self.function
+        text = str(self.log_find.value or "").strip()
+        if fn is None:
+            return
+        if not text:
+            self.found, self._found_runs, self._searched = None, [], ""
+            self._draw_run_chips()
+            if self.logs_page is None and "logs" not in self._tasks:
+                self._load_logs()
+            else:
+                self._draw_runs(renew=True)
+            return
+        start, end = LambdaAnalyzer._window(self._range)
+        self._searched = self._log_query = text
+        self._stop_live()
+        self._status(f"Searching {fn.name}'s logs from {self._range_text()} for {text!r}, then reading each run it's "
+                     "in…", busy=True, owner="logs")
+        self._set(self.run_head, _skeleton(f"Searching {self._range_text()} for {text!r}…"))
+        self._later("search", lambda: self.core._log_runs(fn, start, end, search=text, limit=_RUN_LINES),
+                    self._got_search, self._search_failed)
+
+    def _search_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._set(self.run_head, self._html([_Note(f"The search failed: {text}", "warn")]))
+        self._status(text, "warn")
+
+    def _got_search(self, page: LogPage) -> None:
+        self.found = page
+        self._found_runs = page.runs
+        self._run_offset = 0
+        if len(self._found_runs) <= 3:
+            self._open_runs |= {run.key for run in self._found_runs}
+        self._draw_run_chips()
+        self._draw_runs(renew=True)
+        self._finish("logs", self._logs_line(), "warn" if page.errors else "", tabs=("logs",))
+
+    def _show_run(self, moment: datetime, stream: str, request_id: str | None) -> None:
+        """Opens one run in the Logs tab, every line of it: a failed run from the Errors tab, a slow one from the
+        Performance tab."""
+        fn = self._full()
+        self._show_tab("logs")
+        if request_id:
+            self._quietly(self.log_find, value=request_id)
+            self._searched = self._log_query = request_id
+        label = request_id[:8] if request_id else f"from {_stamp(moment)}"
+        self._status(f"Reading run {label}…", busy=True, owner="logs")
+
+        def done(run: LogRun | None) -> None:
+            if run is None:
+                self._status(f"Couldn't find run {label}'s lines around {_stamp(moment)} UTC: its log stream may have "
+                             "been deleted, or the logs aren't kept that long.", "warn")
+                return
+            self.found = LogPage(fn, fn.log_group, run.start, run.end, events=run.events,
+                                 pattern=f'"{run.request_id}"' if run.request_id else None)
+            self._searched = self._log_query = run.request_id or self._log_query
+            self._quietly(self.log_find, value=self._searched)
+            self._found_runs = [run]
+            self._open_runs.add(run.key)
+            self._run_offset = 0
+            self._draw_run_chips()
+            self._draw_runs(renew=True)
+            self._finish("logs", f"Run {run.request_id or label}: {_RUN_STATES.get(run.status, ('', '', run.status))[2]}"
+                         + (f" in {human_ms(run.duration)}" if run.duration is not None else "")
+                         + " · ✕ shows every run again", tabs=("logs",))
+
+        self._later("search", lambda: self.core._run_around(fn, moment, stream=stream, request_id=request_id), done)
+
+    def _source_runs(self) -> list[LogRun]:
+        return self._found_runs if self.found is not None else self._runs
+
+    def _in_run_chip(self, run: LogRun, key: str) -> bool:
+        return {"": True, "failed": run.status in ("failed", "timeout"), "timeout": run.status == "timeout",
+                "logged": run.status == "logged", "cold": run.cold}[key]
+
+    def _visible_runs(self) -> list[LogRun]:
+        runs = self._source_runs()
+        if self._run_chip:
+            runs = [r for r in runs if self._in_run_chip(r, self._run_chip)]
+        if self._log_query and self.found is None:
+            phrase = _phrase(self._log_query)
+            if phrase:
+                needle = phrase.lower()
+                runs = [r for r in runs if needle in (r.request_id or "").lower()
+                        or any(needle in e.message.lower() for e in r.events)]
+        return runs
+
+    def _pick_run_chip(self, key: str) -> None:
+        self._run_chip = "" if key == self._run_chip else key
+        self._run_offset = 0
+        self._draw_run_chips()
+        self._draw_runs(renew=True)
+
+    def _draw_run_chips(self) -> None:
+        runs = self._source_runs()
+        chips = []
+        for key, label, tone in _RUN_CHIPS:
+            n = sum(1 for r in runs if self._in_run_chip(r, key))
+            if key and not n:
+                continue
+            tip = "Show every run" if not key else f"Show only the runs that {label.lower()} (click again for every run)"
+            chips.append((self._chip_button(self._run_chip_buttons, key, tone, self._pick_run_chip), f"{label} {n:,}", tip,
+                          key == self._run_chip))
+        self._show_chips(self.run_chips, chips if runs else [])
+
+    def _draw_runs(self, renew: bool = False) -> None:
+        visible = self._visible_runs()
+        self._run_offset = min(self._run_offset, max(0, (len(visible) - 1) // _RUN_PAGE * _RUN_PAGE))
+        page = visible[self._run_offset:self._run_offset + _RUN_PAGE]
+        while len(self._run_rows) < len(page):
+            self._run_rows.append(_RunRow(self))
+        words = self._words()
+        today = _utcnow().date()
+        timeout = self._full().timeout if self.function is not None else 0
+        for row, run in zip(self._run_rows, page):
+            row.run = run
+            self._set(row.face, _run_face(run, timeout, words, today))
+            opened = run.key in self._open_runs
+            _class_if(row.box, "lmx-open", opened)
+            tip = _run_tip(run, opened)
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+            if opened:
+                self._set(row.body, _run_body(run, words))
+            row.body.layout.display = "" if opened else "none"
+        children: list[Any] = [row.box for row in self._run_rows[:len(page)]]
+        if not page:
+            children = [self._empty("runs", self._no_runs_text())]
+        if renew:
+            box = self._w.VBox(children, layout=self._w.Layout(width="100%", flex="1 1 auto"))
+            box.add_class("lmx-runs")
+            logs = self.pages["logs"]
+            logs.children = [box if child is self.runs_box else child for child in logs.children]
+            self.runs_box = box
+        else:
+            self.runs_box.children = children
+        self._draw_pager("runs", self._run_offset, len(visible), _RUN_PAGE, "runs",
+                         len(self._source_runs()) if (self._run_chip or self._log_query) else None)
+        page_read = self.logs_page
+        self.older_button.layout.display = "" if (self.found is None and page_read is not None
+                                                  and page_read.truncated) else "none"
+        self._draw_run_head(visible)
+
+    def _no_runs_text(self) -> str:
+        page = self.found if self.found is not None else self.logs_page
+        if self.function is None:
+            return "Pick a function first."
+        if page is None:
+            return "Reading the logs…" if "logs" in self._asked or self.found is not None else "No logs read yet."
+        if page.errors:
+            return "No runs to show."
+        if self.found is not None:
+            return (f"No run in {self._range_text()} has a line with {self._searched!r}. Pick a longer time range, or "
+                    "check the spelling: CloudWatch's search is case-sensitive.")
+        if self._source_runs():
+            return "No run matches. Clear the search, or pick All runs above."
+        if page.latest is not None:
+            return f"Nothing logged in {self._range_text()}. Its newest line is from {human_age(page.latest)}."
+        return (f"Nothing logged in {self._range_text()}, and nothing at all in its log group: it hasn't run, or it "
+                "logs somewhere else.")
+
+    def _draw_run_head(self, visible: list[LogRun]) -> None:
+        """The line over the runs: how many, how many failed, how long they took, the memory they used, the cold
+        starts; and what couldn't be read, or where reading stopped."""
+        fn = self.function
+        page = self.found if self.found is not None else self.logs_page
+        if fn is None or page is None:
+            return
+        notes: list[Any] = list(self.ui._log_notes(page.errors, fn, page.log_group)) if page.errors else []
+        if self.found is None and page.truncated:
+            notes.append(_Note(f"These are the newest {_count(_RUN_LINES)} lines, back to "
+                               f"{_stamp(page.covered_from)} UTC: Older runs (under the list) reads further back."))
+        elif self.found is not None and page.truncated:
+            notes.append(_Note(f"CloudWatch stopped at the newest {_count(_SEARCH_HITS)} matching lines, back to "
+                               f"{_stamp(page.covered_from)} UTC: pick a shorter time range to see older ones."))
+        bits = []
+        if visible:
+            runs = [r for r in visible if r.request_id]
+            failed = sum(1 for r in runs if r.status in ("failed", "timeout"))
+            durations = [r.duration for r in runs if r.duration is not None]
+            used = [(r.report.max_memory, r.report.memory) for r in runs if r.report is not None and r.report.memory]
+            cold = sum(1 for r in runs if r.cold)
+            bits.append(f"<span><b>{len(runs):,}</b> {'run' if len(runs) == 1 else 'runs'}</span>")
+            if failed:
+                bits.append(f'<span class="bad"><b>{failed:,}</b> failed ({_pct(failed / len(runs))})</span>')
+            if durations:
+                fastest = percentile(durations, 50)
+                bits.append(f"<span>median <b>{_esc(human_ms(fastest))}</b></span>")
+                bits.append(f'<span class="{"warn" if max(durations) >= 0.9 * fn.timeout * 1000 else ""}">slowest '
+                            f"<b>{_esc(human_ms(max(durations)))}</b> of {fn.timeout} s</span>")
+            if used:
+                most, size = max(used)
+                bits.append(f'<span class="{"warn" if most >= 0.9 * size else ""}">memory up to <b>{most:,}</b> of '
+                            f"{size:,} MB</span>")
+            if cold:
+                bits.append(f"<span><b>{cold:,}</b> cold {'start' if cold == 1 else 'starts'}</span>")
+            where = (f"with {self._searched!r}" if self.found is not None else self._range_text())
+            bits.append(f'<span class="lmx-note">Newest first, {where}; times in UTC. Click a run to see its lines'
+                        + (", the matching ones marked" if self.found is not None or self._log_query else "")
+                        + ".</span>")
+        summary = f'<div class="lmx-sum">{"".join(bits)}</div>' if bits else ""
+        self._set(self.run_head, summary + (self._html(notes) if notes else ""))
+        latest = page.latest if self.found is None and not self._source_runs() else None
+        if latest is not None:
+            seconds = (_utcnow() - latest).total_seconds()
+            option = next(((label, value) for label, value in _RANGES if _seconds(value) > seconds), None)
+            if option is not None and option[1] != self._range:
+                self.jump_button.description = f"Show {option[0].lower()} ›"
+                self.jump_button.tooltip = f"Its newest line is from {human_age(latest)}"
+                self._jump_to = option[1]
+                self.jump_button.layout.display = ""
+                return
+        self.jump_button.layout.display = "none"
+
+    def _jump(self) -> None:
+        target = getattr(self, "_jump_to", None)
+        if target:
+            self.range_pick.value = target  # its observer reads the logs again
+
+    def _toggle_run(self, row: _RunRow) -> None:
+        run = row.run
+        if run is None:
+            return
+        if run.key in self._open_runs:
+            self._open_runs.discard(run.key)
+            row.body.layout.display = "none"
+        else:
+            self._open_runs.add(run.key)
+            self._set(row.body, _run_body(run, self._words()))
+            row.body.layout.display = ""
+        opened = run.key in self._open_runs
+        _class_if(row.box, "lmx-open", opened)
+        row.button.tooltip = _run_tip(run, opened)
+
+    def _older(self) -> None:
+        """Reads the lines before the oldest one read (when reading stopped at the limit), and adds their runs."""
+        page, fn = self.logs_page, self.function
+        if page is None or fn is None or not page.truncated or page.covered_from is None:
+            return
+        start, end = page.since, page.covered_from - timedelta(milliseconds=1)
+        self._status(f"Reading older lines, before {_stamp(page.covered_from)} UTC…", busy=True, owner="logs")
+        self.older_button.disabled = True
+
+        def done(got: tuple[list[LogEvent], bool, datetime | None]) -> None:
+            self.older_button.disabled = False
+            if self.logs_page is not page:
+                return
+            events, truncated, covered = got
+            known = {(e.stream, e.time, e.message) for e in page.events}
+            page.events = [e for e in events if (e.stream, e.time, e.message) not in known] + page.events
+            page.truncated, page.covered_from = truncated, covered if truncated else None
+            self._runs = page.runs
+            self._draw_run_chips()
+            self._draw_runs()
+            self._finish("logs", f"Read {len(events):,} more lines" + (f", back to {_stamp(covered)} UTC" if truncated
+                                                                       else f": every line of {self._range_text()}"),
+                         tabs=("logs",))
+
+        def failed(exc: BaseException) -> None:
+            self.older_button.disabled = False
+            self._status(self._error_text(exc), "warn")
+
+        self._later("older", lambda: self.core._filter(fn.log_group, fn.region, start, end, None, _RUN_LINES), done,
+                    failed)
+
+    # ------------------------------------------------------------------ live
+
+    def _toggle_live(self) -> None:
+        if self._live:
+            self._stop_live("Live is off.")
+            return
+        if self.function is None or self.logs_page is None:
+            self._status("Live follows the logs shown: open a function's Logs tab first.", "warn")
+            return
+        if self.found is not None:  # back to every run: Live adds to them
+            self._quietly(self.log_find, value="")
+            self.found, self._found_runs, self._searched, self._log_query = None, [], "", ""
+            self._draw_run_chips()
+            self._draw_runs(renew=True)
+        self._live, self._live_new, self._live_started = True, 0, time.monotonic()
+        self._live_token += 1
+        self.live_button.description = "Live"
+        _class_if(self.live_button, "lmx-on", True)
+        self._status(f"Live: looking for new lines every {_LIVE_SECONDS} seconds; new runs show at the top.", "live")
+        loop = _running_loop()
+        if loop is None:  # a script or the tests: one look now
+            self._poll_now()
+            return
+        token = self._live_token
+        self._tasks["live"] = loop.create_task(self._live_loop(token))
+
+    def _stop_live(self, text: str = "", level: str = "") -> None:
+        was = self._live
+        self._live = False
+        self._live_token += 1
+        if hasattr(self, "live_button"):
+            _class_if(self.live_button, "lmx-on", False)
+        if was and text:
+            self._status(text, level)
+
+    def _poll_work(self) -> tuple[LogPage, Callable[[], list[LogEvent]]] | None:
+        page, fn = self.logs_page, self.function
+        if page is None or fn is None:
+            return None
+        newest = max((e.time for e in page.events), default=page.until)
+        start = min(newest, page.until) - timedelta(seconds=2)  # a little overlap: lines can share a millisecond
+        return page, lambda: self.core._filter(fn.log_group, fn.region, start, _utcnow(), None, 2_000)[0]
+
+    def _poll_now(self) -> None:
+        polled = self._poll_work()
+        if polled is not None:
+            page, work = polled
+            self._merge_live(page, work())
+
+    async def _live_loop(self, token: int) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            while self._live and self._live_token == token:
+                await asyncio.sleep(_LIVE_SECONDS)
+                if not (self._live and self._live_token == token):
+                    return
+                if time.monotonic() - self._live_started > _LIVE_MINUTES * 60:
+                    self._stop_live(f"Live stopped after {_LIVE_MINUTES} minutes: click Live to go on.")
+                    return
+                polled = self._poll_work()
+                if polled is None:
+                    continue
+                page, work = polled
+                try:
+                    events = await loop.run_in_executor(self._workers(), work)
+                except Exception as exc:
+                    if self._live_token == token:
+                        self._stop_live(f"Live stopped: {self._error_text(exc)}", "warn")
+                    return
+                if self._live and self._live_token == token:
+                    self._merge_live(page, events)
+        finally:
+            if self._tasks.get("live") is asyncio.current_task():
+                del self._tasks["live"]
+
+    def _merge_live(self, page: LogPage, events: list[LogEvent]) -> None:
+        if self.logs_page is not page:
+            return
+        known = {(e.stream, e.time, e.message) for e in page.events}
+        new = [e for e in events if (e.stream, e.time, e.message) not in known]
+        page.until = _utcnow()
+        checked = f"checked {page.until:%H:%M:%S} UTC"
+        if new:
+            before = {run.key for run in self._runs}
+            page.events = sorted(page.events + new, key=lambda e: e.time)[-20_000:]
+            self._runs = page.runs
+            self._live_new += sum(1 for run in self._runs if run.key not in before and run.request_id)
+            if self.found is None:
+                self._draw_run_chips()
+                self._draw_runs()
+        if self._live:
+            self._status(f"Live · {_plural(self._live_new, 'new run')} since it started · {checked} · every "
+                         f"{_LIVE_SECONDS} seconds", "live")
+
+    # ------------------------------------------------------------------ errors and performance
+
+    def _errors_range_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet or not change.get("new"):
+            return
+        self._errors_range = str(change["new"])
+        self._load_errors()
+
+    def _perf_range_changed(self, change: dict[str, Any]) -> None:
+        if self.quiet or not change.get("new"):
+            return
+        self._perf_range = str(change["new"])
+        self._load_perf()
+
+    def _load_errors(self) -> None:
+        if self.function is None:
+            return
+        self._asked.add("errors")
+        fn = self._full()
+        start, end = LambdaAnalyzer._window(self._errors_range)
+        self.error_report = None
+        self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text(self._errors_range)}"
+                                              "…"))
+        self._set(self.error_head, "")
+        self.error_rows_box.children = []
+        self._counted = 0
+        self._status(f"Reading {fn.name}'s error lines…", busy=True, owner="errors")
+        self._later("errors", lambda: self.core._errors(fn, start, end, progress=lambda n: setattr(self, "_counted",
+                                                                                                  n)),
+                    self._got_errors, self._errors_failed,
+                    counting=f"Reading {fn.name}'s error lines… {{n}} read so far", owner="errors")
+
+    def _errors_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._set(self.errors_view, self._html([_Note(text, "warn")]))
+        self._status(text, "warn")
+
+    def _got_errors(self, report: ErrorReport) -> None:
+        self.error_report = report
+        self._draw("errors", self.errors_view, self.ui._errors_blocks(report, since=self._errors_range, for_window=True))
+        failed = [e for e in report.newest]
+        today = _utcnow().date()
+        while len(self._error_rows) < len(failed):
+            self._error_rows.append(_Row(self, self._clicked_failure, short=True))
+        for row, event in zip(self._error_rows, failed):
+            row.item = event
+            kind, summary = classify_error(event.message) or ("Error", _clip(event.message, 200))
+            self._set(row.face, f'<div class="er"><span class="ri">✕</span><span class="ew">'
+                                f"{_esc(_run_clock(event.time, today))}</span><span class=\"ek\">{_esc(kind)}</span>"
+                                f'<span class="es">{_esc(summary.splitlines()[0][:300])}</span>'
+                                '<span class="eo">Read the run ›</span></div>')
+            tip = f"{_stamp(event.time)} UTC · request {event.request_id or 'unknown'} · click to read every line"
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+        self.error_rows_box.children = [row.box for row in self._error_rows[:len(failed)]]
+        self._set(self.error_head, '<div class="lmx-h">The newest failed runs<span>click one to read every line of '
+                                   "it in the Logs tab</span></div>" if failed else "")
+        self._finish("errors", self._tab_line("errors"), tabs=("errors",))
+
+    def _clicked_failure(self, event: LogEvent) -> None:
+        self._show_run(event.time, event.stream, event.request_id)
+
+    def _load_perf(self) -> None:
+        if self.function is None:
+            return
+        self._asked.add("performance")
+        fn = self._full()
+        start, end = LambdaAnalyzer._window(self._perf_range)
+        self.perf = None
+        self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._range_text(self._perf_range)}…"))
+        self._set(self.slow_head, "")
+        self.slow_rows_box.children = []
+        self._counted = 0
+        self._status(f"Reading {fn.name}'s REPORT lines…", busy=True, owner="performance")
+        self._later("perf", lambda: self.core._performance(fn, start, end,
+                                                           progress=lambda n: setattr(self, "_counted", n)),
+                    self._got_perf, self._perf_failed,
+                    counting=f"Reading {fn.name}'s REPORT lines… {{n}} read so far", owner="performance")
+
+    def _perf_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._set(self.perf_view, self._html([_Note(text, "warn")]))
+        self._status(text, "warn")
+
+    def _got_perf(self, perf: Performance) -> None:
+        self.perf = perf
+        fn = perf.function
+        self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._perf_range,
+                                                                              for_window=True))
+        slowest = sorted(perf.invocations, key=lambda r: r.duration, reverse=True)[:10]
+        today = _utcnow().date()
+        while len(self._slow_rows) < len(slowest):
+            self._slow_rows.append(_Row(self, self._clicked_slow, short=True))
+        for row, inv in zip(self._slow_rows, slowest):
+            row.item = inv
+            share = min(1.0, inv.duration / (fn.timeout * 1000)) if fn.timeout else 0.0
+            fill = "bad" if share >= 0.9 else "warn" if share >= 0.7 else ""
+            bits = [f"{inv.max_memory:,} of {inv.memory:,} MB" if inv.memory else "",
+                    f"cold start {human_ms(inv.init)}" if inv.init is not None else "",
+                    f"status {inv.status}" + (f" ({inv.error_type})" if inv.error_type else "") if inv.status else ""]
+            icon = "✕" if inv.status else "⏱"
+            self._set(row.face, f'<div class="er slow"><span class="ri">{icon}</span><span class="ew">'
+                                f"{_esc(_run_clock(inv.time, today) if inv.time else '-')}</span><span class=\"ek\">"
+                                f'<span class="rr" style="display:inline;height:auto;padding:0"><span class="rb">'
+                                f'<i class="{fill}" style="width:{max(share * 100, 2):.1f}%"></i></span></span> '
+                                f"{_esc(human_ms(inv.duration))}</span><span class=\"es\">"
+                                f"{_esc(' · '.join(b for b in bits if b))}</span>"
+                                '<span class="eo">Read the run ›</span></div>')
+            tip = f"request {inv.request_id} · click to read every line it logged"
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+        self.slow_rows_box.children = [row.box for row in self._slow_rows[:len(slowest)]]
+        self._set(self.slow_head, '<div class="lmx-h">The slowest runs<span>click one to read every line of it in the '
+                                  "Logs tab</span></div>" if slowest else "")
+        self._finish("performance", self._tab_line("performance"), tabs=("performance",))
+
+    def _clicked_slow(self, inv: Invocation) -> None:
+        if inv.time is not None:
+            self._show_run(inv.time, inv.stream, inv.request_id or None)
+
+    # ------------------------------------------------------------------ code
+
+    def _load_code(self, unlimited: bool = False) -> None:
+        fn = self.function
+        if fn is None:
+            return
+        self._asked.add("code")
+        most = None if unlimited else "50MB"
+        self.package = None
+        self.code_more.layout.display = "none"
+        self.code_split.layout.display = "none"
+        self._set(self.code_view, _skeleton(f"Downloading {fn.name}'s deployment package"
+                                            + ("" if unlimited else " (up to 50 MB)") + "…"))
+        self._status(f"Downloading {fn.name}'s deployment package…", busy=True, owner="code")
+
+        def work() -> tuple[Function, bytes | None]:
+            full = self.core.function(fn.name, region=fn.region or None)  # a fresh link to the package
+            return full, self.core._package(full, most)
+
+        self._later("code", work, self._got_code, self._code_failed)
+
+    def _code_failed(self, exc: BaseException) -> None:
+        text = self._error_text(exc)
+        self._set(self.code_view, self._html([_Note(text, "warn")]))
+        if isinstance(exc, ValueError) and "max_size" in str(exc):
+            size = re.search(r"package is ([\d.]+ [KMGT]?B)", str(exc))
+            self.code_more.description = f"Download all {size.group(1)} anyway" if size else "Download it anyway"
+            self.code_more.layout.display = ""
+            said = (f"The package is {size.group(1)}" if size else "The package is over 50 MB") + (
+                ", more than the 50 MB the window downloads at first: the button under this downloads all of it.")
+            self._set(self.code_view, self._html([_Note(said, "warn")]))
+            self._status(said, "warn")
+        else:
+            self._status(text, "warn")
+
+    def _got_code(self, got: tuple[Function, bytes | None]) -> None:
+        full, data = got
+        self._code_fn, self._package_data = full, data
+        self.package = package = read_package(full, data)
+        blocks = [b for b in self.ui._code_blocks(package, source=False) if not isinstance(b, _Table)]
+        self._draw("code", self.code_view, blocks)
+        if not package.files:
+            self.code_split.layout.display = "none"
+            self._finish("code", package.note or "No files in the package.", tabs=("code",))
+            return
+        self.code_split.layout.display = ""
+        self._code_file = package.shown_file
+        self._draw_code_rows(renew=True)
+        self._draw_source(package)
+        self._finish("code", self._tab_line("code"), tabs=("code",))
+
+    def _code_files(self) -> list[CodeFile]:
+        package = self.package
+        if package is None:
+            return []
+        handler = package.handler_file
+        files = sorted(package.files, key=lambda f: (f.path != handler, bool(_JUNK_RE.search(f.path)), "/" in f.path,
+                                                     f.path.lower()))
+        if self._code_query:
+            files = [f for f in files if search_rank(self._code_query, (f.path, posixpath.basename(f.path)))
+                     is not None]
+        return files
+
+    def _code_typed(self, change: dict[str, Any]) -> None:
+        if self.quiet:
+            return
+        self._code_query = str(self.code_find.value or "").strip()
+        self._code_offset = 0
+        self._draw_code_rows(renew=True)
+
+    def _draw_code_rows(self, renew: bool = False) -> None:
+        files = self._code_files()
+        self._code_offset = min(self._code_offset, max(0, (len(files) - 1) // _CODE_PAGE * _CODE_PAGE))
+        page = files[self._code_offset:self._code_offset + _CODE_PAGE]
+        while len(self._code_rows) < len(page):
+            self._code_rows.append(_Row(self, self._open_code_file, short=True))
+        words = self._code_query.split()
+        handler = self.package.handler_file if self.package is not None else None
+        for row, f in zip(self._code_rows, page):
+            row.item = f
+            self._set(row.face, _code_file_face(f, words, handler))
+            tip = f"{f.path} · {human_size(f.size)} unzipped · click to see it"
+            if row.button.tooltip != tip:
+                row.button.tooltip = tip
+            _class_if(row.box, "lmx-on", f.path == self._code_file)
+        children: list[Any] = [row.box for row in self._code_rows[:len(page)]]
+        if not page:
+            children = [self._empty("files", "No file matches.")]
+        if renew:
+            box = self._w.VBox(children, layout=self._w.Layout(width="100%"))
+            box.add_class("lmx-files")
+            self.code_left.children = [box if child is self.files_box else child for child in self.code_left.children]
+            self.files_box = box
+        else:
+            self.files_box.children = children
+        total = len(self.package.files) if self.package is not None else 0
+        self._draw_pager("files", self._code_offset, len(files), _CODE_PAGE, "files", total)
+
+    def _open_code_file(self, f: CodeFile) -> None:
+        if self._code_fn is None:
+            return
+        self._code_file = f.path
+        for row in self._code_rows:
+            _class_if(row.box, "lmx-on", row.item is not None and row.item.path == f.path)
+        self._draw_source(read_package(self._code_fn, self._package_data, file=f.path))
+        self.code_right = self._w.VBox([self.source_view])  # a new box, which starts at the top
+        self.code_right.add_class("lmx-right")
+        self.code_split.children = [self.code_left, self.code_right]
+
+    def _draw_source(self, package: CodePackage) -> None:
+        path = package.shown_file
+        if path is None:
+            self._set(self.source_view, '<div class="lmx-hint">👈 <div>Click a file to see its source.</div></div>')
+            return
+        size = next((f.size for f in package.files if f.path == path), None)
+        about = " · ".join(filter(None, [human_size(size) if size is not None else "",
+                                         "the handler's file" if path == package.handler_file else ""]))
+        head = f'<div class="srch"><b>{_esc(path)}</b><span>{_esc(about)}</span></div>'
+        if package.source is not None:
+            more = (self._html([_Note(f"Only the first {human_size(_SOURCE_LIMIT)} of it is shown.")])
+                    if package.source_truncated else "")
+            self._set(self.source_view, head + _source_html(path, package.source) + more)
+        else:
+            self._set(self.source_view, head + self._html([_Note(package.note or "Nothing to show.")]))
+
+
+def explore(
+    name: str | None = None,
+    *,
+    tab: str | None = None,
+    region: str | None = None,
+    profile: str | None = None,
+    height: int | str | None = None,
+) -> LambdaExplorer:
+    """Opens the Lambda explorer window and returns it: every function in the region, and for the one you click, how
+    it's doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
+    in), its errors grouped by cause, its run times, the code in its package and every setting, all by clicking.
+
+        explore()                                   # every function in the notebook's region
+        explore("orders-etl")                       # straight to one function (a name, an ARN or a console link)
+        explore("orders-etl", tab="logs")           # ...on its logs ('errors', 'performance', 'code', 'settings')
+        explore(region="all")                       # every region your account has turned on
+        explore(region="eu-west-1", profile="dev")  # another region or AWS profile
+
+    The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only
+    reads: where a change would help, it shows the command to run."""
+    return LambdaExplorer(name, tab=tab, region=region, profile=profile, height=height)
