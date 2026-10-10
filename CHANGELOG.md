@@ -18,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `from aws_analyzer.s3 import explain_policy` for anything else a file had. Notebooks that already use the package
   need no change, and a file you copied before keeps working as it is. The files also moved in the repository, from
   `analyzers/` to `src/aws_analyzer/`. ([#61](https://github.com/utkarsh5026/aws-analyzer/pull/61),
-  [#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  [#62](https://github.com/utkarsh5026/aws-analyzer/pull/62))
 
 ## [0.13.0] - 2026-10-11
 
