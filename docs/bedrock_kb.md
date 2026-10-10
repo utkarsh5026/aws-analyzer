@@ -27,12 +27,12 @@ Every example uses a knowledge base called `support-docs`: support policies (PDF
 
 1. **Get `bedrock_kb.py` next to your notebook.** Pick whichever works in your environment:
 
-    - **Upload it.** Download [bedrock_kb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_kb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload it.** Download [bedrock_kb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_kb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch it from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_kb.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_kb.py
         ```
 
     - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:

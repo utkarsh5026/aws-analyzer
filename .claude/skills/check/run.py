@@ -112,7 +112,7 @@ def main() -> int:
 
     # imports: each file alone, boto3 only.
     failures = []
-    for path in sorted((ROOT / "analyzers").glob("*.py")):
+    for path in sorted(p for p in (ROOT / "src" / "aws_analyzer").glob("*.py") if p.name != "__init__.py"):
         with tempfile.TemporaryDirectory() as tmp:
             shutil.copy(path, tmp)
             code = f"MODULE = {path.stem!r}\n{BOTO3_ONLY}"

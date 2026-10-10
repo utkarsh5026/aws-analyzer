@@ -182,6 +182,7 @@ def _module(root: Path, name: str):
 
 
 def _normalize(text: str, root: Path, work: Path) -> str:
+    text = text.replace(sys.executable, "<python>")  # sagemaker_env shows it, and it may be inside the checkout
     text = text.replace(str(root), "<ROOT>").replace(str(work), "<WORK>")
     for pattern, replacement in NORMALIZE:
         text = pattern.sub(replacement, text)

@@ -42,13 +42,14 @@ FIGURES = ("lambda-explorer", "lambda-explorer-overview", "lambda-explorer-logs"
            "lambda-explorer-json", "lambda-explorer-errors", "lambda-explorer-code")
 
 NOTEBOOK_CODE = f"""import os, sys
-sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
+sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
 os.environ.update({{"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                    "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}})
 os.environ.pop("AWS_PROFILE", None)
 from moto import mock_aws
 mock_aws().start()
-import demo, lambda_functions
+import demo
+from aws_analyzer import lambda_functions
 core = lambda_functions.LambdaAnalyzer(region="us-east-1", **demo.seed_lambda_functions())
 # height=620: the figures don't grow with the browser's height
 x = lambda_functions.LambdaExplorer(core=core, height=620)"""

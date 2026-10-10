@@ -10,10 +10,10 @@ import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
-import s3 as s3mod
-import s3_explorer as sx
-from s3 import S3Analyzer, S3View
-from s3_explorer import (
+from aws_analyzer import s3 as s3mod
+from aws_analyzer import s3_explorer as sx
+from aws_analyzer.s3 import S3Analyzer, S3View
+from aws_analyzer.s3_explorer import (
     Entry,
     S3Explorer,
     S3Navigator,
@@ -841,7 +841,8 @@ def test_explorer_without_s3_py(capsys, monkeypatch):
 def test_s3_module_is_found_where_s3_py_is(monkeypatch):
     view = S3View(mode="text")
     assert sx._s3_module(view) is s3mod and sx._s3_module() is s3mod
-    monkeypatch.setitem(sys.modules, "s3", None)  # `import s3` fails...
+    monkeypatch.setitem(sys.modules, "aws_analyzer.s3", None)  # no s3 installed next to it...
+    monkeypatch.setitem(sys.modules, "s3", None)  # ...and `import s3` fails...
     main = sys.modules["__main__"]
     with pytest.raises(ImportError, match="Upload s3.py next to this notebook"):
         sx._s3_module()

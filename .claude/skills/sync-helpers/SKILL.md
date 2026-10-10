@@ -1,6 +1,6 @@
 ---
 name: sync-helpers
-description: Compare the helpers duplicated across analyzers/*.py (human_size, human_money, _require, _esc, the render blocks, _render_html / _render_text, _friendly_errors, View._progress, View.help, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
+description: Compare the helpers duplicated across src/aws_analyzer/*.py (human_size, human_money, _require, _esc, the render blocks, _render_html / _render_text, _friendly_errors, View._progress, View.help, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
 argument-hint: "[helper names, e.g. _render_text help]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/sync-helpers/drift.py:*), Bash(python .claude/skills/sync-helpers/drift.py:*)
 ---
@@ -34,7 +34,7 @@ For each name listed under "Differ in code", decide which kind of difference it 
   should still match, though: a branch for a block both analyzers have should be identical.
 - **Drift.** One copy got a fix, a new edge case or better wording that the other copy didn't get. To find out
   which copy is newer and why it changed:
-  `git log -L :<name>:analyzers/<service>.py --oneline | head -40`, or `git log -S '<changed line>' --oneline`.
+  `git log -L :<name>:src/aws_analyzer/<service>.py --oneline | head -40`, or `git log -S '<changed line>' --oneline`.
 - **Unclear.** Say what you found and ask before changing it.
 
 Docstring-only differences are fine when the wording is service-specific ("objects" vs "items"). Otherwise,

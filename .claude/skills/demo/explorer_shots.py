@@ -98,13 +98,13 @@ FIGURES = [
     )),
 ]
 SEED = f"""import os, sys
-sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
+sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
 os.environ.update(AWS_ACCESS_KEY_ID="testing", AWS_SECRET_ACCESS_KEY="testing", AWS_DEFAULT_REGION="us-east-1")
 from moto import mock_aws
 mock_aws().start()
 import shots
-from s3 import S3Analyzer
-from s3_explorer import S3Explorer
+from aws_analyzer.s3 import S3Analyzer
+from aws_analyzer.s3_explorer import S3Explorer
 core = S3Analyzer(**shots.seed_s3_docs())"""
 FONTS = """<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">

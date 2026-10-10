@@ -16,8 +16,8 @@ from botocore.stub import Stubber
 from botocore.validate import ParamValidator
 from moto import mock_aws
 
-import bedrock_kb as kbmod
-from bedrock_kb import (
+from aws_analyzer import bedrock_kb as kbmod
+from aws_analyzer.bedrock_kb import (
     BEDROCK_PRICES,
     DEFAULT_PROMPT,
     MODEL_PRICES,

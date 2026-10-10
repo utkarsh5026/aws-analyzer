@@ -51,7 +51,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
-sys.path[:0] = [str(ROOT / "analyzers"), str(HERE)]
+sys.path[:0] = [str(ROOT / "src"), str(HERE)]
 
 IMAGES = ROOT / "docs" / "images"
 GUIDES = {"s3": "s3.md", "s3_explorer": "s3_explorer.md", "dynamodb": "dynamodb.md", "bedrock_kb": "bedrock_kb.md",
@@ -930,7 +930,7 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
 
     with mock_aws():
         kwargs = SCENES[service]()
-        mod = importlib.import_module(service)
+        mod = importlib.import_module(f"aws_analyzer.{service}")
         view_cls = next(v for k, v in vars(mod).items() if k.endswith("View") and isinstance(v, type))
         core_cls = next(v for k, v in vars(mod).items() if k.endswith("Analyzer") and isinstance(v, type))
         core = core_cls(region=REGION, **kwargs) if "session" not in kwargs else core_cls(**kwargs)

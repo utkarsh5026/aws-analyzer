@@ -77,7 +77,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(ROOT / "analyzers"))
+sys.path.insert(0, str(ROOT / "src"))
 
 NOW = datetime.now(timezone.utc).replace(tzinfo=None)  # moto keeps naive UTC timestamps
 
@@ -997,7 +997,7 @@ def seed_sagemaker_env() -> dict:
     moto has no Studio apps, spaces or ListApps."""
     import tempfile
 
-    mod = importlib.import_module("sagemaker_env")
+    mod = importlib.import_module("aws_analyzer.sagemaker_env")
     now = datetime.now(timezone.utc)
     root = Path(tempfile.mkdtemp(prefix="sagemaker-demo-"))
     space_arn = f"arn:aws:sagemaker:{REGION}:{ACCOUNT}:app/{SM_DOMAIN}/churn-analysis/JupyterLab/default"
@@ -1810,9 +1810,10 @@ def main() -> int:
     parser.add_argument("--profile", help="with --live: AWS profile")
     args = parser.parse_args()
 
-    if not (ROOT / "analyzers" / f"{args.service}.py").exists():
-        names = ", ".join(sorted(p.stem for p in (ROOT / "analyzers").glob("*.py")))
-        parser.error(f"no analyzers/{args.service}.py (have: {names})")
+    package = ROOT / "src" / "aws_analyzer"
+    if args.service.startswith("_") or not (package / f"{args.service}.py").exists():
+        names = ", ".join(sorted(p.stem for p in package.glob("*.py") if not p.stem.startswith("_")))
+        parser.error(f"no src/aws_analyzer/{args.service}.py (have: {names})")
 
     mock = None
     extra: dict = {}
@@ -1835,7 +1836,7 @@ def main() -> int:
                   "running against an empty account)", file=sys.stderr)
 
     try:
-        mod = importlib.import_module(args.service)
+        mod = importlib.import_module(f"aws_analyzer.{args.service}")
         view_cls = next(v for k, v in vars(mod).items() if k.endswith("View") and isinstance(v, type))
         core_cls = next(v for k, v in vars(mod).items() if k.endswith("Analyzer") and isinstance(v, type))
         kwargs = {"region": args.region, "profile": args.profile} if args.live else {"region": "us-east-1"}

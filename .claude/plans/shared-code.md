@@ -1,26 +1,33 @@
 # Plan: one shared code base for every analyzer
 
-**Status:** plan only. Nothing is implemented. Work starts once the Lambda window branch is merged into `main`
-(see [Start trigger](#9-start-trigger-when-the-lambda-window-merges)). The last pull request deletes this file.
+**Status:** the Lambda window merged in 0.13.0, and the work has started: Phase 0 (`snapshot.py`) and Phase 1 (the
+move to `src/aws_analyzer/`) are the first pull request. The last pull request deletes this file.
+
+**Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
 **Decision already made:** `pip install aws-analyzer` becomes the way to use the project. The analyzers stop being
 standalone files and import their shared code from one place. There is no code generator.
 
-Numbers below are from `main` at `3e4b766` (v0.12.0). Phase 0 measures them again.
+Numbers below are from `main` at `3a2d534` (v0.13.0, with the Lambda explorer), measured in Phase 0.
 
 ---
 
 ## 1. Why, in numbers
 
-- 7 analyzers plus the `s3_explorer.py` companion add up to 55,156 lines.
+- 7 analyzers plus the `s3_explorer.py` companion add up to 58,881 lines.
 - 50 helpers are copied into all 7 analyzers. Each copy is about 770 lines, so about 5,400 lines are repeats.
 - `bedrock_kb.py` and `bedrock_chat.py` also share 103 more names, about 1,600 lines.
-- `drift.py` finds 185 names defined in more than one analyzer. 149 are identical, 30 differ in code and 6 differ
+- `drift.py` finds 201 names defined in more than one analyzer. 155 are identical, 40 differ in code and 6 differ
   only in docstrings.
 - Improvements stay in one file. S3's tables sort, filter and choose columns (its `_CSS` is 200 lines, 54
   elsewhere), and no other service has that. Only 2 of the 56 commits to `analyzers/` changed 4 or more files.
-- The three windows (S3 explorer, chat, KB explorer) each built their own picker, background runner, error guard
-  and row button under different names, so `drift.py` can't see those copies at all.
+- The four windows (S3 explorer, chat, KB explorer and now the Lambda explorer) each have their own picker,
+  background runner, error guard and row button. The Lambda explorer copied about 440 lines from the KB explorer
+  (`_EXPLORER_CSS`, `_explorer_rules`, `_window_text`, `_for_window`, `_window_errors`, `explore`, ...), shares
+  `_cell_number`, `_class_if`, `_css_height`, `_marked`, `_running_loop` and `search_rank` with both Bedrock files,
+  and `_python_html` / `_json_source_html` with the chat. The four window classes share 39 method names
+  (`_later`, `_safely`, `_set`, `_renew`, `_draw_rows`, ...), and only 5 of them are identical; `drift.py` doesn't
+  compare window classes, so it sees none of this.
 
 **What success looks like:** a change to reports, tables, findings, progress, `help()` or a window primitive is
 one edit in one file, and every service gets it. A new service subclasses two base classes instead of pasting

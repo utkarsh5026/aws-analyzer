@@ -6,8 +6,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
-import dynamodb as ddbmod
-from dynamodb import (
+from aws_analyzer import dynamodb as ddbmod
+from aws_analyzer.dynamodb import (
     DYNAMODB_PRICES,
     GB,
     KB,

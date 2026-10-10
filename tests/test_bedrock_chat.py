@@ -16,8 +16,8 @@ from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from botocore.validate import ParamValidator
 
-import bedrock_chat as chatmod
-from bedrock_chat import (
+from aws_analyzer import bedrock_chat as chatmod
+from aws_analyzer.bedrock_chat import (
     DEFAULT_PROMPT,
     DEFAULT_SETTINGS,
     Answer,

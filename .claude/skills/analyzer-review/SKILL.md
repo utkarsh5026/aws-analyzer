@@ -10,7 +10,7 @@ Target: `$ARGUMENTS`.
 
 ## 1. Scope
 
-- **Empty.** Review the uncommitted changes: `git diff HEAD` plus untracked files under `analyzers/`, `tests/`,
+- **Empty.** Review the uncommitted changes: `git diff HEAD` plus untracked files under `src/aws_analyzer/`, `tests/`,
   `docs/` and `README.md` (`git status --short`).
 - **A git ref** (`main`, `HEAD~3`, a SHA). Review `git diff <ref>...HEAD` plus the uncommitted changes.
 - **`<service>.<command>`** (`s3.what_if`, `dynamodb.schema`). Review that command end to end: its View method,

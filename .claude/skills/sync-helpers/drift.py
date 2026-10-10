@@ -1,6 +1,6 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
-Every analyzers/<service>.py carries its own copy of the shared helpers (human_size, _require, the render
+Every src/aws_analyzer/<service>.py carries its own copy of the shared helpers (human_size, _require, the render
 blocks, _render_html, _friendly_errors, View._progress, View.help, ...), because each file must work alone
 in a notebook. This compares every top-level definition, and every private View / Analyzer method, that
 two or more analyzers define under the same name.
@@ -26,7 +26,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-ANALYZERS = ROOT / "analyzers"
+ANALYZERS = ROOT / "src" / "aws_analyzer"
 
 # Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
 COMPANIONS = {"s3_explorer"}
@@ -113,7 +113,7 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="list differing names without diffs")
     args = parser.parse_args()
 
-    files = sorted(f for f in ANALYZERS.glob("*.py") if f.stem not in COMPANIONS)
+    files = sorted(f for f in ANALYZERS.glob("*.py") if f.stem not in COMPANIONS and f.stem != "__init__")
     parsed: dict[str, tuple[dict[str, tuple[int, str]], dict[str, str]]] = {}
     for path in files:
         try:

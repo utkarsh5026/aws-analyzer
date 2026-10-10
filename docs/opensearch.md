@@ -26,12 +26,12 @@ Every example uses `vectors-prod`, an OpenSearch Service domain holding `support
 
 1. **Get `opensearch.py` next to your notebook.** Pick whichever works in your environment:
 
-    - **Upload it.** Download [opensearch.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/opensearch.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload it.** Download [opensearch.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/opensearch.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch it from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/opensearch.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/opensearch.py
         ```
 
     - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:

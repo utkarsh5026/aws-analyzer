@@ -10,32 +10,42 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "src" / "aws_analyzer"
 
 
-def test_wheel_ships_every_analyzer():
+def test_wheel_ships_the_package_and_exports_every_analyzer():
     tomllib = pytest.importorskip("tomllib")  # stdlib from Python 3.11
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    shipped = config["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
-    expected = {f"analyzers/{p.name}": f"aws_analyzer/{p.name}" for p in (ROOT / "analyzers").glob("*.py")}
-    assert shipped == expected
+    wheel = config["tool"]["hatch"]["build"]["targets"]["wheel"]
+    assert wheel["packages"] == ["src/aws_analyzer"] and "force-include" not in wheel
+    modules = {p.stem for p in PACKAGE.glob("*.py") if not p.stem.startswith("_")}
+    init = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
+    listed = re.search(r"^_MODULES = \(([^)]*)\)", init, re.M | re.S)  # what `aws_analyzer.<module>` can load
+    assert listed and set(re.findall(r'"(\w+)"', listed.group(1))) == modules
+
+
+def _loaded() -> list[str]:
+    return [name for name in sys.modules if name == "aws_analyzer" or name.startswith("aws_analyzer.")]
 
 
 @pytest.fixture
 def package(tmp_path, monkeypatch):
-    """aws_analyzer laid out the way the wheel installs it, imported from a temporary folder."""
-    target = tmp_path / "aws_analyzer"
-    shutil.copytree(ROOT / "src" / "aws_analyzer", target)
-    for path in (ROOT / "analyzers").glob("*.py"):
-        shutil.copy(path, target / path.name)
+    """aws_analyzer laid out the way the wheel installs it, imported afresh from a temporary folder. The copy the
+    other tests imported from src/ is put back afterwards, so their modules and classes stay the ones in use."""
+    shutil.copytree(PACKAGE, tmp_path / "aws_analyzer", ignore=shutil.ignore_patterns("__pycache__"))
+    saved = {name: sys.modules.pop(name) for name in _loaded()}
     monkeypatch.syspath_prepend(str(tmp_path))
-    yield importlib.import_module("aws_analyzer")
-    for name in [n for n in sys.modules if n == "aws_analyzer" or n.startswith("aws_analyzer.")]:
-        del sys.modules[name]
+    try:
+        yield importlib.import_module("aws_analyzer")
+    finally:
+        for name in _loaded():
+            del sys.modules[name]
+        sys.modules.update(saved)
 
 
 def test_package_exports_each_analyzer_and_view(package):
     assert re.fullmatch(r"\d+\.\d+\.\d+([ab]|rc)?\d*", package.__version__)
-    assert not any(name.startswith("aws_analyzer.") for name in sys.modules)  # nothing loads until it's used
+    assert _loaded() == ["aws_analyzer"]  # nothing else loads until it's used
     for name in package.__all__[1:]:
         value = getattr(package, name)
         assert value.__name__ == name
@@ -61,6 +71,6 @@ def test_changelog_has_an_entry_for_this_version(package):
 
 
 def test_explorer_builds_on_the_s3_installed_with_it(package):
-    # A top-level `import s3` works here too (conftest puts analyzers/ on sys.path); the package's own wins.
+    # The explorer finds the s3 module installed next to it, not some other s3 on sys.path.
     assert package.s3_explorer._s3_module() is package.s3
     assert package.S3Explorer.__module__ == "aws_analyzer.s3_explorer"

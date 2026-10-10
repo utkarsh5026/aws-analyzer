@@ -40,13 +40,13 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
         %pip install "aws-analyzer[all]"
         ```
 
-    - **Upload them.** Download [s3.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3.py) and [s3_explorer.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3_explorer.py), then drag both into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload them.** Download [s3.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py) and [s3_explorer.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3_explorer.py), then drag both into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch them from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3.py
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3_explorer.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3_explorer.py
         ```
 
     - **Copy them from S3**, for a notebook with no internet access (VPC-only mode). Upload them to a bucket once, then:

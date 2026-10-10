@@ -78,16 +78,16 @@ report still renders.
 
 | Service                            | What it shows you                                                                                                                                                                                                                                       | File and guide                                                                                                                            |
 | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------- |
-| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](analyzers/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
-| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](analyzers/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
-| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](analyzers/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb.py`](analyzers/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#explorer)              |
-| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](analyzers/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
-| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
-| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
+| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon S3**                      | • Every bucket's size, monthly cost and risks<br>• Folder trees, and search by name, size or date<br>• Preview CSV, Parquet, JSON, Excel, PDF, Word and more<br>• Cut storage costs and recover deleted files                                           | [`s3.py`](src/aws_analyzer/s3.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3.html)                                               |
+| <img src="docs/images/aws/s3.svg" width="20" height="20" alt="" align="absmiddle"> **S3 file explorer**               | • Your buckets and folders, one click at a time<br>• What's inside a file, as soon as you click it<br>• Find files by name or type (`.csv`), in subfolders too<br>• Tick files and download them as one .zip                                            | [`s3_explorer.py`](src/aws_analyzer/s3_explorer.py) (with `s3.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)     |
+| <img src="docs/images/aws/dynamodb.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon DynamoDB**                | • Every table's key, size, billing and cost<br>• Scan, query and get items as plain tables<br>• Which attributes the items hold, and their types<br>• The read units each report used; scans stop early                                                 | [`dynamodb.py`](src/aws_analyzer/dynamodb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)                             |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](src/aws_analyzer/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb.py`](src/aws_analyzer/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#explorer)              |
+| <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
+| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](src/aws_analyzer/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
+| <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](src/aws_analyzer/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -99,11 +99,11 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 - **Install it with pip**, in a notebook cell: `%pip install aws-analyzer`. That's every service, and only needs
   boto3; `%pip install "aws-analyzer[all]"` also installs every optional package (pandas, pyarrow, the PDF and Excel
   readers, progress bars). Then import from `aws_analyzer` instead of from the file (step 2).
-- **Upload it:** download [`analyzers/s3.py`](analyzers/s3.py) and drag it into JupyterLab's file browser, in the same
+- **Upload it:** download [`src/aws_analyzer/s3.py`](src/aws_analyzer/s3.py) and drag it into JupyterLab's file browser, in the same
   folder as your notebook.
 - **Fetch it from a cell**, if the notebook can reach the internet:
   ```python
-  !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/s3.py
+  !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py
   ```
 - **Copy it from S3**, for a notebook with no internet access (VPC-only mode): upload it to a bucket once, then run
   `!aws s3 cp s3://your-bucket/tools/s3.py .`
@@ -195,7 +195,7 @@ command's full description.
 <img src="docs/images/aws/s3.svg" width="22" height="22" alt="" align="absmiddle"> **Buckets and the files in them.** Every bucket's size, cost and risks, what's in a folder, a look inside the files,
 and what you could save.
 
-📄 [`analyzers/s3.py`](analyzers/s3.py) · 📖 [S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)
+📄 [`src/aws_analyzer/s3.py`](src/aws_analyzer/s3.py) · 📖 [S3 guide](https://utkarsh5026.github.io/aws-analyzer/s3.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/preview-parquet-dark.webp">
@@ -257,11 +257,11 @@ ui.what_if("s3://my-bucket/logs/", move_after=30, to="STANDARD_IA")  # preview a
 
 ### Browse like a file explorer
 
-[`s3_explorer.py`](analyzers/s3_explorer.py) turns a cell into a small file explorer for S3. Folders and files are
+[`s3_explorer.py`](src/aws_analyzer/s3_explorer.py) turns a cell into a small file explorer for S3. Folders and files are
 listed on the left. Click a folder to open it, or click a file to see what's inside it on the right, drawn by the
 same `preview` as above: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
 
-📄 [`analyzers/s3_explorer.py`](analyzers/s3_explorer.py) · 📖 [Explorer guide](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)
+📄 [`src/aws_analyzer/s3_explorer.py`](src/aws_analyzer/s3_explorer.py) · 📖 [Explorer guide](https://utkarsh5026.github.io/aws-analyzer/s3_explorer.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/explorer-tour-dark.webp">
@@ -589,7 +589,7 @@ every command.
 <img src="docs/images/aws/dynamodb.svg" width="22" height="22" alt="" align="absmiddle"> **Tables and the items in them.** Every table's keys, size, billing and cost, the items as plain tables, and what
 they hold.
 
-📄 [`analyzers/dynamodb.py`](analyzers/dynamodb.py) · 📖 [DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)
+📄 [`src/aws_analyzer/dynamodb.py`](src/aws_analyzer/dynamodb.py) · 📖 [DynamoDB guide](https://utkarsh5026.github.io/aws-analyzer/dynamodb.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dynamodb-scan-filter-dark.webp">
@@ -774,7 +774,7 @@ has a ready-made IAM policy that covers every command.
 and how it was indexed, search with highlighted passages, answers with citations, and retrieval measured on your own
 questions. The [explorer window](#explore-by-clicking) shows it all by clicking.
 
-📄 [`analyzers/bedrock_kb.py`](analyzers/bedrock_kb.py) · 📖 [Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)
+📄 [`src/aws_analyzer/bedrock_kb.py`](src/aws_analyzer/bedrock_kb.py) · 📖 [Knowledge Bases guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/bedrock-ask-dark.webp">
@@ -1099,7 +1099,7 @@ of RetrieveAndGenerate) while you watch the request as JSON. Then ask a whole li
 see how each one did, try every combination of the settings you're unsure of at once and see which setup does best,
 keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
 
-📄 [`analyzers/bedrock_chat.py`](analyzers/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
+📄 [`src/aws_analyzer/bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
@@ -1363,7 +1363,7 @@ with a note naming the missing permission, and its search box takes an ID instea
 costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, and which
 notebooks, apps and endpoints in the region look forgotten.
 
-📄 [`analyzers/sagemaker_env.py`](analyzers/sagemaker_env.py) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
+📄 [`src/aws_analyzer/sagemaker_env.py`](src/aws_analyzer/sagemaker_env.py) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sagemaker-instance-dark.webp">
@@ -1494,7 +1494,7 @@ policy that covers every command.
 English, whether its graphs fit in the memory the nodes have, documents without a vector, vectors that repeat or are
 all zeros, and the documents nearest a question.
 
-📄 [`analyzers/opensearch.py`](analyzers/opensearch.py) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
+📄 [`src/aws_analyzer/opensearch.py`](src/aws_analyzer/opensearch.py) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/opensearch-index-info-dark.webp">
@@ -1655,7 +1655,7 @@ what triggers it and who else can call it, how often it ran, failed and was thro
 fails, read from its own logs, with its memory, cold starts and code. The
 [explorer window](#explore-functions-and-logs-by-clicking) shows it all by clicking, its logs run by run.
 
-📄 [`analyzers/lambda_functions.py`](analyzers/lambda_functions.py) · 📖 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html)
+📄 [`src/aws_analyzer/lambda_functions.py`](src/aws_analyzer/lambda_functions.py) · 📖 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-functions-dark.webp">
@@ -1874,9 +1874,9 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   Bedrock, since moto has none, and OpenSearch's by simulated clusters. The chat window's and the knowledge base
   explorer's are taken in a real JupyterLab by `.claude/skills/demo/chat_shots.py` and
   `.claude/skills/demo/kb_explorer_shots.py` (they need jupyterlab and playwright too).
-- **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships `analyzers/*.py` unchanged as the modules of the
-  `aws_analyzer` package; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the classes
-  and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
+- **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships [`src/aws_analyzer/`](src/aws_analyzer/), where
+  each analyzer is one module; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
+  classes and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
   `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
   [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
   both, see [CONTRIBUTING.md](CONTRIBUTING.md#releases)), and publishes a GitHub release tagged `v<version>`:

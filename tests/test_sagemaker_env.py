@@ -8,8 +8,8 @@ import pytest
 from botocore.stub import Stubber
 from moto import mock_aws
 
-import sagemaker_env as smmod
-from sagemaker_env import (
+from aws_analyzer import sagemaker_env as smmod
+from aws_analyzer.sagemaker_env import (
     GB,
     KB,
     MB,

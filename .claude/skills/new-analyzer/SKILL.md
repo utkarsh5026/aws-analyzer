@@ -1,6 +1,6 @@
 ---
 name: new-analyzer
-description: Scaffold a new AWS service analyzer - analyzers/<service>.py with the five-section layout and the duplicated helpers, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
+description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout and the duplicated helpers, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
 argument-hint: "<module name, e.g. sagemaker> [what users should be able to see first]"
 ---
 
@@ -9,7 +9,8 @@ argument-hint: "<module name, e.g. sagemaker> [what users should be able to see 
 Request: `$ARGUMENTS`. The first word is the module name (snake_case, and a valid Python identifier, because
 users will `import` it). The rest, if given, says what users need from it.
 
-A new analyzer is a new copy-paste file with the same shape as `analyzers/s3.py` and `analyzers/dynamodb.py`.
+A new analyzer is a new copy-paste file with the same shape as `src/aws_analyzer/s3.py` and
+`src/aws_analyzer/dynamodb.py`.
 Read CLAUDE.md's "Hard constraints" and "Architecture of an analyzer file" first. Everything below follows them.
 `dynamodb.py` is the smallest analyzer, so model the new one on it; `bedrock_kb.py` and its tests show how to test a service moto doesn't cover (botocore `Stubber` on injected clients).
 
@@ -45,7 +46,7 @@ the first command has to be useful. A typical set:
 
 For each command, give its name, what the user decides from it, its cards, and its findings.
 
-## 3. Create `analyzers/<service>.py`
+## 3. Create `src/aws_analyzer/<service>.py`
 
 Pick the names first:
 
@@ -87,17 +88,17 @@ Use the same layout as `tests/test_dynamodb.py`: `# ---- helpers` (pure function
 an `aws` fixture around `mock_aws()` plus seeded fixtures, and `# ---- UI` with `ui` in `mode="text"` and the
 `run(capsys, fn, ...)` helper. Cover at least one failure path that shows a note instead of a traceback.
 
-`tests/conftest.py` already puts `analyzers/` on `sys.path` and sets fake credentials. If moto supports the
+`tests/conftest.py` already puts `src/` on `sys.path` (tests import `from aws_analyzer import <service>`) and sets
+fake credentials. If moto supports the
 service, add its extra to the `moto[...]` line in `requirements-dev.txt` and `pip install -r
 requirements-dev.txt`.
 
-CI needs no changes: it lints, imports and tests every `analyzers/*.py`. Check that the loop in
+CI needs no changes: it lints, imports and tests every `src/aws_analyzer/*.py`. Check that the loop in
 `.github/workflows/ci.yml` still globs.
 
-The PyPI package needs the new file wired in: a `"analyzers/<service>.py" = "aws_analyzer/<service>.py"` line under
-`[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml` (`tests/test_package.py` fails without it), and
-the Analyzer and View classes in `src/aws_analyzer/__init__.py` (`__all__`, `_EXPORTS`, `_MODULES` and the
-`TYPE_CHECKING` imports). If the service's API is newer than the `boto3>=` floor in `pyproject.toml`, raise the floor
+The PyPI package ships every module in `src/aws_analyzer/`; wire the new one into `src/aws_analyzer/__init__.py`:
+its name in `_MODULES` (`tests/test_package.py` fails without it), and the Analyzer and View classes in `__all__`,
+`_EXPORTS` and the `TYPE_CHECKING` imports. If the service's API is newer than the `boto3>=` floor in `pyproject.toml`, raise the floor
 to the first boto3 release that has every operation the file calls, and put any new optional package in an extra.
 
 ## 5. Docs

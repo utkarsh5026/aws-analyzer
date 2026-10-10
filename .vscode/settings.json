@@ -4,10 +4,10 @@
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.terminal.activateEnvironment": true,
 
-  // Tests import each analyzer the way a notebook does (`import s3`, `import dynamodb`),
-  // with tests/conftest.py putting analyzers/ on sys.path. Pylance needs the same path
-  // to resolve those imports.
-  "python.analysis.extraPaths": ["analyzers"],
+  // Tests import the analyzers from the package (`from aws_analyzer import s3`), with
+  // tests/conftest.py putting src/ on sys.path. Pylance needs the same path to resolve
+  // those imports.
+  "python.analysis.extraPaths": ["src"],
   "python.analysis.typeCheckingMode": "basic",
 
   "python.testing.pytestEnabled": true,

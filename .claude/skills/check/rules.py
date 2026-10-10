@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-ANALYZERS = ROOT / "analyzers"
+PACKAGE = "aws_analyzer"
+ANALYZERS = ROOT / "src" / PACKAGE
 ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on one analyzer: it imports that analyzer (lazily, so it still imports alone), its UI class
 # is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services.
@@ -100,6 +101,22 @@ def _module_root(node: ast.Import | ast.ImportFrom) -> list[str]:
     return [alias.name.split(".")[0] for alias in node.names]
 
 
+def _analyzers_imported(node: ast.Import | ast.ImportFrom) -> list[str]:
+    """The modules an import loads, by their name in the package: `import s3`, `from .s3 import x`,
+    `from aws_analyzer import s3` and `import aws_analyzer.s3` all give ["s3"]."""
+    if isinstance(node, ast.Import):
+        return [alias.name.split(".")[1] if alias.name.startswith(f"{PACKAGE}.") else alias.name.split(".")[0]
+                for alias in node.names]
+    module = node.module or ""
+    if node.level and module:  # from .s3 import x
+        return [module.split(".")[0]]
+    if node.level or module == PACKAGE:  # from . import s3, from aws_analyzer import s3
+        return [alias.name for alias in node.names]
+    if module.startswith(f"{PACKAGE}."):  # from aws_analyzer.s3 import x
+        return [module.split(".")[1]]
+    return [module.split(".")[0]]
+
+
 def _is_stdlib(name: str) -> bool:
     return name in sys.stdlib_module_names or name in NEWER_STDLIB or name == "__future__"
 
@@ -134,7 +151,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         report.error(f"{rel}:{exc.lineno}", f"doesn't parse: {exc.msg}")
         return
     parent = COMPANIONS.get(path.stem)
-    siblings = {p.stem for p in ANALYZERS.glob("*.py")} - {path.stem, parent}
+    siblings = {p.stem for p in ANALYZERS.glob("*.py")} - {path.stem, parent, "__init__"}
 
     # Imports: boto3 + stdlib at import time, optional packages lazily, never another analyzer.
     future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
@@ -148,11 +165,13 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
+        where = f"{rel}:{node.lineno}"
+        for name in sorted(set(_analyzers_imported(node)) & siblings):
+            report.error(where, f"imports the {name} analyzer; each analyzer must work alone (copy the helper)")
         for name in _module_root(node):
-            where = f"{rel}:{node.lineno}"
-            if name in siblings:
-                report.error(where, f"imports the {name} analyzer; each analyzer must work alone (copy the helper)")
-            elif id(node) in top_level and not _is_stdlib(name) and name not in ALLOWED_TOP_LEVEL:
+            if name in siblings or name == PACKAGE:
+                continue  # reported above
+            if id(node) in top_level and not _is_stdlib(name) and name not in ALLOWED_TOP_LEVEL:
                 report.error(where, f"imports {name} at import time; only boto3 + stdlib may load there "
                                     f"(import it inside the function via _require({name!r}, ...))")
             elif (id(node) not in top_level and not _is_stdlib(name) and name != parent
@@ -259,13 +278,13 @@ def _documented(action: str, readme: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    parser.add_argument("files", nargs="*", type=Path, help="analyzer files (default: analyzers/*.py)")
+    parser.add_argument("files", nargs="*", type=Path, help="analyzer files (default: src/aws_analyzer/*.py)")
     parser.add_argument("--apis", action="store_true", help="list the AWS operations each analyzer calls")
     args = parser.parse_args()
     readme_path = ROOT / "README.md"
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
     report, apis = Report(), {}
-    files = [f.resolve() for f in args.files] or sorted(ANALYZERS.glob("*.py"))
+    files = [f.resolve() for f in args.files] or sorted(p for p in ANALYZERS.glob("*.py") if p.name != "__init__.py")
     for path in files:
         check_file(path, report, readme, apis)
     for label, items in (("error", report.errors), ("warning", report.warnings)):

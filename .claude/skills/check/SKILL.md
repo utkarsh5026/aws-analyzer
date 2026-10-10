@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run this repo's CI locally - ruff, each analyzer imported alone with only boto3, pytest - plus project-rule checks CI doesn't have (read-only AWS calls, lazy optional imports, View conventions, IAM permissions listed in README) and drift between the duplicated helpers. Use after changing analyzers/ or tests/, before saying the work is done, and before committing.
+description: Run this repo's CI locally - ruff, each analyzer imported alone with only boto3, pytest - plus project-rule checks CI doesn't have (read-only AWS calls, lazy optional imports, View conventions, IAM permissions listed in README) and drift between the duplicated helpers. Use after changing src/aws_analyzer/ or tests/, before saying the work is done, and before committing.
 argument-hint: "[matrix] [pytest args, e.g. -k policy]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/check/run.py:*), Bash(python .claude/skills/check/run.py:*), Bash(.venv/bin/python .claude/skills/check/rules.py:*), Bash(python .claude/skills/check/rules.py:*), Bash(.venv/bin/python .claude/skills/check/snapshot.py:*), Bash(python .claude/skills/check/snapshot.py:*)
 ---
@@ -33,7 +33,7 @@ after touching anything that uses pandas, IPython or version-specific stdlib, or
 |---|---|---|
 | `ruff` | `ruff check .` finds a real error (ruff.toml selects only E4/E7/E9/F) | Fix the code. Don't add `noqa` or change ruff.toml |
 | `imports` | an analyzer, copied alone into an empty directory, doesn't import with only boto3 (the same as CI's job) | Move the optional import inside the function that needs it, through `_require(module, purpose)` |
-| `package` | the wheel `pyproject.toml` builds fails `twine check --strict`, or doesn't import with only boto3 (skipped when `build` isn't installed; building fetches hatchling, so it needs the network) | A new analyzer needs its `force-include` line in `pyproject.toml` and its classes in `src/aws_analyzer/__init__.py`; a README that doesn't render on PyPI shows in twine's message |
+| `package` | the wheel `pyproject.toml` builds fails `twine check --strict`, or doesn't import with only boto3 (skipped when `build` isn't installed; building fetches hatchling, so it needs the network) | A new analyzer needs its module in `_MODULES` and its classes in `src/aws_analyzer/__init__.py`; a README that doesn't render on PyPI shows in twine's message |
 | `rules` | `rules.py` finds an error: a write API call, a top-level non-stdlib import, an import of another analyzer, missing `from __future__ import annotations`, section banners out of order, a public View method without `@_friendly_errors` or a docstring, or `print` / `display` outside the rendering plumbing | Follow the message. Each one names the rule from CLAUDE.md |
 | `pytest` | a test fails | Find the root cause. Change a test's expectation only when the behaviour change was intended, and say so |
 | `py3.X` | (`--matrix`) a test fails on that Python only | Usually pandas 2 vs 3 (copy-on-write, the default `str` dtype) or stdlib added after 3.10 |

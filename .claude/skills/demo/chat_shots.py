@@ -55,13 +55,14 @@ SWEEP = """n = 3, 8
 reranker = none, cohere"""
 
 NOTEBOOK_CODE = f"""import os, sys
-sys.path[:0] = [{str(ROOT / "analyzers")!r}, {str(HERE)!r}]
+sys.path[:0] = [{str(ROOT / "src")!r}, {str(HERE)!r}]
 os.environ.update({{"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                    "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}})
 os.environ.pop("AWS_PROFILE", None)
 from moto import mock_aws
 mock_aws().start()
-import demo, bedrock_chat
+import demo
+from aws_analyzer import bedrock_chat
 core = bedrock_chat.BedrockChatAnalyzer(region="us-east-1", **demo.seed_bedrock_kb())
 # height=540: the figures don't grow with the browser's height
 ui = bedrock_chat.BedrockChatView(core, kb="support-docs", model="sonnet", settings={{"n": 5, "search_type": "hybrid"}},
