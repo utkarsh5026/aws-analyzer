@@ -16,7 +16,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - The analyzer files moved from `analyzers/` to `src/aws_analyzer/` in the repository, so a notebook that downloads one
   from GitHub needs the new path: `!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py`
   instead of `.../main/analyzers/s3.py`. Each file still works on its own, and `pip install aws-analyzer` is
-  unchanged. ([#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
+  unchanged. ([#61](https://github.com/utkarsh5026/aws-analyzer/pull/61))
 
 ## [0.13.0] - 2026-10-11
 
