@@ -11,6 +11,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-11
+
 ### Added
 
 - `lambda_functions.py`: `explore()` (or `ui.explore()`; installed with pip, `LambdaExplorer`) opens a window on your
@@ -28,7 +30,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - `lambda_functions.py`: `ui.core.log_runs("orders-etl", since="24h")` returns what a function logged as runs: `.runs`
   is a `LogRun` per call with its lines, status, run time, memory and cold start. `search=` keeps the runs with a line
   that matches (an order ID, a request ID or a filter pattern), each with all of its lines. `split_runs()` does the
-  same for log lines you already have. ([#59](https://github.com/utkarsh5026/aws-analyzer/pull/59))
+  same for log lines you already have, `line_level()` says what kind of line one is (error, warning, Lambda's own...),
+  and `read_package()` reads a deployment package .zip you already have, without AWS.
+  ([#59](https://github.com/utkarsh5026/aws-analyzer/pull/59))
 
 ## [0.12.0] - 2026-10-09
 
@@ -447,7 +451,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.9.0...v0.10.0
