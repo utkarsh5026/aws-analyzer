@@ -24,11 +24,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   whole, or turn on Live to see new runs as they come while you test. The Errors, Performance, Code and Settings tabs
   are `errors()`, `performance()`, `code()` and `function_info()`'s settings, by clicking: a failed or slow run opens in
   the Logs tab, and a package's files open with their source in colour. Like the rest of the file it only reads, with
-  the permissions the commands already use.
+  the permissions the commands already use. ([#59](https://github.com/utkarsh5026/aws-analyzer/pull/59))
 - `lambda_functions.py`: `ui.core.log_runs("orders-etl", since="24h")` returns what a function logged as runs: `.runs`
   is a `LogRun` per call with its lines, status, run time, memory and cold start. `search=` keeps the runs with a line
   that matches (an order ID, a request ID or a filter pattern), each with all of its lines. `split_runs()` does the
-  same for log lines you already have.
+  same for log lines you already have. ([#59](https://github.com/utkarsh5026/aws-analyzer/pull/59))
 
 ## [0.12.0] - 2026-10-09
 
