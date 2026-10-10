@@ -9,7 +9,8 @@
 One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
 DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes, Lambda functions and the SageMaker notebook
 itself: what's there, what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
-knowledge base indexed each of its files, and a chat window for asking it, with every setting in reach.
+knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
+your Lambda functions that reads their logs run by run.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -86,6 +87,7 @@ report still renders.
 | <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](analyzers/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](analyzers/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](analyzers/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -113,7 +115,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
                        # OpenSearchView from opensearch, LambdaView from lambda_functions
 # installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView,
-# LambdaView, S3Explorer, KBExplorer, chat)
+# LambdaView, S3Explorer, KBExplorer, LambdaExplorer, chat)
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -127,8 +129,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 >
 > Installed with pip, every `from s3 import ...` in this README and the guides becomes
 > `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env`,
-> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, `S3Explorer`, `KBExplorer` and
-> `chat` also come straight from `aws_analyzer`.
+> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, `S3Explorer`, `KBExplorer`,
+> `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -1650,7 +1652,8 @@ and data access policy.
 
 <img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Lambda functions, in one region or all of them.** What each function runs and when its runtime loses support,
 what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it
-fails, read from its own logs, with its memory, cold starts and code.
+fails, read from its own logs, with its memory, cold starts and code. The
+[explorer window](#explore-functions-and-logs-by-clicking) shows it all by clicking, its logs run by run.
 
 📄 [`analyzers/lambda_functions.py`](analyzers/lambda_functions.py) · 📖 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html)
 
@@ -1679,6 +1682,7 @@ ui.errors("orders-etl")                      # its errors in the last 24 hours, 
 ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
 ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
 ui.code("orders-etl")                        # the files in its package, and the handler's source
+ui.explore()                                 # all of it in a window, by clicking (below)
 ```
 
 > [!NOTE]
@@ -1687,9 +1691,56 @@ ui.code("orders-etl")                        # the files in its package, and the
 > change would help, the report shows the AWS CLI command to run. Environment variable values never appear in a
 > report, only their names.
 
+### Explore functions and logs by clicking
+
+`explore()` opens a window on your functions that you use by clicking, with nothing to type but a search. Every
+function in the region is listed with how it's doing, the ones that need attention first. Click one for what's wrong
+with it, what calls it and where its results go, and, a click away, **its logs run by run**: each call on one line,
+with its status, run time against the timeout, memory and cold start, the failed ones in red; click a run for every line
+it logged. Its errors grouped by cause, its run times, the code in its package and every setting are tabs beside them.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/lambda-explorer-logs-dark.webp">
+  <img src="docs/images/lambda-explorer-logs-light.webp" alt="The Lambda explorer on orders-etl: the function field, cards for its calls, error rate, run times, monthly cost and warnings, the tabs, and the Logs tab over the last 24 hours: chips for 70 runs, 13 failed, 3 timed out and 8 cold starts, a line summing them up, and the runs newest first, each with its time, status, a bar of its run time against the 60 s timeout, its memory and its first line; a failed run is open with its KeyError traceback in red and its REPORT line summed up, and a run that timed out shows a full red bar">
+</picture>
+
+<p align="center"><sub><code>explore("orders-etl", tab="logs")</code>: the last 24 hours run by run, a failed run open with its traceback, and a run that hit the 60 s timeout.</sub></p>
+
+```python
+from lambda_functions import explore       # with pip: from aws_analyzer import LambdaExplorer
+
+explore()                                  # every function in the notebook's region
+explore("orders-etl", tab="logs")          # straight to one function's logs (a name, an ARN or a console link)
+explore(region="all")                      # every region your account has turned on
+ui.explore("orders-etl")                   # from a LambdaView
+```
+
+The window needs `ipywidgets`, which SageMaker already has (elsewhere: `%pip install ipywidgets`, then reload the
+browser tab). Without it, or outside Jupyter, it shows the same as reports: `functions()`, or `function_info()` and the
+other reports for one function.
+
+| To                         | Do this                                                                                                                                                                                                                                                                                                                                                  |
+| :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Find a function            | **Functions**: every function with its runtime, triggers, calls, error rate, run time, monthly cost, when it was last called and its warnings, problems first. Search by name, description, runtime, region or trigger, click a chip (**Needs attention**, **With errors**, **Old runtime**, **Public**, **Not called**), or a column's header to sort. Or click the function field at the top, which searches as you type and takes an ARN too. The region field switches to another region, or every region |
+| See what's wrong           | **Overview**: the findings, each with what to do; how it's wired (what calls it, and where its results, failed events and logs go); its calls and run time a day for 30 days; and what it costs                                                                                                                                                          |
+| Read its logs              | **Logs**: a line per run, newest first, with its status, run time, memory, cold start and what failed; click one for every line it logged, its REPORT line summed up. Pick the time range (15 minutes to 30 days), type to find runs with some text, **Enter** to search CloudWatch for the whole range (each run found comes back whole), or click a chip for the failed runs, timeouts or cold starts. JSON logs show each line's message, its other fields a click away |
+| Watch it while you test it | **Live**, on the Logs tab: new lines every 5 seconds, new runs at the top (it stops when you leave the tab, and after 15 minutes)                                                                                                                                                                                                                       |
+| See why it fails           | **Errors**: its errors grouped by cause with what to do, and the newest failed runs; click one to read it in the Logs tab. **Performance**: run times, memory and cold starts, and the slowest runs, each a click from its lines                                                                                                                          |
+| Read its code and settings | **Code**: the files in its package, the handler's first; click one for its source, in colour (a secrets file's text is held back). **Settings**: every setting in plain English, then as Lambda returns it, environment values hidden                                                                                                                    |
+
+Everything is read in the background, so a click shows what's known at once and the rest as it arrives. Like the rest
+of the file it only reads. `explore()` returns the window: `x.logs(search="KeyError", since="24h")`, `x.run(request_id)`
+and `x.open("report-api")` do what the clicks do, and `x.ui` is a `LambdaView` for reports in other cells.
+
 ### Commands (`LambdaView`)
 
 Grouped the way `ui.help()` lists them.
+
+#### Explore by clicking
+
+| Command                                                   | Shows                                                                                                                                                                                                 |
+| :-------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `explore(name=None, tab=None, region=None, height=None)`  | The [explorer window](#explore-functions-and-logs-by-clicking): every function, and for the one you click its health, logs run by run, errors, run times, code and settings. `view.explorer` is the window |
 
 #### Functions
 
@@ -1728,14 +1779,17 @@ detail = lam.describe("orders-etl")                    # FunctionDetail: .functi
 lam.errors("orders-etl", since="7d").groups            # ErrorGroup: kind, message, count, first, last, request_ids
 lam.performance("orders-etl").to_df()                  # one row per run: duration, billed, memory used, cold start
 lam.log_events("orders-etl", pattern='"KeyError"').to_df()
+lam.log_runs("orders-etl", since="24h").runs           # LogRun per call: .status, .duration, .cold, .events
+lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                           # CodeFile: path, size, compressed
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
 already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
-`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `percentile`,
-`suggest_memory`, `handler_file`, `secret_like`, and the findings: `function_findings`, `account_findings`,
-`error_findings`, `performance_findings`, `package_findings`.
+`function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs`
+(log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
+`secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`,
+`package_findings`.
 
 </details>
 
@@ -1768,7 +1822,7 @@ Read-only. Grant what you need:
 | `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates |
 | `lambda:GetAccountSettings`                                                                                                                                                         | Each region's concurrency and code storage limits                             |
 | `cloudwatch:GetMetricData`                                                                                                                                                          | Calls, errors, throttles, run time and log volume                             |
-| `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs` and `performance`                |
+| `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs`, `performance` and the explorer's Logs tab |
 | `ec2:DescribeRegions`                                                                                                                                                               | `functions(regions="all")`: the regions your account has turned on            |
 
 `lambda:GetFunction` also returns the environment variables' values, which the reports never show. Anything you can't

@@ -34,7 +34,7 @@ service is given, run a short tour:
 - opensearch: `ui.overview(); ui.indexes("vectors-prod"); ui.index_info("vectors-prod/support-docs");
   ui.search("how do I get my money back?", index="vectors-prod/support-docs")`
 - lambda_functions: `ui.functions(regions="all"); ui.function_info("orders-etl"); ui.errors("orders-etl");
-  ui.performance("orders-etl")`
+  ui.performance("orders-etl")` (the explorer window needs a browser: see `lambda_explorer_shots.py`)
 - other services: `ui.help()` and then the service's overview command
 
 `--help` describes the demo data. Most useful:
@@ -90,8 +90,9 @@ service is given, run a short tour:
     timeout, KeyErrors, AccessDenied and timeouts in its last 24 hours of logs, logs costing more than its compute and
     kept forever, a `.env` file and bundled boto3 in its package), `churn-scoring` (arm64, EventBridge, 4 copies of
     provisioned concurrency it never needs), `report-api` (nodejs20.x, a public function URL, throttled at reserved
-    concurrency 10), `feature-backfill` (python3.10, never called, no triggers) and `support-agent-actions` (a Bedrock
-    agent's action group).
+    concurrency 10, and logging JSON for its last three hours: a WARN now and then, three unhandled TypeErrors),
+    `feature-backfill` (python3.10, never called, no triggers) and `support-agent-actions` (a Bedrock agent's action
+    group). orders-etl's cold starts log an INIT_START line.
   - eu-west-1: `gdpr-export` (SQS). `regions="all"` reads every region moto lists.
   - The run `c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c` is one of orders-etl's KeyErrors.
 
@@ -176,6 +177,17 @@ searches, and opens the Syncs tab. `--out <folder>` writes PNGs there instead, t
 ```bash
 .venv/bin/python .claude/skills/demo/kb_explorer_shots.py                     # every explorer figure, light and dark
 .venv/bin/python .claude/skills/demo/kb_explorer_shots.py kb-explorer-chunks  # just this one
+```
+
+The Lambda explorer (`lambda_functions.py`'s `explore()`) works the same way: `lambda_explorer_shots.py` opens it on
+demo.py's Lambda functions, reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired), its Logs
+over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors and Code tabs, and
+picks report-api for its JSON logs. Its figures are `lambda-explorer*`, in `docs/lambda_functions.md`.
+
+```bash
+.venv/bin/python .claude/skills/demo/lambda_explorer_shots.py                       # every figure, light and dark
+.venv/bin/python .claude/skills/demo/lambda_explorer_shots.py lambda-explorer-logs  # just this one
+.venv/bin/python .claude/skills/demo/lambda_explorer_shots.py --out /tmp/look       # PNGs to look at, docs left alone
 ```
 
 ## Real AWS

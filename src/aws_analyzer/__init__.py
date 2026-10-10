@@ -20,6 +20,9 @@ Quick start
     from aws_analyzer import KBExplorer      # a window to look through a knowledge base: every file, how it was
     KBExplorer("support-docs")               # indexed, its syncs, search and settings, by clicking
 
+    from aws_analyzer import LambdaExplorer  # a window to look through your Lambda functions: their logs run by
+    LambdaExplorer("orders-etl", tab="logs") # run, errors, run times, code and settings, by clicking
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions. Importing
@@ -38,7 +41,7 @@ if TYPE_CHECKING:
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
-    from .lambda_functions import LambdaAnalyzer, LambdaView
+    from .lambda_functions import LambdaAnalyzer, LambdaExplorer, LambdaView
     from .opensearch import OpenSearchAnalyzer, OpenSearchView
     from .s3 import S3Analyzer, S3View
     from .s3_explorer import S3Explorer, S3Navigator
@@ -66,6 +69,7 @@ __all__ = [
     "OpenSearchView",
     "LambdaAnalyzer",
     "LambdaView",
+    "LambdaExplorer",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -86,6 +90,7 @@ _EXPORTS = {  # name -> the module it comes from
     "OpenSearchView": "opensearch",
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
+    "LambdaExplorer": "lambda_functions",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
             "lambda_functions")

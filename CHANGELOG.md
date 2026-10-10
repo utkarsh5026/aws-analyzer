@@ -11,6 +11,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `lambda_functions.py`: `explore()` (or `ui.explore()`; installed with pip, `LambdaExplorer`) opens a window on your
+  Lambda functions that you use by clicking, with nothing to type but a search. Its Functions tab lists every function
+  in the region (or every region) with its runtime, calls, error rate, run time, cost and warnings, the ones that need
+  attention first, to search, filter and sort. Click one for its findings, a diagram of what calls it and where its
+  results, failed events and logs go, and its calls and run time a day. Its Logs tab reads the logs **run by run**:
+  each call on one line with its status, run time against the timeout, memory and cold start, the failed ones in red,
+  and every line it logged a click away (JSON logs as their message, an error as a traceback). Pick the time range,
+  find runs with some text as you type, press Enter to have CloudWatch search the whole range and bring each run back
+  whole, or turn on Live to see new runs as they come while you test. The Errors, Performance, Code and Settings tabs
+  are `errors()`, `performance()`, `code()` and `function_info()`'s settings, by clicking: a failed or slow run opens in
+  the Logs tab, and a package's files open with their source in colour. Like the rest of the file it only reads, with
+  the permissions the commands already use.
+- `lambda_functions.py`: `ui.core.log_runs("orders-etl", since="24h")` returns what a function logged as runs: `.runs`
+  is a `LogRun` per call with its lines, status, run time, memory and cold start. `search=` keeps the runs with a line
+  that matches (an order ID, a request ID or a filter pattern), each with all of its lines. `split_runs()` does the
+  same for log lines you already have.
+
 ## [0.12.0] - 2026-10-09
 
 ### Added

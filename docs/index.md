@@ -1,5 +1,5 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, and an explorer and a chat window for a knowledge base."
+description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, an explorer and a chat window for a knowledge base, and an explorer for Lambda functions and their logs."
 hide:
   - toc
 ---
@@ -127,6 +127,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     Lambda functions, in one region or all of them.
     { .what }
 
+    - An explorer window: every function, and its logs run by run
     - Every function's runtime, triggers, calls, errors and cost
     - Runtimes losing support, and functions anyone can call
     - Errors grouped by cause, from the function's own logs

@@ -8,7 +8,7 @@ Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each servic
 in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
-region or all of them) that a user pastes
+region or all of them, and `explore()`, a window to click through them and read their logs run by run) that a user pastes
 into a notebook cell or uploads next to a notebook and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that
 would hide the SageMaker Python SDK, and `lambda_functions.py` isn't `lambda.py` because `lambda` is a Python keyword
 (`import lambda` is a syntax error). The same
@@ -328,6 +328,39 @@ How the View layer works:
   `_set` only sends HTML that changed, the status line says what each tab holds when nothing's going on (`_said`,
   `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
   `_window_errors`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
+- `lambda_functions`' explorer window, `LambdaExplorer` (after the View, with `explore()`; `LambdaView.explore()` keeps it
+  in `view.explorer`), is the fourth interactive UI, standalone and built like `KBExplorer`: ipywidgets styled by
+  `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript, full-row `Button`s under
+  their faces (`_Row`, which can carry a small action button such as the function list's Logs; `_RunRow`, whose button
+  opens or folds the run's lines below it; the function field `_FunctionField` with its searchable list and `backdrop`),
+  custom tab buttons over pages (`_EXPLORER_TABS`). The region field (`region_pick`: a region, or `"all"`) and the
+  function field pick what it shows. The Functions tab is `overview()` read in three background steps so the list shows
+  at once: `overview(metrics=False, details=False)`, then `_numbers()` (CloudWatch) and `_all_extras()` (resource
+  policies, provisioned concurrency), which return data that `Overview.add_numbers` / `add_extras` merge on the loop
+  (`overview()` itself is built from the same three). `_function_facts` works out each line (findings, cost, the dot's
+  tone); the list sorts by a click on a column header (`_COLUMNS`, `_sort_by`) and filters with `_FUNCTION_CHIPS` and
+  `search_rank`. A picked function is read with `describe()` for the Overview (function_info's findings, with the cards
+  the header already shows left out (`_SETUP_CARDS`), then `_Wiring`, `_Columns` and the cost) and Settings tabs
+  (`LambdaView._function_sections` splits function_info()'s blocks by part, `_INFO_ORDER`); the other tabs read when
+  first opened (`_asked`). The Logs tab is `LambdaAnalyzer._log_runs()` on the Function already read (no GetFunction):
+  the newest `_RUN_LINES` lines of the time range, grouped into runs by `split_runs()` (a stream runs one call at a time:
+  START to REPORT, the start-up lines before START, lines naming an open run's request ID go to it) and drawn
+  `_RUN_PAGE` to a page, newest first, `_run_face` / `_run_body` (`_line_parts` strips what Lambda writes before a
+  line, shows JSON as its message with its fields folded, and an error as a traceback). Typing filters the runs read;
+  Enter is `_log_runs(search=...)`: CloudWatch's matching lines (`_SEARCH_HITS`), then each one's stream read from a
+  timeout before to a timeout after (`_around`, `_SEARCH_WINDOWS` reads), so the runs come back whole with the matches
+  marked (`LogEvent.matched`). Errors and Performance (`_errors` / `_performance`, `for_window=True` drops their tables
+  of runs) list failed and slow runs to click: `_run_around()` reads that run from its stream (`Invocation.stream`).
+  **Live** polls `_filter()` every `_LIVE_SECONDS` in an asyncio task (`_live_loop`, the read on a worker thread) for
+  `_LIVE_MINUTES`, merging new lines into `logs_page` (`_merge_live`); it stops when the Logs tab is left. Code
+  downloads the package once (`_package`, a fresh link from GetFunction) and `read_package()` (pure) reads each file
+  clicked from the cached bytes; over 50 MB, a button downloads it anyway. Background work is `_later` (as in
+  `KBExplorer`), the status line's busy text carries its job (`_status(owner=)`) so only that job, or the user being on
+  its tab, replaces it (`_finish`), and `_drop` bumps keys so a function's results that come back after another was
+  picked are dropped. `_renew` / renewing `runs_box` puts a page's scrolling box anew so it starts at the top.
+  Sentences from reports go through `_for_window` / `_window_text`, which turn calls into tabs (`errors('etl')` -> "the
+  Errors tab", `logs(..., request_id=...)` -> "run 8f5ce35b in the Logs tab") and capitalise them at a sentence's start.
+  Without ipywidgets or Jupyter it shows the reports instead (`_reports`, `_report_for`).
 - `sagemaker_env` also reads the machine it runs on: SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
   processes and which are Jupyter kernels), the disks and `nvidia-smi`. `SageMakerAnalyzer(root=...)` points all of
@@ -354,7 +387,11 @@ runtime per language that findings suggest moving to. A model missing from `MODE
 and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ). The two windows
 also share copies: `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_Json` with
 `_json_html` / `_plain_json`, `SEARCHABLE` and `Analyzer._cached_client` (which makes each client once, under a lock,
-since both windows read from threads).
+since both windows read from threads). `lambda_functions.py`'s explorer carries copies of `_css_height`,
+`_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_skeleton` and `_for_window` (as in
+`bedrock_kb.py`) and of `_python_html`, `_json_source_html`, `_JSON_TOKEN_RE` and `_PY_LITERALS` (as in
+`bedrock_chat.py`); `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`,
+`_window_text`, `_window_errors` and `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
 
 ## The S3 explorer (`s3_explorer.py`)
 
@@ -495,7 +532,12 @@ does both, a page at a time). How the UI works:
   function-URL policy statements, which moto writes outside `Condition`) with functions checked against the service
   model. `core._download` is replaced, since moto doesn't serve the package link. demo.py's
   `seed_lambda_functions()` does the same, and also patches the Logs client's log sizes and `urllib.request.urlopen`
-  for the packages.
+  for the packages; its logs are orders-etl's text logs (with INIT_START lines on cold starts) and report-api's JSON
+  ones (`_report_api_logs`), timed with `_epoch_ms` (moto keeps naive UTC, which `.timestamp()` alone would read as
+  local time). The explorer window's tests build `LambdaExplorer(core=core, mode="widgets")` on the same moto data,
+  click and type through it like the KB explorer's (`seed_runs` adds runs to a stream of their own), and drive the
+  background path and Live inside `asyncio.run`, with `filter_log_events` held back by a `threading.Event` through a
+  `Patched` Logs client (`clients={"logs": ...}`) and `_LIVE_SECONDS` made short.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
@@ -549,11 +591,12 @@ does both, a page at a time). How the UI works:
   runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`, and so do the knowledge base
-  explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`. Remake the affected figures when
+  explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
+  (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows eleven of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
-  `bedrock-ask`, `kb-explorer-file`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`)
-  as `<picture>`s that
+  shows twelve of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
+  `bedrock-ask`, `kb-explorer-file`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`,
+  `lambda-explorer-logs`) as `<picture>`s that
   switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
