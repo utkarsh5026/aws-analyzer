@@ -2,7 +2,7 @@
 name: check
 description: Run this repo's CI locally - ruff, each analyzer imported alone with only boto3, pytest - plus project-rule checks CI doesn't have (read-only AWS calls, lazy optional imports, View conventions, IAM permissions listed in README) and drift between the duplicated helpers. Use after changing analyzers/ or tests/, before saying the work is done, and before committing.
 argument-hint: "[matrix] [pytest args, e.g. -k policy]"
-allowed-tools: Bash(.venv/bin/python .claude/skills/check/run.py:*), Bash(python .claude/skills/check/run.py:*), Bash(.venv/bin/python .claude/skills/check/rules.py:*), Bash(python .claude/skills/check/rules.py:*)
+allowed-tools: Bash(.venv/bin/python .claude/skills/check/run.py:*), Bash(python .claude/skills/check/run.py:*), Bash(.venv/bin/python .claude/skills/check/rules.py:*), Bash(python .claude/skills/check/rules.py:*), Bash(.venv/bin/python .claude/skills/check/snapshot.py:*), Bash(python .claude/skills/check/snapshot.py:*)
 ---
 
 # Check
@@ -51,6 +51,26 @@ Rule **warnings** don't fail the run, but deal with each one that the current ch
 - *not annotated -> None*: View methods render and return nothing.
 
 If a warning was already there before this change, mention it once in the report and leave it alone.
+
+## Refactors: prove nothing a user sees changed
+
+For a change that shouldn't change any output (moving code, sharing a helper), compare snapshots of every
+report before and after. `snapshot.py` runs about 150 View commands on the demo data (the figures in `shots.py`,
+the cases in its own `DEMO_CASES`, and `help()`), each in text and in HTML, with the clock stopped and random IDs
+fixed, so two runs of the same code are identical. It also records the names each module has and the AWS
+operations `rules.py` finds. It needs time-machine (`pip install time-machine`), and takes about two minutes.
+
+```bash
+git worktree add <scratchpad>/main-wt origin/main                                    # the code before the change
+.venv/bin/python .claude/skills/check/snapshot.py run <scratchpad>/snap/main --root <scratchpad>/main-wt
+.venv/bin/python .claude/skills/check/snapshot.py run <scratchpad>/snap/new          # this checkout
+.venv/bin/python .claude/skills/check/snapshot.py compare <scratchpad>/snap/main <scratchpad>/snap/new
+```
+
+`compare` exits 1 and shows the diff for every output that changed, every name a module lost and any change in
+the AWS operations. An unexpected difference is a bug in the change: find it, and don't move the baseline. When a
+difference is intended, say which outputs changed and why. Use the same `snapshot.py` for both runs (the one in
+this checkout), so both run the same cases.
 
 ## Report
 
