@@ -1,7 +1,8 @@
 # Plan: one shared code base for every analyzer
 
-**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61. Phase 2 (`_kit`
-with the leaf helpers, install-only docs) is the next pull request. The last pull request deletes this file.
+**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, and Phase 2 (`_kit`
+with the leaf helpers, install-only docs) in #62. Phase 3 (one renderer) is the next pull request. The last pull
+request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -187,8 +188,14 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 
    After this step the shared part of the renderer is identical in all services. Snapshots identical.
 2. Split each `_CSS` into the common rules (identical once `.<root>` is normalized) and `_EXTRA_CSS`. The common
-   rules become `base_css(root)`. `KBExplorer`'s `_EXPLORER_CSS` embeds the report CSS once and `_html` strips it
-   by string, so keep that string exactly as it is (`s3_explorer` does the same).
+   rules become `base_css(root)`. Three windows strip the report CSS from `_render_html`'s output by exact string:
+   `KBExplorer._html` and `LambdaExplorer._html` (their hidden style widget holds `_CSS + _EXPLORER_CSS` once, and
+   each pane drops its copy with `.replace(_CSS, "", 1)`), and the chat window's Test tab (`.removeprefix(_CSS)`).
+   Both calls do nothing, silently, when the string doesn't match, and every pane would then carry its own copy of
+   the stylesheet. So each service keeps `_CSS` as one module-level string, exactly what its `_render_html`
+   writes, and a test checks that those panes come out without it: the snapshots cover reports, not windows, and
+   no window test checks it today. (`s3_explorer` doesn't strip it: each of its panes carries the report's own
+   `<style>`, and S3's renderer doesn't move in this phase.)
 3. Move the blocks, the registries, `_prose`, `_call`, `_signature`, `_CALL_RE`, `_MARKS`, `_SELECT`, the findings
    HTML and both renderers into `_kit/blocks.py` and `_kit/render.py`. Service-only blocks stay in their service
    and register themselves when it's imported.
@@ -238,7 +245,7 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 - Review every snapshot diff. HTML is expected to change in every service; text should change only in finding and
   note lead-ins. Update HTML assertions one at a time; never regenerate them in bulk.
 - Remake the screenshots (`shots.py`, plus the window shot scripts where a window shows reports). Check captions
-  and alt text in the guides and in the README's eleven `<picture>`s.
+  and alt text in the guides and in the README's twelve `<picture>`s.
 - CHANGELOG "Changed": tables in every report sort, filter and choose columns, as S3's already do.
 
 ### Phase 7: window kit (four windows: S3 explorer, chat, KB explorer, Lambda)
@@ -281,7 +288,7 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 | Importing one service loads all of them | A kit module importing a service | Guardrail 4; `_kit` is a leaf |
 | `rules.py` stops seeing AWS calls | Moving client creation into the base | Literal `session.client("...")` stays in services; `--apis` gate |
 | HTML or CSS shifts, breaking window CSS or old notebook outputs | Root class renames, CSS splits | Roots kept (D5); byte-identical snapshots; Phase 6 is the only visual change |
-| `KBExplorer` / `S3Explorer` strip the embedded report CSS by string | Phase 3 CSS split | Keep the string exactly; the window tests cover it |
+| `KBExplorer`, `LambdaExplorer` and the chat's Test tab strip the embedded report CSS by string | Phase 3 CSS split | `_CSS` stays the exact string `_render_html` writes; a test checks that their panes come out without it (the snapshots cover reports only) |
 | Copied-file users break | Phase 2 | **Breaking** note; docs in the same pull request; 0.12.0 files keep working |
 | VPC-only notebooks can't reach PyPI | Phase 2 docs | The wheel from S3 (D8) |
 | Conflicts with the Lambda window branch | Every service file and the windows | Don't start until it's merged; Phase 0 starts from the new `main` |
