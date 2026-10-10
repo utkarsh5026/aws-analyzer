@@ -1,15 +1,16 @@
 ---
 name: sync-helpers
-description: Compare the helpers duplicated across src/aws_analyzer/*.py (human_size, human_money, _require, _esc, the render blocks, _render_html / _render_text, _friendly_errors, View._progress, View.help, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
+description: Compare the helpers still duplicated across src/aws_analyzer/*.py (the render blocks, _render_html / _render_text, _friendly_errors, View._progress, View.help, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
 argument-hint: "[helper names, e.g. _render_text help]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/sync-helpers/drift.py:*), Bash(python .claude/skills/sync-helpers/drift.py:*)
 ---
 
 # Sync the duplicated helpers
 
-Each analyzer must work alone in a notebook, so the helpers they share are copied into every file on purpose
-(see "Hard constraints" in CLAUDE.md). A fix made to one copy has to reach the others by hand. This skill finds
-the copies that have drifted apart and brings them back in line.
+The analyzers share code through `src/aws_analyzer/_kit/`, and the helpers not moved there yet are still copied
+into every file (see "Hard constraints" in CLAUDE.md and `.claude/plans/shared-code.md`). A fix made to one copy has
+to reach the others by hand. This skill finds the copies that have drifted apart and brings them back in line.
+A helper in `_kit` has one copy, so it never drifts: change it there.
 
 ## 1. See what differs
 

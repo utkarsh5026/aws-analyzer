@@ -1,6 +1,6 @@
 ---
 name: new-analyzer
-description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout and the duplicated helpers, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
+description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout, the shared helpers imported from _kit (and copies of the ones not there yet), a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
 argument-hint: "<module name, e.g. sagemaker> [what users should be able to see first]"
 ---
 
@@ -9,7 +9,7 @@ argument-hint: "<module name, e.g. sagemaker> [what users should be able to see 
 Request: `$ARGUMENTS`. The first word is the module name (snake_case, and a valid Python identifier, because
 users will `import` it). The rest, if given, says what users need from it.
 
-A new analyzer is a new copy-paste file with the same shape as `src/aws_analyzer/s3.py` and
+A new analyzer is a new module of the package with the same shape as `src/aws_analyzer/s3.py` and
 `src/aws_analyzer/dynamodb.py`.
 Read CLAUDE.md's "Hard constraints" and "Architecture of an analyzer file" first. Everything below follows them.
 `dynamodb.py` is the smallest analyzer, so model the new one on it; `bedrock_kb.py` and its tests show how to test a service moto doesn't cover (botocore `Stubber` on injected clients).
@@ -58,14 +58,17 @@ Then build the file:
 
 1. **Module docstring.** Same shape as the others: what it is, "Copy this one file...", the requirements, the
    two layers, and a quick start that shows the commands.
-2. **Imports.** `from __future__ import annotations`, then only the stdlib, `boto3` and `botocore` at the top.
-   Anything optional is imported inside functions through `_require`.
+2. **Imports.** `from __future__ import annotations`, then only the stdlib, `boto3`, `botocore` and the package's
+   own `_kit` at the top (never another analyzer). Anything optional is imported inside functions through
+   `_require`.
 3. **The five banners**, exactly in this form: `# 1. Helpers: ...`, `# 2. Data models (what <Service>Analyzer
    returns)`, `# 3. Pure analysis (no AWS calls - ...)`, `# 4. <Service>Analyzer - pure logic layer ...`,
    `# 5. <Service>View - notebook UI layer ...`, each between `# ===...` lines.
-4. **Shared helpers.** Copy them verbatim from `dynamodb.py`: every name in CLAUDE.md's duplicated list, plus
-   the small helpers they use (`_utcnow`, `_plural`, `_clip`, `_error_code`, `_units`, `_visible_rows`,
-   `_NUMERIC_RE`, `_text_bar`, `_fmt_dt`, `_share`, `_CSS`). Change only the service names and the CSS root
+4. **Shared helpers.** Import what's in `src/aws_analyzer/_kit/` (`human_size`, `_plural`, `_require`, `_esc`,
+   `_why`, `_Hint`, ...) the way `dynamodb.py` does, only the names the file uses: never copy them, `rules.py`
+   fails on a copy. The helpers that aren't in `_kit` yet (CLAUDE.md's list: the render blocks, `_render_html` /
+   `_render_text`, `_friendly_errors`, `View._progress`, `View.help`, ..., plus `_visible_rows`, `_NUMERIC_RE`,
+   `_units` and `_CSS`) you copy verbatim from `dynamodb.py`, changing only the service names and the CSS root
    class. Then run `.venv/bin/python .claude/skills/sync-helpers/drift.py`: every copied helper should be
    reported as identical, or as differing only in docstrings.
 5. **The analyzer.** The constructor matches the others:

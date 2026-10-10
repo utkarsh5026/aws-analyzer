@@ -6,10 +6,11 @@
 
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
-  - an import of another analyzer (each file must work alone), except a companion importing the analyzer it
-    builds on (COMPANIONS: s3_explorer.py on s3.py)
+  - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzer it
+    builds on (COMPANIONS: s3_explorer.py on s3.py); and _kit/ importing any analyzer
+  - an analyzer defining a name that _kit/ has (a copy of a shared helper: import it from _kit instead)
   - no `from __future__ import annotations`
-  - the five numbered `# N. ...` section banners missing or out of order
+  - the five numbered `# N. ...` section banners missing or out of order (not in _kit/)
   - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
   - a public View method without @_friendly_errors or a docstring (help() lists the docstring's first line),
     or one that prints / displays directly instead of building blocks for self._show()
@@ -33,6 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = "aws_analyzer"
 ANALYZERS = ROOT / "src" / PACKAGE
+KIT = ANALYZERS / "_kit"  # the code the analyzers share: checked like them, but it has no sections or View
 ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on one analyzer: it imports that analyzer (lazily, so it still imports alone), its UI class
 # is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services.
@@ -141,7 +143,29 @@ def _operations(services: set[str]) -> dict[str, list[tuple[str, str]]]:
     return ops
 
 
-def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]]) -> None:
+def _top_level_names(tree: ast.Module) -> list[tuple[str, int]]:
+    """(name, line) of every function, class and variable a module defines at its top level."""
+    names = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append((node.name, node.lineno))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names += [(t.id, node.lineno) for t in targets if isinstance(t, ast.Name)]
+    return names
+
+
+def kit_names() -> dict[str, str]:
+    """Every name _kit/ defines -> the module it's in (fmt, text, ...)."""
+    names: dict[str, str] = {}
+    for path in sorted(KIT.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names.update((name, path.stem) for name, _ in _top_level_names(tree))
+    return names
+
+
+def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]],
+               kit: dict[str, str] | None = None) -> None:
     rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
     source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
@@ -150,8 +174,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     except SyntaxError as exc:
         report.error(f"{rel}:{exc.lineno}", f"doesn't parse: {exc.msg}")
         return
-    parent = COMPANIONS.get(path.stem)
+    in_kit = path.parent.name == KIT.name
+    parent = None if in_kit else COMPANIONS.get(path.stem)
     siblings = {p.stem for p in ANALYZERS.glob("*.py")} - {path.stem, parent, "__init__"}
+    kit = kit_names() if kit is None else kit
 
     # Imports: boto3 + stdlib at import time, optional packages lazily, never another analyzer.
     future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
@@ -167,7 +193,12 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
             continue
         where = f"{rel}:{node.lineno}"
         for name in sorted(set(_analyzers_imported(node)) & siblings):
-            report.error(where, f"imports the {name} analyzer; each analyzer must work alone (copy the helper)")
+            if in_kit:
+                report.error(where, f"_kit imports the {name} analyzer; _kit loads with every analyzer, so it "
+                                    "never imports one")
+            else:
+                report.error(where, f"imports the {name} analyzer; analyzers don't import each other (shared "
+                                    "code goes in _kit/)")
         for name in _module_root(node):
             if name in siblings or name == PACKAGE:
                 continue  # reported above
@@ -179,9 +210,16 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 report.warn(where, f"imports {name} directly; use _require({name!r}, purpose) so a missing "
                                    "package becomes a note that says what to pip install")
 
+    # A copy of a shared helper: _kit has it, so the analyzer imports it from there.
+    if not in_kit:
+        for name, line in _top_level_names(tree):
+            if name in kit:
+                report.error(f"{rel}:{line}", f"defines {name}, which _kit/{kit[name]}.py has; import it from there "
+                                              "(from ._kit." + kit[name] + " import " + name + ") instead of a copy")
+
     # Section banners 1..5 in order.
     banners = [int(m.group(1)) for m in re.finditer(r"^# (\d+)\. ", source, re.MULTILINE)]
-    if banners != [1, 2, 3, 4, 5]:
+    if banners != [1, 2, 3, 4, 5] and not in_kit:
         report.error(rel, f"section banners are {banners or 'missing'}; expected # 1. .. # 5. in order "
                           "(Helpers, Data models, Pure analysis, <Service>Analyzer, <Service>View)")
 
@@ -189,7 +227,8 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     ui_suffixes = ("View", "Explorer") if parent else ("View",)
     view = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.endswith(ui_suffixes)), None)
     if view is None:
-        report.error(rel, "no <Service>View class")
+        if not in_kit:
+            report.error(rel, "no <Service>View class")
     else:
         for member in view.body:
             if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) or member.name.startswith("_"):
@@ -278,15 +317,18 @@ def _documented(action: str, readme: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    parser.add_argument("files", nargs="*", type=Path, help="analyzer files (default: src/aws_analyzer/*.py)")
+    parser.add_argument("files", nargs="*", type=Path,
+                        help="files to check (default: src/aws_analyzer/*.py and src/aws_analyzer/_kit/*.py)")
     parser.add_argument("--apis", action="store_true", help="list the AWS operations each analyzer calls")
     args = parser.parse_args()
     readme_path = ROOT / "README.md"
     readme = readme_path.read_text(encoding="utf-8") if readme_path.exists() else ""
     report, apis = Report(), {}
-    files = [f.resolve() for f in args.files] or sorted(p for p in ANALYZERS.glob("*.py") if p.name != "__init__.py")
+    files = [f.resolve() for f in args.files] or sorted(
+        p for p in [*ANALYZERS.glob("*.py"), *KIT.glob("*.py")] if p.name != "__init__.py")
+    kit = kit_names()
     for path in files:
-        check_file(path, report, readme, apis)
+        check_file(path, report, readme, apis, kit)
     for label, items in (("error", report.errors), ("warning", report.warnings)):
         for item in items:
             print(f"{label}: {item}")
@@ -296,7 +338,9 @@ def main() -> int:
             for name in sorted(names):
                 actions = [iam_action(c) or "(none needed)" for c in name.split(" | ")]
                 print(f"  {name:<52} IAM: {' | '.join(actions)}")
-    print(f"\nrules: {len(files)} analyzers, {len(report.errors)} errors, {len(report.warnings)} warnings")
+    shared = sum(path.parent.name == KIT.name for path in files)
+    print(f"\nrules: {len(files) - shared} analyzers and {shared} _kit modules, {len(report.errors)} errors, "
+          f"{len(report.warnings)} warnings")
     return 1 if report.errors else 0
 
 

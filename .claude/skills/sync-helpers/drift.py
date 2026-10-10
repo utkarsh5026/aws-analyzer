@@ -1,9 +1,10 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
-Every src/aws_analyzer/<service>.py carries its own copy of the shared helpers (human_size, _require, the render
-blocks, _render_html, _friendly_errors, View._progress, View.help, ...), because each file must work alone
-in a notebook. This compares every top-level definition, and every private View / Analyzer method, that
-two or more analyzers define under the same name.
+The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, ...), and are moving the rest
+there phase by phase (.claude/plans/shared-code.md). Until then each src/aws_analyzer/<service>.py still carries
+its own copy of the other shared helpers (the render blocks, _render_html, _friendly_errors, View._progress,
+View.help, ...). This compares every top-level definition, and every private View / Analyzer method, that two or
+more analyzers define under the same name.
 
 Service names are normalized first (S3View / DynamoDBView -> <View>, S3_PRICES -> <PRICES>, the CSS root
 class -> <css>), so only real differences are reported. A difference in docstrings or comments only is
@@ -27,13 +28,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ANALYZERS = ROOT / "src" / "aws_analyzer"
+KIT = ANALYZERS / "_kit"
 
 # Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
 COMPANIONS = {"s3_explorer"}
-# The helpers CLAUDE.md lists as deliberately duplicated. Every analyzer should have all of them.
-EXPECTED = ["human_size", "human_money", "_require", "_in_notebook", "_esc", "_Title", "_Cards", "_Table", "_Note",
-            "_Text", "_render_html", "_render_text", "_friendly_errors", "View._progress", "_progress_bar_class",
-            "_progress_bar", "_progress_text", "_duration", "View.help", "View._show"]
+# The helpers CLAUDE.md lists as still duplicated. Every analyzer should have all of them, except those that have
+# moved to _kit (every analyzer imports those instead).
+EXPECTED = ["_Title", "_Cards", "_Table", "_Note", "_Text", "_render_html", "_render_text", "_friendly_errors",
+            "View._progress", "_progress_bar_class", "_progress_bar", "_progress_text", "View.help", "View._show"]
 
 
 def _segment(lines: list[str], node: ast.AST) -> str:
@@ -129,7 +131,8 @@ def main() -> int:
     def selected(name: str) -> bool:
         return not wanted or name in wanted or name.split(".")[-1] in wanted
 
-    missing = {file: [n for n in EXPECTED if n not in defs] for file, (defs, _) in parsed.items()}
+    in_kit = {name for path in KIT.glob("*.py") for name in _definitions(path)[0]}
+    missing = {file: [n for n in EXPECTED if n not in defs and n not in in_kit] for file, (defs, _) in parsed.items()}
     missing = {file: names for file, names in missing.items() if names and any(selected(n) for n in names)}
 
     counts = Counter(name for defs, _ in parsed.values() for name in defs)

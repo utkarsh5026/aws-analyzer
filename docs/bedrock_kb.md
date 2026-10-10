@@ -7,11 +7,11 @@ description: "How to check, search and ask Amazon Bedrock Knowledge Bases from a
 
 # Check, search and ask your Bedrock knowledge bases from a SageMaker notebook
 
-One Python file. Drop it next to your notebook to see whether your knowledge bases are healthy, how each file was indexed, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it. Or open the explorer window and see it all by clicking.
+Install it in your notebook to see whether your knowledge bases are healthy, how each file was indexed, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it. Or open the explorer window and see it all by clicking.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: never starts a sync</li>
   <li>Any Bedrock model</li>
   <li>An explorer window: click, don't type</li>
@@ -25,28 +25,23 @@ Every example uses a knowledge base called `support-docs`: support policies (PDF
 
 <div class="steps" markdown>
 
-1. **Get `bedrock_kb.py` next to your notebook.** Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell:
 
-    - **Upload it.** Download [bedrock_kb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_kb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    ```bash
+    %pip install aws-analyzer
+    ```
 
-    - **Fetch it from a cell**, if the notebook can reach the internet:
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_kb.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/bedrock_kb.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Import it and create the view.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
 
     ```python
-    from bedrock_kb import BedrockKBView
+    from aws_analyzer import BedrockKBView
 
     ui = BedrockKBView()   # uses the notebook's IAM role and region
     ui.help()              # every command, grouped by task; ui.help("ask") shows one in full
@@ -55,7 +50,7 @@ Every example uses a knowledge base called `support-docs`: support policies (PDF
 3. **Optional:** another region or AWS profile, a default knowledge base, or plain-text output. Knowledge bases are regional, so if `kbs()` comes back empty, check the region first.
 
     ```python
-    from bedrock_kb import BedrockKBAnalyzer, BedrockKBView
+    from aws_analyzer import BedrockKBAnalyzer, BedrockKBView
 
     ui = BedrockKBView(BedrockKBAnalyzer(region="us-west-2", profile="dev"))
     ui = BedrockKBView(kb="support-docs")    # commands use this knowledge base unless given another
@@ -96,7 +91,7 @@ Commands take `kb=`: a name in any case, the 10-character ID, or the ARN. Withou
 Rather click than type? `explore()` opens a window on a knowledge base with nothing to type but a question. It puts every file of the knowledge base's S3 data sources next to Bedrock's record of it, shows how each one was indexed, and has the syncs, a search box and every setting a click away. Like the commands, it only reads: where a sync would help, it shows the command to run.
 
 ```python
-from bedrock_kb import explore        # with pip: from aws_analyzer import KBExplorer
+from aws_analyzer.bedrock_kb import explore
 
 explore()                             # the only knowledge base here, or the first active one
 explore("support-docs")               # a name, ID or ARN
@@ -355,7 +350,7 @@ An answer the model wrote in markdown is laid out as such: lists, **bold**, tabl
 With `engine="converse"`, the sources are sent as data, never as instructions (a document that says “ignore your instructions” is just text), and the model is told to say plainly when they don't hold the answer. `bedrock_kb.DEFAULT_PROMPT` is the template it uses; copy it to write your own.
 
 ```python
-import bedrock_kb
+from aws_analyzer import bedrock_kb
 print(bedrock_kb.DEFAULT_PROMPT)
 
 MY_PROMPT = """Sources:

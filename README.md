@@ -6,9 +6,9 @@
 
 **Understand your AWS data from a SageMaker notebook.**
 
-One Python file per AWS service. Drop it next to your notebook and get readable reports on your S3 buckets,
-DynamoDB tables, Bedrock knowledge bases, OpenSearch vector indexes, Lambda functions and the SageMaker notebook
-itself: what's there, what it costs, and what to do next. And windows you use by clicking: an explorer that shows how a
+Install it in your notebook and get readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases,
+OpenSearch vector indexes, Lambda functions and the SageMaker notebook itself: what's there, what it costs, and what
+to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
 your Lambda functions that reads their logs run by run.
 
@@ -57,9 +57,9 @@ show what they read or cost.
 </tr>
 <tr>
 <td width="33%" valign="top">
-<b>📄 One file, boto3 only</b><br>
-Copy one file next to your notebook (no file depends on another), or <code>pip install aws-analyzer</code>. pandas,
-pyarrow and the rest are optional.
+<b>📦 One install, boto3 only</b><br>
+<code>%pip install aws-analyzer</code> in a notebook cell gives you every service. boto3 is the only requirement;
+pandas, pyarrow and the rest are optional.
 </td>
 <td width="33%" valign="top">
 <b>🔒 Read-only</b><br>
@@ -94,28 +94,33 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 
 ## Get started
 
-**1. Install it, or put the file next to your notebook.** Pick whichever works where you are:
+**1. Install it**, in a notebook cell:
 
-- **Install it with pip**, in a notebook cell: `%pip install aws-analyzer`. That's every service, and only needs
-  boto3; `%pip install "aws-analyzer[all]"` also installs every optional package (pandas, pyarrow, the PDF and Excel
-  readers, progress bars). Then import from `aws_analyzer` instead of from the file (step 2).
-- **Upload it:** download [`src/aws_analyzer/s3.py`](src/aws_analyzer/s3.py) and drag it into JupyterLab's file browser, in the same
-  folder as your notebook.
-- **Fetch it from a cell**, if the notebook can reach the internet:
-  ```python
-  !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py
-  ```
-- **Copy it from S3**, for a notebook with no internet access (VPC-only mode): upload it to a bucket once, then run
-  `!aws s3 cp s3://your-bucket/tools/s3.py .`
-- **Or paste** the whole file into a notebook cell and run it.
+```python
+%pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
+%pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
+```
+
+A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
+download the package and copy it to a bucket the notebook can read, once:
+
+```bash
+pip download aws-analyzer --no-deps -d wheels
+aws s3 cp --recursive wheels/ s3://your-bucket/tools/wheels/
+```
+
+Then install it in the notebook from there:
+
+```python
+!aws s3 cp --recursive s3://your-bucket/tools/wheels/ wheels/
+%pip install --no-index --find-links wheels aws-analyzer
+```
 
 **2. Import it and look around.** It uses the notebook's IAM execution role, so there's nothing to configure:
 
 ```python
-from s3 import S3View  # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
-                       # OpenSearchView from opensearch, LambdaView from lambda_functions
-# installed with pip: from aws_analyzer import S3View (or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView,
-# LambdaView, S3Explorer, KBExplorer, LambdaExplorer, chat)
+from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView,
+                                 # S3Explorer, KBExplorer, LambdaExplorer, chat
 
 ui = S3View()          # uses the notebook's IAM role
 ui.help()              # every command, grouped by task; ui.help("summary") shows one in full
@@ -127,16 +132,16 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > Only boto3 is required, and SageMaker already has it. pandas, pyarrow and the other packages are optional: a
 > command that needs one that isn't installed says which to install instead of failing.
 >
-> Installed with pip, every `from s3 import ...` in this README and the guides becomes
-> `from aws_analyzer.s3 import ...` (the same for `dynamodb`, `bedrock_kb`, `bedrock_chat`, `sagemaker_env`,
-> `opensearch`, `lambda_functions` and `s3_explorer`). The Analyzer and View classes, `S3Explorer`, `KBExplorer`,
-> `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
+> Each service is a module of the package: `aws_analyzer.s3`, `aws_analyzer.dynamodb`, `aws_analyzer.bedrock_kb`,
+> `aws_analyzer.bedrock_chat`, `aws_analyzer.sagemaker_env`, `aws_analyzer.opensearch`,
+> `aws_analyzer.lambda_functions` and `aws_analyzer.s3_explorer`. The Analyzer and View classes, `S3Explorer`,
+> `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
 
 ```python
-from s3 import S3Analyzer, S3View
+from aws_analyzer import S3Analyzer, S3View
 
 ui = S3View(S3Analyzer(profile="dev", region="eu-west-1"))   # another AWS profile or region
 ui = S3View(mode="text")          # plain text, e.g. in a terminal or a script
@@ -206,14 +211,14 @@ and what you could save.
 
 ### Quick start
 
-Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker the first line is already
-installed, so you only need the second one, and only for the file types it lists.
+Install the packages first, in a notebook cell (in a terminal, drop the `%`). On SageMaker, pandas and pyarrow are
+already installed, so `aws-analyzer` alone is enough, and the optional packages only for the file types they read.
 
 ```python
-%pip install boto3 pandas pyarrow      # the commands below
+%pip install aws-analyzer pandas pyarrow    # the commands below
 # optional: Excel, PDF text and pages, .zst, snappy Avro, progress bars
 %pip install openpyxl xlrd pypdf pypdfium2 pillow zstandard python-snappy tqdm
-# or, with pip instead of the file: all of the above and s3.py itself
+# or all of the above in one go
 %pip install "aws-analyzer[all]"
 ```
 
@@ -238,7 +243,7 @@ install instead of failing; install it and run the cell again.
 </details>
 
 ```python
-from s3 import S3View
+from aws_analyzer import S3View
 
 ui = S3View()                # uses the notebook's execution role
 ui.help()                    # every command, grouped by task
@@ -270,11 +275,11 @@ same `preview` as above: a table's first rows, a PDF's pages, a Word file with i
 
 <p align="center"><sub><code>S3Explorer()</code>: from your buckets to a Parquet file's first rows, a Word document, and every model file below a folder, one click at a time.</sub></p>
 
-It builds on `s3.py`, so put **both files** next to your notebook, or paste `s3.py` into a cell and `s3_explorer.py`
-into the next one. Clicking needs `ipywidgets`, which SageMaker notebooks already have.
+It builds on `s3.py`, which comes with it in the package. Clicking needs `ipywidgets`, which SageMaker notebooks
+already have.
 
 ```python
-from s3_explorer import S3Explorer
+from aws_analyzer import S3Explorer
 
 S3Explorer()                                   # start from your buckets
 S3Explorer("s3://my-bucket/data/")             # or in a folder; S3 console links work too
@@ -304,8 +309,8 @@ and opening one shows the command that restores it. Like `s3.py`, it only reads:
 <summary><b>Options, and using it from code</b></summary>
 
 ```python
-from s3 import S3Analyzer
-from s3_explorer import S3Explorer, S3Navigator
+from aws_analyzer import S3Analyzer
+from aws_analyzer import S3Explorer, S3Navigator
 
 S3Explorer("s3://my-bucket/", profile="dev")          # another AWS profile (or region=)
 S3Explorer(core=S3Analyzer(region="eu-west-1"))       # an S3Analyzer or S3View you already have
@@ -611,7 +616,7 @@ installed.
 Every `DynamoDBView` command works with boto3 alone; IPython, used for the HTML output, comes with Jupyter.
 
 ```python
-from dynamodb import DynamoDBView
+from aws_analyzer import DynamoDBView
 
 ui = DynamoDBView()          # uses the notebook's execution role and region
 ui.help()                    # every command, grouped by task
@@ -798,7 +803,7 @@ Answers are generated through Bedrock itself (RetrieveAndGenerate or Converse), 
 Bedrock model you have access to works.
 
 ```python
-from bedrock_kb import BedrockKBView
+from aws_analyzer import BedrockKBView
 
 ui = BedrockKBView()               # uses the notebook's execution role and region
 ui.help()                          # every command, grouped by task
@@ -844,7 +849,7 @@ chunks carry, and what to fix.
 <p align="center"><sub><code>explore("support-docs")</code>: every file next to Bedrock's record of it, and for warranty.pdf, each step from S3 into the vector store.</sub></p>
 
 ```python
-from bedrock_kb import explore             # with pip: from aws_analyzer import KBExplorer
+from aws_analyzer.bedrock_kb import explore
 
 explore()                                  # the only knowledge base here, or the first active one
 explore("support-docs")                    # a name, ID or ARN
@@ -1111,7 +1116,7 @@ keep every run in a file that outlasts a restart, and copy the setup as a Python
 ### Quick start
 
 ```python
-from bedrock_chat import chat              # installed with pip: from aws_analyzer import chat
+from aws_analyzer import chat
 
 chat()                                     # pick the knowledge base and the model in the window
 chat("support-docs", model="sonnet")       # or start on these: a name, ID or ARN; a model ID or short name
@@ -1294,7 +1299,7 @@ batch.items[0].answer, batch.items[0].found, batch.items[0].cost   # its Answer,
 batch.failed, batch.cost, batch.to_df()                           # what Bedrock refused, the total, one row each
 ui.batches                            # every test run of the view, oldest first; ui.questions: the Test tab's list
 
-from bedrock_chat import sweep_setups   # with pip: from aws_analyzer.bedrock_chat import sweep_setups
+from aws_analyzer.bedrock_chat import sweep_setups
 setups = sweep_setups({"n": [5, 10], "model": ["haiku", "sonnet"]})   # [{'n': 5, 'model': 'haiku'}, ...]
 sweep = core.sweep("support-docs", ["refund window? | refund-policy.pdf"], setups, {"n": 5})   # Sweep: a Batch each
 sweep.ranked                          # [(Batch, RunScore)], best first: answered, grounded, hits, MRR, failed, cost
@@ -1380,7 +1385,7 @@ The file isn't called `sagemaker.py`, so it doesn't hide the SageMaker Python SD
 Every command works with boto3 alone, so on SageMaker there's nothing to install.
 
 ```python
-from sagemaker_env import SageMakerView
+from aws_analyzer import SageMakerView
 
 ui = SageMakerView()             # uses the notebook's execution role and region
 ui.help()                        # every command, grouped by task
@@ -1509,7 +1514,7 @@ Every command works with boto3 alone, so on SageMaker there's nothing to install
 needed either: requests to a domain or collection are signed with the notebook's role by botocore.
 
 ```python
-from opensearch import OpenSearchView
+from aws_analyzer import OpenSearchView
 
 ui = OpenSearchView()                        # uses the notebook's execution role and region
 ui.help()                                    # every command, grouped by task
@@ -1670,7 +1675,7 @@ Every command works with boto3 alone, so on SageMaker there's nothing to install
 because `lambda` is a Python keyword.
 
 ```python
-from lambda_functions import LambdaView
+from aws_analyzer import LambdaView
 
 ui = LambdaView()                            # uses the notebook's execution role and region
 ui.help()                                    # every command, grouped by task
@@ -1707,7 +1712,7 @@ it logged. Its errors grouped by cause, its run times, the code in its package a
 <p align="center"><sub><code>explore("orders-etl", tab="logs")</code>: the last 24 hours run by run, a failed run open with its traceback, and a run that hit the 60 s timeout.</sub></p>
 
 ```python
-from lambda_functions import explore       # with pip: from aws_analyzer import LambdaExplorer
+from aws_analyzer.lambda_functions import explore
 
 explore()                                  # every function in the notebook's region
 explore("orders-etl", tab="logs")          # straight to one function's logs (a name, an ARN or a console link)
@@ -1875,7 +1880,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   explorer's are taken in a real JupyterLab by `.claude/skills/demo/chat_shots.py` and
   `.claude/skills/demo/kb_explorer_shots.py` (they need jupyterlab and playwright too).
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships [`src/aws_analyzer/`](src/aws_analyzer/), where
-  each analyzer is one module; [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
+  each analyzer is one module and [`_kit/`](src/aws_analyzer/_kit/) holds the code they share (formatting, parsing,
+  optional imports, AWS errors); [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
   classes and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
   `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
   [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
@@ -1883,8 +1889,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   [the Release workflow](.github/workflows/release.yml) builds it, checks it and uploads it to PyPI with trusted
   publishing (its comments have the one-time setup).
 - **[CI](.github/workflows/ci.yml)** runs the same checks on Python 3.10 to 3.14 for every pull request and push to
-  `main`, and also imports each analyzer on its own with only boto3 installed, and builds the package and imports it
-  the same way. The versions in
+  `main`, and also imports each module with only boto3 installed, and builds the package and imports it the same
+  way. The versions in
   `requirements-dev.txt` and `requirements-docs.txt` are pinned; [Dependabot](.github/dependabot.yml) opens weekly
   pull requests to update them and the GitHub Actions the workflows use.
 

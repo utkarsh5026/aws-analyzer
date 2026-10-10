@@ -4,6 +4,7 @@ resolve to their classes. CI's Package job also builds the real wheel and import
 import importlib
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -74,3 +75,15 @@ def test_explorer_builds_on_the_s3_installed_with_it(package):
     # The explorer finds the s3 module installed next to it, not some other s3 on sys.path.
     assert package.s3_explorer._s3_module() is package.s3
     assert package.S3Explorer.__module__ == "aws_analyzer.s3_explorer"
+
+
+def test_each_analyzer_loads_alone():
+    # Analyzers share code through aws_analyzer._kit and never import each other, so importing one loads no other
+    # (s3_explorer builds on s3, which it loads when it first needs it).
+    modules = sorted(p.stem for p in PACKAGE.glob("*.py") if not p.stem.startswith("_"))
+    for module in modules:
+        code = f"import sys, aws_analyzer.{module}; print(*sorted(sys.modules))"
+        loaded = subprocess.run([sys.executable, "-c", code], cwd=PACKAGE.parent, capture_output=True, text=True,
+                                check=True).stdout.split()
+        others = {name.split(".")[1] for name in loaded if name.startswith("aws_analyzer.")} - {module, "_kit"}
+        assert not others, f"importing aws_analyzer.{module} also loads {', '.join(sorted(others))}"

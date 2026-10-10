@@ -2,8 +2,8 @@
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
 OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook.
 
-Each module is one file in the repository's src/aws_analyzer/ folder. A copy of one next to your notebook works the
-same; only the import line differs.
+Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
+share, so install the package rather than copying a file.
 
 Quick start
 -----------

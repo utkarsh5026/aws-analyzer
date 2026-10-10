@@ -60,6 +60,8 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from ._kit.fmt import _plural
+
 # =============================================================================
 # 1. Helpers
 # =============================================================================
@@ -146,17 +148,13 @@ def _parent_prefix(key: str) -> str:
     return head + sep
 
 
-def _plural(count: int, word: str) -> str:
-    return f"{count:,} {word}{'' if count == 1 else 's'}"
-
-
 def _css_height(height: int | str | None) -> str | None:
     """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
     text = "" if height is None else str(height).strip()
     return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
 
 
-def _fmt_dt(moment: datetime | None) -> str:
+def _tip_time(moment: datetime | None) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if moment else ""
 
 
@@ -2009,14 +2007,14 @@ class S3Explorer:
         row.entry = entry
         s3 = self.s3
         if entry.kind == "file":
-            tip = f"{entry.key}\n{s3.human_size(entry.size)} · modified {_fmt_dt(entry.modified)}"
+            tip = f"{entry.key}\n{s3.human_size(entry.size)} · modified {_tip_time(entry.modified)}"
             tip += f"\n{entry.storage_class}: restore it before it can be opened" if entry.archived else (
                 f" · {entry.storage_class}" if entry.storage_class not in ("", "STANDARD") else "")
             size, age = s3.human_size(entry.size), s3.human_age(entry.modified) if entry.modified else ""
         elif entry.kind == "folder":
             tip, size, age = f"Open {entry.key}", "", ""
         else:
-            tip = f"Open the bucket {entry.bucket}" + (f"\ncreated {_fmt_dt(entry.modified)}" if entry.modified else "")
+            tip = f"Open the bucket {entry.bucket}" + (f"\ncreated {_tip_time(entry.modified)}" if entry.modified else "")
             size, age = "", s3.human_age(entry.modified) if entry.modified else ""
         name = entry.name or "(no name)"
         with row.button.hold_sync():

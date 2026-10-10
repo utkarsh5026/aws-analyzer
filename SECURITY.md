@@ -33,6 +33,6 @@ and problems in boto3 or in the optional packages it uses, which belong with tho
 
 ## Supported versions
 
-Fixes go into the latest release on [PyPI](https://pypi.org/project/aws-analyzer/) and into the files on `main`.
-If you copied an analyzer file next to a notebook, replace it with the current one from
-[`src/aws_analyzer/`](src/aws_analyzer/) to get a fix.
+Fixes go into the latest release on [PyPI](https://pypi.org/project/aws-analyzer/): `%pip install -U aws-analyzer`
+gets them. An analyzer file copied next to a notebook (how earlier versions could be used) doesn't get fixes;
+install the package instead.

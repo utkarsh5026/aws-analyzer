@@ -1,6 +1,6 @@
 ---
 name: analyzer-review
-description: Review analyzer changes against this project's product rules (say what it means, findings lead to an action, answer first, forgiving input, honest about limits and cost, no tracebacks, discoverable) and its hard constraints (standalone files, boto3 + stdlib at import, read-only, Python 3.10 floor, pandas 2 and 3). Use before committing or opening a PR, or to audit one existing command.
+description: Review analyzer changes against this project's product rules (say what it means, findings lead to an action, answer first, forgiving input, honest about limits and cost, no tracebacks, discoverable) and its hard constraints (no imports between analyzers, shared code in _kit, boto3 + stdlib at import, read-only, Python 3.10 floor, pandas 2 and 3). Use before committing or opening a PR, or to audit one existing command.
 argument-hint: "[base ref (default: uncommitted changes) | View command name, e.g. dynamodb.schema]"
 ---
 
@@ -25,7 +25,8 @@ List the View commands the scope adds or changes. Those get the output review in
 .venv/bin/python .claude/skills/sync-helpers/drift.py --summary
 ```
 
-`rules.py` covers read-only calls, lazy imports, standalone files, banners, View decoration and docstrings, and
+`rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers, banners,
+View decoration and docstrings, and
 IAM permissions missing from the README. Report its errors, and any warnings the change caused. For drift,
 report only the helpers this change touched, where the other analyzer's copy wasn't updated.
 

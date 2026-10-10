@@ -1,8 +1,6 @@
 # Changelog
 
-What's new in each release of [aws-analyzer](https://pypi.org/project/aws-analyzer/). The files in
-[`src/aws_analyzer/`](src/aws_analyzer/) are the same code as the package, so this also tells you when a copy next to
-your notebook is worth replacing.
+What's new in each release of [aws-analyzer](https://pypi.org/project/aws-analyzer/).
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor version (0.2.0) adds commands or
@@ -13,10 +11,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- The analyzer files moved from `analyzers/` to `src/aws_analyzer/` in the repository, so a notebook that downloads one
-  from GitHub needs the new path: `!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py`
-  instead of `.../main/analyzers/s3.py`. Each file still works on its own, and `pip install aws-analyzer` is
-  unchanged. ([#61](https://github.com/utkarsh5026/aws-analyzer/pull/61))
+- **Breaking**: the analyzers no longer work as single files copied next to a notebook, since they now share code in
+  `aws_analyzer._kit`. Install the package instead, `%pip install aws-analyzer` (a notebook without internet can
+  install it from a bucket: [Get started](https://github.com/utkarsh5026/aws-analyzer#get-started) shows how), and
+  import from it: `from aws_analyzer import S3View` instead of `from s3 import S3View`, and
+  `from aws_analyzer.s3 import explain_policy` for anything else a file had. Notebooks that already use the package
+  need no change, and a file you copied before keeps working as it is. The files also moved in the repository, from
+  `analyzers/` to `src/aws_analyzer/`. ([#61](https://github.com/utkarsh5026/aws-analyzer/pull/61),
+  [#PR](https://github.com/utkarsh5026/aws-analyzer/pull/PR))
 
 ## [0.13.0] - 2026-10-11
 

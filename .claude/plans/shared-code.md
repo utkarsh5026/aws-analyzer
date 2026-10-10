@@ -1,7 +1,7 @@
 # Plan: one shared code base for every analyzer
 
-**Status:** the Lambda window merged in 0.13.0, and the work has started: Phase 0 (`snapshot.py`) and Phase 1 (the
-move to `src/aws_analyzer/`) are the first pull request. The last pull request deletes this file.
+**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61. Phase 2 (`_kit`
+with the leaf helpers, install-only docs) is the next pull request. The last pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -150,6 +150,11 @@ commit and run the tests after each.
 - Gates: everything in section 5. Snapshots are identical by construction.
 
 ### Phase 2: `_kit` foundation (leaf helpers) and the switch to install-only
+
+Done: `_kit/fmt.py`, `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py` and `errors.py`, 31 names
+in all; every copy was checked to be the same code before it was removed. Dead private copies were dropped rather
+than imported (`bedrock_chat._fmt_dt`, three `_share`, `sagemaker_env._count`, `lambda_functions._error_name`, and the
+regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which differs, became `_tip_time`.
 
 - Create `_kit/__init__.py`, `fmt.py`, `deps.py` and `errors.py` (only `_error_code`, `_error_name`, `_why`, `_Hint`).
   Move the identical leaf helpers: formatting, `_require` / `_in_notebook`, `_esc`, `_clip`, `_pad`, `_width`,
