@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
-in `analyzers/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
+in `src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run) that a user pastes
@@ -61,6 +61,8 @@ python -m build                                # the PyPI sdist and wheel, in di
 pip install -r requirements-docs.txt           # the guide site: mkdocs, mkdocs-material
 mkdocs serve                                   # preview docs/ at http://127.0.0.1:8000
 mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
+python .claude/skills/check/snapshot.py run OUT [--root CHECKOUT]  # every report as text and HTML (pip install time-machine)
+python .claude/skills/check/snapshot.py compare BASE NEW           # what a refactor changed in them (see /check)
 ```
 
 CI (`.github/workflows/ci.yml`) also checks that each analyzer imports on its own with only boto3 installed, and
@@ -68,7 +70,7 @@ its Package job builds the wheel, runs `twine check` and imports the installed p
 (`.claude/skills/check/run.py` does both). To reproduce the first locally:
 
 ```bash
-for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
+for f in src/aws_analyzer/[!_]*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
 ```
 
 ## Hard constraints
@@ -467,11 +469,11 @@ does both, a page at a time). How the UI works:
 
 ## The PyPI package
 
-- `pyproject.toml` (hatchling) force-includes each `analyzers/*.py` unchanged into the wheel as
-  `aws_analyzer/<name>.py`, next to `src/aws_analyzer/__init__.py`, which holds `__version__` and re-exports the
-  Analyzer / View / Explorer classes lazily through a module `__getattr__` (importing `aws_analyzer` loads no
-  analyzer). A new analyzer needs its `force-include` line (`tests/test_package.py` checks every file is listed) and
-  its classes in `__init__.py`'s `__all__`, `_EXPORTS`, `_MODULES` and `TYPE_CHECKING` imports.
+- `pyproject.toml` (hatchling) ships `src/aws_analyzer/` as the wheel's `aws_analyzer` package: each analyzer is a
+  module there, next to `__init__.py`, which holds `__version__` and re-exports the Analyzer / View / Explorer
+  classes lazily through a module `__getattr__` (importing `aws_analyzer` loads no analyzer). A new analyzer needs
+  its module name in `__init__.py`'s `_MODULES` (`tests/test_package.py` checks every module is listed) and its
+  classes in `__all__`, `_EXPORTS` and the `TYPE_CHECKING` imports.
 - The only code that knows about the package is `s3_explorer._s3_module()`, which looks for `s3` next to itself
   (`{__package__}.s3`) before `import s3`.
 - The one dependency is `boto3>=1.35.72`, the first release whose service models have every AWS operation the
@@ -492,8 +494,10 @@ does both, a page at a time). How the UI works:
 
 ## Tests
 
-- `tests/conftest.py` puts `analyzers/` on `sys.path` so tests `import s3` / `import dynamodb` the way a notebook
-  would, and sets fake AWS credentials plus `AWS_DEFAULT_REGION=us-east-1`.
+- `tests/conftest.py` puts `src/` on `sys.path` so tests import the analyzers from the package
+  (`from aws_analyzer import s3`, `from aws_analyzer.dynamodb import ...`) the way an installed notebook does, and
+  sets fake AWS credentials plus `AWS_DEFAULT_REGION=us-east-1`. The run fails if a module also loads under its bare
+  name (`import s3`): its classes would be a second copy that `isinstance` doesn't match.
 - One test file per analyzer. Pure functions are tested directly; AWS-backed methods use an `aws` fixture wrapping
   `moto.mock_aws()` and fixtures that seed a bucket / table. A new AWS service needs its moto extra added to
   `moto[...]` in `requirements-dev.txt`.

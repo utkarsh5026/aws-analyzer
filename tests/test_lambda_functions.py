@@ -15,8 +15,8 @@ from botocore.exceptions import ClientError
 from botocore.validate import ParamValidator
 from moto import mock_aws
 
-import lambda_functions as lfmod
-from lambda_functions import (
+from aws_analyzer import lambda_functions as lfmod
+from aws_analyzer.lambda_functions import (
     GB,
     LAMBDA_PRICES,
     MB,

@@ -1,9 +1,8 @@
 # The PyPI package: `pip install aws-analyzer`, then `from aws_analyzer import S3View`.
 #
-# The analyzers stay one standalone file each in analyzers/, so copying one next to a notebook keeps working. The
-# wheel ships those files unchanged as the modules of the aws_analyzer package (aws_analyzer/s3.py, ...), next to
-# src/aws_analyzer/__init__.py, which only re-exports the Analyzer and View classes. Nothing here is needed to run
-# the tests or to use a file on its own.
+# The analyzers are the modules of the aws_analyzer package, one file each in src/aws_analyzer/ (s3.py, ...), next to
+# __init__.py, which only re-exports the Analyzer and View classes. The wheel ships that folder as it is. Nothing
+# here is needed to run the tests (tests/conftest.py puts src/ on sys.path).
 #
 #   python -m build                     # dist/aws_analyzer-<version>.tar.gz and -py3-none-any.whl
 #   twine check --strict dist/*         # the metadata, and that the README renders on PyPI
@@ -76,19 +75,8 @@ path = "src/aws_analyzer/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/aws_analyzer"]
 
-# Every analyzers/*.py goes in the wheel (tests/test_package.py checks none is missing).
-[tool.hatch.build.targets.wheel.force-include]
-"analyzers/s3.py" = "aws_analyzer/s3.py"
-"analyzers/s3_explorer.py" = "aws_analyzer/s3_explorer.py"
-"analyzers/dynamodb.py" = "aws_analyzer/dynamodb.py"
-"analyzers/bedrock_kb.py" = "aws_analyzer/bedrock_kb.py"
-"analyzers/bedrock_chat.py" = "aws_analyzer/bedrock_chat.py"
-"analyzers/sagemaker_env.py" = "aws_analyzer/sagemaker_env.py"
-"analyzers/opensearch.py" = "aws_analyzer/opensearch.py"
-"analyzers/lambda_functions.py" = "aws_analyzer/lambda_functions.py"
-
 [tool.hatch.build.targets.sdist]
-include = ["/analyzers/*.py", "/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/requirements-dev.txt"]
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/requirements-dev.txt"]
 
 # PyPI shows README.md as the project page, but resolves none of its relative links or pictures, so they're
 # pointed at GitHub, and GitHub's > [!NOTE] callouts become bold labels.

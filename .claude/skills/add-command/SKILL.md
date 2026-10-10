@@ -9,7 +9,7 @@ argument-hint: "<service> <what the user wants to see or decide>"
 Request: `$ARGUMENTS`. The first word is the analyzer (`s3`, `dynamodb`, ...). The rest describes what the
 user wants to see or decide.
 
-If `analyzers/<service>.py` doesn't exist, stop and suggest `/new-analyzer`. If the need is too vague to
+If `src/aws_analyzer/<service>.py` doesn't exist, stop and suggest `/new-analyzer`. If the need is too vague to
 design an output for, ask one question about the decision the user is trying to make.
 
 ## 1. Learn the neighbourhood

@@ -27,12 +27,12 @@ Every example uses acme's functions: `orders-etl`, which loads each day's orders
 
 1. **Get `lambda_functions.py` next to your notebook.** Pick whichever works in your environment:
 
-    - **Upload it.** Download [lambda_functions.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/lambda_functions.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload it.** Download [lambda_functions.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/lambda_functions.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch it from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/lambda_functions.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/lambda_functions.py
         ```
 
     - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:

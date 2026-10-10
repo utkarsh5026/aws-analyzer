@@ -37,12 +37,12 @@ The examples use a knowledge base called `support-docs` holding support policies
         %pip install "aws-analyzer[notebook]"
         ```
 
-    - **Upload it.** Download [bedrock_chat.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_chat.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload it.** Download [bedrock_chat.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_chat.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch it from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/bedrock_chat.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_chat.py
         ```
 
     - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:

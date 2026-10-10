@@ -30,8 +30,8 @@ from botocore.exceptions import ClientError
 from moto import mock_aws
 from PIL import Image
 
-import s3 as s3mod
-from s3 import (
+from aws_analyzer import s3 as s3mod
+from aws_analyzer.s3 import (
     GB,
     KB,
     MB,

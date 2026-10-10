@@ -26,12 +26,12 @@ Every example uses a table called `acme-app`, a single-table design that keeps c
 
 1. **Get `dynamodb.py` next to your notebook.** Pick whichever works in your environment:
 
-    - **Upload it.** Download [dynamodb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/dynamodb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    - **Upload it.** Download [dynamodb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/dynamodb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
 
     - **Fetch it from a cell**, if the notebook can reach the internet:
 
         ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/analyzers/dynamodb.py
+        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/dynamodb.py
         ```
 
     - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:

@@ -12,8 +12,8 @@ from botocore.validate import ParamValidator
 from fake_opensearch import FakeCluster, FakeIndex, score, topic_vector, unit
 from moto import mock_aws
 
-import opensearch as osmod
-from opensearch import (
+from aws_analyzer import opensearch as osmod
+from aws_analyzer.opensearch import (
     GB,
     INSTANCE_TYPES,
     OPENSEARCH_PRICES,

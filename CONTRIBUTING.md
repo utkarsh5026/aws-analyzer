@@ -28,7 +28,7 @@ For the guide site: `pip install -r requirements-docs.txt`, then `mkdocs serve`.
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads
 just as well for people. The rules that matter most:
 
-- **One file per service.** Each file in [`analyzers/`](analyzers/) works on its own, pasted into a notebook or
+- **One file per service.** Each file in [`src/aws_analyzer/`](src/aws_analyzer/) works on its own, pasted into a notebook or
   copied next to one, so files never import each other. Helpers they all need (`human_size`, the render blocks,
   `View.help`, ...) are copied into each file on purpose: when you change one, change the copies too.
 - **Only boto3 and the standard library at import time.** pandas, pyarrow, IPython and the file readers are
@@ -56,7 +56,7 @@ just as well for people. The rules that matter most:
 5. Check that each analyzer still imports alone with only boto3:
 
    ```bash
-   for f in analyzers/*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
+   for f in src/aws_analyzer/[!_]*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
    ```
 
    With Claude Code, `/check` runs this and everything else CI runs, plus the project's own rule checks.

@@ -2,8 +2,8 @@
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
 OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook.
 
-This is the pip-installed form of the files in the repository's analyzers/ folder: each module here is one of
-those files, unchanged, so it works the same as a copy next to your notebook. Only the import line differs.
+Each module is one file in the repository's src/aws_analyzer/ folder. A copy of one next to your notebook works the
+same; only the import line differs.
 
 Quick start
 -----------
@@ -34,9 +34,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-# For editors and type checkers; at run time __getattr__ imports them on first use. The modules are analyzers/*.py,
-# which the build copies in here (pyproject.toml), so in the repository itself these imports don't resolve.
-# pyright: reportMissingImports=false
+# For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer

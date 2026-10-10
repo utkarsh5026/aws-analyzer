@@ -1,8 +1,8 @@
 # Changelog
 
 What's new in each release of [aws-analyzer](https://pypi.org/project/aws-analyzer/). The files in
-[`analyzers/`](analyzers/) are the same code as the package, so this also tells you when a copy next to your notebook
-is worth replacing.
+[`src/aws_analyzer/`](src/aws_analyzer/) are the same code as the package, so this also tells you when a copy next to
+your notebook is worth replacing.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor version (0.2.0) adds commands or
@@ -10,6 +10,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 **Breaking** and says what to change. To upgrade: `pip install -U aws-analyzer`.
 
 ## [Unreleased]
+
+### Changed
+
+- The analyzer files moved from `analyzers/` to `src/aws_analyzer/` in the repository, so a notebook that downloads one
+  from GitHub needs the new path: `!curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py`
+  instead of `.../main/analyzers/s3.py`. Each file still works on its own, and `pip install aws-analyzer` is
+  unchanged. ([#61](https://github.com/utkarsh5026/aws-analyzer/pull/61))
 
 ## [0.13.0] - 2026-10-11
 
