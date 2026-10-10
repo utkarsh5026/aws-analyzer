@@ -13,7 +13,8 @@ monotonic clock, moto's random IDs, the checkout's own path) is normalized: two 
 
 OUT also gets names.json, every name each module defines and the attributes of each class it defines, and
 apis.txt, the AWS operations rules.py finds. `compare` reports any case whose output changed, a name or class
-attribute that no longer exists, and any change in the AWS operations.
+attribute that no longer exists (`--allow-lost s3._band` for one removed on purpose), and any change in the AWS
+operations.
 
 Needs the dev requirements, plus time-machine (pip install time-machine).
 """
@@ -167,10 +168,11 @@ NORMALIZE: list[tuple[re.Pattern[str], str]] = [
 
 
 def _layout(root: Path) -> tuple[Path, str]:
-    """(the folder the analyzers are in, the prefix their modules import under) for this checkout."""
-    if (root / "analyzers").is_dir():
-        return root / "analyzers", ""
-    return root / "src" / "aws_analyzer", "aws_analyzer."
+    """(the folder the analyzers are in, the prefix their modules import under) for this checkout: the package in
+    src/aws_analyzer/, or the analyzers/ folder of the files before 0.14 (a stale analyzers/__pycache__ doesn't count)."""
+    if (root / "src" / "aws_analyzer" / "s3.py").exists():
+        return root / "src" / "aws_analyzer", "aws_analyzer."
+    return root / "analyzers", ""
 
 
 def _module(root: Path, name: str):
@@ -340,9 +342,11 @@ def run(root: Path, out: Path, sources: list[str], services: list[str]) -> int:
         print(proc.stderr[-3000:], file=sys.stderr)
     rules = root / ".claude" / "skills" / "check" / "rules.py"
     proc = subprocess.run([sys.executable, str(rules), "--apis"], cwd=root, capture_output=True, text=True)
-    apis = re.sub(r"(analyzers|src/aws_analyzer)/", "<pkg>/", proc.stdout + proc.stderr)
-    apis = re.sub(r"(<pkg>/[\w.]+):\d+:", r"\1:", apis)
-    (out / "apis.txt").write_text(apis, encoding="utf-8")
+    output = re.sub(r"(analyzers|src/aws_analyzer)/", "<pkg>/", proc.stdout + proc.stderr)
+    # Only the operations each file calls: the rest of the output (warnings with line numbers, how many files were
+    # checked) changes with refactors that change nothing.
+    blocks = re.findall(r"^AWS operations in .*\n(?:  .*\n)*", output, re.MULTILINE)
+    (out / "apis.txt").write_text("\n".join(blocks) or output, encoding="utf-8")
     print(f"{'ok':6} apis", flush=True)
     if work.exists():
         shutil.rmtree(work)
@@ -352,7 +356,7 @@ def run(root: Path, out: Path, sources: list[str], services: list[str]) -> int:
 # ----------------------------------------------------------------------------- comparing two snapshots
 
 
-def compare(base: Path, new: Path, context: int, max_lines: int) -> int:
+def compare(base: Path, new: Path, context: int, max_lines: int, allow_lost: set[str]) -> int:
     def files(root: Path) -> set[str]:
         return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and p.name != "names.json"}
 
@@ -389,9 +393,13 @@ def compare(base: Path, new: Path, context: int, max_lines: int) -> int:
             continue
         present = set(after["present"])
         for name in before["defined"]:
-            if name not in present:
-                print(f"LOST     {module}.{name}")
-                lost += 1
+            if name in present:
+                continue
+            if f"{module}.{name}" in allow_lost:
+                print(f"removed  {module}.{name} (--allow-lost)")
+                continue
+            print(f"LOST     {module}.{name}")
+            lost += 1
         for cls, attrs in before["classes"].items():
             if cls not in present:
                 continue  # reported above, if the file defined it
@@ -428,10 +436,12 @@ def main() -> int:
     compare_cmd.add_argument("new", type=Path)
     compare_cmd.add_argument("--context", type=int, default=2, help="lines of context in each diff")
     compare_cmd.add_argument("--max-lines", type=int, default=60, help="diff lines shown per output")
+    compare_cmd.add_argument("--allow-lost", nargs="*", default=[], metavar="MODULE.NAME",
+                             help="names removed on purpose (a dead private copy), reported but not counted")
     args = parser.parse_args()
     if args.command == "run":
         return run(args.root.resolve(), args.out.resolve(), args.source or ["demo", "shots"], args.service or SERVICES)
-    return compare(args.base, args.new, args.context, args.max_lines)
+    return compare(args.base, args.new, args.context, args.max_lines, set(args.allow_lost))
 
 
 if __name__ == "__main__":

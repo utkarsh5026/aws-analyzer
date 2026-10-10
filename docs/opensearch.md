@@ -7,11 +7,11 @@ description: "How to inspect Amazon OpenSearch Service and OpenSearch Serverless
 
 # Look inside your OpenSearch vector indexes from a SageMaker notebook
 
-One Python file. Drop it next to your notebook and see what your vector indexes hold: each vector field in plain English, whether its graphs fit in the memory the nodes have, documents that have no vector, vectors that repeat or are all zeros, and the documents nearest a question, without leaving Jupyter.
+Install it in your notebook and see what your vector indexes hold: each vector field in plain English, whether its graphs fit in the memory the nodes have, documents that have no vector, vectors that repeat or are all zeros, and the documents nearest a question, without leaving Jupyter.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: reads and searches, never writes</li>
   <li>Domains and Serverless collections</li>
   <li>Plain text outside Jupyter</li>
@@ -24,28 +24,23 @@ Every example uses `vectors-prod`, an OpenSearch Service domain holding `support
 
 <div class="steps" markdown>
 
-1. **Get `opensearch.py` next to your notebook.** Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell:
 
-    - **Upload it.** Download [opensearch.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/opensearch.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    ```bash
+    %pip install aws-analyzer
+    ```
 
-    - **Fetch it from a cell**, if the notebook can reach the internet:
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/opensearch.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/opensearch.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Import it and create the view.** It uses the notebook's IAM execution role and region, and signs its requests to OpenSearch with that role, so there's nothing to configure.
 
     ```python
-    from opensearch import OpenSearchView
+    from aws_analyzer import OpenSearchView
 
     ui = OpenSearchView()   # uses the notebook's IAM role and region
     ui.help()               # every command, grouped by task; ui.help("search") shows one in full
@@ -54,7 +49,7 @@ Every example uses `vectors-prod`, an OpenSearch Service domain holding `support
 3. **Optional:** another region or AWS profile, a user name and password, an OpenSearch you run yourself, or plain-text output.
 
     ```python
-    from opensearch import OpenSearchAnalyzer, OpenSearchView
+    from aws_analyzer import OpenSearchAnalyzer, OpenSearchView
 
     ui = OpenSearchView(OpenSearchAnalyzer(region="eu-west-1", profile="dev"))
     ui = OpenSearchView(OpenSearchAnalyzer(auth=("analyst", "...")))   # fine-grained access control's internal users
@@ -268,7 +263,7 @@ aos.request("vectors-prod", "support-docs/_search", {"query": {"match": {"text":
 The analysis functions don't call AWS, so they also work on mappings and documents you already have: `parse_mapping`, `read_settings`, `vector_memory`, `index_vector_memory`, `knn_memory_limit`, `check_vectors`, `score_to_similarity`, `build_filter`, `knn_query`, `query_python`, `domain_monthly_cost`, `serverless_minimum`, and the findings: `domain_findings`, `collection_findings`, `index_findings`, `store_findings`, `vector_findings`, `search_findings`.
 
 ```python
-from opensearch import check_vectors, parse_mapping, vector_memory
+from aws_analyzer.opensearch import check_vectors, parse_mapping, vector_memory
 
 fields, vectors, _ = parse_mapping(my_index_body["mappings"])   # before you create the index
 vector_memory(vectors[0], 2_000_000)                            # bytes its graphs will need

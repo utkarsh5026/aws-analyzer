@@ -54,7 +54,6 @@ import functools
 import gzip
 import hashlib
 import heapq
-import html
 import importlib
 import importlib.util
 import inspect
@@ -73,7 +72,6 @@ import sys
 import tarfile
 import threading
 import time
-import unicodedata
 import zipfile
 import zlib
 from xml.etree import ElementTree
@@ -87,6 +85,13 @@ from typing import Any, BinaryIO, Callable, Generator, Iterable, Iterator
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+
+from ._kit.deps import _in_notebook, _require
+from ._kit.errors import _error_code
+from ._kit.fmt import (
+    _band, _duration, _fmt_dt, _plural, _share, _utcnow, human_age, human_money, human_size, parse_size, parse_time,
+)
+from ._kit.text import _clip, _esc, _pad, _text_bar, _width
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -119,91 +124,6 @@ def base_prefix(prefix: str) -> str:
 
 def relative_key(key: str, prefix: str) -> str:
     return key[len(prefix) :] if key.startswith(prefix) else key
-
-
-def human_size(num_bytes: float | None) -> str:
-    """1536 -> '1.5 KB' (binary units, like the S3 console)."""
-    if num_bytes is None:
-        return "-"
-    value = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(value) < 1024:
-            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} PB"
-
-
-_SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?)i?b?\s*$", re.IGNORECASE)
-
-
-def parse_size(value: int | float | str | None) -> int | None:
-    """'10MB', '1.5 GiB', '512k', 1024 -> bytes. Units are binary (1 KB = 1024 B)."""
-    if value is None or isinstance(value, (int, float)):
-        return None if value is None else int(value)
-    match = _SIZE_RE.match(value)
-    if not match:
-        raise ValueError(f"Can't parse size {value!r}; try 1024, '10MB' or '1.5GB'")
-    number, unit = match.groups()
-    return int(float(number) * 1024 ** " kmgtp".index(unit.lower() or " "))
-
-
-_RELATIVE_TIME_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$", re.IGNORECASE)
-_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def parse_time(
-    value: datetime | date | timedelta | str | None, now: datetime | None = None
-) -> datetime | None:
-    """datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), or a relative
-    age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are UTC."""
-    if value is None:
-        return None
-    if isinstance(value, timedelta):
-        return (now or _utcnow()) - value
-    if isinstance(value, datetime):
-        moment = value
-    elif isinstance(value, date):
-        moment = datetime(value.year, value.month, value.day)
-    else:
-        relative = _RELATIVE_TIME_RE.match(str(value))
-        if relative:
-            seconds = (
-                float(relative.group(1)) * _UNIT_SECONDS[relative.group(2).lower()]
-            )
-            return (now or _utcnow()) - timedelta(seconds=seconds)
-        moment = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
-
-
-def human_age(when: datetime | None, now: datetime | None = None) -> str:
-    """datetime -> '3d ago' / '5mo ago' / 'just now'."""
-    if when is None:
-        return "-"
-    seconds = ((now or _utcnow()) - when).total_seconds()
-    for unit, size in (
-        ("y", 365 * 86400),
-        ("mo", 30 * 86400),
-        ("d", 86400),
-        ("h", 3600),
-        ("m", 60),
-    ):
-        if seconds >= size:
-            return f"{int(seconds // size)}{unit} ago"
-    return "just now"
-
-
-def human_money(usd: float | None) -> str:
-    """12.345 -> '$12.35', 0.004 -> '<$0.01', 12345.6 -> '$12,346', -3 -> '-$3.00'."""
-    if usd is None:
-        return "-"
-    sign, usd = ("-" if usd < 0 else ""), abs(usd)
-    if 0 < usd < 0.01:
-        return f"{sign}<$0.01"
-    return f"{sign}${usd:,.0f}" if usd >= 1000 else f"{sign}${usd:,.2f}"
 
 
 _COMPRESSION_EXTS = {
@@ -1454,19 +1374,6 @@ def _xlsx_sheets(archive: zipfile.ZipFile) -> list[dict[str, Any]]:
     return sheets
 
 
-def _plural(count: int, word: str) -> str:
-    return f"{count:,} {word}{'' if count == 1 else 's'}"
-
-
-def _require(module: str, purpose: str, package: str | None = None) -> Any:
-    """Import an optional package, or say what to pip install. package: its pip name when that differs (pillow)."""
-    try:
-        return importlib.import_module(module)
-    except ImportError as exc:
-        package = package or module.split(".")[0]
-        raise ImportError(f"{purpose} needs `{package}` (pip install {package})") from exc
-
-
 def _restore_note(bucket: str, key: str, storage_class: str, restore: str = "") -> str:
     """Why an archived object can't be read, and the command that restores it (shown, never run)."""
     name, wait = key.rsplit("/", 1)[-1], "3-5 hours" if storage_class == "GLACIER" else "up to 12 hours"
@@ -1475,10 +1382,6 @@ def _restore_note(bucket: str, key: str, storage_class: str, restore: str = "") 
     return (f"{name} is in {storage_class}, so it can't be read until it's restored, which takes {wait} and costs a "
             f"retrieval fee. To make it readable for 7 days: aws s3api restore-object --bucket {bucket} "
             f"--key {shlex.quote(key)} --restore-request Days=7")
-
-
-def _error_code(exc: ClientError) -> str:
-    return exc.response.get("Error", {}).get("Code", "Unknown")
 
 
 def _looks_binary(data: bytes) -> bool:
@@ -2563,13 +2466,6 @@ def cloudwatch_cost(
         price = prices.get(storage_type_class(storage_type) or "")
         costs[storage_type] = None if price is None else size * price / GB
     return costs
-
-
-def _band(value: float, bands: list[tuple[str, int | None]]) -> str:
-    for label, upper in bands:
-        if upper is None or value < upper:
-            return label
-    return bands[-1][0]
 
 
 def _by_size(stats: dict[str, Stat]) -> dict[str, Stat]:
@@ -8272,10 +8168,6 @@ _MARKS = {
 _SELECT = ' title="Click to select, then copy"'
 
 
-def _esc(value: Any) -> str:
-    return html.escape("" if value is None else str(value))
-
-
 def _prose(value: Any, money: bool = False) -> str:
     """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects
     (and, with money=True, amounts like $12.40/month stressed). The text is split on the calls and every
@@ -9155,35 +9047,6 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
     return "".join(out)
 
 
-def _text_bar(fraction: float, width: int = 20) -> str:
-    fraction = max(0.0, min(1.0, fraction))
-    filled = round(fraction * width)
-    return "█" * filled + "░" * (width - filled) + f" {fraction * 100:5.1f}%"
-
-
-def _clip(text: str, width: int = 90) -> str:
-    return text if len(text) <= width else text[: width - 1] + "…"
-
-
-def _width(text: str) -> int:
-    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
-    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
-    width, wide = 0, False
-    for ch in text:
-        if ch == "\ufe0f":
-            width, wide = width + (not wide), True
-        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
-            wide = unicodedata.east_asian_width(ch) in ("W", "F")
-            width += 2 if wide else 1
-    return width
-
-
-def _pad(text: str, width: int, right: bool = False) -> str:
-    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
-    fill = " " * max(0, width - _width(text))
-    return fill + text if right else text + fill
-
-
 def _render_text(blocks: list[Any], max_rows: int) -> str:
     out: list[str] = []
     for block in blocks:
@@ -9290,15 +9153,6 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
     return "\n".join(out)
 
 
-def _in_notebook() -> bool:
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return False
-    shell = get_ipython()
-    return shell is not None and type(shell).__name__ != "TerminalInteractiveShell"
-
-
 def _progress_bar_class(notebook: bool) -> Any:
     """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
     try:
@@ -9336,17 +9190,6 @@ def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> A
     return bar_class(**options)
 
 
-def _duration(seconds: float) -> str:
-    """0.42 -> '0.4s', 42.4 -> '42s', 125 -> '2m 05s', 7500 -> '2h 05m'."""
-    if seconds < 10:
-        return f"{seconds:.1f}s"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    if seconds < 3600:
-        return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
-    return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60):02d}m"
-
-
 def _progress_text(
     label: str, unit: str, count: int, total: int | None, elapsed: float
 ) -> str:
@@ -9371,18 +9214,6 @@ def _progress_text(
         if total and total > count:
             text += f" · about {_duration((total - count) / rate)} left"
     return text
-
-
-def _fmt_dt(moment: datetime | None) -> str:
-    return (
-        "-"
-        if moment is None
-        else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    )
-
-
-def _share(part: float, whole: float) -> float:
-    return part / whole if whole else 0.0
 
 
 def _stat_table(

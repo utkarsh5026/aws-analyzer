@@ -7,11 +7,11 @@ description: "How to see what your SageMaker notebook is, what it costs, whether
 
 # Know the SageMaker notebook you're working in
 
-One Python file. Run it in a notebook and see what the notebook is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and which notebooks, apps and endpoints in the region are still running.
+Install it in your notebook and see what the notebook is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and which notebooks, apps and endpoints in the region are still running.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: never stops or deletes anything</li>
   <li>Notebook instances and Studio</li>
   <li>Plain text outside Jupyter</li>
@@ -24,28 +24,23 @@ The examples run in a Studio JupyterLab space called `churn-analysis`, in the do
 
 <div class="steps" markdown>
 
-1. **Get `sagemaker_env.py` next to your notebook.** Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell:
 
-    - **Upload it.** Download [sagemaker_env.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/sagemaker_env.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    ```bash
+    %pip install aws-analyzer
+    ```
 
-    - **Fetch it from a cell**, if the notebook can reach the internet:
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/sagemaker_env.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/sagemaker_env.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Import it and create the view.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
 
     ```python
-    from sagemaker_env import SageMakerView
+    from aws_analyzer import SageMakerView
 
     ui = SageMakerView()   # uses the notebook's IAM role and region
     ui.help()              # every command, grouped by task; ui.help("disk") shows one in full
@@ -54,7 +49,7 @@ The examples run in a Studio JupyterLab space called `churn-analysis`, in the do
 3. **Optional:** another region or AWS profile, or plain-text output.
 
     ```python
-    from sagemaker_env import SageMakerAnalyzer, SageMakerView
+    from aws_analyzer import SageMakerAnalyzer, SageMakerView
 
     ui = SageMakerView(SageMakerAnalyzer(region="eu-west-1", profile="dev"))
     ui = SageMakerView(mode="text")          # plain text, e.g. in a terminal or a script
@@ -65,7 +60,7 @@ The examples run in a Studio JupyterLab space called `churn-analysis`, in the do
 
 !!! note ""
 
-    **Why not `sagemaker.py`?** The SageMaker Python SDK is imported as `sagemaker`, so a file with that name next to your notebook would hide it. `sagemaker_env.py` lives happily beside the SDK.
+    **Why `sagemaker_env`?** So it's never mixed up with the SageMaker Python SDK, which is imported as `sagemaker`.
 
 ## Five-minute tour { #tour }
 
@@ -232,7 +227,7 @@ r.to_df()                                             # one row per notebook, ap
 The analysis functions don't call AWS, so they work on responses and text you already have: `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`, `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `idle_shutdown_commands`, `stop_command`, and the findings, `instance_findings`, `disk_findings` and `running_findings`.
 
 ```python
-from sagemaker_env import describe_instance, hourly_price, smaller_type
+from aws_analyzer.sagemaker_env import describe_instance, hourly_price, smaller_type
 
 hourly_price("ml.g5.2xlarge")                          # 1.52
 describe_instance("ml.g5.2xlarge")                     # '8 vCPU · 32 GiB · 1 GPU'

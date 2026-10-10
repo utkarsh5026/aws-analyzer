@@ -7,8 +7,8 @@ output of any step that failed.
 
 Steps:
   ruff        ruff check . (the rules in ruff.toml)
-  imports     each analyzer copied alone into an empty directory and imported with every package except
-              boto3 / botocore blocked, like CI's "only boto3 installed" job
+  imports     each module of the package (aws_analyzer.s3, ...) imported in a fresh interpreter with every package
+              except boto3 / botocore blocked, like CI's "only boto3 installed" job
   package     the wheel pyproject.toml builds, twine-checked, then imported with only boto3 (like CI's
               Package job); skipped when build isn't installed
   rules       .claude/skills/check/rules.py: read-only AWS calls, lazy optional imports, View conventions,
@@ -43,9 +43,9 @@ ALLOWED = {"boto3", "botocore", "s3transfer", "jmespath", "dateutil", "urllib3",
 class OnlyBoto3:
     def find_spec(self, name, path=None, target=None):
         root = name.split(".")[0]
-        if root in sys.stdlib_module_names or root in ALLOWED or root == MODULE:
+        if root in sys.stdlib_module_names or root in ALLOWED or root == MODULE.partition(".")[0]:
             return None
-        raise ModuleNotFoundError(f"No module named {root!r} (CI imports each analyzer with only boto3 installed)")
+        raise ModuleNotFoundError(f"No module named {root!r} (CI imports each module with only boto3 installed)")
 sys.meta_path.insert(0, OnlyBoto3())
 import importlib
 importlib.import_module(MODULE)
@@ -110,16 +110,14 @@ def main() -> int:
     else:
         results.append(step("ruff", [*ruff, "check", "."]))
 
-    # imports: each file alone, boto3 only.
+    # imports: each module of the package in a fresh interpreter, boto3 only.
     failures = []
     for path in sorted(p for p in (ROOT / "src" / "aws_analyzer").glob("*.py") if p.name != "__init__.py"):
-        with tempfile.TemporaryDirectory() as tmp:
-            shutil.copy(path, tmp)
-            code = f"MODULE = {path.stem!r}\n{BOTO3_ONLY}"
-            proc = subprocess.run([python, "-c", code], cwd=tmp, capture_output=True, text=True)
-            if proc.returncode:
-                failures.append(f"{path.name}: {last_line(proc.stderr)}")
-    results.append((f"{'FAIL' if failures else 'PASS'}  imports  each analyzer alone with only boto3",
+        code = f"MODULE = 'aws_analyzer.{path.stem}'\n{BOTO3_ONLY}"
+        proc = subprocess.run([python, "-c", code], cwd=ROOT / "src", capture_output=True, text=True)
+        if proc.returncode:
+            failures.append(f"{path.name}: {last_line(proc.stderr)}")
+    results.append((f"{'FAIL' if failures else 'PASS'}  imports  each module with only boto3",
                     not failures, "\n".join(failures), ""))
 
     # package: the wheel pyproject.toml builds, checked by twine, unpacked and imported with only boto3.

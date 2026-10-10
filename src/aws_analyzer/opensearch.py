@@ -45,7 +45,6 @@ import difflib
 import fnmatch
 import functools
 import hashlib
-import html
 import importlib
 import inspect
 import json
@@ -54,7 +53,6 @@ import os
 import re
 import sys
 import time
-import unicodedata
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -71,12 +69,19 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 from botocore.httpsession import URLLib3Session
 from botocore.utils import get_environ_proxies
 
+from ._kit.deps import _in_notebook, _require
+from ._kit.errors import _Hint, _error_code, _error_name, _why
+from ._kit.fmt import (
+    HOURS_PER_MONTH, _as_int, _count, _duration, _fmt_dt, _plural, _total, _utcnow, human_age, human_money,
+    human_size,
+)
+from ._kit.text import _clip, _esc, _pad, _text_bar, _width
+
 # =============================================================================
 # 1. Helpers: parsing and formatting
 # =============================================================================
 
 KB, MB, GB, TB = 1024, 1024**2, 1024**3, 1024**4
-HOURS_PER_MONTH = 730
 
 # Instance type -> (USD per hour, vCPUs, memory in GiB). us-east-1 on-demand list prices for OpenSearch Service, read
 # from the AWS Price List API (the AmazonES offer file) on 2026-10-05. Data nodes, dedicated master nodes and
@@ -318,115 +323,6 @@ _EMBEDDING_ALIASES = {
     "cohere-multilingual": "cohere.embed-multilingual-v3",
     "cohere-v4": "cohere.embed-v4:0",
 }
-
-def human_size(num_bytes: float | None) -> str:
-    """1536 -> '1.5 KB' (binary units, like the AWS console)."""
-    if num_bytes is None:
-        return "-"
-    value = float(num_bytes)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(value) < 1024:
-            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} PB"
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-def human_age(when: datetime | None, now: datetime | None = None) -> str:
-    """datetime -> '3d ago' / '5mo ago' / 'just now'."""
-    if when is None:
-        return "-"
-    seconds = ((now or _utcnow()) - when).total_seconds()
-    for unit, size in (
-        ("y", 365 * 86400),
-        ("mo", 30 * 86400),
-        ("d", 86400),
-        ("h", 3600),
-        ("m", 60),
-    ):
-        if seconds >= size:
-            return f"{int(seconds // size)}{unit} ago"
-    return "just now"
-
-def human_money(usd: float | None) -> str:
-    """12.345 -> '$12.35', 0.004 -> '<$0.01', 12345.6 -> '$12,346', -3 -> '-$3.00'."""
-    if usd is None:
-        return "-"
-    sign, usd = ("-" if usd < 0 else ""), abs(usd)
-    if 0 < usd < 0.01:
-        return f"{sign}<$0.01"
-    return f"{sign}${usd:,.0f}" if usd >= 1000 else f"{sign}${usd:,.2f}"
-
-def _plural(count: int, word: str) -> str:
-    return f"{count:,} {word}{'' if count == 1 else 's'}"
-
-def _require(module: str, purpose: str, package: str | None = None) -> Any:
-    """Import an optional package, or say what to pip install. package: its pip name when that differs (pillow)."""
-    try:
-        return importlib.import_module(module)
-    except ImportError as exc:
-        package = package or module.split(".")[0]
-        raise ImportError(
-            f"{purpose} needs `{package}` (pip install {package})"
-        ) from exc
-
-def _error_code(exc: ClientError) -> str:
-    return exc.response.get("Error", {}).get("Code", "Unknown")
-
-def _error_name(exc: ClientError | BotoCoreError) -> str:
-    return _error_code(exc) if isinstance(exc, ClientError) else type(exc).__name__
-
-def _why(code: str, permission: str) -> str:
-    """'AccessDeniedException' -> 'AccessDeniedException; needs dynamodb:Scan'. Other codes stay as they are."""
-    return (
-        f"{code}; needs {permission}"
-        if "denied" in code.lower() or code == "UnauthorizedOperation"
-        else code
-    )
-
-_COUNT_RE = re.compile(r"^\s*(\d[\d,_]*(?:\.\d+)?)\s*([km]?)\s*$", re.IGNORECASE)
-
-def _as_int(value: Any, name: str, *, hint: str = "") -> int:
-    """A number-of-items argument: 1000, '10,000', '10k' or '2m' -> int."""
-    if (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and float(value).is_integer()
-    ):
-        return int(value)
-    match = _COUNT_RE.match(value) if isinstance(value, str) else None
-    if match:
-        number = (
-            float(match.group(1).replace(",", "").replace("_", ""))
-            * {"": 1, "k": 1000, "m": 10**6}[match.group(2).lower()]
-        )
-        if number.is_integer():
-            return int(number)
-    raise ValueError(
-        f"{name} takes a number of items, like 1000 or '10k'{hint}; got {value!r}"
-    )
-
-def _clip(text: str, width: int = 90) -> str:
-    return text if len(text) <= width else text[: width - 1] + "…"
-
-def _width(text: str) -> int:
-    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
-    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
-    width, wide = 0, False
-    for ch in text:
-        if ch == "\ufe0f":
-            width, wide = width + (not wide), True
-        elif not unicodedata.combining(ch) and unicodedata.category(ch) not in ("Mn", "Me", "Cf"):
-            wide = unicodedata.east_asian_width(ch) in ("W", "F")
-            width += 2 if wide else 1
-    return width
-
-def _pad(text: str, width: int, right: bool = False) -> str:
-    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
-    fill = " " * max(0, width - _width(text))
-    return fill + text if right else text + fill
-
 
 def _int(value: Any) -> int | None:
     """'1,024' / '1024' / 1024.0 -> 1024; None for missing or unreadable values (the _cat API answers in strings)."""
@@ -1373,12 +1269,6 @@ def domain_monthly_cost(domain: Domain, prices: dict[str, float] | None = None) 
         rate = prices.get(domain.volume_type)
         cost["storage"] = None if rate is None else rate * domain.volume_gb * domain.instance_count
     return cost
-
-
-def _total(cost: dict[str, float | None]) -> float | None:
-    """The sum of a cost breakdown, or None when no part of it is known."""
-    known = [v for v in cost.values() if v is not None]
-    return sum(known) if known else None
 
 
 def _key_label(key: str | None) -> str:
@@ -3182,10 +3072,6 @@ _MARKS = {
 _SELECT = ' title="Click to select, then copy"'
 
 
-def _esc(value: Any) -> str:
-    return html.escape("" if value is None else str(value))
-
-
 def _prose(value: Any) -> str:
     """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
     The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
@@ -3399,12 +3285,6 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
     return "".join(out)
 
 
-def _text_bar(fraction: float, width: int = 20) -> str:
-    fraction = max(0.0, min(1.0, fraction))
-    filled = round(fraction * width)
-    return "█" * filled + "░" * (width - filled) + f" {fraction * 100:5.1f}%"
-
-
 def _render_text(blocks: list[Any], max_rows: int) -> str:
     out: list[str] = []
     for block in blocks:
@@ -3479,15 +3359,6 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
     return "\n".join(out)
 
 
-def _in_notebook() -> bool:
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return False
-    shell = get_ipython()
-    return shell is not None and type(shell).__name__ != "TerminalInteractiveShell"
-
-
 def _progress_bar_class(notebook: bool) -> Any:
     """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
     try:
@@ -3525,17 +3396,6 @@ def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> A
     return bar_class(**options)
 
 
-def _duration(seconds: float) -> str:
-    """0.42 -> '0.4s', 42.4 -> '42s', 125 -> '2m 05s', 7500 -> '2h 05m'."""
-    if seconds < 10:
-        return f"{seconds:.1f}s"
-    if seconds < 60:
-        return f"{seconds:.0f}s"
-    if seconds < 3600:
-        return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
-    return f"{int(seconds // 3600)}h {int(seconds % 3600 // 60):02d}m"
-
-
 def _progress_text(
     label: str, unit: str, count: int, total: int | None, elapsed: float
 ) -> str:
@@ -3560,22 +3420,6 @@ def _progress_text(
         if total and total > count:
             text += f" · about {_duration((total - count) / rate)} left"
     return text
-
-
-def _fmt_dt(moment: datetime | None) -> str:
-    return (
-        "-"
-        if moment is None
-        else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    )
-
-
-def _share(part: float, whole: float) -> float:
-    return part / whole if whole else 0.0
-
-
-def _count(value: int | None) -> str:
-    return "-" if value is None else f"{value:,}"
 
 
 _COLLECTION_KINDS = {"VECTORSEARCH": "vector search", "SEARCH": "search", "TIMESERIES": "time series"}
@@ -3728,10 +3572,6 @@ def _filter_rows(info: IndexInfo) -> list[list[str]]:
             example, kind = "'<exact value>'", f"{kind} (+ keyword)"
         rows.append([path, kind, f"where={{{path!r}: {example}}}"])
     return rows
-
-
-class _Hint(ValueError):
-    """A question back to the user (e.g. which index), shown as a plain note rather than an error."""
 
 
 def _friendly_errors(method: Callable) -> Callable:

@@ -28,40 +28,27 @@ Every example uses a bucket called `acme-ml-data`; use your own bucket names. Th
 
 ## Set up in SageMaker { #setup }
 
-The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AWS calls all come from it. So it needs both files.
+The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AWS calls all come from it, and both come in the package.
 
 <div class="steps" markdown>
 
-1. **Get `s3.py` and `s3_explorer.py` next to your notebook**, or install the package. Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell (`[all]` adds what the previews use: pandas, pyarrow, the PDF and Excel readers):
 
-    - **Install it with pip**, in a notebook cell, then import from `aws_analyzer` (step 2). Both files come with it:
+    ```bash
+    %pip install "aws-analyzer[all]"
+    ```
 
-        ```bash
-        %pip install "aws-analyzer[all]"
-        ```
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-    - **Upload them.** Download [s3.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py) and [s3_explorer.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3_explorer.py), then drag both into JupyterLab's file browser, in the same folder as your notebook.
-
-    - **Fetch them from a cell**, if the notebook can reach the internet:
-
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3.py
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/s3_explorer.py
-        ```
-
-    - **Copy them from S3**, for a notebook with no internet access (VPC-only mode). Upload them to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/s3.py .
-        !aws s3 cp s3://acme-ml-data/tools/s3_explorer.py .
-        ```
-
-    - Or paste `s3.py` into a notebook cell and run it, then `s3_explorer.py` into the next one.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Open the explorer.** It uses the notebook's IAM execution role, so there's nothing to configure.
 
     ```python
-    from s3_explorer import S3Explorer        # installed with pip: from aws_analyzer import S3Explorer
+    from aws_analyzer import S3Explorer
 
     S3Explorer()                                           # start from your buckets
     S3Explorer("s3://acme-ml-data/curated/")               # or in a folder; S3 console links work too
@@ -71,7 +58,7 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
 3. **Optional:** another AWS profile or region, a fixed height, or bigger zips:
 
     ```python
-    from s3 import S3Analyzer
+    from aws_analyzer import S3Analyzer
 
     S3Explorer("s3://acme-ml-data/", profile="dev")   # another AWS profile (or region=)
     S3Explorer(core=S3Analyzer(region="eu-west-1"))   # an S3Analyzer or S3View you already have
@@ -268,7 +255,7 @@ Outside Jupyter, without `ipywidgets`, or with `S3Explorer(mode="text")`, the ex
 `S3Navigator` is the explorer without the UI: the same listing, history and cache, returning data instead of drawing it. A folder it can't list has the reason in `folder.error` instead of raising.
 
 ```python
-from s3_explorer import S3Navigator
+from aws_analyzer import S3Navigator
 
 nav = S3Navigator()                                  # or S3Navigator(S3Analyzer(profile="dev"))
 folder = nav.open("s3://acme-ml-data/curated/")      # Folder: entries, more, error
@@ -284,7 +271,7 @@ nav.back(); nav.forward(); nav.up(); nav.refresh()
 The functions behind it don't call AWS, so they work on anything:
 
 ```python
-from s3_explorer import parse_location, breadcrumbs, filter_entries, folder_stats
+from aws_analyzer.s3_explorer import parse_location, breadcrumbs, filter_entries, folder_stats
 
 parse_location("https://us-east-1.console.aws.amazon.com/s3/buckets/acme-ml-data?prefix=curated/features/")
 # ('acme-ml-data', 'curated/features/')
@@ -331,10 +318,6 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 ??? question "The cell shows a table instead of the explorer, or “Error displaying widget”"
 
     Clicking needs ipywidgets in the kernel and its extension in JupyterLab. On SageMaker both are there. Elsewhere, run `%pip install ipywidgets`, restart the kernel and reload the browser tab. An explorer from before the notebook was reopened can't come back (it lived in the old kernel): run its cell again.
-
-??? question "“s3_explorer.py builds on s3.py, which isn't here”"
-
-    Put `s3.py` in the same folder as the notebook (or paste it into a cell above and run that cell), then run the explorer's cell again. Installed with pip, both come together: `from aws_analyzer import S3Explorer`.
 
 ??? question "“Your AWS role isn't allowed to list this”"
 

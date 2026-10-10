@@ -4,18 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Copy-paste AWS analysis utilities for SageMaker / Jupyter notebooks. Each service is **one self-contained file**
-in `src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
+AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
+(`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
+`src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
-region or all of them, and `explore()`, a window to click through them and read their logs run by run) that a user pastes
-into a notebook cell or uploads next to a notebook and `import`s. `sagemaker_env.py` isn't `sagemaker.py` because that
-would hide the SageMaker Python SDK, and `lambda_functions.py` isn't `lambda.py` because `lambda` is a Python keyword
-(`import lambda` is a syntax error). The same
-files are also on PyPI as `aws-analyzer` (`from aws_analyzer import S3View`; see "The PyPI package" below), but the
-build only copies them into the wheel unchanged, so they stay standalone and nothing in them depends on it.
-The one exception to "one file" is `s3_explorer.py`, a **companion** to `s3.py`: a clickable file explorer (ipywidgets)
-that imports `s3.py` for its previews, formatting and AWS calls, so users put both files next to the notebook.
+region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
+all share lives once in `src/aws_analyzer/_kit/` (see "Hard constraints"). `sagemaker_env.py` isn't `sagemaker.py` so it's
+never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
+would have hidden it), and `lambda_functions.py` isn't `lambda.py` because `lambda` is a Python keyword
+(`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
+next to a notebook; that's gone, and the package is the one way in.
+`s3_explorer.py` is a **companion** to `s3.py`: a clickable file explorer (ipywidgets) that imports `s3` for its
+previews, formatting and AWS calls.
 
 ## Product goal: help the user decide what to do
 
@@ -65,29 +66,40 @@ python .claude/skills/check/snapshot.py run OUT [--root CHECKOUT]  # every repor
 python .claude/skills/check/snapshot.py compare BASE NEW           # what a refactor changed in them (see /check)
 ```
 
-CI (`.github/workflows/ci.yml`) also checks that each analyzer imports on its own with only boto3 installed, and
-its Package job builds the wheel, runs `twine check` and imports the installed package with only boto3
-(`.claude/skills/check/run.py` does both). To reproduce the first locally:
+CI (`.github/workflows/ci.yml`) also checks that each module of the package imports with only boto3 installed, each
+in a fresh interpreter, and its Package job builds the wheel, runs `twine check` and imports the installed package
+with only boto3 (`.claude/skills/check/run.py` does both, blocking every other package). To reproduce the first
+locally, in an environment with only boto3:
 
 ```bash
-for f in src/aws_analyzer/[!_]*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
+cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(basename "$f" .py)" && echo "ok: $f"; done
 ```
 
 ## Hard constraints
 
-- **No imports between analyzers and no shared module.** Each file must work alone in a notebook. Helpers that
-  every file needs (`human_size`, `human_money`, `_require`, `_in_notebook`, `_esc`, `_prose`, `_call`,
+- **No imports between analyzers; shared code lives in `_kit/`.** An analyzer imports only the standard library,
+  boto3 / botocore and `._kit` (and a companion its parent), so importing one loads no other
+  (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
+  (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
+  `_as_int`, `HOURS_PER_MONTH`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
+  (`_require`, `_in_notebook`) and `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`). Each analyzer
+  imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size` still works,
+  and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an analyzer, and it
+  follows the same import-time rule as they do. The rest of the shared helpers move into `_kit` phase by phase
+  (`.claude/plans/shared-code.md`); until then they are still duplicated in all seven analyzers (`_prose`, `_call`,
   `_signature`, the render blocks and `_render_html` / `_render_text` with their small helpers, `_friendly_errors`,
-  `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text` / `_duration`, `View.help`) are
-  deliberately duplicated in all seven analyzers. Only the CSS root class, `_BADGE` and the View's `_GROUPS` /
-  `_START` differ between the copies. When you fix or change one of them, check the copies in the others.
+  `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text`, `View.help`). Only the CSS root
+  class, `_BADGE` and the View's `_GROUPS` / `_START` differ between the copies. When you fix or change one of
+  them, check the copies in the others. A test that patches a helper patches it where it's looked up: on the
+  analyzer module for a call the analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit`
+  module for a call `_kit` makes.
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
   and findings are laid out as described under "How the View layer works" (asked for S3 first). Until that's
   ported (`/sync-helpers`), `drift.py` lists `_CSS`, `_Table`, `_prose`, `_findings_html` and `_render_html` /
   `_render_text` for `s3.py`; don't "fix" that drift by reverting `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
-  (lazily, inside `_s3_module()`, so it still imports alone), reuses its helpers instead of copying them, and is
-  left out of `drift.py`. Nothing imports a companion.
+  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`.
+  Nothing imports a companion.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image",
@@ -231,8 +243,8 @@ How the View layer works:
   keeping each character's offset in the answer, because citations are offsets into the raw text. Raw HTML stays
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
-- `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but standalone (not a companion): it
-  copies its helpers like the other analyzers. `chat()` (module level) builds a `BedrockChatView` and calls
+- `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but not a companion: like the other
+  analyzers, it imports `_kit` and has its own copies of the helpers that aren't there yet. `chat()` (module level) builds a `BedrockChatView` and calls
   `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
   `column-reverse` box so it stays scrolled to the newest, and the side tabs).
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
@@ -307,7 +319,7 @@ How the View layer works:
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
 - `bedrock_kb`'s explorer window, `KBExplorer` (after the View, with `explore()`; `BedrockKBView.explore()` keeps it in
-  `view.explorer`), is the third interactive UI, standalone like `bedrock_chat` and built the same way: ipywidgets
+  `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way: ipywidgets
   styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS` included once in its style widget, so `_html`
   strips it from each report), no JavaScript, full-row `Button`s under their faces (`_FileRow`, the knowledge base
   field `_Chooser` with its searchable list and `backdrop`), custom tab buttons over pages (`_EXPLORER_TABS`, icons from
@@ -331,7 +343,7 @@ How the View layer works:
   `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
   `_window_errors`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
 - `lambda_functions`' explorer window, `LambdaExplorer` (after the View, with `explore()`; `LambdaView.explore()` keeps it
-  in `view.explorer`), is the fourth interactive UI, standalone and built like `KBExplorer`: ipywidgets styled by
+  in `view.explorer`), is the fourth interactive UI, not a companion, and built like `KBExplorer`: ipywidgets styled by
   `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript, full-row `Button`s under
   their faces (`_Row`, which can carry a small action button such as the function list's Logs; `_RunRow`, whose button
   opens or folds the run's lines below it; the function field `_FunctionField` with its searchable list and `backdrop`),
@@ -474,8 +486,9 @@ does both, a page at a time). How the UI works:
   classes lazily through a module `__getattr__` (importing `aws_analyzer` loads no analyzer). A new analyzer needs
   its module name in `__init__.py`'s `_MODULES` (`tests/test_package.py` checks every module is listed) and its
   classes in `__all__`, `_EXPORTS` and the `TYPE_CHECKING` imports.
-- The only code that knows about the package is `s3_explorer._s3_module()`, which looks for `s3` next to itself
-  (`{__package__}.s3`) before `import s3`.
+- Every analyzer imports `._kit` relatively, so it runs only as part of the package. `s3_explorer._s3_module()`
+  looks for `s3` next to itself (`{__package__}.s3`) first; its `import s3` and `__main__` fallbacks date from the
+  standalone files.
 - The one dependency is `boto3>=1.35.72`, the first release whose service models have every AWS operation the
   analyzers call (Bedrock's `ListKnowledgeBaseDocuments`). A call to a newer operation means raising it; otherwise
   keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's

@@ -7,11 +7,11 @@ description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker
 
 # Chat with a Bedrock knowledge base, and see exactly what's sent
 
-One Python file and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer. Then ask a whole list of test questions with the setup you've built, or with every combination of the settings you're unsure of at once, see which setup does best, keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
+One install and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer. Then ask a whole list of test questions with the setup you've built, or with every combination of the settings you're unsure of at once, see which setup does best, keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 + ipywidgets</li>
+  <li>One install, boto3 + ipywidgets</li>
   <li>Every RetrieveAndGenerate field</li>
   <li>Answers stream as they're written</li>
   <li>Retrieval and answer, checked apart</li>
@@ -29,34 +29,23 @@ The examples use a knowledge base called `support-docs` holding support policies
 
 <div class="steps" markdown>
 
-1. **Get `bedrock_chat.py` next to your notebook**, or install the package. Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell (`[notebook]` adds ipywidgets for the window, which SageMaker already has):
 
-    - **Install it with pip**, in a notebook cell, then import from `aws_analyzer` (step 2):
+    ```bash
+    %pip install "aws-analyzer[notebook]"
+    ```
 
-        ```bash
-        %pip install "aws-analyzer[notebook]"
-        ```
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-    - **Upload it.** Download [bedrock_chat.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_chat.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
-
-    - **Fetch it from a cell**, if the notebook can reach the internet:
-
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/bedrock_chat.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/bedrock_chat.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Open the window.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
 
     ```python
-    from bedrock_chat import chat                  # installed with pip: from aws_analyzer import chat
+    from aws_analyzer import chat
 
     chat()                                         # pick the knowledge base and the model in the window
     chat("support-docs", model="sonnet")           # or start on these: a name, ID or ARN; a model ID or short name
@@ -326,7 +315,7 @@ A field Bedrock doesn't take is refused before anything is sent, with the fields
 The object `chat()` returns is a `BedrockChatView`. Its commands render reports under the cell (HTML in Jupyter, plain text in a terminal), share the window's settings and conversation, and an open window follows them.
 
 ```python
-from bedrock_chat import BedrockChatView
+from aws_analyzer import BedrockChatView
 
 ui = BedrockChatView(kb="support-docs", model="sonnet")
 ui.ask("How long do refunds take?")    # the answer with [1][2] citations, sources, findings, cost
@@ -384,7 +373,7 @@ batch.items[0].answer                 # its Answer (None when it failed: batch.i
 batch.items[0].found                  # the [n] the answer cites refund-policy.pdf as (None: not cited)
 batch.to_df()                         # one row per question; ui.batches holds every test run
 
-from bedrock_chat import sweep_setups
+from aws_analyzer.bedrock_chat import sweep_setups
 setups = sweep_setups({"n": [5, 10], "model": ["haiku", "sonnet"]})   # [{'n': 5, 'model': 'haiku'}, ...]
 sweep = core.sweep("support-docs", ["refund window? | refund-policy.pdf"], setups, {"n": 5})   # a Batch per setup
 sweep.ranked                          # [(Batch, RunScore)], best first: answered, grounded, hits, MRR, failed, cost
@@ -398,7 +387,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 Each answer shows an estimated cost, and the line under the box the conversation's total. RetrieveAndGenerate doesn't report tokens, so they're estimated from characters: the question, the prompt, and the passages retrieved (only the cited ones come back, so their average size stands in for the rest). The estimate adds the question's embedding and, with a reranker, the reranking. Prices are us-east-1 list prices (`MODEL_PRICES`, `GLOBAL_MODEL_PRICES` and `BEDROCK_PRICES`, the same tables as `bedrock_kb.py`); a model not in the table shows its cost as unknown. For exact token counts, use `bedrock_kb.py`'s `ask(engine="converse")`. A **Retrieve only** search calls no model, so it costs the question's embedding and, with a reranker, the reranking. A [test run](#test) costs what its questions would cost asked one by one; the Test tab shows an estimate before you run it (guessing about 300 tokens per passage and per answer), and the run's cards show its estimated cost after. A [sweep](#sweep) costs its setups' runs added up, 4 setups × 20 questions being 80 answers: it's estimated before anything is sent, and over $2 it isn't sent unless you allow it (`max_cost=`, or a second click in the window). With **Retrieve only**, a sweep costs only the questions' embeddings and any reranking.
 
 ```python
-from bedrock_chat import BedrockChatAnalyzer, BedrockChatView
+from aws_analyzer import BedrockChatAnalyzer, BedrockChatView
 
 ui = BedrockChatView(BedrockChatAnalyzer(model_prices={"claude-sonnet-5": (2.00, 10.00)}))   # $ per 1M tokens
 ui.app()

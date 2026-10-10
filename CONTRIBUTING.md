@@ -28,9 +28,12 @@ For the guide site: `pip install -r requirements-docs.txt`, then `mkdocs serve`.
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads
 just as well for people. The rules that matter most:
 
-- **One file per service.** Each file in [`src/aws_analyzer/`](src/aws_analyzer/) works on its own, pasted into a notebook or
-  copied next to one, so files never import each other. Helpers they all need (`human_size`, the render blocks,
-  `View.help`, ...) are copied into each file on purpose: when you change one, change the copies too.
+- **One module per service, sharing one kit.** Each service is one module in
+  [`src/aws_analyzer/`](src/aws_analyzer/), and services never import each other. Code they all need lives once in
+  [`src/aws_analyzer/_kit/`](src/aws_analyzer/_kit/) (`human_size`, `_require`, `_esc`, ...): import it from there,
+  never copy it (a check fails on a copy). Some helpers (the render blocks, `View.help`, ...) are still copied into
+  each module while they move to `_kit` ([the plan](.claude/plans/shared-code.md)): when you change one of those,
+  change the copies too.
 - **Only boto3 and the standard library at import time.** pandas, pyarrow, IPython and the file readers are
   imported inside the function that needs them, through `_require(...)`, so a missing package becomes a note that
   says what to install.
@@ -53,15 +56,15 @@ just as well for people. The rules that matter most:
 4. Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md), in the group it belongs to (Added, Changed,
    Fixed, Removed). Write it for someone upgrading: start with the command (`S3View.preview()`:) and say what they
    can do now. Leave out changes users never see (tests, CI, refactors).
-5. Check that each analyzer still imports alone with only boto3:
+5. Check that each module still imports with only boto3 (in an environment where only boto3 is installed):
 
    ```bash
-   for f in src/aws_analyzer/[!_]*.py; do d=$(mktemp -d); cp "$f" "$d/"; (cd "$d" && python -c "import $(basename "$f" .py)") && echo "ok: $f"; done
+   cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(basename "$f" .py)" && echo "ok: $f"; done
    ```
 
    With Claude Code, `/check` runs this and everything else CI runs, plus the project's own rule checks.
-6. Open a pull request. CI runs lint and the tests on Python 3.10 to 3.14, imports each analyzer on its own, builds
-   the package, and builds the guide site with `--strict` when `docs/` changes.
+6. Open a pull request. CI runs lint and the tests on Python 3.10 to 3.14, imports each module with only boto3,
+   builds the package, and builds the guide site with `--strict` when `docs/` changes.
 
 ## Releases
 

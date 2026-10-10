@@ -7,11 +7,11 @@ description: "How to see every AWS Lambda function, in one region or all of them
 
 # See every Lambda function from a SageMaker notebook
 
-One Python file. Drop it next to your notebook and see your Lambda functions, in one region or every one your account uses: what each one runs and when its runtime loses support, what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it fails, read from its own logs, without leaving Jupyter. Or open the explorer window and see it all by clicking, its logs run by run.
+Install it in your notebook and see your Lambda functions, in one region or every one your account uses: what each one runs and when its runtime loses support, what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it fails, read from its own logs, without leaving Jupyter. Or open the explorer window and see it all by clicking, its logs run by run.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: never invokes or changes a function</li>
   <li>Every region at once</li>
   <li>An explorer window: click, don't type</li>
@@ -25,28 +25,23 @@ Every example uses acme's functions: `orders-etl`, which loads each day's orders
 
 <div class="steps" markdown>
 
-1. **Get `lambda_functions.py` next to your notebook.** Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell:
 
-    - **Upload it.** Download [lambda_functions.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/lambda_functions.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    ```bash
+    %pip install aws-analyzer
+    ```
 
-    - **Fetch it from a cell**, if the notebook can reach the internet:
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/lambda_functions.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/lambda_functions.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Import it and create the view.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
 
     ```python
-    from lambda_functions import LambdaView
+    from aws_analyzer import LambdaView
 
     ui = LambdaView()   # uses the notebook's IAM role and region
     ui.help()           # every command, grouped by task; ui.help("errors") shows one in full
@@ -55,7 +50,7 @@ Every example uses acme's functions: `orders-etl`, which loads each day's orders
 3. **Optional:** another region or AWS profile, or plain-text output.
 
     ```python
-    from lambda_functions import LambdaAnalyzer, LambdaView
+    from aws_analyzer import LambdaAnalyzer, LambdaView
 
     ui = LambdaView(LambdaAnalyzer(region="eu-west-1", profile="dev"))
     ui = LambdaView(mode="text")    # plain text, e.g. in a terminal or a script
@@ -65,7 +60,7 @@ Every example uses acme's functions: `orders-etl`, which loads each day's orders
 
 !!! note ""
 
-    **Only boto3 is required.** The file isn't called `lambda.py` because `lambda` is a Python keyword, so `import lambda` can't work. Installed with pip, it's `from aws_analyzer import LambdaView`.
+    **Only boto3 is required.** The module isn't called `lambda` because that's a Python keyword: `from aws_analyzer import lambda` can't work, so it's `aws_analyzer.lambda_functions`.
 
 !!! note ""
 
@@ -95,7 +90,7 @@ ui.explore()                                # all of it in a window, by clicking
 Rather click than type? `explore()` opens a window on your functions that you use by clicking, with nothing to type but a search. Every function in the region is listed with how it's doing. Click one to see what's wrong with it, what calls it and where its results go, and, a click away, its logs run by run, its errors grouped by cause, its run times, the code in its package and every setting. Like the commands, it only reads: where a change would help, it shows the command to run.
 
 ```python
-from lambda_functions import explore     # with pip: from aws_analyzer import LambdaExplorer
+from aws_analyzer.lambda_functions import explore
 
 explore()                                # every function in the notebook's region
 explore("orders-etl")                    # straight to one function: a name, an ARN or a console link
@@ -362,7 +357,7 @@ lam.code("orders-etl").files                      # CodeFile: path, size, compre
 The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
 
 ```python
-from lambda_functions import parse_report, runtime_status, suggest_memory
+from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory
 
 runtime_status("python3.9")                       # RuntimeStatus: state 'deprecated', upgrade 'python3.14'
 parse_report(report_line).max_memory              # a REPORT line from a log export

@@ -1,8 +1,9 @@
 # The PyPI package: `pip install aws-analyzer`, then `from aws_analyzer import S3View`.
 #
-# The analyzers are the modules of the aws_analyzer package, one file each in src/aws_analyzer/ (s3.py, ...), next to
-# __init__.py, which only re-exports the Analyzer and View classes. The wheel ships that folder as it is. Nothing
-# here is needed to run the tests (tests/conftest.py puts src/ on sys.path).
+# The analyzers are the modules of the aws_analyzer package, one file each in src/aws_analyzer/ (s3.py, ...), with
+# the code they share in src/aws_analyzer/_kit/ and __init__.py, which only re-exports the Analyzer and View classes.
+# The wheel ships that folder as it is. Nothing here is needed to run the tests (tests/conftest.py puts src/ on
+# sys.path).
 #
 #   python -m build                     # dist/aws_analyzer-<version>.tar.gz and -py3-none-any.whl
 #   twine check --strict dist/*         # the metadata, and that the README renders on PyPI

@@ -1,16 +1,16 @@
 ---
-description: "Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, an explorer and a chat window for a knowledge base, and an explorer for Lambda functions and their logs."
+description: "Guides for aws-analyzer: one install that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, an explorer and a chat window for a knowledge base, and an explorer for Lambda functions and their logs."
 hide:
   - toc
 ---
 
 # Understand your AWS data from a SageMaker notebook
 
-One Python file per AWS service. Drop it next to your notebook and get readable reports: what's there, what it costs, and what to do next, without leaving Jupyter.
+Install it in your notebook and get readable reports on each AWS service: what's there, what it costs, and what to do next, without leaving Jupyter.
 { .lede }
 
 <ul class="pills">
-  <li>One file per service, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: never changes your data</li>
   <li>Plain text outside Jupyter</li>
 </ul>
@@ -139,11 +139,10 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
 ## Every service works the same way { #pattern }
 
-The files don't depend on each other, so copy only the ones you need. Each guide shows how to get the file into SageMaker: upload it, fetch it from a cell, or copy it from S3 when the notebook has no internet access.
+`%pip install aws-analyzer` gives you every service, and only needs boto3, which SageMaker already has. Each guide shows how to install it, from a bucket too when the notebook has no internet access.
 
 ```python
-from s3 import S3View      # or DynamoDBView from dynamodb, BedrockKBView from bedrock_kb, SageMakerView from sagemaker_env,
-                           # OpenSearchView from opensearch, LambdaView from lambda_functions
+from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView
 
 ui = S3View()              # uses the notebook's IAM role; nothing to configure
 ui.help()                  # every command, grouped by task; ui.help("name") shows one in full

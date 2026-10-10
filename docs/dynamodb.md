@@ -7,11 +7,11 @@ description: "How to browse, query and understand Amazon DynamoDB tables from a 
 
 # Explore your DynamoDB tables from a SageMaker notebook
 
-One Python file. Drop it next to your notebook and read your tables the easy way: items as plain tables, one item with every nested field laid out, what attributes the items actually hold, and what each read costs, without leaving Jupyter.
+Install it in your notebook and read your tables the easy way: items as plain tables, one item with every nested field laid out, what attributes the items actually hold, and what each read costs, without leaving Jupyter.
 { .lede }
 
 <ul class="pills">
-  <li>One file, boto3 only</li>
+  <li>One install, boto3 only</li>
   <li>Read-only: never writes to a table</li>
   <li>Scans stop early by default</li>
   <li>Plain text outside Jupyter</li>
@@ -24,28 +24,23 @@ Every example uses a table called `acme-app`, a single-table design that keeps c
 
 <div class="steps" markdown>
 
-1. **Get `dynamodb.py` next to your notebook.** Pick whichever works in your environment:
+1. **Install the package**, in a notebook cell:
 
-    - **Upload it.** Download [dynamodb.py](https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/dynamodb.py), then drag it into JupyterLab's file browser, in the same folder as your notebook.
+    ```bash
+    %pip install aws-analyzer
+    ```
 
-    - **Fetch it from a cell**, if the notebook can reach the internet:
+    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
-        ```bash
-        !curl -sO https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/main/src/aws_analyzer/dynamodb.py
-        ```
-
-    - **Copy it from S3**, for a notebook with no internet access (VPC-only mode). Upload it to a bucket once, then:
-
-        ```bash
-        !aws s3 cp s3://acme-ml-data/tools/dynamodb.py .
-        ```
-
-    - Or paste the whole file into a notebook cell and run it.
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
 
 2. **Import it and create the view.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
 
     ```python
-    from dynamodb import DynamoDBView
+    from aws_analyzer import DynamoDBView
 
     ui = DynamoDBView()   # uses the notebook's IAM role and region
     ui.help()             # every command, grouped by task; ui.help("scan") shows one in full
@@ -54,7 +49,7 @@ Every example uses a table called `acme-app`, a single-table design that keeps c
 3. **Optional:** another region or AWS profile, plain-text output, or longer tables. Tables are regional, so if `tables()` comes back empty, check the region first.
 
     ```python
-    from dynamodb import DynamoDBAnalyzer, DynamoDBView
+    from aws_analyzer import DynamoDBAnalyzer, DynamoDBView
 
     ui = DynamoDBView(DynamoDBAnalyzer(region="eu-west-1", profile="dev"))
     ui = DynamoDBView(mode="text")          # plain text, e.g. in a terminal or a script
@@ -289,8 +284,8 @@ for item in ddb.iter_items("acme-app", limit=None):         # stream a full scan
 The analysis functions don't call AWS, so they also work on items you already have, for example a [DynamoDB export to S3](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport.HowItWorks.html). Read the export with `s3.py` and profile it without touching the table:
 
 ```python
-from dynamodb import from_dynamo_item, items_to_df, profile_items
-from s3 import S3Analyzer
+from aws_analyzer.dynamodb import from_dynamo_item, items_to_df, profile_items
+from aws_analyzer import S3Analyzer
 
 rows = S3Analyzer().read_jsonl("s3://acme-ml-data/exports/AWSDynamoDB/01234-abcd/data/part.json.gz")
 items = [from_dynamo_item(row["Item"]) for row in rows]
