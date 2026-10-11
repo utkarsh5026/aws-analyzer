@@ -1,11 +1,12 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
 The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, the render blocks and the
-renderer, ...), and are moving the rest there phase by phase (.claude/plans/shared-code.md). Until then each
-src/aws_analyzer/<service>.py still carries its own copy of the other shared helpers (_friendly_errors,
-View._progress, View.help, ...). This compares every top-level definition, and every private View / Analyzer
-method, that two or more analyzers define under the same name, and every name an analyzer defines that _kit has
-too: S3's own renderer (_Table, _prose, _findings_html, _table_html, _render_text), which stays until Phase 6.
+renderer, and since Phase 4 the base View and Analyzer: _show, _progress, help, _friendly_errors, ...), and are
+moving the rest there phase by phase (.claude/plans/shared-code.md): what bedrock_kb.py and bedrock_chat.py share
+(Phase 5) and the explorer windows' parts (Phase 7) are still copied. This compares every top-level definition, and
+every private View / Analyzer method, that two or more analyzers define under the same name, and every name an
+analyzer defines that _kit has too: S3's own renderer (_Table, _prose, _findings_html, _table_html, _render_text),
+which stays until Phase 6.
 
 Service names are normalized first (S3View / DynamoDBView -> <View>, S3_PRICES -> <PRICES>, the CSS root
 class -> <css>), so only real differences are reported. A difference in docstrings or comments only is
@@ -33,11 +34,10 @@ KIT = ANALYZERS / "_kit"
 
 # Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
 COMPANIONS = {"s3_explorer"}
-# The helpers CLAUDE.md lists as still duplicated. Every analyzer should have all of them, except those that have
-# moved to _kit (every analyzer imports those instead). _render_html is each service's own (a call to _kit's
-# _report_html with its stylesheet, root class and badge, or S3's renderer).
-EXPECTED = ["_render_html", "_friendly_errors", "View._progress", "_progress_bar_class", "_progress_bar",
-            "_progress_text", "View.help", "View._show"]
+# What every analyzer defines for itself, except what has moved to _kit (every analyzer imports that instead):
+# _render_html, a call to _kit's _report_html with its stylesheet, root class and badge (or S3's renderer), which
+# its View's _render_html attribute points at.
+EXPECTED = ["_render_html"]
 
 
 def _segment(lines: list[str], node: ast.AST) -> str:
