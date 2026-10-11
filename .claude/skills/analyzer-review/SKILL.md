@@ -75,6 +75,8 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
 - **IPython 8 and 9.** Only `IPython.display` and `get_ipython` are used. Flag anything else.
 - **Read-only.** Look beyond API calls too: no local side effects either (no files written outside a path the
   user passed, and no environment changes).
+- **Blocks.** A new block type registers both drawings, `@_draws(_Block, "html")` and `@_draws(_Block, "text")`,
+  and shows in a text-mode test: one without a text drawing becomes a "Part of this report isn't shown" note.
 - **Tests.** Pure logic is tested without moto. There's a text-mode UI test, and a failure-path test where one
   exists. Tests don't depend on the real clock or on network access.
 - **Docs.** Check the README command table, "Getting the data", the pure-function list and the IAM paragraph;
