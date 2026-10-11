@@ -91,8 +91,6 @@ import dataclasses
 import difflib
 import functools
 import html
-import importlib
-import inspect
 import io
 import itertools
 import json
@@ -101,7 +99,6 @@ import math
 import queue
 import re
 import shlex
-import sys
 import textwrap
 import threading
 import time
@@ -109,29 +106,28 @@ import tokenize
 import uuid
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import quote, unquote
 
-import boto3
 import botocore
 import botocore.session
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 from botocore.validate import ParamValidator
 
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _in_notebook, _require
+from ._kit.analyzer import _BaseAnalyzer
+from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Title, _Tone, _draws
+from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
-from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money, human_size
+from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money
 from ._kit.render import (
-    _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _render_text, _report_html,
-    _signature, _text_lines,
+    _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _report_html,
+    _text_lines,
 )
 from ._kit.text import _clip, _esc
+from ._kit.view import _BaseView, _friendly_errors, _which_prices
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -3471,7 +3467,7 @@ def _question_text(question: Any) -> str:
     return text
 
 
-class BedrockChatAnalyzer:
+class BedrockChatAnalyzer(_BaseAnalyzer):
     """Pure logic for chatting with a Bedrock knowledge base: builds RetrieveAndGenerate requests from settings,
     sends them and returns an Answer, or only the search behind one (Retrieve, retrieve()). Nothing is printed, and
     nothing in AWS is changed.
@@ -3482,6 +3478,8 @@ class BedrockChatAnalyzer:
     when none is given (DEFAULT_MODEL otherwise). `clients` pre-fills boto3 clients by service name
     ('bedrock-agent', 'bedrock-agent-runtime', 'bedrock'), e.g. to use stubbed ones.
     """
+
+    _LIST_PRICES = BEDROCK_PRICES
 
     def __init__(
         self,
@@ -3495,13 +3493,11 @@ class BedrockChatAnalyzer:
         model_prices: dict[str, tuple[float, float]] | None = None,
         default_model: str | None = None,
     ):
-        self.session = session or boto3.Session(profile_name=profile, region_name=region)
-        self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
+        super().__init__(session, region=region, profile=profile, prices=prices)
         self._clients: dict[str, Any] = dict(clients or {})
         self._lock = threading.RLock()  # clients are made once, even when the Test tab asks from threads
         if client is not None:
             self._clients["bedrock-agent"] = client
-        self.prices = {**BEDROCK_PRICES, **(prices or {})}
         self.model_prices = {**MODEL_PRICES, **(model_prices or {})}
         self.default_model = default_model  # what model=None means (None: DEFAULT_MODEL)
         self._models: list[ModelInfo] | None = None
@@ -3527,19 +3523,6 @@ class BedrockChatAnalyzer:
                     "or set AWS_DEFAULT_REGION."
                 ) from None
         return self._clients["bedrock-agent"]
-
-    @property
-    def region(self) -> str:
-        return self.client.meta.region_name
-
-    def _paginate(
-        self, operation: str, key: str, **params: Any
-    ) -> list[dict[str, Any]]:
-        return [
-            item
-            for page in self.client.get_paginator(operation).paginate(**params)
-            for item in page.get(key, [])
-        ]
 
     def _kb_summaries(self) -> list[dict[str, Any]]:
         summaries = self._paginate("list_knowledge_bases", "knowledgeBaseSummaries")
@@ -3720,13 +3703,6 @@ class BedrockChatAnalyzer:
                          "full s3:// paths instead.")
             raise ValueError(text)
         return uris
-
-    def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
-        if service not in self._clients:
-            with self._lock:  # sessions aren't thread-safe, and the window reads from threads
-                if service not in self._clients:
-                    self._clients[service] = make()
-        return self._clients[service]
 
     def _runtime_client(self) -> Any:
         """bedrock-agent-runtime: Retrieve and RetrieveAndGenerate."""
@@ -5684,69 +5660,6 @@ def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
     return out
 
 
-def _progress_bar_class(notebook: bool) -> Any:
-    """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
-    try:
-        if notebook:
-            importlib.import_module("ipywidgets")
-            return importlib.import_module("tqdm.notebook").tqdm
-        return importlib.import_module("tqdm").tqdm
-    except Exception:  # not installed, or too old to import cleanly: the plain progress line takes over
-        return None
-
-
-def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
-    """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
-    options: dict[str, Any] = {
-        "desc": label,
-        "total": total,
-        "leave": False,
-        "delay": 0.5,
-        "mininterval": 0.25,
-        "dynamic_ncols": True,
-        "disable": False,
-        "unit_scale": True,
-    }
-    if unit == "B":
-        options.update(unit="B", unit_divisor=1024)
-    else:
-        known = total is not None
-        counts = "{percentage:3.0f}%|{bar}| {n:,}/{total:,}" if known else "{n:,}"
-        timing = (
-            "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
-        )
-        options.update(
-            unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]"
-        )
-    return bar_class(**options)
-
-
-def _progress_text(
-    label: str, unit: str, count: int, total: int | None, elapsed: float
-) -> str:
-    """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
-    amount = human_size if unit == "B" else (lambda n: f"{n:,}")
-    text = f"{label}... {amount(count)}"
-    if total:
-        text += f" of {amount(total)}"
-    text += "" if unit == "B" else f" {unit}"
-    if total:
-        text += f" ({min(count / total, 1):.0%})"
-    text += f" · {_duration(elapsed)}"
-    if elapsed >= 1 and count:
-        rate = count / elapsed
-        text += (
-            f" · {human_size(rate)}/s"
-            if unit == "B"
-            else f" · {rate:,.0f}/s"
-            if rate >= 10
-            else f" · {rate:.1f}/s"
-        )
-        if total and total > count:
-            text += f" · about {_duration((total - count) / rate)} left"
-    return text
-
-
 def _per_million(price: float | None) -> str:
     """0.8 -> '$0.80', 0.035 -> '$0.035' (a price per million tokens); None -> '-'."""
     if price is None:
@@ -5778,36 +5691,6 @@ def _cell_number() -> Any:
         return None
     shell = get_ipython()
     return getattr(shell, "execution_count", None) if shell is not None else None
-
-
-def _friendly_errors(method: Callable) -> Callable:
-    """Show AWS / input errors as a readable note instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: BedrockChatView, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except ClientError as exc:
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            self._show(
-                [
-                    _Note(
-                        f"{code}: {self._explain(code, message)}  [{method.__name__}]",
-                        "warn",
-                    )
-                ]
-            )
-        except _Hint as exc:
-            self._show([_Note(str(exc))])
-        except ImportError as exc:  # a missing optional package: the message says what to pip install
-            self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
-        except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
-            self._show(
-                [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
-            )
-
-    return wrapper
 
 
 def _kind_text(f: Field) -> str:
@@ -8086,7 +7969,7 @@ class _ChatApp:
                                         f'<pre class="code hl"{_SELECT}>{body}</pre>'))
 
 
-class BedrockChatView:
+class BedrockChatView(_BaseView):
     """The chat window, and reports, over BedrockChatAnalyzer. Each command renders something and returns nothing:
     the conversation's answers are in `view.answers`, the settings in `view.values`, and the analyzer is
     `view.core`.
@@ -8108,7 +7991,7 @@ class BedrockChatView:
     with the time), 'plain' (always that line) or 'off'.
     """
 
-    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
+    _render_html = staticmethod(_render_html)  # its look: the stylesheet, root class and badge
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💬 Chat": ("app", "ask", "retrieve", "new_chat", "transcript", "last"),
         "🧪 Test a list of questions": ("ask_all", "sweep", "results"),
@@ -8143,11 +8026,8 @@ class BedrockChatView:
         max_rows: int = 50,
         progress: str = "auto",
     ):
-        if mode not in ("auto", "html", "text"):
-            raise ValueError("mode must be 'auto', 'html' or 'text'")
-        if progress not in ("auto", "plain", "off"):
-            raise ValueError("progress must be 'auto', 'plain' or 'off'")
-        self.core = core or BedrockChatAnalyzer()
+        super().__init__(mode=mode, max_rows=max_rows, progress=progress)
+        self.core: BedrockChatAnalyzer = core or BedrockChatAnalyzer()
         self.kb = kb  # what kb= named; its ID once resolved
         self.data_source: Any = data_source  # what data_source= named; {ID: name} once resolved ({} = all of them)
         self.picked_files: Any = files  # what files= named; their s3:// paths once resolved ([] = all of them)
@@ -8155,9 +8035,6 @@ class BedrockChatView:
         self.stream = stream
         self.height = height  # the window's conversation (None: it fills the browser window)
         self.retrieve_only = bool(retrieve_only)  # the window's Send only searches; request() shows that request
-        self.use_html = _in_notebook() if mode == "auto" else mode == "html"
-        self.max_rows = max_rows
-        self.progress = progress
         self.values: dict[str, Any] = normalize_settings(
             DEFAULT_SETTINGS if settings is None else settings, self.core.schema()
         )
@@ -8188,185 +8065,6 @@ class BedrockChatView:
             print(repr(self))
 
     # ------------------------------------------------------------------ plumbing
-
-    def _show(self, blocks: list[Any]) -> None:
-        if self.use_html:
-            try:
-                from IPython.display import HTML, display
-            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
-                self.use_html = False
-                note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
-                blocks = [*blocks, _Note(note, "warn")]
-            else:
-                display(HTML(_render_html(blocks, self.max_rows)))
-                return
-        print(_render_text(blocks, self.max_rows))
-
-    @contextmanager
-    def _progress(
-        self, label: str = "Reading", unit: str = "items read"
-    ) -> Generator[Callable[..., None], None, None]:
-        """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
-        and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
-        Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
-        at a time: when a nested _progress starts showing, the outer one's bar goes away."""
-        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
-        bar_class = [
-            _progress_bar_class(notebook)
-            if self.progress == "auto"
-            else None
-        ]
-        bar: list[Any] = [None]
-        handle: list[Any] = [None]
-        started: list[Any] = [
-            time.monotonic(),
-            None,
-        ]  # when the current total started, and that total
-        shown, width, stopped = [0.0], [0], [False]
-
-        def close_bar() -> None:
-            if bar[0] is not None:
-                if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
-                    bar[0].total = bar[
-                        0
-                    ].n  # done early (a file it couldn't read): no red "failed" widget
-                bar[0].close()
-                bar[0] = None
-
-        def clear() -> None:
-            close_bar()
-            if handle[0] is not None:
-                from IPython.display import HTML
-
-                handle[0].update(HTML(""))
-            elif width[0]:
-                print("\r" + " " * width[0] + "\r", end="", file=sys.stderr, flush=True)
-                width[0] = 0
-
-        def take_over() -> None:
-            owner = self._progress_owner
-            if owner is not clear:
-                if owner is not None:
-                    owner()
-                self._progress_owner = clear
-
-        def tick(count: int, total: int | None = None) -> None:
-            if self.progress == "off":
-                return
-            if bar_class[0] is not None:
-                try:
-                    if bar[0] is not None and total != bar[0].total:
-                        close_bar()
-                    if bar[0] is None:
-                        take_over()
-                        bar[0] = _progress_bar(bar_class[0], label, unit, total)
-                    bar[0].update(count - bar[0].n)
-                    return
-                except Exception:  # an old tqdm or a broken widget front end: use the plain line instead
-                    bar_class[0] = None
-            now = time.monotonic()
-            if total != started[1]:
-                started[:] = [now, total]
-            if now - started[0] < 0.5 or now - shown[0] < 0.5:
-                return
-            shown[0] = now
-            take_over()
-            text = _progress_text(label, unit, count, total, now - started[0])
-            if notebook:
-                from IPython.display import HTML, display
-
-                if handle[0] is None:
-                    handle[0] = display(HTML(""), display_id=True)
-                if handle[0] is not None:  # display() returns None outside IPython
-                    handle[0].update(
-                        HTML(f'<div style="opacity:.6">{_esc(text)}</div>')
-                    )
-            else:
-                width[0] = max(width[0], len(text))
-                print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
-
-        try:
-            yield tick
-        except BaseException:
-            stopped[0] = True  # interrupted: a tqdm widget stays, red, where it stopped
-            raise
-        finally:
-            clear()
-            if self._progress_owner is clear:
-                self._progress_owner = None
-
-    def help(self, command: Any = None) -> None:
-        """Every command, grouped by task; help('name') shows one command in full."""
-        view = type(self).__name__
-        commands = {
-            name: inspect.unwrap(member)
-            for name, member in vars(type(self)).items()
-            if not name.startswith("_") and callable(member)
-        }
-
-        def about(name: str) -> str:  # the docstring's first paragraph, on one line
-            return " ".join(
-                (inspect.getdoc(commands[name]) or "").split("\n\n")[0].split()
-            )
-
-        if command is not None:
-            name = getattr(command, "__name__", str(command))
-            if name not in commands:
-                close = difflib.get_close_matches(name, list(commands), n=3)
-                hint = (
-                    f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
-                )
-                self._show(
-                    [
-                        _Note(
-                            f"{view} has no command {name!r}.{hint} help() lists them all.",
-                            "warn",
-                        )
-                    ]
-                )
-                return
-            self._show(
-                [
-                    _Title(
-                        f"{name}{_signature(commands[name])}",
-                        f"{view} command · help() lists them all",
-                    ),
-                    _Text(
-                        inspect.getdoc(commands[name]) or "(no description)", wrap=True
-                    ),
-                ]
-            )
-            return
-        grouped = {name for names in self._GROUPS.values() for name in names}
-        groups = {
-            **self._GROUPS,
-            "Other": tuple(name for name in commands if name not in grouped),
-        }
-        blocks: list[Any] = [
-            _Title(
-                f"{view} commands",
-                "help('name') shows one in full · the data behind each report "
-                f"comes from .core ({type(self.core).__name__})",
-            ),
-            _Next(list(self._START), title="Start here"),
-        ]
-        for group, names in groups.items():
-            rows = [
-                [f"{name}{_signature(commands[name])}", about(name)]
-                for name in names
-                if name in commands
-            ]
-            if rows:
-                blocks.append(
-                    _Table(
-                        ["Command", "What it shows"],
-                        rows,
-                        title=group,
-                        max_rows=0,
-                        code_cols=(0,),
-                    )
-                )
-        self._show(blocks)
 
     def _display(self, widget: Any) -> None:
         from IPython.display import display
@@ -8440,12 +8138,8 @@ class BedrockChatView:
         return names[ds_id], count
 
     def _price_basis(self, models: bool = False) -> str:
-        default = (
-            self.core.model_prices == MODEL_PRICES
-            if models
-            else self.core.prices == BEDROCK_PRICES
-        )
-        return "us-east-1 list prices" if default else "your prices"
+        """The prices a cost was worked out with; models=True: the models' prices (model_prices=)."""
+        return _which_prices(self.core.model_prices, MODEL_PRICES) if models else super()._price_basis()
 
     def _region(self) -> str:
         try:
