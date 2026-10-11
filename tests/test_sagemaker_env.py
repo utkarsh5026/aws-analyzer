@@ -9,6 +9,7 @@ from botocore.stub import Stubber
 from moto import mock_aws
 
 from aws_analyzer import sagemaker_env as smmod
+from aws_analyzer._kit.text import _pad, _width
 from aws_analyzer.sagemaker_env import (
     GB,
     KB,
@@ -957,12 +958,12 @@ def test_render_html_and_badge():
 
 
 def test_text_tables_line_up_around_emoji():
-    assert [smmod._width(s) for s in ("abc", "📓 a", "🏋️ a", "日本", "é")] == [3, 4, 4, 4, 1]
-    assert smmod._pad("📓 a", 6) == "📓 a  " and smmod._pad("12", 4, right=True) == "  12"
+    assert [_width(s) for s in ("abc", "📓 a", "🏋️ a", "日本", "é")] == [3, 4, 4, 4, 1]
+    assert _pad("📓 a", 6) == "📓 a  " and _pad("12", 4, right=True) == "  12"
     table = smmod._Table(["Kind", "Name"], [["📓 notebook instance", "a"], ["🏋️ training job", "b"], ["endpoint", "c"]])
     lines = [line for line in smmod._render_text([table], 50).splitlines()[-5:] if not line.startswith("-")]
     assert len(lines) == 4  # the header and three rows
-    assert len({smmod._width(line[: line.rindex(" ") + 1]) for line in lines}) == 1  # 'Name' and each name line up
+    assert len({_width(line[: line.rindex(" ") + 1]) for line in lines}) == 1  # 'Name' and each name line up
 
 
 def test_ui_without_ipython_or_an_optional_package(tmp_path, capsys, monkeypatch):
