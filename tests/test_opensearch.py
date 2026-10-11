@@ -13,6 +13,7 @@ from fake_opensearch import FakeCluster, FakeIndex, score, topic_vector, unit
 from moto import mock_aws
 
 from aws_analyzer import opensearch as osmod
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.opensearch import (
     GB,
     INSTANCE_TYPES,
@@ -1137,8 +1138,7 @@ def test_help_lists_every_command(ui, capsys):
     for name in ("overview", "use", "indexes", "index_info", "sample", "search"):
         assert f"{name}(" in out
     assert "Other" not in out
-    commands = {name for name, member in vars(OpenSearchView).items() if not name.startswith("_") and callable(member)}
-    assert commands == {name for names in OpenSearchView._GROUPS.values() for name in names}
+    assert set(_commands(OpenSearchView)) == {name for names in OpenSearchView._GROUPS.values() for name in names}
     assert "where=" in run(capsys, ui.help, "search")
     assert "Did you mean 'search'" in run(capsys, ui.help, "serch")
 
