@@ -86,10 +86,15 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
+from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Text, _Title, _Tone
 from ._kit.deps import _in_notebook, _require
 from ._kit.errors import _error_code
 from ._kit.fmt import (
     _band, _duration, _fmt_dt, _plural, _share, _utcnow, human_age, human_money, human_size, parse_size, parse_time,
+)
+from ._kit.render import (
+    _CALL_RE, _MARKS, _NUMERIC_RE, _SELECT, _TONES, _call, _counts, _hidden, _ordered, _signature, _tone,
+    _visible_rows,
 )
 from ._kit.text import _clip, _esc, _pad, _text_bar, _width
 
@@ -7835,19 +7840,6 @@ class S3Analyzer:
 
 
 @dataclass
-class _Title:
-    text: str
-    sub: str = ""
-
-
-@dataclass
-class _Cards:
-    items: list[
-        tuple[str, ...]
-    ]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
-
-
-@dataclass
 class _Table:
     headers: list[str]
     rows: list[list[Any]]  # cells are text, or _Tone for a coloured status
@@ -7863,48 +7855,6 @@ class _Table:
     collapsed: bool = False  # a secondary view: folded under its title in HTML
     path_cols: tuple[int, ...] = ()  # columns of keys / paths: the file name always shows, a long folder is shortened
     sortable: bool = True  # in HTML a click on a column's header sorts by it (tree tables never sort)
-
-
-@dataclass
-class _Note:
-    text: str
-    level: str = "info"  # 'info' | 'warn' | 'ok'
-
-
-@dataclass
-class _Text:
-    text: str
-    title: str = ""
-    wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
-    code: bool = False  # a snippet to copy: in HTML one click selects all of it
-    collapsed: bool = (
-        False  # a secondary view (raw JSON): folded under its title in HTML
-    )
-
-
-@dataclass
-class _Findings:
-    items: list[tuple[str, str]]  # (level, message) pairs from a *_findings function
-    empty: str = ""  # said (as an ok note) when there are none; nothing when blank
-
-
-@dataclass
-class _Next:
-    items: list[
-        tuple[str, str]
-    ]  # (call, what it shows): the commands worth running next, arguments filled in
-    title: str = "Next"
-
-
-@dataclass
-class _Tone:
-    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
-
-    text: str
-    tone: str = "warn"  # 'warn' | 'bad' | 'ok'
-
-    def __str__(self) -> str:
-        return self.text
 
 
 @dataclass
@@ -8152,20 +8102,6 @@ _CSS = """<style>
 ))
 
 _BADGE = "🪣 S3"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
-_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
-# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
-# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
-_CALL_RE = re.compile(
-    r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
-    r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
-    r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)"
-)
-_TONES = ("warn", "bad", "ok")
-_MARKS = {
-    "warn": "[!] ",
-    "ok": "[ok] ",
-}  # text-mode prefix of a note by level; anything else is "[i] "
-_SELECT = ' title="Click to select, then copy"'
 
 
 def _prose(value: Any, money: bool = False) -> str:
@@ -8179,83 +8115,6 @@ def _prose(value: Any, money: bool = False) -> str:
                      for k, part in enumerate(_MONEY_RE.split(piece))) if money
         else _esc(piece)
         for i, piece in enumerate(pieces)
-    )
-
-
-def _call(name: str, *args: Any, **kwargs: Any) -> str:
-    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
-
-    def literal(
-        value: Any,
-    ) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
-        if type(value).__name__ == "Decimal":
-            return str(value)
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items())
-                + "}"
-            )
-        if isinstance(value, (list, tuple)):
-            inner = ", ".join(map(literal, value)) + (
-                "," if isinstance(value, tuple) and len(value) == 1 else ""
-            )
-            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
-        return repr(value)
-
-    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
-
-
-def _signature(function: Callable) -> str:
-    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
-    sig = inspect.signature(function)
-    params = [
-        p.replace(annotation=inspect.Parameter.empty)
-        for name, p in sig.parameters.items()
-        if name != "self"
-    ]
-    return str(
-        sig.replace(parameters=params, return_annotation=inspect.Signature.empty)
-    )
-
-
-def _tone(item: tuple[str, ...]) -> str:
-    """The tone of a card: its third element, when it's one this renderer colours."""
-    return item[2] if len(item) > 2 and item[2] in _TONES else ""
-
-
-def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Warnings first, then notes, each in the order they were found."""
-    return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
-
-
-def _counts(findings: list[tuple[str, str]], sep: str) -> str:
-    """'2 warnings · 3 notes'."""
-    warns = sum(level == "warn" for level, _ in findings)
-    return sep.join(
-        filter(
-            None,
-            [
-                _plural(warns, "warning") if warns else "",
-                _plural(len(findings) - warns, "note") if len(findings) > warns else "",
-            ],
-        )
-    )
-
-
-def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
-    cap = default_max if table.max_rows is None else table.max_rows
-    rows = table.rows if not cap else table.rows[:cap]
-    return rows, len(table.rows) - len(rows)
-
-
-def _hidden(count: int, table: _Table, default_max: int) -> str:
-    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
-    text = f"... {count:,} more rows not shown"
-    return text + (
-        f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)"
-        if table.max_rows is None
-        else ""
     )
 
 
