@@ -931,8 +931,9 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
     with mock_aws():
         kwargs = SCENES[service]()
         mod = importlib.import_module(f"aws_analyzer.{service}")
-        view_cls = next(v for k, v in vars(mod).items() if k.endswith("View") and isinstance(v, type))
-        core_cls = next(v for k, v in vars(mod).items() if k.endswith("Analyzer") and isinstance(v, type))
+        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
+        core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         core = core_cls(region=REGION, **kwargs) if "session" not in kwargs else core_cls(**kwargs)
         out: dict[str, list[str]] = {}
         for figure in figures:

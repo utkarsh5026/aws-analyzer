@@ -16,6 +16,8 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import lambda_functions as lfmod
+from aws_analyzer._kit.render import _render_text
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.lambda_functions import (
     GB,
     LAMBDA_PRICES,
@@ -717,16 +719,16 @@ def test_wiring_and_columns_render_as_html_and_text():
                            title="How it's wired")
     page = lfmod._render_html([wiring], 50)
     assert '<div class="wire">' in page and "orders" in page and 'class="wn warn"' in page and "λ" in page
-    out = lfmod._render_text([wiring], 50)
+    out = _render_text([wiring], 50)
     assert "Called by: SQS queue orders; Function URL anyone (!)" in out and "Then:      On failure: nowhere" in out
     assert "Nothing calls it on its own" in lfmod._render_html([lfmod._Wiring([], ("etl", ""), [])], 50)
     columns = lfmod._Columns([("Oct 1", 10.0, 2.0, "10 calls"), ("Oct 2", 0.0, 0.0, "none"), ("Oct 3", 5.0, 0.0, "")],
                              title="Calls a day")
     page = lfmod._render_html([columns], 50)
     assert page.count("<i ") == 3 and 'title="10 calls"' in page and "height:20.0%" in page
-    assert "Oct 1 █ ▄ Oct 3   (the most: 10, Oct 1)" in lfmod._render_text([columns], 50)
+    assert "Oct 1 █ ▄ Oct 3   (the most: 10, Oct 1)" in _render_text([columns], 50)
     timed = lfmod._Columns([("a", 900.0, 100.0, "")], part="dim", limit=1000.0, limit_label="timeout 1 s", unit="ms")
-    assert 'class="lim"' in lfmod._render_html([timed], 50) and "the most: 900 ms" in lfmod._render_text([timed], 50)
+    assert 'class="lim"' in lfmod._render_html([timed], 50) and "the most: 900 ms" in _render_text([timed], 50)
 
 
 # ---- AWS (moto)
@@ -1324,8 +1326,7 @@ def test_html_report(core):
 
 def test_help_lists_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    commands = {name for name, member in vars(LambdaView).items() if not name.startswith("_") and callable(member)}
-    assert commands == {name for names in LambdaView._GROUPS.values() for name in names}
+    assert set(_commands(LambdaView)) == {name for names in LambdaView._GROUPS.values() for name in names}
     assert "Start here:" in out and "Other" not in out and "functions(regions='all')" in out
     assert "request_id=" in run(capsys, ui.help, "logs")
     assert "Did you mean 'errors'" in run(capsys, ui.help, "eror")

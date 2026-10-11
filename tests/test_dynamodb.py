@@ -7,6 +7,9 @@ import pytest
 from moto import mock_aws
 
 from aws_analyzer import dynamodb as ddbmod
+from aws_analyzer._kit import view as viewmod
+from aws_analyzer._kit.render import _render_text
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.dynamodb import (
     DYNAMODB_PRICES,
     GB,
@@ -911,9 +914,7 @@ def test_ui_without_a_region(monkeypatch, capsys):
 def test_ui_progress_options(capsys, monkeypatch):
     with pytest.raises(ValueError, match="progress must be"):
         DynamoDBView(mode="text", progress="fancy")
-    monkeypatch.setattr(
-        ddbmod, "_progress_bar_class", lambda notebook: None
-    )  # no tqdm: a plain line
+    monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm: a plain line
     clock = iter(range(100))
     monkeypatch.setattr(ddbmod.time, "monotonic", lambda: next(clock))
     for progress, shown in (("auto", True), ("plain", True), ("off", False)):
@@ -983,7 +984,7 @@ def test_render_findings_tones_and_next():
         ),
         ddbmod._Next([("sample('t')", "a few items")]),
     ]
-    text = ddbmod._render_text(blocks, 50)
+    text = _render_text(blocks, 50)
     assert (
         "Point-in-time recovery: off (!)" in text
         and "-- Findings: 1 warning, 1 note --\n[!] a:" in text
@@ -1003,12 +1004,7 @@ def test_render_findings_tones_and_next():
 
 def test_ui_help_groups_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    commands = {
-        name
-        for name in vars(DynamoDBView)
-        if not name.startswith("_") and callable(getattr(DynamoDBView, name))
-    }
-    assert commands == {
+    assert set(_commands(DynamoDBView)) == {
         name for names in DynamoDBView._GROUPS.values() for name in names
     }
     assert (

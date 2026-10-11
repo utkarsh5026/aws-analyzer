@@ -1,9 +1,9 @@
 # Plan: one shared code base for every analyzer
 
-**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, and Phase 2 (`_kit`
-with the leaf helpers, install-only docs) in #62. Phase 3 (one renderer in `_kit`) is done on the branch
-`claude/wonderful-mendel-cqzhux`, for the next pull request; Phase 4 (base View and base Analyzer) follows. The last
-pull request deletes this file.
+**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, Phase 2 (`_kit`
+with the leaf helpers, install-only docs) in #62 and Phase 3 (one renderer in `_kit`) in #63. Phase 4 (base View and
+base Analyzer) is done on the branch `claude/blissful-lamport-u4t9cc`, for the next pull request; Phase 5
+(`_bedrock.py`) follows. The last pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -56,11 +56,11 @@ src/aws_analyzer/
   _kit/                shared by every service. Top-level imports: stdlib + boto3/botocore only. Never imports a service.
     fmt.py             human_size, human_money, human_age, _plural, _fmt_dt, _utcnow, parse_size, parse_time, _as_int, ...
     deps.py            _require, _in_notebook
-    errors.py          _error_code, _error_name, _why, _Hint, _friendly_errors (with hooks, see Phase 4)
+    errors.py          _error_code, _error_name, _why, _Hint
     blocks.py          _Title, _Cards, _Tone, _Table, _Note, _Text, _Findings, _Next, plus the block/cell registries
     render.py          base CSS (templated on the root class), _prose, _call, _signature, _render_html, _render_text
-    progress.py        _progress_bar_class, _progress_bar, _progress_text, _duration
-    view.py            _BaseView: _show, help, _progress, _price_basis common part, _commands(cls)
+    progress.py        _progress_bar_class, _progress_bar, _progress_text
+    view.py            _BaseView: _show, help, _progress, _price_basis common part; _commands(cls), _friendly_errors
     analyzer.py        _BaseAnalyzer: session/region/profile/prices, _cached_client, _paginate, _map
     widgets/           Phase 7: jobs, guard, app shell (style, icons, tabs), picker, rows
   _bedrock.py          shared by bedrock_kb and bedrock_chat
@@ -223,6 +223,44 @@ snapshot.py normalizes download_zip's Free disk card.
 
 ### Phase 4: base View and base Analyzer
 
+Done: every `<Service>View` subclasses `_BaseView` (`_kit/view.py`) and every `<Service>Analyzer` `_BaseAnalyzer`
+(`_kit/analyzer.py`); the progress helpers are in `_kit/progress.py`. One commit per service, and all 303 snapshot
+outputs, the AWS operations and every error path (a script raising each kind of error through each service's
+decorator, on main and on the branch) came out the same. What differs from the plan below:
+
+- `_explain(code, message)` keeps its two arguments: the windows and the chat's batch findings call it too
+  (`explain=self._explain`). The decorator asks `_explain_call(code, message, command, args, kwargs)`, which is
+  `_explain`'s unless a View needs the command's arguments: DynamoDB's names the table and the closest names. S3's
+  "object not found" is its `_explain`.
+- `_extra_note(exc, command)` returns a `_Note` or None; anything that isn't a `ClientError`, `_Hint`, `ImportError`
+  or one of `BotoCoreError` + `_DATA_ERRORS` goes to it, and still raises when it returns None.
+- `_DATA_ERRORS` is `(ValueError, TypeError)` in the base, and S3's own tuple (decoding errors, no `TypeError`), as
+  its decorator caught before. S3 and DynamoDB gain `_Hint` as a plain note; neither raises one.
+- S3 draws with its own renderer until Phase 6, which doesn't know `_kit`'s `_Table`: so the View's renderers are
+  class attributes (`_render_html = staticmethod(_render_html)` in every service, `_render_text` and `_TABLE` in
+  S3), and help() builds its tables with `self._TABLE`. Phase 6 drops S3's three.
+- `_PROGRESS = ("Reading", "items read")` is the base's progress label and unit; S3's is `("Scanning", "objects")`.
+- `_BaseView.__init__` takes only `mode`, `max_rows` and `progress` (checked first, as before); each View then sets
+  `self.core: <Service>Analyzer = core or <Service>Analyzer()`, so editors keep the analyzer's type.
+- `_BaseAnalyzer` takes `session`, `region`, `profile` and `prices`, with the service's table as `_LIST_PRICES`
+  (which `_price_basis` compares with). It also gives `region` (S3Analyzer gains it), `_paginate`, `_map` and
+  `_cached_client`; `max_workers`, `_clients` and `_lock` are set by the services that use them, since Lambda keys
+  its clients by region and S3 and DynamoDB keep theirs in attributes of their own.
+- Shared state: nothing writes to a module's price table, and the analyzer copies it; `test_kit.py` checks that
+  `prices=` (and Bedrock's `model_prices=`) given to one analyzer changes neither the table nor another's prices.
+- The S3 explorer's own decorator (it shows an error in the explorer) is now `_window_errors`, the name the other
+  windows use, since `_friendly_errors` is `_kit`'s; `rules.py` accepts it on a companion window's commands. The
+  explorer takes `_in_notebook` from `_kit.deps`, which `s3.py` no longer imports.
+- demo.py, shots.py and snapshot.py pick the View and Analyzer a module defines, not `_BaseView` / `_BaseAnalyzer`.
+- Tests: the five `_progress_bar_class` patches and the chat's `_in_notebook` one patch `_kit.view`, the seven help
+  tests compare `_commands(<Service>View)` with `_GROUPS`, and tests that drew text with `<service>._render_text`
+  use `_kit.render`'s (S3 keeps its own).
+- Lost names (`snapshot.py compare` reports them): the 21 progress helpers each service imported
+  (`<service>._progress_bar_class`, `_progress_bar`, `_progress_text`), importable from `_kit.progress` only, and
+  `s3_explorer._friendly_errors`.
+
+As planned:
+
 - `_kit/view.py`, `_BaseView`:
   - the common part of `__init__` (mode, max_rows, progress), `_show` / display, `_progress` and its helpers,
     and the common part of `_price_basis`
@@ -247,8 +285,8 @@ snapshot.py normalizes download_zip's Free disk card.
 
 - Move the 97 names `bedrock_kb` and `bedrock_chat` share whose code matches (`_highlight` differs only in its
   docstring), including the price tables, `DEFAULT_MODEL`,
-  the model helpers, `_Markdown`, `_Json` / `_json_html`, the filter helpers, `parse_*`, `search_rank`, `_marked`
-  and `_cached_client`.
+  the model helpers, `_Markdown`, `_Json` / `_json_html`, the filter helpers, `parse_*`, `search_rank` and `_marked`
+  (`Analyzer._cached_client` went to `_BaseAnalyzer` in Phase 4).
 - Resolve the 6 that differ (`Answer`, `DEFAULT_PROMPT`, `View._answer_blocks`, `_question_text`,
   `answer_findings`, `parse_rag`) by the section 4 rule. Find which copy is newer with `git log -L`.
 - Gates: snapshots identical, except any drift fix ported on purpose (listed in the pull request and the

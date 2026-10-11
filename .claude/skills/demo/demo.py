@@ -1837,17 +1837,18 @@ def main() -> int:
 
     try:
         mod = importlib.import_module(f"aws_analyzer.{args.service}")
-        view_cls = next(v for k, v in vars(mod).items() if k.endswith("View") and isinstance(v, type))
-        core_cls = next(v for k, v in vars(mod).items() if k.endswith("Analyzer") and isinstance(v, type))
+        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
+        core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         kwargs = {"region": args.region, "profile": args.profile} if args.live else {"region": "us-east-1"}
         core = core_cls(**{k: v for k, v in kwargs.items() if v}, **extra)
         ui = view_cls(core, mode="text", max_rows=args.max_rows)
         fragments: list[str] = []
 
         def show(blocks: list) -> None:
-            print(mod._render_text(blocks, ui.max_rows), flush=True)
+            print(ui._render_text(blocks, ui.max_rows), flush=True)  # how the View draws a report as text
             if args.html:
-                fragments.append(mod._render_html(blocks, ui.max_rows))
+                fragments.append(ui._render_html(blocks, ui.max_rows))
 
         ui._show = show
         exec(compile(args.code, "<demo>", "exec"), {"ui": ui, "core": core, "mod": mod, args.service: mod})

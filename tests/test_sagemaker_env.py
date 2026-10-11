@@ -9,7 +9,9 @@ from botocore.stub import Stubber
 from moto import mock_aws
 
 from aws_analyzer import sagemaker_env as smmod
+from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.text import _pad, _width
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.sagemaker_env import (
     GB,
     KB,
@@ -961,7 +963,7 @@ def test_text_tables_line_up_around_emoji():
     assert [_width(s) for s in ("abc", "📓 a", "🏋️ a", "日本", "é")] == [3, 4, 4, 4, 1]
     assert _pad("📓 a", 6) == "📓 a  " and _pad("12", 4, right=True) == "  12"
     table = smmod._Table(["Kind", "Name"], [["📓 notebook instance", "a"], ["🏋️ training job", "b"], ["endpoint", "c"]])
-    lines = [line for line in smmod._render_text([table], 50).splitlines()[-5:] if not line.startswith("-")]
+    lines = [line for line in _render_text([table], 50).splitlines()[-5:] if not line.startswith("-")]
     assert len(lines) == 4  # the header and three rows
     assert len({_width(line[: line.rindex(" ") + 1]) for line in lines}) == 1  # 'Name' and each name line up
 
@@ -980,9 +982,7 @@ def test_ui_without_ipython_or_an_optional_package(tmp_path, capsys, monkeypatch
 def test_ui_help_groups_every_command(tmp_path, capsys):
     ui = SageMakerView(SageMakerAnalyzer(root=str(tmp_path)), mode="text")
     out = run(capsys, ui.help)
-    commands = {name for name in vars(SageMakerView)
-                if not name.startswith("_") and callable(getattr(SageMakerView, name))}
-    assert commands == {name for names in SageMakerView._GROUPS.values() for name in names}
+    assert set(_commands(SageMakerView)) == {name for names in SageMakerView._GROUPS.values() for name in names}
     assert "Start here:" in out and "-- 💻 This notebook --" in out and "instance(name=None)" in out
     assert "Did you mean 'disk'" in run(capsys, ui.help, "dsk")
     assert "Its machine can only be read from inside it" in run(capsys, ui.help, "instance")

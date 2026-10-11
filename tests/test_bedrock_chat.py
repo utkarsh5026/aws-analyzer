@@ -17,6 +17,8 @@ from botocore.stub import Stubber
 from botocore.validate import ParamValidator
 
 from aws_analyzer import bedrock_chat as chatmod
+from aws_analyzer._kit import view as viewmod
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.bedrock_chat import (
     DEFAULT_PROMPT,
     DEFAULT_SETTINGS,
@@ -1615,9 +1617,7 @@ def ui(core):
 
 def test_ui_help_groups_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    commands = {name for name in vars(BedrockChatView) if not name.startswith("_")
-                and callable(getattr(BedrockChatView, name))}
-    assert commands == {name for names in BedrockChatView._GROUPS.values() for name in names}
+    assert set(_commands(BedrockChatView)) == {name for names in BedrockChatView._GROUPS.values() for name in names}
     assert "Start here:" in out and "-- ⚙️ Settings --" in out and "set(name=None, value=None, **values)" in out
     assert "None removes a setting; an open window follows." in run(capsys, ui.help, "set")
 
@@ -2166,7 +2166,7 @@ def test_window_fills_the_browser_unless_given_a_height(window, core, monkeypatc
     assert ".kbc-app.kbc-app .kbc-log{height:clamp(540px,calc(100vh - 400px),1400px);" in chatmod._CSS
     assert "body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}" in chatmod._CSS
     monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
-    monkeypatch.setattr(chatmod, "_in_notebook", lambda: True)
+    monkeypatch.setattr(viewmod, "_in_notebook", lambda: True)  # where the View's mode='auto' asks
     shown = []
     monkeypatch.setattr(BedrockChatView, "_display", lambda self, widget: shown.append(widget))
     view = chatmod.chat("support-docs", height=800)
