@@ -1,7 +1,9 @@
 # Plan: one shared code base for every analyzer
 
-**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61. Phase 2 (`_kit`
-with the leaf helpers, install-only docs) is the next pull request. The last pull request deletes this file.
+**Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, and Phase 2 (`_kit`
+with the leaf helpers, install-only docs) in #62. Phase 3 (one renderer in `_kit`) is done on the branch
+`claude/wonderful-mendel-cqzhux`, for the next pull request; Phase 4 (base View and base Analyzer) follows. The last
+pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -105,7 +107,8 @@ CHANGELOG "Fixed" line. If the difference is intentional, it becomes a parameter
 4. **Independence test** (`tests/test_package.py`): in a fresh subprocess, importing `aws_analyzer.<service>` loads
    no other service module (except `s3` for `s3_explorer`). `_kit` never imports a service.
 5. **No re-copying** (new `rules.py` error): a service module may not define a top-level name that `_kit` (or, for
-   the Bedrock pair, `_bedrock`) defines. This replaces `drift.py` for everything that has moved.
+   the Bedrock pair, `_bedrock`) defines. This replaces `drift.py` for everything that has moved. The one exception
+   is S3's own renderer until Phase 6 (`OWN_RENDERER`), which `drift.py` compares with `_kit`'s.
 6. **One copy of each module** (conftest): the test session fails if a top-level `s3`, `dynamodb`, ... module is in
    `sys.modules` beside `aws_analyzer.s3`. Two copies would make `isinstance` checks fail between them.
 7. **Only boto3 at import time**, as now: CI imports every module, `_kit` included, with only boto3 installed.
@@ -179,6 +182,21 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 
 ### Phase 3: one renderer, extended per service
 
+Done: every service but S3 draws its blocks through one registry, and the shared blocks (`_kit/blocks.py`: the
+eight blocks, `_Report`, `_HTML` / `_TEXT` / `_CELLS`, `@_draws`) and renderer (`_kit/render.py`: `_base_css`,
+`_prose`, `_call`, `_signature`, the shared blocks' drawers, `_report_html`, `_render_text`, `_blocks_html`) live
+in `_kit`. A drawing function takes the block and the `_Report` being drawn (the view's `max_rows` and the badge);
+each service's `_render_html` is `_report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)`. The chat's stylesheet
+isn't the shared rules plus its own: it restyles eleven of them and adds one in the middle, to match its window,
+so `_base_css` also takes `theme=`, `restyle=` and `after=`, and a restyle that stops matching exactly one shared
+rule raises. S3 imports the blocks and helpers it shared unchanged and keeps the rest of its renderer
+(`OWN_RENDERER` in rules.py). A service imports only the renderer names it uses, so 56 private names it no
+longer used are importable from `_kit.render` only (`_counts`, `_ordered`, `_tone`, `_visible_rows`, `_hidden`,
+`_NUMERIC_RE`, `_CALL_RE`, `_MARKS`, `_SELECT`, `_TONES`, `_prose`, and the chat's `_cards_html` /
+`_findings_html`, which `_blocks_html` replaced); `snapshot.py compare` lists them as lost. New: a block nothing
+draws shows as a note (`tests/test_kit.py`), the window tests check that each window holds the report CSS once, and
+snapshot.py normalizes download_zip's Free disk card.
+
 1. **Inside each service, before anything moves**, replace the `isinstance` chains in `_render_html` /
    `_render_text` with registries:
    - `_HTML[type] = fn` / `_TEXT[type] = fn`, filled by a decorator (`@_draws(_Passage)`)
@@ -187,8 +205,14 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 
    After this step the shared part of the renderer is identical in all services. Snapshots identical.
 2. Split each `_CSS` into the common rules (identical once `.<root>` is normalized) and `_EXTRA_CSS`. The common
-   rules become `base_css(root)`. `KBExplorer`'s `_EXPLORER_CSS` embeds the report CSS once and `_html` strips it
-   by string, so keep that string exactly as it is (`s3_explorer` does the same).
+   rules become `_base_css(root, extra)`. Three windows strip the report CSS from `_render_html`'s output by exact string:
+   `KBExplorer._html` and `LambdaExplorer._html` (their hidden style widget holds `_CSS + _EXPLORER_CSS` once, and
+   each pane drops its copy with `.replace(_CSS, "", 1)`), and the chat window's Test tab (`.removeprefix(_CSS)`).
+   Both calls do nothing, silently, when the string doesn't match, and every pane would then carry its own copy of
+   the stylesheet. So each service keeps `_CSS` as one module-level string, exactly what its `_render_html`
+   writes, and a test checks that those panes come out without it: the snapshots cover reports, not windows, and
+   no window test checks it today. (`s3_explorer` doesn't strip it: each of its panes carries the report's own
+   `<style>`, and S3's renderer doesn't move in this phase.)
 3. Move the blocks, the registries, `_prose`, `_call`, `_signature`, `_CALL_RE`, `_MARKS`, `_SELECT`, the findings
    HTML and both renderers into `_kit/blocks.py` and `_kit/render.py`. Service-only blocks stay in their service
    and register themselves when it's imported.
@@ -235,10 +259,16 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 - Port S3's `_table_html` (sort, filter, the Columns menu, `path_cols`, `sortable=`), `_split_lead`,
   `_finding_html`, `_lead` and the text renderer's path handling into `_kit`. Delete S3's own copy. Mark tables
   that shouldn't sort `sortable=False`.
+- With Phase 3's registry, that means: `_kit`'s `_Table`, `_prose`, `_findings_html`, `_table_html` and
+  `_table_lines` become S3's; what a report's blocks share goes on `_Report` (the table rules S3's renderer collects
+  and inserts after the stylesheet, the PDF pages' `_Zoom`); S3's own blocks (`_Frame`, `_Image`, `_Link`,
+  `_Media`, `_Pages`, `_Flow`, `_JsonTree`) register their drawings with `@_draws`; S3 gets `_ROOT` and
+  `_base_css`; and `OWN_RENDERER` in rules.py empties. S3's `_CSS` restyles some shared rules (`.sub`, the table
+  header, `.fh`): they become the shared ones, and the chat's `restyle=` is checked against them.
 - Review every snapshot diff. HTML is expected to change in every service; text should change only in finding and
   note lead-ins. Update HTML assertions one at a time; never regenerate them in bulk.
 - Remake the screenshots (`shots.py`, plus the window shot scripts where a window shows reports). Check captions
-  and alt text in the guides and in the README's eleven `<picture>`s.
+  and alt text in the guides and in the README's twelve `<picture>`s.
 - CHANGELOG "Changed": tables in every report sort, filter and choose columns, as S3's already do.
 
 ### Phase 7: window kit (four windows: S3 explorer, chat, KB explorer, Lambda)
@@ -281,7 +311,7 @@ regexes only the moved helpers used), and `s3_explorer`'s own `_fmt_dt`, which d
 | Importing one service loads all of them | A kit module importing a service | Guardrail 4; `_kit` is a leaf |
 | `rules.py` stops seeing AWS calls | Moving client creation into the base | Literal `session.client("...")` stays in services; `--apis` gate |
 | HTML or CSS shifts, breaking window CSS or old notebook outputs | Root class renames, CSS splits | Roots kept (D5); byte-identical snapshots; Phase 6 is the only visual change |
-| `KBExplorer` / `S3Explorer` strip the embedded report CSS by string | Phase 3 CSS split | Keep the string exactly; the window tests cover it |
+| `KBExplorer`, `LambdaExplorer` and the chat's Test tab strip the embedded report CSS by string | Phase 3 CSS split | `_CSS` stays the exact string `_render_html` writes; a test checks that their panes come out without it (the snapshots cover reports only) |
 | Copied-file users break | Phase 2 | **Breaking** note; docs in the same pull request; 0.12.0 files keep working |
 | VPC-only notebooks can't reach PyPI | Phase 2 docs | The wheel from S3 (D8) |
 | Conflicts with the Lambda window branch | Every service file and the windows | Don't start until it's merged; Phase 0 starts from the new `main` |

@@ -4,6 +4,8 @@
     text     escaping for HTML, and clipping and padding for text tables
     deps     optional packages (`_require`) and whether this is a notebook
     errors   AWS error codes, the permission a denied call needs, and `_Hint`
+    blocks   the blocks a report is made of (`_Title`, `_Cards`, `_Table`, ...) and what draws each kind (`@_draws`)
+    render   how reports are drawn: the stylesheet (`_base_css`), the shared blocks' HTML and text, `_render_text`
 
 Like the services, these load only the standard library and boto3 / botocore when imported, and they never import a
 service module. Nothing here is re-exported: import each name from its own module.

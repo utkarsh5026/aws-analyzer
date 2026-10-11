@@ -82,21 +82,28 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
   `_as_int`, `HOURS_PER_MONTH`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
-  (`_require`, `_in_notebook`) and `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`). Each analyzer
-  imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size` still works,
-  and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an analyzer, and it
-  follows the same import-time rule as they do. The rest of the shared helpers move into `_kit` phase by phase
-  (`.claude/plans/shared-code.md`); until then they are still duplicated in all seven analyzers (`_prose`, `_call`,
-  `_signature`, the render blocks and `_render_html` / `_render_text` with their small helpers, `_friendly_errors`,
-  `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text`, `View.help`). Only the CSS root
-  class, `_BADGE` and the View's `_GROUPS` / `_START` differ between the copies. When you fix or change one of
-  them, check the copies in the others. A test that patches a helper patches it where it's looked up: on the
+  (`_require`, `_in_notebook`), `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
+  render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
+  `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
+  `_prose`, `_call`, `_signature`, the shared blocks' drawers, `_report_html`, `_render_text`, `_blocks_html`).
+  Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
+  still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
+  analyzer, and it follows the same import-time rule as they do. Each service sets its look: `_ROOT` (its CSS root
+  class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
+  `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
+  max_rows)`, which is `_report_html` with those three. The rest of the shared helpers move into `_kit` phase by
+  phase (`.claude/plans/shared-code.md`); until then they are still duplicated in all seven analyzers
+  (`_friendly_errors`, `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text`,
+  `View.help`). Only `_BADGE` and the View's `_GROUPS` / `_START` differ between the copies. When you fix or change
+  one of them, check the copies in the others. A test that patches a helper patches it where it's looked up: on the
   analyzer module for a call the analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit`
   module for a call `_kit` makes.
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
-  and findings are laid out as described under "How the View layer works" (asked for S3 first). Until that's
-  ported (`/sync-helpers`), `drift.py` lists `_CSS`, `_Table`, `_prose`, `_findings_html` and `_render_html` /
-  `_render_text` for `s3.py`; don't "fix" that drift by reverting `s3.py`.
+  and findings are laid out as described under "How the View layer works" (asked for S3 first). Until Phase 6
+  ports it to `_kit`, `s3.py` keeps its own `_Table`, `_prose`, `_findings_html`, `_table_html` and `_render_text`
+  (`OWN_RENDERER` in `rules.py` allows exactly these), its own `_CSS` and `_render_html`, and imports the rest of
+  the blocks and helpers from `_kit`; `drift.py` lists those five next to `_kit`'s. Don't "fix" that by reverting
+  `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`.
   Nothing imports a companion.
@@ -178,6 +185,13 @@ How the View layer works:
   and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.
+- Outside S3 (until Phase 6), the renderer draws each block by what's registered for its type, so a new block
+  type registers both of its drawings next to it: `@_draws(_Steps, "html")` on `f(block, report) -> str` and
+  `@_draws(_Steps, "text")` on `f(block, report) -> list[str]`, where `report` is the `_Report` being drawn (the
+  view's `max_rows` and the service's badge). A table cell of a new type registers `"cell"`, `f(cell, text) -> str`
+  (`bedrock_kb`'s `_Link`); text mode shows `str(cell)`. A block that nothing draws shows as a warning note saying
+  so. The shared blocks' drawers are in `_kit/render.py`; a window that has the stylesheet already draws blocks
+  with `_blocks_html([...])` (the chat's Test and Runs tabs).
 - The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
   interactive uses CSS or `<details>`. What the blocks offer:
   - Cards take an optional tone: `(label, value, "warn" | "bad" | "ok")`. Text mode adds ` (!)` to warn and bad.
@@ -513,7 +527,8 @@ does both, a page at a time). How the UI works:
   name (`import s3`): its classes would be a second copy that `isinstance` doesn't match.
 - One test file per analyzer. Pure functions are tested directly; AWS-backed methods use an `aws` fixture wrapping
   `moto.mock_aws()` and fixtures that seed a bucket / table. A new AWS service needs its moto extra added to
-  `moto[...]` in `requirements-dev.txt`.
+  `moto[...]` in `requirements-dev.txt`. `_kit` is tested through the services, and `tests/test_kit.py` covers what
+  no service reaches in normal use (a block nothing draws, `_base_css`'s checks on a restyle).
 - Bedrock has little moto support (moto 5.2 only creates / gets / lists / deletes knowledge bases), so
   `tests/test_bedrock_kb.py` uses botocore `Stubber` with injected clients:
   `BedrockKBAnalyzer(client=agent, clients={"bedrock-agent-runtime": ..., "bedrock-runtime": ..., "bedrock": ...})`.

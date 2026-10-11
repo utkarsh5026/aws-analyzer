@@ -75,13 +75,15 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
+from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
 from ._kit.deps import _in_notebook, _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _utcnow, human_age, human_money,
     human_size, parse_time,
 )
-from ._kit.text import _clip, _esc, _pad, _text_bar, _width
+from ._kit.render import _CALL_RE, _SELECT, _TONES, _base_css, _call, _prose, _render_text, _report_html, _signature
+from ._kit.text import _clip, _esc, _text_bar
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -4945,77 +4947,6 @@ class BedrockKBAnalyzer:
 
 
 @dataclass
-class _Title:
-    text: str
-    sub: str = ""
-
-
-@dataclass
-class _Cards:
-    items: list[
-        tuple[str, ...]
-    ]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
-
-
-@dataclass
-class _Table:
-    headers: list[str]
-    rows: list[list[Any]]  # cells are text, or _Tone for a coloured status
-    title: str = ""
-    bars: list[float] | None = None  # 0..1 per row, drawn as an extra column
-    bar_label: str = "Share"
-    tree: bool = False  # first column holds indented tree labels
-    max_rows: int | None = None  # None = view default, 0 = no cap
-    code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
-    prose_cols: tuple[
-        int, ...
-    ] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
-    collapsed: bool = False  # a secondary view: folded under its title in HTML
-
-
-@dataclass
-class _Note:
-    text: str
-    level: str = "info"  # 'info' | 'warn' | 'ok'
-
-
-@dataclass
-class _Text:
-    text: str
-    title: str = ""
-    wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
-    code: bool = False  # a snippet to copy: in HTML one click selects all of it
-    collapsed: bool = (
-        False  # a secondary view (raw JSON): folded under its title in HTML
-    )
-
-
-@dataclass
-class _Findings:
-    items: list[tuple[str, str]]  # (level, message) pairs from a *_findings function
-    empty: str = ""  # said (as an ok note) when there are none; nothing when blank
-
-
-@dataclass
-class _Next:
-    items: list[
-        tuple[str, str]
-    ]  # (call, what it shows): the commands worth running next, arguments filled in
-    title: str = "Next"
-
-
-@dataclass
-class _Tone:
-    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
-
-    text: str
-    tone: str = "warn"  # 'warn' | 'bad' | 'ok'
-
-    def __str__(self) -> str:
-        return self.text
-
-
-@dataclass
 class _Passage:
     rank: int
     score_share: (
@@ -5096,59 +5027,8 @@ class _Json:
     collapsed: bool = False  # folded under its title in HTML
 
 
-_CSS = """<style>
-.kba{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
-.kba h3{margin:10px 0 2px;font-size:16px}
-.kba h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
-.kba h4{margin:14px 0 4px;font-size:13px}
-.kba .sub{opacity:.65;font-size:12px;margin-bottom:6px}
-.kba .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.kba .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
-.kba .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
-.kba .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
-.kba .card.ok{border-color:rgba(16,185,129,.7)}
-.kba .card .l{font-size:11px;opacity:.65}
-.kba .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.kba .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
-.kba .tw.scroll{max-height:640px;overflow:auto}
-.kba table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.kba table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
-.kba .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.kba .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
-.kba table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
-.kba table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
-.kba table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
-.kba table.t td.s{white-space:nowrap}
-.kba table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.kba table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.kba table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.kba .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
-.kba .track{vertical-align:middle;margin-right:6px}
-.kba .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
-.kba .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
-.kba .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
-.kba .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
-.kba .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.kba .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
-.kba .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.kba .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
-.kba .note.warn::before{content:"\\26A0\\FE0E"}
-.kba .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
-.kba .note.ok::before{content:"\\2713"}
-.kba .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.kba code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
-.kba code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
-.kba .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.kba pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
-.kba pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
-.kba pre.code{user-select:all;-webkit-user-select:all;cursor:text}
-.kba .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
-.kba details.sec{margin:14px 0 4px}
-.kba details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
-.kba .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
-.kba .next{border-top:1px dashed rgba(127,127,127,.35)}
-.kba .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.kba .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+_ROOT = "kba"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+_EXTRA_CSS = """\
 .kba .psg{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 10px;margin:6px 0;max-width:900px}
 .kba .psg .ph{font-weight:600;font-size:12px}
 .kba .psg .pm{opacity:.65;font-size:12px}
@@ -5267,58 +5147,9 @@ _CSS = """<style>
 body[data-jp-theme-light="false"] .kba .jk,body.vscode-dark .kba .jk{color:#c4b5fd}
 body[data-jp-theme-light="false"] .kba .js,body.vscode-dark .kba .js{color:#86efac}
 body[data-jp-theme-light="false"] .kba .jn,body.vscode-dark .kba .jn{color:#fcd34d}
-body[data-jp-theme-light="false"] .kba .jl,body.vscode-dark .kba .jl{color:#93c5fd}
-</style>"""
-
+body[data-jp-theme-light="false"] .kba .jl,body.vscode-dark .kba .jl{color:#93c5fd}"""
+_CSS = _base_css(_ROOT, _EXTRA_CSS)
 _BADGE = "📚 Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
-_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
-# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
-# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
-_CALL_RE = re.compile(
-    r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
-    r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
-    r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)"
-)
-_TONES = ("warn", "bad", "ok")
-_MARKS = {
-    "warn": "[!] ",
-    "ok": "[ok] ",
-}  # text-mode prefix of a note by level; anything else is "[i] "
-_SELECT = ' title="Click to select, then copy"'
-
-
-def _prose(value: Any) -> str:
-    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
-    The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
-    pieces = _CALL_RE.split("" if value is None else str(value))
-    return "".join(
-        f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece)
-        for i, piece in enumerate(pieces)
-    )
-
-
-def _call(name: str, *args: Any, **kwargs: Any) -> str:
-    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
-
-    def literal(
-        value: Any,
-    ) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
-        if type(value).__name__ == "Decimal":
-            return str(value)
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items())
-                + "}"
-            )
-        if isinstance(value, (list, tuple)):
-            inner = ", ".join(map(literal, value)) + (
-                "," if isinstance(value, tuple) and len(value) == 1 else ""
-            )
-            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
-        return repr(value)
-
-    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
 
 
 def _link_html(url: str, text: str) -> str:
@@ -5331,226 +5162,9 @@ def _link_html(url: str, text: str) -> str:
     )
 
 
-def _signature(function: Callable) -> str:
-    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
-    sig = inspect.signature(function)
-    params = [
-        p.replace(annotation=inspect.Parameter.empty)
-        for name, p in sig.parameters.items()
-        if name != "self"
-    ]
-    return str(
-        sig.replace(parameters=params, return_annotation=inspect.Signature.empty)
-    )
-
-
-def _tone(item: tuple[str, ...]) -> str:
-    """The tone of a card: its third element, when it's one this renderer colours."""
-    return item[2] if len(item) > 2 and item[2] in _TONES else ""
-
-
-def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Warnings first, then notes, each in the order they were found."""
-    return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
-
-
-def _counts(findings: list[tuple[str, str]], sep: str) -> str:
-    """'2 warnings · 3 notes'."""
-    warns = sum(level == "warn" for level, _ in findings)
-    return sep.join(
-        filter(
-            None,
-            [
-                _plural(warns, "warning") if warns else "",
-                _plural(len(findings) - warns, "note") if len(findings) > warns else "",
-            ],
-        )
-    )
-
-
-def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
-    cap = default_max if table.max_rows is None else table.max_rows
-    rows = table.rows if not cap else table.rows[:cap]
-    return rows, len(table.rows) - len(rows)
-
-
-def _hidden(count: int, table: _Table, default_max: int) -> str:
-    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
-    text = f"... {count:,} more rows not shown"
-    return text + (
-        f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)"
-        if table.max_rows is None
-        else ""
-    )
-
-
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    out = [_CSS, '<div class="kba">']
-    for block in blocks:
-        if isinstance(block, _Title):
-            out.append(
-                f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>'
-            )
-            if block.sub:
-                out.append(f'<div class="sub">{_prose(block.sub)}</div>')
-        elif isinstance(block, _Cards):
-            cards = "".join(
-                f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
-                f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
-                for item in block.items
-            )
-            out.append(f'<div class="cards">{cards}</div>')
-        elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
-        elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                notes = "".join(
-                    f'<div class="note {level}">{_prose(message)}</div>'
-                    for level, message in items
-                )
-                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
-                out.append(f'<div class="fd">{head}{notes}</div>')
-            elif block.empty:
-                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
-        elif isinstance(block, _Next):
-            if block.items:
-                calls = "".join(
-                    f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
-                    + (f'<span class="nw">{_esc(why)}</span>' if why else "")
-                    + "</span>"
-                    for call, why in block.items
-                )
-                out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
-                )
-        elif isinstance(block, _Table):
-            if not block.rows:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append('<div class="more">(none)</div>')
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
-            head += (
-                f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
-            )
-            body = []
-            for i, row in enumerate(rows):
-                cells = []
-                for j, cell in enumerate(row):
-                    text = "" if cell is None else str(cell)
-                    inner = _esc(text)
-                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
-                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
-                    elif isinstance(cell, _Link) and text:
-                        inner = _link_html(cell.url, text)
-                    if block.tree and j == 0:
-                        css = "tree"
-                    elif j in block.code_cols and text:
-                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
-                    elif j in block.prose_cols:
-                        css, inner = "", _prose(text)
-                    elif _NUMERIC_RE.match(text):
-                        css = "n"
-                    else:
-                        css = "s" if len(text) <= 16 and "\n" not in text else ""
-                    cells.append(
-                        f'<td class="{css}">{inner}</td>'
-                        if css
-                        else f"<td>{inner}</td>"
-                    )
-                if block.bars is not None:
-                    pct = max(0.0, min(1.0, block.bars[i])) * 100
-                    cells.append(
-                        f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                        f"</span></span>{pct:.1f}%</td>"
-                    )
-                body.append(f"<tr>{''.join(cells)}</tr>")
-            table = (
-                f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
-                f"</thead><tbody>{''.join(body)}</tbody></table></div>"
-            )
-            if hidden:
-                table += (
-                    f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
-                )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")} '
-                    f"({len(block.rows):,})</summary>{table}</details>"
-                )
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(table)
-        elif isinstance(block, _Text):
-            css = " ".join(
-                filter(
-                    None, ["wrap" if block.wrap else "", "code" if block.code else ""]
-                )
-            )
-            pre = (
-                f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>'
-                if css
-                else f"<pre>{_esc(block.text)}</pre>"
-            )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
-                )
-            else:
-                hint = (
-                    '<span class="hint">click it to select all, then copy</span>'
-                    if block.code
-                    else ""
-                )
-                if block.title or hint:
-                    out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
-                out.append(pre)
-        elif isinstance(block, _Passage):
-            head = " · ".join(
-                filter(
-                    None,
-                    [
-                        _esc(f"#{block.rank}"),
-                        _link_html(block.url, block.source),
-                        _esc(block.detail),
-                        "" if block.score is None else f"score {block.score:.2f}",
-                    ],
-                )
-            )
-            bar = ""
-            if block.score_share is not None:
-                pct = max(0.0, min(1.0, block.score_share)) * 100
-                bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
-            meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
-            out.append(
-                f'<div class="psg"><div class="ph">{bar}{head}</div>{meta}'
-                f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>'
-            )
-        elif isinstance(block, _Link):
-            out.append(f'<div class="lnk">{_link_html(block.url, block.label)}</div>')
-        elif isinstance(block, _Answer):
-            out.append(f'<div class="ans">{_answer_html(block)}</div>')
-        elif isinstance(block, _Steps):
-            out.append(_steps_html(block))
-        elif isinstance(block, _Pipeline):
-            out.append(_pipeline_html(block))
-        elif isinstance(block, _Chunks):
-            out.append(_chunks_html(block))
-        elif isinstance(block, _Shares):
-            out.append(_shares_html(block))
-        elif isinstance(block, _Json):
-            tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
-            if block.collapsed:
-                out.append(f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>')
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(tree)
-    out.append("</div>")
-    return "".join(out)
+    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
 def _plain_json(value: Any) -> Any:
@@ -5601,7 +5215,22 @@ def _json_html(
     return f'<div class="json">{node("", value, (), 0, False)}</div>'
 
 
-def _steps_html(block: _Steps) -> str:
+@_draws(_Json, "html")
+def _json_block_html(block: _Json, report: _Report) -> str:
+    tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
+    if block.collapsed:
+        return f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>'
+    return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + tree
+
+
+@_draws(_Json, "text")
+def _json_block_lines(block: _Json, report: _Report) -> list[str]:
+    head = ["", f"-- {block.title} --"] if block.title else []
+    return head + [json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False)]
+
+
+@_draws(_Steps, "html")
+def _steps_html(block: _Steps, report: _Report) -> str:
     rows = "".join(
         f'<div class="st {tone if tone in _TONES else ""}"><span class="sd"></span><div class="sb">'
         f'<span class="sk">{_esc(step)}</span><span class="sv">{_esc(value)}</span>'
@@ -5613,7 +5242,8 @@ def _steps_html(block: _Steps) -> str:
     return f'{title}<div class="steps">{rows}</div>'
 
 
-def _pipeline_html(block: _Pipeline) -> str:
+@_draws(_Pipeline, "html")
+def _pipeline_html(block: _Pipeline, report: _Report) -> str:
     out = [f"<h4>{_prose(block.title)}</h4>"] if block.title else []
     for label, stages in block.rows:
         cells = '<span class="pa">→</span>'.join(
@@ -5642,7 +5272,8 @@ def _raw_offset(text: str, flat_offset: int) -> int:
     return len(text)
 
 
-def _chunks_html(block: _Chunks) -> str:
+@_draws(_Chunks, "html")
+def _chunks_html(block: _Chunks, report: _Report) -> str:
     out = [f"<h4>{_prose(block.title)}</h4>"] if block.title else []
     if block.items:
         bars = "".join(
@@ -5679,7 +5310,8 @@ def _chunks_html(block: _Chunks) -> str:
     return "".join(out)
 
 
-def _shares_html(block: _Shares) -> str:
+@_draws(_Shares, "html")
+def _shares_html(block: _Shares, report: _Report) -> str:
     total = sum(count for _, count, _ in block.items) or 1
     bar = "".join(f'<i class="s-{_esc(kind)}" style="flex:{count} 1 0" title="{_esc(label)}: {count:,} '
                   f'({count / total:.0%})"></i>' for label, count, kind in block.items if count)
@@ -5692,7 +5324,8 @@ def _shares_html(block: _Shares) -> str:
 _STEP_MARKS = {"ok": "[ok]", "warn": "[!]", "bad": "[x]"}  # text mode's mark for a step's tone; '[ ]' for none
 
 
-def _steps_lines(block: _Steps) -> list[str]:
+@_draws(_Steps, "text")
+def _steps_lines(block: _Steps, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
     for i, (step, value, detail, tone) in enumerate(block.items, 1):
         out.append(f"{i}. {_STEP_MARKS.get(tone, '[ ]')} {step}: {value}")
@@ -5701,7 +5334,8 @@ def _steps_lines(block: _Steps) -> list[str]:
     return out
 
 
-def _pipeline_lines(block: _Pipeline) -> list[str]:
+@_draws(_Pipeline, "text")
+def _pipeline_lines(block: _Pipeline, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
     for label, stages in block.rows:
         out.append(f"{label}:")
@@ -5710,9 +5344,10 @@ def _pipeline_lines(block: _Pipeline) -> list[str]:
     return out
 
 
-def _chunks_lines(block: _Chunks, max_rows: int) -> list[str]:
+@_draws(_Chunks, "text")
+def _chunks_lines(block: _Chunks, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
-    shown = block.items if not max_rows else block.items[:max_rows]
+    shown = block.items if not report.max_rows else block.items[:report.max_rows]
     for n, p, overlap in shown:
         where = f" p.{p.page}" if p.page is not None else ""
         shared = f", {overlap:,} characters shared with #{n - 1}" if overlap else ""
@@ -5722,6 +5357,54 @@ def _chunks_lines(block: _Chunks, max_rows: int) -> list[str]:
     if len(block.items) > len(shown):
         out.append(f"... {len(block.items) - len(shown):,} more chunks not shown (ui.max_rows = 0 shows all)")
     return out
+
+
+@_draws(_Shares, "text")
+def _shares_lines(block: _Shares, report: _Report) -> list[str]:
+    total = sum(count for _, count, _ in block.items) or 1
+    out = ["", f"-- {block.title} --"] if block.title else [""]
+    return out + [f"  {label.ljust(22)} {count:>7,}  {_text_bar(count / total)}" for label, count, _ in block.items]
+
+
+@_draws(_Passage, "html")
+def _passage_block_html(block: _Passage, report: _Report) -> str:
+    head = " · ".join(filter(None, [
+        _esc(f"#{block.rank}"),
+        _link_html(block.url, block.source),
+        _esc(block.detail),
+        "" if block.score is None else f"score {block.score:.2f}",
+    ]))
+    bar = ""
+    if block.score_share is not None:
+        pct = max(0.0, min(1.0, block.score_share)) * 100
+        bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
+    meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
+    return (f'<div class="psg"><div class="ph">{bar}{head}</div>{meta}'
+            f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>')
+
+
+@_draws(_Passage, "text")
+def _passage_block_lines(block: _Passage, report: _Report) -> list[str]:
+    score = "" if block.score is None else f" (score {block.score:.2f})"
+    out = ["", f"[{block.rank}] {block.source}" + (f" {block.detail}" if block.detail else "") + score]
+    if block.meta:
+        out.append("    " + block.meta)
+    return out + (textwrap.wrap(block.text, 100, initial_indent="    ", subsequent_indent="    ") or ["    (no text)"])
+
+
+@_draws(_Link, "html")
+def _link_block_html(block: _Link, report: _Report) -> str:
+    return f'<div class="lnk">{_link_html(block.url, block.label)}</div>'
+
+
+@_draws(_Link, "text")
+def _link_block_lines(block: _Link, report: _Report) -> list[str]:
+    return [block.label + ":", block.url]
+
+
+@_draws(_Link, "cell")
+def _link_cell_html(cell: _Link, text: str) -> str:
+    return _link_html(cell.url, text) if text else _esc(text)
 
 
 def _highlight(text: str, terms: Iterable[str]) -> str:
@@ -6295,114 +5978,14 @@ def _answer_html(block: _Answer) -> str:
     return _markdown_html(block.text, block.citations, block.inline)
 
 
-def _render_text(blocks: list[Any], max_rows: int) -> str:
-    out: list[str] = []
-    for block in blocks:
-        if isinstance(block, _Title):
-            out += ["", block.text, "=" * min(len(block.text), 100)] + (
-                [block.sub] if block.sub else []
-            )
-        elif isinstance(block, _Cards):
-            line = ""
-            for entry in block.items:
-                item = f"{entry[0]}: {entry[1]}" + (
-                    " (!)" if _tone(entry) in ("warn", "bad") else ""
-                )
-                if line and len(line) + len(item) > 100:
-                    out.append(line)
-                    line = ""
-                line += ("   " if line else "") + item
-            out.append(line)
-        elif isinstance(block, _Note):
-            out.append(_MARKS.get(block.level, "[i] ") + block.text)
-        elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                out += ["", f"-- Findings: {_counts(items, ', ')} --"]
-                out += [_MARKS.get(level, "[i] ") + message for level, message in items]
-            elif block.empty:
-                out.append("[ok] " + block.empty)
-        elif isinstance(block, _Next):
-            if block.items:
-                width = max(len(call) for call, _ in block.items)
-                out += ["", f"{block.title}:"]
-                out += [
-                    f"  {call.ljust(width)}   {why}".rstrip()
-                    for call, why in block.items
-                ]
-        elif isinstance(block, _Table):
-            out.append("")
-            if block.title:
-                out.append(f"-- {block.title} --")
-            if not block.rows:
-                out.append("(none)")
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            headers = list(block.headers) + (
-                [block.bar_label] if block.bars is not None else []
-            )
-            cells = [
-                [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
-                + ([_text_bar(block.bars[i])] if block.bars is not None else [])
-                for i, row in enumerate(rows)
-            ]
-            widths = [
-                max([_width(h)] + [_width(r[j]) for r in cells])
-                for j, h in enumerate(headers)
-            ]
+@_draws(_Answer, "html")
+def _answer_block_html(block: _Answer, report: _Report) -> str:
+    return f'<div class="ans">{_answer_html(block)}</div>'
 
-            def line_of(values: list[str], widths: list[int] = widths) -> str:
-                return "  ".join(
-                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
-                    for v, w in zip(values, widths)
-                ).rstrip()
 
-            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [
-                line_of(r) for r in cells
-            ]
-            if hidden:
-                out.append(_hidden(hidden, block, max_rows))
-        elif isinstance(block, _Text):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(block.text)
-        elif isinstance(block, _Passage):
-            score = "" if block.score is None else f" (score {block.score:.2f})"
-            out += [
-                "",
-                f"[{block.rank}] {block.source}"
-                + (f" {block.detail}" if block.detail else "")
-                + score,
-            ]
-            if block.meta:
-                out.append("    " + block.meta)
-            out += textwrap.wrap(
-                block.text, 100, initial_indent="    ", subsequent_indent="    "
-            ) or ["    (no text)"]
-        elif isinstance(block, _Link):
-            out += [block.label + ":", block.url]
-        elif isinstance(block, _Answer):
-            text = (
-                block.text
-                if block.inline
-                else _with_markers(block.text, block.citations)
-            )
-            out += _answer_lines(text, 100)
-        elif isinstance(block, _Steps):
-            out += _steps_lines(block)
-        elif isinstance(block, _Pipeline):
-            out += _pipeline_lines(block)
-        elif isinstance(block, _Chunks):
-            out += _chunks_lines(block, max_rows)
-        elif isinstance(block, _Shares):
-            total = sum(count for _, count, _ in block.items) or 1
-            out += ["", f"-- {block.title} --"] if block.title else [""]
-            out += [f"  {label.ljust(22)} {count:>7,}  {_text_bar(count / total)}" for label, count, _ in block.items]
-        elif isinstance(block, _Json):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False))
-    return "\n".join(out)
+@_draws(_Answer, "text")
+def _answer_block_lines(block: _Answer, report: _Report) -> list[str]:
+    return _answer_lines(block.text if block.inline else _with_markers(block.text, block.citations), 100)
 
 
 def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:

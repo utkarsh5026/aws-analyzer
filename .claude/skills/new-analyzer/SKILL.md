@@ -51,7 +51,7 @@ For each command, give its name, what the user decides from it, its cards, and i
 Pick the names first:
 
 - the classes: `<Service>Analyzer` / `<Service>View` (for example `BedrockKBAnalyzer` / `BedrockKBView`)
-- a short CSS root class for `_render_html` (`s3a` and `ddb` are taken)
+- a short CSS root class, the file's `_ROOT` (taken: `s3a`, `ddb`, `kba`, `kbc`, `smk`, `osv`, `lmb`)
 - the price table: `<SERVICE>_PRICES`
 
 Then build the file:
@@ -65,12 +65,17 @@ Then build the file:
    returns)`, `# 3. Pure analysis (no AWS calls - ...)`, `# 4. <Service>Analyzer - pure logic layer ...`,
    `# 5. <Service>View - notebook UI layer ...`, each between `# ===...` lines.
 4. **Shared helpers.** Import what's in `src/aws_analyzer/_kit/` (`human_size`, `_plural`, `_require`, `_esc`,
-   `_why`, `_Hint`, ...) the way `dynamodb.py` does, only the names the file uses: never copy them, `rules.py`
-   fails on a copy. The helpers that aren't in `_kit` yet (CLAUDE.md's list: the render blocks, `_render_html` /
-   `_render_text`, `_friendly_errors`, `View._progress`, `View.help`, ..., plus `_visible_rows`, `_NUMERIC_RE`,
-   `_units` and `_CSS`) you copy verbatim from `dynamodb.py`, changing only the service names and the CSS root
-   class. Then run `.venv/bin/python .claude/skills/sync-helpers/drift.py`: every copied helper should be
-   reported as identical, or as differing only in docstrings.
+   `_why`, `_Hint`, the render blocks `_Title`, `_Cards`, `_Table`, ... and `_call`, `_signature`, `_render_text`,
+   `_report_html`, `_base_css`, ...) the way `dynamodb.py` does, only the names the file uses: never copy them,
+   `rules.py` fails on a copy. At the start of section 5, set the service's look the way `dynamodb.py` does:
+   `_ROOT`, `_CSS = _base_css(_ROOT)` (or `_base_css(_ROOT, _EXTRA_CSS)` with the rules for its own blocks, each
+   starting with `.<root>`), `_BADGE`, and `_render_html(blocks, max_rows)` calling `_report_html` with the three.
+   A block type of its own registers how it's drawn with `@_draws(_Block, "html")` and `@_draws(_Block, "text")`
+   (CLAUDE.md, "How the View layer works"). The helpers that aren't in `_kit` yet (CLAUDE.md's list:
+   `_friendly_errors`, `View._progress` with its progress-bar helpers, `View.help`, ..., plus `_units`) you copy
+   verbatim from `dynamodb.py`, changing only the service names. Then run
+   `.venv/bin/python .claude/skills/sync-helpers/drift.py`: every copied helper should be reported as identical,
+   or as differing only in docstrings.
 5. **The analyzer.** The constructor matches the others:
    `(session=None, *, region=None, profile=None, client=None, prices=None)`. Clients are made lazily, and a
    missing region turns into a readable `ValueError` (see `DynamoDBAnalyzer.client`). Use

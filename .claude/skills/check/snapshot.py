@@ -161,6 +161,8 @@ DEMO_CASES: dict[str, list[tuple[str, str, str]]] = {
 NORMALIZE: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"), "<uuid>"),  # uuid4() in demo data
     (re.compile(r"\b\d[\d,.]* ?(B|KB|MB|GB|TB) free\b"), "<size> free"),  # this machine's free memory and disk
+    # download_zip's Free disk card: "Free disk: 29.4 GB" in text, the card's label then its value in HTML
+    (re.compile(r"(Free disk(?::|</div><div class=\"v\">) ?)\d[\d,.]* ?(B|KB|MB|GB|TB)\b"), r"\1<size>"),
 ]
 
 

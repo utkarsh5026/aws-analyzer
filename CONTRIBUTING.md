@@ -30,10 +30,11 @@ just as well for people. The rules that matter most:
 
 - **One module per service, sharing one kit.** Each service is one module in
   [`src/aws_analyzer/`](src/aws_analyzer/), and services never import each other. Code they all need lives once in
-  [`src/aws_analyzer/_kit/`](src/aws_analyzer/_kit/) (`human_size`, `_require`, `_esc`, ...): import it from there,
-  never copy it (a check fails on a copy). Some helpers (the render blocks, `View.help`, ...) are still copied into
-  each module while they move to `_kit` ([the plan](.claude/plans/shared-code.md)): when you change one of those,
-  change the copies too.
+  [`src/aws_analyzer/_kit/`](src/aws_analyzer/_kit/) (`human_size`, `_require`, the render blocks and the
+  renderer, ...): import it from there, never copy it (a check fails on a copy). A service's own block registers how
+  it's drawn with `@_draws`. Some helpers (`View.help`, `_friendly_errors`, ...) are still copied into each module
+  while they move to `_kit` ([the plan](.claude/plans/shared-code.md)): when you change one of those, change the
+  copies too.
 - **Only boto3 and the standard library at import time.** pandas, pyarrow, IPython and the file readers are
   imported inside the function that needs them, through `_require(...)`, so a missing package becomes a note that
   says what to install.

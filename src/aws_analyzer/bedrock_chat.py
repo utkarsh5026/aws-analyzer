@@ -123,10 +123,15 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 from botocore.validate import ParamValidator
 
+from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
 from ._kit.deps import _in_notebook, _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money, human_size
-from ._kit.text import _clip, _esc, _pad, _text_bar, _width
+from ._kit.render import (
+    _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _render_text, _report_html,
+    _signature, _text_lines,
+)
+from ._kit.text import _clip, _esc
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -4266,77 +4271,6 @@ class BedrockChatAnalyzer:
 
 
 @dataclass
-class _Title:
-    text: str
-    sub: str = ""
-
-
-@dataclass
-class _Cards:
-    items: list[
-        tuple[str, ...]
-    ]  # (label, value), or (label, value, tone) with tone 'warn' | 'bad' | 'ok'
-
-
-@dataclass
-class _Table:
-    headers: list[str]
-    rows: list[list[Any]]  # cells are text, or _Tone for a coloured status
-    title: str = ""
-    bars: list[float] | None = None  # 0..1 per row, drawn as an extra column
-    bar_label: str = "Share"
-    tree: bool = False  # first column holds indented tree labels
-    max_rows: int | None = None  # None = view default, 0 = no cap
-    code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
-    prose_cols: tuple[
-        int, ...
-    ] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
-    collapsed: bool = False  # a secondary view: folded under its title in HTML
-
-
-@dataclass
-class _Note:
-    text: str
-    level: str = "info"  # 'info' | 'warn' | 'ok'
-
-
-@dataclass
-class _Text:
-    text: str
-    title: str = ""
-    wrap: bool = False  # prose: wrap long lines instead of scrolling sideways
-    code: bool = False  # a snippet to copy: in HTML one click selects all of it
-    collapsed: bool = (
-        False  # a secondary view (raw JSON): folded under its title in HTML
-    )
-
-
-@dataclass
-class _Findings:
-    items: list[tuple[str, str]]  # (level, message) pairs from a *_findings function
-    empty: str = ""  # said (as an ok note) when there are none; nothing when blank
-
-
-@dataclass
-class _Next:
-    items: list[
-        tuple[str, str]
-    ]  # (call, what it shows): the commands worth running next, arguments filled in
-    title: str = "Next"
-
-
-@dataclass
-class _Tone:
-    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
-
-    text: str
-    tone: str = "warn"  # 'warn' | 'bad' | 'ok'
-
-    def __str__(self) -> str:
-        return self.text
-
-
-@dataclass
 class _Answer:
     text: str
     citations: list[Citation] = field(default_factory=list)
@@ -4445,64 +4379,28 @@ def _tab_rules() -> str:
                       f"@container (max-width:359px){{{''.join(tight)}}}"])
 
 
-_CSS = """<style>
+_ROOT = "kbc"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+# Custom properties the chat's rules use (its window's too), light and dark.
+_THEME_CSS = """\
 .kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11);--kc-raised:var(--kc-surface)}
 .kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8;--kf:#0e7490;--ka:#c2410c;--kw:#be185d}
 body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
-.kbc{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
-.kbc h3{margin:10px 0 2px;font-size:16px}
-.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}
-.kbc h4{margin:14px 0 4px;font-size:13px}
-.kbc .sub{opacity:.65;font-size:12px;margin-bottom:6px}
-.kbc .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.kbc .card{border:1px solid var(--kc-line);border-radius:12px;padding:7px 13px;min-width:96px;background:var(--kc-tint)}
-.kbc .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
-.kbc .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
-.kbc .card.ok{border-color:rgba(16,185,129,.7)}
-.kbc .card .l{font-size:11px;opacity:.65}
-.kbc .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.kbc .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
-.kbc .tw.scroll{max-height:640px;overflow:auto}
-.kbc table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.kbc table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
-.kbc .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.kbc .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
-.kbc table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
-.kbc table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
-.kbc table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
-.kbc table.t td.s{white-space:nowrap}
-.kbc table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.kbc table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.kbc table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.kbc .track{display:inline-block;width:110px;height:8px;border-radius:4px;background:rgba(127,127,127,.18)}
-.kbc .track{vertical-align:middle;margin-right:6px}
-.kbc .fill{display:block;height:100%;border-radius:4px;background:var(--kc-accent)}
-.kbc .pill{display:inline-block;padding:0 8px;border-radius:999px;font-weight:600;font-size:12px}
-.kbc .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
-.kbc .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
-.kbc .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}
-.kbc .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}
-.kbc .note.warn::before{content:"\\26A0\\FE0E"}
-.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}
-.kbc .note.ok::before{content:"\\2713"}
-.kbc .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}
-.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}
-.kbc .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}
-.kbc pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
-.kbc pre.code{user-select:all;-webkit-user-select:all;cursor:text}
-.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}
-.kbc .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
-.kbc details.sec{margin:14px 0 4px}
-.kbc details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
-.kbc .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
-.kbc .next{border-top:1px dashed rgba(127,127,127,.35)}
-.kbc .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.kbc .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}"""
+# The chat's reports match its window: rounder cards, badges and pills, and colours from the theme.
+_RESTYLE = {
+    "h3 .badge{": '.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}',
+    ".card{": '.kbc .card{border:1px solid var(--kc-line);border-radius:12px;padding:7px 13px;min-width:96px;background:var(--kc-tint)}',
+    ".track{display:": '.kbc .track{display:inline-block;width:110px;height:8px;border-radius:4px;background:rgba(127,127,127,.18)}',
+    ".fill{": '.kbc .fill{display:block;height:100%;border-radius:4px;background:var(--kc-accent)}',
+    ".pill{": '.kbc .pill{display:inline-block;padding:0 8px;border-radius:999px;font-weight:600;font-size:12px}',
+    ".note{": '.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}',
+    ".note.warn{": '.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}',
+    ".note.ok{": '.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}',
+    "code{font-family:": '.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}',
+    "code{background:": '.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}',
+    "pre{": '.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}',
+}
+_EXTRA_CSS = """\
 .kbc mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
 .kbc .ans{font-size:14px;line-height:1.6;margin:8px 0 10px;max-width:900px;overflow-wrap:anywhere}
 .kbc .ans>:first-child{margin-top:0}
@@ -4794,118 +4692,11 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 .kbc-app.kbc-app .kbc-trig>.kbc-trig-b:active:enabled,.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:active:enabled{transform:none}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
-""" + _tab_rules() + "\n</style>"
-
+""" + _tab_rules()
+# Highlighted code to copy (_Code), next to the shared rules for <pre>.
+_PRE_HL = '.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}'
+_CSS = _base_css(_ROOT, _EXTRA_CSS, theme=_THEME_CSS, restyle=_RESTYLE, after={"pre.code{": _PRE_HL})
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
-_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
-
-
-# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
-# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
-_CALL_RE = re.compile(
-    r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
-    r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
-    r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)"
-)
-
-
-_TONES = ("warn", "bad", "ok")
-
-
-_MARKS = {
-    "warn": "[!] ",
-    "ok": "[ok] ",
-}  # text-mode prefix of a note by level; anything else is "[i] "
-
-
-_SELECT = ' title="Click to select, then copy"'
-
-
-def _prose(value: Any) -> str:
-    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects.
-    The text is split on the calls and every piece escaped before it's wrapped, so nothing in it becomes markup."""
-    pieces = _CALL_RE.split("" if value is None else str(value))
-    return "".join(
-        f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2 else _esc(piece)
-        for i, piece in enumerate(pieces)
-    )
-
-
-def _call(name: str, *args: Any, **kwargs: Any) -> str:
-    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
-
-    def literal(
-        value: Any,
-    ) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
-        if type(value).__name__ == "Decimal":
-            return str(value)
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items())
-                + "}"
-            )
-        if isinstance(value, (list, tuple)):
-            inner = ", ".join(map(literal, value)) + (
-                "," if isinstance(value, tuple) and len(value) == 1 else ""
-            )
-            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
-        return repr(value)
-
-    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
-
-
-def _signature(function: Callable) -> str:
-    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
-    sig = inspect.signature(function)
-    params = [
-        p.replace(annotation=inspect.Parameter.empty)
-        for name, p in sig.parameters.items()
-        if name != "self"
-    ]
-    return str(
-        sig.replace(parameters=params, return_annotation=inspect.Signature.empty)
-    )
-
-
-def _tone(item: tuple[str, ...]) -> str:
-    """The tone of a card: its third element, when it's one this renderer colours."""
-    return item[2] if len(item) > 2 and item[2] in _TONES else ""
-
-
-def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Warnings first, then notes, each in the order they were found."""
-    return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
-
-
-def _counts(findings: list[tuple[str, str]], sep: str) -> str:
-    """'2 warnings · 3 notes'."""
-    warns = sum(level == "warn" for level, _ in findings)
-    return sep.join(
-        filter(
-            None,
-            [
-                _plural(warns, "warning") if warns else "",
-                _plural(len(findings) - warns, "note") if len(findings) > warns else "",
-            ],
-        )
-    )
-
-
-def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int]:
-    cap = default_max if table.max_rows is None else table.max_rows
-    rows = table.rows if not cap else table.rows[:cap]
-    return rows, len(table.rows) - len(rows)
-
-
-def _hidden(count: int, table: _Table, default_max: int) -> str:
-    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
-    text = f"... {count:,} more rows not shown"
-    return text + (
-        f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)"
-        if table.max_rows is None
-        else ""
-    )
 
 
 def _json_html(
@@ -4951,6 +4742,20 @@ def _json_html(
     return f'<div class="json">{node("", value, (), 0, False)}</div>'
 
 
+@_draws(_Json, "html")
+def _json_block_html(block: _Json, report: _Report) -> str:
+    tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
+    if block.collapsed:
+        return f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>'
+    return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + tree
+
+
+@_draws(_Json, "text")
+def _json_block_lines(block: _Json, report: _Report) -> list[str]:
+    head = ["", f"-- {block.title} --"] if block.title else []
+    return head + [json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False)]
+
+
 _JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
 
 
@@ -4977,6 +4782,15 @@ def _shell_html(command: str) -> str:
 def _code_html(text: str, lang: str) -> str:
     """Code as highlighted HTML: Python, JSON or a shell command."""
     return {"python": _python_html, "json": _json_source_html, "shell": _shell_html}.get(lang, _esc)(text)
+
+
+@_draws(_Code, "html")
+def _code_block_html(block: _Code, report: _Report) -> str:
+    hint = '<span class="hint">click it to select all, then copy</span>'
+    return f'<h4>{_prose(block.title)}{hint}</h4><pre class="code hl"{_SELECT}>{_code_html(block.text, block.lang)}</pre>'
+
+
+_draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any other text
 
 
 def _json_source_html(text: str) -> str:
@@ -5159,26 +4973,6 @@ def _question_html(question: str) -> str:
     return f'<div class="ask"><div class="msg you">{_esc(question)}</div>{_YOU}</div>'
 
 
-def _cards_html(items: list[tuple[str, ...]]) -> str:
-    cards = "".join(
-        f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
-        f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
-        for item in items
-    )
-    return f'<div class="cards">{cards}</div>'
-
-
-def _findings_html(block: _Findings) -> str:
-    """The findings panel: warnings first, with how many there are of each; block.empty (an ok note) when there's
-    none."""
-    items = _ordered(block.items)
-    if items:
-        notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
-        head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
-        return f'<div class="fd">{head}{notes}</div>'
-    return f'<div class="note ok">{_prose(block.empty)}</div>' if block.empty else ""
-
-
 def _row_stats(item: BatchItem) -> str:
     """The numbers on a test question's line: '92% grounded · 2 cited · 2.1s', 'best 0.812 · 0.3s'."""
     a = item.answer
@@ -5251,138 +5045,40 @@ def _result_lines(row: _ResultRow) -> list[str]:
     return out
 
 
+@_draws(_Results, "html")
+def _results_html(block: _Results, report: _Report) -> str:
+    return f'<div class="bqs">{"".join(_result_html(row) for row in block.rows)}</div>'
+
+
+@_draws(_Results, "text")
+def _results_lines(block: _Results, report: _Report) -> list[str]:
+    return [line for row in block.rows for line in _result_lines(row)]
+
+
+@_draws(_Turn, "html")
+def _turn_block_html(block: _Turn, report: _Report) -> str:
+    a = block.answer
+    if a.retrieve_only:
+        return _question_html(a.question) + _search_html(a, block.meta, block.findings, block.ranks)
+    return _question_html(a.question) + _turn_html(a, block.meta, block.findings)
+
+
+@_draws(_Turn, "text")
+def _turn_block_lines(block: _Turn, report: _Report) -> list[str]:
+    a = block.answer
+    if a.retrieve_only:
+        out = ["", f"You: {a.question}", f"Bedrock search ({block.meta}):"]
+        out += _passage_lines(a, block.ranks) or ["  (no passages found)"]
+    else:
+        out = ["", f"You: {a.question}", f"Bedrock ({block.meta}):"]
+        out += _answer_lines(_with_markers(a.text, a.citations), 100, "  ")
+        out += [f"  [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
+    return out + ["  " + _MARKS.get(level, "[i] ") + message for level, message in _ordered(block.findings)]
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    out = [_CSS, '<div class="kbc">']
-    for block in blocks:
-        if isinstance(block, _Title):
-            out.append(
-                f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>'
-            )
-            if block.sub:
-                out.append(f'<div class="sub">{_prose(block.sub)}</div>')
-        elif isinstance(block, _Cards):
-            out.append(_cards_html(block.items))
-        elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
-        elif isinstance(block, _Findings):
-            out.append(_findings_html(block))
-        elif isinstance(block, _Next):
-            if block.items:
-                calls = "".join(
-                    f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
-                    + (f'<span class="nw">{_esc(why)}</span>' if why else "")
-                    + "</span>"
-                    for call, why in block.items
-                )
-                out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
-                )
-        elif isinstance(block, _Table):
-            if not block.rows:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append('<div class="more">(none)</div>')
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
-            head += (
-                f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
-            )
-            body = []
-            for i, row in enumerate(rows):
-                cells = []
-                for j, cell in enumerate(row):
-                    text = "" if cell is None else str(cell)
-                    inner = _esc(text)
-                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
-                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
-                    if block.tree and j == 0:
-                        css = "tree"
-                    elif j in block.code_cols and text:
-                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
-                    elif j in block.prose_cols:
-                        css, inner = "", _prose(text)
-                    elif _NUMERIC_RE.match(text):
-                        css = "n"
-                    else:
-                        css = "s" if len(text) <= 16 and "\n" not in text else ""
-                    cells.append(
-                        f'<td class="{css}">{inner}</td>'
-                        if css
-                        else f"<td>{inner}</td>"
-                    )
-                if block.bars is not None:
-                    pct = max(0.0, min(1.0, block.bars[i])) * 100
-                    cells.append(
-                        f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                        f"</span></span>{pct:.1f}%</td>"
-                    )
-                body.append(f"<tr>{''.join(cells)}</tr>")
-            table = (
-                f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
-                f"</thead><tbody>{''.join(body)}</tbody></table></div>"
-            )
-            if hidden:
-                table += (
-                    f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
-                )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")} '
-                    f"({len(block.rows):,})</summary>{table}</details>"
-                )
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(table)
-        elif isinstance(block, _Text):
-            css = " ".join(
-                filter(
-                    None, ["wrap" if block.wrap else "", "code" if block.code else ""]
-                )
-            )
-            pre = (
-                f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>'
-                if css
-                else f"<pre>{_esc(block.text)}</pre>"
-            )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
-                )
-            else:
-                hint = (
-                    '<span class="hint">click it to select all, then copy</span>'
-                    if block.code
-                    else ""
-                )
-                if block.title or hint:
-                    out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
-                out.append(pre)
-        elif isinstance(block, _Json):
-            tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
-            if block.collapsed:
-                out.append(f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>')
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(tree)
-        elif isinstance(block, _Code):
-            hint = '<span class="hint">click it to select all, then copy</span>'
-            out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
-            out.append(f'<pre class="code hl"{_SELECT}>{_code_html(block.text, block.lang)}</pre>')
-        elif isinstance(block, _Results):
-            out.append(f'<div class="bqs">{"".join(_result_html(row) for row in block.rows)}</div>')
-        elif isinstance(block, _Turn):
-            out.append(_question_html(block.answer.question))
-            if block.answer.retrieve_only:
-                out.append(_search_html(block.answer, block.meta, block.findings, block.ranks))
-            else:
-                out.append(_turn_html(block.answer, block.meta, block.findings))
-        elif isinstance(block, _Answer):
-            out.append(f'<div class="ans">{_answer_html(block)}</div>')
-    out.append("</div>")
-    return "".join(out)
+    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
 def _split_marks(span: str) -> tuple[str, str]:
@@ -5944,102 +5640,14 @@ def _answer_html(block: _Answer) -> str:
     return _markdown_html(block.text, block.citations, block.inline)
 
 
-def _render_text(blocks: list[Any], max_rows: int) -> str:
-    out: list[str] = []
-    for block in blocks:
-        if isinstance(block, _Title):
-            out += ["", block.text, "=" * min(len(block.text), 100)] + (
-                [block.sub] if block.sub else []
-            )
-        elif isinstance(block, _Cards):
-            line = ""
-            for entry in block.items:
-                item = f"{entry[0]}: {entry[1]}" + (
-                    " (!)" if _tone(entry) in ("warn", "bad") else ""
-                )
-                if line and len(line) + len(item) > 100:
-                    out.append(line)
-                    line = ""
-                line += ("   " if line else "") + item
-            out.append(line)
-        elif isinstance(block, _Note):
-            out.append(_MARKS.get(block.level, "[i] ") + block.text)
-        elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                out += ["", f"-- Findings: {_counts(items, ', ')} --"]
-                out += [_MARKS.get(level, "[i] ") + message for level, message in items]
-            elif block.empty:
-                out.append("[ok] " + block.empty)
-        elif isinstance(block, _Next):
-            if block.items:
-                width = max(len(call) for call, _ in block.items)
-                out += ["", f"{block.title}:"]
-                out += [
-                    f"  {call.ljust(width)}   {why}".rstrip()
-                    for call, why in block.items
-                ]
-        elif isinstance(block, _Table):
-            out.append("")
-            if block.title:
-                out.append(f"-- {block.title} --")
-            if not block.rows:
-                out.append("(none)")
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            headers = list(block.headers) + (
-                [block.bar_label] if block.bars is not None else []
-            )
-            cells = [
-                [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
-                + ([_text_bar(block.bars[i])] if block.bars is not None else [])
-                for i, row in enumerate(rows)
-            ]
-            widths = [
-                max([_width(h)] + [_width(r[j]) for r in cells])
-                for j, h in enumerate(headers)
-            ]
+@_draws(_Answer, "html")
+def _answer_block_html(block: _Answer, report: _Report) -> str:
+    return f'<div class="ans">{_answer_html(block)}</div>'
 
-            def line_of(values: list[str], widths: list[int] = widths) -> str:
-                return "  ".join(
-                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
-                    for v, w in zip(values, widths)
-                ).rstrip()
 
-            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [
-                line_of(r) for r in cells
-            ]
-            if hidden:
-                out.append(_hidden(hidden, block, max_rows))
-        elif isinstance(block, (_Text, _Code)):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(block.text)
-        elif isinstance(block, _Json):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False))
-        elif isinstance(block, _Results):
-            for row in block.rows:
-                out += _result_lines(row)
-        elif isinstance(block, _Turn):
-            a = block.answer
-            if a.retrieve_only:
-                out += ["", f"You: {a.question}", f"Bedrock search ({block.meta}):"]
-                out += _passage_lines(a, block.ranks) or ["  (no passages found)"]
-            else:
-                out += ["", f"You: {a.question}", f"Bedrock ({block.meta}):"]
-                out += _answer_lines(_with_markers(a.text, a.citations), 100, "  ")
-                out += [f"  [{i}] {p.source}" for i, p in enumerate(a.sources, 1)]
-            out += ["  " + _MARKS.get(level, "[i] ") + message for level, message in _ordered(block.findings)]
-        elif isinstance(block, _Answer):
-            text = (
-                block.text
-                if block.inline
-                else _with_markers(block.text, block.citations)
-            )
-            out += _answer_lines(text, 100)
-    return "\n".join(out)
+@_draws(_Answer, "text")
+def _answer_block_lines(block: _Answer, report: _Report) -> list[str]:
+    return _answer_lines(block.text if block.inline else _with_markers(block.text, block.citations), 100)
 
 
 def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
@@ -8291,8 +7899,8 @@ class _ChatApp:
             checked = any(_filled(i.expected) for i in batch.items)
             empty = (("Every search found passages" if batch.retrieve_only else "Every question was answered, citing "
                       "its sources") + (", and the expected one." if checked else "."))
-            head += (f'<div class="tests">{_cards_html(view._batch_cards(batch))}'
-                     f"{_findings_html(_Findings(view._batch_findings(batch), empty))}</div>")
+            parts = [_Cards(view._batch_cards(batch)), _Findings(view._batch_findings(batch), empty)]
+            head += f'<div class="tests">{_blocks_html(parts)}</div>'
         self._set(self.test_head, _wrap(head))
 
     # ------------------------------------------------------------------- Runs
@@ -8362,8 +7970,8 @@ class _ChatApp:
             findings = next(b for b in blocks if isinstance(b, _Findings))
             places = view._places()
             lines = [self._run_line(b, places.get(id(b))) for b in reversed(view.batches)]
-            self._set(self.runs_view, _wrap(f'<div class="tests">{_cards_html(cards.items)}{_findings_html(findings)}'
-                                            f'</div><div class="bqs narrow">{"".join(lines)}</div>'))
+            self._set(self.runs_view, _wrap(f'<div class="tests">{_blocks_html([cards, findings])}</div>'
+                                            f'<div class="bqs narrow">{"".join(lines)}</div>'))
             options = [(self._run_option(b), view._run_number(b)) for b in reversed(view.batches)]
             numbers = [number for _, number in options]
             self._quietly(self.run_pick, options=options,

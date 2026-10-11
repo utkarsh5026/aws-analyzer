@@ -2683,6 +2683,17 @@ def open_window(monkeypatch, clients=None, **kwargs):
     return view
 
 
+def html_widgets(widget):
+    """Every widget in a window that shows HTML."""
+    found, todo = [], [widget]
+    while todo:
+        item = todo.pop()
+        if type(item).__name__ == "HTML":
+            found.append(item)
+        todo += getattr(item, "children", ())
+    return found
+
+
 def code_text(app):
     """What the Code tab's code block shows, as text."""
     return plain(re.search(r"<pre[^>]*>(.*)</pre>", app.code_view.value, re.S).group(1))
@@ -2812,6 +2823,8 @@ def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
     assert len(view.batches) == 4 and all(a is b for a, b in zip(view.batches, sweep.batches))
     head = html.unescape(app.sweep_head.value)
     assert "Sweep 1" in head and "Setups, best first" in head and "n=8 · search_type=SEMANTIC did best" in head
+    assert '<div class="kbc">' in head and "<style>" not in head  # the window's style holds the report CSS, once
+    assert [pane for pane in html_widgets(app.root) if chatmod._CSS in pane.value] == [app.root.children[0]]
     assert app.sweep_bar.layout.display == "" and app.setup_pick.value == 3 and sweep.best is view.batches[2]
     assert [label for label, _ in app.setup_pick.options][0] == "#1 · run 3 · n=8 · search_type=SEMANTIC"
     assert "Test run 3 (n=8 · search_type=SEMANTIC)" in app.test_head.value and len(app.test_rows.children) == 3
@@ -2910,6 +2923,7 @@ def test_window_runs_tab_lists_shows_switches_compares_and_saves(monkeypatch, tm
     assert view.values == {"n": 8} and "Now using the setup of run 3 (sweep 1: n=8): n 5 → 8." in app.status.value
     app.compare_button.click()
     assert "3 test runs on support-docs compared" in html.unescape(app.compare_view.value)
+    assert '<div class="kbc">' in app.compare_view.value and "<style>" not in app.compare_view.value
     view.ask_all(["Something else?"])
     app.run_pick.value = 4
     app.compare_button.click()

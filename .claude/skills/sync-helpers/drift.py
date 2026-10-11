@@ -1,10 +1,11 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
-The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, ...), and are moving the rest
-there phase by phase (.claude/plans/shared-code.md). Until then each src/aws_analyzer/<service>.py still carries
-its own copy of the other shared helpers (the render blocks, _render_html, _friendly_errors, View._progress,
-View.help, ...). This compares every top-level definition, and every private View / Analyzer method, that two or
-more analyzers define under the same name.
+The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, the render blocks and the
+renderer, ...), and are moving the rest there phase by phase (.claude/plans/shared-code.md). Until then each
+src/aws_analyzer/<service>.py still carries its own copy of the other shared helpers (_friendly_errors,
+View._progress, View.help, ...). This compares every top-level definition, and every private View / Analyzer
+method, that two or more analyzers define under the same name, and every name an analyzer defines that _kit has
+too: S3's own renderer (_Table, _prose, _findings_html, _table_html, _render_text), which stays until Phase 6.
 
 Service names are normalized first (S3View / DynamoDBView -> <View>, S3_PRICES -> <PRICES>, the CSS root
 class -> <css>), so only real differences are reported. A difference in docstrings or comments only is
@@ -33,9 +34,10 @@ KIT = ANALYZERS / "_kit"
 # Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
 COMPANIONS = {"s3_explorer"}
 # The helpers CLAUDE.md lists as still duplicated. Every analyzer should have all of them, except those that have
-# moved to _kit (every analyzer imports those instead).
-EXPECTED = ["_Title", "_Cards", "_Table", "_Note", "_Text", "_render_html", "_render_text", "_friendly_errors",
-            "View._progress", "_progress_bar_class", "_progress_bar", "_progress_text", "View.help", "View._show"]
+# moved to _kit (every analyzer imports those instead). _render_html is each service's own (a call to _kit's
+# _report_html with its stylesheet, root class and badge, or S3's renderer).
+EXPECTED = ["_render_html", "_friendly_errors", "View._progress", "_progress_bar_class", "_progress_bar",
+            "_progress_text", "View.help", "View._show"]
 
 
 def _segment(lines: list[str], node: ast.AST) -> str:
@@ -76,7 +78,8 @@ def _definitions(path: Path) -> tuple[dict[str, tuple[int, str]], dict[str, str]
             defs[name] = (node.lineno, _segment(lines, node))
             if name.endswith("_PRICES"):
                 tokens["PRICES"] = name
-    css = re.search(r"""<div class="([\w-]+)">""", defs.get("_render_html", (0, ""))[1])
+    css = re.search(r'^_ROOT = "([\w-]+)"', source, re.MULTILINE) or re.search(
+        r"""<div class="([\w-]+)">""", defs.get("_render_html", (0, ""))[1])  # S3 has no _ROOT until Phase 6
     if css:
         tokens["css"] = css.group(1)
     return defs, tokens
@@ -147,10 +150,28 @@ def main() -> int:
         else:
             code.append((name, variants))
 
+    # Names an analyzer defines that _kit has too: rules.py lets only S3's own renderer do that (until Phase 6).
+    kit_defs = {name: (f"_kit/{path.name}", *where) for path in sorted(KIT.glob("*.py"))
+                for name, where in _definitions(path)[0].items()}
+    from_kit = [(name, file) for file, (defs, _) in parsed.items() for name in defs
+                if name in kit_defs and "." not in name and selected(name)]
+
     print(f"Compared {', '.join(parsed)}: {len(shared)} shared names, {len(same)} identical, "
           f"{len(docs_only)} differ in docstrings/comments only, {len(code)} differ in code.")
     for file, names in missing.items():
         print(f"\n{file} is missing shared helpers: {', '.join(names)}")
+
+    if from_kit:
+        print("\n== Defined in an analyzer and in _kit (S3's own renderer until Phase 6) ==")
+        for name, file in from_kit:
+            print(f"  {name:<28} {file}:{parsed[file][0][name][0]} vs {kit_defs[name][0]}:{kit_defs[name][1]}")
+        if not args.summary:
+            for name, file in from_kit:
+                kit_file, _, kit_text = kit_defs[name]
+                mine = _normalize(parsed[file][0][name][1], parsed[file][1])
+                print(f"\n--- {name}: {kit_file} vs {file}")
+                diff = difflib.unified_diff(kit_text.splitlines(), mine.splitlines(), kit_file, file, lineterm="", n=1)
+                print("\n".join(list(diff)[2:]))
 
     for title, group in (("Differ in code", code), ("Differ in docstrings or comments only", docs_only)):
         if not group:
