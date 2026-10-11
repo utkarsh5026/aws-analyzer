@@ -85,19 +85,24 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   (`_require`, `_in_notebook`), `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
-  `_prose`, `_call`, `_signature`, the shared blocks' drawers, `_report_html`, `_render_text`, `_blocks_html`).
+  `_prose`, `_call`, `_signature`, the shared blocks' drawers, `_report_html`, `_render_text`, `_blocks_html`),
+  `progress.py` (`_progress_bar_class`, `_progress_bar`, `_progress_text`), `view.py` (`_BaseView`, which every
+  `<Service>View` subclasses: `_show`, `_progress`, `help()`, `_price_basis`; `@_friendly_errors`; `_commands`) and
+  `analyzer.py` (`_BaseAnalyzer`, which every `<Service>Analyzer` subclasses: the session, `_config`, `prices`,
+  `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
   analyzer, and it follows the same import-time rule as they do. Each service sets its look: `_ROOT` (its CSS root
   class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
   `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
-  max_rows)`, which is `_report_html` with those three. The rest of the shared helpers move into `_kit` phase by
-  phase (`.claude/plans/shared-code.md`); until then they are still duplicated in all seven analyzers
-  (`_friendly_errors`, `View._progress` with `_progress_bar_class` / `_progress_bar` / `_progress_text`,
-  `View.help`). Only `_BADGE` and the View's `_GROUPS` / `_START` differ between the copies. When you fix or change
-  one of them, check the copies in the others. A test that patches a helper patches it where it's looked up: on the
-  analyzer module for a call the analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit`
-  module for a call `_kit` makes.
+  max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it). What
+  `bedrock_kb.py` and `bedrock_chat.py` share, and the explorer windows' parts, are still copied until Phases 5 and 7 of
+  `.claude/plans/shared-code.md` (listed at the end of "Architecture of an analyzer file"); `drift.py` lists what
+  differs between the copies, so when you fix one, check the others. A test that patches a helper patches it where it's
+  looked up: on the analyzer module for a call the analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on
+  the `_kit` module for a call `_kit` makes (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with
+  `from aws_analyzer._kit import view as viewmod`: `_BaseView._progress` makes that call, and `_BaseView.__init__`
+  asks `_in_notebook` there too).
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
   and findings are laid out as described under "How the View layer works" (asked for S3 first). Until Phase 6
   ports it to `_kit`, `s3.py` keeps its own `_Table`, `_prose`, `_findings_html`, `_table_html` and `_render_text`
@@ -105,14 +110,15 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   the blocks and helpers from `_kit`; `drift.py` lists those five next to `_kit`'s. Don't "fix" that by reverting
   `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
-  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`.
-  Nothing imports a companion.
+  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`. Its
+  public commands are guarded by its own `@_window_errors`, which shows an error in its pane (`rules.py` accepts
+  that name on a companion's window). Nothing imports a companion.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
-  ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image",
-  ..., "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its
-  notebook widget) is the exception that fails quietly: `_progress_bar_class` loads it with `importlib`, and without
-  it the progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`.
+  ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image", ...,
+  "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its notebook widget) is the
+  exception that fails quietly: `_progress_bar_class` (`_kit/progress.py`) loads it with `importlib`, and without it the
+  progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
@@ -157,12 +163,25 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
    are public API: users run them on S3 Inventory rows, DynamoDB exports or their own passages. Put new analysis logic here when it doesn't need AWS,
    so it can be unit-tested without moto.
 4. **`<Service>Analyzer`**: the logic layer. Talks to AWS, returns section-2 data, **never prints**. Takes
-   `session` / `region` / `profile` / `client` / `prices`. Long scans accept `limit=` and a `progress=` callback.
+   `session` / `region` / `profile` / `client` / `prices`. It subclasses `_BaseAnalyzer` (`_kit/analyzer.py`): it
+   sets `_LIST_PRICES` (its price table) and passes `session`, `region`, `profile` and `prices` to
+   `super().__init__()`, which makes the session (or keeps the one given), the clients' retry `_config` and
+   `self.prices`, a copy of the list prices with `prices=` over them (the module's table never changes; a test
+   checks). The base also gives `region` (the main client's), `_paginate(operation, key, **params)`, `_map(fn,
+   items)` over `self.max_workers` threads, and `_cached_client(name, make)` (once, under `self._lock`, into
+   `self._clients`). The service makes its own clients, each with its service name spelled out. Long scans accept
+   `limit=` and a `progress=` callback.
    Config sections the caller can't read are recorded in an `errors` dict on the result (section → error code)
    instead of raising, so missing IAM permissions degrade to a note.
 5. **`<Service>View`**: the notebook UI. Wraps an analyzer as `self.core`; each public method renders a report and
    returns `None`. Many share a name with their data method (`ls`, `find`, `scan`, `query`), but not all
    (`summary` → `summarize`, `what_if` → `simulate_lifecycle`, `schema` → `profile`, `table_info` → `describe`).
+   It subclasses `_BaseView` (`_kit/view.py`): `__init__` passes `mode`, `max_rows` and `progress` to
+   `super().__init__()` and then sets `self.core: <Service>Analyzer = core or <Service>Analyzer()`, and the class
+   says what's its own: `_render_html = staticmethod(_render_html)` (its look), `_GROUPS` and `_START` (help()),
+   and where it differs, `_PROGRESS` (what `_progress()` says without a label: S3's `("Scanning", "objects")`) and
+   `_DATA_ERRORS` (S3's decoding errors), plus `_render_text` and `_TABLE`, S3's own renderer until Phase 6. The
+   base defines no command but `help()`.
 
 How the View layer works:
 
@@ -217,12 +236,20 @@ How the View layer works:
     its first `:`, `;` or full stop, never inside a call): a finding shows it as a bold headline over the rest as
     points (`_finding_html`), and notes and Warnings cells get it as a bold lead-in (`_lead`); amounts of money
     in them are stressed. So write a finding as "what's wrong: why it matters. What to do (the call)."
-- Every public View method is decorated with `@_friendly_errors`, which turns `ClientError` / `BotoCoreError` /
-  data-decoding errors into a warning note instead of a traceback.
-- `help()` lists public View methods by introspection, grouped by the View's `_GROUPS` (anything missing lands
-  in "Other"), with their signatures without type hints and the **first paragraph of each docstring** as the
-  description, after a "Start here" `_Next` from `_START`. `help("name")` shows one command's whole docstring.
-- Long operations wrap the analyzer call in `with self._progress(label, unit) as tick:` and pass `progress=tick`.
+- Every public View method is decorated with `@_friendly_errors` (`_kit/view.py`), which turns `ClientError` /
+  `BotoCoreError` / data-decoding errors into a warning note instead of a traceback, and asks the View what to
+  say: `_explain(code, message)` adds what an AWS error means and what to do (the windows call it too), and
+  `_explain_call(code, message, command, args, kwargs)` is for a View that needs the command's arguments
+  (DynamoDB names the table that wasn't found, and the closest names); `_DATA_ERRORS` are the other errors shown
+  as `"ValueError: ..."` (`ValueError`, `TypeError`; S3's are what decoding a file raises); a `_Hint` shows as a
+  plain note; `_extra_note(exc, command)` returns the note for the service's own errors (OpenSearch's failed
+  requests and unexpected answers), and anything else still raises.
+- `help()` lists the commands `_commands(cls)` finds (the public methods of the View and its bases, the View's own
+  first, so `_BaseView`'s `help` too), grouped by the View's `_GROUPS` (anything missing lands in "Other"; a test
+  checks nothing does), with their signatures without type hints and the **first paragraph of each docstring** as
+  the description, after a "Start here" `_Next` from `_START`. `help("name")` shows one command's whole docstring.
+- Long operations wrap the analyzer call in `with self._progress(label, unit) as tick:` and pass `progress=tick`
+  (without them, `_progress()` says the View's `_PROGRESS`).
   The analyzer calls `progress(count)` with a running count, or `progress(done, total)` when it knows the total
   (a new total starts a new bar; `unit="B"` counts bytes). `_progress` shows a tqdm bar when tqdm is installed and a
   plain line with the rate and time left otherwise, only one at a time (a nested `_progress` replaces the outer
@@ -411,13 +438,13 @@ AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonCloudWatc
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
-`bedrock_chat.py` carries its own copies of `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL`
-and the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ). The two windows
-also share copies: `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_Json` with
-`_json_html` / `_plain_json`, `SEARCHABLE` and `Analyzer._cached_client` (which makes each client once, under a lock,
-since both windows read from threads). `lambda_functions.py`'s explorer carries copies of `_css_height`,
-`_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_skeleton` and `_for_window` (as in
-`bedrock_kb.py`) and of `_python_html`, `_json_source_html`, `_JSON_TOKEN_RE` and `_PY_LITERALS` (as in
+`bedrock_chat.py` carries its own copies of `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and
+the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ). The two windows also
+share copies: `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_Json` with
+`_json_html` / `_plain_json` and `SEARCHABLE`, and both analyzers make their clients with the base's `_cached_client`
+(once, under a lock, since both windows read from threads). `lambda_functions.py`'s explorer carries copies of
+`_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_skeleton` and `_for_window` (as
+in `bedrock_kb.py`) and of `_python_html`, `_json_source_html`, `_JSON_TOKEN_RE` and `_PY_LITERALS` (as in
 `bedrock_chat.py`); `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`,
 `_window_text`, `_window_errors` and `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
 
@@ -528,7 +555,8 @@ does both, a page at a time). How the UI works:
 - One test file per analyzer. Pure functions are tested directly; AWS-backed methods use an `aws` fixture wrapping
   `moto.mock_aws()` and fixtures that seed a bucket / table. A new AWS service needs its moto extra added to
   `moto[...]` in `requirements-dev.txt`. `_kit` is tested through the services, and `tests/test_kit.py` covers what
-  no service reaches in normal use (a block nothing draws, `_base_css`'s checks on a restyle).
+  no service reaches in normal use (a block nothing draws, `_base_css`'s checks on a restyle, each error kind
+  `@_friendly_errors` meets on a toy View, and that `prices=` given to one analyzer changes no other's).
 - Bedrock has little moto support (moto 5.2 only creates / gets / lists / deletes knowledge bases), so
   `tests/test_bedrock_kb.py` uses botocore `Stubber` with injected clients:
   `BedrockKBAnalyzer(client=agent, clients={"bedrock-agent-runtime": ..., "bedrock-runtime": ..., "bedrock": ...})`.
@@ -579,7 +607,7 @@ does both, a page at a time). How the UI works:
   against a `Fake` client put in `sys.modules["boto3"]`. `save_runs()` / `load_runs()` tests `monkeypatch.chdir` into
   `tmp_path`.
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
-  helper.
+  helper. Each service's help test checks that `set(_commands(<Service>View))` is what its `_GROUPS` list.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
   clicks with `button.click()`, sets text boxes' `.value`, sends the path box's Enter with
   `_handle_custom_msg({"event": "submit"}, [])`, sets `_CLICK_GRACE` to 0, and reads the right pane as blocks in

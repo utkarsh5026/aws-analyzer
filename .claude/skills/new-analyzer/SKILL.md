@@ -1,6 +1,6 @@
 ---
 name: new-analyzer
-description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout, the shared helpers imported from _kit (and copies of the ones not there yet), a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
+description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout, the shared helpers imported from _kit and its Analyzer and View built on _kit's base classes, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
 argument-hint: "<module name, e.g. sagemaker> [what users should be able to see first]"
 ---
 
@@ -71,21 +71,28 @@ Then build the file:
    `_ROOT`, `_CSS = _base_css(_ROOT)` (or `_base_css(_ROOT, _EXTRA_CSS)` with the rules for its own blocks, each
    starting with `.<root>`), `_BADGE`, and `_render_html(blocks, max_rows)` calling `_report_html` with the three.
    A block type of its own registers how it's drawn with `@_draws(_Block, "html")` and `@_draws(_Block, "text")`
-   (CLAUDE.md, "How the View layer works"). The helpers that aren't in `_kit` yet (CLAUDE.md's list:
-   `_friendly_errors`, `View._progress` with its progress-bar helpers, `View.help`, ..., plus `_units`) you copy
-   verbatim from `dynamodb.py`, changing only the service names. Then run
-   `.venv/bin/python .claude/skills/sync-helpers/drift.py`: every copied helper should be reported as identical,
-   or as differing only in docstrings.
-5. **The analyzer.** The constructor matches the others:
-   `(session=None, *, region=None, profile=None, client=None, prices=None)`. Clients are made lazily, and a
-   missing region turns into a readable `ValueError` (see `DynamoDBAnalyzer.client`). Use
-   `Config(retries={"max_attempts": 10, "mode": "adaptive"})`. Record config sections the caller can't read in
-   `errors`. Long reads take `limit=` and `progress=`.
-6. **The View.** `__init__(core=None, *, mode="auto", max_rows=50)`, plus `_show`, `_progress`, `help` and
-   `_price_basis` copied from the other Views, and the service's own `_GROUPS` (commands by task, for help()) and
-   `_START` (the first two or three calls to try). Every command is decorated with `@_friendly_errors`, and its
-   docstring's first paragraph is its help() text. `_friendly_errors` gets a service-specific not-found message.
-   Set the file's `_BADGE` (the chip before each report title) and CSS root class.
+   (CLAUDE.md, "How the View layer works"). Nothing else is copied: the analyzer and the View get the rest from
+   their base classes (steps 5 and 6).
+5. **The analyzer.** Subclass `_BaseAnalyzer` (`from ._kit.analyzer import _BaseAnalyzer`) and set
+   `_LIST_PRICES = <SERVICE>_PRICES`. The constructor matches the others:
+   `(session=None, *, region=None, profile=None, client=None, prices=None)`, and starts with
+   `super().__init__(session, region=region, profile=profile, prices=prices)`, which sets `self.session`, the
+   clients' retry settings `self._config` and `self.prices`. Clients are made lazily, each with the service name
+   spelled out (`self.session.client("<service>", config=self._config)`, so `rules.py` sees its calls), and a
+   missing region turns into a readable `ValueError` (see `DynamoDBAnalyzer.client`). The base's `region`,
+   `_paginate`, `_map` (set `self.max_workers`) and `_cached_client` (set `self._clients` and `self._lock`) are
+   there to use. Record config sections the caller can't read in `errors`. Long reads take `limit=` and
+   `progress=`.
+6. **The View.** Subclass `_BaseView` (`from ._kit.view import _BaseView, _friendly_errors`):
+   `__init__(core=None, *, mode="auto", max_rows=50, progress="auto")` calls
+   `super().__init__(mode=mode, max_rows=max_rows, progress=progress)` and then sets
+   `self.core: <Service>Analyzer = core or <Service>Analyzer()`. The class sets
+   `_render_html = staticmethod(_render_html)`, `_GROUPS` (commands by task, for help()) and `_START` (the first
+   two or three calls to try); `_show`, `_progress`, `help()` and `_price_basis` come from the base. Every command
+   is decorated with `@_friendly_errors`, and its docstring's first paragraph is its help() text. Give the View an
+   `_explain(code, message)` that says what the service's common AWS errors mean and what to do (a not-found names
+   the command that lists what exists; see `LambdaView._explain`). Set the file's `_BADGE` (the chip before each
+   report title) and CSS root class.
 
 Build each command the way `/add-command` does: the data model, then the pure function and its findings, then
 the analyzer method, then the View method.

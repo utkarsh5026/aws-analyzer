@@ -1881,7 +1881,8 @@ mkdocs serve                           # preview it at http://127.0.0.1:8000
   `.claude/skills/demo/kb_explorer_shots.py` (they need jupyterlab and playwright too).
 - **The PyPI package** ([`pyproject.toml`](pyproject.toml)) ships [`src/aws_analyzer/`](src/aws_analyzer/), where
   each analyzer is one module and [`_kit/`](src/aws_analyzer/_kit/) holds the code they share (formatting, parsing,
-  optional imports, AWS errors); [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
+  optional imports, AWS errors, how reports are drawn, and the base View and analyzer each service builds on);
+  [`src/aws_analyzer/__init__.py`](src/aws_analyzer/__init__.py) only re-exports the
   classes and holds `__version__`. Optional packages are extras: `data` (pandas, pyarrow), `files` (Excel, PDF, .zst, snappy),
   `notebook` (IPython, ipywidgets, tqdm) and `all`. A release moves the `## [Unreleased]` entries in
   [`CHANGELOG.md`](CHANGELOG.md) under the new version, sets `__version__` to match (`/release` in Claude Code does
