@@ -266,8 +266,9 @@ def worker(root: Path, source: str, service: str, out: Path, work: Path) -> int:
     with mock_aws():
         kwargs = seed() or {}
         mod = _module(root, service)
-        view_cls = next(v for k, v in vars(mod).items() if k.endswith("View") and isinstance(v, type))
-        core_cls = next(v for k, v in vars(mod).items() if k.endswith("Analyzer") and isinstance(v, type))
+        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
+        core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         core = core_cls(**kwargs) if "session" in kwargs else core_cls(region=REGION, **kwargs)
         for name, setup, code in cases:
             for mode, suffix in (("text", "txt"), ("html", "html")):
