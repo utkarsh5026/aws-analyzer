@@ -5015,6 +5015,37 @@ class _Tone:
         return self.text
 
 
+@dataclass(frozen=True)
+class _Report:
+    """One report being drawn: what each block's drawing function gets besides the block."""
+
+    max_rows: int  # the view's cap on table rows; 0 = no cap
+    badge: str = ""  # the chip before each title (HTML), so reports from different services are easy to tell apart
+
+
+_HTML: dict[type, Callable[[Any, _Report], str]] = {}  # block type -> its HTML
+_TEXT: dict[type, Callable[[Any, _Report], list[str]]] = {}  # block type -> its lines in text mode
+_CELLS: dict[type, Callable[[Any, str], str]] = {}  # table cell type -> its HTML, given the cell's text
+
+
+def _draws(kind: type, mode: str) -> Callable[[Callable], Callable]:
+    """@_draws(_Passage, "html") makes the function under it the way a _Passage block is drawn in HTML:
+    f(block, report) -> str. "text" registers its lines in text mode, f(block, report) -> list[str], and "cell" how
+    a table cell of that type shows in HTML, f(cell, text) -> str (text mode shows str(cell))."""
+    registry: dict[type, Callable] = {"html": _HTML, "text": _TEXT, "cell": _CELLS}[mode]
+
+    def register(draw: Callable) -> Callable:
+        registry[kind] = draw
+        return draw
+
+    return register
+
+
+def _drawer(registry: dict[type, Callable], value: Any) -> Callable | None:
+    """What draws value: the function registered for its type, or for the closest type it's made from."""
+    return next((registry[cls] for cls in type(value).__mro__ if cls in registry), None)
+
+
 @dataclass
 class _Passage:
     rank: int
@@ -5384,173 +5415,138 @@ def _hidden(count: int, table: _Table, default_max: int) -> str:
     )
 
 
+def _undrawn(block: Any) -> _Note:
+    """The note shown in place of a block that nothing draws, rather than a traceback."""
+    return _Note(f"Part of this report isn't shown: there's no way to draw a {type(block).__name__} here "
+                 "(a bug in aws-analyzer).", "warn")
+
+
+@_draws(_Title, "html")
+def _title_html(block: _Title, report: _Report) -> str:
+    sub = f'<div class="sub">{_prose(block.sub)}</div>' if block.sub else ""
+    return f'<h3><span class="badge">{_esc(report.badge)}</span>{_esc(block.text)}</h3>{sub}'
+
+
+@_draws(_Cards, "html")
+def _cards_html(block: _Cards, report: _Report) -> str:
+    cards = "".join(
+        f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
+        f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
+        for item in block.items
+    )
+    return f'<div class="cards">{cards}</div>'
+
+
+@_draws(_Note, "html")
+def _note_html(block: _Note, report: _Report) -> str:
+    return f'<div class="note {block.level}">{_prose(block.text)}</div>'
+
+
+@_draws(_Findings, "html")
+def _findings_html(block: _Findings, report: _Report) -> str:
+    """The findings panel: warnings first, with how many there are of each; block.empty (an ok note) when there's
+    none."""
+    items = _ordered(block.items)
+    if items:
+        notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in items)
+        head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
+        return f'<div class="fd">{head}{notes}</div>'
+    return f'<div class="note ok">{_prose(block.empty)}</div>' if block.empty else ""
+
+
+@_draws(_Next, "html")
+def _next_html(block: _Next, report: _Report) -> str:
+    if not block.items:
+        return ""
+    calls = "".join(
+        f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
+        + (f'<span class="nw">{_esc(why)}</span>' if why else "")
+        + "</span>"
+        for call, why in block.items
+    )
+    return f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
+
+
+@_draws(_Tone, "cell")
+def _tone_cell_html(cell: _Tone, text: str) -> str:
+    return f'<span class="pill {cell.tone}">{_esc(text)}</span>' if cell.tone in _TONES and text else _esc(text)
+
+
+def _cell_html(cell: Any, text: str) -> str:
+    """A table cell's HTML: its text, escaped, or what's registered for its type (a _Tone's coloured pill)."""
+    draw = _drawer(_CELLS, cell)
+    return draw(cell, text) if draw else _esc(text)
+
+
+@_draws(_Table, "html")
+def _table_html(block: _Table, report: _Report) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    if not block.rows:
+        return f'{title}<div class="more">(none)</div>'
+    rows, hidden = _visible_rows(block, report.max_rows)
+    head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
+    head += f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
+    body = []
+    for i, row in enumerate(rows):
+        cells = []
+        for j, cell in enumerate(row):
+            text = "" if cell is None else str(cell)
+            inner = _cell_html(cell, text)
+            if block.tree and j == 0:
+                css = "tree"
+            elif j in block.code_cols and text:
+                css, inner = "c", f"<code{_SELECT}>{inner}</code>"
+            elif j in block.prose_cols:
+                css, inner = "", _prose(text)
+            elif _NUMERIC_RE.match(text):
+                css = "n"
+            else:
+                css = "s" if len(text) <= 16 and "\n" not in text else ""
+            cells.append(f'<td class="{css}">{inner}</td>' if css else f"<td>{inner}</td>")
+        if block.bars is not None:
+            pct = max(0.0, min(1.0, block.bars[i])) * 100
+            cells.append(
+                f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
+                f"</span></span>{pct:.1f}%</td>"
+            )
+        body.append(f"<tr>{''.join(cells)}</tr>")
+    table = (
+        f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
+        f"</thead><tbody>{''.join(body)}</tbody></table></div>"
+    )
+    if hidden:
+        table += f'<div class="more">{_esc(_hidden(hidden, block, report.max_rows))}</div>'
+    if block.collapsed:
+        return (
+            f'<details class="sec"><summary>{_prose(block.title or "Details")} '
+            f"({len(block.rows):,})</summary>{table}</details>"
+        )
+    return title + table
+
+
+@_draws(_Text, "html")
+def _text_html(block: _Text, report: _Report) -> str:
+    css = " ".join(filter(None, ["wrap" if block.wrap else "", "code" if block.code else ""]))
+    pre = (
+        f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>'
+        if css
+        else f"<pre>{_esc(block.text)}</pre>"
+    )
+    if block.collapsed:
+        return f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
+    hint = '<span class="hint">click it to select all, then copy</span>' if block.code else ""
+    return (f"<h4>{_prose(block.title)}{hint}</h4>" if block.title or hint else "") + pre
+
+
+def _block_html(block: Any, report: _Report) -> str:
+    """One block as HTML, drawn by what's registered for its type."""
+    draw = _drawer(_HTML, block)
+    return draw(block, report) if draw else _note_html(_undrawn(block), report)
+
+
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    out = [_CSS, '<div class="kba">']
-    for block in blocks:
-        if isinstance(block, _Title):
-            out.append(
-                f'<h3><span class="badge">{_esc(_BADGE)}</span>{_esc(block.text)}</h3>'
-            )
-            if block.sub:
-                out.append(f'<div class="sub">{_prose(block.sub)}</div>')
-        elif isinstance(block, _Cards):
-            cards = "".join(
-                f'<div class="{" ".join(filter(None, ["card", _tone(item)]))}"><div class="l">'
-                f'{_esc(item[0])}</div><div class="v">{_esc(item[1])}</div></div>'
-                for item in block.items
-            )
-            out.append(f'<div class="cards">{cards}</div>')
-        elif isinstance(block, _Note):
-            out.append(f'<div class="note {block.level}">{_prose(block.text)}</div>')
-        elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                notes = "".join(
-                    f'<div class="note {level}">{_prose(message)}</div>'
-                    for level, message in items
-                )
-                head = f'<div class="fh">Findings · {_esc(_counts(items, " · "))}</div>'
-                out.append(f'<div class="fd">{head}{notes}</div>')
-            elif block.empty:
-                out.append(f'<div class="note ok">{_prose(block.empty)}</div>')
-        elif isinstance(block, _Next):
-            if block.items:
-                calls = "".join(
-                    f'<span class="ni"><code{_SELECT}>{_esc(call)}</code>'
-                    + (f'<span class="nw">{_esc(why)}</span>' if why else "")
-                    + "</span>"
-                    for call, why in block.items
-                )
-                out.append(
-                    f'<div class="next"><span class="nl">{_esc(block.title)}</span>{calls}</div>'
-                )
-        elif isinstance(block, _Table):
-            if not block.rows:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append('<div class="more">(none)</div>')
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            head = "".join(f"<th>{_esc(h)}</th>" for h in block.headers)
-            head += (
-                f"<th>{_esc(block.bar_label)}</th>" if block.bars is not None else ""
-            )
-            body = []
-            for i, row in enumerate(rows):
-                cells = []
-                for j, cell in enumerate(row):
-                    text = "" if cell is None else str(cell)
-                    inner = _esc(text)
-                    if isinstance(cell, _Tone) and cell.tone in _TONES and text:
-                        inner = f'<span class="pill {cell.tone}">{inner}</span>'
-                    elif isinstance(cell, _Link) and text:
-                        inner = _link_html(cell.url, text)
-                    if block.tree and j == 0:
-                        css = "tree"
-                    elif j in block.code_cols and text:
-                        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
-                    elif j in block.prose_cols:
-                        css, inner = "", _prose(text)
-                    elif _NUMERIC_RE.match(text):
-                        css = "n"
-                    else:
-                        css = "s" if len(text) <= 16 and "\n" not in text else ""
-                    cells.append(
-                        f'<td class="{css}">{inner}</td>'
-                        if css
-                        else f"<td>{inner}</td>"
-                    )
-                if block.bars is not None:
-                    pct = max(0.0, min(1.0, block.bars[i])) * 100
-                    cells.append(
-                        f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                        f"</span></span>{pct:.1f}%</td>"
-                    )
-                body.append(f"<tr>{''.join(cells)}</tr>")
-            table = (
-                f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"><thead><tr>{head}</tr>'
-                f"</thead><tbody>{''.join(body)}</tbody></table></div>"
-            )
-            if hidden:
-                table += (
-                    f'<div class="more">{_esc(_hidden(hidden, block, max_rows))}</div>'
-                )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")} '
-                    f"({len(block.rows):,})</summary>{table}</details>"
-                )
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(table)
-        elif isinstance(block, _Text):
-            css = " ".join(
-                filter(
-                    None, ["wrap" if block.wrap else "", "code" if block.code else ""]
-                )
-            )
-            pre = (
-                f'<pre class="{css}"{_SELECT if block.code else ""}>{_esc(block.text)}</pre>'
-                if css
-                else f"<pre>{_esc(block.text)}</pre>"
-            )
-            if block.collapsed:
-                out.append(
-                    f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
-                )
-            else:
-                hint = (
-                    '<span class="hint">click it to select all, then copy</span>'
-                    if block.code
-                    else ""
-                )
-                if block.title or hint:
-                    out.append(f"<h4>{_prose(block.title)}{hint}</h4>")
-                out.append(pre)
-        elif isinstance(block, _Passage):
-            head = " · ".join(
-                filter(
-                    None,
-                    [
-                        _esc(f"#{block.rank}"),
-                        _link_html(block.url, block.source),
-                        _esc(block.detail),
-                        "" if block.score is None else f"score {block.score:.2f}",
-                    ],
-                )
-            )
-            bar = ""
-            if block.score_share is not None:
-                pct = max(0.0, min(1.0, block.score_share)) * 100
-                bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
-            meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
-            out.append(
-                f'<div class="psg"><div class="ph">{bar}{head}</div>{meta}'
-                f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>'
-            )
-        elif isinstance(block, _Link):
-            out.append(f'<div class="lnk">{_link_html(block.url, block.label)}</div>')
-        elif isinstance(block, _Answer):
-            out.append(f'<div class="ans">{_answer_html(block)}</div>')
-        elif isinstance(block, _Steps):
-            out.append(_steps_html(block))
-        elif isinstance(block, _Pipeline):
-            out.append(_pipeline_html(block))
-        elif isinstance(block, _Chunks):
-            out.append(_chunks_html(block))
-        elif isinstance(block, _Shares):
-            out.append(_shares_html(block))
-        elif isinstance(block, _Json):
-            tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
-            if block.collapsed:
-                out.append(f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>')
-            else:
-                if block.title:
-                    out.append(f"<h4>{_prose(block.title)}</h4>")
-                out.append(tree)
-    out.append("</div>")
-    return "".join(out)
+    report = _Report(max_rows, _BADGE)
+    return "".join([_CSS, '<div class="kba">', *(_block_html(block, report) for block in blocks), "</div>"])
 
 
 def _plain_json(value: Any) -> Any:
@@ -5601,7 +5597,22 @@ def _json_html(
     return f'<div class="json">{node("", value, (), 0, False)}</div>'
 
 
-def _steps_html(block: _Steps) -> str:
+@_draws(_Json, "html")
+def _json_block_html(block: _Json, report: _Report) -> str:
+    tree = _json_html(block.value, open_depth=block.open_depth, marks=block.marks, notes=block.notes)
+    if block.collapsed:
+        return f'<details class="sec"><summary>{_prose(block.title or "JSON")}</summary>{tree}</details>'
+    return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + tree
+
+
+@_draws(_Json, "text")
+def _json_block_lines(block: _Json, report: _Report) -> list[str]:
+    head = ["", f"-- {block.title} --"] if block.title else []
+    return head + [json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False)]
+
+
+@_draws(_Steps, "html")
+def _steps_html(block: _Steps, report: _Report) -> str:
     rows = "".join(
         f'<div class="st {tone if tone in _TONES else ""}"><span class="sd"></span><div class="sb">'
         f'<span class="sk">{_esc(step)}</span><span class="sv">{_esc(value)}</span>'
@@ -5613,7 +5624,8 @@ def _steps_html(block: _Steps) -> str:
     return f'{title}<div class="steps">{rows}</div>'
 
 
-def _pipeline_html(block: _Pipeline) -> str:
+@_draws(_Pipeline, "html")
+def _pipeline_html(block: _Pipeline, report: _Report) -> str:
     out = [f"<h4>{_prose(block.title)}</h4>"] if block.title else []
     for label, stages in block.rows:
         cells = '<span class="pa">→</span>'.join(
@@ -5642,7 +5654,8 @@ def _raw_offset(text: str, flat_offset: int) -> int:
     return len(text)
 
 
-def _chunks_html(block: _Chunks) -> str:
+@_draws(_Chunks, "html")
+def _chunks_html(block: _Chunks, report: _Report) -> str:
     out = [f"<h4>{_prose(block.title)}</h4>"] if block.title else []
     if block.items:
         bars = "".join(
@@ -5679,7 +5692,8 @@ def _chunks_html(block: _Chunks) -> str:
     return "".join(out)
 
 
-def _shares_html(block: _Shares) -> str:
+@_draws(_Shares, "html")
+def _shares_html(block: _Shares, report: _Report) -> str:
     total = sum(count for _, count, _ in block.items) or 1
     bar = "".join(f'<i class="s-{_esc(kind)}" style="flex:{count} 1 0" title="{_esc(label)}: {count:,} '
                   f'({count / total:.0%})"></i>' for label, count, kind in block.items if count)
@@ -5692,7 +5706,8 @@ def _shares_html(block: _Shares) -> str:
 _STEP_MARKS = {"ok": "[ok]", "warn": "[!]", "bad": "[x]"}  # text mode's mark for a step's tone; '[ ]' for none
 
 
-def _steps_lines(block: _Steps) -> list[str]:
+@_draws(_Steps, "text")
+def _steps_lines(block: _Steps, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
     for i, (step, value, detail, tone) in enumerate(block.items, 1):
         out.append(f"{i}. {_STEP_MARKS.get(tone, '[ ]')} {step}: {value}")
@@ -5701,7 +5716,8 @@ def _steps_lines(block: _Steps) -> list[str]:
     return out
 
 
-def _pipeline_lines(block: _Pipeline) -> list[str]:
+@_draws(_Pipeline, "text")
+def _pipeline_lines(block: _Pipeline, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
     for label, stages in block.rows:
         out.append(f"{label}:")
@@ -5710,9 +5726,10 @@ def _pipeline_lines(block: _Pipeline) -> list[str]:
     return out
 
 
-def _chunks_lines(block: _Chunks, max_rows: int) -> list[str]:
+@_draws(_Chunks, "text")
+def _chunks_lines(block: _Chunks, report: _Report) -> list[str]:
     out = ["", f"-- {block.title} --"] if block.title else [""]
-    shown = block.items if not max_rows else block.items[:max_rows]
+    shown = block.items if not report.max_rows else block.items[:report.max_rows]
     for n, p, overlap in shown:
         where = f" p.{p.page}" if p.page is not None else ""
         shared = f", {overlap:,} characters shared with #{n - 1}" if overlap else ""
@@ -5722,6 +5739,54 @@ def _chunks_lines(block: _Chunks, max_rows: int) -> list[str]:
     if len(block.items) > len(shown):
         out.append(f"... {len(block.items) - len(shown):,} more chunks not shown (ui.max_rows = 0 shows all)")
     return out
+
+
+@_draws(_Shares, "text")
+def _shares_lines(block: _Shares, report: _Report) -> list[str]:
+    total = sum(count for _, count, _ in block.items) or 1
+    out = ["", f"-- {block.title} --"] if block.title else [""]
+    return out + [f"  {label.ljust(22)} {count:>7,}  {_text_bar(count / total)}" for label, count, _ in block.items]
+
+
+@_draws(_Passage, "html")
+def _passage_block_html(block: _Passage, report: _Report) -> str:
+    head = " · ".join(filter(None, [
+        _esc(f"#{block.rank}"),
+        _link_html(block.url, block.source),
+        _esc(block.detail),
+        "" if block.score is None else f"score {block.score:.2f}",
+    ]))
+    bar = ""
+    if block.score_share is not None:
+        pct = max(0.0, min(1.0, block.score_share)) * 100
+        bar = f'<span class="track"><span class="fill" style="width:{pct:.1f}%"></span></span>'
+    meta = f'<div class="pm">{_esc(block.meta)}</div>' if block.meta else ""
+    return (f'<div class="psg"><div class="ph">{bar}{head}</div>{meta}'
+            f'<div class="pt">{_highlight(block.text, block.terms)}</div></div>')
+
+
+@_draws(_Passage, "text")
+def _passage_block_lines(block: _Passage, report: _Report) -> list[str]:
+    score = "" if block.score is None else f" (score {block.score:.2f})"
+    out = ["", f"[{block.rank}] {block.source}" + (f" {block.detail}" if block.detail else "") + score]
+    if block.meta:
+        out.append("    " + block.meta)
+    return out + (textwrap.wrap(block.text, 100, initial_indent="    ", subsequent_indent="    ") or ["    (no text)"])
+
+
+@_draws(_Link, "html")
+def _link_block_html(block: _Link, report: _Report) -> str:
+    return f'<div class="lnk">{_link_html(block.url, block.label)}</div>'
+
+
+@_draws(_Link, "text")
+def _link_block_lines(block: _Link, report: _Report) -> list[str]:
+    return [block.label + ":", block.url]
+
+
+@_draws(_Link, "cell")
+def _link_cell_html(cell: _Link, text: str) -> str:
+    return _link_html(cell.url, text) if text else _esc(text)
 
 
 def _highlight(text: str, terms: Iterable[str]) -> str:
@@ -6295,114 +6360,91 @@ def _answer_html(block: _Answer) -> str:
     return _markdown_html(block.text, block.citations, block.inline)
 
 
-def _render_text(blocks: list[Any], max_rows: int) -> str:
-    out: list[str] = []
-    for block in blocks:
-        if isinstance(block, _Title):
-            out += ["", block.text, "=" * min(len(block.text), 100)] + (
-                [block.sub] if block.sub else []
-            )
-        elif isinstance(block, _Cards):
-            line = ""
-            for entry in block.items:
-                item = f"{entry[0]}: {entry[1]}" + (
-                    " (!)" if _tone(entry) in ("warn", "bad") else ""
-                )
-                if line and len(line) + len(item) > 100:
-                    out.append(line)
-                    line = ""
-                line += ("   " if line else "") + item
+@_draws(_Answer, "html")
+def _answer_block_html(block: _Answer, report: _Report) -> str:
+    return f'<div class="ans">{_answer_html(block)}</div>'
+
+
+@_draws(_Answer, "text")
+def _answer_block_lines(block: _Answer, report: _Report) -> list[str]:
+    return _answer_lines(block.text if block.inline else _with_markers(block.text, block.citations), 100)
+
+
+@_draws(_Title, "text")
+def _title_lines(block: _Title, report: _Report) -> list[str]:
+    return ["", block.text, "=" * min(len(block.text), 100)] + ([block.sub] if block.sub else [])
+
+
+@_draws(_Cards, "text")
+def _cards_lines(block: _Cards, report: _Report) -> list[str]:
+    out, line = [], ""
+    for entry in block.items:
+        item = f"{entry[0]}: {entry[1]}" + (" (!)" if _tone(entry) in ("warn", "bad") else "")
+        if line and len(line) + len(item) > 100:
             out.append(line)
-        elif isinstance(block, _Note):
-            out.append(_MARKS.get(block.level, "[i] ") + block.text)
-        elif isinstance(block, _Findings):
-            items = _ordered(block.items)
-            if items:
-                out += ["", f"-- Findings: {_counts(items, ', ')} --"]
-                out += [_MARKS.get(level, "[i] ") + message for level, message in items]
-            elif block.empty:
-                out.append("[ok] " + block.empty)
-        elif isinstance(block, _Next):
-            if block.items:
-                width = max(len(call) for call, _ in block.items)
-                out += ["", f"{block.title}:"]
-                out += [
-                    f"  {call.ljust(width)}   {why}".rstrip()
-                    for call, why in block.items
-                ]
-        elif isinstance(block, _Table):
-            out.append("")
-            if block.title:
-                out.append(f"-- {block.title} --")
-            if not block.rows:
-                out.append("(none)")
-                continue
-            rows, hidden = _visible_rows(block, max_rows)
-            headers = list(block.headers) + (
-                [block.bar_label] if block.bars is not None else []
-            )
-            cells = [
-                [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
-                + ([_text_bar(block.bars[i])] if block.bars is not None else [])
-                for i, row in enumerate(rows)
-            ]
-            widths = [
-                max([_width(h)] + [_width(r[j]) for r in cells])
-                for j, h in enumerate(headers)
-            ]
+            line = ""
+        line += ("   " if line else "") + item
+    return out + [line]
 
-            def line_of(values: list[str], widths: list[int] = widths) -> str:
-                return "  ".join(
-                    _pad(v, w, right=bool(_NUMERIC_RE.match(v)))
-                    for v, w in zip(values, widths)
-                ).rstrip()
 
-            out += [line_of(headers), "  ".join("-" * w for w in widths)] + [
-                line_of(r) for r in cells
-            ]
-            if hidden:
-                out.append(_hidden(hidden, block, max_rows))
-        elif isinstance(block, _Text):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(block.text)
-        elif isinstance(block, _Passage):
-            score = "" if block.score is None else f" (score {block.score:.2f})"
-            out += [
-                "",
-                f"[{block.rank}] {block.source}"
-                + (f" {block.detail}" if block.detail else "")
-                + score,
-            ]
-            if block.meta:
-                out.append("    " + block.meta)
-            out += textwrap.wrap(
-                block.text, 100, initial_indent="    ", subsequent_indent="    "
-            ) or ["    (no text)"]
-        elif isinstance(block, _Link):
-            out += [block.label + ":", block.url]
-        elif isinstance(block, _Answer):
-            text = (
-                block.text
-                if block.inline
-                else _with_markers(block.text, block.citations)
-            )
-            out += _answer_lines(text, 100)
-        elif isinstance(block, _Steps):
-            out += _steps_lines(block)
-        elif isinstance(block, _Pipeline):
-            out += _pipeline_lines(block)
-        elif isinstance(block, _Chunks):
-            out += _chunks_lines(block, max_rows)
-        elif isinstance(block, _Shares):
-            total = sum(count for _, count, _ in block.items) or 1
-            out += ["", f"-- {block.title} --"] if block.title else [""]
-            out += [f"  {label.ljust(22)} {count:>7,}  {_text_bar(count / total)}" for label, count, _ in block.items]
-        elif isinstance(block, _Json):
-            if block.title:
-                out += ["", f"-- {block.title} --"]
-            out.append(json.dumps(_plain_json(block.value), indent=2, ensure_ascii=False))
-    return "\n".join(out)
+@_draws(_Note, "text")
+def _note_lines(block: _Note, report: _Report) -> list[str]:
+    return [_MARKS.get(block.level, "[i] ") + block.text]
+
+
+@_draws(_Findings, "text")
+def _findings_lines(block: _Findings, report: _Report) -> list[str]:
+    items = _ordered(block.items)
+    if items:
+        return ["", f"-- Findings: {_counts(items, ', ')} --"] + [
+            _MARKS.get(level, "[i] ") + message for level, message in items
+        ]
+    return ["[ok] " + block.empty] if block.empty else []
+
+
+@_draws(_Next, "text")
+def _next_lines(block: _Next, report: _Report) -> list[str]:
+    if not block.items:
+        return []
+    width = max(len(call) for call, _ in block.items)
+    return ["", f"{block.title}:"] + [f"  {call.ljust(width)}   {why}".rstrip() for call, why in block.items]
+
+
+@_draws(_Table, "text")
+def _table_lines(block: _Table, report: _Report) -> list[str]:
+    out = [""] + ([f"-- {block.title} --"] if block.title else [])
+    if not block.rows:
+        return out + ["(none)"]
+    rows, hidden = _visible_rows(block, report.max_rows)
+    headers = list(block.headers) + ([block.bar_label] if block.bars is not None else [])
+    cells = [
+        [_clip(("" if c is None else str(c)).replace("\n", ", ")) for c in row]
+        + ([_text_bar(block.bars[i])] if block.bars is not None else [])
+        for i, row in enumerate(rows)
+    ]
+    widths = [max([_width(h)] + [_width(r[j]) for r in cells]) for j, h in enumerate(headers)]
+
+    def line_of(values: list[str]) -> str:
+        return "  ".join(_pad(v, w, right=bool(_NUMERIC_RE.match(v))) for v, w in zip(values, widths)).rstrip()
+
+    out += [line_of(headers), "  ".join("-" * w for w in widths)] + [line_of(r) for r in cells]
+    return out + ([_hidden(hidden, block, report.max_rows)] if hidden else [])
+
+
+@_draws(_Text, "text")
+def _text_lines(block: _Text, report: _Report) -> list[str]:
+    return (["", f"-- {block.title} --"] if block.title else []) + [block.text]
+
+
+def _block_lines(block: Any, report: _Report) -> list[str]:
+    """One block as lines of text, drawn by what's registered for its type."""
+    draw = _drawer(_TEXT, block)
+    return draw(block, report) if draw else _note_lines(_undrawn(block), report)
+
+
+def _render_text(blocks: list[Any], max_rows: int) -> str:
+    report = _Report(max_rows)
+    return "\n".join(line for block in blocks for line in _block_lines(block, report))
 
 
 def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
