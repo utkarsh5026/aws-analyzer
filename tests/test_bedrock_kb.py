@@ -17,6 +17,9 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import bedrock_kb as kbmod
+from aws_analyzer._kit import view as viewmod
+from aws_analyzer._kit.render import _render_text
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.bedrock_kb import (
     BEDROCK_PRICES,
     DEFAULT_PROMPT,
@@ -2552,7 +2555,7 @@ def test_html_links_open_only_web_addresses():
     assert "javascript:" not in rendered and ">bad<" in rendered
     assert 'href="https://x.example/a?b=1&amp;c=&lt;2&gt;" target="_blank"' in rendered
     assert ">a&lt;b&gt;.pdf</a>" in rendered
-    assert "a<b>.pdf" in kbmod._render_text(blocks, 50)
+    assert "a<b>.pdf" in _render_text(blocks, 50)
 
 
 def test_ui_search_notes(aws, ui, capsys):
@@ -3099,9 +3102,7 @@ def test_ui_without_a_region(monkeypatch, capsys):
 def test_ui_progress_options(capsys, monkeypatch):
     with pytest.raises(ValueError, match="progress must be"):
         BedrockKBView(mode="text", progress="fancy")
-    monkeypatch.setattr(
-        kbmod, "_progress_bar_class", lambda notebook: None
-    )  # no tqdm: a plain line
+    monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm: a plain line
     clock = iter(range(100))
     monkeypatch.setattr(kbmod.time, "monotonic", lambda: next(clock))
     for progress, shown in (("auto", True), ("plain", True), ("off", False)):
@@ -3220,7 +3221,7 @@ def test_render_findings_tones_and_next():
         kbmod._Table(["Status"], [[kbmod._Tone("FAILED", "bad")]]),
         kbmod._Next([("chunk(1)", "result #1 in full")]),
     ]
-    text = kbmod._render_text(blocks, 50)
+    text = _render_text(blocks, 50)
     assert (
         "Last sync: FAILED 2h ago (!)" in text
         and "-- Findings: 1 warning --" in text
@@ -3239,12 +3240,7 @@ def test_render_findings_tones_and_next():
 
 def test_ui_help_groups_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    commands = {
-        name
-        for name in vars(BedrockKBView)
-        if not name.startswith("_") and callable(getattr(BedrockKBView, name))
-    }
-    assert commands == {
+    assert set(_commands(BedrockKBView)) == {
         name for names in BedrockKBView._GROUPS.values() for name in names
     }
     assert "Start here:" in out and "-- 🔎 Search and answer --" in out
@@ -3626,7 +3622,7 @@ def test_file_report_blocks_render_and_escape():
     assert '<div class="st bad">' in html and "&lt;script&gt;.pdf" in html and "docs-&lt;s3&gt;" in html
     assert '<mark class="ov">' in html and "↩ 159 chars shared" in html and "<mark>word090</mark>" in html
     assert "70% covered" in html and 'class="s-failed"' in html
-    text = kbmod._render_text(blocks, 50)
+    text = _render_text(blocks, 50)
     assert "Read by the <b>parser</b>" in text and "Now" in text and "docs-<s3>" in text
     assert "#2 p.1 ~" in text and "159 characters shared with #1" in text and "Failed <x>" in text
 
