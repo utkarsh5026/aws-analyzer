@@ -81,6 +81,7 @@ from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _utcnow, human_age, human_money,
     human_size, parse_time,
 )
+from ._kit.render import _base_css
 from ._kit.text import _clip, _esc, _pad, _text_bar, _width
 
 # =============================================================================
@@ -5127,59 +5128,8 @@ class _Json:
     collapsed: bool = False  # folded under its title in HTML
 
 
-_CSS = """<style>
-.kba{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
-.kba h3{margin:10px 0 2px;font-size:16px}
-.kba h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
-.kba h4{margin:14px 0 4px;font-size:13px}
-.kba .sub{opacity:.65;font-size:12px;margin-bottom:6px}
-.kba .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.kba .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
-.kba .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
-.kba .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
-.kba .card.ok{border-color:rgba(16,185,129,.7)}
-.kba .card .l{font-size:11px;opacity:.65}
-.kba .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.kba .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
-.kba .tw.scroll{max-height:640px;overflow:auto}
-.kba table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.kba table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
-.kba .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.kba .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
-.kba table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
-.kba table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
-.kba table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
-.kba table.t td.s{white-space:nowrap}
-.kba table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.kba table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.kba table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.kba .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
-.kba .track{vertical-align:middle;margin-right:6px}
-.kba .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
-.kba .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
-.kba .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
-.kba .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
-.kba .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.kba .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
-.kba .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.kba .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
-.kba .note.warn::before{content:"\\26A0\\FE0E"}
-.kba .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
-.kba .note.ok::before{content:"\\2713"}
-.kba .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.kba code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
-.kba code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
-.kba .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.kba pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
-.kba pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
-.kba pre.code{user-select:all;-webkit-user-select:all;cursor:text}
-.kba .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
-.kba details.sec{margin:14px 0 4px}
-.kba details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
-.kba .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
-.kba .next{border-top:1px dashed rgba(127,127,127,.35)}
-.kba .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.kba .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+_ROOT = "kba"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+_EXTRA_CSS = """\
 .kba .psg{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 10px;margin:6px 0;max-width:900px}
 .kba .psg .ph{font-weight:600;font-size:12px}
 .kba .psg .pm{opacity:.65;font-size:12px}
@@ -5298,8 +5248,8 @@ _CSS = """<style>
 body[data-jp-theme-light="false"] .kba .jk,body.vscode-dark .kba .jk{color:#c4b5fd}
 body[data-jp-theme-light="false"] .kba .js,body.vscode-dark .kba .js{color:#86efac}
 body[data-jp-theme-light="false"] .kba .jn,body.vscode-dark .kba .jn{color:#fcd34d}
-body[data-jp-theme-light="false"] .kba .jl,body.vscode-dark .kba .jl{color:#93c5fd}
-</style>"""
+body[data-jp-theme-light="false"] .kba .jl,body.vscode-dark .kba .jl{color:#93c5fd}"""
+_CSS = _base_css(_ROOT, _EXTRA_CSS)
 
 _BADGE = "📚 Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")

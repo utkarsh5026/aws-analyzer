@@ -126,6 +126,7 @@ from botocore.validate import ParamValidator
 from ._kit.deps import _in_notebook, _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money, human_size
+from ._kit.render import _base_css
 from ._kit.text import _clip, _esc, _pad, _text_bar, _width
 
 # =============================================================================
@@ -4476,64 +4477,28 @@ def _tab_rules() -> str:
                       f"@container (max-width:359px){{{''.join(tight)}}}"])
 
 
-_CSS = """<style>
+_ROOT = "kbc"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+# Custom properties the chat's rules use (its window's too), light and dark.
+_THEME_CSS = """\
 .kbc,.kbc-app{--kc-solid:#2563eb;--kc-accent:#2563eb;--kc-accent-2:#7c3aed;--kc-soft:rgba(37,99,235,.11);--kc-ring:rgba(37,99,235,.28);--kc-line:rgba(127,127,127,.22);--kc-line-2:rgba(127,127,127,.36);--kc-tint:rgba(127,127,127,.06);--kc-tint-2:rgba(127,127,127,.11);--kc-bg:var(--jp-layout-color0,var(--vscode-editor-background,#fff));--kc-surface:var(--jp-layout-color1,var(--vscode-editor-background,#fff));--kc-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 14px rgba(15,23,42,.06);--kc-cite:rgba(59,130,246,.11);--kc-raised:var(--kc-surface)}
 .kbc{--kk:#7c3aed;--ks:#15803d;--kn:#b45309;--kl:#1d4ed8;--kf:#0e7490;--ka:#c2410c;--kw:#be185d}
 body[data-jp-theme-light="false"] .kbc,body[data-jp-theme-light="false"] .kbc-app,body.vscode-dark .kbc,body.vscode-dark .kbc-app,body.vscode-high-contrast .kbc,body.vscode-high-contrast .kbc-app,.kbc-dark .kbc,.kbc-dark .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}
-.kbc{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
-.kbc h3{margin:10px 0 2px;font-size:16px}
-.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}
-.kbc h4{margin:14px 0 4px;font-size:13px}
-.kbc .sub{opacity:.65;font-size:12px;margin-bottom:6px}
-.kbc .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.kbc .card{border:1px solid var(--kc-line);border-radius:12px;padding:7px 13px;min-width:96px;background:var(--kc-tint)}
-.kbc .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
-.kbc .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
-.kbc .card.ok{border-color:rgba(16,185,129,.7)}
-.kbc .card .l{font-size:11px;opacity:.65}
-.kbc .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.kbc .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
-.kbc .tw.scroll{max-height:640px;overflow:auto}
-.kbc table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.kbc table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
-.kbc .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.kbc .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
-.kbc table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
-.kbc table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
-.kbc table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
-.kbc table.t td.s{white-space:nowrap}
-.kbc table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.kbc table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.kbc table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.kbc .track{display:inline-block;width:110px;height:8px;border-radius:4px;background:rgba(127,127,127,.18)}
-.kbc .track{vertical-align:middle;margin-right:6px}
-.kbc .fill{display:block;height:100%;border-radius:4px;background:var(--kc-accent)}
-.kbc .pill{display:inline-block;padding:0 8px;border-radius:999px;font-weight:600;font-size:12px}
-.kbc .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
-.kbc .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
-.kbc .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}
-.kbc .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}
-.kbc .note.warn::before{content:"\\26A0\\FE0E"}
-.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}
-.kbc .note.ok::before{content:"\\2713"}
-.kbc .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}
-.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}
-.kbc .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}
-.kbc pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
-.kbc pre.code{user-select:all;-webkit-user-select:all;cursor:text}
-.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}
-.kbc .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
-.kbc details.sec{margin:14px 0 4px}
-.kbc details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
-.kbc .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
-.kbc .next{border-top:1px dashed rgba(127,127,127,.35)}
-.kbc .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.kbc .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .kbc,body:not([data-jp-theme-light]):not(.vscode-light) .kbc-app{--kc-solid:#2563eb;--kc-accent:#60a5fa;--kc-accent-2:#a78bfa;--kc-soft:rgba(96,165,250,.15);--kc-ring:rgba(96,165,250,.35);--kc-shadow:0 1px 2px rgba(0,0,0,.35),0 4px 14px rgba(0,0,0,.25);--kc-cite:rgba(96,165,250,.16);--kc-raised:rgba(255,255,255,.12);--kk:#c4b5fd;--ks:#86efac;--kn:#fcd34d;--kl:#93c5fd;--kf:#67e8f9;--ka:#fdba74;--kw:#f9a8d4}}"""
+# The chat's reports match its window: rounder cards, badges and pills, and colours from the theme.
+_RESTYLE = {
+    "h3 .badge{": '.kbc h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:var(--kc-soft);color:var(--kc-accent)}',
+    ".card{": '.kbc .card{border:1px solid var(--kc-line);border-radius:12px;padding:7px 13px;min-width:96px;background:var(--kc-tint)}',
+    ".track{display:": '.kbc .track{display:inline-block;width:110px;height:8px;border-radius:4px;background:rgba(127,127,127,.18)}',
+    ".fill{": '.kbc .fill{display:block;height:100%;border-radius:4px;background:var(--kc-accent)}',
+    ".pill{": '.kbc .pill{display:inline-block;padding:0 8px;border-radius:999px;font-weight:600;font-size:12px}',
+    ".note{": '.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}',
+    ".note.warn{": '.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}',
+    ".note.ok{": '.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}',
+    "code{font-family:": '.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}',
+    "code{background:": '.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}',
+    "pre{": '.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}',
+}
+_EXTRA_CSS = """\
 .kbc mark{background:rgba(250,204,21,.4);color:inherit;border-radius:3px;padding:0 1px}
 .kbc .ans{font-size:14px;line-height:1.6;margin:8px 0 10px;max-width:900px;overflow-wrap:anywhere}
 .kbc .ans>:first-child{margin-top:0}
@@ -4825,7 +4790,10 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 .kbc-app.kbc-app .kbc-trig>.kbc-trig-b:active:enabled,.kbc-app.kbc-app .kbc-opt>.kbc-opt-b:active:enabled{transform:none}
 .kbc-app.kbc-app .noUi-connect{background:var(--kc-accent)}
 .kbc-app.kbc-app .noUi-handle{border-radius:50%;border-color:var(--kc-accent)}
-""" + _tab_rules() + "\n</style>"
+""" + _tab_rules()
+# Highlighted code to copy (_Code), next to the shared rules for <pre>.
+_PRE_HL = '.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}'
+_CSS = _base_css(_ROOT, _EXTRA_CSS, theme=_THEME_CSS, restyle=_RESTYLE, after={"pre.code{": _PRE_HL})
 
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 _NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")

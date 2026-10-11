@@ -4093,6 +4093,30 @@ def test_explorer_shows_how_a_file_was_indexed(world):
     assert x.selected.name == "faq.md" and x._tab == "files"
 
 
+def html_widgets(widget):
+    """Every widget in a window that shows HTML."""
+    found, todo = [], [widget]
+    while todo:
+        item = todo.pop()
+        if type(item).__name__ == "HTML":
+            found.append(item)
+        todo += getattr(item, "children", ())
+    return found
+
+
+def test_explorer_holds_the_report_css_once(world):
+    # Each page is a report drawn without the stylesheet _render_html starts with, which the window's hidden style
+    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match.
+    x = explorer(world)
+    x.tab_buttons["files"].click()
+    row(x, "faq.md").button.click()
+    panes = html_widgets(x.root)
+    [style] = [pane for pane in panes if kbmod._CSS in pane.value]
+    assert style.layout.display == "none"
+    pages = [pane for pane in panes if '<div class="kba">' in pane.value]
+    assert len(pages) >= 2 and not any("<style>" in page.value for page in pages)
+
+
 def test_explorer_looks_up_a_file_the_document_list_didnt_reach(world):
     x = explorer(world)
     faq = next(f for f in x.inventory.files if f.name == "faq.md")

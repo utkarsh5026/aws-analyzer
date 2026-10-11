@@ -84,6 +84,7 @@ from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
     human_money, human_size, parse_size, parse_time,
 )
+from ._kit.render import _base_css
 from ._kit.text import _clip, _esc, _pad, _text_bar, _width
 
 # =============================================================================
@@ -3450,59 +3451,8 @@ class _Columns:
     unit: str = ""  # 'ms' shows the scale as run times; '' as counts
 
 
-_CSS = """<style>
-.lmb{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
-.lmb h3{margin:10px 0 2px;font-size:16px}
-.lmb h3 .badge{display:inline-block;vertical-align:2px;margin-right:8px;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:rgba(59,130,246,.14);color:#3b82f6}
-.lmb h4{margin:14px 0 4px;font-size:13px}
-.lmb .sub{opacity:.65;font-size:12px;margin-bottom:6px}
-.lmb .cards{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-.lmb .card{border:1px solid rgba(127,127,127,.3);border-radius:6px;padding:6px 12px;min-width:96px}
-.lmb .card.warn{border-color:rgba(245,158,11,.8);background:rgba(245,158,11,.08)}
-.lmb .card.bad{border-color:rgba(239,68,68,.8);background:rgba(239,68,68,.08)}
-.lmb .card.ok{border-color:rgba(16,185,129,.7)}
-.lmb .card .l{font-size:11px;opacity:.65}
-.lmb .card .v{font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.lmb .tw{max-width:100%;overflow-x:auto;margin:2px 0 8px}
-.lmb .tw.scroll{max-height:640px;overflow:auto}
-.lmb table.t{border-collapse:collapse;width:auto;font-size:inherit}
-.lmb table.t th{text-align:left;font-weight:600;padding:4px 10px;border-bottom:1px solid rgba(127,127,127,.5)}
-.lmb .tw.scroll table.t th{position:sticky;top:0;z-index:1;box-shadow:inset 0 -1px rgba(127,127,127,.5);backdrop-filter:blur(8px)}
-.lmb .tw.scroll table.t th{background:var(--jp-layout-color0,var(--vscode-editor-background,transparent))}
-.lmb table.t td{text-align:left;padding:3px 10px;border-bottom:1px solid rgba(127,127,127,.15);vertical-align:top}
-.lmb table.t td{white-space:pre-line;overflow-wrap:break-word;max-width:640px}
-.lmb table.t tbody tr:hover td{background:rgba(127,127,127,.07)}
-.lmb table.t td.s{white-space:nowrap}
-.lmb table.t td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.lmb table.t td.tree{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.lmb table.t td.bar{white-space:nowrap;font-variant-numeric:tabular-nums}
-.lmb .track{display:inline-block;width:110px;height:8px;border-radius:2px;background:rgba(127,127,127,.18)}
-.lmb .track{vertical-align:middle;margin-right:6px}
-.lmb .fill{display:block;height:100%;border-radius:2px;background:#3b82f6}
-.lmb .pill{display:inline-block;padding:0 7px;border-radius:9px;font-weight:600;font-size:12px}
-.lmb .pill.warn{background:rgba(245,158,11,.18);box-shadow:inset 0 0 0 1px rgba(245,158,11,.6)}
-.lmb .pill.bad{background:rgba(239,68,68,.16);box-shadow:inset 0 0 0 1px rgba(239,68,68,.6)}
-.lmb .pill.ok{background:rgba(16,185,129,.14);box-shadow:inset 0 0 0 1px rgba(16,185,129,.55)}
-.lmb .note{padding:5px 10px;margin:4px 0;border-left:3px solid #3b82f6;background:rgba(59,130,246,.08)}
-.lmb .note::before{content:"\\2139\\FE0E";margin-right:7px;opacity:.7}
-.lmb .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.10)}
-.lmb .note.warn::before{content:"\\26A0\\FE0E"}
-.lmb .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.10)}
-.lmb .note.ok::before{content:"\\2713"}
-.lmb .fh{font-size:12px;font-weight:600;opacity:.75;margin:10px 0 2px}
-.lmb code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:0 4px;border-radius:4px}
-.lmb code{background:rgba(127,127,127,.15);user-select:all;-webkit-user-select:all;cursor:text}
-.lmb .more{opacity:.6;font-size:12px;margin:-4px 0 8px}
-.lmb pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
-.lmb pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
-.lmb pre.code{user-select:all;-webkit-user-select:all;cursor:text}
-.lmb .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
-.lmb details.sec{margin:14px 0 4px}
-.lmb details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
-.lmb .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
-.lmb .next{border-top:1px dashed rgba(127,127,127,.35)}
-.lmb .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.lmb .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+_ROOT = "lmb"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+_EXTRA_CSS = """\
 .lmb .wire{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,.9fr) 26px minmax(0,1fr);align-items:center;margin:6px 0 10px;max-width:980px}
 .lmb .wire .wc{display:flex;flex-direction:column;gap:6px;min-width:0}
 .lmb .wire .wa{text-align:center;font-size:18px;opacity:.45}
@@ -3525,8 +3475,8 @@ _CSS = """<style>
 .lmb .cols .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
 .lmb .cols .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
 .lmb .cols .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
-.lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}
-</style>"""
+.lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}"""
+_CSS = _base_css(_ROOT, _EXTRA_CSS)
 
 
 _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from different analyzers are easy to tell apart

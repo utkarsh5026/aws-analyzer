@@ -1417,6 +1417,30 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     assert repr(x) == "LambdaExplorer(etl-nightly) · help(LambdaExplorer) says what it shows"
 
 
+def html_widgets(widget):
+    """Every widget in a window that shows HTML."""
+    found, todo = [], [widget]
+    while todo:
+        item = todo.pop()
+        if type(item).__name__ == "HTML":
+            found.append(item)
+        todo += getattr(item, "children", ())
+    return found
+
+
+def test_explorer_holds_the_report_css_once(explorer):
+    # Each page is a report drawn without the stylesheet _render_html starts with, which the window's hidden style
+    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match.
+    x = explorer()
+    row_of(x, "etl-nightly").button.click()
+    x.tab_buttons["settings"].click()
+    panes = html_widgets(x.root)
+    [style] = [pane for pane in panes if lfmod._CSS in pane.value]
+    assert style.layout.display == "none"
+    pages = [pane for pane in panes if '<div class="lmb">' in pane.value]
+    assert len(pages) >= 2 and not any("<style>" in page.value for page in pages)
+
+
 def test_explorer_searches_filters_sorts_and_pages_the_functions(role, core, explorer):
     for i in range(43):
         create(f"batch-{i:02d}", role, Description="a nightly batch" if i % 2 else "")
