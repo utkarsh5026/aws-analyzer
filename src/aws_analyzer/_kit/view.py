@@ -45,8 +45,8 @@ def _which_prices(prices: dict[str, Any], list_prices: dict[str, Any]) -> str:
 
 def _friendly_errors(method: Callable) -> Callable:
     """Show AWS and input errors as a readable note instead of a traceback. The view says what an AWS error means
-    (_explain), which other errors are shown as they are (_DATA_ERRORS) and what to say about its own (_extra_note);
-    anything else still raises."""
+    (_explain_call, which is _explain unless the command's arguments help), which other errors are shown as they are
+    (_DATA_ERRORS) and what to say about its own (_extra_note); anything else still raises."""
 
     @functools.wraps(method)
     def wrapper(self: _BaseView, *args: Any, **kwargs: Any) -> None:
@@ -81,7 +81,7 @@ class _BaseView:
     core: Any  # the service's analyzer: the View's __init__ makes one when it isn't given one
     _render_html: Callable[[list[Any], int], str]  # the service's look: its stylesheet, root class and badge
     _render_text = staticmethod(_render_text)  # how a report reads as text, the same for every service
-    _TABLE = _Table  # the block help() lists commands in (S3 draws its own _Table until Phase 6)
+    _TABLE: Callable[..., Any] = _Table  # the block help() lists commands in (S3 draws its own until Phase 6)
     _GROUPS: dict[str, tuple[str, ...]] = {}  # help() lists the commands in these groups, in this order
     _START: tuple[tuple[str, str], ...] = ()  # help()'s "Start here": (call, what it shows)
     _PROGRESS = ("Reading", "items read")  # the label and unit _progress() shows when it's given none
