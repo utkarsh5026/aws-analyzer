@@ -8,7 +8,8 @@ Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzer it
     builds on (COMPANIONS: s3_explorer.py on s3.py); and _kit/ importing any analyzer
-  - an analyzer defining a name that _kit/ has (a copy of a shared helper: import it from _kit instead)
+  - an analyzer defining a name that _kit/ has (a copy of a shared helper: import it from _kit instead), except
+    S3's own renderer until Phase 6 of .claude/plans/shared-code.md (OWN_RENDERER)
   - no `from __future__ import annotations`
   - the five numbered `# N. ...` section banners missing or out of order (not in _kit/)
   - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
@@ -39,6 +40,9 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on one analyzer: it imports that analyzer (lazily, so it still imports alone), its UI class
 # is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services.
 COMPANIONS = {"s3_explorer": "s3"}
+# S3's tables sort, filter and pick columns, and its findings read as headlines over points: until Phase 6 of
+# .claude/plans/shared-code.md brings that to every service, s3.py keeps its own versions of these _kit names.
+OWN_RENDERER = {"s3": {"_Table", "_prose", "_findings_html", "_table_html", "_render_text"}}
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
                  "Retrieve")
@@ -213,7 +217,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     # A copy of a shared helper: _kit has it, so the analyzer imports it from there.
     if not in_kit:
         for name, line in _top_level_names(tree):
-            if name in kit:
+            if name in kit and name not in OWN_RENDERER.get(path.stem, set()):
                 report.error(f"{rel}:{line}", f"defines {name}, which _kit/{kit[name]}.py has; import it from there "
                                               "(from ._kit." + kit[name] + " import " + name + ") instead of a copy")
 
