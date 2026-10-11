@@ -52,15 +52,12 @@ import dataclasses
 import difflib
 import fnmatch
 import functools
-import importlib
-import inspect
 import io
 import json
 import keyword
 import math
 import posixpath
 import re
-import sys
 import threading
 import time
 import tokenize
@@ -74,19 +71,19 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Generator, Iterable
 from urllib.parse import quote, unquote
 
-import boto3
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
+from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
 from ._kit.deps import _in_notebook, _require
 from ._kit.errors import _Hint, _error_code, _why
 from ._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
+    HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
     human_money, human_size, parse_size, parse_time,
 )
-from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _render_text, _report_html, _signature
+from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc
+from ._kit.view import _BaseView, _friendly_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -2391,7 +2388,7 @@ def _qualifier(arn: str | None) -> str:
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
-class LambdaAnalyzer:
+class LambdaAnalyzer(_BaseAnalyzer):
     """Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
 
     Functions are read in the analyzer's region, or in several: overview(regions=['us-east-1', 'eu-west-1']) or
@@ -2401,6 +2398,8 @@ class LambdaAnalyzer:
     clients by service name ('lambda', 'cloudwatch', 'logs', 'ec2'): a client, used in every region, or a function
     that makes one for a region (e.g. for tests).
     """
+
+    _LIST_PRICES = LAMBDA_PRICES
 
     def __init__(
         self,
@@ -2412,14 +2411,12 @@ class LambdaAnalyzer:
         clients: dict[str, Any] | None = None,
         prices: dict[str, float] | None = None,
     ):
-        self.session = session or boto3.Session(profile_name=profile, region_name=region)
-        self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
+        super().__init__(session, region=region, profile=profile, prices=prices)
         self._given: dict[str, Any] = dict(clients or {})
         if client is not None:
             self._given["lambda"] = client
         self._clients: dict[tuple[str, str | None], Any] = {}
         self._lock = threading.Lock()  # boto3 sessions aren't thread-safe, so clients are made one at a time
-        self.prices = {**LAMBDA_PRICES, **(prices or {})}
         self.max_workers = 8  # functions and regions read in parallel
         self._seen: dict[str, set[str]] = defaultdict(set)  # function name -> regions overview() found it in
 
@@ -2457,17 +2454,6 @@ class LambdaAnalyzer:
     def client(self) -> Any:
         """The Lambda client in the analyzer's region."""
         return self._service("lambda")
-
-    @property
-    def region(self) -> str:
-        return self.client.meta.region_name
-
-    def _map(self, fn: Callable[[Any], Any], items: list[Any]) -> list[Any]:
-        """fn over items, in parallel threads unless max_workers is 1 (a Stubber answers in order)."""
-        if self.max_workers <= 1 or len(items) <= 1:
-            return [fn(item) for item in items]
-        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
-            return list(pool.map(fn, items))
 
     def regions(self, which: str | Iterable[str] | None = None) -> list[str]:
         """The regions a report covers: None -> the analyzer's; 'all' -> every region turned on for the account
@@ -3448,69 +3434,6 @@ def _columns_lines(block: _Columns, report: _Report) -> list[str]:
     return out + [f"  {block.items[0][0]} {spark} {block.items[-1][0]}   (the most: {most}, {label})"]
 
 
-def _progress_bar_class(notebook: bool) -> Any:
-    """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
-    try:
-        if notebook:
-            importlib.import_module("ipywidgets")
-            return importlib.import_module("tqdm.notebook").tqdm
-        return importlib.import_module("tqdm").tqdm
-    except Exception:  # not installed, or too old to import cleanly: the plain progress line takes over
-        return None
-
-
-def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
-    """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
-    options: dict[str, Any] = {
-        "desc": label,
-        "total": total,
-        "leave": False,
-        "delay": 0.5,
-        "mininterval": 0.25,
-        "dynamic_ncols": True,
-        "disable": False,
-        "unit_scale": True,
-    }
-    if unit == "B":
-        options.update(unit="B", unit_divisor=1024)
-    else:
-        known = total is not None
-        counts = "{percentage:3.0f}%|{bar}| {n:,}/{total:,}" if known else "{n:,}"
-        timing = (
-            "{elapsed}<{remaining}, {rate_fmt}" if known else "{elapsed}, {rate_fmt}"
-        )
-        options.update(
-            unit=f" {unit}", bar_format=f"{{desc}}: {counts} {unit} [{timing}]"
-        )
-    return bar_class(**options)
-
-
-def _progress_text(
-    label: str, unit: str, count: int, total: int | None, elapsed: float
-) -> str:
-    """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
-    amount = human_size if unit == "B" else (lambda n: f"{n:,}")
-    text = f"{label}... {amount(count)}"
-    if total:
-        text += f" of {amount(total)}"
-    text += "" if unit == "B" else f" {unit}"
-    if total:
-        text += f" ({min(count / total, 1):.0%})"
-    text += f" · {_duration(elapsed)}"
-    if elapsed >= 1 and count:
-        rate = count / elapsed
-        text += (
-            f" · {human_size(rate)}/s"
-            if unit == "B"
-            else f" · {rate:,.0f}/s"
-            if rate >= 10
-            else f" · {rate:.1f}/s"
-        )
-        if total and total > count:
-            text += f" · about {_duration((total - count) / rate)} left"
-    return text
-
-
 def _stamp(moment: datetime | None) -> str:
     """A log line's time, to the second, in UTC."""
     return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -3686,37 +3609,7 @@ def _since_arg(since: Any, default: str) -> dict[str, Any]:
     return {"since": since} if isinstance(since, str) and since != default else {}
 
 
-def _friendly_errors(method: Callable) -> Callable:
-    """Show AWS / input errors as a readable note instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: LambdaView, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except ClientError as exc:
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            self._show(
-                [
-                    _Note(
-                        f"{code}: {self._explain(code, message)}  [{method.__name__}]",
-                        "warn",
-                    )
-                ]
-            )
-        except _Hint as exc:
-            self._show([_Note(str(exc))])
-        except ImportError as exc:  # a missing optional package: the message says what to pip install
-            self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
-        except (BotoCoreError, ValueError, TypeError, ImportError) as exc:
-            self._show(
-                [_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")]
-            )
-
-    return wrapper
-
-
-class LambdaView:
+class LambdaView(_BaseView):
     """Notebook UI over LambdaAnalyzer. Each method renders a report and returns nothing; for the underlying data
     call the matching method on `view.core` (a LambdaAnalyzer): functions() -> overview(), function_info() ->
     describe(), logs() -> log_events(), and errors(), performance() and code() by the same name.
@@ -3727,7 +3620,7 @@ class LambdaView:
     rate and time left), 'plain' (always that line) or 'off'.
     """
 
-    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
+    _render_html = staticmethod(_render_html)  # its look: the stylesheet, root class and badge
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
@@ -3750,198 +3643,11 @@ class LambdaView:
         max_rows: int = 50,
         progress: str = "auto",
     ):
-        if mode not in ("auto", "html", "text"):
-            raise ValueError("mode must be 'auto', 'html' or 'text'")
-        if progress not in ("auto", "plain", "off"):
-            raise ValueError("progress must be 'auto', 'plain' or 'off'")
-        self.core = core or LambdaAnalyzer()
-        self.use_html = _in_notebook() if mode == "auto" else mode == "html"
-        self.max_rows = max_rows
-        self.progress = progress
+        super().__init__(mode=mode, max_rows=max_rows, progress=progress)
+        self.core: LambdaAnalyzer = core or LambdaAnalyzer()
         self.explorer: LambdaExplorer | None = None  # the window explore() opened last
 
     # ------------------------------------------------------------------ plumbing
-
-    def _show(self, blocks: list[Any]) -> None:
-        if self.use_html:
-            try:
-                from IPython.display import HTML, display
-            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
-                self.use_html = False
-                note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
-                blocks = [*blocks, _Note(note, "warn")]
-            else:
-                display(HTML(_render_html(blocks, self.max_rows)))
-                return
-        print(_render_text(blocks, self.max_rows))
-
-
-    @contextmanager
-    def _progress(
-        self, label: str = "Reading", unit: str = "items read"
-    ) -> Generator[Callable[..., None], None, None]:
-        """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
-        and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
-        Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
-        at a time: when a nested _progress starts showing, the outer one's bar goes away."""
-        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
-        bar_class = [
-            _progress_bar_class(notebook)
-            if self.progress == "auto"
-            else None
-        ]
-        bar: list[Any] = [None]
-        handle: list[Any] = [None]
-        started: list[Any] = [
-            time.monotonic(),
-            None,
-        ]  # when the current total started, and that total
-        shown, width, stopped = [0.0], [0], [False]
-
-        def close_bar() -> None:
-            if bar[0] is not None:
-                if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
-                    bar[0].total = bar[
-                        0
-                    ].n  # done early (a file it couldn't read): no red "failed" widget
-                bar[0].close()
-                bar[0] = None
-
-        def clear() -> None:
-            close_bar()
-            if handle[0] is not None:
-                from IPython.display import HTML
-
-                handle[0].update(HTML(""))
-            elif width[0]:
-                print("\r" + " " * width[0] + "\r", end="", file=sys.stderr, flush=True)
-                width[0] = 0
-
-        def take_over() -> None:
-            owner = self._progress_owner
-            if owner is not clear:
-                if owner is not None:
-                    owner()
-                self._progress_owner = clear
-
-        def tick(count: int, total: int | None = None) -> None:
-            if self.progress == "off":
-                return
-            if bar_class[0] is not None:
-                try:
-                    if bar[0] is not None and total != bar[0].total:
-                        close_bar()
-                    if bar[0] is None:
-                        take_over()
-                        bar[0] = _progress_bar(bar_class[0], label, unit, total)
-                    bar[0].update(count - bar[0].n)
-                    return
-                except Exception:  # an old tqdm or a broken widget front end: use the plain line instead
-                    bar_class[0] = None
-            now = time.monotonic()
-            if total != started[1]:
-                started[:] = [now, total]
-            if now - started[0] < 0.5 or now - shown[0] < 0.5:
-                return
-            shown[0] = now
-            take_over()
-            text = _progress_text(label, unit, count, total, now - started[0])
-            if notebook:
-                from IPython.display import HTML, display
-
-                if handle[0] is None:
-                    handle[0] = display(HTML(""), display_id=True)
-                if handle[0] is not None:  # display() returns None outside IPython
-                    handle[0].update(
-                        HTML(f'<div style="opacity:.6">{_esc(text)}</div>')
-                    )
-            else:
-                width[0] = max(width[0], len(text))
-                print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
-
-        try:
-            yield tick
-        except BaseException:
-            stopped[0] = True  # interrupted: a tqdm widget stays, red, where it stopped
-            raise
-        finally:
-            clear()
-            if self._progress_owner is clear:
-                self._progress_owner = None
-
-
-    def help(self, command: Any = None) -> None:
-        """Every command, grouped by task; help('name') shows one command in full."""
-        view = type(self).__name__
-        commands = {
-            name: inspect.unwrap(member)
-            for name, member in vars(type(self)).items()
-            if not name.startswith("_") and callable(member)
-        }
-
-        def about(name: str) -> str:  # the docstring's first paragraph, on one line
-            return " ".join(
-                (inspect.getdoc(commands[name]) or "").split("\n\n")[0].split()
-            )
-
-        if command is not None:
-            name = getattr(command, "__name__", str(command))
-            if name not in commands:
-                close = difflib.get_close_matches(name, list(commands), n=3)
-                hint = (
-                    f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
-                )
-                self._show(
-                    [
-                        _Note(
-                            f"{view} has no command {name!r}.{hint} help() lists them all.",
-                            "warn",
-                        )
-                    ]
-                )
-                return
-            self._show(
-                [
-                    _Title(
-                        f"{name}{_signature(commands[name])}",
-                        f"{view} command · help() lists them all",
-                    ),
-                    _Text(
-                        inspect.getdoc(commands[name]) or "(no description)", wrap=True
-                    ),
-                ]
-            )
-            return
-        grouped = {name for names in self._GROUPS.values() for name in names}
-        groups = {
-            **self._GROUPS,
-            "Other": tuple(name for name in commands if name not in grouped),
-        }
-        blocks: list[Any] = [
-            _Title(
-                f"{view} commands",
-                "help('name') shows one in full · the data behind each report "
-                f"comes from .core ({type(self.core).__name__})",
-            ),
-            _Next(list(self._START), title="Start here"),
-        ]
-        for group, names in groups.items():
-            rows = [
-                [f"{name}{_signature(commands[name])}", about(name)]
-                for name in names
-                if name in commands
-            ]
-            if rows:
-                blocks.append(
-                    _Table(
-                        ["Command", "What it shows"],
-                        rows,
-                        title=group,
-                        max_rows=0,
-                        code_cols=(0,),
-                    )
-                )
-        self._show(blocks)
 
     def _explain(self, code: str, message: str) -> str:
         """The AWS error message plus what to do about it."""
@@ -3955,9 +3661,6 @@ class LambdaView:
         if code in ("ThrottlingException", "TooManyRequestsException"):
             return f"{text} AWS throttled the call: wait a few seconds and retry."
         return message
-
-    def _price_basis(self) -> str:
-        return "us-east-1 list prices" if self.core.prices == LAMBDA_PRICES else "your prices"
 
     def _missing(self, ref: str, region: str | None) -> _Hint:
         """What to say when a function isn't there: the closest names, and where else functions() saw it."""
