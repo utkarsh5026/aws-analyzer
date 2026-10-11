@@ -13,8 +13,9 @@ Errors (exit 1):
   - no `from __future__ import annotations`
   - the five numbered `# N. ...` section banners missing or out of order (not in _kit/)
   - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
-  - a public View method without @_friendly_errors or a docstring (help() lists the docstring's first line),
-    or one that prints / displays directly instead of building blocks for self._show()
+  - a public View method without @_friendly_errors (a companion's window: @_window_errors) or a docstring
+    (help() lists the docstring's first line), or one that prints / displays directly instead of building blocks
+    for self._show()
   - print() outside the View class (the analyzer and the pure functions never print)
 Warnings:
   - PartiQL (execute_statement and friends) can write; it needs a guard that only lets SELECT through, marked
@@ -229,6 +230,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
 
     # View methods: decorated, documented, render through blocks.
     ui_suffixes = ("View", "Explorer") if parent else ("View",)
+    guards = {"_friendly_errors", "_window_errors"} if parent else {"_friendly_errors"}  # a window guards its own
     view = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.endswith(ui_suffixes)), None)
     if view is None:
         if not in_kit:
@@ -242,8 +244,9 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 continue  # an attribute to read or set, not a command
             where = f"{rel}:{member.lineno} {view.name}.{member.name}"
             decorators = {d.id if isinstance(d, ast.Name) else getattr(d, "attr", "") for d in member.decorator_list}
-            if member.name != "help" and "_friendly_errors" not in decorators:
-                report.error(where, "no @_friendly_errors (an AWS or input error would show a traceback)")
+            if member.name != "help" and not decorators & guards:
+                report.error(where, f"no @{' or @'.join(sorted(guards))} (an AWS or input error would show a "
+                                    "traceback)")
             doc = ast.get_docstring(member)
             if not doc or not doc.strip().split("\n")[0].strip():
                 report.error(where, "no docstring; help() shows its first line as the description")

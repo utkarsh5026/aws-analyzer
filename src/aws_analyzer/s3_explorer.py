@@ -60,6 +60,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
+from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
 
 # =============================================================================
@@ -720,8 +721,9 @@ class S3Navigator:
 # =============================================================================
 
 
-def _friendly_errors(method: Callable) -> Callable:
-    """Show AWS / input errors as a note in the explorer instead of a traceback."""
+def _window_errors(method: Callable) -> Callable:
+    """For the explorer's own commands: an AWS or input error is shown as a note in the explorer instead of a
+    traceback."""
 
     @functools.wraps(method)
     def wrapper(self: S3Explorer, *args: Any, **kwargs: Any) -> None:
@@ -1076,13 +1078,13 @@ class S3Explorer:
         self._pane = self.s3.S3View(self.core, mode="text" if mode == "text" else "auto", progress=progress)
         self._pane._show = self._capture  # its reports land in the right-hand pane, not in a new output
         note = ""
-        if mode != "text" and (mode == "widgets" or self.s3._in_notebook()):
+        if mode != "text" and (mode == "widgets" or _in_notebook()):
             try:
                 self._widgets = self.s3._require("ipywidgets", "Clicking through folders")
             except ImportError as exc:
                 note = (f"{exc}, which SageMaker notebooks normally have. Install it and restart the kernel; "
                         "until then this is a plain listing, and open(...) moves around.")
-        self._pane.use_html = self._widgets is not None or (mode != "text" and self.s3._in_notebook())
+        self._pane.use_html = self._widgets is not None or (mode != "text" and _in_notebook())
         self._cache: dict[tuple[str, str, str], list[list[Any]]] = {}
         self._sort, self._descending = "name", False
         self._offset = 0  # the list's page: the index of its first row in _visible
@@ -1133,35 +1135,35 @@ class S3Explorer:
         x.picked) zips them from code."""
         return list(self._picked)
 
-    @_friendly_errors
+    @_window_errors
     def open(self, uri: str = "") -> None:
         """Go to a folder, or show a file (its folder opens with the file on the right). Takes s3:// paths,
         bucket/prefix and S3 console links; open() with nothing goes to your list of buckets."""
         self._navigate(lambda: self.nav.open(uri))
 
-    @_friendly_errors
+    @_window_errors
     def back(self) -> None:
         """Go back to the folder you were in before (the ← button)."""
         self._navigate(self.nav.back)
 
-    @_friendly_errors
+    @_window_errors
     def forward(self) -> None:
         """Go forward again after back() (the → button)."""
         self._navigate(self.nav.forward)
 
-    @_friendly_errors
+    @_window_errors
     def up(self) -> None:
         """Go to the folder above this one (the ↑ button)."""
         self._navigate(self.nav.up)
 
-    @_friendly_errors
+    @_window_errors
     def refresh(self) -> None:
         """List this folder again, to pick up files added or removed since it was opened (the ↻ button)."""
         keep = self.selected
         self._cache.clear()
         self._navigate(self.nav.refresh, keep=keep, same=True)
 
-    @_friendly_errors
+    @_window_errors
     def filter(self, text: str = "", kind: str = "all", subfolders: bool = False) -> None:
         """Show only part of the list, as the search box and the buttons above it do: names with `text` in them,
         file types such as '.csv' or '.csv .json' (.csv also finds .csv.gz), patterns such as 'part-0*'; only

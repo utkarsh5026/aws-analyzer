@@ -31,6 +31,9 @@ from moto import mock_aws
 from PIL import Image
 
 from aws_analyzer import s3 as s3mod
+from aws_analyzer._kit import view as viewmod
+from aws_analyzer._kit.progress import _progress_text
+from aws_analyzer._kit.view import _commands
 from aws_analyzer.s3 import (
     GB,
     KB,
@@ -691,14 +694,14 @@ def test_downloads_findings():
 
 def test_progress_text():
     assert (
-        s3mod._progress_text("Listing", "files", 12345, None, 0.4)
+        _progress_text("Listing", "files", 12345, None, 0.4)
         == "Listing... 12,345 files · 0.4s"
     )
     assert (
-        s3mod._progress_text("Reading", "B", 400 * MB, GB, 4.0)
+        _progress_text("Reading", "B", 400 * MB, GB, 4.0)
         == "Reading... 400.0 MB of 1.0 GB (39%) · 4.0s · 100.0 MB/s · about 6.2s left"
     )
-    assert s3mod._progress_text("Checking", "buckets", 3, 12, 2.0).startswith(
+    assert _progress_text("Checking", "buckets", 3, 12, 2.0).startswith(
         "Checking... 3 of 12 buckets (25%)"
     )
     assert [s3mod._duration(t) for t in (0.42, 42.4, 125, 7500)] == [
@@ -707,7 +710,7 @@ def test_progress_text():
         "2m 05s",
         "2h 05m",
     ]
-    assert s3mod._progress_text("Checking", "buckets", 2, None, 4.0).endswith("· 0.5/s")
+    assert _progress_text("Checking", "buckets", 2, None, 4.0).endswith("· 0.5/s")
 
 
 def test_compare_objects():
@@ -3865,7 +3868,7 @@ class FakeBar:
 
 def test_progress_shows_one_tqdm_bar_at_a_time(ui, monkeypatch):
     FakeBar.made = []
-    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: FakeBar)
+    monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: FakeBar)
     with (
         ui._progress("Listing", unit="files") as tick,
         ui._progress("Reading", unit="B") as read,
@@ -3909,9 +3912,7 @@ def test_progress_shows_one_tqdm_bar_at_a_time(ui, monkeypatch):
 def test_progress_without_tqdm(core, capsys, monkeypatch):
     clock = itertools.count(0, 1.0)
     monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(
-        s3mod, "_progress_bar_class", lambda notebook: None
-    )  # tqdm not installed
+    monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # tqdm not installed
     for progress in ("auto", "plain"):
         ui = S3View(core, mode="text", progress=progress)
         with ui._progress("Reading", unit="B") as tick:
@@ -3981,7 +3982,7 @@ def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
     assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
     clock = itertools.count(0, 1.0)
     monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
-    monkeypatch.setattr(s3mod, "_progress_bar_class", lambda notebook: None)  # no tqdm either: the plain line
+    monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm either: the plain line
     with ui._progress("Reading", unit="B") as tick:
         tick(MB, 4 * MB)
         tick(2 * MB, 4 * MB)
@@ -4203,12 +4204,7 @@ def test_findings_read_as_headline_and_points():
 
 def test_ui_help_groups_every_command(ui, capsys):
     out = run(capsys, ui.help)
-    commands = {
-        name
-        for name in vars(S3View)
-        if not name.startswith("_") and callable(getattr(S3View, name))
-    }
-    assert commands == {
+    assert set(_commands(S3View)) == {
         name for names in S3View._GROUPS.values() for name in names
     }  # a new command needs a group
     assert (

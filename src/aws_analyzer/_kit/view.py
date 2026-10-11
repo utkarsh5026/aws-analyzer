@@ -81,6 +81,7 @@ class _BaseView:
     core: Any  # the service's analyzer: the View's __init__ makes one when it isn't given one
     _render_html: Callable[[list[Any], int], str]  # the service's look: its stylesheet, root class and badge
     _render_text = staticmethod(_render_text)  # how a report reads as text, the same for every service
+    _TABLE = _Table  # the block help() lists commands in (S3 draws its own _Table until Phase 6)
     _GROUPS: dict[str, tuple[str, ...]] = {}  # help() lists the commands in these groups, in this order
     _START: tuple[tuple[str, str], ...] = ()  # help()'s "Start here": (call, what it shows)
     _PROGRESS = ("Reading", "items read")  # the label and unit _progress() shows when it's given none
@@ -245,5 +246,5 @@ class _BaseView:
         for group, names in groups.items():
             rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
             if rows:
-                blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
+                blocks.append(self._TABLE(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
         self._show(blocks)
