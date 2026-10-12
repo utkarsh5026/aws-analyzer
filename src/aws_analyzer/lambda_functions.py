@@ -4653,6 +4653,11 @@ _EXPLORER_TABS = (
      "<circle cx='8.5' cy='16.5' r='2.5'/>"),
 )
 _FUNCTION_TABS = ("overview", "logs", "errors", "performance", "code", "settings")  # the tabs about one function
+_PANEL = "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/>"
+_FILES_ICONS = (  # the Code tab's Hide files / Show files button: a panel whose side folds in, or out
+    ("files-hide", _PANEL + "<path d='M9.5 4.5v15M16 9.5 13.5 12l2.5 2.5'/>"),
+    ("files-show", _PANEL + "<path d='M9.5 4.5v15M13.5 9.5 16 12l-2.5 2.5'/>"),
+)
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
          'stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h2.3c.9 0 1.6.5 2 1.3l6.7 13.7"/>'
          '<path d="M12.3 10.6 6.4 19.5"/></svg>')
@@ -4694,11 +4699,12 @@ _DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda funct
 
 
 def _explorer_rules() -> str:
-    """The explorer's tab icons: .lmx-i-<key> sets --lx-icon, which a tab's ::before draws."""
+    """The explorer's icons, the tabs' and the Hide files button's: .lmx-i-<key> sets --lx-icon, which ::before draws."""
     svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
            "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+    icons = [(key, paths) for key, _, _, paths in _EXPLORER_TABS] + list(_FILES_ICONS)
     return "\n".join(f'.lmx-app .lmx-i-{key}{{--lx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-                     for key, _, _, paths in _EXPLORER_TABS)
+                     for key, paths in icons)
 
 
 _EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,165,250,.15);--lx-ring:rgba(96,165,250,"
@@ -4951,6 +4957,8 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app .lmx-codebar{align-items:center;gap:10px;padding:8px 2px 10px;flex-wrap:wrap}
 .lmx-app.lmx-app .lmx-codebar>*{margin:0}
 .lmx-app.lmx-app .lmx-codebar button.lmx-small{font-weight:600;color:var(--lx-accent)}
+.lmx-app.lmx-app .lmx-codebar button.lmx-side{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:108px;padding:0 13px 0 11px;font-weight:500;color:inherit}
+.lmx-app.lmx-app .lmx-codebar button.lmx-side::before{content:"";width:15px;height:15px;flex:0 0 auto;background:currentColor;opacity:.75;-webkit-mask:var(--lx-icon) center/contain no-repeat;mask:var(--lx-icon) center/contain no-repeat}
 .lmx-app .cbs{font-size:12px;opacity:.7;line-height:1.4}
 .lmx-app .cbs.ok{opacity:1}
 .lmx-app .cbs.ok b{font-weight:600;color:var(--lx-ink-ok)}
@@ -5807,8 +5815,8 @@ class LambdaExplorer:
         Performance  run times against the timeout, memory used against what it has, cold starts, and the slowest
                      runs (click one to read it)
         Code         the files in its deployment package as a tree of folders, and the source of the one you click,
-                     with Copy to copy all of it (secrets files held back). Download .zip saves the package next to
-                     the notebook
+                     with Copy to copy all of it (secrets files held back). Hide files gives the source the whole
+                     width, and Show files brings the tree back. Download .zip saves the package next to the notebook
         Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
 
     name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
@@ -5885,6 +5893,7 @@ class LambdaExplorer:
         self._code_open: set[str] = set()  # the tree's folders shown open ('boto3/')
         self._code_shut: set[str] = set()  # ...and the ones folded while searching, when every other one is open
         self._toggled: tuple[str, float] = ("", 0.0)  # the folder clicked last, and when
+        self._files_shown = True  # the tree beside the source; Hide files folds it away (for every function after)
         self._code_rows: list[_Row] = []
         self._pagers: dict[str, tuple[Any, dict[str, Any]]] = {}
         self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
@@ -6398,7 +6407,12 @@ class LambdaExplorer:
         self.code_save.add_class("lmx-small")
         self.code_save.on_click(self._safely(lambda _button: self._save_code()))
         self.code_saved = w.HTML(layout=layout(flex="1 1 auto", width="auto"))
-        self.code_bar = w.HBox([self.code_save, self.code_saved], layout=layout(width="100%", display="none"))
+        self.files_toggle = w.Button(layout=layout(width="auto"))
+        self.files_toggle.add_class("lmx-small")
+        self.files_toggle.add_class("lmx-side")
+        self.files_toggle.on_click(self._safely(lambda _button: self._toggle_files()))
+        self.code_bar = w.HBox([self.files_toggle, self.code_save, self.code_saved],
+                               layout=layout(width="100%", display="none"))
         self.code_bar.add_class("lmx-codebar")
         self.code_find = w.Text(placeholder="Find a file", continuous_update=True,
                                 layout=layout(flex="1 1 auto", width="auto"))
@@ -6417,6 +6431,7 @@ class LambdaExplorer:
         self.code_split.add_class("lmx-split")
         head = w.VBox([self.code_view, self.code_more], layout=layout(width="100%"))
         head.add_class("lmx-codehead")
+        self._draw_files_toggle()
         return w.VBox([head, self.code_bar, self.code_split])
 
     def _show_tab(self, key: str, *, load: bool = True) -> None:
@@ -6471,8 +6486,12 @@ class LambdaExplorer:
             return (f"{_plural(len(self.perf.invocations), 'run')} in the last "
                     f"{_window((self.perf.until - self.perf.since).total_seconds())} · click a slow run to read it")
         if key == "code" and self.package is not None:
-            return (f"{_plural(len(self.package.files), 'file')} in its package · click a folder to open it, a file "
-                    "to see its source" if self.package.files else "")
+            if not self.package.files:
+                return ""
+            files = f"{_plural(len(self.package.files), 'file')} in its package"
+            if not self._files_shown:
+                return f"{files} · Show files lists them beside the source"
+            return f"{files} · click a folder to open it, a file to see its source"
         if key == "settings" and self.detail is not None:
             return "Every setting in plain English, then as Lambda returns it (folded, at the end)."
         return ""
@@ -7752,6 +7771,7 @@ class LambdaExplorer:
         blocks = [b for b in self.ui._code_blocks(package, source=False) if not isinstance(b, _Table)]
         self._draw("code", self.code_view, blocks)
         self.code_bar.layout.display = "" if data is not None else "none"
+        self.files_toggle.layout.display = "" if package.files else "none"
         self._draw_saved()
         if not package.files:
             self.code_split.layout.display = "none"
@@ -7796,6 +7816,22 @@ class LambdaExplorer:
             return
         self._status(f"Saved {fn.name}'s package as {where} ({human_size(saved.size)})"
                      + (", replacing the one there." if saved.replaced else "."), "ok")
+
+    def _toggle_files(self) -> None:
+        """Hide files / Show files: folds the tree away so the source has the tab's whole width, or brings it back."""
+        self._files_shown = not self._files_shown
+        self._draw_files_toggle()
+        if not self._said[2] and self._said[1] != "warn":
+            self._status(self._tab_line("code"))
+
+    def _draw_files_toggle(self) -> None:
+        shown = self._files_shown
+        self.code_left.layout.display = "" if shown else "none"
+        self.files_toggle.description = "Hide files" if shown else "Show files"
+        self.files_toggle.tooltip = ("Hide the files, so the source has the whole width" if shown
+                                     else "Show the package's files beside the source")
+        _class_if(self.files_toggle, "lmx-i-files-hide", shown)
+        _class_if(self.files_toggle, "lmx-i-files-show", not shown)
 
     def _code_lines(self) -> list[_TreeLine]:
         package = self.package

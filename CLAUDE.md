@@ -419,7 +419,9 @@ How the View layer works:
   click within `_TOGGLE_GRACE`). The file's **Copy** (`_copy_html`) is a `user-select:all` span holding the text
   hidden, its label drawn by `::before`, so a click selects the file and Ctrl+C copies it, with no JavaScript.
   **Download .zip** (`_save_code`) writes the cached bytes with `_save_package`, no new download; `x.saved` is the
-  `PackageDownload`. Background work is `_later` (as in
+  `PackageDownload`. **Hide files** (`files_toggle`, `_toggle_files`) hides the tree's pane, `code_left`, so the source
+  has the tab's width; `_files_shown` isn't reset by `_open_function`, so it stays hidden for the next function.
+  Background work is `_later` (as in
   `KBExplorer`), the status line's busy text carries its job (`_status(owner=)`) so only that job, or the user being on
   its tab, replaces it (`_finish`), and `_drop` bumps keys so a function's results that come back after another was
   picked are dropped. `_renew` / renewing `runs_box` puts a page's scrolling box anew so it starts at the top.

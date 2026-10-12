@@ -1683,6 +1683,20 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     source = x.source_view.value
     assert "app.py" in plain(source) and "the handler&#x27;s file" in source and '<span class="pk">def</span>' in source
     assert '<pre class="gut">1\n2</pre>' in source
+
+    # Hide files folds the tree away so the source has the whole width, and Show files brings it back
+    toggle = x.files_toggle
+    assert toggle.description == "Hide files" and "lmx-i-files-hide" in toggle._dom_classes
+    assert x.code_bar.children[0] is toggle and x.code_left.layout.display == ""
+    toggle.click()
+    assert x.code_left.layout.display == "none" and x.code_split.layout.display == ""
+    assert toggle.description == "Show files" and toggle.tooltip == "Show the package's files beside the source"
+    assert "lmx-i-files-show" in toggle._dom_classes and "lmx-i-files-hide" not in toggle._dom_classes
+    assert plain(x.status.value) == "3 files in its package · Show files lists them beside the source"
+    assert x.source_view.value == source  # the file shown stays
+    toggle.click()
+    assert x.code_left.layout.display == "" and toggle.description == "Hide files"
+    assert plain(x.status.value) == "3 files in its package · click a folder to open it, a file to see its source"
     copy = re.search(r'<span class="cpy"[^>]*title="([^"]*)"><span class="cpt">(.*?)</span></span>', source, re.S)
     assert copy and "to copy all of app.py" in copy.group(1) and 'aria-label="Copy app.py"' in source
     held = "def handler(event, context):\n    return event['customer_id']\n\n"  # a browser copies one line break less
@@ -1737,6 +1751,10 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     nested.code_save.click()
     assert nested.saved.sha256_matches is False
     assert "its SHA-256 differs from the one Lambda reports" in plain(nested.status.value)
+    nested.files_toggle.click()  # hidden, the tree stays hidden for the next function's code
+    nested.open("api-handler", tab="code")
+    assert nested.package.function.name == "api-handler" and nested.code_left.layout.display == "none"
+    assert nested.files_toggle.description == "Show files"
 
     def too_big(url, most):
         raise ValueError("The package is 80.0 MB, more than max_size (50.0 MB): pass max_size='81MB' to read it anyway.")
