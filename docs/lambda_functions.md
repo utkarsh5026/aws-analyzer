@@ -78,6 +78,7 @@ ui.errors("orders-etl")                     # its errors in the last 24 hours, g
 ui.logs("orders-etl", search="KeyError")    # the newest lines it logged
 ui.performance("orders-etl")                # run times, memory used and cold starts, and the memory it needs
 ui.code("orders-etl")                       # the files in its package, and the handler's source
+ui.download("orders-etl")                   # its package (.zip) saved in lambda-downloads/, next to the notebook
 ui.explore()                                # all of it in a window, by clicking: functions, logs run by run
 ```
 
@@ -164,7 +165,7 @@ The **Overview** tab has `function_info()`'s findings, each with what to do. Und
 
 - **Errors** is [`errors()`](#errors): the errors in its logs grouped by cause, with what to do about each, then the newest failed runs. Click one to read every line of it in the Logs tab.
 - **Performance** is [`performance()`](#performance): run times against the timeout, the memory used against what it has and the size that would do, cold starts, and the slowest runs, each a click from its lines.
-- **Code** downloads the deployment package once and lists its files, the handler's first; click one to see its source, with line numbers, and Python and JSON in colour. A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
+- **Code** downloads the deployment package once and shows its files as a tree of folders, folders first, with the handler's folder open (a folder that holds only a folder shares its line, as `botocore/data/` does). Click a folder to open or fold it, and a file to see its source, with line numbers, and Python and JSON in colour; **Copy** beside its name selects all of it, so <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd>+<kbd>C</kbd> on a Mac) copies the file. Typing in **Find a file** shows only the files that match, in their folders. **Download .zip** saves the package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook, like [`download()`](#download). A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
 - **Settings** has every setting in plain English, then the configuration as Lambda returns it, folded, and the AWS CLI commands that read it. Environment variable values never appear.
 
 The Errors and Performance tabs read the last 24 hours, and have their own time range.
@@ -175,13 +176,13 @@ The Errors and Performance tabs read the last 24 hours, and have their own time 
 **Errors**: three causes, each with what to do; the failed runs under them open in the Logs tab.
 ///
 
-![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; on the left its files, etl.py marked HANDLER, then .env marked KEY, db.py, requirements.txt and the bundled boto3, botocore and psycopg2 files; on the right etl.py with line numbers, its keywords, strings and calls in colour](images/lambda-explorer-code-light.webp#only-light){ width="984" height="860" loading=lazy }
-![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; on the left its files, etl.py marked HANDLER, then .env marked KEY, db.py, requirements.txt and the bundled boto3, botocore and psycopg2 files; on the right etl.py with line numbers, its keywords, strings and calls in colour](images/lambda-explorer-code-dark.webp#only-dark){ width="984" height="860" loading=lazy }
+![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; a Download .zip button that saves it in lambda-downloads/; on the left its files as a tree, the folders boto3/, botocore/data/ (open, holding endpoints.json) and psycopg2/ with their sizes, then .env marked KEY, db.py, etl.py marked HANDLER and requirements.txt; on the right etl.py with line numbers, its keywords, strings and calls in colour, and a Copy button](images/lambda-explorer-code-light.webp#only-light){ width="984" height="861" loading=lazy }
+![orders-etl's Code tab: cards for a 17.2 KB package, 16.0 MB unzipped, 7 files, no layers and the handler file etl.py; a warning that the package holds .env and a note that it carries its own boto3 and botocore; a Download .zip button that saves it in lambda-downloads/; on the left its files as a tree, the folders boto3/, botocore/data/ (open, holding endpoints.json) and psycopg2/ with their sizes, then .env marked KEY, db.py, etl.py marked HANDLER and requirements.txt; on the right etl.py with line numbers, its keywords, strings and calls in colour, and a Copy button](images/lambda-explorer-code-dark.webp#only-dark){ width="984" height="861" loading=lazy }
 /// caption
-**Code**: the handler's source, and a `.env` file that shouldn't be in the package.
+**Code**: the package as a tree of folders, the handler's source to copy, and a `.env` file that shouldn't be in the package.
 ///
 
-Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page` and `x.package` hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
+Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package` and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
 
 ## Every function { #functions }
 
@@ -334,6 +335,18 @@ ui.code("orders-etl", max_size="200MB")  # packages up to 50 MB are read by defa
 
 The findings: a handler setting no file in the package matches, secrets files packed in it (`.env`, keys, credentials), code and layers near Lambda's 250 MB limit, boto3 bundled although the runtime has it, and caches or tests that never run. A container image isn't pulled: the report names the image instead.
 
+### Download the package { #download }
+
+`download()` saves the deployment package on the notebook's disk, the .zip as Lambda stores it, and says where, how big it is, how many files it holds, and whether its SHA-256 matches the one Lambda reports (so you know it's the code the function runs). Nothing in it is unzipped or run.
+
+```python
+ui.download("orders-etl")                     # lambda-downloads/orders-etl.zip, next to the notebook
+ui.download("churn-scoring:live")             # the version an alias points to: churn-scoring-v<version>.zip
+ui.download("orders-etl", "~/packages/")      # into a folder of your own (or a file name: "~/etl.zip")
+```
+
+Without a path it goes in `lambda-downloads/`, next to the notebook, and replaces an earlier download of the same function. When that folder is new, it gets a `.gitignore` that keeps it out of git, because a package can hold secrets. To get the file on your computer, right-click it in JupyterLab's file browser and pick **Download**. To unzip it next to the notebook, the report's **Next** row has the line to run: `import shutil; shutil.unpack_archive('lambda-downloads/orders-etl.zip', 'lambda-downloads/orders-etl')`. The explorer's Code tab has the same as a **Download .zip** button, which saves the package the tab already read.
+
 ## Use the data in Python { #python }
 
 Every report has a data version on `ui.core` (a `LambdaAnalyzer`) that returns dataclasses and DataFrames instead of printing.
@@ -352,9 +365,10 @@ lam.log_events("orders-etl", since="1h", pattern='"KeyError"').to_df()
 runs = lam.log_runs("orders-etl", since="24h").runs   # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                      # CodeFile: path, size, compressed
+lam.download("orders-etl").path                   # PackageDownload: where it was saved, size, files, sha256_matches
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
 
 ```python
 from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory
@@ -429,7 +443,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()` downloads the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()` and `code()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()` and `code()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -488,6 +502,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
+| `download(name, path=None, region=None)` | Its deployment package saved on the notebook's disk, in `lambda-downloads/` (or at `path=`), checked against Lambda's SHA-256 |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
 </div>

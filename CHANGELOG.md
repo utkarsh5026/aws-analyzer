@@ -9,6 +9,22 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `lambda_functions.py`: `download("orders-etl")` saves a function's deployment package, the .zip as Lambda stores it,
+  in `lambda-downloads/` next to the notebook (or at `path=`, a file or a folder; `"name:alias"` saves that version, as
+  `orders-etl-v3.zip`), and says where, its size and files, and whether its SHA-256 matches the one Lambda reports. In
+  JupyterLab, right-click it in the file browser and pick Download to get it on your computer. A downloads folder it
+  makes gets a `.gitignore`, since a package can hold secrets. The explorer's Code tab has the same as a
+  **Download .zip** button, which saves the package the tab already read.
+
+### Changed
+
+- `lambda_functions.py`: the explorer's Code tab shows the package's files as a tree of folders instead of a flat
+  list: folders first, with their sizes, the handler's folder open, and a folder that holds only a folder on one line
+  (`botocore/data/`). Click a folder to open or fold it; **Find a file** shows the files that match inside their
+  folders. Beside the open file's name, **Copy** selects all of its source, so Ctrl+C (⌘C on a Mac) copies the file.
+
 ## [0.14.0] - 2026-10-12
 
 ### Changed

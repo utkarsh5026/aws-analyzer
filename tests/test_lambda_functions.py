@@ -2,6 +2,7 @@ import asyncio
 import html
 import io
 import json
+import os
 import re
 import sys
 import threading
@@ -55,6 +56,7 @@ from aws_analyzer.lambda_functions import (
     human_ms,
     line_level,
     masked_config,
+    package_file_name,
     package_findings,
     parse_event_source_mapping,
     parse_function,
@@ -545,6 +547,36 @@ def test_handler_file_and_package_findings():
     assert "take 205.0 MB unzipped" in text and "boto3 and botocore (203.0 MB)" in text
     assert "caches, tests or version-control files" in text
     assert package_findings(CodePackage(fn(), files=[CodeFile("app.py", 10, 5)], handler_file="app.py")) == []
+
+
+def test_file_tree_folds_folders_and_finds_files():
+    files = [CodeFile(path, size, 1) for path, size in [
+        ("app.py", 10), ("README.md", 5), ("boto3/__init__.py", 100), ("botocore/data/endpoints.json", 1000),
+        ("botocore/data/ec2.json", 500), ("pkg/sub/mod.py", 20), ("pkg/util.py", 30), ("Zeta/x.txt", 1)]]
+    tree = lfmod._file_tree(files, set())
+    assert [(t.label, t.depth, t.folder, t.files, t.size) for t in tree] == [
+        ("boto3/", 0, True, 1, 100), ("botocore/data/", 0, True, 2, 1500), ("pkg/", 0, True, 2, 50),
+        ("Zeta/", 0, True, 1, 1), ("app.py", 0, False, 1, 10), ("README.md", 0, False, 1, 5)]
+    assert tree[1].path == "botocore/data/"  # a folder that holds only a folder shares its line
+    opened = [(t.label, t.depth) for t in lfmod._file_tree(files, {"pkg/", "pkg/sub/", "botocore/data/"})]
+    assert opened[1:7] == [("botocore/data/", 0), ("ec2.json", 1), ("endpoints.json", 1), ("pkg/", 0), ("sub/", 1),
+                           ("mod.py", 2)]
+    assert opened[7] == ("util.py", 1)
+    found = lfmod._file_tree(files, set(), "json")
+    assert [(t.label, t.open) for t in found] == [("botocore/data/", True), ("ec2.json", False),
+                                                  ("endpoints.json", False)]
+    assert [t.label for t in lfmod._file_tree(files, set(), "json", shut={"botocore/data/"})] == ["botocore/data/"]
+    assert lfmod._file_tree(files, set(), "nothing-like-it") == []
+    assert lfmod._folders_of("a/b/c.py") == ["a/", "a/b/"] and lfmod._folders_of("c.py") == []
+    assert plain(lfmod._tree_face(found[1], [], None)) == "JSON ec2.json 500 B"
+    assert "ec2.<mark>json</mark>" in lfmod._tree_face(found[1], ["json"], None)
+    assert 'style="--d:1"' in lfmod._tree_face(found[1], [], None)
+    assert "HANDLER" in lfmod._tree_face(tree[4], [], "app.py") and " d open" in lfmod._tree_face(found[0], [], None)
+    assert lfmod._file_badge(".env") == ("KEY", "key") and lfmod._file_badge("bin/tool") == ("FILE", "")
+
+
+def test_package_file_name():
+    assert package_file_name(fn()) == "etl.zip" and package_file_name(fn(version="7")) == "etl-v7.zip"
 
 
 def test_secret_like():
@@ -1099,11 +1131,37 @@ def test_download_checks_size_and_network(core, monkeypatch):
         download("file:///etc/passwd", 50 * MB)
 
 
+def test_download_saves_the_package(core, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    saved = core.download("etl-nightly")
+    assert saved.path == str(tmp_path / "lambda-downloads" / "etl-nightly.zip") and saved.size == len(CODE)
+    assert (tmp_path / "lambda-downloads" / "etl-nightly.zip").read_bytes() == CODE
+    assert saved.files == 3 and saved.sha256_matches is True and saved.marked and not saved.replaced
+    assert (tmp_path / "lambda-downloads" / ".gitignore").read_text().splitlines()[-1] == "*"
+    again = core.download("etl-nightly")
+    assert again.replaced and not again.marked
+    assert sorted(os.listdir(tmp_path / "lambda-downloads")) == [".gitignore", "etl-nightly.zip"]  # no .part left
+    (tmp_path / "mine").mkdir()
+    assert core.download("etl-nightly", "mine").path == str(tmp_path / "mine" / "etl-nightly.zip")
+    assert core.download("etl-nightly", "new/pkg.zip").path == str(tmp_path / "new" / "pkg.zip")
+    assert not (tmp_path / "new" / ".gitignore").exists()  # only a downloads folder it makes gets one
+    core.downloads = "elsewhere"
+    assert core.download("etl-nightly").path == str(tmp_path / "elsewhere" / "etl-nightly.zip")
+    core._download = lambda url, most: zipped({"app.py": "changed"})
+    changed = core.download("etl-nightly")
+    assert changed.sha256_matches is False and changed.files == 1
+    (tmp_path / "blocked").write_text("a file, not a folder")
+    with pytest.raises(ValueError, match="Couldn't save etl-nightly.zip in .*blocked"):
+        core.download("etl-nightly", "blocked/pkg.zip")
+
+
 def test_code_of_a_container_image(core, monkeypatch):
     image = fn(package_type="Image", runtime=None, image_uri=f"{ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/etl:1")
     monkeypatch.setattr(core, "function", lambda ref, region=None: image)
     package = core.code("etl")
     assert package.files == [] and "container image" in package.note and "etl:1" in package.note
+    with pytest.raises(lfmod._Hint, match="etl is a container image .*etl:1.*docker pull"):
+        core.download("etl")
 
 
 def seed_runs(now, group="/aws/lambda/etl-nightly", stream="2026/10/06/[$LATEST]def", count=4):
@@ -1302,6 +1360,30 @@ def test_code_report(ui, capsys):
     secret = run(capsys, ui.code, "etl-nightly", ".env")
     assert ".env looks like a secrets file, so its text isn't shown" in secret and "hunter2" not in secret
     assert "aws lambda get-function --function-name etl-nightly --region us-east-1 --query Code.Location" in secret
+
+
+def test_download_report(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = run(capsys, ui.download, "etl-nightly")
+    assert "Downloaded etl-nightly's code" in out and "Saved as: lambda-downloads/etl-nightly.zip" in out
+    assert "Files: 3" in out and "SHA-256: matches Lambda's" in out
+    assert "right-click it in the file browser and pick Download" in out
+    assert "lambda-downloads was made for downloads, with a .gitignore" in out
+    assert "code('etl-nightly')" in out
+    assert ("import shutil; shutil.unpack_archive('lambda-downloads/etl-nightly.zip', 'lambda-downloads/etl-nightly')"
+            in out)
+    again = run(capsys, ui.download, "etl-nightly")
+    assert "where it replaced the one downloaded before" in again and "was made for downloads" not in again
+    ui.core._download = lambda url, most: b"not a zip"
+    odd = run(capsys, ui.download, "etl-nightly", "odd.zip")
+    assert "SHA-256: differs from Lambda's (!)" in odd and "Files: not a .zip (!)" in odd
+    assert "download('etl-nightly', " in odd and "odd.zip')" in odd
+    assert "No function 'etl-nightly2' in us-east-1" in run(capsys, ui.download, "etl-nightly2")
+    version = lfmod.PackageDownload(fn(name="etl", version="7", region=OTHER), str(tmp_path / "etl-v7.zip"), 10,
+                                    files=1, sha256_matches=False)
+    text = _render_text(ui._download_blocks(version), 50)
+    assert "version 7" in text and f"download('etl:7', '{tmp_path / 'etl-v7.zip'}', region='{OTHER}')" in text
+    assert f"code('etl:7', region='{OTHER}')" in text
 
 
 def test_access_denied_becomes_a_note(seeded, capsys):
@@ -1576,20 +1658,85 @@ def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     assert x._tab == "logs" and x._found_runs[0].request_id == RID
 
 
-def test_explorer_code_tab(core, explorer):
+NESTED = zipped({
+    "app.py": "def handler(event, context):\n    return 1\n",
+    "lib/helpers.py": "def helper():\n    return 2\n",
+    "lib/data/rates.json": '{"usd": 1}',
+    "vendor/requests/api.py": "def get(url):\n    ...\n",
+})
+
+
+def tree_of(x):
+    """The lines the Code tab's tree shows, as text (search marks dropped)."""
+    return [plain(re.sub("</?mark>", "", row.face.value)) for row in x._code_rows[:len(x.files_box.children)]]
+
+
+def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 0)
     x = explorer("etl-nightly", tab="code")
     assert x.package is not None and x._code_file == "app.py" and x.code_split.layout.display == ""
-    assert faces(x._code_rows, 3) == ["PY app.py HANDLER top level 61 B", "KEY .env top level 20 B",
-                                      "PY utils.py top level 28 B"]
+    assert tree_of(x) == ["KEY .env 20 B", "PY app.py HANDLER 61 B", "PY utils.py 28 B"]
+    assert "lmx-on" in x._code_rows[1].box._dom_classes and "lmx-tree" in x._code_rows[0].box._dom_classes
+    assert plain(x._pagers["files"][0].value) == "3 files"
     assert "The package holds .env" in plain(x.code_view.value) and "Every file" not in plain(x.code_view.value)
     source = x.source_view.value
     assert "app.py" in plain(source) and "the handler&#x27;s file" in source and '<span class="pk">def</span>' in source
     assert '<pre class="gut">1\n2</pre>' in source
-    x._code_rows[1].button.click()
+    copy = re.search(r'<span class="cpy"[^>]*title="([^"]*)"><span class="cpt">(.*?)</span></span>', source, re.S)
+    assert copy and "to copy all of app.py" in copy.group(1) and 'aria-label="Copy app.py"' in source
+    held = "def handler(event, context):\n    return event['customer_id']\n\n"  # a browser copies one line break less
+    assert html.unescape(copy.group(2)) == held
+    x._code_rows[0].button.click()
     assert ".env looks like a secrets file, so its text isn't shown" in plain(x.source_view.value)
-    assert "hunter2" not in x.source_view.value
+    assert "hunter2" not in x.source_view.value and 'class="cpy"' not in x.source_view.value
     x.code_find.value = "util"
     assert len(x.files_box.children) == 1 and "<mark>util</mark>s.py" in x._code_rows[0].face.value
+    assert plain(x._pagers["files"][0].value) == "1 of 3 files match"
+
+    # Download .zip saves the package the tab read, with no new download
+    assert x.code_bar.layout.display == "" and "saves it in lambda-downloads/" in plain(x.code_saved.value)
+    core._download = lambda url, most: pytest.fail("Download .zip downloads nothing more")
+    x.code_save.click()
+    assert (tmp_path / "lambda-downloads" / "etl-nightly.zip").read_bytes() == CODE and x.saved.sha256_matches
+    assert "✓ Saved as lambda-downloads/etl-nightly.zip" in plain(x.code_saved.value)
+    assert plain(x.status.value).startswith("Saved etl-nightly's package as lambda-downloads/etl-nightly.zip (")
+    x.code_save.click()
+    assert plain(x.status.value).endswith(", replacing the one there.")
+
+    # the tree: folders first, a folder that holds only a folder on one line, opened and folded by a click
+    core._download = lambda url, most: NESTED
+    nested = explorer("etl-nightly", tab="code")
+    assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
+    assert len(nested.files_box.children) == 3
+    assert plain(nested._pagers["files"][0].value) == "4 files in 4 folders"
+    assert nested._code_rows[0].button.tooltip == "lib/ · 2 files, 37 B unzipped · click to open it"
+    nested._code_rows[0].button.click()
+    assert tree_of(nested) == ["lib/ 37 B", "data/ 10 B", "PY helpers.py 27 B", "vendor/requests/ 22 B",
+                                           "PY app.py HANDLER 42 B"]
+    assert 'style="--d:1"' in nested._code_rows[2].face.value
+    nested._code_rows[2].button.click()
+    assert nested._code_file == "lib/helpers.py" and "def helper" in plain(nested.source_view.value)
+    assert "lmx-on" in nested._code_rows[2].box._dom_classes
+    nested._code_rows[0].button.click()  # folds lib/ again
+    assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
+    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 60)
+    nested._code_rows[0].button.click()  # so soon after the last click on it: a double click's second click
+    assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
+    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 0)
+    nested._code_rows[0].button.click()
+    opened = tree_of(nested)
+    assert opened == ["lib/ 37 B", "data/ 10 B", "PY helpers.py 27 B", "vendor/requests/ 22 B",
+                              "PY app.py HANDLER 42 B"]
+    nested.code_find.value = "api"
+    assert tree_of(nested) == ["vendor/requests/ 22 B", "PY api.py 22 B"]
+    nested._code_rows[0].button.click()  # folds a folder while searching
+    assert tree_of(nested) == ["vendor/requests/ 22 B"]
+    nested.code_find.value = ""
+    assert tree_of(nested) == opened
+    nested.code_save.click()
+    assert nested.saved.sha256_matches is False
+    assert "its SHA-256 differs from the one Lambda reports" in plain(nested.status.value)
 
     def too_big(url, most):
         raise ValueError("The package is 80.0 MB, more than max_size (50.0 MB): pass max_size='81MB' to read it anyway.")

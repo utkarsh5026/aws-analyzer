@@ -1687,6 +1687,7 @@ ui.errors("orders-etl")                      # its errors in the last 24 hours, 
 ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
 ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
 ui.code("orders-etl")                        # the files in its package, and the handler's source
+ui.download("orders-etl")                    # its package (.zip) saved in lambda-downloads/, next to the notebook
 ui.explore()                                 # all of it in a window, by clicking (below)
 ```
 
@@ -1694,7 +1695,8 @@ ui.explore()                                 # all of it in a window, by clickin
 > A function is named by its name, `"name:alias"`, its ARN or a link to it in the Lambda console; pass
 > `region="eu-west-1"` for one in another region. Nothing in the file invokes, changes or deletes a function: where a
 > change would help, the report shows the AWS CLI command to run. Environment variable values never appear in a
-> report, only their names.
+> report, only their names. The one file it writes is the package `download()` (or the explorer's **Download .zip**)
+> saves, on the notebook's disk.
 
 ### Explore functions and logs by clicking
 
@@ -1731,7 +1733,7 @@ other reports for one function.
 | Read its logs              | **Logs**: a line per run, newest first, with its status, run time, memory, cold start and what failed; click one for every line it logged, its REPORT line summed up. Pick the time range (15 minutes to 30 days), type to find runs with some text, **Enter** to search CloudWatch for the whole range (each run found comes back whole), or click a chip for the failed runs, timeouts or cold starts. JSON logs show each line's message, its other fields a click away |
 | Watch it while you test it | **Live**, on the Logs tab: new lines every 5 seconds, new runs at the top (it stops when you leave the tab, and after 15 minutes)                                                                                                                                                                                                                       |
 | See why it fails           | **Errors**: its errors grouped by cause with what to do, and the newest failed runs; click one to read it in the Logs tab. **Performance**: run times, memory and cold starts, and the slowest runs, each a click from its lines                                                                                                                          |
-| Read its code and settings | **Code**: the files in its package, the handler's first; click one for its source, in colour (a secrets file's text is held back). **Settings**: every setting in plain English, then as Lambda returns it, environment values hidden                                                                                                                    |
+| Read its code and settings | **Code**: the files in its package as a tree of folders, the handler's open; click a folder to open it, a file for its source in colour, and **Copy** to copy all of it (a secrets file's text is held back). **Download .zip** saves the package in `lambda-downloads/` next to the notebook. **Settings**: every setting in plain English, then as Lambda returns it, environment values hidden |
 
 Everything is read in the background, so a click shows what's known at once and the rest as it arrives. Like the rest
 of the file it only reads. `explore()` returns the window: `x.logs(search="KeyError", since="24h")`, `x.run(request_id)`
@@ -1767,6 +1769,7 @@ Grouped the way `ui.help()` lists them.
 | Command                                                 | Shows                                                                                                                                                                                                                                         |
 | :------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code(name, file=None, region=None, max_size="50MB")`   | What's in its deployment package: files and folders by size, and the source of the handler's file (or `file=`; a secrets file's text is held back). Findings: a handler no file matches, secrets files packed in it, size near Lambda's limit, boto3 bundled although the runtime has it |
+| `download(name, path=None, region=None)`                | Saves its deployment package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook (or at `path=`, a file or a folder), and says where, its size and files, and whether its SHA-256 matches the one Lambda reports. A new downloads folder gets a `.gitignore`, since a package can hold secrets. In JupyterLab, right-click it in the file browser and pick **Download** to get it on your computer |
 
 ### Reference
 
@@ -1787,13 +1790,14 @@ lam.log_events("orders-etl", pattern='"KeyError"').to_df()
 lam.log_runs("orders-etl", since="24h").runs           # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                           # CodeFile: path, size, compressed
+lam.download("orders-etl").path                        # where its .zip was saved (PackageDownload)
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
 already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
 `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs`
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
-`secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`,
+`package_file_name`, `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`,
 `package_findings`.
 
 </details>
@@ -1822,7 +1826,7 @@ Read-only. Grant what you need:
 
 | Permission                                                                                                                                                                          | For                                                                          |
 | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- |
-| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code` downloads from          |
+| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code` and `download` download from |
 | `lambda:GetPolicy`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionUrlConfig`                                                                                                 | What triggers each function, and who may call it                              |
 | `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates |
 | `lambda:GetAccountSettings`                                                                                                                                                         | Each region's concurrency and code storage limits                             |
