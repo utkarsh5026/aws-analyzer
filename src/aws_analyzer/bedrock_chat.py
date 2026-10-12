@@ -91,10 +91,8 @@ import dataclasses
 import difflib
 import functools
 import html
-import io
 import itertools
 import json
-import keyword
 import math
 import queue
 import re
@@ -102,7 +100,6 @@ import shlex
 import textwrap
 import threading
 import time
-import tokenize
 import uuid
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -134,12 +131,14 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Titl
 from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money
+from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import (
     _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _report_html,
     _text_lines,
 )
-from ._kit.text import _clip, _esc
+from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
+from ._kit.window import _cell_number, _class_if, _css_height, _running_loop
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -1015,26 +1014,6 @@ def describe_files(uris: list[str]) -> str:
         return f"file {source_name(uris[0])!r}"
     names = [repr(source_name(u)) for u in uris]
     return f"files {', '.join(names[:-1])} and {names[-1]}" if len(uris) <= 3 else f"{len(uris)} files"
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 def kb_search_text(text: str) -> str:
@@ -3887,9 +3866,6 @@ _CSS = _base_css(_ROOT, _EXTRA_CSS, theme=_THEME_CSS, restyle=_RESTYLE, after={"
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
 
-_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
-
-
 def _json_text_html(value: Any) -> str:
     """JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped)."""
     return _json_source_html(json.dumps(_plain_json(value), indent=2, ensure_ascii=False))
@@ -3922,75 +3898,6 @@ def _code_block_html(block: _Code, report: _Report) -> str:
 
 
 _draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any other text
-
-
-def _json_source_html(text: str) -> str:
-    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
-    out, last = [], 0
-    for m in _JSON_TOKEN_RE.finditer(text):
-        out.append(_esc(text[last:m.start()]))
-        if m.group(1):
-            css = "jk" if m.group(2) else "js"
-            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
-        else:
-            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
-        last = m.end()
-    return "".join(out) + _esc(text[last:])
-
-
-_PY_LITERALS = frozenset({"True", "False", "None"})
-
-
-def _python_html(code: str) -> str:
-    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
-    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
-    try:
-        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
-                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
-    except (tokenize.TokenError, SyntaxError):
-        return _esc(code)
-    starts = [0]
-    for line in code.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
-    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
-    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
-    out, last = [], 0
-    for t in tokens:
-        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
-        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
-        if a < last or b <= a:
-            continue
-        css = ""
-        if t.type == tokenize.COMMENT:
-            css = "pc"
-        elif t.type == tokenize.STRING:
-            css = "jk" if after.get(id(t)) == ":" else "js"
-        elif t.type == tokenize.NUMBER:
-            css = "jn"
-        elif t.type == tokenize.NAME:
-            if t.string in _PY_LITERALS:
-                css = "jl"
-            elif keyword.iskeyword(t.string):
-                css = "pk"
-            elif after.get(id(t)) == "(":
-                css = "pf"
-            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
-                css = "pa"
-        out.append(_esc(code[last:a]))
-        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
-        last = b
-    return "".join(out) + _esc(code[last:])
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
 
 
 def _sources_html(a: Answer) -> str:
@@ -4217,32 +4124,6 @@ def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
     return out
 
 
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
-
-
 def _kind_text(f: Field) -> str:
     """What a field takes, in words: 'number 0–1', 'HYBRID | SEMANTIC', 'text up to 4,000 characters'."""
     span = ""
@@ -4267,14 +4148,6 @@ def _kind_text(f: Field) -> str:
 
 def _wrap(inner: str) -> str:
     return f'<div class="kbc">{inner}</div>'
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
 
 
 def _waiting(keys: list[str]) -> str:
