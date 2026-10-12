@@ -39,7 +39,8 @@ class _Loud(_Note):  # a block made from another one
 def test_a_block_nothing_draws_becomes_a_note():
     html = _report_html([_Title("Report"), _Mystery()], 0, "<style></style>", "ddb", "🗄️ DynamoDB")
     assert html.startswith('<style></style><div class="ddb"><h3><span class="badge">🗄️ DynamoDB</span>Report</h3>')
-    assert '<div class="note warn">Part of this report isn&#x27;t shown: there&#x27;s no way to draw a _Mystery' in html
+    assert ('<div class="note warn"><span class="ld">Part of this report isn&#x27;t shown:</span> there&#x27;s no way to '
+            'draw a _Mystery') in html
     assert _render_text([_Mystery()], 0).startswith("[!] Part of this report isn't shown")
 
 
@@ -50,7 +51,7 @@ def test_a_block_made_from_another_is_drawn_like_it():
 
 
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == dynamodb._CSS and _base_css("x").count(".x ") == 51
+    assert _base_css("ddb") == dynamodb._CSS and _base_css("x").count(".x ") == 161
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")

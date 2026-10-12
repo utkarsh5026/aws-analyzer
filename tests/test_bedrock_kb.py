@@ -2543,7 +2543,7 @@ def test_ui_without_credentials_still_shows_sources(aws, ui, capsys, monkeypatch
     ui._show = shown.extend
     ui.search("How long do refunds take?")
     rendered = kbmod._render_html(shown, 50)
-    assert "refund-policy.pdf" in rendered and 'class="fl"' not in rendered
+    assert "refund-policy.pdf" in rendered and '<a class="fl"' not in rendered
 
 
 def test_html_links_open_only_web_addresses():
@@ -4102,7 +4102,8 @@ def html_widgets(widget):
 
 def test_explorer_holds_the_report_css_once(world):
     # Each page is a report drawn without the stylesheet _render_html starts with, which the window's hidden style
-    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match.
+    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match. A page
+    # keeps only the rules its own tables add (their filters and columns), which ship with them.
     x = explorer(world)
     x.tab_buttons["files"].click()
     row(x, "faq.md").button.click()
@@ -4110,7 +4111,9 @@ def test_explorer_holds_the_report_css_once(world):
     [style] = [pane for pane in panes if kbmod._CSS in pane.value]
     assert style.layout.display == "none"
     pages = [pane for pane in panes if '<div class="kba">' in pane.value]
-    assert len(pages) >= 2 and not any("<style>" in page.value for page in pages)
+    rules = [rule for page in pages for style in page.value.split("<style>")[1:]
+             for rule in style.split("</style>")[0].split("\n")]
+    assert len(pages) >= 2 and all(rule.startswith(".kba form.tbl:has(") for rule in rules)
 
 
 def test_explorer_looks_up_a_file_the_document_list_didnt_reach(world):

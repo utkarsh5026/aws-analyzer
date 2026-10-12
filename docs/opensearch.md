@@ -81,7 +81,7 @@ ui.search("how do I get my money back?")     # the documents nearest a question
 ui.search(like="art-00156")                  # the documents nearest an existing one: no model needed
 ```
 
-**Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each ending in what to do. The tables of detail come after, and at the bottom a **Next** row of two or three commands with the arguments filled in from this report, such as `index_info('vectors-prod/support-docs')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
+**Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after. Click a column's header to sort by it (again for the other way, a third time for the original order), pick a value in a column's **Filter** to see only those rows (an index's health, a collection's type), and untick columns under **Columns** to focus on the ones you need. It's all plain HTML and CSS, so it still works when you reopen the notebook. At the bottom is a **Next** row of two or three commands with the arguments filled in from this report, such as `index_info('vectors-prod/support-docs')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
 
 **Naming an index.** Commands that work on one index take it as `"domain/index"` or `"collection/index"`, like a path. A collection also works by its ID, and anything by its ARN or endpoint URL, so you can paste the URL your code already uses. After `use("vectors-prod")`, the index name alone is enough; after `use("vectors-prod/support-docs")`, nothing is. Without either, commands use the only domain or collection in the region and its only vector index, or ask which one you mean.
 
@@ -93,8 +93,8 @@ ui.search(like="art-00156")                  # the documents nearest an existing
 ui.overview()
 ```
 
-![overview(): three domains with engine, data nodes, storage, endpoint, k-NN memory and estimated monthly cost, three Serverless collections with type, standby replicas and network access, the Serverless capacity in OCUs with the idle minimum, the last 24 hours' use and the account limit, and a warning that one domain is open to the internet](images/opensearch-overview-light.webp#only-light){ width="984" height="851" loading=lazy }
-![overview(): three domains with engine, data nodes, storage, endpoint, k-NN memory and estimated monthly cost, three Serverless collections with type, standby replicas and network access, the Serverless capacity in OCUs with the idle minimum, the last 24 hours' use and the account limit, and a warning that one domain is open to the internet](images/opensearch-overview-dark.webp#only-dark){ width="984" height="851" loading=lazy }
+![overview(): three domains with engine, data nodes, storage, endpoint, k-NN memory and estimated monthly cost, three Serverless collections with type, standby replicas and network access, the Serverless capacity in OCUs with the idle minimum, the last 24 hours' use and the account limit, and a warning that one domain is open to the internet](images/opensearch-overview-light.webp#only-light){ width="984" height="889" loading=lazy }
+![overview(): three domains with engine, data nodes, storage, endpoint, k-NN memory and estimated monthly cost, three Serverless collections with type, standby replicas and network access, the Serverless capacity in OCUs with the idle minimum, the last 24 hours' use and the account limit, and a warning that one domain is open to the internet](images/opensearch-overview-dark.webp#only-dark){ width="984" height="889" loading=lazy }
 /// caption
 `ui.overview()`: what each domain runs on and costs, how much memory its nodes have for vector graphs, and what Serverless bills even when idle.
 ///
@@ -115,8 +115,8 @@ ui.overview()
 ui.indexes("vectors-prod")
 ```
 
-![indexes(): four indexes with health, documents, size, shards, vector fields and the documents that have a vector, a warning that the vector graphs need 15.7 GB of memory, more than the 12 GB the data nodes have, a note that the k-NN cache has dropped graphs, and warnings about an nmslib index and 27,000 documents without a vector](images/opensearch-indexes-light.webp#only-light){ width="984" height="828" loading=lazy }
-![indexes(): four indexes with health, documents, size, shards, vector fields and the documents that have a vector, a warning that the vector graphs need 15.7 GB of memory, more than the 12 GB the data nodes have, a note that the k-NN cache has dropped graphs, and warnings about an nmslib index and 27,000 documents without a vector](images/opensearch-indexes-dark.webp#only-dark){ width="984" height="828" loading=lazy }
+![indexes(): four indexes with health, documents, size, shards, vector fields and the documents that have a vector, a warning that the vector graphs need 15.7 GB of memory, more than the 12 GB the data nodes have, a note that the k-NN cache has dropped graphs, and warnings about an nmslib index and 27,000 documents without a vector](images/opensearch-indexes-light.webp#only-light){ width="984" height="894" loading=lazy }
+![indexes(): four indexes with health, documents, size, shards, vector fields and the documents that have a vector, a warning that the vector graphs need 15.7 GB of memory, more than the 12 GB the data nodes have, a note that the k-NN cache has dropped graphs, and warnings about an nmslib index and 27,000 documents without a vector](images/opensearch-indexes-dark.webp#only-dark){ width="984" height="894" loading=lazy }
 /// caption
 `ui.indexes("vectors-prod")`: the graphs need more memory than the nodes have, so searches load them from disk; one index uses a deprecated engine, another has documents vector search can't find.
 ///
@@ -137,8 +137,8 @@ On Serverless, shards, replicas and memory are managed for you, so the report le
 ui.index_info("vectors-prod/support-docs")
 ```
 
-![index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on](images/opensearch-index-info-light.webp#only-light){ width="984" height="1172" loading=lazy }
-![index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on](images/opensearch-index-info-dark.webp#only-dark){ width="984" height="1172" loading=lazy }
+![index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on](images/opensearch-index-info-light.webp#only-light){ width="984" height="1250" loading=lazy }
+![index_info(): cards for documents, documents with a vector, size, shards, dimensions, engine, similarity and estimated vector memory; findings that 27,000 documents have no vector, that the graphs need more memory than the nodes have, and that on-disk mode would need about 1 GB instead of 15.7 GB; the vector field's settings; how to read scores; and the fields to filter on](images/opensearch-index-info-dark.webp#only-dark){ width="984" height="1250" loading=lazy }
 /// caption
 `ui.index_info("vectors-prod/support-docs")`: 32-bit vectors that need 15.7 GB with replicas, and what on-disk mode would need instead.
 ///
@@ -165,8 +165,8 @@ ui.sample("vectors-prod/support-docs", where={"embedding": ("missing",)})   # do
 ui.sample("vectors-prod/support-docs", n=20, check=1000)                    # show 20, check 1,000
 ```
 
-![sample(): cards for the documents in the index, the 200 looked at, 1,024 dimensions, unit-length vectors, no zero vectors and 2 repeats; a note that 2 sampled vectors repeat another one exactly; and five documents with their text, source, vector summary and fields](images/opensearch-sample-light.webp#only-light){ width="984" height="824" loading=lazy }
-![sample(): cards for the documents in the index, the 200 looked at, 1,024 dimensions, unit-length vectors, no zero vectors and 2 repeats; a note that 2 sampled vectors repeat another one exactly; and five documents with their text, source, vector summary and fields](images/opensearch-sample-dark.webp#only-dark){ width="984" height="824" loading=lazy }
+![sample(): cards for the documents in the index, the 200 looked at, 1,024 dimensions, unit-length vectors, no zero vectors and 2 repeats; a note that 2 sampled vectors repeat another one exactly; and five documents with their text, source, vector summary and fields](images/opensearch-sample-light.webp#only-light){ width="984" height="1027" loading=lazy }
+![sample(): cards for the documents in the index, the 200 looked at, 1,024 dimensions, unit-length vectors, no zero vectors and 2 repeats; a note that 2 sampled vectors repeat another one exactly; and five documents with their text, source, vector summary and fields](images/opensearch-sample-dark.webp#only-dark){ width="984" height="1027" loading=lazy }
 /// caption
 `ui.sample("vectors-prod/support-docs")`: unit-length vectors, a few repeated passages, and where each document came from.
 ///
@@ -185,8 +185,8 @@ What the checks mean:
 ui.search("how do I get my money back?", index="vectors-prod/support-docs")
 ```
 
-![search(): eight results nearest to a question about getting money back, all about refunds, with score, cosine, ID, text, source and fields; cards for the best score and cosine, the search time, the embedding model and its cost; and a note on which model embedded the question and why](images/opensearch-search-light.webp#only-light){ width="984" height="1107" loading=lazy }
-![search(): eight results nearest to a question about getting money back, all about refunds, with score, cosine, ID, text, source and fields; cards for the best score and cosine, the search time, the embedding model and its cost; and a note on which model embedded the question and why](images/opensearch-search-dark.webp#only-dark){ width="984" height="1107" loading=lazy }
+![search(): eight results nearest to a question about getting money back, all about refunds, with score, cosine, ID, text, source and fields; cards for the best score and cosine, the search time, the embedding model and its cost; and a note on which model embedded the question and why](images/opensearch-search-light.webp#only-light){ width="984" height="1319" loading=lazy }
+![search(): eight results nearest to a question about getting money back, all about refunds, with score, cosine, ID, text, source and fields; cards for the best score and cosine, the search time, the embedding model and its cost; and a note on which model embedded the question and why](images/opensearch-search-dark.webp#only-dark){ width="984" height="1319" loading=lazy }
 /// caption
 `ui.search("how do I get my money back?")`: refund articles at cosine 0.74 to 0.75, the question embedded with Titan Text Embeddings V2 for less than a cent.
 ///

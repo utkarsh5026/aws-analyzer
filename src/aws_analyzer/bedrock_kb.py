@@ -6919,7 +6919,7 @@ body[class*=vscode-] .kbx-app.kbx-app .kbx-page{height:620px}
 .kbx-app .kba .card.warn{border-color:rgba(245,158,11,.75);background:rgba(245,158,11,.08)}
 .kbx-app .kba .card.bad{border-color:rgba(239,68,68,.75);background:rgba(239,68,68,.08)}
 .kbx-app .kba .card.ok{border-color:rgba(16,185,129,.55)}
-.kbx-app .kba .note{border-radius:4px 10px 10px 4px}
+.kbx-app .kba .note,.kbx-app .kba .fi{border-radius:4px 10px 10px 4px}
 .kbx-app .kba details.ck,.kbx-app .kba .psg,.kbx-app .kba .pipe .ps{border-radius:10px;background:var(--kx-surface)}
 .kbx-app .kba pre,.kbx-app .kba .json{border-radius:10px}
 .kbx-app .kba a.fl{color:var(--kx-accent)}

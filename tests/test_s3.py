@@ -31,7 +31,9 @@ from moto import mock_aws
 from PIL import Image
 
 from aws_analyzer import s3 as s3mod
+from aws_analyzer._kit import render
 from aws_analyzer._kit import view as viewmod
+from aws_analyzer._kit.blocks import _Report
 from aws_analyzer._kit.progress import _progress_text
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.s3 import (
@@ -1350,7 +1352,7 @@ def test_pages_and_flow_render_as_html():
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "<script>" not in html
     assert "<ul><li>one</li><li>two</li></ul>" in html and '<div class="dh d0">' in html
     assert "<h1" not in html and "<th>h1</th>" in html and 'class="pm"' in html
-    text = s3mod._render_text([s3mod._Pages([page]), s3mod._Flow(flow)], 50)
+    text = render._render_text([s3mod._Pages([page]), s3mod._Flow(flow)], 50)
     assert "[Page 1: a picture" in text and "# <script>" in text and "- one\n- two" in text
     assert "h1 | h2\na | b" in text and "[Picture Page 1, " in text and "[Picture a.emf: EMF format]" in text
 
@@ -4002,7 +4004,7 @@ def test_html_escapes_untrusted_keys():
 
 def test_text_tables_cap_rows():
     table = s3mod._Table(["n"], [[str(i)] for i in range(10)])
-    out = s3mod._render_text([table], 3)
+    out = render._render_text([table], 3)
     assert "7 more rows" in out
 
 
@@ -4012,7 +4014,7 @@ def test_findings_panel_puts_warnings_first():
         ("warn", "call documents(status='FAILED') <b>now</b>"),
         ("info", "another"),
     ]
-    text = s3mod._render_text([s3mod._Findings(found)], 50)
+    text = render._render_text([s3mod._Findings(found)], 50)
     assert "-- Findings: 1 warning, 2 notes --" in text
     assert text.index("[!] call") < text.index("[i] a note") < text.index("[i] another")
     rendered = s3mod._render_html([s3mod._Findings(found)], 50)
@@ -4026,10 +4028,10 @@ def test_findings_panel_puts_warnings_first():
         in rendered
     )
     assert (
-        s3mod._render_text([s3mod._Findings([], empty="No issues found.")], 50).strip()
+        render._render_text([s3mod._Findings([], empty="No issues found.")], 50).strip()
         == "[ok] No issues found."
     )
-    assert s3mod._render_text([s3mod._Findings([])], 50).strip() == ""
+    assert render._render_text([s3mod._Findings([])], 50).strip() == ""
 
 
 def test_prose_marks_commands_and_escapes_them():
@@ -4095,7 +4097,7 @@ def test_render_tones_pills_scroll_folds_and_next():
     assert '<span class="badge">🪣 S3</span>' in s3mod._render_html(
         [s3mod._Title("Summary")], 50
     )
-    text = s3mod._render_text(blocks, 50)
+    text = render._render_text(blocks, 50)
     assert (
         "Encryption: none (!)   Objects: 12" in text
         and "FAILED" in text
@@ -4108,15 +4110,15 @@ def test_text_tables_say_how_to_see_hidden_rows():
     rows = [[str(i)] for i in range(10)]
     assert (
         "7 more rows not shown (the view shows 3; ui.max_rows = 0 shows all)"
-        in s3mod._render_text([s3mod._Table(["n"], rows)], 3)
+        in render._render_text([s3mod._Table(["n"], rows)], 3)
     )
-    assert s3mod._render_text([s3mod._Table(["n"], rows, max_rows=4)], 3).endswith(
+    assert render._render_text([s3mod._Table(["n"], rows, max_rows=4)], 3).endswith(
         "6 more rows not shown"
     )
 
 
 def test_sort_keys_read_human_units():
-    key = s3mod._sort_key
+    key = render._sort_key
     assert key("900.0 MB") < key("1.5 GB") < key("2.0 TB")
     assert key("-$3.00") < key("<$0.01") < key("$0.02") < key("$1,234")
     assert key("just now") < key("5m ago") < key("3d ago") < key("2mo ago") < key("1y ago")
@@ -4124,16 +4126,17 @@ def test_sort_keys_read_human_units():
     assert key("epoch-2.pt") < key("epoch-10.pt") and key("Alpha") < key("beta")
     assert key("2024-05-01 10:00") < key("2025-01-01 09:00") and key("📁 b/") == key("b/")
     assert key("") is None and key("-") is None
-    assert s3mod._ranks([(0, 2), (0, 1), None, (0, 2)]) == ([1, 0, 4, 1], [0, 2, 4, 0])  # ties share; empty last
-    assert s3mod._sort_kind(["3d ago", "1y ago"], [(0, 1.0), (0, 2.0)]) == "age"
-    assert s3mod._sort_kind(["1 KB", "2 KB"], [(0, 1.0), (0, 2.0)]) == "number"
+    assert render._ranks([(0, 2), (0, 1), None, (0, 2)]) == ([1, 0, 4, 1], [0, 2, 4, 0])  # ties share; empty last
+    assert render._sort_kind(["3d ago", "1y ago"], [(0, 1.0), (0, 2.0)]) == "age"
+    assert render._sort_kind(["1 KB", "2 KB"], [(0, 1.0), (0, 2.0)]) == "number"
 
 
 def test_html_tables_sort_filter_and_pick_columns():
     rows = [[f"logs/app/2026/part-{i}.json", f"{i + 1}.0 MB", "GLACIER" if i % 3 else "STANDARD"] for i in range(8)]
-    rules: set[str] = set()
-    html_out = s3mod._table_html(
-        s3mod._Table(["Key", "Size", "Storage class"], rows, title="Files", path_cols=(0,)), 50, rules)
+    report = _Report(50, root="s3a")
+    rules = report.rules
+    html_out = render._table_html(
+        s3mod._Table(["Key", "Size", "Storage class"], rows, title="Files", path_cols=(0,)), report)
     assert html_out.startswith('<form class="tbl" method="dialog" autocomplete="off">')
     assert '<th class="srt k1 n"><label class="o1" title="Sort: largest first">' in html_out
     assert '<label class="o2" title="Sort: smallest first" hidden="hidden">' in html_out
@@ -4152,23 +4155,23 @@ def test_html_tables_sort_filter_and_pick_columns():
     # a key: its type's icon, its folder dimmed, the name whole, the full key on hover
     assert ('<td class="p" title="logs/app/2026/part-0.json"><span class="pl"><span class="pi">📋</span>'
             '<span class="pd">logs/app/2026/</span><span class="pn">part-0.json</span></span></td>') in html_out
-    icons = {key: s3mod._file_icon(key) for key in (
+    icons = {key: render._file_icon(key) for key in (
         "a.csv.gz", "b.snappy.parquet", "model.tar.gz", "r.pdf", "w.docx", "m.safetensors", "p.png", "README", "x.weird",
         "raw/")}
     assert icons == {"a.csv.gz": "📊", "b.snappy.parquet": "📊", "model.tar.gz": "📦", "r.pdf": "📕", "w.docx": "📘",
                      "m.safetensors": "🧠", "p.png": "🖼️", "README": "📄", "x.weird": "📄", "raw/": "📁"}
-    assert '<span class="pi">📁</span><span class="pn">raw/</span>' in s3mod._path_html("raw/")
-    assert s3mod._path_html("-") == '<span class="pl"><span class="pn">-</span></span>'  # a missing key gets none
+    assert '<span class="pi">📁</span><span class="pn">raw/</span>' in render._path_html("raw/")
+    assert render._path_html("-") == '<span class="pl"><span class="pn">-</span></span>'  # a missing key gets none
     long_name = "x/" + "n" * 70 + ".parquet"
-    assert 'class="pd" style="max-width:12ch"' in s3mod._path_html(long_name)  # a long name leaves the folder less room
-    assert s3mod._path_html("📁 raw/") == '<span class="pl"><span class="pi">📁</span><span class="pn">raw/</span></span>'
-    assert '<span class="pd">Reports 2024/</span><span class="pn">q1 summary.pdf</span>' in s3mod._path_html(
+    assert 'class="pd" style="max-width:12ch"' in render._path_html(long_name)  # a long name leaves the folder less room
+    assert render._path_html("📁 raw/") == '<span class="pl"><span class="pi">📁</span><span class="pn">raw/</span></span>'
+    assert '<span class="pd">Reports 2024/</span><span class="pn">q1 summary.pdf</span>' in render._path_html(
         "Reports 2024/q1 summary.pdf\n… and 3 more")
-    assert s3mod._path_html("… and 3 more") == '<span class="pl"><span class="pn">… and 3 more</span></span>'
+    assert render._path_html("… and 3 more") == '<span class="pl"><span class="pn">… and 3 more</span></span>'
     # small tables, tree tables and lists of commands stay plain
-    assert "<form" not in s3mod._table_html(s3mod._Table(["Tag", "Value"], [["a", "1"], ["b", "2"]]), 50, set())
-    tree = s3mod._table_html(s3mod._Table(["Folder", "Objects"], [["a/", "1"], ["  b/", "2"], ["c/", "3"]], tree=True),
-                             50, set())
+    assert "<form" not in render._table_html(s3mod._Table(["Tag", "Value"], [["a", "1"], ["b", "2"]]), _Report(50))
+    tree = render._table_html(s3mod._Table(["Folder", "Objects"], [["a/", "1"], ["  b/", "2"], ["c/", "3"]], tree=True),
+                              _Report(50))
     assert "srt" not in tree
     rendered = s3mod._render_html([s3mod._Table(["Key", "Size", "Storage class"], rows)], 50)
     assert rendered.index("<style>.s3a form.tbl:has(") < rendered.index("<form")  # its rules ship with it
@@ -4176,30 +4179,30 @@ def test_html_tables_sort_filter_and_pick_columns():
 
 def test_text_tables_keep_file_names():
     key = "raw/events/year=2026/month=09/day=01/hour=05/source=mobile-app/region=us-east-1/part-00001-c000.parquet"
-    out = s3mod._render_text([s3mod._Table(["Key", "Note"], [[key, "x" * 120]], path_cols=(0,))], 50)
+    out = render._render_text([s3mod._Table(["Key", "Note"], [[key, "x" * 120]], path_cols=(0,))], 50)
     assert "…/" in out and "part-00001-c000.parquet" in out and "raw/events" not in out
     assert "x" * 89 + "…" in out  # other columns are still cut at the end
-    assert s3mod._clip_path("a/b.csv") == "a/b.csv"
+    assert render._clip_path("a/b.csv") == "a/b.csv"
 
 
 def test_findings_read_as_headline_and_points():
-    html_out = s3mod._finding_html(
+    html_out = render._finding_html(
         "info", "586.2 GB hasn't changed in 90+ days. If it's rarely read, tiering could cut cost. "
                 "In STANDARD_IA it would cost about $6.15/month less (see what_if).")
     assert html_out.startswith('<div class="fi info"><div class="hd">586.2 GB hasn&#x27;t changed in 90+ days</div>')
     assert '<ul class="dt"><li>If it&#x27;s rarely read' in html_out and '<span class="m">$6.15/month</span>' in html_out
-    colon = s3mod._finding_html("warn", "The disk doesn't have room: the zip needs 2 GB and 1 GB is free.")
+    colon = render._finding_html("warn", "The disk doesn't have room: the zip needs 2 GB and 1 GB is free.")
     assert '<div class="hd">The disk doesn&#x27;t have room</div><div class="dt">The zip needs 2 GB' in colon
-    assert s3mod._split_lead("Check it: find('s3://b/a: b. C') lists them.") == (
+    assert render._split_lead("Check it: find('s3://b/a: b. C') lists them.") == (
         "Check it", ":", "find('s3://b/a: b. C') lists them.")  # never inside a command
-    assert s3mod._split_lead("Something went wrong (RuntimeError: boom). Click it again.") == (
+    assert render._split_lead("Something went wrong (RuntimeError: boom). Click it again.") == (
         "Something went wrong (RuntimeError: boom)", ".", "Click it again.")  # nor inside brackets
-    assert s3mod._prose_sentences("A (e.g. Foo. Bar) b. C d.") == ["A (e.g. Foo. Bar) b.", "C d."]
-    assert s3mod._capitalized("invoices/a.pdf is scanned") == "invoices/a.pdf is scanned"
-    assert '<div class="hd">&lt;b&gt;x&lt;/b&gt; is bad</div>' in s3mod._finding_html("warn", "<b>x</b> is bad: really")
-    assert s3mod._lead("Showing the first 500 entries; pass limit= for more.") == (
+    assert render._prose_sentences("A (e.g. Foo. Bar) b. C d.") == ["A (e.g. Foo. Bar) b.", "C d."]
+    assert render._capitalized("invoices/a.pdf is scanned") == "invoices/a.pdf is scanned"
+    assert '<div class="hd">&lt;b&gt;x&lt;/b&gt; is bad</div>' in render._finding_html("warn", "<b>x</b> is bad: really")
+    assert render._lead("Showing the first 500 entries; pass limit= for more.") == (
         '<span class="ld">Showing the first 500 entries;</span> pass limit= for more.')
-    assert s3mod._lead("No objects under this prefix.") == "No objects under this prefix."
+    assert render._lead("No objects under this prefix.") == "No objects under this prefix."
 
 
 def test_ui_help_groups_every_command(ui, capsys):

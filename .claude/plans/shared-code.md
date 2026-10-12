@@ -2,9 +2,9 @@
 
 **Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, Phase 2 (`_kit`
 with the leaf helpers, install-only docs) in #62, Phase 3 (one renderer in `_kit`) in #63 and Phase 4 (base View and
-base Analyzer) in #64, released in 0.14.0. Phase 5 (`_bedrock.py`) is done on the branch
-`claude/stage-5-refactor-readiness-ebsvr4`, for the next pull request; Phase 6 (S3's renderer for every service)
-follows. The last pull request deletes this file.
+base Analyzer) in #64, released in 0.14.0, and Phase 5 (`_bedrock.py`) in #69. Phase 6 (S3's renderer for every
+service) is done on the branch `claude/stage-6-refactoring-tqutue`, for the next pull request; Phase 7 (the window
+kit) follows. The last pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -333,6 +333,32 @@ As planned:
   CHANGELOG).
 
 ### Phase 6: S3's renderer becomes everyone's (the one visible change)
+
+Done: `_kit/render.py`'s stylesheet, `_prose`, notes, findings and tables are S3's, so every service's tables sort,
+filter and choose columns and every finding reads as a headline over points. `s3.py` has `_ROOT = "s3a"`,
+`_EXTRA_CSS` (its own blocks' rules) and `_CSS = _base_css(_ROOT, _EXTRA_CSS)`, which is byte-identical to the
+stylesheet it had; its `_Frame`, `_Image`, `_Link`, `_Media`, `_Pages`, `_Flow` and `_JsonTree` register their
+drawings, and `OWN_RENDERER` is gone from `rules.py` (and `_TABLE` from `_BaseView`). Of the 312 snapshot outputs,
+every S3 output came out the same, HTML too; the other services' HTML changed (110 files), and their text only where
+findings were reworded (7 files; SageMaker's `instance` also lists whatever is installed, so it moves with the
+environment). What differs from the plan below:
+
+- `_Report` carries the root class, the report's blocks, `rules` (a table's filter and column rules, written in a
+  `<style>` after the stylesheet) and `shared(key, make)` (S3's `_Zoom`). The explorer windows' panes and the chat's
+  tabs keep that small `<style>`: the window tests now check a pane holds only those rules, not the report CSS.
+- `file_extension` moved to `_kit/fmt.py` (`_file_icon` needs it; `aws_analyzer.s3.file_extension` still works), and
+  `s3_explorer` takes `_file_icon` from `_kit.render` (`entry_icon`'s `s3=` is no longer needed).
+- No table needed `sortable=False`: none has rows that depend on the one above, and S3 never opted one out.
+- Text output changed only where a finding read wrong as a headline, which `_split_lead` makes of its first clause:
+  DynamoDB's idle capacity, Lambda's most common error (`KeyError: 'x'` split it), OpenSearch's k-NN memory and the
+  chat's questions no setup answered (no headline at all) were reworded. `_capitalized` no longer capitalizes a detail that starts with a command
+  (`aws bedrock-agent ...` became `Aws ...`).
+- Class names the shared rules use clashed with three windows' own: the chat's header `.hd` (now `.whd`), the Lambda
+  chart's `.cols` (now `.colbars`) and the Lambda explorer's code tree `.tl` (now `.ftl`); the chat's setting docs
+  pin their margin against the findings' `.fd`. The chat restyles `.chip`, `.chip.info` and `.fi` to its theme, and
+  both explorers round `.fi` like their notes.
+- The figures were remade with this container's fontconfig minus `56-prefer-inter.conf` (it maps the system fonts to
+  Inter); with it, the text is wider than in the existing figures and Lambda's 12-column table no longer fits.
 
 - Port S3's `_table_html` (sort, filter, the Columns menu, `path_cols`, `sortable=`), `_split_lead`,
   `_finding_html`, `_lead` and the text renderer's path handling into `_kit`. Delete S3's own copy. Mark tables

@@ -1250,9 +1250,10 @@ def _capacity_findings(
     found.append(
         (
             "warn" if saving >= 10 else "info",
-            f"{text[0].upper()}{text[1:]} in the last {metrics.hours}h. The table's own capacity costs "
-            f"{human_money(now)}/month; {' and '.join(options)}. If the last {metrics.hours}h were typical, "
-            f"that saves up to {human_money(saving)}/month. Auto scaling can also adjust the capacity for you.",
+            f"Most of the provisioned capacity goes unused: {text} in the last {metrics.hours}h. The table's own "
+            f"capacity costs {human_money(now)}/month; {' and '.join(options)}. If the last {metrics.hours}h were "
+            f"typical, that saves up to {human_money(saving)}/month. Auto scaling can also adjust the capacity for "
+            "you.",
         )
     )
     return found

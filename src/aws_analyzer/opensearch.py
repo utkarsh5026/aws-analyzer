@@ -1803,16 +1803,17 @@ def _vector_index_findings(
         if share > 1:
             found.append((
                 "warn",
-                f"The vector graphs need about {human_size(need)} of memory with replicas, more than the "
-                f"{human_size(knn_memory)} the k-NN plugin can use on these data nodes{used}. Searches then load "
-                "graphs from disk, which is slow, and indexing can trip the k-NN circuit breaker. Use bigger "
-                "(memory-optimized) instances, more nodes, or compressed vectors (see the next note).",
+                f"The vector graphs don't fit in the k-NN plugin's memory: they need about {human_size(need)} with "
+                f"replicas, more than the {human_size(knn_memory)} it can use on these data nodes{used}. Searches "
+                "then load graphs from disk, which is slow, and indexing can trip the k-NN circuit breaker. Use "
+                "bigger (memory-optimized) instances, more nodes, or compressed vectors (see the next note).",
             ))
         elif share > 0.6:
             found.append((
                 "info",
-                f"The vector graphs need about {human_size(need)} of memory with replicas, {share:.0%} of the "
-                f"{human_size(knn_memory)} the k-NN plugin can use on these data nodes{used}: little room to grow.",
+                f"The vector graphs have little room to grow: they need about {human_size(need)} of memory with "
+                f"replicas, {share:.0%} of the {human_size(knn_memory)} the k-NN plugin can use on these data "
+                f"nodes{used}.",
             ))
     plain = [
         vf for vf in info.vectors

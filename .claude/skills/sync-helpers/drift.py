@@ -1,13 +1,13 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
 The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, the render blocks and the
-renderer, and since Phase 4 the base View and Analyzer: _show, _progress, help, _friendly_errors, ...), and
-bedrock_kb.py and bedrock_chat.py also through _bedrock.py (since Phase 5: the model prices and helpers, passages,
-filters, the answer's markdown, ...). The rest moves phase by phase (.claude/plans/shared-code.md): the explorer
-windows' parts (Phase 7) are still copied. This compares every top-level definition (tables too), and every private
-View / Analyzer method, that two or more analyzers define under the same name, and every name an analyzer defines
-that _kit or the shared module it imports has too: S3's own renderer (_Table, _prose, _findings_html, _table_html,
-_render_text), which stays until Phase 6.
+renderer, since Phase 6 with S3's sortable tables and finding headlines for every service, and since Phase 4 the base
+View and Analyzer: _show, _progress, help, _friendly_errors, ...), and bedrock_kb.py and bedrock_chat.py also through
+_bedrock.py (since Phase 5: the model prices and helpers, passages, filters, the answer's markdown, ...). The rest
+moves phase by phase (.claude/plans/shared-code.md): the explorer windows' parts (Phase 7) are still copied. This
+compares every top-level definition (tables too), and every private View / Analyzer method, that two or more
+analyzers define under the same name, and every name an analyzer defines that _kit or the shared module it imports
+has too (rules.py fails on those: a copy to delete).
 
 Service names are normalized first (S3View / DynamoDBView -> <View>, S3_PRICES -> <PRICES>, the CSS root
 class -> <css>), so only real differences are reported. A difference in docstrings or comments only is
@@ -38,8 +38,8 @@ COMPANIONS = {"s3_explorer"}
 # Modules a few analyzers share, beside them in the package -> the analyzers that import them (see rules.py).
 SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
 # What every analyzer defines for itself, except what has moved to _kit (every analyzer imports that instead):
-# _render_html, a call to _kit's _report_html with its stylesheet, root class and badge (or S3's renderer), which
-# its View's _render_html attribute points at.
+# _render_html, a call to _kit's _report_html with its stylesheet, root class and badge, which its View's
+# _render_html attribute points at.
 EXPECTED = ["_render_html"]
 
 
@@ -83,8 +83,7 @@ def _definitions(path: Path) -> tuple[dict[str, tuple[int, str]], dict[str, str]
             defs[node.targets[0].id] = (node.lineno, _segment(lines, node))
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             defs[node.target.id] = (node.lineno, _segment(lines, node))  # MODEL_PRICES: dict[...] = {...}
-    css = re.search(r'^_ROOT = "([\w-]+)"', source, re.MULTILINE) or re.search(
-        r"""<div class="([\w-]+)">""", defs.get("_render_html", (0, ""))[1])  # S3 has no _ROOT until Phase 6
+    css = re.search(r'^_ROOT = "([\w-]+)"', source, re.MULTILINE)
     if css:
         tokens["css"] = css.group(1)
     return defs, tokens
@@ -155,8 +154,7 @@ def main() -> int:
         else:
             code.append((name, variants))
 
-    # Names an analyzer defines that _kit (or the shared module it imports) has too: rules.py lets only S3's own
-    # renderer do that (until Phase 6).
+    # Names an analyzer defines that _kit (or the shared module it imports) has too: rules.py fails on them.
     kit_defs = {name: (f"_kit/{path.name}", *where) for path in sorted(KIT.glob("*.py"))
                 for name, where in _definitions(path)[0].items()}
     shared_defs = {module: {name: (f"{module}.py", *where) for name, where in
@@ -179,7 +177,7 @@ def main() -> int:
         print(f"\n{file} is missing shared helpers: {', '.join(names)}")
 
     if from_kit:
-        print("\n== Defined in an analyzer and in _kit or its shared module (S3's own renderer until Phase 6) ==")
+        print("\n== Defined in an analyzer and in _kit or its shared module (a copy: import it instead) ==")
         for name, file, (kit_file, kit_line, _) in from_kit:
             print(f"  {name:<28} {file}:{parsed[file][0][name][0]} vs {kit_file}:{kit_line}")
         if not args.summary:

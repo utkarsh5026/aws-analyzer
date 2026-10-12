@@ -489,12 +489,12 @@ def test_error_findings_say_what_to_do():
     assert "1 run ran out of memory at 1,024 MB" in text and "Lambda killed it" in text and "--memory-size 1536" in text
     assert "Its code can't be loaded" in text and "code('etl') shows what's in the package" in text
     assert "its role etl-role isn't allowed dynamodb:PutItem on orders. Add the permission" in text
-    assert "The most common other error, KeyError: 'customer_id', happened 7 times" in text
+    assert "The most common other error happened 7 times (the last" in text and "): KeyError: 'customer_id'." in text
     quiet = error_findings(report([], metrics=metrics(invocations=50, errors=4, throttles=2)))
     assert "CloudWatch counted 4 failed calls" in quiet[0][1] and "2 calls were throttled" in quiet[1][1]
     assert error_findings(report([])) == []
     first = error_findings(report([group("Logged error", "Couldn't save", 2)]))
-    assert first == [("info", f"The most common error, Couldn't save, happened twice (the last 1h ago). "
+    assert first == [("info", f"The most common error happened twice (the last 1h ago): Couldn't save. "
                               f"logs('etl', request_id='{RID}') shows the whole run.")]
 
 
@@ -1303,7 +1303,7 @@ def test_errors_report(ui, capsys):
     out = run(capsys, ui.errors, "etl-nightly")
     assert "Errors in etl-nightly" in out and "Failed calls (CloudWatch): 40" in out
     assert "Throttled calls: 3 (!)" in out and "Causes: 1" in out
-    assert "The most common error, KeyError: 'customer_id', happened once" in out
+    assert "The most common error happened once (the last" in out and "): KeyError: 'customer_id'." in out
     assert "-- Errors by cause" in out and "-- The newest error lines --" in out
     assert "function_info('etl-nightly')" in out
     none = run(capsys, ui.errors, "api-handler")
@@ -1486,7 +1486,8 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     overview = plain(x.overview_view.value)
     assert "Runtime python3.9 (ended) Memory 1,024 MB Timeout 900 s Architecture x86_64 Triggers 2" in overview
     assert "Calls (30d)" not in overview  # the header shows the numbers
-    assert "the Errors tab groups them by cause" in overview and "errors('etl-nightly')" not in overview
+    assert "the last today The Errors tab groups them by cause" in overview  # a headline, then its detail
+    assert "errors('etl-nightly')" not in overview
     assert "How it's wired" in overview and "SQS queue orders batches of up to 10" in overview
     assert "On failure nowhere: dropped events from S3 bucket that still fail after 2 retries are lost" in overview
     assert "Calls a day, the failed part in red" in overview and "Estimated monthly cost" in overview
@@ -1513,7 +1514,8 @@ def html_widgets(widget):
 
 def test_explorer_holds_the_report_css_once(explorer):
     # Each page is a report drawn without the stylesheet _render_html starts with, which the window's hidden style
-    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match.
+    # widget holds once. _html drops it with str.replace, which does nothing when the string doesn't match. A page
+    # keeps only the rules its own tables add (their filters and columns), which ship with them.
     x = explorer()
     row_of(x, "etl-nightly").button.click()
     x.tab_buttons["settings"].click()
@@ -1521,7 +1523,9 @@ def test_explorer_holds_the_report_css_once(explorer):
     [style] = [pane for pane in panes if lfmod._CSS in pane.value]
     assert style.layout.display == "none"
     pages = [pane for pane in panes if '<div class="lmb">' in pane.value]
-    assert len(pages) >= 2 and not any("<style>" in page.value for page in pages)
+    rules = [rule for page in pages for style in page.value.split("<style>")[1:]
+             for rule in style.split("</style>")[0].split("\n")]
+    assert len(pages) >= 2 and all(rule.startswith(".lmb form.tbl:has(") for rule in rules)
 
 
 def test_explorer_searches_filters_sorts_and_pages_the_functions(role, core, explorer):
@@ -1639,7 +1643,8 @@ def test_explorer_live_adds_new_runs(core, explorer):
 def test_explorer_errors_and_performance_tabs_open_their_runs(core, explorer):
     x = explorer("etl-nightly", tab="errors")
     errors = plain(x.errors_view.value)
-    assert "Errors in etl-nightly" in errors and "The most common error, KeyError: 'customer_id', happened once" in errors
+    assert "Errors in etl-nightly" in errors and "The most common error happened once" in errors
+    assert "KeyError: 'customer_id'" in errors
     assert f"Run {RID[:8]} in the Logs tab shows the whole run" in errors and "The newest error lines" not in errors
     assert faces(x._error_rows, 1) == [f"✕ {plain(x._error_rows[0].face.value).split()[1]} KeyError KeyError: "
                                        "'customer_id' Read the run ›"]

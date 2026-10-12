@@ -2392,9 +2392,9 @@ def ranking_findings(batches: Iterable[Batch], *, now: Batch | None = None,
     if stuck:
         one = len(stuck) == 1
         how = item_verdict(items[id(best)][_key(stuck[0].question)])[0]
-        found.append(("warn", f"{_plural(len(stuck), 'question')} didn't work with any setup ({_examples(stuck)}; "
-                              f"{'' if one else 'the first: '}{how} with the best one): nothing tried here fixes "
-                              f"{'it' if one else 'them'}, so the documents may not hold the answer, or a file isn't "
+        found.append(("warn", f"{_plural(len(stuck), 'question')} didn't work with any setup: nothing tried here "
+                              f"fixes {'it' if one else 'them'} ({_examples(stuck)}; {'' if one else 'the first: '}"
+                              f"{how} with the best one), so the documents may not hold the answer, or a file isn't "
                               f"indexed. {_call('retrieve', stuck[0].question)} shows what the search finds"
                               f"{'' if one else ' for the first'}, and files() whether a file is indexed."))
     if len(varied) >= 2:
@@ -3581,6 +3581,9 @@ _RESTYLE = {
     ".note{": '.kbc .note{padding:7px 12px;margin:5px 0;border-left:3px solid var(--kc-accent);border-radius:4px 10px 10px 4px;background:var(--kc-soft)}',
     ".note.warn{": '.kbc .note.warn{border-left-color:#f59e0b;background:rgba(245,158,11,.11)}',
     ".note.ok{": '.kbc .note.ok{border-left-color:#10b981;background:rgba(16,185,129,.11)}',
+    ".chip{": '.kbc .chip{display:inline-block;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px}',
+    ".chip.info{": '.kbc .chip.info{background:var(--kc-soft);box-shadow:inset 0 0 0 1px var(--kc-ring)}',
+    ".fi{border-left:": '.kbc .fi{border-left:3px solid var(--kc-accent);background:var(--kc-soft);border-radius:4px 10px 10px 4px}',
     "code{font-family:": '.kbc code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:1px 5px;border-radius:5px}',
     "code{background:": '.kbc code{background:var(--kc-tint-2);user-select:all;-webkit-user-select:all;cursor:text}',
     "pre{": '.kbc pre{max-height:420px;overflow:auto;padding:9px 12px;border:1px solid var(--kc-line);border-radius:10px;font-size:12px;background:var(--kc-tint)}',
@@ -3715,18 +3718,18 @@ _EXTRA_CSS = """\
 .kbc .fc{min-width:0;line-height:1.35}
 .kbc .fc .fl{display:flex;align-items:baseline;gap:7px;min-width:0}
 .kbc .fc .fl b{font-weight:600;font-size:12px;white-space:nowrap}
-.kbc .fc .fd{font-size:11px;opacity:.65;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.kbc .fc .fd{font-size:11px;opacity:.65;margin:2px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .kbc .fc .fw{font-size:10px;opacity:.4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .kbc details.setup{margin-top:6px;font-size:11px;line-height:1.4}
 .kbc details.setup>summary{cursor:pointer;width:fit-content;font-weight:600;font-size:12px;padding:2px 8px 2px 4px;border-radius:7px}
 .kbc details.setup>summary:hover{background:var(--kc-tint-2)}
 .kbc pre{word-break:normal}
 .kbc details.setup pre{margin:6px 0 0}
-.kbc .hd{display:flex;align-items:center;gap:12px;min-width:0}
-.kbc .hd .av{width:36px;height:36px;border-radius:12px;font-size:18px;margin:0;box-shadow:0 2px 8px var(--kc-ring)}
-.kbc .hd h3{margin:0;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kbc .hd h3 .badge{margin:0 0 0 8px}
-.kbc .hd .sub{margin:2px 0 0}
+.kbc .whd{display:flex;align-items:center;gap:12px;min-width:0}
+.kbc .whd .av{width:36px;height:36px;border-radius:12px;font-size:18px;margin:0;box-shadow:0 2px 8px var(--kc-ring)}
+.kbc .whd h3{margin:0;font-size:17px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbc .whd h3 .badge{margin:0 0 0 8px}
+.kbc .whd .sub{margin:2px 0 0}
 .kbc .fx{position:relative;padding:6px 34px 6px 12px;min-width:0;line-height:1.3}
 .kbc .fbl{font-size:12px;opacity:.65;margin-right:2px;white-space:nowrap}
 .kbc .fxl{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.55;white-space:nowrap}
@@ -5725,7 +5728,7 @@ class _ChatApp:
             region = "no region"
         api = "Retrieve (retrieve only)" if view.retrieve_only else "RetrieveAndGenerate"
         sub = " · ".join(filter(None, [view.kb if view.kb != name else "", region, api]))
-        self._set(self.title, _wrap(f'<div class="hd">{_AVATAR}<div style="min-width:0"><h3>{_esc(name)}<span '
+        self._set(self.title, _wrap(f'<div class="whd">{_AVATAR}<div style="min-width:0"><h3>{_esc(name)}<span '
                                     f'class="badge">{_esc(_BADGE)}</span></h3><div class="sub">{_esc(sub)}</div></div>'
                                     "</div>"))
         params, problems = view._preview()
@@ -6330,7 +6333,7 @@ class _ChatApp:
             empty = (("Every search found passages" if batch.retrieve_only else "Every question was answered, citing "
                       "its sources") + (", and the expected one." if checked else "."))
             parts = [_Cards(view._batch_cards(batch)), _Findings(view._batch_findings(batch), empty)]
-            head += f'<div class="tests">{_blocks_html(parts)}</div>'
+            head += f'<div class="tests">{_blocks_html(parts, root=_ROOT)}</div>'
         self._set(self.test_head, _wrap(head))
 
     # ------------------------------------------------------------------- Runs
@@ -6400,7 +6403,7 @@ class _ChatApp:
             findings = next(b for b in blocks if isinstance(b, _Findings))
             places = view._places()
             lines = [self._run_line(b, places.get(id(b))) for b in reversed(view.batches)]
-            self._set(self.runs_view, _wrap(f'<div class="tests">{_blocks_html([cards, findings])}</div>'
+            self._set(self.runs_view, _wrap(f'<div class="tests">{_blocks_html([cards, findings], root=_ROOT)}</div>'
                                             f'<div class="bqs narrow">{"".join(lines)}</div>'))
             options = [(self._run_option(b), view._run_number(b)) for b in reversed(view.batches)]
             numbers = [number for _, number in options]
