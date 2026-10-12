@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-12
+
 ### Added
 
 - `lambda_functions.py`: `download("orders-etl")` saves a function's deployment package, the .zip as Lambda stores it,
@@ -16,7 +18,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `orders-etl-v3.zip`), and says where, its size and files, and whether its SHA-256 matches the one Lambda reports. In
   JupyterLab, right-click it in the file browser and pick Download to get it on your computer. A downloads folder it
   makes gets a `.gitignore`, since a package can hold secrets. The explorer's Code tab has the same as a
-  **Download .zip** button, which saves the package the tab already read.
+  **Download .zip** button, which saves the package the tab already read. ([#66](https://github.com/utkarsh5026/aws-analyzer/pull/66))
 
 ### Changed
 
@@ -24,8 +26,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   list: folders first, with their sizes, the handler's folder open, and a folder that holds only a folder on one line
   (`botocore/data/`). Click a folder to open or fold it; **Find a file** shows the files that match inside their
   folders. Beside the open file's name, **Copy** selects all of its source, so Ctrl+C (⌘C on a Mac) copies the file.
+  ([#66](https://github.com/utkarsh5026/aws-analyzer/pull/66))
 - `lambda_functions.py`: the explorer's Code tab has a **Hide files** button that folds the file tree away, so the source
   has the whole width; **Show files** brings it back. It stays hidden for the next function you open.
+  ([#67](https://github.com/utkarsh5026/aws-analyzer/pull/67))
 
 ## [0.14.0] - 2026-10-12
 
@@ -480,7 +484,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.11.0...v0.12.0
