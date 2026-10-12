@@ -86,7 +86,9 @@ from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
-from ._kit.window import _class_if, _Explorer, _for_window, _icon_url, _running_loop, _skeleton, _window_errors
+from ._kit.window import (
+    _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _running_loop, _skeleton, _window_errors,
+)
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -5400,7 +5402,7 @@ def _source_html(path: str, text: str) -> str:
     return f'<div class="src"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
 
 
-class _FunctionField:
+class _FunctionField(_Picker):
     """The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
     a list over the window, with a search box that finds a function by any part of its name, description, runtime or
     region. Enter picks the first line, or hands what's typed to on_text when no line has it (an ARN, or a function the
@@ -5408,42 +5410,11 @@ class _FunctionField:
     target. While the list is open, the window's backdrop takes a click anywhere else and closes it."""
 
     def __init__(self, app: LambdaExplorer, *, on_pick: Callable[[Function], None], on_text: Callable[[str], None]):
-        w, layout = app._w, app._w.Layout
-        self.app, self.on_pick, self.on_text = app, on_pick, on_text
+        super().__init__(app, app._w, "lmx", on_pick=on_pick, on_text=on_text, tooltip="Pick another function",
+                         placeholder="Search by name, description, runtime or region")
         self.choices: list[Function] = []
         self.value = ""  # the ARN shown
-        self.problem = ""  # why there's nothing to list
-        self.message = ""  # what went wrong with the last Enter
-        self.shown: list[str] = []  # the ARNs the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # ARN -> (its line, the line's button, its text)
-        self.button = w.Button(tooltip="Pick another function", layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("lmx-trig")
-        self.search = w.Text(placeholder="Search by name, description, runtime or region", continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("lmx-find")
-        self.search.observe(app._safely(lambda _change: self._draw_list()), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(flex="0 0 auto"))
-        close.add_class("lmx-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("lmx-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none"))
-        self.panel.add_class("lmx-pop")
-        self.box = w.VBox([trigger, self.panel])
-        self.box.add_class("lmx-field")
         self.draw()
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     def set_choices(self, functions: Iterable[Function]) -> None:
         self.choices = sorted(functions, key=lambda f: (f.name.lower(), f.region))
@@ -5468,52 +5439,21 @@ class _FunctionField:
         if self.is_open:
             self._draw_list()
 
-    def open(self) -> None:
-        if self.is_open:
-            return
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.box, "lmx-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
-
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        self.app.backdrop.layout.display = "none"
-        _class_if(self.box, "lmx-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
-
-    def toggle(self) -> None:
-        self.close() if self.is_open else self.open()
-
-    def matches(self) -> list[Function]:
-        text = str(self.search.value or "")
+    def _query(self, text: str) -> str:
         try:
             name, _, _ = parse_function_ref(text)
-            text = name if text.strip().startswith(("arn:", "http")) else text
         except ValueError:
-            pass
-        ranked = [(rank, i, f) for i, f in enumerate(self.choices)
-                  if (rank := search_rank(text, (f.name, f.description, f.runtime, f.region, f.arn))) is not None]
-        return [f for _, _, f in sorted(ranked, key=lambda r: r[:2])]
+            return text
+        return name if text.strip().startswith(("arn:", "http")) else text
+
+    def _fields(self, fn: Function) -> tuple[str, ...]:
+        return (fn.name, fn.description, fn.runtime, fn.region, fn.arn)
+
+    def _key(self, fn: Function) -> str:
+        return fn.arn
 
     def _row(self, fn: Function, words: list[str]) -> Any:
-        if fn.arn not in self.rows:
-            w, layout = self.app._w, self.app._w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("lmx-opt-b")
-            button.on_click(self.app._safely(lambda _button, arn=fn.arn: self._clicked(arn)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("lmx-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("lmx-opt")
-            self.rows[fn.arn] = (row, button, text)
-        row, button, text = self.rows[fn.arn]
+        row, button, text = self._line(fn.arn)
         _class_if(row, "lmx-on", fn.arn == self.value)
         facts = self.app._facts.get(fn.arn)
         m = facts.metrics if facts is not None else None
@@ -5556,23 +5496,6 @@ class _FunctionField:
         if fn is not None and arn != self.value:
             self.on_pick(fn)
 
-    def _entered(self) -> None:
-        text = str(self.search.value or "").strip()
-        if not text:
-            self.close()
-            return
-        found = self.matches()
-        try:
-            if found:
-                self._clicked(found[0].arn)
-            else:
-                self.on_text(text)
-                self.close()
-        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
-            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
-            self._draw_list()
-
-
 class _Row:
     """One reusable line of a list: a full-width button under its face (HTML), so the whole line is the click target,
     with an optional small action button on its right (the function list's Logs). `item` is what it shows."""
@@ -5581,21 +5504,16 @@ class _Row:
                  action: tuple[str, str, Callable[[Any], None]] | None = None):
         w, layout = app._w, app._w.Layout
         self.item: Any = None
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-row-b")
-        self.button.on_click(app._safely(lambda _button: on_click(self.item) if self.item is not None else None))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-row-t")
-        children = [self.button, self.face]
         self.action = None
         if action is not None:
             label, tip, act = action
             self.action = w.Button(description=label, tooltip=tip, layout=layout(width="auto"))
             self.action.add_class("lmx-act")
             self.action.on_click(app._safely(lambda _button: act(self.item) if self.item is not None else None))
-            children.append(self.action)
-        self.box = w.Box(children, layout=layout(width="100%"))
-        self.box.add_class("lmx-row")
+        self.box, self.button, self.face = _row_button(
+            w, ("lmx-row", "lmx-row-b", "lmx-row-t"),
+            app._safely(lambda _button: on_click(self.item) if self.item is not None else None),
+            after=[self.action] if self.action is not None else [])
         if short:
             self.box.add_class("lmx-short")
 
@@ -5607,13 +5525,9 @@ class _RunRow:
     def __init__(self, app: LambdaExplorer):
         w, layout = app._w, app._w.Layout
         self.run: LogRun | None = None
-        self.button = w.Button(tooltip="Click to see its lines", layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-run-b")
-        self.button.on_click(app._safely(lambda _button: app._toggle_run(self)))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-run-t")
-        head = w.Box([self.button, self.face], layout=layout(width="100%"))
-        head.add_class("lmx-run-h")
+        head, self.button, self.face = _row_button(w, ("lmx-run-h", "lmx-run-b", "lmx-run-t"),
+                                                   app._safely(lambda _button: app._toggle_run(self)),
+                                                   tooltip="Click to see its lines")
         self.body = w.HTML(layout=layout(width="100%", display="none"))
         self.box = w.VBox([head, self.body], layout=layout(width="100%"))
         self.box.add_class("lmx-run")
@@ -5862,7 +5776,7 @@ class LambdaExplorer(_Explorer):
         w, layout = self._w, self._w.Layout
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("lmx-backdrop")
-        self.backdrop.on_click(self._safely(lambda _button: self.field.close()))
+        self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
         self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
         self.region_pick = w.Dropdown(options=[("Region: …", "")], value="", layout=layout(width="auto"))
         self.region_pick.add_class("lmx-region")
@@ -5875,7 +5789,7 @@ class LambdaExplorer(_Explorer):
         top.add_class("lmx-top")
         self.field = _FunctionField(self, on_pick=self._picked, on_text=self._typed)
         self.stats = w.HTML(layout=layout(flex="1 1 360px", min_width="0"))
-        meta = w.HBox([self.field.box, self.stats], layout=layout(width="100%"))
+        meta = w.HBox([self.field.field, self.stats], layout=layout(width="100%"))
         meta.add_class("lmx-meta")
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("lmx-head")
