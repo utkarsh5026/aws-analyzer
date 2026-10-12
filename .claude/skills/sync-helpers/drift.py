@@ -1,12 +1,13 @@
 """Find duplicated helpers that have drifted apart between the analyzers.
 
 The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _esc, the render blocks and the
-renderer, and since Phase 4 the base View and Analyzer: _show, _progress, help, _friendly_errors, ...), and are
-moving the rest there phase by phase (.claude/plans/shared-code.md): what bedrock_kb.py and bedrock_chat.py share
-(Phase 5) and the explorer windows' parts (Phase 7) are still copied. This compares every top-level definition, and
-every private View / Analyzer method, that two or more analyzers define under the same name, and every name an
-analyzer defines that _kit has too: S3's own renderer (_Table, _prose, _findings_html, _table_html, _render_text),
-which stays until Phase 6.
+renderer, and since Phase 4 the base View and Analyzer: _show, _progress, help, _friendly_errors, ...), and
+bedrock_kb.py and bedrock_chat.py also through _bedrock.py (since Phase 5: the model prices and helpers, passages,
+filters, the answer's markdown, ...). The rest moves phase by phase (.claude/plans/shared-code.md): the explorer
+windows' parts (Phase 7) are still copied. This compares every top-level definition (tables too), and every private
+View / Analyzer method, that two or more analyzers define under the same name, and every name an analyzer defines
+that _kit or the shared module it imports has too: S3's own renderer (_Table, _prose, _findings_html, _table_html,
+_render_text), which stays until Phase 6.
 
 Service names are normalized first (S3View / DynamoDBView -> <View>, S3_PRICES -> <PRICES>, the CSS root
 class -> <css>), so only real differences are reported. A difference in docstrings or comments only is
@@ -34,6 +35,8 @@ KIT = ANALYZERS / "_kit"
 
 # Files that build on one analyzer and import its helpers instead of copying them (see rules.py).
 COMPANIONS = {"s3_explorer"}
+# Modules a few analyzers share, beside them in the package -> the analyzers that import them (see rules.py).
+SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
 # What every analyzer defines for itself, except what has moved to _kit (every analyzer imports that instead):
 # _render_html, a call to _kit's _report_html with its stylesheet, root class and badge (or S3's renderer), which
 # its View's _render_html attribute points at.
@@ -73,11 +76,13 @@ def _definitions(path: Path) -> tuple[dict[str, tuple[int, str]], dict[str, str]
                             member.name.startswith("_") or member.name == "help"):
                         segment = _segment(lines, member)
                         defs[f"{role}.{member.name}"] = (member.lineno, textwrap.dedent("    " + segment))
+                    elif (role == "Analyzer" and isinstance(member, ast.Assign) and isinstance(member.value, ast.Name)
+                          and any(isinstance(t, ast.Name) and t.id == "_LIST_PRICES" for t in member.targets)):
+                        tokens["PRICES"] = member.value.id  # _LIST_PRICES = S3_PRICES: the service's own table
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            name = node.targets[0].id
-            defs[name] = (node.lineno, _segment(lines, node))
-            if name.endswith("_PRICES"):
-                tokens["PRICES"] = name
+            defs[node.targets[0].id] = (node.lineno, _segment(lines, node))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            defs[node.target.id] = (node.lineno, _segment(lines, node))  # MODEL_PRICES: dict[...] = {...}
     css = re.search(r'^_ROOT = "([\w-]+)"', source, re.MULTILINE) or re.search(
         r"""<div class="([\w-]+)">""", defs.get("_render_html", (0, ""))[1])  # S3 has no _ROOT until Phase 6
     if css:
@@ -118,7 +123,7 @@ def main() -> int:
     parser.add_argument("--summary", action="store_true", help="list differing names without diffs")
     args = parser.parse_args()
 
-    files = sorted(f for f in ANALYZERS.glob("*.py") if f.stem not in COMPANIONS and f.stem != "__init__")
+    files = sorted(f for f in ANALYZERS.glob("*.py") if f.stem not in COMPANIONS and not f.stem.startswith("_"))
     parsed: dict[str, tuple[dict[str, tuple[int, str]], dict[str, str]]] = {}
     for path in files:
         try:
@@ -150,11 +155,23 @@ def main() -> int:
         else:
             code.append((name, variants))
 
-    # Names an analyzer defines that _kit has too: rules.py lets only S3's own renderer do that (until Phase 6).
+    # Names an analyzer defines that _kit (or the shared module it imports) has too: rules.py lets only S3's own
+    # renderer do that (until Phase 6).
     kit_defs = {name: (f"_kit/{path.name}", *where) for path in sorted(KIT.glob("*.py"))
                 for name, where in _definitions(path)[0].items()}
-    from_kit = [(name, file) for file, (defs, _) in parsed.items() for name in defs
-                if name in kit_defs and "." not in name and selected(name)]
+    shared_defs = {module: {name: (f"{module}.py", *where) for name, where in
+                            _definitions(ANALYZERS / f"{module}.py")[0].items()}
+                   for module in SHARED if (ANALYZERS / f"{module}.py").exists()}
+
+    def kept_elsewhere(name: str, file: str) -> tuple[str, int, str] | None:
+        """Where _kit or a shared module the file imports defines name: (file, line, source), or None."""
+        if name in kit_defs:
+            return kit_defs[name]
+        return next((defs[name] for module, defs in shared_defs.items()
+                     if Path(file).stem in SHARED[module] and name in defs), None)
+
+    from_kit = [(name, file, where) for file, (defs, _) in parsed.items() for name in defs
+                if "." not in name and selected(name) and (where := kept_elsewhere(name, file))]
 
     print(f"Compared {', '.join(parsed)}: {len(shared)} shared names, {len(same)} identical, "
           f"{len(docs_only)} differ in docstrings/comments only, {len(code)} differ in code.")
@@ -162,12 +179,11 @@ def main() -> int:
         print(f"\n{file} is missing shared helpers: {', '.join(names)}")
 
     if from_kit:
-        print("\n== Defined in an analyzer and in _kit (S3's own renderer until Phase 6) ==")
-        for name, file in from_kit:
-            print(f"  {name:<28} {file}:{parsed[file][0][name][0]} vs {kit_defs[name][0]}:{kit_defs[name][1]}")
+        print("\n== Defined in an analyzer and in _kit or its shared module (S3's own renderer until Phase 6) ==")
+        for name, file, (kit_file, kit_line, _) in from_kit:
+            print(f"  {name:<28} {file}:{parsed[file][0][name][0]} vs {kit_file}:{kit_line}")
         if not args.summary:
-            for name, file in from_kit:
-                kit_file, _, kit_text = kit_defs[name]
+            for name, file, (kit_file, _, kit_text) in from_kit:
                 mine = _normalize(parsed[file][0][name][1], parsed[file][1])
                 print(f"\n--- {name}: {kit_file} vs {file}")
                 diff = difflib.unified_diff(kit_text.splitlines(), mine.splitlines(), kit_file, file, lineterm="", n=1)

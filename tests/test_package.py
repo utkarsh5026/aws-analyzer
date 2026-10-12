@@ -77,13 +77,20 @@ def test_explorer_builds_on_the_s3_installed_with_it(package):
     assert package.S3Explorer.__module__ == "aws_analyzer.s3_explorer"
 
 
+# Modules a few analyzers share (SHARED in .claude/skills/check/rules.py) -> the analyzers that import them.
+SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
+
+
 def test_each_analyzer_loads_alone():
-    # Analyzers share code through aws_analyzer._kit and never import each other, so importing one loads no other
-    # (s3_explorer builds on s3, which it loads when it first needs it).
+    # Analyzers share code through aws_analyzer._kit (the Bedrock pair also through aws_analyzer._bedrock) and never
+    # import each other, so importing one loads no other (s3_explorer builds on s3, which it loads when it first needs
+    # it), and a shared module loads no analyzer.
     modules = sorted(p.stem for p in PACKAGE.glob("*.py") if not p.stem.startswith("_"))
+    modules += sorted(module for module in SHARED if (PACKAGE / f"{module}.py").exists())
     for module in modules:
         code = f"import sys, aws_analyzer.{module}; print(*sorted(sys.modules))"
         loaded = subprocess.run([sys.executable, "-c", code], cwd=PACKAGE.parent, capture_output=True, text=True,
                                 check=True).stdout.split()
-        others = {name.split(".")[1] for name in loaded if name.startswith("aws_analyzer.")} - {module, "_kit"}
+        allowed = {module, "_kit"} | {shared for shared, users in SHARED.items() if module in users}
+        others = {name.split(".")[1] for name in loaded if name.startswith("aws_analyzer.")} - allowed
         assert not others, f"importing aws_analyzer.{module} also loads {', '.join(sorted(others))}"
