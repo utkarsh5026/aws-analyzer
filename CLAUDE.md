@@ -83,11 +83,12 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
-  `_as_int`, `HOURS_PER_MONTH`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
+  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
   (`_require`, `_in_notebook`), `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
-  `_prose`, `_call`, `_signature`, the shared blocks' drawers, `_report_html`, `_render_text`, `_blocks_html`),
+  `_prose`, `_lead`, `_call`, `_signature`, the shared blocks' drawers with the tables' sorting, filters and key
+  columns, `_report_html`, `_render_text`, `_blocks_html`),
   `progress.py` (`_progress_bar_class`, `_progress_bar`, `_progress_text`), `view.py` (`_BaseView`, which every
   `<Service>View` subclasses: `_show`, `_progress`, `help()`, `_price_basis`; `@_friendly_errors`; `_commands`) and
   `analyzer.py` (`_BaseAnalyzer`, which every `<Service>Analyzer` subclasses: the session, `_config`, `prices`,
@@ -115,12 +116,6 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit` (or `_bedrock`) module for a call it
   makes (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as
   viewmod`: `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too).
-  For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
-  and findings are laid out as described under "How the View layer works" (asked for S3 first). Until Phase 6
-  ports it to `_kit`, `s3.py` keeps its own `_Table`, `_prose`, `_findings_html`, `_table_html` and `_render_text`
-  (`OWN_RENDERER` in `rules.py` allows exactly these), its own `_CSS` and `_render_html`, and imports the rest of
-  the blocks and helpers from `_kit`; `drift.py` lists those five next to `_kit`'s. Don't "fix" that by reverting
-  `s3.py`.
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`. Its
   public commands are guarded by its own `@_window_errors`, which shows an error in its pane (`rules.py` accepts
@@ -195,8 +190,7 @@ Every analyzer has the same five numbered sections, marked by `# ====` banner co
    `super().__init__()` and then sets `self.core: <Service>Analyzer = core or <Service>Analyzer()`, and the class
    says what's its own: `_render_html = staticmethod(_render_html)` (its look), `_GROUPS` and `_START` (help()),
    and where it differs, `_PROGRESS` (what `_progress()` says without a label: S3's `("Scanning", "objects")`) and
-   `_DATA_ERRORS` (S3's decoding errors), plus `_render_text` and `_TABLE`, S3's own renderer until Phase 6. The
-   base defines no command but `help()`.
+   `_DATA_ERRORS` (S3's decoding errors). The base defines no command but `help()`.
 
 How the View layer works:
 
@@ -219,20 +213,25 @@ How the View layer works:
   and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
   Don't emit HTML or print directly; add to the block list so both renderers handle it.
-- Outside S3 (until Phase 6), the renderer draws each block by what's registered for its type, so a new block
-  type registers both of its drawings next to it: `@_draws(_Steps, "html")` on `f(block, report) -> str` and
-  `@_draws(_Steps, "text")` on `f(block, report) -> list[str]`, where `report` is the `_Report` being drawn (the
-  view's `max_rows` and the service's badge). A table cell of a new type registers `"cell"`, `f(cell, text) -> str`
-  (`bedrock_kb`'s `_Link`); text mode shows `str(cell)`. A block that nothing draws shows as a warning note saying
-  so. The shared blocks' drawers are in `_kit/render.py`; a window that has the stylesheet already draws blocks
-  with `_blocks_html([...])` (the chat's Test and Runs tabs).
+- The renderer draws each block by what's registered for its type, so a new block type registers both of its
+  drawings next to it: `@_draws(_Steps, "html")` on `f(block, report) -> str` and `@_draws(_Steps, "text")` on
+  `f(block, report) -> list[str]`, where `report` is the `_Report` being drawn (the view's `max_rows`, the service's
+  badge and root class, and the whole report's blocks). What a report's blocks share while it's drawn goes on it: a
+  table adds the CSS rules its filters and columns need to `report.rules` (written in a `<style>` after the
+  stylesheet, so they ship with the table), and S3's PDF pages share one `_Zoom` through `report.shared(...)`. A
+  table cell of a new type registers `"cell"`, `f(cell, text) -> str` (`bedrock_kb`'s `_Link`); text mode shows
+  `str(cell)`. A block that nothing draws shows as a warning note saying so. The shared blocks' drawers are in
+  `_kit/render.py`; a window that has the stylesheet already draws blocks with `_blocks_html([...], root=_ROOT)`
+  (the chat's Test and Runs tabs). The shared rules use class names a service's own blocks and windows must not
+  reuse for something else (`.fi`, `.hd`, `.dt`, `.chip`, `.cols`, `.tl`, `.tb`, `.pd`, `.m`, ...): a window's
+  `.kbc .hd{display:flex}` would also restyle every finding's headline.
 - The HTML is plain HTML and CSS, never JavaScript (Jupyter drops scripts from reopened notebooks), so anything
   interactive uses CSS or `<details>`. What the blocks offer:
   - Cards take an optional tone: `(label, value, "warn" | "bad" | "ok")`. Text mode adds ` (!)` to warn and bad.
   - A table cell can be `_Tone(text, tone)`, a coloured pill in HTML and plain text elsewhere. `code_cols` shows
     columns of calls as code, and `prose_cols` passes columns of tool-written sentences (the Warnings tables)
     through `_prose`. Tables over 30 rows scroll under a sticky header.
-  - In `s3.py` (`_table_html`), a table of 3+ rows sorts by a click on a header (largest, newest or A to Z first,
+  - A table (`_table_html`) of 3+ rows sorts by a click on a header (largest, newest or A to Z first,
     then the other way, then the original order; `_sort_key` reads sizes, money, ages and dates), a column of a
     few repeated values (storage class, region, status) gets a filter, and a table of 3+ columns gets a Columns
     menu of checkboxes. They are radio buttons, selects and checkboxes in a `<form method="dialog">` that `:has()`
@@ -247,10 +246,12 @@ How the View layer works:
     `_Text(code=True)` marks a snippet to copy: one click selects all of it.
   - `_prose` renders every tool-written sentence (notes, findings, table titles, subtitles): it escapes the text
     and shows the calls in it (`documents(status='FAILED')`) and AWS CLI commands as code that one click selects.
-    Never use it on table cells that hold data. In `s3.py`, `_split_lead` finds what a sentence says first (up to
-    its first `:`, `;` or full stop, never inside a call): a finding shows it as a bold headline over the rest as
+    Never use it on table cells that hold data. `_split_lead` finds what a sentence says first (up to its first
+    `:`, `;` or full stop, never inside a call or brackets): a finding shows it as a bold headline over the rest as
     points (`_finding_html`), and notes and Warnings cells get it as a bold lead-in (`_lead`); amounts of money
-    in them are stressed. So write a finding as "what's wrong: why it matters. What to do (the call)."
+    in them are stressed. So write a finding as "what's wrong: why it matters. What to do (the call)", and keep
+    other colons out of its first clause ("The most common error happened twice (the last 1h ago): KeyError: 'x'",
+    not "The most common error, KeyError: 'x', happened twice").
 - Every public View method is decorated with `@_friendly_errors` (`_kit/view.py`), which turns `ClientError` /
   `BotoCoreError` / data-decoding errors into a warning note instead of a traceback, and asks the View what to
   say: `_explain(code, message)` adds what an AWS error means and what to do (the windows call it too), and
@@ -670,7 +671,10 @@ does both, a page at a time). How the UI works:
   `.claude/skills/demo/shots.py` from the "acme" scenes the guides are written around (S3, DynamoDB) and demo.py's
   fake Bedrock, SageMaker and OpenSearch, and demo.py's Lambda functions: `shots.py <name>` remakes one figure and sets
   the `height=` of both its images (`CHROME=/opt/pw-browsers/chromium_headless_shell-*/chrome-linux/headless_shell` in
-  a cloud session).
+  a cloud session). The figures are drawn in Liberation Sans, what Helvetica becomes on Linux; a cloud session's
+  `/etc/fonts/conf.d/56-prefer-inter.conf` makes the system fonts Inter, which is wider, so point `FONTCONFIG_FILE` at
+  a copy of `/etc/fonts/fonts.conf` that includes every `conf.d` file but that one (an unchanged S3 figure then comes
+  out as committed).
   The explorer is a live widget, so its figures (`explorer`, `explorer-docx`, `explorer-buckets`, and `explorer-tour`,
   an animated WebP of a pointer clicking through it, all in `s3_explorer.md`) come from `explorer_shots.py`, which
   runs it in a real JupyterLab with Playwright (`pip install jupyterlab playwright`). The chat window's figures

@@ -1,6 +1,6 @@
 ---
 name: sync-helpers
-description: Compare the helpers still duplicated across src/aws_analyzer/*.py (the explorer windows' parts, S3's own renderer, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
+description: Compare the helpers still duplicated across src/aws_analyzer/*.py (the explorer windows' parts, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
 argument-hint: "[helper names, e.g. search_rank _marked]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/sync-helpers/drift.py:*), Bash(python .claude/skills/sync-helpers/drift.py:*)
 ---
@@ -13,10 +13,10 @@ reach the others by hand. This skill finds the copies that have drifted apart an
 in `_kit` has one copy, so it never drifts: change it there. The View and Analyzer plumbing is there since Phase 4
 (`_BaseView` with `_show`, `_progress` and `help()`, `@_friendly_errors`, `_BaseAnalyzer`), and what `bedrock_kb.py`
 and `bedrock_chat.py` share is in `_bedrock.py` since Phase 5 (one copy too: change it there), so what still drifts is
-the explorer windows' parts (until Phase 7). The render blocks and the renderer are there since Phase 3, except S3's
-own renderer (until Phase 6), which `drift.py` lists next to `_kit`'s versions under "Defined in an analyzer and in
-_kit or its shared module": a fix to `_kit/render.py`'s table, findings or prose may be wanted in `s3.py`'s too, and
-the other way round.
+the explorer windows' parts (until Phase 7). The render blocks and the renderer are there since Phase 3, and since
+Phase 6 S3's tables (sorting, filters, the Columns menu, key columns) and finding headlines are the renderer every
+service draws with, so a name `drift.py` lists under "Defined in an analyzer and in _kit or its shared module" is a
+copy to delete (`rules.py` fails on it too).
 
 ## 1. See what differs
 
