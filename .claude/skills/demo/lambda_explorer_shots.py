@@ -8,10 +8,11 @@ and dark.
 shots.py renders reports, which are plain HTML. The explorer is ipywidgets, which only draw in a browser connected to
 a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's Lambda functions (moto, us-east-1),
 then uses it the way a person would: reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired),
-its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors and Code tabs,
-then picks report-api in the function field for its JSON logs, a failed run and a good one open. Each figure is the
-window, 984 CSS px wide at 1.5x like the other images, written to docs/images/<name>-{light,dark}.webp, and the height=
-of both its images is set in docs/lambda_functions.md, by shots.py's set_height.
+its Logs over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors tab and the
+Code tab (a folder of its tree open), then picks report-api in the function field for its JSON logs, a failed run and a
+good one open. Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
+docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/lambda_functions.md, by
+shots.py's set_height.
 
 Needs jupyterlab, playwright and Pillow (pip install jupyterlab playwright pillow), and Chromium: $CHROME, or the
 one Playwright installs (playwright install chromium).
@@ -131,6 +132,8 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     shot("lambda-explorer-errors")
     tab("Code")
     settled()
+    page.locator(".lmx-app .lmx-tree", has_text="botocore/data/").locator("button.lmx-row-b").first.click()
+    time.sleep(0.4)
     page.mouse.move(1, 1)
     shot("lambda-explorer-code")
     if "lambda-explorer-json" in wanted:  # report-api, which logs JSON

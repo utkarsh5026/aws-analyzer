@@ -35,6 +35,7 @@ Quick start
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
+    ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
     ui.explore()                                      # all of it in a window, by clicking: functions, logs, errors
 
     explore("etl-nightly", tab="logs")                # the window, straight to one function's logs
@@ -48,14 +49,17 @@ Quick start
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import difflib
 import fnmatch
 import functools
+import hashlib
 import io
 import json
 import keyword
 import math
+import os
 import posixpath
 import re
 import threading
@@ -908,6 +912,19 @@ class CodePackage:
     @property
     def unzipped(self) -> int:
         return sum(f.size for f in self.files)
+
+
+@dataclass
+class PackageDownload:
+    """A deployment package download() saved on the notebook's disk, as Lambda stores it (nothing unzipped or run)."""
+
+    function: Function
+    path: str  # where it was saved (absolute)
+    size: int  # bytes written: the .zip as Lambda stores it
+    files: int | None = None  # files in the .zip (None when it isn't a readable .zip)
+    sha256_matches: bool | None = None  # its SHA-256 against the CodeSha256 Lambda reports (None: Lambda gave none)
+    replaced: bool = False  # a file of that name was there already, and this replaced it
+    marked: bool = False  # the downloads folder was made now, with a .gitignore that keeps it out of git
 
 
 # =============================================================================
@@ -2163,6 +2180,12 @@ def performance_findings(perf: Performance, prices: dict[str, float] | None = No
 
 _HANDLER_EXTENSIONS = {"python": (".py",), "nodejs": (".js", ".mjs", ".cjs"), "ruby": (".rb",)}
 _SOURCE_LIMIT = 200 * KB  # the most of one file code() reads and shows
+DOWNLOADS = "lambda-downloads"  # where download() saves a package without a path=: this folder, next to the notebook
+_DOWNLOADS_MARK = (  # the .gitignore in a downloads folder download() makes: a package can hold secrets (.env, keys)
+    "# Made by aws-analyzer for the deployment packages download() saves from Lambda.\n"
+    "# A package can hold secrets, so this file keeps them out of git.\n"
+    "*\n"
+)
 _SECRET_FILE_RE = re.compile(
     r"(^|/)(\.env(\.[\w-]+)?|credentials|[\w.-]+\.pem|id_rsa|id_ed25519|\.npmrc|\.pypirc|\.netrc)$", re.I
 )
@@ -2187,6 +2210,20 @@ def handler_file(handler: str | None, runtime: str | None, names: Iterable[str])
         if nested:
             return nested[0]
     return None
+
+
+def package_file_name(fn: Function) -> str:
+    """The name download() saves a function's package as: 'etl.zip', or 'etl-v3.zip' for a published version (an
+    alias names the version it points to)."""
+    return f"{fn.name}.zip" if fn.version in ("", "$LATEST") else f"{fn.name}-v{fn.version}.zip"
+
+
+def _local_path(path: str) -> str:
+    """A path on the notebook's disk as a report shows it: relative to the notebook's folder when it's in it, else
+    as it is."""
+    here = os.path.abspath(os.getcwd())
+    path = os.path.abspath(path)
+    return os.path.relpath(path, here) if path.startswith(here.rstrip(os.sep) + os.sep) else path
 
 
 def _top_folder(path: str) -> str:
@@ -2396,7 +2433,8 @@ class LambdaAnalyzer(_BaseAnalyzer):
     when it's in another region (an ARN or a link says so itself, and a name overview() found in one other region
     is looked for there). `prices` overrides LAMBDA_PRICES. `client` is the Lambda client and `clients` other boto3
     clients by service name ('lambda', 'cloudwatch', 'logs', 'ec2'): a client, used in every region, or a function
-    that makes one for a region (e.g. for tests).
+    that makes one for a region (e.g. for tests). `downloads` is the folder download() saves packages in without a
+    path= (DOWNLOADS, 'lambda-downloads' next to the notebook).
     """
 
     _LIST_PRICES = LAMBDA_PRICES
@@ -2410,8 +2448,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         client: Any = None,
         clients: dict[str, Any] | None = None,
         prices: dict[str, float] | None = None,
+        downloads: str | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=prices)
+        self.downloads = downloads or DOWNLOADS  # where download() saves without a path (see downloads_folder())
         self._given: dict[str, Any] = dict(clients or {})
         if client is not None:
             self._given["lambda"] = client
@@ -3305,6 +3345,60 @@ class LambdaAnalyzer(_BaseAnalyzer):
         fn = self.function(ref, region=region)
         return read_package(fn, self._package(fn, max_size), file=file)
 
+    def download(self, ref: str, path: str | None = None, *, region: str | None = None) -> PackageDownload:
+        """Saves a function's deployment package on the notebook's disk, the .zip as Lambda stores it: at `path` (a
+        file, or a folder to put <name>.zip in), else in the downloads folder (see downloads_folder()) as
+        'etl.zip', or 'etl-v3.zip' for a published version. A file of that name is replaced. Nothing in it is
+        unzipped or run, and its SHA-256 is checked against the one Lambda reports. A container image is named, not
+        pulled."""
+        fn = self.function(ref, region=region)
+        if fn.package_type == "Image":
+            raise _Hint(f"{fn.name} is a container image ({fn.image_uri or 'image URI not shown'}): its code is in the "
+                        "image, which this doesn't pull. docker pull it from ECR to look inside.")
+        data = self._package(fn, None)
+        if data is None:
+            raise ValueError(f"Lambda gave no link to download {fn.name}'s code.")
+        return self._save_package(fn, data, path)
+
+    def downloads_folder(self) -> str:
+        """The folder download() saves in when it's given no path (absolute): `self.downloads`, 'lambda-downloads'
+        next to the notebook unless LambdaAnalyzer(downloads=...) says otherwise."""
+        return os.path.abspath(os.path.expanduser(str(self.downloads).strip() or "."))
+
+    def _save_package(self, fn: Function, data: bytes, path: str | None = None) -> PackageDownload:
+        """Writes a package already downloaded (data, from _package) where download() would: no AWS call. A downloads
+        folder it makes gets a .gitignore that keeps it out of git, since a package can hold secrets."""
+        name = package_file_name(fn)
+        target = os.path.abspath(os.path.expanduser(path)) if path else os.path.join(self.downloads_folder(), name)
+        if os.path.isdir(target) or (path and path.endswith(("/", os.sep))):
+            target = os.path.join(target, name)
+        folder = os.path.dirname(target)
+        saved = PackageDownload(fn, target, len(data), replaced=os.path.exists(target))
+        part = target + ".part"
+        try:
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
+                if not path:  # a downloads folder made now holds only downloads: keep it out of git
+                    with open(os.path.join(folder, ".gitignore"), "w", encoding="utf-8") as mark:
+                        mark.write(_DOWNLOADS_MARK)
+                    saved.marked = True
+            with open(part, "wb") as handle:
+                handle.write(data)
+            os.replace(part, target)
+        except OSError as exc:
+            if os.path.exists(part):
+                os.remove(part)
+            raise ValueError(f"Couldn't save {name} in {folder}: {exc.strerror or exc}") from None
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                saved.files = sum(1 for info in archive.infolist() if not info.is_dir())
+        except zipfile.BadZipFile:
+            pass
+        expected = fn.raw.get("CodeSha256")
+        if expected:
+            saved.sha256_matches = base64.b64encode(hashlib.sha256(data).digest()).decode() == expected
+        return saved
+
 
 # =============================================================================
 # 5. LambdaView - notebook UI layer (renders what LambdaAnalyzer returns)
@@ -3625,7 +3719,7 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
-        "📦 Code": ("code",),
+        "📦 Code": ("code", "download"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -4462,6 +4556,60 @@ class LambdaView(_BaseView):
         blocks.append(_Next(steps))
         return blocks
 
+    @_friendly_errors
+    def download(self, name: str, path: str | None = None, *, region: str | None = None) -> None:
+        """Saves a function's deployment package (the .zip) on the notebook's disk, in lambda-downloads next to the
+        notebook, or at path= (a file, or a folder), and says where, how big, and whether it's the code Lambda runs
+        (its SHA-256 against Lambda's). In JupyterLab, right-click it in the file browser and pick Download to get it
+        on your computer. Nothing in it is unzipped or run; a container image is named, not pulled."""
+        with self._named(name, region):
+            saved = self.core.download(name, path, region=region)
+        self._show(self._download_blocks(saved))
+
+    def _download_blocks(self, saved: PackageDownload) -> list[Any]:
+        """download()'s report, as blocks."""
+        fn = saved.function
+        where = _local_path(saved.path)
+        ref = fn.name if fn.version in ("", "$LATEST") else f"{fn.name}:{fn.version}"  # the version it saved
+        elsewhere = {"region": fn.region} if fn.region and fn.region != self.core.region else {}
+        own_path = saved.path != os.path.join(self.core.downloads_folder(), package_file_name(fn))
+        blocks: list[Any] = [
+            _Title(f"Downloaded {fn.name}'s code", " · ".join(filter(None, [
+                where, f"version {fn.version}" if fn.version not in ("", "$LATEST") else "",
+                f"handler {fn.handler}" if fn.handler else "", fn.runtime or ""]))),
+            _Cards([
+                ("Saved as", where),
+                ("Size (zipped)", human_size(saved.size)),
+                ("Files", _count(saved.files) if saved.files is not None else "not a .zip",
+                 "" if saved.files is not None else "warn"),
+                ("SHA-256", {True: "matches Lambda's", False: "differs from Lambda's", None: "not reported"}[
+                    saved.sha256_matches], "warn" if saved.sha256_matches is False else ""),
+            ]),
+        ]
+        if saved.sha256_matches is False:
+            blocks.append(_Note(
+                f"Its SHA-256 differs from the CodeSha256 Lambda reports, so it may not be the code {fn.name} runs: "
+                "the code was probably deployed again while it downloaded. "
+                f"{_call('download', ref, *([saved.path] if own_path else []), **elsewhere)} downloads it again.",
+                "warn"))
+        if saved.files is None:
+            blocks.append(_Note("Lambda's link gave a file that isn't a readable .zip, so code() can't list it.",
+                                "warn"))
+        said = [f"It's on the notebook's disk{', where it replaced the one downloaded before' if saved.replaced else ''}"
+                ": in JupyterLab, right-click it in the file browser and pick Download to save it on your computer."]
+        if saved.marked:
+            said.append(f"{_local_path(os.path.dirname(saved.path))} was made for downloads, with a .gitignore that "
+                        "keeps it out of git, since a package can hold secrets.")
+        said.append("Nothing in it was unzipped or run.")
+        blocks.append(_Note(" ".join(said)))
+        folder = saved.path[:-4] if saved.path.endswith(".zip") else saved.path + "-files"
+        blocks.append(_Next([
+            (_call("code", ref, **elsewhere), "what's in it, file by file, and the handler's source"),
+            ("import shutil; " + _call("shutil.unpack_archive", _local_path(saved.path), _local_path(folder)),
+             "unzip it next to the notebook"),
+        ]))
+        return blocks
+
     # ------------------------------------------------------------------ the window
 
     @_friendly_errors
@@ -4497,7 +4645,8 @@ _EXPLORER_TABS = (
      "<path d='M12 4.2 20.8 19.5H3.2z'/><path d='M12 10v4.2M12 17h.01'/>"),
     ("performance", "Performance", "Run times, memory used and cold starts, and the slowest runs",
      "<circle cx='12' cy='13.5' r='7'/><path d='M12 13.5V9.8M9.8 3.5h4.4M18.4 7.1l1.4-1.4'/>"),
-    ("code", "Code", "The files in its deployment package, and the source of the one you click",
+    ("code", "Code", "Its deployment package as a tree of folders, the source of the file you click to read or copy, "
+     "and the .zip to download",
      "<path d='M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5'/>"),
     ("settings", "Settings", "Every setting in plain English, and as Lambda returns it",
      "<path d='M4 7.5h9M17.5 7.5H20M4 16.5h2.5M11 16.5h9'/><circle cx='15' cy='7.5' r='2.5'/>"
@@ -4511,7 +4660,8 @@ _RANGES = (("Last 15 minutes", "15m"), ("Last hour", "1h"), ("Last 3 hours", "3h
            ("Last 24 hours", "24h"), ("Last 3 days", "3d"), ("Last 7 days", "7d"), ("Last 30 days", "30d"))
 _FUNCTION_PAGE = 40  # functions on a page of the list; « ‹ › » move between pages
 _RUN_PAGE = 25  # runs on a page of the Logs tab
-_CODE_PAGE = 60  # files on a page of the Code tab's list
+_CODE_PAGE = 60  # lines (folders and files) on a page of the Code tab's tree
+_TOGGLE_GRACE = 0.4  # seconds: a second click on a folder this soon is a double click's, not a fold
 _RUN_LINES = 3_000  # log lines the Logs tab reads at a time, the newest first ("Older runs" reads more)
 _BODY_LINES = 500  # lines an open run shows; the rest are counted
 _LIVE_SECONDS = 5  # how often Live looks for new lines...
@@ -4798,21 +4948,43 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app .lmx-right{flex:1 1 300px;min-width:0;overflow:hidden auto;padding:0 6px 0 2px}
 .lmx-app.lmx-app .lmx-right>*{flex:0 0 auto;margin:0}
 @media (max-width:900px){.lmx-app.lmx-app .lmx-split{flex-wrap:wrap;overflow:hidden auto}.lmx-app.lmx-app .lmx-left{flex:1 1 100%;max-width:100%;height:360px}.lmx-app.lmx-app .lmx-right{flex:1 1 100%;overflow:visible}}
-.lmx-app .cf{display:flex;align-items:center;gap:9px;height:42px;padding:0 8px;min-width:0}
-.lmx-app .cf .ct{flex:0 0 auto;width:34px;height:20px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:750;letter-spacing:.03em;background:var(--lx-tint-2)}
-.lmx-app .cf .ct.py{background:rgba(59,130,246,.14);color:var(--lx-accent)}
-.lmx-app .cf .ct.js{background:rgba(234,179,8,.18);color:#a16207}
-.lmx-app .cf .ct.cfg{background:rgba(16,185,129,.14);color:var(--lx-ink-ok)}
-.lmx-app .cf .ct.key{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
-.lmx-app .cf .cm{flex:1 1 auto;min-width:0;line-height:1.25}
-.lmx-app .cf .cn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lmx-app .cf .cd{font-size:11px;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lmx-app .cf .cz{flex:0 0 auto;font-size:11px;opacity:.6;font-variant-numeric:tabular-nums}
-.lmx-app .cf.junk{opacity:.55}
-.lmx-app .cf .hb{font-size:9.5px;font-weight:700;padding:0 5px;border-radius:4px;background:rgba(234,88,12,.14);color:#c2410c;margin-left:6px}
+.lmx-app.lmx-app .lmx-codebar{align-items:center;gap:10px;padding:8px 2px 10px;flex-wrap:wrap}
+.lmx-app.lmx-app .lmx-codebar>*{margin:0}
+.lmx-app.lmx-app .lmx-codebar button.lmx-small{font-weight:600;color:var(--lx-accent)}
+.lmx-app .cbs{font-size:12px;opacity:.7;line-height:1.4}
+.lmx-app .cbs.ok{opacity:1}
+.lmx-app .cbs.ok b{font-weight:600;color:var(--lx-ink-ok)}
+.lmx-app .cbs code{font-family:var(--lx-mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--lx-tint-2);color:inherit;user-select:all;-webkit-user-select:all;cursor:text}
+.lmx-app.lmx-app .lmx-row.lmx-tree{height:30px;margin:0}
+.lmx-app.lmx-app .lmx-row.lmx-tree>.lmx-row-b{border-radius:7px}
+.lmx-app .tl{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 calc(6px + var(--d,0) * 16px);min-width:0;font-size:12.5px;background:repeating-linear-gradient(90deg,transparent 0 11.5px,var(--lx-line) 11.5px 12.5px,transparent 12.5px 16px) 0 0/calc(var(--d,0) * 16px) 100% no-repeat}
+.lmx-app .tl .tv{flex:0 0 12px;width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center}
+.lmx-app .tl.d .tv::before{content:"";width:6px;height:6px;margin-left:-2px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.55;transition:transform .15s}
+.lmx-app .tl.d.open .tv::before{transform:rotate(45deg);margin:-3px 0 0}
+.lmx-app .tl .ti{flex:0 0 30px;height:16px;display:inline-flex;align-items:center;justify-content:center}
+.lmx-app .tl .ti::before{content:"";width:16px;height:16px;background:var(--lx-accent);opacity:.8;-webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat}
+.lmx-app .tl.open .ti::before{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E")}
+.lmx-app .tl .tn{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .tl.d .tn{font-weight:600}
+.lmx-app .tl .tz{flex:0 0 auto;font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}
+.lmx-app .tl.junk{opacity:.55}
+.lmx-app .ct{flex:0 0 auto;width:30px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:750;letter-spacing:.03em;background:var(--lx-tint-2)}
+.lmx-app .ct.py{background:rgba(59,130,246,.14);color:var(--lx-accent)}
+.lmx-app .ct.js{background:rgba(234,179,8,.18);color:#a16207}
+.lmx-app .ct.cfg{background:rgba(16,185,129,.14);color:var(--lx-ink-ok)}
+.lmx-app .ct.key{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
+.lmx-app .tl .hb{font-size:9px;font-weight:700;padding:0 5px;border-radius:4px;background:rgba(234,88,12,.14);color:#c2410c;margin-left:6px}
 .lmx-app .srch{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 8px}
 .lmx-app .srch b{font-size:14px;font-family:var(--lx-mono)}
 .lmx-app .srch span{font-size:12px;opacity:.65}
+.lmx-app .srch .cpy{align-self:center;position:relative;margin-left:auto;display:inline-flex;align-items:center;height:26px;padding:0 12px;border-radius:999px;border:1px solid var(--lx-line-2);background:var(--lx-tint);color:var(--lx-accent);font-weight:600;opacity:1;white-space:nowrap;cursor:pointer;user-select:all;-webkit-user-select:all;outline:none;transition:background-color .15s,border-color .15s}
+.lmx-app .srch .cpy::before{content:"\\29C9\\2002 Copy"}
+.lmx-app .srch .cpy:hover{background:var(--lx-tint-2)}
+.lmx-app .srch .cpy:focus{border-color:var(--lx-accent);background:var(--lx-soft)}
+.lmx-app .srch .cpy:focus-visible{outline:2px solid var(--lx-ring);outline-offset:1px}
+.lmx-app .srch .cpy:focus:not(:focus-visible)::before{content:"\\2713\\2002Selected: press Ctrl+C or \\2318 C"}
+.lmx-app .srch .cpy .cpt{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:pre;opacity:1}
+.lmx-app .srch .cpy ::selection,.lmx-app .srch .cpy::selection{background:transparent}
 .lmx-app .src{display:flex;border:1px solid var(--lx-line);border-radius:10px;background:var(--lx-code);overflow:auto;max-height:none;font-family:var(--lx-mono);font-size:12px;line-height:1.55}
 .lmx-app .src pre{margin:0;padding:8px 12px;border:0;background:transparent;white-space:pre;overflow:visible;max-height:none;font-size:inherit;line-height:inherit;font-family:inherit}
 .lmx-app .src pre.gut{flex:0 0 auto;text-align:right;opacity:.38;user-select:none;-webkit-user-select:none;border-right:1px solid var(--lx-line);padding-right:10px}
@@ -5263,21 +5435,112 @@ def _destination(arn: str | None) -> tuple[str, str]:
     return kind or "destination", _source_name(arn)[0] or (arn or "-")
 
 
-def _code_file_face(f: CodeFile, words: list[str], handler: str | None) -> str:
-    """A file's line in the Code tab: its type, name and folder, and its size."""
-    folder, _, name = f.path.rpartition("/")
+def _file_badge(path: str) -> tuple[str, str]:
+    """A file's type as the Code tab's tree shows it: (its badge, its colour), 'KEY' for a secrets file."""
+    name = path.rpartition("/")[2]
+    if _SECRET_FILE_RE.search(path):
+        return "KEY", "key"
     kind = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    badge, tone = {"py": ("PY", "py"), "js": ("JS", "js"), "mjs": ("JS", "js"), "cjs": ("JS", "js"),
-                   "ts": ("TS", "js"), "rb": ("RB", "py"), "json": ("JSON", "cfg"), "yaml": ("YAML", "cfg"),
-                   "yml": ("YAML", "cfg"), "toml": ("TOML", "cfg"), "txt": ("TXT", ""), "md": ("MD", "")}.get(
-        kind, ((kind or "file")[:4].upper(), ""))
-    if _SECRET_FILE_RE.search(f.path):
-        badge, tone = "KEY", "key"
-    junk = " junk" if _JUNK_RE.search(f.path) else ""
-    hb = '<span class="hb">HANDLER</span>' if f.path == handler else ""
-    return (f'<div class="cf{junk}"><span class="ct {tone}">{_esc(badge)}</span><div class="cm"><div class="cn">'
-            f'{_marked(name, words)}{hb}</div><div class="cd">{_marked(folder + "/" if folder else "top level", words)}'
-            f'</div></div><span class="cz">{_esc(human_size(f.size))}</span></div>')
+    return {"py": ("PY", "py"), "js": ("JS", "js"), "mjs": ("JS", "js"), "cjs": ("JS", "js"), "ts": ("TS", "js"),
+            "rb": ("RB", "py"), "json": ("JSON", "cfg"), "yaml": ("YAML", "cfg"), "yml": ("YAML", "cfg"),
+            "toml": ("TOML", "cfg"), "txt": ("TXT", ""), "md": ("MD", "")}.get(kind, ((kind or "file")[:4].upper(), ""))
+
+
+@dataclass
+class _TreeLine:
+    """A line of the Code tab's tree: a folder or a file, how deep it sits, and what it shows."""
+
+    path: str  # 'boto3/' for a folder (its deepest, when the line holds a chain), 'boto3/__init__.py' for a file
+    label: str  # the name shown: '__init__.py', 'boto3/', or 'botocore/data/' for a folder that holds only a folder
+    depth: int
+    file: CodeFile | None = None  # None for a folder
+    files: int = 1  # a folder's files, at any depth
+    size: int = 0  # unzipped: the file's, or every file's in the folder
+    open: bool = False  # a folder whose lines show under it
+
+    @property
+    def folder(self) -> bool:
+        return self.file is None
+
+
+def _folders_of(path: str) -> list[str]:
+    """The folders a file is in, outermost first: 'a/b/c.py' -> ['a/', 'a/b/']."""
+    parts = path.split("/")[:-1]
+    return ["/".join(parts[:i]) + "/" for i in range(1, len(parts) + 1)]
+
+
+def _file_tree(files: Iterable[CodeFile], opened: set[str], query: str = "", shut: set[str] | None = None
+               ) -> list[_TreeLine]:
+    """The Code tab's tree, as the lines it shows: in each folder its folders, then its files, A to Z; a folder's
+    lines under it when `opened` holds its path ('boto3/'), and a folder that holds only a folder on one line with it
+    ('botocore/data/'). With a query, only the files it finds, inside the folders that hold them, open unless `shut`
+    holds them."""
+    files = list(files)
+    if query:
+        files = [f for f in files if search_rank(query, (f.path, posixpath.basename(f.path))) is not None]
+    root: dict[str, Any] = {}
+    for f in files:
+        node = root
+        *folders, name = f.path.split("/")
+        for part in folders:
+            node = node.setdefault(part + "/", {})
+        node[name] = f
+    sums: dict[int, tuple[int, int]] = {}
+
+    def total(node: dict[str, Any]) -> tuple[int, int]:
+        count = size = 0
+        for child in node.values():
+            c, z = total(child) if isinstance(child, dict) else (1, child.size)
+            count, size = count + c, size + z
+        sums[id(node)] = (count, size)
+        return count, size
+
+    total(root)
+    lines: list[_TreeLine] = []
+
+    def walk(node: dict[str, Any], prefix: str, depth: int) -> None:
+        for key in sorted((k for k, v in node.items() if isinstance(v, dict)), key=lambda k: (k.lower(), k)):
+            child, label = node[key], key
+            while len(child) == 1 and isinstance(next(iter(child.values())), dict):  # a folder holding one folder
+                only = next(iter(child))
+                child, label = child[only], label + only
+            path = prefix + label
+            is_open = path not in (shut or set()) if query else path in opened
+            count, size = sums[id(child)]
+            lines.append(_TreeLine(path, label, depth, None, count, size, is_open))
+            if is_open:
+                walk(child, path, depth + 1)
+        for key in sorted((k for k, v in node.items() if not isinstance(v, dict)), key=lambda k: (k.lower(), k)):
+            f = node[key]
+            lines.append(_TreeLine(f.path, key, depth, f, 1, f.size))
+
+    walk(root, "", 0)
+    return lines
+
+
+def _tree_face(line: _TreeLine, words: list[str], handler: str | None) -> str:
+    """A line of the Code tab's tree: indented by its depth (with a guide for each folder it's in), a folder's chevron
+    and icon or a file's type, its name, and its size."""
+    junk = " junk" if _JUNK_RE.search(line.path) else ""
+    style = f' style="--d:{line.depth}"'
+    size = f'<span class="tz">{_esc(human_size(line.size))}</span>'
+    if line.folder:
+        return (f'<div class="tl d{" open" if line.open else ""}{junk}"{style}><span class="tv"></span>'
+                f'<span class="ti"></span><span class="tn">{_marked(line.label, words)}</span>{size}</div>')
+    badge, tone = _file_badge(line.path)
+    hb = '<span class="hb">HANDLER</span>' if line.path == handler else ""
+    return (f'<div class="tl{junk}"{style}><span class="tv"></span><span class="ct {tone}">{_esc(badge)}</span>'
+            f'<span class="tn">{_marked(line.label, words)}{hb}</span>{size}</div>')
+
+
+def _copy_html(name: str, text: str, part: bool = False) -> str:
+    """A file's Copy button: a click selects the text it holds (hidden: the button shows only its label), so Ctrl+C
+    copies the file, with no JavaScript (the window has none)."""
+    what = f"the part of {name} shown" if part else f"all of {name}"
+    held = text + "\n" if text.endswith("\n") else text  # a browser copies a text without its last line break
+    return (f'<span class="cpy" tabindex="0" role="button" aria-label="Copy {_esc(name)}" '
+            f'title="Click, then press Ctrl+C (⌘C on a Mac) to copy {_esc(what)}"><span class="cpt">{_esc(held)}</span>'
+            "</span>")
 
 
 def _source_html(path: str, text: str) -> str:
@@ -5543,8 +5806,9 @@ class LambdaExplorer:
                      read every line of it
         Performance  run times against the timeout, memory used against what it has, cold starts, and the slowest
                      runs (click one to read it)
-        Code         the files in its deployment package, and the source of the one you click (secrets files held
-                     back)
+        Code         the files in its deployment package as a tree of folders, and the source of the one you click,
+                     with Copy to copy all of it (secrets files held back). Download .zip saves the package next to
+                     the notebook
         Settings     every setting in plain English, and as Lambda returns it (environment values hidden)
 
     name: a function to open (its name, 'name:alias', an ARN or a console link), on tab= ('overview', 'logs',
@@ -5554,8 +5818,9 @@ class LambdaExplorer:
     CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports elsewhere), 'widgets' or 'text'.
 
     Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
-    command. x.ui is a LambdaView for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail,
-    x.logs_page and x.package hold the data behind what's shown."""
+    command. The one file it writes is the package Download .zip saves, on the notebook's disk. x.ui is a LambdaView
+    for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
+    hold the data behind what's shown."""
 
     def __init__(
         self,
@@ -5590,6 +5855,7 @@ class LambdaExplorer:
         self.error_report: ErrorReport | None = None  # the Errors tab
         self.perf: Performance | None = None  # the Performance tab
         self.package: CodePackage | None = None  # the Code tab
+        self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
         self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
         self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
         self._w: Any = None
@@ -5616,6 +5882,9 @@ class LambdaExplorer:
         self._code_fn: Function | None = None  # the function as GetFunction gave it, with the link to its package
         self._package_data: bytes | None = None
         self._code_query, self._code_offset, self._code_file = "", 0, None
+        self._code_open: set[str] = set()  # the tree's folders shown open ('boto3/')
+        self._code_shut: set[str] = set()  # ...and the ones folded while searching, when every other one is open
+        self._toggled: tuple[str, float] = ("", 0.0)  # the folder clicked last, and when
         self._code_rows: list[_Row] = []
         self._pagers: dict[str, tuple[Any, dict[str, Any]]] = {}
         self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
@@ -5983,11 +6252,13 @@ class LambdaExplorer:
         self._pagers[key] = (text, buttons)
         return [text, *buttons.values()]
 
-    def _draw_pager(self, key: str, offset: int, total: int, size: int, noun: str, whole: int | None = None) -> None:
+    def _draw_pager(self, key: str, offset: int, total: int, size: int, noun: str, whole: int | None = None,
+                    label: str | None = None) -> None:
         text, buttons = self._pagers[key]
         first, last = offset + 1, min(offset + size, total)
         shown = f"<b>{first:,}–{last:,}</b> of {total:,} {noun}" if total else f"0 {noun}"
-        self._set(text, shown + (f" (of {whole:,})" if whole is not None and whole != total else ""))
+        self._set(text, label if label is not None else
+                  shown + (f" (of {whole:,})" if whole is not None and whole != total else ""))
         more = total > size
         for where, button in buttons.items():
             button.layout.display = "" if more else "none"
@@ -5996,7 +6267,7 @@ class LambdaExplorer:
     def _page(self, key: str, where: str) -> None:
         size = {"functions": _FUNCTION_PAGE, "runs": _RUN_PAGE, "files": _CODE_PAGE}[key]
         total = {"functions": len(self._visible), "runs": len(self._visible_runs()),
-                 "files": len(self._code_files())}[key]
+                 "files": len(self._code_lines())}[key]
         offset = {"functions": self._offset, "runs": self._run_offset, "files": self._code_offset}[key]
         end = max(0, (total - 1) // size * size)
         offset = {"first": 0, "previous": max(0, offset - size), "next": min(end, offset + size), "last": end}[where]
@@ -6122,6 +6393,13 @@ class LambdaExplorer:
         self.code_view = w.HTML(layout=layout(width="100%"))
         self.code_more = w.Button(layout=layout(width="auto", display="none"), button_style="primary")
         self.code_more.on_click(self._safely(lambda _button: self._load_code(unlimited=True)))
+        self.code_save = w.Button(description="⬇ Download .zip", layout=layout(width="auto"),
+                                  tooltip="Save the package, the .zip as Lambda stores it, on the notebook's disk")
+        self.code_save.add_class("lmx-small")
+        self.code_save.on_click(self._safely(lambda _button: self._save_code()))
+        self.code_saved = w.HTML(layout=layout(flex="1 1 auto", width="auto"))
+        self.code_bar = w.HBox([self.code_save, self.code_saved], layout=layout(width="100%", display="none"))
+        self.code_bar.add_class("lmx-codebar")
         self.code_find = w.Text(placeholder="Find a file", continuous_update=True,
                                 layout=layout(flex="1 1 auto", width="auto"))
         self.code_find.add_class("lmx-find")
@@ -6139,7 +6417,7 @@ class LambdaExplorer:
         self.code_split.add_class("lmx-split")
         head = w.VBox([self.code_view, self.code_more], layout=layout(width="100%"))
         head.add_class("lmx-codehead")
-        return w.VBox([head, self.code_split])
+        return w.VBox([head, self.code_bar, self.code_split])
 
     def _show_tab(self, key: str, *, load: bool = True) -> None:
         if key != "logs" and self._live:
@@ -6193,8 +6471,8 @@ class LambdaExplorer:
             return (f"{_plural(len(self.perf.invocations), 'run')} in the last "
                     f"{_window((self.perf.until - self.perf.since).total_seconds())} · click a slow run to read it")
         if key == "code" and self.package is not None:
-            return (f"{_plural(len(self.package.files), 'file')} in its package · click one to see its source"
-                    if self.package.files else "")
+            return (f"{_plural(len(self.package.files), 'file')} in its package · click a folder to open it, a file "
+                    "to see its source" if self.package.files else "")
         if key == "settings" and self.detail is not None:
             return "Every setting in plain English, then as Lambda returns it (folded, at the end)."
         return ""
@@ -6695,8 +6973,8 @@ class LambdaExplorer:
         self.logs_page = self.found = self.error_report = self.perf = self.package = None
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
-        self._code_fn = self._package_data = self._code_file = None
-        self._code_query, self._code_offset = "", 0
+        self._code_fn = self._package_data = self._code_file = self.saved = None
+        self._code_query, self._code_offset, self._code_open, self._code_shut = "", 0, set(), set()
         self._asked = set()
         self._quietly(self.log_find, value="")
         self._quietly(self.code_find, value="")
@@ -6715,7 +6993,7 @@ class LambdaExplorer:
         self.error_rows_box.children = self.slow_rows_box.children = self.files_box.children = []
         self.runs_box.children = []
         self.run_chips.children = []
-        self.code_split.layout.display = "none"
+        self.code_split.layout.display = self.code_bar.layout.display = "none"
         self.code_more.layout.display = self.jump_button.layout.display = self.older_button.layout.display = "none"
         for key in ("overview", "settings", "errors", "performance"):
             self._renew(key)
@@ -7442,7 +7720,7 @@ class LambdaExplorer:
         most = None if unlimited else "50MB"
         self.package = None
         self.code_more.layout.display = "none"
-        self.code_split.layout.display = "none"
+        self.code_split.layout.display = self.code_bar.layout.display = "none"
         self._set(self.code_view, _skeleton(f"Downloading {fn.name}'s deployment package"
                                             + ("" if unlimited else " (up to 50 MB)") + "…"))
         self._status(f"Downloading {fn.name}'s deployment package…", busy=True, owner="code")
@@ -7473,50 +7751,86 @@ class LambdaExplorer:
         self.package = package = read_package(full, data)
         blocks = [b for b in self.ui._code_blocks(package, source=False) if not isinstance(b, _Table)]
         self._draw("code", self.code_view, blocks)
+        self.code_bar.layout.display = "" if data is not None else "none"
+        self._draw_saved()
         if not package.files:
             self.code_split.layout.display = "none"
             self._finish("code", package.note or "No files in the package.", tabs=("code",))
             return
         self.code_split.layout.display = ""
         self._code_file = package.shown_file
+        self._code_open = {folder for path in (package.handler_file, package.shown_file) if path
+                           for folder in _folders_of(path)}
         self._draw_code_rows(renew=True)
         self._draw_source(package)
         self._finish("code", self._tab_line("code"), tabs=("code",))
 
-    def _code_files(self) -> list[CodeFile]:
+    def _draw_saved(self) -> None:
+        """The line beside Download .zip: where it saves, or where it saved."""
+        saved = self.saved
+        if saved is None:
+            where = _local_path(self.core.downloads_folder())
+            self._set(self.code_saved, f'<div class="cbs">saves it in <code>{_esc(where)}/</code>, on the '
+                                       "notebook's disk</div>")
+            return
+        self._set(self.code_saved, f'<div class="cbs ok"><b>✓ Saved as <code>{_esc(_local_path(saved.path))}</code>'
+                                   "</b> · to get it on your computer, right-click it in JupyterLab's file browser "
+                                   "and pick Download</div>")
+
+    def _save_code(self) -> None:
+        """Download .zip: the package the tab downloaded, saved where download() would (no new download)."""
+        fn, data = self._code_fn, self._package_data
+        if fn is None or data is None:
+            return
+        try:
+            saved = self.core._save_package(fn, data)
+        except ValueError as exc:
+            self._status(str(exc), "warn")
+            return
+        self.saved = saved
+        self._draw_saved()
+        where = _local_path(saved.path)
+        if saved.sha256_matches is False:
+            self._status(f"Saved {where}, but its SHA-256 differs from the one Lambda reports: the code was probably "
+                         "deployed again since this tab read it. Refresh reads it again.", "warn")
+            return
+        self._status(f"Saved {fn.name}'s package as {where} ({human_size(saved.size)})"
+                     + (", replacing the one there." if saved.replaced else "."), "ok")
+
+    def _code_lines(self) -> list[_TreeLine]:
         package = self.package
         if package is None:
             return []
-        handler = package.handler_file
-        files = sorted(package.files, key=lambda f: (f.path != handler, bool(_JUNK_RE.search(f.path)), "/" in f.path,
-                                                     f.path.lower()))
-        if self._code_query:
-            files = [f for f in files if search_rank(self._code_query, (f.path, posixpath.basename(f.path)))
-                     is not None]
-        return files
+        return _file_tree(package.files, self._code_open, self._code_query, self._code_shut)
 
     def _code_typed(self, change: dict[str, Any]) -> None:
         if self.quiet:
             return
         self._code_query = str(self.code_find.value or "").strip()
-        self._code_offset = 0
+        self._code_offset, self._code_shut = 0, set()
         self._draw_code_rows(renew=True)
 
     def _draw_code_rows(self, renew: bool = False) -> None:
-        files = self._code_files()
-        self._code_offset = min(self._code_offset, max(0, (len(files) - 1) // _CODE_PAGE * _CODE_PAGE))
-        page = files[self._code_offset:self._code_offset + _CODE_PAGE]
+        lines = self._code_lines()
+        self._code_offset = min(self._code_offset, max(0, (len(lines) - 1) // _CODE_PAGE * _CODE_PAGE))
+        page = lines[self._code_offset:self._code_offset + _CODE_PAGE]
         while len(self._code_rows) < len(page):
-            self._code_rows.append(_Row(self, self._open_code_file, short=True))
+            row = _Row(self, self._clicked_code_line, short=True)
+            row.box.add_class("lmx-tree")
+            self._code_rows.append(row)
         words = self._code_query.split()
         handler = self.package.handler_file if self.package is not None else None
-        for row, f in zip(self._code_rows, page):
-            row.item = f
-            self._set(row.face, _code_file_face(f, words, handler))
-            tip = f"{f.path} · {human_size(f.size)} unzipped · click to see it"
+        for row, line in zip(self._code_rows, page):
+            row.item = line
+            self._set(row.face, _tree_face(line, words, handler))
+            if line.folder:
+                tip = (f"{line.path} · {_plural(line.files, 'file')}, {human_size(line.size)} unzipped · click to "
+                       + ("fold it" if line.open else "open it"))
+            else:
+                tip = f"{line.path} · {human_size(line.size)} unzipped · click to see it"
             if row.button.tooltip != tip:
                 row.button.tooltip = tip
-            _class_if(row.box, "lmx-on", f.path == self._code_file)
+            _class_if(row.box, "lmx-on", not line.folder and line.path == self._code_file)
         children: list[Any] = [row.box for row in self._code_rows[:len(page)]]
         if not page:
             children = [self._empty("files", "No file matches.")]
@@ -7527,15 +7841,43 @@ class LambdaExplorer:
             self.files_box = box
         else:
             self.files_box.children = children
-        total = len(self.package.files) if self.package is not None else 0
-        self._draw_pager("files", self._code_offset, len(files), _CODE_PAGE, "files", total)
+        files = self.package.files if self.package is not None else []
+        if self._code_query:
+            found = sum(1 for f in files if search_rank(self._code_query, (f.path, posixpath.basename(f.path)))
+                        is not None)
+            label = f"<b>{found:,}</b> of {_plural(len(files), 'file')} match"
+        else:
+            folders = len({folder for f in files for folder in _folders_of(f.path)})
+            label = f"<b>{len(files):,}</b> {'file' if len(files) == 1 else 'files'}" + (
+                f" in <b>{folders:,}</b> {'folder' if folders == 1 else 'folders'}" if folders else "")
+        if len(lines) > _CODE_PAGE:
+            label += (f" · lines {self._code_offset + 1:,}–{min(self._code_offset + _CODE_PAGE, len(lines)):,} of "
+                      f"{len(lines):,}")
+        self._draw_pager("files", self._code_offset, len(lines), _CODE_PAGE, "lines", label=label)
+
+    def _clicked_code_line(self, line: _TreeLine) -> None:
+        if not line.folder:
+            if line.file is not None:
+                self._open_code_file(line.file)
+            return
+        last, when = self._toggled
+        if last == line.path and time.monotonic() - when < _TOGGLE_GRACE:
+            return  # a double click's second click: the first one opened (or folded) it already
+        self._toggled = (line.path, time.monotonic())
+        folded = self._code_shut if self._code_query else self._code_open
+        if line.path in folded:
+            folded.discard(line.path)
+        else:
+            folded.add(line.path)
+        self._draw_code_rows()
 
     def _open_code_file(self, f: CodeFile) -> None:
         if self._code_fn is None:
             return
         self._code_file = f.path
+        self._code_open.update(_folders_of(f.path))  # so it's still in sight when the search is cleared
         for row in self._code_rows:
-            _class_if(row.box, "lmx-on", row.item is not None and row.item.path == f.path)
+            _class_if(row.box, "lmx-on", row.item is not None and not row.item.folder and row.item.path == f.path)
         self._draw_source(read_package(self._code_fn, self._package_data, file=f.path))
         self.code_right = self._w.VBox([self.source_view])  # a new box, which starts at the top
         self.code_right.add_class("lmx-right")
@@ -7549,14 +7891,15 @@ class LambdaExplorer:
         size = next((f.size for f in package.files if f.path == path), None)
         about = " · ".join(filter(None, [human_size(size) if size is not None else "",
                                          "the handler's file" if path == package.handler_file else ""]))
-        head = f'<div class="srch"><b>{_esc(path)}</b><span>{_esc(about)}</span></div>'
+        copy = (_copy_html(posixpath.basename(path), package.source, package.source_truncated)
+                if package.source is not None else "")
+        head = f'<div class="srch"><b>{_esc(path)}</b><span>{_esc(about)}</span>{copy}</div>'
         if package.source is not None:
             more = (self._html([_Note(f"Only the first {human_size(_SOURCE_LIMIT)} of it is shown.")])
                     if package.source_truncated else "")
             self._set(self.source_view, head + _source_html(path, package.source) + more)
         else:
             self._set(self.source_view, head + self._html([_Note(package.note or "Nothing to show.")]))
-
 
 def explore(
     name: str | None = None,

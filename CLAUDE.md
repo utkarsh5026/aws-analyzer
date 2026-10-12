@@ -127,7 +127,10 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `S3Analyzer._make_downloads_folder` writes `_DOWNLOADS_MARK` (a `.gitignore` of `*`) when the folder is new or
   empty, `_made_for_downloads` checks for it, and `_protected_folder` refuses the notebook's own folder, the home
   folder and the ones above them, even when marked. Local files are only written where the user asks: S3 downloads,
-  and `bedrock_chat`'s `save_runs()` / `log=`, which only append lines.
+  `lambda_functions`' `download()` and the explorer's Download .zip (`LambdaAnalyzer._save_package`: one .zip, written
+  to `<name>.zip.part` then renamed, in `lambda-downloads/` or the path given; a downloads folder it makes gets its own
+  `_DOWNLOADS_MARK`, and nothing in Lambda's module ever deletes a download), and `bedrock_chat`'s `save_runs()` /
+  `log=`, which only append lines.
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
   the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
@@ -138,9 +141,9 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   test on any other request. Index fixes (replicas, force merge) are shown as opensearch-py calls, never run.
   `lambda_functions.py` never invokes, changes or deletes a function (findings show the `aws lambda ...` /
   `aws logs put-retention-policy ...` command instead); its `filter_log_events` call lines carry `# read-only:`
-  comments (`FilterLogEvents` isn't a Get/List/Describe name), and `code()` downloads the deployment package with
-  urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only), which
-  `rules.py` can't see. Environment variable values never reach a report: `parse_function` keeps their names, and
+  comments (`FilterLogEvents` isn't a Get/List/Describe name), and `code()` and `download()` download the deployment
+  package with urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only),
+  which `rules.py` can't see. Environment variable values never reach a report: `parse_function` keeps their names, and
   `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
@@ -409,7 +412,14 @@ How the View layer works:
   **Live** polls `_filter()` every `_LIVE_SECONDS` in an asyncio task (`_live_loop`, the read on a worker thread) for
   `_LIVE_MINUTES`, merging new lines into `logs_page` (`_merge_live`); it stops when the Logs tab is left. Code
   downloads the package once (`_package`, a fresh link from GetFunction) and `read_package()` (pure) reads each file
-  clicked from the cached bytes; over 50 MB, a button downloads it anyway. Background work is `_later` (as in
+  clicked from the cached bytes; over 50 MB, a button downloads it anyway. Its files are a tree (`_file_tree`, pure:
+  folders first, `_code_open` the folders shown open, the handler's at first, a folder holding only a folder on its
+  line; with a search, every folder holding a match is open unless in `_code_shut`), drawn `_CODE_PAGE` lines to a
+  page by `_tree_face`; a click on a folder toggles it (`_clicked_code_line`, which drops a double click's second
+  click within `_TOGGLE_GRACE`). The file's **Copy** (`_copy_html`) is a `user-select:all` span holding the text
+  hidden, its label drawn by `::before`, so a click selects the file and Ctrl+C copies it, with no JavaScript.
+  **Download .zip** (`_save_code`) writes the cached bytes with `_save_package`, no new download; `x.saved` is the
+  `PackageDownload`. Background work is `_later` (as in
   `KBExplorer`), the status line's busy text carries its job (`_status(owner=)`) so only that job, or the user being on
   its tab, replaces it (`_finish`), and `_drop` bumps keys so a function's results that come back after another was
   picked are dropped. `_renew` / renewing `runs_box` puts a page's scrolling box anew so it starts at the top.
