@@ -137,7 +137,7 @@ from ._kit.render import (
 )
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _cell_number, _class_if, _css_height, _icon_url, _running_loop, _Window
+from ._kit.window import _cell_number, _class_if, _css_height, _icon_url, _Picker, _running_loop, _Window
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -4187,7 +4187,7 @@ class _Choice:
         return (self.title, self.value, self.detail, self.note, *self.also)
 
 
-class _Picker:
+class _ChoicePicker(_Picker):
     """A field of the window's header that opens a list to pick from, with a search box over it: the knowledge base,
     data source, model and files pickers. Plain widgets and CSS, like the rest of the window: the field is a button
     under its label and value, the list opens under it over the chat (.kbc-pop), and each line is a button under its
@@ -4206,53 +4206,22 @@ class _Picker:
                  query: Callable[[str], str] | None = None,
                  describe: Callable[[list[str]], tuple[str, str]] | None = None, multi: bool = False,
                  basis: str = "240px", list_width: str = ""):
-        w, layout = app.w, app.w.Layout
-        self.app, self.label, self.noun, self.multi, self.empty = app, label, noun, multi, empty
-        self.on_pick, self.on_text, self.on_open, self.query, self.describe = on_pick, on_text, on_open, query, describe
+        # the header's fields share its row, each from its basis up to 420px, and wrap when they don't fit
+        super().__init__(app, app.w, "kbc", on_pick=on_pick, on_text=on_text, placeholder=placeholder,
+                         close_width="26px", list_width=list_width or None,
+                         field_layout={"flex": f"1 1 {basis}", "min_width": "150px", "max_width": "420px"})
+        self.label, self.noun, self.multi, self.empty = label, noun, multi, empty
+        self.on_open, self.query, self.describe = on_open, query, describe
         self.choices: list[_Choice] = []
         self.picked: list[str] = []  # the value picked (one, unless multi)
-        self.problem = ""  # why there's nothing to list (it couldn't be read), shown under the list
         self.note = ""  # more to say under the list (only part of it was listed)
-        self.message = ""  # what went wrong with the last Enter, until the next key
         self.tip_off = ""  # the field's tooltip while it's disabled
-        self.shown: list[str] = []  # the values of the lines the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # value -> (its line, the line's button, its text)
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbc-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbc-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("kbc-trig")
-        self.search = w.Text(placeholder=placeholder, continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("kbc-find")
-        self.search.observe(app._safely(self._typed), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(width="26px", flex="0 0 auto"))
-        close.add_class("kbc-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("kbc-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none", min_width=list_width or None))
-        self.panel.add_class("kbc-pop")
-        # the header's fields share its row, each from its basis up to 420px, and wrap when they don't fit
-        self.field = w.VBox([trigger, self.panel], layout=layout(flex=f"1 1 {basis}", min_width="150px",
-                                                                 max_width="420px"))
-        self.field.add_class("kbc-field")
-        app.pickers.append(self)
         self._draw()
 
     @property
     def value(self) -> str:
         """The value picked ('' when none); with multi, see `picked`."""
         return self.picked[0] if self.picked else ""
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     @property
     def visible(self) -> bool:
@@ -4290,48 +4259,21 @@ class _Picker:
         self.picked = [v for v in values if v] if self.multi else values[:1]
         self._draw()
 
-    def open(self) -> None:
-        if self.disabled or self.is_open:
-            return
-        for other in self.app.pickers:  # one list open at a time
-            if other is not self:
-                other.close()
+    def _can_open(self) -> bool:
+        return not self.disabled
+
+    def _opening(self) -> None:
         if self.on_open is not None:
             self.on_open()
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.field, "kbc-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
 
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        if not any(p.is_open for p in self.app.pickers):
-            self.app.backdrop.layout.display = "none"
-        _class_if(self.field, "kbc-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
+    def _query(self, text: str) -> str:
+        return self.query(text) if self.query else text
 
-    def toggle(self) -> None:
-        if self.is_open:
-            self.close()
-        else:
-            self.open()
+    def _fields(self, c: _Choice) -> tuple[str, ...]:
+        return c.fields()
 
-    def matches(self) -> list[_Choice]:
-        """The lines the search box finds, best first; every line, in order, while it's empty."""
-        text = str(self.search.value or "")
-        text = self.query(text) if self.query else text
-        ranked = []
-        for i, c in enumerate(self.choices):
-            rank = search_rank(text, c.fields())
-            if rank is not None:
-                ranked.append((rank, i, c))
-        return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
+    def _key(self, c: _Choice) -> str:
+        return c.value
 
     def _choice(self, value: str) -> _Choice | None:
         return next((c for c in self.choices if c.value == value), None)
@@ -4364,17 +4306,7 @@ class _Picker:
             self._draw_list()
 
     def _row(self, c: _Choice, words: list[str], dots: bool) -> Any:
-        if c.value not in self.rows:
-            w, layout = self.app.w, self.app.w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("kbc-opt-b")
-            button.on_click(self.app._safely(lambda _button, value=c.value: self._clicked(value)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("kbc-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("kbc-opt")
-            self.rows[c.value] = (row, button, text)
-        row, button, text = self.rows[c.value]
+        row, button, text = self._line(c.value)
         on = c.value in self.picked
         _class_if(row, "kbc-on", on)
         tip = " · ".join(part for part in (c.title, c.detail, c.note) if part)
@@ -4508,7 +4440,7 @@ class _ChatApp(_Window):
         self.edit_base = ""  # the request the editor was filled with, to tell whether it's been changed since
         self.problems: list[str] = []  # why a picker couldn't list its choices
         self.unlisted: set[str] = set()  # knowledge bases whose data sources couldn't be listed: not tried again
-        self.pickers: list[_Picker] = []  # the header's fields: one list open at a time
+        self.pickers: list[_ChoicePicker] = []  # the header's fields: one list open at a time
         self._params: dict[str, Any] | None = None
         self.batch: Batch | None = None  # the test run the Test tab shows
         self.batch_rows: list[Any] = []  # an HTML widget per question of it, reused by the next run
@@ -4781,9 +4713,9 @@ class _ChatApp(_Window):
                             "</span></div>"))
         return w.VBox([head, self.code_mode, self.code_view], layout=layout(width="100%"))
 
-    def _kb_picker(self) -> _Picker:
+    def _kb_picker(self) -> _ChoicePicker:
         view = self.view
-        picker = _Picker(self, "Knowledge base", "knowledge base", on_pick=self._kb_picked, on_text=self._kb_typed,
+        picker = _ChoicePicker(self, "Knowledge base", "knowledge base", on_pick=self._kb_picked, on_text=self._kb_typed,
                          query=kb_search_text, placeholder="Search by name, ID or description",
                          empty="Pick a knowledge base", basis="250px", list_width="420px")
         kbs: list[KnowledgeBase] | None
@@ -4823,8 +4755,8 @@ class _ChatApp(_Window):
         return _Choice(kb.id, kb.name or kb.id, detail=kb.id, tone=tone, also=(kb.status,),
                        note=" · ".join(part for part in (status, kb.description, changed) if part))
 
-    def _source_picker(self) -> _Picker:
-        picker = _Picker(self, "Data source", "data source", on_pick=self._source_picked,
+    def _source_picker(self) -> _ChoicePicker:
+        picker = _ChoicePicker(self, "Data source", "data source", on_pick=self._source_picked,
                          placeholder="Search by name or ID", empty="All data sources", basis="190px")
         self.source_pick = picker
         problem = self._fill_sources()
@@ -4869,11 +4801,11 @@ class _ChatApp(_Window):
         picker.visible = len(choices) > 2 or bool(value)
         return problem
 
-    def _files_picker(self) -> _Picker:
+    def _files_picker(self) -> _ChoicePicker:
         """The Files field, and the line under the header that shows the files ticked, as chips."""
         w, layout = self.w, self.w.Layout
         self.files_kb: str | None = None  # the knowledge base whose files the list holds
-        self.files_pick = _Picker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
+        self.files_pick = _ChoicePicker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
                                   on_open=self._list_files, describe=self._files_face, multi=True,
                                   placeholder="Search by file name or folder", empty="All files", basis="140px")
         self.file_chips = w.HBox(layout=layout(width="auto", flex_flow="row wrap", align_items="center"))
@@ -4986,9 +4918,9 @@ class _ChatApp(_Window):
         self._set_status(f"The next questions search {describe_files(self.view.picked_files)}; the conversation goes "
                          "on.", "ok")
 
-    def _model_picker(self) -> _Picker:
+    def _model_picker(self) -> _ChoicePicker:
         view = self.view
-        picker = _Picker(self, "Model", "model", on_pick=self._model_picked, on_text=self._model_typed,
+        picker = _ChoicePicker(self, "Model", "model", on_pick=self._model_picked, on_text=self._model_typed,
                          placeholder="Search by name, provider or ID", empty="Pick a model", basis="300px",
                          list_width="420px")
         picker.tip_off = "Retrieve only doesn't use a model: switch to Answer to pick one"
@@ -5046,11 +4978,6 @@ class _ChatApp(_Window):
         )
 
     # ---------------------------------------------------------------- plumbing
-
-    def _close_lists(self) -> None:
-        """A click on the backdrop, anywhere in the window but the open list: closes it."""
-        for picker in self.pickers:
-            picker.close()
 
     def _explain(self, code: str, message: str) -> str:
         return self.view._explain(code, message)
