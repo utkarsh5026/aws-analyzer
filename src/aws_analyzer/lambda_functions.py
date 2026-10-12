@@ -70,7 +70,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Generator, Iterable
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
@@ -86,7 +86,7 @@ from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
-from ._kit.window import _class_if, _css_height, _Explorer, _for_window, _running_loop, _skeleton, _window_errors
+from ._kit.window import _class_if, _Explorer, _for_window, _icon_url, _running_loop, _skeleton, _window_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -4653,11 +4653,8 @@ _DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda funct
 
 def _explorer_rules() -> str:
     """The explorer's icons, the tabs' and the Hide files button's: .lmx-i-<key> sets --lx-icon, which ::before draws."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
     icons = [(key, paths) for key, _, _, paths in _EXPLORER_TABS] + list(_FILES_ICONS)
-    return "\n".join(f'.lmx-app .lmx-i-{key}{{--lx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-                     for key, paths in icons)
+    return "\n".join(f".lmx-app .lmx-i-{key}{{--lx-icon:{_icon_url(paths)}}}" for key, paths in icons)
 
 
 _EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,165,250,.15);--lx-ring:rgba(96,165,250,"
@@ -5655,7 +5652,7 @@ class LambdaExplorer(_Explorer):
     for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
     hold the data behind what's shown."""
 
-    _THREADS = "lambda-explorer"
+    _PREFIX, _THREADS = "lmx", "lambda-explorer"
     _reword = staticmethod(_window_text)
 
     def __init__(
@@ -5863,7 +5860,6 @@ class LambdaExplorer(_Explorer):
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
-        style = w.HTML(_CSS + _EXPLORER_CSS, layout=layout(display="none"))
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("lmx-backdrop")
         self.backdrop.on_click(self._safely(lambda _button: self.field.close()))
@@ -5884,19 +5880,11 @@ class LambdaExplorer(_Explorer):
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("lmx-head")
 
-        self.tab_buttons: dict[str, Any] = {}
-        for key, title, tip, _ in _EXPLORER_TABS:
-            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
-            for name in ("lmx-tab", f"lmx-i-{key}"):
-                button.add_class(name)
-            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
-            self.tab_buttons[key] = button
-        tabs = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
-        tabs.add_class("lmx-tabs")
+        tabs = self._tab_bar(_EXPLORER_TABS)
 
         self.overview_view = w.HTML(layout=layout(width="100%"))
         self.settings_view = w.HTML(layout=layout(width="100%"))
-        self.pages = {
+        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
             "functions": self._functions_page(),
             "overview": self._scroll_page([self.overview_view]),
             "logs": self._logs_page(),
@@ -5904,20 +5892,7 @@ class LambdaExplorer(_Explorer):
             "performance": self._performance_page(),
             "code": self._code_page(),
             "settings": self._scroll_page([self.settings_view]),
-        }
-        height = _css_height(self.height)
-        for key, page in self.pages.items():
-            page.add_class("lmx-page")
-            page.layout.width = "100%"
-            if height:
-                page.layout.height = height
-            if key != self._tab:
-                page.layout.display = "none"
-        self.status = w.HTML(layout=layout(width="100%"))
-        self.status.add_class("lmx-status")
-        self.root = w.VBox([style, head, tabs, *self.pages.values(), self.status, self.backdrop],
-                           layout=layout(width="100%"))
-        self.root.add_class("lmx-app")
+        })
         self._show_tab(self._tab)
 
     def _scroll_page(self, children: list[Any], above: list[Any] | None = None) -> Any:
