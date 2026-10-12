@@ -45,7 +45,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import fnmatch
-import functools
 import html
 import importlib
 import os
@@ -63,7 +62,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
 from ._kit.render import _file_icon
-from ._kit.window import _cell_number, _css_height, _running_loop
+from ._kit.window import _cell_number, _css_height, _running_loop, _window_errors
 
 # =============================================================================
 # 1. Helpers
@@ -718,29 +717,6 @@ class S3Navigator:
 # =============================================================================
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is shown as a note in the explorer instead of a
-    traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: S3Explorer, *args: Any, **kwargs: Any) -> None:
-        if self.s3 is None:
-            self._say(self._broken)
-            return None
-        try:
-            return method(self, *args, **kwargs)
-        except ClientError as exc:
-            error = exc.response.get("Error", {})
-            self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{method.__name__}]")
-        except ImportError as exc:  # a missing optional package: the message says what to pip install
-            self._fail(f"{str(exc).rstrip('.')}.")
-        except (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError))) as exc:
-            self._fail(f"{type(exc).__name__}: {exc}  [{method.__name__}]")
-        return None
-
-    return wrapper
-
-
 # The toolbar's icons (24 x 24, drawn with lines), shown as masks in the text's colour so they follow the theme.
 _ICON_PATHS = {
     "back": "<path d='M19 12H5M11 18l-6-6 6-6'/>",
@@ -1219,6 +1195,26 @@ class S3Explorer:
 
     def _fail(self, text: str) -> None:
         self._set_pane([[self.s3._Note(text, "warn")]])
+
+    def _ready(self) -> bool:
+        """Whether a command can run (see _window_errors): not without s3.py, which says so instead."""
+        if self.s3 is None:
+            self._say(self._broken)
+            return False
+        return True
+
+    def _command_failed(self, exc: Exception, command: str) -> bool:
+        """A command's AWS or input error as a note in the explorer (see _window_errors); False for any other."""
+        if isinstance(exc, ClientError):
+            error = exc.response.get("Error", {})
+            self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{command}]")
+        elif isinstance(exc, ImportError):  # a missing optional package: the message says what to pip install
+            self._fail(f"{str(exc).rstrip('.')}.")
+        elif isinstance(exc, (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError)))):
+            self._fail(f"{type(exc).__name__}: {exc}  [{command}]")
+        else:
+            return False
+        return True
 
     def _capture(self, blocks: list[Any]) -> None:
         """The pane's S3View renders here (see _trim)."""
