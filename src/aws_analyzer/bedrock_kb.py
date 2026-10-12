@@ -47,9 +47,7 @@ Quick start
 
 from __future__ import annotations
 
-import asyncio
 import difflib
-import functools
 import html
 import json
 import mimetypes
@@ -82,7 +80,7 @@ from ._bedrock import (
 )
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _in_notebook, _require
+from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _utcnow, human_age, human_money,
@@ -91,7 +89,7 @@ from ._kit.fmt import (
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _cell_number, _class_if, _css_height, _for_window, _running_loop, _skeleton
+from ._kit.window import _class_if, _css_height, _Explorer, _for_window, _skeleton, _window_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -7171,25 +7169,7 @@ def _short_value(value: Any, width: int = 48) -> str:
     return _clip(json.dumps(_plain_json(value), ensure_ascii=False), width)
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is said in the window's status line (or, without the
-    window, as a note) instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: KBExplorer, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except (ClientError, BotoCoreError, ValueError, TypeError) as exc:
-            if self._w is None:
-                self.ui._show([_Note(self._error_text(exc), "warn")])
-            else:
-                self._status(self._error_text(exc), "warn")
-        return None
-
-    return wrapper
-
-
-class KBExplorer:
+class KBExplorer(_Explorer):
     """The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
 
@@ -7215,6 +7195,9 @@ class KBExplorer:
     x.ui is a BedrockKBView for reports in other cells (x.ui.search(...)); x.inventory, x.info, x.chunks hold the
     data behind what's shown."""
 
+    _THREADS = "kb-explorer"
+    _reword = staticmethod(_window_text)
+
     def __init__(
         self,
         kb: str | None = None,
@@ -7230,6 +7213,7 @@ class KBExplorer:
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
+        super().__init__()
         if view is None:
             view = BedrockKBView(core or BedrockKBAnalyzer(region=region, profile=profile), kb=kb,
                                  mode="text" if mode == "text" else "auto", progress=progress)
@@ -7246,27 +7230,12 @@ class KBExplorer:
         self.probe: FileProbe | None = None  # the last question asked of that file
         self.jobs: list[IngestionJob] | None = None  # the Syncs tab's history, once read
         self.found: Retrieval | None = None  # the Search tab's last search
-        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
-        self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
-        self._w: Any = None
         self._want_file = file  # opened once the files are listed
         self._query, self._state, self._source, self._sort, self._offset = "", "", "", "problems", 0
         self._tab = "overview"
-        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
-        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
-        self._pool: ThreadPoolExecutor | None = None
-        self._counted = 0  # what the background listing has read so far
-        self._said: tuple[str, str, bool] = ("", "", False)  # the status line: text, level, busy
         self._rows: list[_FileRow] = []
         self._visible: list[KBFile] = []  # the files the list's filters let through, in order
-        self._shown_at: Any = object()
-        note = ""
-        if mode != "text" and (mode == "widgets" or _in_notebook()):
-            try:
-                self._w = _require("ipywidgets", "The explorer window")
-            except ImportError as exc:
-                note = (f"{exc}, which SageMaker notebooks normally have: install it and restart the kernel. Until "
-                        "then, the same in reports:")
+        note = self._load_widgets(mode)
         if self._w is None:
             self._reports(kb, note, mode)
             return
@@ -7322,20 +7291,6 @@ class KBExplorer:
 
     # ------------------------------------------------------------------ plumbing
 
-    def _ipython_display_(self) -> None:
-        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
-        its reports were shown when it was made)."""
-        if self._w is not None and _cell_number() != self._shown_at:
-            self._display()
-
-    def _display(self) -> None:
-        self._shown_at = _cell_number()
-        if self._shown_at is None:
-            return  # outside IPython there's nowhere to show widgets
-        from IPython.display import display
-
-        display(self.root)
-
     def _reports(self, kb: str | None, note: str, mode: str) -> None:
         """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
         if note:
@@ -7347,111 +7302,10 @@ class KBExplorer:
         self.ui.files(kb)
         self.kb = next(reversed(self.ui._inventories), None)  # the ID files() listed (None when it couldn't)
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._status(self._error_text(exc), "warn")
-                return None
-
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {_window_text(self.ui._explain(code, message))}"
-        if isinstance(exc, _Hint):
-            return _window_text(str(exc))
-        return f"{type(exc).__name__}: {exc}"
-
-    def _status(self, text: str, level: str = "", busy: bool = False) -> None:
-        self._said = (text, level, busy)
-        spin = '<span class="spin"></span>' if busy else ""
-        self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
-        chunk and JSON object the user opened."""
-        if widget.value != value:
-            widget.value = value
-
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
         return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
-
-    def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
-        self.shown[page] = blocks
-        self._set(widget, self._html(blocks))
-
-    def _workers(self) -> ThreadPoolExecutor:
-        if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="kb-explorer")
-        return self._pool
-
-    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
-               failed: Callable[[BaseException], None] | None = None, counting: str = "") -> None:
-        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
-        window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
-        A newer job of the same key makes this one's result go unused. counting: the status line to show, with the
-        count read so far, while it runs."""
-        self._jobs[key] = job = self._jobs.get(key, 0) + 1
-        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
-
-        def finish(handler: Callable[[Any], None], value: Any) -> None:
-            if self._jobs.get(key) != job:
-                return
-            try:
-                handler(value)
-            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
-                self._status(self._error_text(exc), "warn")
-
-        loop = _running_loop()
-        if loop is None:
-            try:
-                result = work()
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            return
-
-        async def run() -> None:
-            future = loop.run_in_executor(self._workers(), work)
-            while counting and not future.done():
-                await asyncio.wait([future], timeout=0.4)
-                if self._jobs.get(key) == job and not future.done() and self._counted:
-                    self._status(f"{counting}… {self._counted:,} read so far", busy=True)
-            try:
-                result = await future
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            finally:
-                if self._tasks.get(key) is task:
-                    del self._tasks[key]
-
-        task = loop.create_task(run())
-        self._tasks[key] = task
 
     # ------------------------------------------------------------------ layout
 
@@ -7726,7 +7580,7 @@ class KBExplorer:
         self._status(f"Listing {info.name}'s files: Bedrock's document list next to the files in S3…", busy=True)
         self._later("files", lambda: self.core.file_inventory(
             info.id, info=info, progress=lambda count: setattr(self, "_counted", count)),
-            self._listed, self._files_failed, counting="Listing the files")
+            self._listed, self._files_failed, counting="Listing the files… {n} read so far")
 
     def _files_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)

@@ -1,7 +1,8 @@
 """The code every service shares (aws_analyzer._kit): what the renderer does with a block nothing draws, the
 stylesheet every report starts with, and what the base View and Analyzer do that no service shows in normal use
-(an error none of them raises, a command no group lists, prices passed to one analyzer). Each service's tests cover
-how its reports read."""
+(an error none of them raises, a command no group lists, prices passed to one analyzer), and the windows' guards for
+what no window meets (a command that can't run, an error that should still raise). Each service's tests cover how its
+reports read, and each window's tests click through it."""
 
 import itertools
 
@@ -15,6 +16,7 @@ from aws_analyzer._kit.blocks import _Note, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _base_css, _render_text, _report_html
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
+from aws_analyzer._kit.window import _Window, _window_errors
 
 # Each service: its module, Analyzer and View, and its list prices.
 SERVICES = [
@@ -153,3 +155,52 @@ def test_prices_given_to_one_analyzer_change_nothing_else(module, analyzer, view
         assert module.MODEL_PRICES[model] != (1.0, 2.0) and other.model_prices == module.MODEL_PRICES
         assert view(custom, mode="text")._price_basis(models=True) == "your prices"
         assert view(other, mode="text")._price_basis(models=True) == "us-east-1 list prices"
+
+
+class _ToyWindow(_Window):
+    """A window that writes down what it says, and says a ValueError from a command but nothing else."""
+
+    def __init__(self, ready=True):
+        self.said, self.ran, self.ready = [], [], ready
+
+    def _warn(self, text):
+        self.said.append(text)
+
+    def _explain(self, code, message):
+        return f"{message}. See syncs()"
+
+    @staticmethod
+    def _reword(text):
+        return text.replace("syncs()", "the Syncs tab")
+
+    def _ready(self):
+        return self.ready
+
+    def _command_failed(self, exc, command):
+        if isinstance(exc, ValueError):
+            self.said.append(f"{command}: {exc}")
+            return True
+        return False
+
+    @_window_errors
+    def go(self, exc=None):
+        """A command: raises exc when given one."""
+        self.ran.append(exc)
+        if exc is not None:
+            raise exc
+        return "went"
+
+
+def test_window_guards_say_errors_in_the_window():
+    w = _ToyWindow()
+    denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "not allowed"}}, "ListThings")
+    w._safely(w.go)(denied)  # a callback's error goes to the window, in its words (the command lets it through)
+    assert w.said == ["AccessDenied: not allowed. See the Syncs tab"]
+    assert w._on_enter(lambda: w.said.append("entered"))(None, {"event": "blur"}, []) is None and len(w.said) == 1
+    w._on_enter(lambda: w.said.append("entered"))(None, {"event": "submit"}, [])
+    assert w.said[-1] == "entered" and w._error_text(_Hint("Try syncs()")) == "Try the Syncs tab"
+    assert w.go() == "went" and w.go(ValueError("bad")) is None and w.said[-1] == "go: bad"
+    with pytest.raises(KeyError):  # an error the window doesn't say still raises
+        w.go(KeyError("k"))
+    idle = _ToyWindow(ready=False)
+    assert idle.go() is None and idle.ran == []  # a window that can't run a command doesn't start it
