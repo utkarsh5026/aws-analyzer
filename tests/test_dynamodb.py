@@ -393,7 +393,7 @@ def test_table_findings():
     )
     # Writes use 2% of 5 units: 1 unit leaves the busiest period at 70%; reads (90% used) stay at 10.
     assert (
-        "Writes peaked at 2% of the 5 provisioned units" in text
+        "capacity goes unused: writes peaked at 2% of the 5 provisioned units" in text
         and "costs $3.32/month" in text
     )
     assert (
@@ -430,7 +430,7 @@ def test_table_findings_price_idle_capacity():
     )
     [(level, message)] = table_findings(idle, quiet_day)
     assert level == "warn" and message.startswith(
-        "Reads peaked at under 1% of the 1,000 provisioned units"
+        "Most of the provisioned capacity goes unused: reads peaked at under 1% of the 1,000 provisioned units"
     )
     assert f"costs {human_money(capacity_cost(1000, 1000))}/month" in message
     assert (

@@ -12,6 +12,7 @@ from moto import mock_aws
 
 from aws_analyzer import s3 as s3mod
 from aws_analyzer import s3_explorer as sx
+from aws_analyzer._kit.render import _render_text
 from aws_analyzer.s3 import S3Analyzer, S3View
 from aws_analyzer.s3_explorer import (
     Entry,
@@ -354,7 +355,7 @@ def row(x, name):
 
 
 def text(x):
-    return s3mod._render_text(x.shown, 0)
+    return _render_text(x.shown, 0)
 
 
 def test_explorer_fills_the_window_unless_given_a_height(explorer):

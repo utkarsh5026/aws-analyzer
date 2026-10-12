@@ -11,8 +11,7 @@ Errors (exit 1):
     analyzer (SHARED: _bedrock.py, for bedrock_kb.py and bedrock_chat.py); a shared module importing an analyzer;
     and _kit/ importing any of them
   - an analyzer defining a name that _kit/ has, or the shared module it imports (a copy of a shared helper: import
-    it from there instead), except S3's own renderer until Phase 6 of .claude/plans/shared-code.md (OWN_RENDERER);
-    and a shared module defining a name that _kit/ has
+    it from there instead); and a shared module defining a name that _kit/ has
   - no `from __future__ import annotations`
   - the five numbered `# N. ...` section banners missing or out of order (not in _kit/ or a shared module)
   - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
@@ -48,9 +47,6 @@ COMPANIONS = {"s3_explorer": "s3"}
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
 # analyzers that import it don't define its names again.
 SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
-# S3's tables sort, filter and pick columns, and its findings read as headlines over points: until Phase 6 of
-# .claude/plans/shared-code.md brings that to every service, s3.py keeps its own versions of these _kit names.
-OWN_RENDERER = {"s3": {"_Table", "_prose", "_findings_html", "_table_html", "_render_text"}}
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
                  "Retrieve")
@@ -245,7 +241,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     # A copy of a shared helper: _kit (or the shared module the analyzer imports) has it, so it's imported from there.
     if not in_kit:
         for name, line in _top_level_names(tree):
-            if name in kit and name not in OWN_RENDERER.get(path.stem, set()):
+            if name in kit:
                 report.error(f"{rel}:{line}", f"defines {name}, which _kit/{kit[name]}.py has; import it from there "
                                               "(from ._kit." + kit[name] + " import " + name + ") instead of a copy")
             for module in sorted(uses):

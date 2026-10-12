@@ -1,4 +1,5 @@
-"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show."""
+"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; and
+file names' extensions."""
 
 from __future__ import annotations
 
@@ -148,3 +149,35 @@ def _as_int(value: Any, name: str, *, hint: str = "") -> int:
 def _as_count(value: Any, name: str) -> int | None:
     """Like _as_int, for limits where None means no limit."""
     return None if value is None else _as_int(value, name, hint=", or None for no limit")
+
+
+_COMPRESSION_EXTS = {
+    "gz",
+    "gzip",
+    "bz2",
+    "xz",
+    "zst",
+    "zstd",
+    "snappy",
+    "lz4",
+    "zip",
+    "z",
+}
+
+
+def file_extension(key: str) -> str:
+    """'a/data.csv.gz' -> 'csv.gz', 'a/part-0.snappy.parquet' -> 'parquet', 'a/README' -> '(none)'."""
+    if key.endswith("/"):
+        return "(folder marker)"
+    parts = key.rsplit("/", 1)[-1].lower().split(".")
+    if len(parts) < 2 or parts[-1] == "" or (len(parts) == 2 and parts[0] == ""):
+        return "(none)"  # 'README', 'name.', '.env'
+    ext = parts[-1]
+    if (
+        ext in _COMPRESSION_EXTS
+        and len(parts) > 2
+        and parts[-2].isalpha()
+        and len(parts[-2]) <= 8
+    ):
+        return f"{parts[-2]}.{ext}"
+    return ext

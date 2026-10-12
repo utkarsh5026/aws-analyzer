@@ -8,7 +8,7 @@ register how they're drawn with @_draws when it's imported.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
@@ -35,6 +35,8 @@ class _Table:
     code_cols: tuple[int, ...] = ()  # columns holding calls to copy, shown as code
     prose_cols: tuple[int, ...] = ()  # columns of sentences this tool wrote (findings): calls in them shown as code
     collapsed: bool = False  # a secondary view: folded under its title in HTML
+    path_cols: tuple[int, ...] = ()  # columns of keys / paths: the file name always shows, a long folder is shortened
+    sortable: bool = True  # in HTML a click on a column's header sorts by it (tree tables never sort)
 
 
 @dataclass
@@ -81,6 +83,18 @@ class _Report:
 
     max_rows: int  # the view's cap on table rows; 0 = no cap
     badge: str = ""  # the chip before each title (HTML), so reports from different services are easy to tell apart
+    root: str = ""  # the service's root class, which scopes the CSS rules below
+    blocks: tuple[Any, ...] = ()  # the whole report, for a block that needs to know what else is in it
+    rules: set[str] = field(default_factory=set)  # CSS rules the blocks need beyond the stylesheet (a table's
+    # filters and columns): a <style> after it
+    parts: dict[Any, Any] = field(default_factory=dict)  # what blocks share while the report is drawn (see shared)
+
+    def shared(self, key: Any, make: Callable[[], Any]) -> Any:
+        """What the report's blocks share while it's drawn, made by make() the first time one asks for it: S3's PDF
+        pages share one full-size view, so its ‹ › step through every page in the report."""
+        if key not in self.parts:
+            self.parts[key] = make()
+        return self.parts[key]
 
 
 _HTML: dict[type, Callable[[Any, _Report], str]] = {}  # block type -> its HTML

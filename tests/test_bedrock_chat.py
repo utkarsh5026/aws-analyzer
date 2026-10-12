@@ -1090,10 +1090,10 @@ def test_ranking_findings_name_the_best_setup_and_what_each_setting_changed():
     same = ranking_findings(runs[:2])
     assert same[0][1].startswith("Every setup did as well as the others on these 2 questions (each cites the expected "
                                  "source in 1 of 1 question), so what was tried made no difference here.")
-    assert same[1] == ("warn", "1 question didn't work with any setup ('Moon?'; unable to assist with the best one): "
-                               "nothing tried here fixes it, so the documents may not hold the answer, or a file isn't "
-                               "indexed. retrieve('Moon?') shows what the search finds, and files() whether a file is "
-                               "indexed.")
+    assert same[1] == ("warn", "1 question didn't work with any setup: nothing tried here fixes it ('Moon?'; unable "
+                               "to assist with the best one), so the documents may not hold the answer, or a file "
+                               "isn't indexed. retrieve('Moon?') shows what the search finds, and files() whether a "
+                               "file is indexed.")
     refused = run_of(BatchItem("How long?", error="HYBRID isn't supported.", error_code="ValidationException"),
                      BatchItem("Moon?", error="HYBRID isn't supported.", error_code="ValidationException"),
                      settings={"n": 5, "search_type": "HYBRID"})
@@ -2683,6 +2683,13 @@ def open_window(monkeypatch, clients=None, **kwargs):
     return view
 
 
+def only_table_rules(value):
+    """Whether every <style> in a pane holds only the rules its own tables add (their filters and columns), which ship
+    with them: the report CSS is the window's style's, once."""
+    return all(rule.startswith(".kbc form.tbl:has(") for style in value.split("<style>")[1:]
+               for rule in style.split("</style>")[0].split("\n"))
+
+
 def html_widgets(widget):
     """Every widget in a window that shows HTML."""
     found, todo = [], [widget]
@@ -2727,7 +2734,7 @@ def test_window_test_tab_asks_a_list_and_shows_how_each_did(monkeypatch, capsys)
     view.set(n=8)  # from another cell; then Run again: each line says what changed
     app.run_button.click()
     assert "↑ was unable to assist" in app.batch_rows[1].value and "Test run 2" in app.test_head.value
-    assert "Since the last run (n 5 → 8): 1 question did better" in app.test_head.value
+    assert '<div class="hd">Since the last run (n 5 → 8)</div><div class="dt">1 question did better' in app.test_head.value
     app.test_box.value = "  "
     app._run_tests()
     assert "Type or paste questions in the Test tab first" in app.status.value and len(view.batches) == 2
@@ -2823,7 +2830,7 @@ def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
     assert len(view.batches) == 4 and all(a is b for a, b in zip(view.batches, sweep.batches))
     head = html.unescape(app.sweep_head.value)
     assert "Sweep 1" in head and "Setups, best first" in head and "n=8 · search_type=SEMANTIC did best" in head
-    assert '<div class="kbc">' in head and "<style>" not in head  # the window's style holds the report CSS, once
+    assert '<div class="kbc">' in head and only_table_rules(head)  # the window's style holds the report CSS, once
     assert [pane for pane in html_widgets(app.root) if chatmod._CSS in pane.value] == [app.root.children[0]]
     assert app.sweep_bar.layout.display == "" and app.setup_pick.value == 3 and sweep.best is view.batches[2]
     assert [label for label, _ in app.setup_pick.options][0] == "#1 · run 3 · n=8 · search_type=SEMANTIC"
@@ -2923,7 +2930,7 @@ def test_window_runs_tab_lists_shows_switches_compares_and_saves(monkeypatch, tm
     assert view.values == {"n": 8} and "Now using the setup of run 3 (sweep 1: n=8): n 5 → 8." in app.status.value
     app.compare_button.click()
     assert "3 test runs on support-docs compared" in html.unescape(app.compare_view.value)
-    assert '<div class="kbc">' in app.compare_view.value and "<style>" not in app.compare_view.value
+    assert '<div class="kbc">' in app.compare_view.value and only_table_rules(app.compare_view.value)
     view.ask_all(["Something else?"])
     app.run_pick.value = 4
     app.compare_button.click()

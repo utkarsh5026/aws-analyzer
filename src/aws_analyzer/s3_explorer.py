@@ -62,6 +62,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
+from ._kit.render import _file_icon
 
 # =============================================================================
 # 1. Helpers
@@ -315,12 +316,13 @@ def breadcrumbs(uri: str) -> list[tuple[str, str]]:
 
 def entry_icon(entry: Entry, s3: Any = None) -> str:
     """🪣 bucket, 📁 folder, or a file's icon by its type (📊 tables, 📕 PDF, 🖼️ images, 🧠 models, ...), the same
-    icons s3.py's reports put in front of keys (its _file_icon; pass the s3 module when you have it)."""
+    icons the reports put in front of keys (_kit's _file_icon). `s3` isn't needed any more; it's kept so older calls
+    still work."""
     if entry.kind == "bucket":
         return "🪣"
     if entry.kind == "folder":
         return "📁"
-    return (s3 or _s3_module())._file_icon(entry.name)
+    return _file_icon(entry.name)
 
 
 def sort_entries(entries: list[Entry], by: str = "name", descending: bool = False) -> list[Entry]:
@@ -1609,7 +1611,7 @@ class S3Explorer:
                     "button above adds it all up."))
         if listing:
             shown = self._shown_entries(folder)
-            rows = [[f"{entry_icon(e, s3)} {e.key[len(prefix):] if folder.deep else e.name}"
+            rows = [[f"{entry_icon(e)} {e.key[len(prefix):] if folder.deep else e.name}"
                      f"{'/' if e.kind == 'folder' and not folder.deep else ''}{' ❄' if e.archived else ''}",
                      "" if e.is_folder else s3.human_size(e.size), s3.human_age(e.modified) if e.modified else ""]
                     for e in shown]
@@ -1949,7 +1951,7 @@ class S3Explorer:
         for chip, (kind, files, size) in zip(self._chips, shown):
             on = kind in wanted.types
             with chip.hold_sync():
-                chip.description = f"{s3._file_icon('x.' + kind)} .{kind} {files:,}"
+                chip.description = f"{_file_icon('x.' + kind)} .{kind} {files:,}"
                 chip.tooltip = (f"{_plural(files, f'.{kind} file')}, {s3.human_size(size)}"
                                 f"{' so far' if folder.more else ''}: " + (
                                     "click to show every type again" if on else
@@ -2020,7 +2022,7 @@ class S3Explorer:
             size, age = "", s3.human_age(entry.modified) if entry.modified else ""
         name = entry.name or "(no name)"
         with row.button.hold_sync():
-            row.button.description = f"{entry_icon(entry, s3)}  {name}{'  ❄' if entry.archived else ''}"
+            row.button.description = f"{entry_icon(entry)}  {name}{'  ❄' if entry.archived else ''}"
             row.button.tooltip = tip
             row.button._dom_classes = self._row_classes(entry)
         row.check._dom_classes = _CHECK + (("s3x-on",) if entry.uri in self._picked else ())

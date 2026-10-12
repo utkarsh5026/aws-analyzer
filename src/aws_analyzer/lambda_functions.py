@@ -1913,8 +1913,8 @@ def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
         g = uncovered[0]
         see = f" logs('{name}', request_id='{g.request_ids[0]}') shows the whole run." if g.request_ids else ""
         found.append(("warn" if g.kind != "Logged error" else "info", (
-            f"The most common {'error' if not covered else 'other error'}, {_clip(g.message, 160)}, happened "
-            f"{_times(g.count)} (the last {human_age(g.last, report.until)}).{see}"
+            f"The most common {'error' if not covered else 'other error'} happened {_times(g.count)} (the last "
+            f"{human_age(g.last, report.until)}): {_clip(g.message, 160).rstrip('.')}.{see}"
         )))
     m = report.metrics
     window = _window((report.until - report.since).total_seconds())
@@ -3445,15 +3445,15 @@ _EXTRA_CSS = """\
 .lmb .wire .wf{border:1px solid rgba(234,88,12,.55);border-radius:10px;padding:10px 12px;background:rgba(234,88,12,.06);text-align:center}
 .lmb .wire .wf .wl{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;margin-bottom:4px;color:#fff;font-weight:700;background:linear-gradient(135deg,#f97316,#ea580c)}
 .lmb .wire .wf b{display:block;font-size:14px;overflow-wrap:anywhere}
-.lmb .cols{display:flex;align-items:flex-end;gap:2px;height:120px;padding:0 0 0 2px;position:relative;border-bottom:1px solid rgba(127,127,127,.35);max-width:980px}
-.lmb .cols i{flex:1 1 0;min-width:2px;max-width:34px;border-radius:2px 2px 0 0;background:rgba(59,130,246,.55);position:relative;display:flex;flex-direction:column;justify-content:flex-start}
-.lmb .cols i:hover{background:rgba(59,130,246,.8)}
-.lmb .cols i b{display:block;width:100%;border-radius:2px 2px 0 0;background:#ef4444}
-.lmb .cols.dim i{background:rgba(59,130,246,.22);justify-content:flex-end}
-.lmb .cols.dim i b{background:rgba(59,130,246,.75);border-radius:0}
-.lmb .cols .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
-.lmb .cols .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
-.lmb .cols .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
+.lmb .colbars{display:flex;align-items:flex-end;gap:2px;height:120px;padding:0 0 0 2px;position:relative;border-bottom:1px solid rgba(127,127,127,.35);max-width:980px}
+.lmb .colbars i{flex:1 1 0;min-width:2px;max-width:34px;border-radius:2px 2px 0 0;background:rgba(59,130,246,.55);position:relative;display:flex;flex-direction:column;justify-content:flex-start}
+.lmb .colbars i:hover{background:rgba(59,130,246,.8)}
+.lmb .colbars i b{display:block;width:100%;border-radius:2px 2px 0 0;background:#ef4444}
+.lmb .colbars.dim i{background:rgba(59,130,246,.22);justify-content:flex-end}
+.lmb .colbars.dim i b{background:rgba(59,130,246,.75);border-radius:0}
+.lmb .colbars .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
+.lmb .colbars .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
+.lmb .colbars .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
 .lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS)
 _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
@@ -3501,7 +3501,7 @@ def _columns_html(block: _Columns, report: _Report) -> str:
                  f"{_esc(block.limit_label)}</span></span>")
     labels = [block.items[0][0], block.items[len(block.items) // 2][0], block.items[-1][0]]
     axis = "".join(f"<span>{_esc(label)}</span>" for label in (labels if len(block.items) > 2 else labels[::2]))
-    return (f'{title}<div class="cols{" dim" if block.part == "dim" else ""}"><span class="top">{_esc(scale)}</span>'
+    return (f'{title}<div class="colbars{" dim" if block.part == "dim" else ""}"><span class="top">{_esc(scale)}</span>'
             f'{limit}{bars}</div><div class="colx">{axis}</div>')
 
 
@@ -4965,23 +4965,23 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .cbs code{font-family:var(--lx-mono);font-size:11px;padding:1px 5px;border-radius:5px;background:var(--lx-tint-2);color:inherit;user-select:all;-webkit-user-select:all;cursor:text}
 .lmx-app.lmx-app .lmx-row.lmx-tree{height:30px;margin:0}
 .lmx-app.lmx-app .lmx-row.lmx-tree>.lmx-row-b{border-radius:7px}
-.lmx-app .tl{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 calc(6px + var(--d,0) * 16px);min-width:0;font-size:12.5px;background:repeating-linear-gradient(90deg,transparent 0 11.5px,var(--lx-line) 11.5px 12.5px,transparent 12.5px 16px) 0 0/calc(var(--d,0) * 16px) 100% no-repeat}
-.lmx-app .tl .tv{flex:0 0 12px;width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center}
-.lmx-app .tl.d .tv::before{content:"";width:6px;height:6px;margin-left:-2px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.55;transition:transform .15s}
-.lmx-app .tl.d.open .tv::before{transform:rotate(45deg);margin:-3px 0 0}
-.lmx-app .tl .ti{flex:0 0 30px;height:16px;display:inline-flex;align-items:center;justify-content:center}
-.lmx-app .tl .ti::before{content:"";width:16px;height:16px;background:var(--lx-accent);opacity:.8;-webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat}
-.lmx-app .tl.open .ti::before{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E")}
-.lmx-app .tl .tn{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lmx-app .tl.d .tn{font-weight:600}
-.lmx-app .tl .tz{flex:0 0 auto;font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}
-.lmx-app .tl.junk{opacity:.55}
+.lmx-app .ftl{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 calc(6px + var(--d,0) * 16px);min-width:0;font-size:12.5px;background:repeating-linear-gradient(90deg,transparent 0 11.5px,var(--lx-line) 11.5px 12.5px,transparent 12.5px 16px) 0 0/calc(var(--d,0) * 16px) 100% no-repeat}
+.lmx-app .ftl .tv{flex:0 0 12px;width:12px;height:12px;display:inline-flex;align-items:center;justify-content:center}
+.lmx-app .ftl.d .tv::before{content:"";width:6px;height:6px;margin-left:-2px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.55;transition:transform .15s}
+.lmx-app .ftl.d.open .tv::before{transform:rotate(45deg);margin:-3px 0 0}
+.lmx-app .ftl .ti{flex:0 0 30px;height:16px;display:inline-flex;align-items:center;justify-content:center}
+.lmx-app .ftl .ti::before{content:"";width:16px;height:16px;background:var(--lx-accent);opacity:.8;-webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%206.5a1.5%201.5%200%200%201%201.5-1.5h4.3l2%202.2H19a1.5%201.5%200%200%201%201.5%201.5v9.3a1.5%201.5%200%200%201-1.5%201.5H5a1.5%201.5%200%200%201-1.5-1.5z%27/%3E%3C/svg%3E") center/contain no-repeat}
+.lmx-app .ftl.open .ti::before{-webkit-mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3.5%2017.5V6.5A1.5%201.5%200%200%201%205%205h4.3l2%202.2H17.5A1.5%201.5%200%200%201%2019%208.7V10%27/%3E%3Cpath%20d%3D%27M3.5%2018.5%206.4%2011a1.5%201.5%200%200%201%201.4-1H20.6a1%201%200%200%201%20.9%201.4l-2.6%206.7a1.5%201.5%200%200%201-1.4.9H4.5%27/%3E%3C/svg%3E")}
+.lmx-app .ftl .tn{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-app .ftl.d .tn{font-weight:600}
+.lmx-app .ftl .tz{flex:0 0 auto;font-size:11px;opacity:.55;font-variant-numeric:tabular-nums}
+.lmx-app .ftl.junk{opacity:.55}
 .lmx-app .ct{flex:0 0 auto;width:30px;height:16px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:750;letter-spacing:.03em;background:var(--lx-tint-2)}
 .lmx-app .ct.py{background:rgba(59,130,246,.14);color:var(--lx-accent)}
 .lmx-app .ct.js{background:rgba(234,179,8,.18);color:#a16207}
 .lmx-app .ct.cfg{background:rgba(16,185,129,.14);color:var(--lx-ink-ok)}
 .lmx-app .ct.key{background:rgba(239,68,68,.13);color:var(--lx-ink-bad)}
-.lmx-app .tl .hb{font-size:9px;font-weight:700;padding:0 5px;border-radius:4px;background:rgba(234,88,12,.14);color:#c2410c;margin-left:6px}
+.lmx-app .ftl .hb{font-size:9px;font-weight:700;padding:0 5px;border-radius:4px;background:rgba(234,88,12,.14);color:#c2410c;margin-left:6px}
 .lmx-app .srch{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 8px}
 .lmx-app .srch b{font-size:14px;font-family:var(--lx-mono)}
 .lmx-app .srch span{font-size:12px;opacity:.65}
@@ -5028,7 +5028,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .lmb .card.warn{border-color:rgba(245,158,11,.75);background:rgba(245,158,11,.08)}
 .lmx-app .lmb .card.bad{border-color:rgba(239,68,68,.75);background:rgba(239,68,68,.08)}
 .lmx-app .lmb .card.ok{border-color:rgba(16,185,129,.55)}
-.lmx-app .lmb .note{border-radius:4px 10px 10px 4px}
+.lmx-app .lmb .note,.lmx-app .lmb .fi{border-radius:4px 10px 10px 4px}
 .lmx-app .lmb pre{border-radius:10px}
 .lmx-app .lmb .wire .wn,.lmx-app .lmb .wire .wf{border-radius:12px;background-color:var(--lx-surface)}
 @media (prefers-reduced-motion:reduce){.lmx-app *,.lmx-app *::before{transition:none!important;animation-duration:2.5s!important}}
@@ -5533,11 +5533,11 @@ def _tree_face(line: _TreeLine, words: list[str], handler: str | None) -> str:
     style = f' style="--d:{line.depth}"'
     size = f'<span class="tz">{_esc(human_size(line.size))}</span>'
     if line.folder:
-        return (f'<div class="tl d{" open" if line.open else ""}{junk}"{style}><span class="tv"></span>'
+        return (f'<div class="ftl d{" open" if line.open else ""}{junk}"{style}><span class="tv"></span>'
                 f'<span class="ti"></span><span class="tn">{_marked(line.label, words)}</span>{size}</div>')
     badge, tone = _file_badge(line.path)
     hb = '<span class="hb">HANDLER</span>' if line.path == handler else ""
-    return (f'<div class="tl{junk}"{style}><span class="tv"></span><span class="ct {tone}">{_esc(badge)}</span>'
+    return (f'<div class="ftl{junk}"{style}><span class="tv"></span><span class="ct {tone}">{_esc(badge)}</span>'
             f'<span class="tn">{_marked(line.label, words)}{hb}</span>{size}</div>')
 
 
