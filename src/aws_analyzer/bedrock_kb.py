@@ -61,7 +61,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
@@ -89,7 +89,7 @@ from ._kit.fmt import (
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _class_if, _css_height, _Explorer, _for_window, _skeleton, _window_errors
+from ._kit.window import _class_if, _Explorer, _for_window, _icon_url, _skeleton, _window_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -6687,10 +6687,7 @@ _STATE_INKS = {"failed": ("#dc2626", "#f87171"), "changed": ("#b45309", "#fbbf24
 def _explorer_rules() -> str:
     """The explorer's tab icons (.kbx-i-<key> sets --kx-icon, which a tab's ::before draws), and each file state's
     colour on the list's dots and chips."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
-    icons = [f'.kbx-app .kbx-i-{key}{{--kx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-             for key, _, _, paths in _EXPLORER_TABS]
+    icons = [f".kbx-app .kbx-i-{key}{{--kx-icon:{_icon_url(paths)}}}" for key, _, _, paths in _EXPLORER_TABS]
     states = [f".kbx-app .dot.s-{state},.kbx-app.kbx-app button.kbx-chip.kbx-s-{state}::before{{background:{colour}}}"
               for state, colour in _STATE_COLOURS.items()]
     inks = [".kbx-app{" + ";".join(f"--kx-s-{state}:{light}" for state, (light, _) in _STATE_INKS.items()) + "}"]
@@ -7195,7 +7192,7 @@ class KBExplorer(_Explorer):
     x.ui is a BedrockKBView for reports in other cells (x.ui.search(...)); x.inventory, x.info, x.chunks hold the
     data behind what's shown."""
 
-    _THREADS = "kb-explorer"
+    _PREFIX, _THREADS = "kbx", "kb-explorer"
     _reword = staticmethod(_window_text)
 
     def __init__(
@@ -7311,7 +7308,6 @@ class KBExplorer(_Explorer):
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
-        style = w.HTML(_CSS + _EXPLORER_CSS, layout=layout(display="none"))
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("kbx-backdrop")
         self.backdrop.on_click(self._safely(lambda _button: self.chooser.close()))
@@ -7328,40 +7324,18 @@ class KBExplorer(_Explorer):
         meta.add_class("kbx-meta")
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("kbx-head")
+        tabs = self._tab_bar(_EXPLORER_TABS)
 
-        self.tab_buttons: dict[str, Any] = {}
-        for key, title, tip, _ in _EXPLORER_TABS:
-            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
-            for name in ("kbx-tab", f"kbx-i-{key}"):
-                button.add_class(name)
-            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
-            self.tab_buttons[key] = button
-        tabs = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
-        tabs.add_class("kbx-tabs")
-
-        height = _css_height(self.height)
         self.overview = w.HTML(layout=layout(width="100%"))
         self.syncs_view = w.HTML(layout=layout(width="100%"))
         self.settings_view = w.HTML(layout=layout(width="100%"))
-        self.pages = {
+        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
             "overview": w.VBox([self.overview]),
             "files": self._files_page(),
             "syncs": w.VBox([self.syncs_view]),
             "search": self._search_page(),
             "settings": w.VBox([self.settings_view]),
-        }
-        for key, page in self.pages.items():
-            page.add_class("kbx-page")
-            page.layout.width = "100%"
-            if height:
-                page.layout.height = height
-            if key != self._tab:
-                page.layout.display = "none"
-        self.status = w.HTML(layout=layout(width="100%"))
-        self.status.add_class("kbx-status")
-        self.root = w.VBox([style, head, tabs, *self.pages.values(), self.status, self.backdrop],
-                           layout=layout(width="100%"))
-        self.root.add_class("kbx-app")
+        })
         self._show_tab(self._tab)
 
     def _files_page(self) -> Any:

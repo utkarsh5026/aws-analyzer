@@ -12,6 +12,7 @@ import functools
 import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable
+from urllib.parse import quote
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -46,6 +47,16 @@ def _cell_number() -> Any:
         return None
     shell = get_ipython()
     return getattr(shell, "execution_count", None) if shell is not None else None
+
+
+_ICON_SVG = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
+             "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
+
+
+def _icon_url(paths: str) -> str:
+    """A line drawing's paths (24 x 24) as a CSS url(): the windows draw their icons as masks of it, in the text's
+    colour, so they follow the theme."""
+    return f'url("data:image/svg+xml,{quote(_ICON_SVG.format(paths))}")'
 
 
 def _class_if(widget: Any, name: str, on: bool) -> None:
@@ -182,9 +193,12 @@ class _Explorer(_Window):
     off the notebook's event loop (_later), report blocks drawn into a page (_draw), their commands' errors said in
     the window, and the window shown once per cell.
 
-    A subclass calls this __init__ first, sets ui (its View), and builds root (the window) and status (the line);
-    _html(blocks) draws a report the way it shows them. _THREADS names its worker threads."""
+    A subclass calls this __init__ first and sets ui (its View) and height; its _build makes the head, the tab bar
+    (_tab_bar) and the pages, and _frame puts them in the window. _show_tab(key) opens a tab, and _html(blocks) draws
+    a report the way the window shows them. _PREFIX starts its CSS class names (.kbx-app, .kbx-tab, ...), and
+    _THREADS names its worker threads."""
 
+    _PREFIX = "explorer"
     _THREADS = "explorer"
 
     def __init__(self) -> None:
@@ -222,6 +236,44 @@ class _Explorer(_Window):
         from IPython.display import display
 
         display(self.root)
+
+    def _tab_bar(self, tabs: Iterable[tuple[str, str, str, str]]) -> Any:
+        """The tab buttons in a row, one per (key, title, what it holds, its icon's paths), in tab_buttons: a click
+        opens its tab. The CSS draws each one's icon from its <prefix>-i-<key> class."""
+        w, layout, prefix = self._w, self._w.Layout, self._PREFIX
+        self.tab_buttons: dict[str, Any] = {}
+        for key, title, tip, _ in tabs:
+            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
+            for name in (f"{prefix}-tab", f"{prefix}-i-{key}"):
+                button.add_class(name)
+            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
+            self.tab_buttons[key] = button
+        bar = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
+        bar.add_class(f"{prefix}-tabs")
+        return bar
+
+    def _frame(self, css: str, head: Any, tabs: Any, pages: dict[str, Any]) -> None:
+        """The window, in root: its stylesheet (in a hidden HTML widget), the head and the tab bar over the tabs'
+        pages (only the open one shows; each is height= tall when that's set), the status line and the backdrop."""
+        w, layout, prefix = self._w, self._w.Layout, self._PREFIX
+        style = w.HTML(css, layout=layout(display="none"))
+        height = _css_height(self.height)
+        self.pages = pages
+        for key, page in pages.items():
+            page.add_class(f"{prefix}-page")
+            page.layout.width = "100%"
+            if height:
+                page.layout.height = height
+            if key != self._tab:
+                page.layout.display = "none"
+        self.status = w.HTML(layout=layout(width="100%"))
+        self.status.add_class(f"{prefix}-status")
+        self.root = w.VBox([style, head, tabs, *pages.values(), self.status, self.backdrop],
+                           layout=layout(width="100%"))
+        self.root.add_class(f"{prefix}-app")
+
+    def _show_tab(self, key: str) -> None:
+        raise NotImplementedError
 
     def _explain(self, code: str, message: str) -> str:
         return self.ui._explain(code, message)
