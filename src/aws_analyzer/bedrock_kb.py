@@ -89,7 +89,9 @@ from ._kit.fmt import (
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _class_if, _Explorer, _for_window, _icon_url, _skeleton, _window_errors
+from ._kit.window import (
+    _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _skeleton, _window_errors,
+)
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -6935,7 +6937,7 @@ def _window_text(text: str) -> str:
     return _CALL_RE.sub(swap, text)
 
 
-class _Chooser:
+class _Chooser(_Picker):
     """The explorer's knowledge base field: a button under its face (the name, ID and a status dot) that opens a list
     over the window, with a search box that finds a knowledge base by any part of its name, ID or description. Enter
     picks the first line, or hands what's typed to on_text when no line has it (an ID or ARN). Plain widgets and CSS:
@@ -6943,42 +6945,11 @@ class _Chooser:
     backdrop takes a click anywhere else and closes it."""
 
     def __init__(self, app: KBExplorer, *, on_pick: Callable[[str], None], on_text: Callable[[str], None]):
-        w, layout = app._w, app._w.Layout
-        self.app, self.on_pick, self.on_text = app, on_pick, on_text
+        super().__init__(app, app._w, "kbx", on_pick=on_pick, on_text=on_text, tooltip="Pick another knowledge base",
+                         placeholder="Search by name, ID or description")
         self.choices: list[KnowledgeBaseInfo] = []
         self.value = ""  # the ID shown
-        self.problem = ""  # why there's nothing to list
-        self.message = ""  # what went wrong with the last Enter
-        self.shown: list[str] = []  # the IDs the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # ID -> (its line, the line's button, its text)
-        self.button = w.Button(tooltip="Pick another knowledge base", layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbx-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbx-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("kbx-trig")
-        self.search = w.Text(placeholder="Search by name, ID or description", continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("kbx-find")
-        self.search.observe(app._safely(lambda _change: self._draw_list()), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(flex="0 0 auto"))
-        close.add_class("kbx-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("kbx-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none"))
-        self.panel.add_class("kbx-pop")
-        self.field = w.VBox([trigger, self.panel])
-        self.field.add_class("kbx-field")
         self.draw()
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     def set_choices(self, kbs: Iterable[KnowledgeBaseInfo]) -> None:
         self.choices = sorted(kbs, key=lambda kb: (kb.name or kb.id).lower())
@@ -6999,52 +6970,21 @@ class _Chooser:
         if self.is_open:
             self._draw_list()
 
-    def open(self) -> None:
-        if self.is_open:
-            return
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.field, "kbx-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
-
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        self.app.backdrop.layout.display = "none"
-        _class_if(self.field, "kbx-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
-
-    def toggle(self) -> None:
-        self.close() if self.is_open else self.open()
-
-    def matches(self) -> list[KnowledgeBaseInfo]:
-        text = str(self.search.value or "")
+    def _query(self, text: str) -> str:
         try:
             kind, value = parse_kb_ref(text)
-            text = value if kind == "arn" else text
         except ValueError:
-            pass
-        ranked = [(rank, i, kb) for i, kb in enumerate(self.choices)
-                  if (rank := search_rank(text, (kb.name, kb.id, kb.description, kb.status))) is not None]
-        return [kb for _, _, kb in sorted(ranked, key=lambda r: r[:2])]
+            return text
+        return value if kind == "arn" else text
+
+    def _fields(self, kb: KnowledgeBaseInfo) -> tuple[str, ...]:
+        return (kb.name, kb.id, kb.description, kb.status)
+
+    def _key(self, kb: KnowledgeBaseInfo) -> str:
+        return kb.id
 
     def _row(self, kb: KnowledgeBaseInfo, words: list[str]) -> Any:
-        if kb.id not in self.rows:
-            w, layout = self.app._w, self.app._w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("kbx-opt-b")
-            button.on_click(self.app._safely(lambda _button, kb_id=kb.id: self._clicked(kb_id)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("kbx-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("kbx-opt")
-            self.rows[kb.id] = (row, button, text)
-        row, button, text = self.rows[kb.id]
+        row, button, text = self._line(kb.id)
         _class_if(row, "kbx-on", kb.id == self.value)
         status = "" if kb.status == "ACTIVE" else kb.status.lower().replace("_", " ")
         note = " · ".join(p for p in (status, kb.description, f"changed {human_age(kb.updated)}" if kb.updated else "")
@@ -7081,23 +7021,6 @@ class _Chooser:
         if kb_id != self.value:
             self.on_pick(kb_id)
 
-    def _entered(self) -> None:
-        text = str(self.search.value or "").strip()
-        if not text:
-            self.close()
-            return
-        found = self.matches()
-        try:
-            if found:
-                self._clicked(found[0].id)
-            else:
-                self.on_text(text)
-                self.close()
-        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
-            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
-            self._draw_list()
-
-
 _PARSER_NAMES = {"BEDROCK_FOUNDATION_MODEL": "Foundation model", "BEDROCK_DATA_AUTOMATION": "Data Automation",
                  "SMART_PARSING": "Smart parsing", "MULTI_MODAL_EMBEDDINGS": "Multimodal embeddings"}
 
@@ -7117,15 +7040,9 @@ class _FileRow:
     it, the name, its folder and state, its size and age), so the whole line is the click target."""
 
     def __init__(self, app: KBExplorer):
-        w, layout = app._w, app._w.Layout
         self.file: KBFile | None = None
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbx-row-b")
-        self.button.on_click(app._safely(lambda _button: app._clicked_row(self)))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbx-row-t")
-        self.box = w.Box([self.button, self.face], layout=layout(width="100%"))
-        self.box.add_class("kbx-row")
+        self.box, self.button, self.face = _row_button(app._w, ("kbx-row", "kbx-row-b", "kbx-row-t"),
+                                                       app._safely(lambda _button: app._clicked_row(self)))
 
 
 def _sync_step(job: IngestionJob, names: dict[str, str]) -> tuple[str, str, str, str]:
@@ -7310,7 +7227,7 @@ class KBExplorer(_Explorer):
         w, layout = self._w, self._w.Layout
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("kbx-backdrop")
-        self.backdrop.on_click(self._safely(lambda _button: self.chooser.close()))
+        self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
         self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
         self.refresh_button = w.Button(description="↻ Refresh", tooltip="Read the knowledge base again: settings, "
                                        "files and syncs", layout=layout(width="auto", flex="0 0 auto"))

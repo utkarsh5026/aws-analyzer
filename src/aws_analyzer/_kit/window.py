@@ -20,7 +20,7 @@ from .blocks import _Findings, _Next, _Note, _Table, _Title
 from .deps import _in_notebook, _require
 from .errors import _Hint
 from .render import _prose
-from .text import _esc
+from .text import _esc, search_rank
 
 
 def _css_height(height: int | str | None) -> str | None:
@@ -57,6 +57,21 @@ def _icon_url(paths: str) -> str:
     """A line drawing's paths (24 x 24) as a CSS url(): the windows draw their icons as masks of it, in the text's
     colour, so they follow the theme."""
     return f'url("data:image/svg+xml,{quote(_ICON_SVG.format(paths))}")'
+
+
+def _row_button(w: Any, classes: tuple[str, str, str], on_click: Callable[[Any], None], *, tooltip: str | None = None,
+                after: Iterable[Any] = ()) -> tuple[Any, Any, Any]:
+    """A line the whole of which is the click target: a full-width button under its face, an HTML widget that shows
+    what the line says (the window's CSS lets clicks through it). classes: the CSS classes of the box, the button and
+    the face; after: widgets after them in the box (a line's own small button). Returns (box, button, face)."""
+    button = w.Button(tooltip=tooltip, layout=w.Layout(width="100%", height="100%"))
+    button.add_class(classes[1])
+    button.on_click(on_click)
+    face = w.HTML(layout=w.Layout(width="100%"))
+    face.add_class(classes[2])
+    box = w.Box([button, face, *after], layout=w.Layout(width="100%"))
+    box.add_class(classes[0])
+    return box, button, face
 
 
 def _class_if(widget: Any, name: str, on: bool) -> None:
@@ -121,9 +136,12 @@ class _Window:
     and widgets set quietly or only when their HTML changed.
 
     A window says where an error goes (_warn: its status line) and what an AWS error means (_explain: its View's),
-    in its own words (_reword: an explorer turns a report's commands into its tabs)."""
+    in its own words (_reword: an explorer turns a report's commands into its tabs). Its pickers (_Picker) go in
+    pickers, and its backdrop, the invisible button under an open list, calls _close_lists."""
 
     quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
+    pickers: list[_Picker]
+    backdrop: Any
 
     def _warn(self, text: str) -> None:
         """Says what went wrong where the window says things."""
@@ -187,6 +205,11 @@ class _Window:
         if widget.value != value:
             widget.value = value
 
+    def _close_lists(self) -> None:
+        """A click on the backdrop, anywhere in the window but the open list: closes it."""
+        for picker in self.pickers:
+            picker.close()
+
 
 class _Explorer(_Window):
     """What the knowledge base and Lambda explorers share on top of _Window: the status line under the tabs, AWS read
@@ -211,6 +234,7 @@ class _Explorer(_Window):
         self._counted = 0  # what the background read has read so far
         self._said: tuple[str, str, bool, str] = ("", "", False, "")  # the status line: text, level, busy, whose
         self._shown_at: Any = object()
+        self.pickers: list[_Picker] = []  # the fields that open a list: one open at a time
 
     def _load_widgets(self, mode: str) -> str:
         """Loads ipywidgets into _w when the window can show (mode 'widgets', or 'auto' in a notebook). Returns what
@@ -365,3 +389,144 @@ class _Explorer(_Window):
         """Makes what's still being read for these jobs go unused when it comes back."""
         for key in keys:
             self._jobs[key] = self._jobs.get(key, 0) + 1
+
+
+class _Picker:
+    """A window's field that opens a list to pick from, with a search box over it. Plain widgets and CSS: the field is
+    a button under its face (_row_button), the list opens under it over the window (its panel, <prefix>-pop), and
+    each line of the list is a button under its text, made the first time it's shown and kept (rows, _line), so the
+    whole line is the click target. One list is open at a time (the window's pickers), and while one is, the window's
+    backdrop (an invisible button over the rest of the window, under the open field) takes a click anywhere else and
+    closes it, as a dropdown would. Enter picks the first line the search box finds, or hands what's typed to on_text
+    when there's none (an ID or ARN the list doesn't hold).
+
+    A subclass says what the search box finds a choice by (_fields; _query rewrites what's typed first, an ARN into
+    its name), a choice's value (_key), and draws the field's face, the list (_draw_list) and its lines, and what a
+    click on one does (_clicked). prefix starts the CSS classes (kbx: .kbx-field, .kbx-trig, .kbx-opt, ...)."""
+
+    def __init__(self, app: _Window, w: Any, prefix: str, *, on_pick: Callable[[Any], None],
+                 on_text: Callable[[str], None] | None, placeholder: str, tooltip: str | None = None,
+                 close_width: str | None = None, list_width: str | None = None,
+                 field_layout: dict[str, str] | None = None):
+        layout = w.Layout
+        self.app, self.w, self.prefix, self.on_pick, self.on_text = app, w, prefix, on_pick, on_text
+        self.choices: list[Any] = []
+        self.problem = ""  # why there's nothing to list (it couldn't be read), shown under the list
+        self.message = ""  # what went wrong with the last Enter
+        self.shown: list[str] = []  # the values of the lines the list shows, top to bottom
+        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # value -> (its line, the line's button, its text)
+        trigger, self.button, self.face = _row_button(w, (f"{prefix}-trig", f"{prefix}-trig-b", f"{prefix}-face"),
+                                                      app._safely(lambda _button: self.toggle()), tooltip=tooltip)
+        self.search = w.Text(placeholder=placeholder, continuous_update=True,
+                             layout=layout(flex="1 1 auto", width="auto"))
+        self.search.add_class(f"{prefix}-find")
+        self.search.observe(app._safely(self._typed), names="value")
+        self.search.on_msg(app._on_enter(self._entered))
+        close = w.Button(description="✕", tooltip="Close the list", layout=layout(width=close_width, flex="0 0 auto"))
+        close.add_class(f"{prefix}-x")
+        close.on_click(app._safely(lambda _button: self.close()))
+        self.list = w.VBox(layout=layout(width="100%"))
+        self.list.add_class(f"{prefix}-opts")
+        self.foot = w.HTML(layout=layout(width="100%"))
+        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
+                             self.list, self.foot], layout=layout(display="none", min_width=list_width))
+        self.panel.add_class(f"{prefix}-pop")
+        self.field = w.VBox([trigger, self.panel], layout=layout(**(field_layout or {})))
+        self.field.add_class(f"{prefix}-field")
+        app.pickers.append(self)
+
+    @property
+    def is_open(self) -> bool:
+        return self.panel.layout.display != "none"
+
+    def _can_open(self) -> bool:
+        return True
+
+    def _opening(self) -> None:
+        """What to do as the list opens, before it's drawn."""
+
+    def open(self) -> None:
+        if not self._can_open() or self.is_open:
+            return
+        for other in self.app.pickers:  # one list open at a time
+            if other is not self:
+                other.close()
+        self._opening()
+        self.message = ""
+        self.panel.layout.display = ""
+        self.app.backdrop.layout.display = ""
+        _class_if(self.field, f"{self.prefix}-open", True)
+        self._draw_list()
+        if hasattr(self.search, "focus"):  # ipywidgets 8
+            self.search.focus()
+
+    def close(self) -> None:
+        if not self.is_open:
+            return
+        self.panel.layout.display = "none"
+        if not any(p.is_open for p in self.app.pickers):
+            self.app.backdrop.layout.display = "none"
+        _class_if(self.field, f"{self.prefix}-open", False)
+        self.app._quietly(self.search, value="")
+        self.message = ""
+
+    def toggle(self) -> None:
+        if self.is_open:
+            self.close()
+        else:
+            self.open()
+
+    def _query(self, text: str) -> str:
+        """What's typed, as the search looks for it."""
+        return text
+
+    def _fields(self, choice: Any) -> Iterable[Any]:
+        """What the search box finds a choice by (its name, ID, description...)."""
+        raise NotImplementedError
+
+    def _key(self, choice: Any) -> str:
+        """The value a choice's line stands for."""
+        raise NotImplementedError
+
+    def matches(self) -> list[Any]:
+        """The choices the search box finds, best first (search_rank); every one, in order, while it's empty."""
+        text = self._query(str(self.search.value or ""))
+        ranked = [(rank, i, c) for i, c in enumerate(self.choices)
+                  if (rank := search_rank(text, self._fields(c))) is not None]
+        return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
+
+    def _line(self, value: str) -> tuple[Any, Any, Any]:
+        """The widgets of value's line in the list (its line, the line's button, its text), made once."""
+        if value not in self.rows:
+            prefix = self.prefix
+            self.rows[value] = _row_button(self.w, (f"{prefix}-opt", f"{prefix}-opt-b", f"{prefix}-opt-t"),
+                                           self.app._safely(lambda _button: self._clicked(value)))
+        return self.rows[value]
+
+    def _draw_list(self) -> None:
+        raise NotImplementedError
+
+    def _clicked(self, value: str) -> None:
+        raise NotImplementedError
+
+    def _typed(self, change: dict[str, Any]) -> None:
+        self._draw_list()
+
+    def _entered(self) -> None:
+        """Enter in the search box: picks the first line found, or hands the text to on_text when nothing is found
+        (a picker without on_text has an _entered of its own). What goes wrong is said under the list, where the eyes
+        are."""
+        text = str(self.search.value or "").strip()
+        if not text:
+            self.close()
+            return
+        found = self.matches()
+        try:
+            if found:
+                self._clicked(self._key(found[0]))
+            else:
+                self.on_text(text)  # type: ignore[misc]
+                self.close()
+        except (ValueError, ClientError, BotoCoreError) as exc:
+            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
+            self._draw_list()
