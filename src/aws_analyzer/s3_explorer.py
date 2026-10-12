@@ -63,6 +63,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
 from ._kit.render import _file_icon
+from ._kit.window import _cell_number, _css_height, _running_loop
 
 # =============================================================================
 # 1. Helpers
@@ -148,12 +149,6 @@ def _parent_prefix(key: str) -> str:
     """The folder part of a key: 'a/b/c.csv' -> 'a/b/', 'c.csv' -> '', '/c.csv' -> '/'."""
     head, sep, _ = key.rpartition("/")
     return head + sep
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
 
 
 def _tip_time(moment: datetime | None) -> str:
@@ -1198,20 +1193,11 @@ class S3Explorer:
         return f"S3Explorer({where})"
 
     def _ipython_display_(self) -> None:
-        if self._execution() != self._shown_at:  # it already showed itself when this cell made it
+        if _cell_number() != self._shown_at:  # it already showed itself when this cell made it
             self._display()
 
-    @staticmethod
-    def _execution() -> Any:
-        try:
-            from IPython.core.getipython import get_ipython
-        except ImportError:
-            return None
-        shell = get_ipython()
-        return getattr(shell, "execution_count", None) if shell is not None else None
-
     def _display(self) -> None:
-        self._shown_at = self._execution()
+        self._shown_at = _cell_number()
         if self.s3 is None or self._widgets is None or self._shown_at is None:
             return  # a text explorer prints as it goes; outside IPython there's nowhere to show widgets
         from IPython.display import display
@@ -1223,7 +1209,7 @@ class S3Explorer:
         if self.s3 is not None:
             self._set_pane([[self.s3._Note(text, "warn")]])
             return
-        if self._execution() is not None:
+        if _cell_number() is not None:
             from IPython.display import HTML, display
 
             display(HTML(f'<div style="padding:6px 10px;border-left:3px solid #f59e0b;'
@@ -1272,7 +1258,7 @@ class S3Explorer:
 
     def _background(self) -> bool:
         """Whether listings go on in the background: in a notebook, where the kernel's event loop runs the clicks."""
-        return self._widgets is not None and self._loop() is not None
+        return self._widgets is not None and _running_loop() is not None
 
     def _goal(self, folder: Folder) -> int:
         """How much of a folder the explorer lists before it stops and offers "Load more from S3"."""
@@ -1299,7 +1285,7 @@ class S3Explorer:
             return
         self._stop_listing()
         self._lister, self._list_error = folder, ()
-        self._list_task = self._loop().create_task(self._list_later(folder, keys))
+        self._list_task = _running_loop().create_task(self._list_later(folder, keys))
 
     def _stop_listing(self) -> None:
         if self._lister is not None:
@@ -1375,7 +1361,7 @@ class S3Explorer:
                    "zip": "Listing every file below this folder, then zipping them…",
                    "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
         self._wait(waiting.get(action, "Working…"))
-        loop = self._loop() if isinstance(method, str) and action in _BACKGROUND else None
+        loop = _running_loop() if isinstance(method, str) and action in _BACKGROUND else None
         if loop is not None:
             self._task = loop.create_task(self._later(self._job, key, cache, method, self.selected, args, kwargs))
             return
@@ -1383,7 +1369,7 @@ class S3Explorer:
             with self._progress:
                 run(*args, **kwargs)
         finally:
-            if self._execution() is not None:  # outside a kernel, clear_output() prints terminal escape codes
+            if _cell_number() is not None:  # outside a kernel, clear_output() prints terminal escape codes
                 self._progress.clear_output()
         self._keep(key, self._captured, cache)
         self._set_pane(self._captured)
@@ -1394,15 +1380,6 @@ class S3Explorer:
             while len(self._cache) >= 24:
                 self._cache.pop(next(iter(self._cache)))
             self._cache[key] = reports
-
-    @staticmethod
-    def _loop() -> asyncio.AbstractEventLoop | None:
-        """The kernel's event loop, which runs clicks and cells in a notebook; None elsewhere (a script, the
-        tests), where reports load right away as the click waits."""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            return None
 
     async def _later(self, job: int, key: tuple, cache: bool, method: str, selected: str, args: tuple,
                      kwargs: dict) -> None:
