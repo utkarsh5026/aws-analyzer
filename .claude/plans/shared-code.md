@@ -1,9 +1,10 @@
 # Plan: one shared code base for every analyzer
 
 **Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, Phase 2 (`_kit`
-with the leaf helpers, install-only docs) in #62 and Phase 3 (one renderer in `_kit`) in #63. Phase 4 (base View and
-base Analyzer) is done on the branch `claude/blissful-lamport-u4t9cc`, for the next pull request; Phase 5
-(`_bedrock.py`) follows. The last pull request deletes this file.
+with the leaf helpers, install-only docs) in #62, Phase 3 (one renderer in `_kit`) in #63 and Phase 4 (base View and
+base Analyzer) in #64, released in 0.14.0. Phase 5 (`_bedrock.py`) is done on the branch
+`claude/stage-5-refactor-readiness-ebsvr4`, for the next pull request; Phase 6 (S3's renderer for every service)
+follows. The last pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -84,8 +85,13 @@ services:
 
 - `IndexInfo` (DynamoDB vs OpenSearch)
 - `Overview` (Lambda vs OpenSearch)
+- `INSTANCE_TYPES` (OpenSearch's instance types vs SageMaker's)
 - `build_filter` / `describe_filter` (DynamoDB, OpenSearch and Bedrock filter languages)
 - `_SECTIONS`, `_section`, `Analyzer._service`, `View._explain`, `View._settings_rows`, `_number`
+- in the Bedrock pair, `Answer`, `DEFAULT_PROMPT`, `parse_rag`, `describe_filter`, `answer_findings`,
+  `_question_text` and `View._answer_blocks` (Phase 5): the knowledge base's answers also come from Converse, with
+  its own prompt, and its `describe_filter` reads `where=`; the chat's keep their request, response and settings,
+  and its `describe_filter` reads a raw RetrievalFilter
 
 **Drifted copies** (30 today) are sorted the `/sync-helpers` way before moving. If one copy has a fix the other
 lacks, port the fix first in its own commit; if its output changes, the snapshot diff shows it and it gets a
@@ -107,8 +113,9 @@ CHANGELOG "Fixed" line. If the difference is intentional, it becomes a parameter
 4. **Independence test** (`tests/test_package.py`): in a fresh subprocess, importing `aws_analyzer.<service>` loads
    no other service module (except `s3` for `s3_explorer`). `_kit` never imports a service.
 5. **No re-copying** (new `rules.py` error): a service module may not define a top-level name that `_kit` (or, for
-   the Bedrock pair, `_bedrock`) defines. This replaces `drift.py` for everything that has moved. The one exception
-   is S3's own renderer until Phase 6 (`OWN_RENDERER`), which `drift.py` compares with `_kit`'s.
+   the Bedrock pair, `_bedrock`: `SHARED` in `rules.py`) defines. This replaces `drift.py` for everything that has
+   moved. The one exception is S3's own renderer until Phase 6 (`OWN_RENDERER`), which `drift.py` compares with
+   `_kit`'s.
 6. **One copy of each module** (conftest): the test session fails if a top-level `s3`, `dynamodb`, ... module is in
    `sys.modules` beside `aws_analyzer.s3`. Two copies would make `isinstance` checks fail between them.
 7. **Only boto3 at import time**, as now: CI imports every module, `_kit` included, with only boto3 installed.
@@ -283,6 +290,39 @@ As planned:
 
 ### Phase 5: `_bedrock.py`
 
+Done: `src/aws_analyzer/_bedrock.py` holds the 92 names `bedrock_kb` and `bedrock_chat` defined identically, moved
+unchanged in `bedrock_kb`'s order (one commit per service): the price tables, `DEFAULT_MODEL` and the model helpers,
+`Passage`, `Citation`, `KBDocument` and `ModelInfo` with their `parse_*` readers, the filter helpers, the token and
+cost estimates, the question's words and snippets, `_Markdown`, and the `_Answer` and `_Json` blocks with their
+drawings. All 313 snapshot outputs and the AWS operations came out the same. What differs from the plan below:
+
+- 92 names, not 97. By the plan's rule it was 98: `drift.py` didn't see annotated assignments, so it never compared
+  the three price tables (it does now; they matched). The six window helpers `lambda_functions` has identical copies
+  of too (`search_rank`, `_marked`, `_cell_number`, `_class_if`, `_css_height`, `_running_loop`) aren't Bedrock's:
+  they stay in the three files for Phase 7, so the 15 `_cell_number` test patches stay put. Nothing that moved uses
+  them.
+- The "6 that differ" were 7 (`describe_filter` too), and none was drift: each file has its own thing under the
+  name, so they stay, listed in section 4.
+- Identical but staying: `_render_html` (it reads its own module's `_CSS`, `_ROOT` and `_BADGE`), the View's
+  `_price_basis`, `_profile_for`, `_source_names` and `_top_source`, and the Analyzer's `_bedrock_client`,
+  `_runtime_client` and `_kb_summaries` (the client methods keep `session.client("bedrock-runtime", ...)` in the
+  service, for `rules.py`).
+- Tooling first: `rules.py`'s `SHARED` (`_bedrock` is checked like `_kit`, only the pair may import it, it imports no
+  analyzer, and the pair may not define its names again), `drift.py` (leaves `_bedrock.py` out of the analyzers,
+  lists a re-copied name next to it, compares annotated tables, and takes a service's price table from its
+  Analyzer's `_LIST_PRICES`, since every table is annotated) and `test_package.py` (the pair may load `_bedrock`).
+- Names: each imports what it uses, and the public names it doesn't use as `X as X` (`bedrock_kb`:
+  `DATA_SOURCE_KEY`, `GLOBAL_MODEL_PRICES`, `data_source_filter`, `model_price`, `split_metadata`; `bedrock_chat` the
+  same but `DATA_SOURCE_KEY`, which it uses), so every public name stays where it was. 43 private names of
+  `bedrock_kb` and 41 of `bedrock_chat` that they no longer use (`_Markdown`, the `_md_*` helpers, the `_MD_*`
+  patterns, ...) are importable from `_bedrock` only; `snapshot.py compare` lists them as lost.
+- The price tables are one dict for both modules now. Nothing writes to them (`prices=` and `model_prices=` are
+  copied per analyzer, which `test_kit.py` checks since Phase 4).
+- `snapshot.py` gained five cases for what no case used: the knowledge base's search with `where=` and with
+  `data_source=`, ask with `engine="converse"`, and the chat's ask with one data source and with a filter setting.
+
+As planned:
+
 - Move the 97 names `bedrock_kb` and `bedrock_chat` share whose code matches (`_highlight` differs only in its
   docstring), including the price tables, `DEFAULT_MODEL`,
   the model helpers, `_Markdown`, `_Json` / `_json_html`, the filter helpers, `parse_*`, `search_rank` and `_marked`
@@ -313,8 +353,9 @@ As planned:
 
 - Inventory first: put each primitive's four versions side by side and choose the most complete one.
 - Primitives, in order of risk:
-  1. small helpers: `_css_height`, `_running_loop`, `_cell_number`, `_class_if`, once-per-cell
-     `_ipython_display_`
+  1. small helpers: `_css_height`, `_running_loop`, `_cell_number`, `_class_if`, `search_rank` and `_marked`
+     (identical in `bedrock_kb`, `bedrock_chat` and `lambda_functions`; left out of `_bedrock.py` in Phase 5),
+     once-per-cell `_ipython_display_`
   2. the callback guard (`_safely` / `_guard`, plus `_window_errors`) and `_set`, which only sends HTML that changed
   3. background work (`_later`, `_workers` / `_threads`, job keys, `_tasks`): every window runs AWS reads on the
      loop's executor and drops stale results

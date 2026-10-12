@@ -1,7 +1,8 @@
 # The PyPI package: `pip install aws-analyzer`, then `from aws_analyzer import S3View`.
 #
 # The analyzers are the modules of the aws_analyzer package, one file each in src/aws_analyzer/ (s3.py, ...), with
-# the code they share in src/aws_analyzer/_kit/ and __init__.py, which only re-exports the Analyzer and View classes.
+# the code they share in src/aws_analyzer/_kit/ (and what the two Bedrock ones share in _bedrock.py) and __init__.py,
+# which only re-exports the Analyzer and View classes.
 # The wheel ships that folder as it is. Nothing here is needed to run the tests (tests/conftest.py puts src/ on
 # sys.path).
 #

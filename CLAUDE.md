@@ -10,7 +10,8 @@ AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as 
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
-all share lives once in `src/aws_analyzer/_kit/` (see "Hard constraints"). `sagemaker_env.py` isn't `sagemaker.py` so it's
+all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
+`src/aws_analyzer/_bedrock.py` (see "Hard constraints"). `sagemaker_env.py` isn't `sagemaker.py` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
 would have hidden it), and `lambda_functions.py` isn't `lambda.py` because `lambda` is a Python keyword
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
@@ -78,7 +79,8 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
 ## Hard constraints
 
 - **No imports between analyzers; shared code lives in `_kit/`.** An analyzer imports only the standard library,
-  boto3 / botocore and `._kit` (and a companion its parent), so importing one loads no other
+  boto3 / botocore and `._kit` (a companion also its parent, and the two Bedrock modules `._bedrock`), so importing
+  one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
   `_as_int`, `HOURS_PER_MONTH`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
@@ -95,14 +97,24 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   analyzer, and it follows the same import-time rule as they do. Each service sets its look: `_ROOT` (its CSS root
   class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
   `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
-  max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it). What
-  `bedrock_kb.py` and `bedrock_chat.py` share, and the explorer windows' parts, are still copied until Phases 5 and 7 of
-  `.claude/plans/shared-code.md` (listed at the end of "Architecture of an analyzer file"); `drift.py` lists what
-  differs between the copies, so when you fix one, check the others. A test that patches a helper patches it where it's
-  looked up: on the analyzer module for a call the analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on
-  the `_kit` module for a call `_kit` makes (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with
-  `from aws_analyzer._kit import view as viewmod`: `_BaseView._progress` makes that call, and `_BaseView.__init__`
-  asks `_in_notebook` there too).
+  max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it).
+  What `bedrock_kb.py` and `bedrock_chat.py` share is written once in `src/aws_analyzer/_bedrock.py`: the Bedrock
+  price tables, `DEFAULT_MODEL` and the model helpers (`model_price`, `short_model`, `parse_models`, `ModelInfo`), what
+  Bedrock returns (`Passage`, `Citation`, `KBDocument`, `parse_retrieve`, `parse_document`, ...), the filter helpers
+  (`build_filter`, `with_data_sources`, `describe_sources`), the cost and token estimates, the question's words and
+  snippets, and the `_Answer` block (with `_Markdown`) and the `_Json` block, with their drawings. It's Bedrock's, so
+  it isn't in `_kit`: only those two import it (`SHARED` in `rules.py`), it imports `_kit` and never an analyzer, and
+  `rules.py` fails when either defines one of its names. Each imports the names it uses, and the public ones it doesn't
+  as `from ._bedrock import model_price as model_price` (a re-export ruff accepts), so `bedrock_chat.model_price` still
+  works. The price tables are one dict for both: `prices=` / `model_prices=` copy them per analyzer, so nothing edits
+  them. Some names are the same in both files but mean different things, and stay in each: `Answer`, `DEFAULT_PROMPT`,
+  `parse_rag`, `describe_filter`, `answer_findings`, `_question_text` and the View's `_answer_blocks`.
+  The explorer windows' parts are still copied until Phase 7 of `.claude/plans/shared-code.md` (listed at the end of
+  "Architecture of an analyzer file"); `drift.py` lists what differs between the copies, so when you fix one, check
+  the others. A test that patches a helper patches it where it's looked up: on the analyzer module for a call the
+  analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit` (or `_bedrock`) module for a call it
+  makes (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as
+  viewmod`: `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too).
   For now `s3.py`'s renderer is ahead of the others: its tables sort, filter and pick columns, and its key columns
   and findings are laid out as described under "How the View layer works" (asked for S3 first). Until Phase 6
   ports it to `_kit`, `s3.py` keeps its own `_Table`, `_prose`, `_findings_html`, `_table_html` and `_render_text`
@@ -202,7 +214,7 @@ How the View layer works:
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
   document order: a bar of their sizes, and of where each sits in the file when its text was read, then each folded,
   the text it repeats from the one before in `<mark class="ov">`) and `_Shares` (parts of a whole in one bar: files by
-  state), plus a copy of `bedrock_chat`'s `_Json`, and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
+  state), and in both `_Json` (from `_bedrock.py`), and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
   `_python_html`, from `tokenize`, JSON by `_json_source_html` or an AWS CLI command by `_shell_html`, by its `lang`)
   and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
@@ -283,12 +295,13 @@ How the View layer works:
   slices (`_filter`) so the newest lines are the ones kept when a window holds more than `limit`.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
-  markdown: `_Markdown` (stdlib only, the same in `bedrock_kb` and `bedrock_chat`) parses blocks and inline markup
+  markdown: `_Markdown` (stdlib only, in `_bedrock.py` for both) parses blocks and inline markup
   keeping each character's offset in the answer, because citations are offsets into the raw text. Raw HTML stays
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
 - `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but not a companion: like the other
-  analyzers, it imports `_kit` and has its own copies of the helpers that aren't there yet. `chat()` (module level) builds a `BedrockChatView` and calls
+  analyzers, it imports `_kit` (and, like `bedrock_kb`, `_bedrock`) and has its own copies of the window helpers that
+  aren't shared yet. `chat()` (module level) builds a `BedrockChatView` and calls
   `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
   `column-reverse` box so it stays scrolled to the newest, and the side tabs).
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
@@ -450,11 +463,11 @@ AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonCloudWatc
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
-`bedrock_chat.py` carries its own copies of `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and
-the model helpers; change them together with `bedrock_kb.py`'s (`drift.py` lists any that differ). The two windows also
-share copies: `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_Json` with
-`_json_html` / `_plain_json` and `SEARCHABLE`, and both analyzers make their clients with the base's `_cached_client`
-(once, under a lock, since both windows read from threads). `lambda_functions.py`'s explorer carries copies of
+`BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in `_bedrock.py`,
+once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, and `SEARCHABLE`.
+The two windows still share copies of `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked` and
+`_class_if` (until Phase 7), and both analyzers make their clients with the base's `_cached_client` (once, under a lock,
+since both windows read from threads). `lambda_functions.py`'s explorer carries copies of
 `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_skeleton` and `_for_window` (as
 in `bedrock_kb.py`) and of `_python_html`, `_json_source_html`, `_JSON_TOKEN_RE` and `_PY_LITERALS` (as in
 `bedrock_chat.py`); `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`,
