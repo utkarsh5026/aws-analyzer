@@ -138,7 +138,7 @@ from ._kit.render import (
 )
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _cell_number, _class_if, _css_height, _running_loop
+from ._kit.window import _cell_number, _class_if, _css_height, _running_loop, _Window
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -4482,7 +4482,7 @@ class _Picker:
             self._draw_list()
 
 
-class _ChatApp:
+class _ChatApp(_Window):
     """The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
     log, where nobody looks."""
@@ -5055,31 +5055,11 @@ class _ChatApp:
         for picker in self.pickers:
             picker.close()
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._set_status(self._error_text(exc), "warn")
-                return None
+    def _explain(self, code: str, message: str) -> str:
+        return self.view._explain(code, message)
 
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {self.view._explain(code, message)}"
-        if isinstance(exc, _Hint):
-            return str(exc)
-        return f"{type(exc).__name__}: {exc}"
+    def _warn(self, text: str) -> None:
+        self._set_status(text, "warn")
 
     def _set_status(self, text: str, level: str = "") -> None:
         self.status.value = _wrap(f'<div class="st {level}">{_prose(text)}</div>') if text else ""
@@ -5091,21 +5071,6 @@ class _ChatApp:
 
     def _show_log(self) -> None:
         self.log.children = tuple(reversed(self.bubbles))  # the box runs bottom-up, so the newest goes first
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: re-sending the same HTML would fold up every
-        part of a JSON tree the user had opened, and close an open source."""
-        if widget.value != value:
-            widget.value = value
 
     def sync(self) -> None:
         """Follows changes made from another cell (set(), use(), new_chat(), ask())."""
