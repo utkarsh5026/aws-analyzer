@@ -57,14 +57,12 @@ import functools
 import hashlib
 import io
 import json
-import keyword
 import math
 import os
 import posixpath
 import re
 import threading
 import time
-import tokenize
 import urllib.request
 import zipfile
 from collections import Counter, defaultdict
@@ -85,9 +83,11 @@ from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
     human_money, human_size, parse_size, parse_time,
 )
+from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc
+from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
+from ._kit.window import _cell_number, _class_if, _css_height, _for_window, _running_loop, _skeleton
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -293,32 +293,6 @@ def _in_days(days: int) -> str:
     if days == 1:
         return "tomorrow"
     return f"in {days:,} days" if days > 0 else f"{-days:,} days ago"
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
 
 
 # =============================================================================
@@ -2342,26 +2316,6 @@ def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
             "(__pycache__, tests/, .git/): leave them out to make the package smaller."
         )))
     return found
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 # =============================================================================
@@ -5076,116 +5030,6 @@ def _window_text(text: str) -> str:
 _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(the [A-Z]\w* tab|the region field|run [0-9a-f]{8} in the Logs tab)")
 
 
-def _for_window(blocks: list[Any]) -> list[Any]:
-    """A report's blocks for the explorer window: no Next block (its calls are for a cell), and the commands its
-    sentences name changed into the tabs that show the same (_window_text)."""
-    out = []
-    for block in blocks:
-        if isinstance(block, _Next):
-            continue
-        if isinstance(block, _Findings):
-            block = dataclasses.replace(block, items=[(level, _window_text(m)) for level, m in block.items],
-                                        empty=_window_text(block.empty))
-        elif isinstance(block, _Note):
-            block = dataclasses.replace(block, text=_window_text(block.text))
-        elif isinstance(block, _Title):
-            block = dataclasses.replace(block, sub=_window_text(block.sub))
-        elif isinstance(block, _Table):
-            rows = [[_window_text(cell) if j in block.prose_cols and isinstance(cell, str) else cell
-                     for j, cell in enumerate(row)] for row in block.rows]
-            block = dataclasses.replace(block, rows=rows, title=_window_text(block.title))
-        out.append(block)
-    return out
-
-
-def _skeleton(text: str) -> str:
-    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
-    return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
-            '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
-            '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
-            "</div></div>")
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
-
-
-_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
-
-
-def _json_source_html(text: str) -> str:
-    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
-    out, last = [], 0
-    for m in _JSON_TOKEN_RE.finditer(text):
-        out.append(_esc(text[last:m.start()]))
-        if m.group(1):
-            css = "jk" if m.group(2) else "js"
-            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
-        else:
-            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
-        last = m.end()
-    return "".join(out) + _esc(text[last:])
-
-
-_PY_LITERALS = frozenset({"True", "False", "None"})
-
-
-def _python_html(code: str) -> str:
-    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
-    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
-    try:
-        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
-                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
-    except (tokenize.TokenError, SyntaxError):
-        return _esc(code)
-    starts = [0]
-    for line in code.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
-    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
-    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
-    out, last = [], 0
-    for t in tokens:
-        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
-        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
-        if a < last or b <= a:
-            continue
-        css = ""
-        if t.type == tokenize.COMMENT:
-            css = "pc"
-        elif t.type == tokenize.STRING:
-            css = "jk" if after.get(id(t)) == ":" else "js"
-        elif t.type == tokenize.NUMBER:
-            css = "jn"
-        elif t.type == tokenize.NAME:
-            if t.string in _PY_LITERALS:
-                css = "jl"
-            elif keyword.iskeyword(t.string):
-                css = "pk"
-            elif after.get(id(t)) == "(":
-                css = "pf"
-            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
-                css = "pa"
-        out.append(_esc(code[last:a]))
-        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
-        last = b
-    return "".join(out) + _esc(code[last:])
-
-
 @dataclass
 class _Facts:
     """What the explorer's list says about one function, worked out once each time more is read."""
@@ -6103,7 +5947,7 @@ class LambdaExplorer:
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
-        return _render_html(_for_window(blocks), self.ui.max_rows).replace(_CSS, "", 1)
+        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
         self.shown[page] = blocks
