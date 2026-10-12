@@ -107,7 +107,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
-from urllib.parse import quote
 
 import botocore
 import botocore.session
@@ -138,7 +137,7 @@ from ._kit.render import (
 )
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _cell_number, _class_if, _css_height, _running_loop, _Window
+from ._kit.window import _cell_number, _class_if, _css_height, _icon_url, _running_loop, _Window
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -3509,8 +3508,6 @@ def _tab_rules() -> str:
     """The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
     icon while the bar is 480px wide or more (a container query), tighter under 360px. For both ipywidgets 8's (lm-)
     and 7's (p-) class names."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
     rules, narrow, tight = [], [], []
     for x in ("lm", "p"):
         bar = f".kbc-app.kbc-app .kbc-side>.{x}-TabBar"
@@ -3535,8 +3532,8 @@ def _tab_rules() -> str:
             "-webkit-mask:var(--kc-icon) center/contain no-repeat;mask:var(--kc-icon) center/contain no-repeat}",
             f"{tab}.{x}-mod-current .{x}-TabBar-tabIcon{{background:var(--kc-accent)}}",
         ]
-        rules += [f'{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:url("data:image/svg+xml,'
-                  f'{quote(svg.format(paths))}")}}' for k, (_, paths) in enumerate(_TABS, 1)]
+        rules += [f"{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:{_icon_url(paths)}}}"
+                  for k, (_, paths) in enumerate(_TABS, 1)]
         narrow.append(f"{tab} .{x}-TabBar-tabIcon{{display:none}}")
         tight.append(f"{tab}{{padding:0 5px}}")
     return "\n".join([*rules, f"@container (max-width:479px){{{''.join(narrow)}}}",
