@@ -7,11 +7,14 @@
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzer it
-    builds on (COMPANIONS: s3_explorer.py on s3.py); and _kit/ importing any analyzer
-  - an analyzer defining a name that _kit/ has (a copy of a shared helper: import it from _kit instead), except
-    S3's own renderer until Phase 6 of .claude/plans/shared-code.md (OWN_RENDERER)
+    builds on (COMPANIONS: s3_explorer.py on s3.py); an import of a module a few analyzers share by any other
+    analyzer (SHARED: _bedrock.py, for bedrock_kb.py and bedrock_chat.py); a shared module importing an analyzer;
+    and _kit/ importing any of them
+  - an analyzer defining a name that _kit/ has, or the shared module it imports (a copy of a shared helper: import
+    it from there instead), except S3's own renderer until Phase 6 of .claude/plans/shared-code.md (OWN_RENDERER);
+    and a shared module defining a name that _kit/ has
   - no `from __future__ import annotations`
-  - the five numbered `# N. ...` section banners missing or out of order (not in _kit/)
+  - the five numbered `# N. ...` section banners missing or out of order (not in _kit/ or a shared module)
   - an AWS operation that isn't read-only (Put*, Delete*, Create*, ...) - nothing may write
   - a public View method without @_friendly_errors (a companion's window: @_window_errors) or a docstring
     (help() lists the docstring's first line), or one that prints / displays directly instead of building blocks
@@ -41,6 +44,10 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on one analyzer: it imports that analyzer (lazily, so it still imports alone), its UI class
 # is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services.
 COMPANIONS = {"s3_explorer": "s3"}
+# Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
+# that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
+# analyzers that import it don't define its names again.
+SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
 # S3's tables sort, filter and pick columns, and its findings read as headlines over points: until Phase 6 of
 # .claude/plans/shared-code.md brings that to every service, s3.py keeps its own versions of these _kit names.
 OWN_RENDERER = {"s3": {"_Table", "_prose", "_findings_html", "_table_html", "_render_text"}}
@@ -169,8 +176,19 @@ def kit_names() -> dict[str, str]:
     return names
 
 
+def shared_names() -> dict[str, set[str]]:
+    """Every name each shared module defines: {"_bedrock": {"MODEL_PRICES", ...}} (none for one not written yet)."""
+    names: dict[str, set[str]] = {}
+    for module in SHARED:
+        path = ANALYZERS / f"{module}.py"
+        if path.exists():
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            names[module] = {name for name, _ in _top_level_names(tree)}
+    return names
+
+
 def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]],
-               kit: dict[str, str] | None = None) -> None:
+               kit: dict[str, str] | None = None, shared: dict[str, set[str]] | None = None) -> None:
     rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
     source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
@@ -180,9 +198,12 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         report.error(f"{rel}:{exc.lineno}", f"doesn't parse: {exc.msg}")
         return
     in_kit = path.parent.name == KIT.name
+    is_shared = not in_kit and path.stem in SHARED
     parent = None if in_kit else COMPANIONS.get(path.stem)
-    siblings = {p.stem for p in ANALYZERS.glob("*.py")} - {path.stem, parent, "__init__"}
+    uses = set() if in_kit else {module for module, users in SHARED.items() if path.stem in users}
+    siblings = {p.stem for p in ANALYZERS.glob("*.py")} - {path.stem, parent, "__init__"} - uses
     kit = kit_names() if kit is None else kit
+    shared = shared_names() if shared is None else shared
 
     # Imports: boto3 + stdlib at import time, optional packages lazily, never another analyzer.
     future = any(isinstance(n, ast.ImportFrom) and n.module == "__future__"
@@ -199,8 +220,14 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         where = f"{rel}:{node.lineno}"
         for name in sorted(set(_analyzers_imported(node)) & siblings):
             if in_kit:
-                report.error(where, f"_kit imports the {name} analyzer; _kit loads with every analyzer, so it "
-                                    "never imports one")
+                report.error(where, f"_kit imports {name}; _kit loads with every analyzer, so it never imports an "
+                                    "analyzer or a module some of them share")
+            elif name in SHARED:
+                report.error(where, f"imports {name}, which only {' and '.join(sorted(SHARED[name]))} share; what "
+                                    "every analyzer needs goes in _kit/")
+            elif is_shared:
+                report.error(where, f"imports the {name} analyzer; {path.stem} loads with "
+                                    f"{' and '.join(sorted(SHARED[path.stem]))}, so it never imports an analyzer")
             else:
                 report.error(where, f"imports the {name} analyzer; analyzers don't import each other (shared "
                                     "code goes in _kit/)")
@@ -215,16 +242,20 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 report.warn(where, f"imports {name} directly; use _require({name!r}, purpose) so a missing "
                                    "package becomes a note that says what to pip install")
 
-    # A copy of a shared helper: _kit has it, so the analyzer imports it from there.
+    # A copy of a shared helper: _kit (or the shared module the analyzer imports) has it, so it's imported from there.
     if not in_kit:
         for name, line in _top_level_names(tree):
             if name in kit and name not in OWN_RENDERER.get(path.stem, set()):
                 report.error(f"{rel}:{line}", f"defines {name}, which _kit/{kit[name]}.py has; import it from there "
                                               "(from ._kit." + kit[name] + " import " + name + ") instead of a copy")
+            for module in sorted(uses):
+                if name in shared.get(module, set()):
+                    report.error(f"{rel}:{line}", f"defines {name}, which {module}.py has; import it from there "
+                                                  f"(from .{module} import {name}) instead of a copy")
 
     # Section banners 1..5 in order.
     banners = [int(m.group(1)) for m in re.finditer(r"^# (\d+)\. ", source, re.MULTILINE)]
-    if banners != [1, 2, 3, 4, 5] and not in_kit:
+    if banners != [1, 2, 3, 4, 5] and not in_kit and not is_shared:
         report.error(rel, f"section banners are {banners or 'missing'}; expected # 1. .. # 5. in order "
                           "(Helpers, Data models, Pure analysis, <Service>Analyzer, <Service>View)")
 
@@ -233,7 +264,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     guards = {"_friendly_errors", "_window_errors"} if parent else {"_friendly_errors"}  # a window guards its own
     view = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.endswith(ui_suffixes)), None)
     if view is None:
-        if not in_kit:
+        if not in_kit and not is_shared:
             report.error(rel, "no <Service>View class")
     else:
         for member in view.body:
@@ -333,9 +364,9 @@ def main() -> int:
     report, apis = Report(), {}
     files = [f.resolve() for f in args.files] or sorted(
         p for p in [*ANALYZERS.glob("*.py"), *KIT.glob("*.py")] if p.name != "__init__.py")
-    kit = kit_names()
+    kit, shared = kit_names(), shared_names()
     for path in files:
-        check_file(path, report, readme, apis, kit)
+        check_file(path, report, readme, apis, kit, shared)
     for label, items in (("error", report.errors), ("warning", report.warnings)):
         for item in items:
             print(f"{label}: {item}")
@@ -345,8 +376,10 @@ def main() -> int:
             for name in sorted(names):
                 actions = [iam_action(c) or "(none needed)" for c in name.split(" | ")]
                 print(f"  {name:<52} IAM: {' | '.join(actions)}")
-    shared = sum(path.parent.name == KIT.name for path in files)
-    print(f"\nrules: {len(files) - shared} analyzers and {shared} _kit modules, {len(report.errors)} errors, "
+    in_kit = sum(path.parent.name == KIT.name for path in files)
+    in_shared = sum(path.parent.name != KIT.name and path.stem in SHARED for path in files)
+    modules = f"{len(files) - in_kit - in_shared} analyzers" + (f", {in_shared} shared module" if in_shared else "")
+    print(f"\nrules: {modules} and {in_kit} _kit modules, {len(report.errors)} errors, "
           f"{len(report.warnings)} warnings")
     return 1 if report.errors else 0
 

@@ -47,6 +47,8 @@ SERVICES =["s3", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "ope
 # kept. Left out: commands that write files (download, save_runs), open a window (explore, app) or show a signed
 # link that expires (link).
 _CHAT_QUESTIONS = '["How long do refunds take? | refund-policy.pdf", "What does error E1234 mean?"]'
+_CHAT_FILTER = ('{"andAll": [{"equals": {"key": "team", "value": "billing"}}, '
+                '{"greaterThanOrEquals": {"key": "year", "value": 2024}}]}')
 DEMO_CASES: dict[str, list[tuple[str, str, str]]] = {
     "s3": [
         ("overview", "", "ui.overview()"),
@@ -103,9 +105,15 @@ DEMO_CASES: dict[str, list[tuple[str, str, str]]] = {
         ("files", 'ui.use("support-docs")', "ui.files()"),
         ("file", 'ui.use("support-docs")', 'ui.file("warranty.pdf")'),
         ("search", 'ui.use("support-docs")', 'ui.search("How long do refunds take?")'),
+        ("search_where", 'ui.use("support-docs")',
+         'ui.search("How long do refunds take?", where={"team": "billing", "year": (">=", 2024)})'),
+        ("search_data_source", 'ui.use("support-docs")',
+         'ui.search("How long do refunds take?", data_source="docs-s3")'),
         ("chunk", 'ui.use("support-docs"); ui.search("How long do refunds take?")', "ui.chunk(1)"),
         ("search_file", 'ui.use("support-docs")', 'ui.search_file("warranty.pdf", "Can I return a faulty laptop?")'),
         ("ask", 'ui.use("support-docs")', 'ui.ask("How long do refunds take?")'),
+        ("ask_converse", 'ui.use("support-docs")',
+         'ui.ask("How long do refunds take?", engine="converse", data_source="docs-s3")'),
         ("follow_up", 'ui.use("support-docs"); ui.ask("How long do refunds take?")',
          'ui.follow_up("What about EU customers?")'),
         ("models", "", "ui.models()"),
@@ -115,6 +123,9 @@ DEMO_CASES: dict[str, list[tuple[str, str, str]]] = {
     ],
     "bedrock_chat": [
         ("ask", 'ui.use("support-docs")', 'ui.ask("How long do refunds take?")'),
+        ("ask_data_source", 'ui.use("support-docs", data_source="docs-s3")', 'ui.ask("How long do refunds take?")'),
+        ("ask_filter", f'ui.use("support-docs"); ui.set("filter", {_CHAT_FILTER})',
+         'ui.ask("How long do refunds take?"); ui.settings()'),
         ("retrieve", 'ui.use("support-docs")', 'ui.retrieve("How long do refunds take?")'),
         ("last_transcript", 'ui.use("support-docs"); ui.ask("How long do refunds take?")',
          "ui.last(); ui.transcript()"),

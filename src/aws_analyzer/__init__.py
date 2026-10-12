@@ -3,7 +3,7 @@ aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock kno
 OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook.
 
 Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
-share, so install the package rather than copying a file.
+share (aws_analyzer._bedrock what the two Bedrock modules share), so install the package rather than copying a file.
 
 Quick start
 -----------

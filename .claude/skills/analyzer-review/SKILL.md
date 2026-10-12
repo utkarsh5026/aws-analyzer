@@ -25,7 +25,8 @@ List the View commands the scope adds or changes. Those get the output review in
 .venv/bin/python .claude/skills/sync-helpers/drift.py --summary
 ```
 
-`rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers, banners,
+`rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers (and, in the
+Bedrock pair, of `_bedrock.py`'s), banners,
 View decoration and docstrings, and
 IAM permissions missing from the README. Report its errors, and any warnings the change caused. For drift,
 report only the helpers this change touched, where the other analyzer's copy wasn't updated.

@@ -1,6 +1,6 @@
 ---
 name: sync-helpers
-description: Compare the helpers still duplicated across src/aws_analyzer/*.py (what bedrock_kb.py and bedrock_chat.py share, the explorer windows' parts, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
+description: Compare the helpers still duplicated across src/aws_analyzer/*.py (the explorer windows' parts, S3's own renderer, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
 argument-hint: "[helper names, e.g. search_rank _marked]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/sync-helpers/drift.py:*), Bash(python .claude/skills/sync-helpers/drift.py:*)
 ---
@@ -11,11 +11,12 @@ The analyzers share code through `src/aws_analyzer/_kit/`, and the helpers not m
 every file (see "Hard constraints" in CLAUDE.md and `.claude/plans/shared-code.md`). A fix made to one copy has to
 reach the others by hand. This skill finds the copies that have drifted apart and brings them back in line. A helper
 in `_kit` has one copy, so it never drifts: change it there. The View and Analyzer plumbing is there since Phase 4
-(`_BaseView` with `_show`, `_progress` and `help()`, `@_friendly_errors`, `_BaseAnalyzer`), so what still drifts is
-what `bedrock_kb.py` and `bedrock_chat.py` share (until Phase 5) and the explorer windows' parts (until Phase 7).
-The render blocks and the renderer are there since Phase 3, except S3's own renderer (until Phase 6), which
-`drift.py` lists next to `_kit`'s versions under "Defined in an analyzer and in _kit": a fix to `_kit/render.py`'s
-table, findings or prose may be wanted in `s3.py`'s too, and the other way round.
+(`_BaseView` with `_show`, `_progress` and `help()`, `@_friendly_errors`, `_BaseAnalyzer`), and what `bedrock_kb.py`
+and `bedrock_chat.py` share is in `_bedrock.py` since Phase 5 (one copy too: change it there), so what still drifts is
+the explorer windows' parts (until Phase 7). The render blocks and the renderer are there since Phase 3, except S3's
+own renderer (until Phase 6), which `drift.py` lists next to `_kit`'s versions under "Defined in an analyzer and in
+_kit or its shared module": a fix to `_kit/render.py`'s table, findings or prose may be wanted in `s3.py`'s too, and
+the other way round.
 
 ## 1. See what differs
 
@@ -38,6 +39,11 @@ For each name listed under "Differ in code", decide which kind of difference it 
   `_extra_note`) and its class attributes (`_GROUPS`, `_START`, `_PROGRESS`, `_DATA_ERRORS`); the signatures of
   `__init__`, `_section` and `_price_basis`. Leave these alone. The shared part of the function around them should
   still match, though.
+- **Same name, different thing.** Each file's own idea under a name another file also uses: DynamoDB's and
+  OpenSearch's `IndexInfo`, Lambda's and OpenSearch's `Overview`, OpenSearch's and SageMaker's `INSTANCE_TYPES`, the
+  filter languages' `build_filter` / `describe_filter`, and in the Bedrock pair `Answer`, `DEFAULT_PROMPT`,
+  `parse_rag`, `describe_filter`, `answer_findings`, `_question_text` and `View._answer_blocks` (the knowledge base's
+  answers come from Converse too; the chat's keep their request and response). Never merge these.
 - **Drift.** One copy got a fix, a new edge case or better wording that the other copy didn't get. To find out
   which copy is newer and why it changed:
   `git log -L :<name>:src/aws_analyzer/<service>.py --oneline | head -40`, or `git log -S '<changed line>' --oneline`.
