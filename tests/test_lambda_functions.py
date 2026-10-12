@@ -17,6 +17,7 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import lambda_functions as lfmod
+from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.lambda_functions import (
@@ -1902,7 +1903,7 @@ def test_explorer_shows_its_window_once_per_cell(explorer, monkeypatch):
     import IPython.display
 
     shown, cell = [], [1]
-    monkeypatch.setattr(lfmod, "_cell_number", lambda: cell[0])
+    monkeypatch.setattr(windowmod, "_cell_number", lambda: cell[0])  # where _Explorer looks it up
     monkeypatch.setattr(IPython.display, "display", lambda obj: shown.append(obj))
     x = explorer()
     x._ipython_display_()  # a cell ending in explore() shows it once

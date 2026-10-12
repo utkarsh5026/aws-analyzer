@@ -66,7 +66,6 @@ import time
 import urllib.request
 import zipfile
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -77,7 +76,7 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _in_notebook, _require
+from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
@@ -87,7 +86,7 @@ from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
-from ._kit.window import _cell_number, _class_if, _css_height, _for_window, _running_loop, _skeleton
+from ._kit.window import _class_if, _css_height, _Explorer, _for_window, _running_loop, _skeleton, _window_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -5404,24 +5403,6 @@ def _source_html(path: str, text: str) -> str:
     return f'<div class="src"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is said in the window's status line (or, without the
-    window, as a note) instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: LambdaExplorer, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except (ClientError, BotoCoreError, ValueError, TypeError) as exc:
-            if self._w is None:
-                self.ui._show([_Note(self._error_text(exc), "warn")])
-            else:
-                self._status(self._error_text(exc), "warn")
-        return None
-
-    return wrapper
-
-
 class _FunctionField:
     """The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
     a list over the window, with a search box that finds a function by any part of its name, description, runtime or
@@ -5641,7 +5622,7 @@ class _RunRow:
         self.box.add_class("lmx-run")
 
 
-class LambdaExplorer:
+class LambdaExplorer(_Explorer):
     """The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
 
@@ -5674,6 +5655,9 @@ class LambdaExplorer:
     for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
     hold the data behind what's shown."""
 
+    _THREADS = "lambda-explorer"
+    _reword = staticmethod(_window_text)
+
     def __init__(
         self,
         name: str | None = None,
@@ -5691,6 +5675,7 @@ class LambdaExplorer:
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         if tab is not None and tab not in {key for key, *_ in _EXPLORER_TABS}:
             raise ValueError(f"tab= is one of {', '.join(repr(key) for key, *_ in _EXPLORER_TABS)}; got {tab!r}")
+        super().__init__()
         every = isinstance(region, str) and region.strip().lower() == "all"
         if view is None:
             view = LambdaView(core or LambdaAnalyzer(region=None if every else region, profile=profile),
@@ -5708,9 +5693,6 @@ class LambdaExplorer:
         self.perf: Performance | None = None  # the Performance tab
         self.package: CodePackage | None = None  # the Code tab
         self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
-        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
-        self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
-        self._w: Any = None
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
         self._want, self._want_tab = name, tab  # opened once the functions are listed...
@@ -5743,20 +5725,8 @@ class LambdaExplorer:
         self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
         self._run_chip_buttons: dict[str, Any] = {}
         self._empties: dict[str, Any] = {}  # list -> the line it shows when it's empty
-        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
-        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
-        self._pool: ThreadPoolExecutor | None = None
-        self._counted = 0  # what the background read has read so far
-        self._said: tuple[str, str, bool, str] = ("", "", False, "")  # the status line: text, level, busy, whose
         self._listing = False  # the functions are being listed
-        self._shown_at: Any = object()
-        note = ""
-        if mode != "text" and (mode == "widgets" or _in_notebook()):
-            try:
-                self._w = _require("ipywidgets", "The explorer window")
-            except ImportError as exc:
-                note = (f"{exc}, which SageMaker notebooks normally have: install it and restart the kernel. Until "
-                        "then, the same in reports:")
+        note = self._load_widgets(mode)
         if self._w is None:
             self._reports(note, mode)
             return
@@ -5843,20 +5813,6 @@ class LambdaExplorer:
 
     # ------------------------------------------------------------------ plumbing
 
-    def _ipython_display_(self) -> None:
-        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
-        its reports were shown when it was made)."""
-        if self._w is not None and _cell_number() != self._shown_at:
-            self._display()
-
-    def _display(self) -> None:
-        self._shown_at = _cell_number()
-        if self._shown_at is None:
-            return  # outside IPython there's nowhere to show widgets
-        from IPython.display import display
-
-        display(self.root)
-
     def _reports(self, note: str, mode: str) -> None:
         """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
         if note:
@@ -5891,118 +5847,10 @@ class LambdaExplorer:
         assert self.function is not None
         return self.detail.function if self.detail is not None else self.function
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._status(self._error_text(exc), "warn")
-                return None
-
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {_window_text(self.ui._explain(code, message))}"
-        if isinstance(exc, _Hint):
-            return _window_text(str(exc))
-        return f"{type(exc).__name__}: {exc}"
-
-    def _status(self, text: str, level: str = "", busy: bool = False, owner: str = "") -> None:
-        """The line under the tabs. owner: the background job a busy line is about (it says the job's last word)."""
-        self._said = (text, level, busy, owner)
-        spin = '<span class="spin"></span>' if busy else ""
-        self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
-
-    def _finish(self, owner: str, text: str, level: str = "", *, tabs: Iterable[str] = (), busy: bool = False) -> None:
-        """A background job's word in the status line (its last, unless busy= says it goes on): said while the line is
-        still that job's (busy), or while one of its tabs is open; otherwise the line stays as it is."""
-        if (self._said[2] and self._said[3] == owner) or self._tab in tabs:
-            self._status(text, level, busy=busy, owner=owner if busy else "")
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
-        run and table the user opened."""
-        if widget.value != value:
-            widget.value = value
-
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
         return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
-
-    def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
-        self.shown[page] = blocks
-        self._set(widget, self._html(blocks))
-
-    def _workers(self) -> ThreadPoolExecutor:
-        if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lambda-explorer")
-        return self._pool
-
-    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
-               failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
-        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
-        window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
-        A newer job of the same key makes this one's result go unused. counting: the status line to show while it runs
-        and the line is still owner's, {n} standing for the count read so far."""
-        self._jobs[key] = job = self._jobs.get(key, 0) + 1
-        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
-
-        def finish(handler: Callable[[Any], None], value: Any) -> None:
-            if self._jobs.get(key) != job:
-                return
-            try:
-                handler(value)
-            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
-                self._status(self._error_text(exc), "warn")
-
-        loop = _running_loop()
-        if loop is None:
-            try:
-                result = work()
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            return
-
-        async def run() -> None:
-            future = loop.run_in_executor(self._workers(), work)
-            while counting and not future.done():
-                await asyncio.wait([future], timeout=0.4)
-                if self._jobs.get(key) == job and not future.done() and self._counted and self._said[3] == owner:
-                    self._status(counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=owner)
-            try:
-                result = await future
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            finally:
-                if self._tasks.get(key) is task:
-                    del self._tasks[key]
-
-        task = loop.create_task(run())
-        self._tasks[key] = task
 
     def _empty(self, key: str, text: str) -> Any:
         """The line an empty list shows, one widget per list, kept."""
@@ -6010,11 +5858,6 @@ class LambdaExplorer:
             self._empties[key] = self._w.HTML(layout=self._w.Layout(width="100%"))
         self._set(self._empties[key], f'<div class="lmx-empty">{_esc(text)}</div>')
         return self._empties[key]
-
-    def _drop(self, *keys: str) -> None:
-        """Makes what's still being read for these jobs go unused when it comes back."""
-        for key in keys:
-            self._jobs[key] = self._jobs.get(key, 0) + 1
 
     # ------------------------------------------------------------------ layout
 
