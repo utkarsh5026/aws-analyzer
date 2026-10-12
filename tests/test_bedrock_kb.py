@@ -3601,7 +3601,7 @@ def test_window_text_points_at_the_windows_tabs():
     blocks = kbmod._for_window([
         kbmod._Title("t", "see kbs()"), kbmod._Findings([("warn", "run documents()")], empty="all fine: syncs()"),
         kbmod._Note("files() lists them"), kbmod._Next([("file('a.pdf')", "how it was indexed")]),
-    ])
+    ], kbmod._window_text)
     assert [type(b).__name__ for b in blocks] == ["_Title", "_Findings", "_Note"]
     assert blocks[0].sub == "see the knowledge base list" and blocks[1].items == [("warn", "run the Files tab")]
     assert blocks[1].empty == "all fine: the Syncs tab" and blocks[2].text == "the Files tab lists them"

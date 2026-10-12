@@ -48,7 +48,6 @@ Quick start
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import difflib
 import functools
 import html
@@ -90,8 +89,9 @@ from ._kit.fmt import (
     human_size, parse_time,
 )
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc, _text_bar
+from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
+from ._kit.window import _cell_number, _class_if, _css_height, _for_window, _running_loop, _skeleton
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -154,32 +154,6 @@ def file_type(uri: str | None) -> str:
     """The extension a file is read by, lower case: 's3://b/Refund-Policy.PDF' -> 'pdf', 'faq/README' -> ''."""
     name = source_name(uri)
     return name.rsplit(".", 1)[-1].lower() if "." in name.strip(".") else ""
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
 
 
 def sync_command(kb_id: str, data_source_id: str, region: str = "") -> str:
@@ -2804,26 +2778,6 @@ def sort_files(files: Iterable[KBFile], by: str = "problems") -> list[KBFile]:
     if by == "indexed":
         return sorted(files, key=lambda f: (-when(f.indexed), f.key.lower()))
     raise ValueError(f"by= is one of {', '.join(map(repr, _SORTS))}; got {by!r}")
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 # =============================================================================
@@ -6986,54 +6940,6 @@ def _window_text(text: str) -> str:
     return _CALL_RE.sub(swap, text)
 
 
-def _for_window(blocks: list[Any]) -> list[Any]:
-    """A report's blocks for the explorer window: no Next block (its calls are for a cell), and the commands its
-    sentences name changed into the tabs that show the same (_window_text)."""
-    out = []
-    for block in blocks:
-        if isinstance(block, _Next):
-            continue
-        if isinstance(block, _Findings):
-            block = dataclasses.replace(block, items=[(level, _window_text(m)) for level, m in block.items],
-                                        empty=_window_text(block.empty))
-        elif isinstance(block, _Note):
-            block = dataclasses.replace(block, text=_window_text(block.text))
-        elif isinstance(block, _Title):
-            block = dataclasses.replace(block, sub=_window_text(block.sub))
-        elif isinstance(block, _Table):
-            rows = [[_window_text(cell) if j in block.prose_cols and isinstance(cell, str) else cell
-                     for j, cell in enumerate(row)] for row in block.rows]
-            block = dataclasses.replace(block, rows=rows, title=_window_text(block.title))
-        out.append(block)
-    return out
-
-
-def _skeleton(text: str) -> str:
-    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
-    return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
-            '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
-            '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
-            "</div></div>")
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
-
-
 class _Chooser:
     """The explorer's knowledge base field: a button under its face (the name, ID and a status dot) that opens a list
     over the window, with a search box that finds a knowledge base by any part of its name, ID or description. Enter
@@ -7490,7 +7396,7 @@ class KBExplorer:
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
-        return _render_html(_for_window(blocks), self.ui.max_rows).replace(_CSS, "", 1)
+        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
         self.shown[page] = blocks
