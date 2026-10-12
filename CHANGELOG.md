@@ -24,6 +24,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   list: folders first, with their sizes, the handler's folder open, and a folder that holds only a folder on one line
   (`botocore/data/`). Click a folder to open or fold it; **Find a file** shows the files that match inside their
   folders. Beside the open file's name, **Copy** selects all of its source, so Ctrl+C (⌘C on a Mac) copies the file.
+- `lambda_functions.py`: the explorer's Code tab has a **Hide files** button that folds the file tree away, so the source
+  has the whole width; **Show files** brings it back. It stays hidden for the next function you open.
 
 ## [0.14.0] - 2026-10-12
 
