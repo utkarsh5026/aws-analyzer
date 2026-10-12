@@ -11,7 +11,8 @@
              `@_friendly_errors`, which turns a command's errors into notes
     analyzer `_BaseAnalyzer`, which every <Service>Analyzer subclasses (session, prices, clients made once)
     highlight source code as HTML: Python and JSON with their tokens in colour
-    window   what the notebook windows share (the explorers and the chat): small widget helpers, ...
+    window   what the notebook windows share: `_Window` and `_Explorer` (errors said in the window, AWS read in the
+             background, the status line, tabs), `@_window_errors`, the searchable `_Picker`, `_row_button`, ...
 
 Like the services, these load only the standard library and boto3 / botocore when imported, and they never import a
 service module. Nothing here is re-exported: import each name from its own module.

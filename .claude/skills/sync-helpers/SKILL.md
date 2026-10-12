@@ -1,6 +1,6 @@
 ---
 name: sync-helpers
-description: Compare the helpers still duplicated across src/aws_analyzer/*.py (the explorer windows' parts, ...) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
+description: Compare the names still defined in more than one of src/aws_analyzer/*.py (each service's own look and words, and the few kept apart on purpose) and port fixes between the copies. Use after changing one of those helpers in one analyzer, when /check reports drift, or when a new analyzer copies them in.
 argument-hint: "[helper names, e.g. search_rank _marked]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/sync-helpers/drift.py:*), Bash(python .claude/skills/sync-helpers/drift.py:*)
 ---
@@ -12,8 +12,10 @@ every file (see "Hard constraints" in CLAUDE.md and `.claude/plans/shared-code.m
 reach the others by hand. This skill finds the copies that have drifted apart and brings them back in line. A helper
 in `_kit` has one copy, so it never drifts: change it there. The View and Analyzer plumbing is there since Phase 4
 (`_BaseView` with `_show`, `_progress` and `help()`, `@_friendly_errors`, `_BaseAnalyzer`), and what `bedrock_kb.py`
-and `bedrock_chat.py` share is in `_bedrock.py` since Phase 5 (one copy too: change it there), so what still drifts is
-the explorer windows' parts (until Phase 7). The render blocks and the renderer are there since Phase 3, and since
+and `bedrock_chat.py` share is in `_bedrock.py` since Phase 5 (one copy too: change it there), and since Phase 7 what
+the notebook windows share is in `_kit/window.py` (the helpers, `_Window`, `_Explorer`, `@_window_errors`, `_Picker`,
+`_row_button`), so what `drift.py` still lists is mostly names that mean something different in each file, and the
+few identical ones kept apart on purpose (see the plan). The render blocks and the renderer are there since Phase 3, and since
 Phase 6 S3's tables (sorting, filters, the Columns menu, key columns) and finding headlines are the renderer every
 service draws with, so a name `drift.py` lists under "Defined in an analyzer and in _kit or its shared module" is a
 copy to delete (`rules.py` fails on it too).

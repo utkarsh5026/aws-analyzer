@@ -2,9 +2,9 @@
 
 **Status:** Phase 0 (`snapshot.py`) and Phase 1 (the move to `src/aws_analyzer/`) merged in #61, Phase 2 (`_kit`
 with the leaf helpers, install-only docs) in #62, Phase 3 (one renderer in `_kit`) in #63 and Phase 4 (base View and
-base Analyzer) in #64, released in 0.14.0, and Phase 5 (`_bedrock.py`) in #69. Phase 6 (S3's renderer for every
-service) is done on the branch `claude/stage-6-refactoring-tqutue`, for the next pull request; Phase 7 (the window
-kit) follows. The last pull request deletes this file.
+base Analyzer) in #64, released in 0.14.0, Phase 5 (`_bedrock.py`) in #69 and Phase 6 (S3's renderer for every
+service) in #70. Phase 7 (the window kit) is done on the branch `claude/practical-curie-63dsws`, for the next pull
+request; Phase 8 (cleanup) follows. The last pull request deletes this file.
 
 **Decisions confirmed:** D1 `src/aws_analyzer/`, one pull request per phase, D5 per-service CSS roots kept.
 
@@ -63,7 +63,8 @@ src/aws_analyzer/
     progress.py        _progress_bar_class, _progress_bar, _progress_text
     view.py            _BaseView: _show, help, _progress, _price_basis common part; _commands(cls), _friendly_errors
     analyzer.py        _BaseAnalyzer: session/region/profile/prices, _cached_client, _paginate, _map
-    widgets/           Phase 7: jobs, guard, app shell (style, icons, tabs), picker, rows
+    window.py          Phase 7: the windows' helpers, _Window, _Explorer, @_window_errors, _Picker, _row_button
+    highlight.py       Phase 7: _python_html, _json_source_html (the chat's code to copy, the Lambda Code tab)
   _bedrock.py          shared by bedrock_kb and bedrock_chat
   s3.py  s3_explorer.py  dynamodb.py  bedrock_kb.py  bedrock_chat.py  sagemaker_env.py  opensearch.py  lambda_functions.py
 ```
@@ -376,6 +377,53 @@ environment). What differs from the plan below:
 - CHANGELOG "Changed": tables in every report sort, filter and choose columns, as S3's already do.
 
 ### Phase 7: window kit (four windows: S3 explorer, chat, KB explorer, Lambda)
+
+Done: `_kit/window.py` holds what the four windows share, `_kit/highlight.py` the code colouring the chat and the
+Lambda explorer both had, and `_kit/text.py` gained `search_rank` and `_marked`. One commit per primitive and window,
+with the window tests passing after each. Two new comparisons, run on `main` and on the branch, came out the same:
+every window's whole widget tree (each widget's type, CSS classes, layout, text, tooltips and HTML, the stylesheets
+included) at 43 points of clicking and typing through the four windows on demo.py's data, and every kind of error
+through every window's guards (callbacks, commands with and without the window, background jobs, Enter). The report
+snapshots and the AWS operations are unchanged. What differs from the plan below:
+
+- One module, `_kit/window.py`, not a `widgets/` package. Its parts:
+  - the helpers: `_css_height`, `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_for_window` (it takes
+    the window's words, its `_window_text`), `_icon_url` (the one SVG template all four windows used) and
+    `_row_button` (the nine full-width lines: rows, run rows, picker fields and their lines)
+  - `_Window`, the base of `_ChatApp`, `KBExplorer` and `LambdaExplorer`: `_safely`, `_on_enter`, `_error_text`,
+    `_quietly`, `_set` and `_close_lists`, with the hooks `_warn`, `_explain` and `_reword`
+  - `_Explorer(_Window)`, the two explorers' base: their state, `_load_widgets`, `_status` (Lambda's, with `owner`),
+    `_finish`, `_tab_bar`, `_frame`, `_draw`, `_workers`, `_later`, `_drop`, `_display` and `_ipython_display_`.
+    KB's counting line says `{n}`, as Lambda's do, and comes out the same.
+  - `@_window_errors` for every window's commands, through the window's `_ready` and `_command_failed`: the S3
+    explorer's decorator becomes those two methods (nothing runs without s3.py; its errors as notes, the same ones)
+  - `_Picker`, which the KB explorer's `_Chooser`, the Lambda explorer's `_FunctionField` and the chat's picker
+    (renamed `_ChoicePicker`, since the kit's is `_Picker`) subclass: the widgets, opening and closing (one list open
+    at a time; the chat's version, which is the same for one picker), `matches()`, pooled lines and Enter (the chat
+    keeps its own Enter, for multi). `_FunctionField.box` is now `.field`, as in the other two.
+- Not shared, because the copies do different jobs: the S3 explorer's `_guard` (it runs the handler at once, says
+  KeyboardInterrupt and mends an unfinished status line), so the S3 explorer isn't a `_Window` and its text boxes'
+  Enter stays a one-liner through `_guard`; the chat's test runner (`_start` / `_run_later`, a queue drained on the
+  loop as answers come back) and the S3 explorer's report loader (one job number for the pane, a cache, a worker
+  that skips a stale job); `_renew` (Lambda's page box, S3's panes, KB's `_renew_pane`); `_CLICK_GRACE` (S3: a click
+  on rows that just changed) and `_TOGGLE_GRACE` (Lambda: a double click's second click on a folder); the chat's
+  tabs (ipywidgets' `Tab`, `_tab_rules`); and the explorers' `_html`, `_reports`, `_show_tab` and `_tab_line`.
+- The explorers' stylesheets aren't merged: 112 of their 218 and 331 rules match once the prefixes are normalized,
+  but between each one's own, and CSS order decides which rule wins. One templated explorer stylesheet (like
+  `_base_css`) would change the order, so it needs before and after screenshots; it's left for later.
+- Test patches: 2 `_cell_number` patches moved to `_kit.window` (the explorers' once-per-cell display moved); the
+  chat's 13 stay, because the chat checks the cell in its View's `_ipython_display_`, which stays. The KB test of
+  `_for_window` passes `_window_text`. `test_kit.py` checks `@_window_errors` on a toy window (a command that can't
+  run, an error the window doesn't say).
+- Screenshots weren't remade: the widget-tree comparison covers what the shot scripts would show (the tree, with its
+  HTML and stylesheets, is everything the browser draws from), and exactly.
+- Lost names (`snapshot.py compare` lists 11, all private): `_JSON_TOKEN_RE` and `_PY_LITERALS` of `bedrock_chat` and
+  `lambda_functions` (only the highlighters used them), the `_cell_number`, `_css_height` and `_running_loop` that
+  `bedrock_kb` and `lambda_functions` (not `_running_loop`: Live uses it) no longer use since `_Explorer` does, all
+  importable from `_kit` only; `S3Explorer._execution` and `_loop` (`_cell_number` and `_running_loop` now); and
+  `bedrock_chat._Picker`'s own methods, since that name is the kit's base now and the chat's is `_ChoicePicker`.
+
+As planned:
 
 - Inventory first: put each primitive's four versions side by side and choose the most complete one.
 - Primitives, in order of risk:

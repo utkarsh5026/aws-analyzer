@@ -83,8 +83,9 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
-  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`), `deps.py`
-  (`_require`, `_in_notebook`), `errors.py` (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
+  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`,
+  and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
+  (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
   `_prose`, `_lead`, `_call`, `_signature`, the shared blocks' drawers with the tables' sorting, filters and key
@@ -92,7 +93,9 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `progress.py` (`_progress_bar_class`, `_progress_bar`, `_progress_text`), `view.py` (`_BaseView`, which every
   `<Service>View` subclasses: `_show`, `_progress`, `help()`, `_price_basis`; `@_friendly_errors`; `_commands`) and
   `analyzer.py` (`_BaseAnalyzer`, which every `<Service>Analyzer` subclasses: the session, `_config`, `prices`,
-  `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file").
+  `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file"), `highlight.py`
+  (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab)
+  and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
   analyzer, and it follows the same import-time rule as they do. Each service sets its look: `_ROOT` (its CSS root
@@ -110,16 +113,17 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   works. The price tables are one dict for both: `prices=` / `model_prices=` copy them per analyzer, so nothing edits
   them. Some names are the same in both files but mean different things, and stay in each: `Answer`, `DEFAULT_PROMPT`,
   `parse_rag`, `describe_filter`, `answer_findings`, `_question_text` and the View's `_answer_blocks`.
-  The explorer windows' parts are still copied until Phase 7 of `.claude/plans/shared-code.md` (listed at the end of
-  "Architecture of an analyzer file"); `drift.py` lists what differs between the copies, so when you fix one, check
-  the others. A test that patches a helper patches it where it's looked up: on the analyzer module for a call the
-  analyzer makes (`monkeypatch.setattr(s3mod, "_require", ...)`), on the `_kit` (or `_bedrock`) module for a call it
-  makes (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as
-  viewmod`: `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too).
+  A test that patches a helper patches it where it's looked up: on the analyzer module for a call the analyzer
+  makes (`monkeypatch.setattr(s3mod, "_require", ...)`, `monkeypatch.setattr(chatmod, "_cell_number", ...)`: the
+  chat's View asks it), on the `_kit` (or `_bedrock`) module for a call it makes
+  (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as viewmod`:
+  `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too; an explorer's
+  once-per-cell display asks `_cell_number` on `_kit.window`).
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`. Its
-  public commands are guarded by its own `@_window_errors`, which shows an error in its pane (`rules.py` accepts
-  that name on a companion's window). Nothing imports a companion.
+  public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
+  `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
+  Nothing imports a companion.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image", ...,
@@ -300,9 +304,31 @@ How the View layer works:
   keeping each character's offset in the answer, because citations are offsets into the raw text. Raw HTML stays
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
+- **The windows' kit** (`_kit/window.py`) is what the four windows share, written once: `_css_height`,
+  `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_icon_url` (a line drawing as the CSS `url()` every
+  window masks its icons with), `_row_button` (a line whose whole width is the click target: a full-width button under
+  its HTML face, in a box) and `_for_window(blocks, words)`. `_Window`, which `_ChatApp` and both explorers subclass,
+  has `_safely` (a widget callback's error said in the window), `_on_enter` (a text box's `submit` message),
+  `_error_text`, `_quietly`, `_set` (only HTML that changed) and `_close_lists` (the backdrop's click), with three
+  hooks: `_warn` (where an error is said), `_explain` (its View's) and `_reword` (an explorer's `_window_text`).
+  `_Explorer(_Window)`, which `KBExplorer` and `LambdaExplorer` subclass, adds their state (its `__init__`, called
+  first), `_load_widgets`, the status line (`_status` with the `owner` a busy line belongs to, `_finish`, `_said`),
+  `_tab_bar` and `_frame` (CSS classes from `_PREFIX`), `_draw` (with the explorer's `_html`), `_workers` (threads
+  named by `_THREADS`), `_later`, `_drop`, and the window shown once per cell (`_display`, `_ipython_display_`).
+  `@_window_errors` guards a window's own commands through its `_ready` and `_command_failed` (the S3 explorer's
+  too). `_Picker` is a field that opens a searchable list over the window, which the KB explorer's `_Chooser`, the
+  Lambda explorer's `_FunctionField` and the chat's `_ChoicePicker` subclass: the button under its face, the panel
+  with its search box and close button, one list open at a time across the window's `pickers`, the backdrop shown
+  while one is, pooled lines (`_line`), `matches()` by `search_rank` over a subclass's `_query` and `_fields`, and
+  Enter (`_entered`; the chat has its own). A subclass draws the face, the list and its lines, and says what a click
+  does (`_clicked`); `_can_open` and `_opening` let it refuse or prepare. What stays in each window does a different
+  job there: the S3 explorer's `_guard` (it runs a handler at once and mends an unfinished status line), report
+  loader and `_renew`, the chat's test runner (`_start` / `_run_later`, a queue drained on the loop), and the
+  explorers' `_html`, `_reports`, `_show_tab`, `_tab_line`, `_renew` and stylesheets (`_EXPLORER_CSS`: about half
+  their rules match, in different orders). `_CLICK_GRACE` (S3) and `_TOGGLE_GRACE` (Lambda) drop different clicks.
 - `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but not a companion: like the other
-  analyzers, it imports `_kit` (and, like `bedrock_kb`, `_bedrock`) and has its own copies of the window helpers that
-  aren't shared yet. `chat()` (module level) builds a `BedrockChatView` and calls
+  analyzers, it imports `_kit` (and, like `bedrock_kb`, `_bedrock`), and its window is a `_Window`. `chat()` (module
+  level) builds a `BedrockChatView` and calls
   `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
   `column-reverse` box so it stays scrolled to the newest, and the side tabs).
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
@@ -321,8 +347,9 @@ How the View layer works:
   on `x-amz-bedrock-kb-source-uri`: `view.picked_files` (s3:// paths; `resolve_files` / `match_files` turn names into
   paths from `core.files()`, a cached ListKnowledgeBaseDocuments), `build_request(files=)`, `split_condition()`, and
   the Files field (`_list_files` fills it only when it's first opened; ticked files are chips, `_draw_files`).
-  The header's four fields are `_Picker`s: a button under its face (label, name, ID) that opens a list of `_Choice`
-  lines over the chat (`.kbc-pop`, absolutely placed, so the boxes around it are `overflow:visible`), each line a
+  The header's four fields are `_ChoicePicker`s (`_kit`'s `_Picker`): a button under its face (label, name, ID)
+  that opens a list of `_Choice` lines over the chat (`.kbc-pop`, absolutely placed, so the boxes around it are
+  `overflow:visible`), each line a
   button under its text, with a search box that ranks lines by `search_rank` (name, ID, description...; `match_kbs`
   and `kbs(match=)` use it too) and marks what it found (`_marked`). Enter picks the first line, or hands text the
   list doesn't hold to `on_text` (an ID or ARN, through `core.resolve`); `multi=True` (Files) ticks lines and stays
@@ -333,9 +360,9 @@ How the View layer works:
   view buttons are disabled, and `_follow_edit` refills an untouched editor when the request changes, or warns what
   Apply would undo in an edited one. Each tab scrolls on its own (the box inside the tab's frame), and `_set` only
   assigns an HTML widget a value that changed, so a re-render doesn't fold up what the user opened. Every widget
-  callback goes through `_ChatApp._safely`, which shows errors in
+  callback goes through `_safely` (`_Window`'s), which shows errors in
   the window (a callback's exception would only reach the browser log); Enter in a text box is the box's `submit`
-  message (`_ChatApp._on_enter`, as in the explorer: `on_submit` is deprecated). View commands run from other cells
+  message (`_on_enter`, as in the explorers: `on_submit` is deprecated). View commands run from other cells
   update an open window through `view._changed()`. The composer's Answer / Retrieve only switch (`mode_pick`, saved as
   `view.retrieve_only`) makes Send a Retrieve search: `build_retrieve_request` takes the RetrieveAndGenerate request's
   `retrievalConfiguration` and nothing else (`retrieve_settings`; the answer's rows are dimmed, `_off`), and the
@@ -377,11 +404,12 @@ How the View layer works:
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
 - `bedrock_kb`'s explorer window, `KBExplorer` (after the View, with `explore()`; `BedrockKBView.explore()` keeps it in
-  `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way: ipywidgets
-  styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS` included once in its style widget, so `_html`
-  strips it from each report), no JavaScript, full-row `Button`s under their faces (`_FileRow`, the knowledge base
-  field `_Chooser` with its searchable list and `backdrop`), custom tab buttons over pages (`_EXPLORER_TABS`, icons from
-  `_explorer_rules()`, which also gives each `FILE_STATES` key its colour). Its data is the analyzer's file layer:
+  `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way, on the
+  windows' kit (an `_Explorer`): ipywidgets styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS`
+  included once in its style widget, so `_html` strips it from each report), no JavaScript, full-row buttons under
+  their faces (`_FileRow`, the knowledge base field `_Chooser`, a `_Picker`, with its searchable list and `backdrop`),
+  custom tab buttons over pages (`_EXPLORER_TABS`, `_tab_bar`, icons from `_explorer_rules()`, which also gives each
+  `FILE_STATES` key its colour). Its data is the analyzer's file layer:
   `file_inventory()` reads Bedrock's document list (ListKnowledgeBaseDocuments) next to the bucket (ListObjectsV2 under
   the inclusion prefixes, `<file>.metadata.json` attached to its file) and `inventory_files` / `file_state` join them
   into one state per file (`FILE_STATES`: failed, changed, new, skipped, deleted, partial, ignored, indexing,
@@ -393,19 +421,21 @@ How the View layer works:
   The View's `files()` / `file()` / `search_file()` show the same as reports, and the window draws their blocks
   (`_files_blocks`, `_file_blocks`, `_probe_blocks` with `window=True`) through `_for_window`, which drops `_Next` and
   rewrites what a sentence tells you to call into where the window shows it (`_window_text`: `syncs()` -> "the Syncs
-  tab", `where=` filters -> metadata filters). AWS is read off the loop: `_later(key, work, done, failed)` runs `work`
-  in `_workers()` through the running loop's executor and `done` on the loop, inline without one; `self._jobs[key]`
+  tab", `where=` filters -> metadata filters). AWS is read off the loop: `_later(key, work, done, failed)`
+  (`_Explorer`'s) runs `work` in `_workers()` through the running loop's executor and `done` on the loop, inline
+  without one; `self._jobs[key]`
   drops a stale result, `_open_kb` bumps every key so an earlier knowledge base's results are dropped, and `_tasks`
   holds the asyncio tasks (tests await them). `_renew_pane` puts the file page in a new box so it starts at the top,
   `_set` only sends HTML that changed, the status line says what each tab holds when nothing's going on (`_said`,
   `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
   `_window_errors`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
 - `lambda_functions`' explorer window, `LambdaExplorer` (after the View, with `explore()`; `LambdaView.explore()` keeps it
-  in `view.explorer`), is the fourth interactive UI, not a companion, and built like `KBExplorer`: ipywidgets styled by
-  `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript, full-row `Button`s under
-  their faces (`_Row`, which can carry a small action button such as the function list's Logs; `_RunRow`, whose button
-  opens or folds the run's lines below it; the function field `_FunctionField` with its searchable list and `backdrop`),
-  custom tab buttons over pages (`_EXPLORER_TABS`). The region field (`region_pick`: a region, or `"all"`) and the
+  in `view.explorer`), is the fourth interactive UI, not a companion, and built like `KBExplorer`, on the windows' kit:
+  ipywidgets styled by `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript,
+  full-row buttons under their faces (`_Row`, which can carry a small action button such as the function list's Logs;
+  `_RunRow`, whose button opens or folds the run's lines below it; the function field `_FunctionField`, a `_Picker`,
+  with its searchable list and `backdrop`), custom tab buttons over pages (`_EXPLORER_TABS`, `_tab_bar`). The region
+  field (`region_pick`: a region, or `"all"`) and the
   function field pick what it shows. The Functions tab is `overview()` read in three background steps so the list shows
   at once: `overview(metrics=False, details=False)`, then `_numbers()` (CloudWatch) and `_all_extras()` (resource
   policies, provisioned concurrency), which return data that `Overview.add_numbers` / `add_extras` merge on the loop
@@ -435,7 +465,7 @@ How the View layer works:
   **Download .zip** (`_save_code`) writes the cached bytes with `_save_package`, no new download; `x.saved` is the
   `PackageDownload`. **Hide files** (`files_toggle`, `_toggle_files`) hides the tree's pane, `code_left`, so the source
   has the tab's width; `_files_shown` isn't reset by `_open_function`, so it stays hidden for the next function.
-  Background work is `_later` (as in
+  Background work is `_later` (`_Explorer`'s, as in
   `KBExplorer`), the status line's busy text carries its job (`_status(owner=)`) so only that job, or the user being on
   its tab, replaces it (`_finish`), and `_drop` bumps keys so a function's results that come back after another was
   picked are dropped. `_renew` / renewing `runs_box` puts a page's scrolling box anew so it starts at the top.
@@ -466,13 +496,10 @@ runtime's end of support, block-create and block-update dates from AWS's Lambda 
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in `_bedrock.py`,
 once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, and `SEARCHABLE`.
-The two windows still share copies of `_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked` and
-`_class_if` (until Phase 7), and both analyzers make their clients with the base's `_cached_client` (once, under a lock,
-since both windows read from threads). `lambda_functions.py`'s explorer carries copies of
-`_css_height`, `_running_loop`, `_cell_number`, `search_rank`, `_marked`, `_class_if`, `_skeleton` and `_for_window` (as
-in `bedrock_kb.py`) and of `_python_html`, `_json_source_html`, `_JSON_TOKEN_RE` and `_PY_LITERALS` (as in
-`bedrock_chat.py`); `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`,
-`_window_text`, `_window_errors` and `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
+Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
+read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions.py`'s
+`_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and
+`explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
 
 ## The S3 explorer (`s3_explorer.py`)
 
@@ -532,7 +559,8 @@ does both, a page at a time). How the UI works:
 - Callbacks go through `_guard()`, which turns any exception into a note on the right; an exception in a widget
   callback would otherwise go to Jupyter's log, and the click would seem to do nothing.
 - Quick reports (`_BACKGROUND`: preview, head) load on `_WORKERS` threads when the kernel's event loop is running
-  (`_loop()`), so a click returns at once and the next click isn't kept waiting. `_later` awaits the worker's future
+  (`_running_loop()`), so a click returns at once and the next click isn't kept waiting. `_later` awaits the worker's
+  future
   on that loop and shows the report only if `_job` (bumped by every `_set_pane`) hasn't moved since; it's cached
   either way, and a job already out of date when a worker picks it up is skipped. A worker uses its own
   `S3View(progress="off")` and touches no widgets. Without a running loop (scripts, the tests) reports load inline;

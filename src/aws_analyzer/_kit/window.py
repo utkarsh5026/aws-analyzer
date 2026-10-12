@@ -2,6 +2,14 @@
 
 The windows are ipywidgets laid out and styled by CSS, with no JavaScript. ipywidgets and IPython load only inside the
 functions that need them (the window itself loads ipywidgets with `_require`), so this module imports with boto3 alone.
+
+    helpers          _css_height, _running_loop, _cell_number, _class_if, _skeleton, _icon_url, _row_button,
+                     _for_window
+    _window_errors   a window's own commands say their errors in the window
+    _Window          the chat's and the explorers' base: callbacks' errors said in the window, Enter, quiet updates
+    _Explorer        the knowledge base and Lambda explorers' base: their status line, tabs and frame, AWS read off
+                     the event loop (_later), the window shown once per cell
+    _Picker          a field that opens a list to search and pick from
 """
 
 from __future__ import annotations
