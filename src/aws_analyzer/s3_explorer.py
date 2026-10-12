@@ -55,14 +55,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
 from ._kit.render import _file_icon
-from ._kit.window import _cell_number, _css_height, _running_loop, _window_errors
+from ._kit.window import _cell_number, _css_height, _icon_url, _running_loop, _window_errors
 
 # =============================================================================
 # 1. Helpers
@@ -741,10 +741,7 @@ _ICON_PATHS = {
 
 def _icon_rules() -> str:
     """A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
-    return "\n".join(f'.s3x .s3x-i-{name}{{--s3x-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-                     for name, paths in _ICON_PATHS.items())
+    return "\n".join(f".s3x .s3x-i-{name}{{--s3x-icon:{_icon_url(paths)}}}" for name, paths in _ICON_PATHS.items())
 
 
 _CSS = """<style>
