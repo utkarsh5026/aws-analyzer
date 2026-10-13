@@ -166,7 +166,7 @@ The **Overview** tab has `function_info()`'s findings, each with what to do. Und
 - **Errors** is [`errors()`](#errors): the errors in its logs grouped by cause, with what to do about each, then the newest failed runs. Click one to read every line of it in the Logs tab.
 - **Performance** is [`performance()`](#performance): run times against the timeout, the memory used against what it has and the size that would do, cold starts, and the slowest runs, each a click from its lines.
 - **Code** downloads the deployment package once and shows its files as a tree of folders, folders first, with the handler's folder open (a folder that holds only a folder shares its line, as `botocore/data/` does). Click a folder to open or fold it, and a file to see its source, with line numbers, and Python and JSON in colour; **Copy** beside its name selects all of it, so <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd>+<kbd>C</kbd> on a Mac) copies the file. Typing in **Find a file** shows only the files that match, in their folders. **Hide files** folds the tree away so the source has the whole width, and **Show files** brings it back (it stays hidden for the next function you open). **Download .zip** saves the package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook, like [`download()`](#download). A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
-- **Settings** has every setting in plain English, then the configuration as Lambda returns it, folded, and the AWS CLI commands that read it. Environment variable values never appear.
+- **Settings** has every setting in plain English, then the configuration as Lambda returns it, folded (open it for the JSON in colour, where a click on an object or a list folds it, and hovering over a line shows its path in `raw`), and the AWS CLI commands that read it. Environment variable values never appear.
 
 The Errors and Performance tabs read the last 24 hours, and have their own time range.
 
@@ -232,7 +232,7 @@ The report's tables:
 - **What it can reach**: its execution role (what its code may do in AWS), its network (a VPC reaches the internet only through a NAT gateway or VPC endpoints), and the names of its environment variables.
 - **Versions, aliases and provisioned concurrency**, with what each provisioned copy costs.
 - **The last 30 days**, one row per day: calls, errors, throttles, average and longest run.
-- **The estimated monthly cost**, by part, and the configuration as Lambda returns it, folded away, with environment values hidden.
+- **The estimated monthly cost**, by part, and the configuration as Lambda returns it, folded away, with environment values hidden: JSON in colour, where a click on an object or a list folds it, as in S3's preview of a `.json` file.
 
 `days=7` reads a shorter window. The findings each end in the command to run: the `update-function-configuration` call that moves it to a supported runtime or raises its timeout, the `put-retention-policy` call that stops its logs being kept forever, the `put-function-event-invoke-config` call that catches failed events.
 
