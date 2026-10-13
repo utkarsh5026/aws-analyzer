@@ -1,7 +1,7 @@
 """Run what CI runs, locally, plus the project-rule checks CI doesn't have. Prints one line per step and the
 output of any step that failed.
 
-    python .claude/skills/check/run.py                  # lint, standalone imports, package, rules, tests, drift
+    python .claude/skills/check/run.py                  # lint, imports with only boto3, package, rules, tests
     python .claude/skills/check/run.py --matrix         # also pytest on every other Python in CI's matrix (uv)
     python .claude/skills/check/run.py -- -k policy     # pass arguments through to pytest
 
@@ -17,8 +17,6 @@ Steps:
   matrix      with --matrix: pytest on each Python version in .github/workflows/ci.yml other than this one,
               in throwaway environments built by uv from requirements-dev.txt (pandas 2 / IPython 8 on 3.10,
               pandas 3 / IPython 9 on 3.11+)
-  drift       .claude/skills/sync-helpers/drift.py --summary: duplicated helpers that differ between analyzers
-              (information only; some differences are intentional)
 """
 
 from __future__ import annotations
@@ -146,12 +144,6 @@ def main() -> int:
                 "uv", "run", "--quiet", "--no-project", "--python", version, "--with-requirements",
                 "requirements-dev.txt", "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
                 *args.pytest_args], tail=60))
-
-    drift = subprocess.run([python, str(ROOT / ".claude/skills/sync-helpers/drift.py"), "--summary"],
-                           cwd=ROOT, capture_output=True, text=True)
-    drift_out = drift.stdout.strip()
-    results.append((f"INFO  drift    {drift_out.splitlines()[0] if drift_out else drift.stderr.strip()}", True, "",
-                    drift_out))
 
     print(f"Python {sys.version.split()[0]} ({python})\n")
     for line, *_ in results:

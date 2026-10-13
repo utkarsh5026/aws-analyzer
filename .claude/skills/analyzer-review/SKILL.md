@@ -22,14 +22,14 @@ List the View commands the scope adds or changes. Those get the output review in
 
 ```bash
 .venv/bin/python .claude/skills/check/rules.py --apis
-.venv/bin/python .claude/skills/sync-helpers/drift.py --summary
 ```
 
 `rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers (and, in the
 Bedrock pair, of `_bedrock.py`'s), banners,
 View decoration and docstrings, and
-IAM permissions missing from the README. Report its errors, and any warnings the change caused. For drift,
-report only the helpers this change touched, where the other analyzer's copy wasn't updated.
+IAM permissions missing from the README. Report its errors, and any warnings the change caused. It can't see a
+helper copied from one service into another: when the change adds a function another service has too, say whether
+it's the same code (it goes in `_kit/`, or `_bedrock.py` for the Bedrock pair) or a different thing under the name.
 
 Don't run the whole test suite here. That's `/check`'s job. Suggest it at the end if it hasn't been run since
 the change.

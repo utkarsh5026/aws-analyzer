@@ -120,7 +120,7 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too; an explorer's
   once-per-cell display asks `_cell_number` on `_kit.window`).
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
-  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`. Its
+  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
   public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
   `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
   Nothing imports a companion.
