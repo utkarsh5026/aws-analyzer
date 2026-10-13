@@ -94,7 +94,9 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `<Service>View` subclasses: `_show`, `_progress`, `help()`, `_price_basis`; `@_friendly_errors`; `_commands`) and
   `analyzer.py` (`_BaseAnalyzer`, which every `<Service>Analyzer` subclasses: the session, `_config`, `prices`,
   `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file"), `highlight.py`
-  (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab)
+  (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab),
+  `jsontree.py` (the `_JsonTree` block, JSON you can fold: S3's .json previews and Lambda's configuration; a service
+  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`)
   and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
@@ -204,9 +206,10 @@ How the View layer works:
   are labels for the neighbouring pages' radios and the report's "none" radio, so a click shows the page full size
   and steps through every drawn page in the report; JupyterLab confines fixed elements to the notebook panel, so
   it fills the notebook, not the window), `_Flow` (a Word
-  document laid out: headings, lists, tables and its pictures in place) and `_JsonTree` (a JSON file as nested
-  `<details>` with coloured tokens, capped and opened breadth-first; not `bedrock_chat`'s `_Json`, which shows a
-  request with its settings marked), and in Bedrock `_Passage` (a retrieved
+  document laid out: headings, lists, tables and its pictures in place), in S3 and Lambda `_JsonTree` (`_kit`'s: a
+  JSON file or Lambda's configuration as nested `<details>` with coloured tokens, capped and opened breadth-first,
+  `collapsed=True` folding it all under its title; not `bedrock_chat`'s `_Json`, which shows a request with its
+  settings marked), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
   cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in

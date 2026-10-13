@@ -1405,6 +1405,13 @@ def test_html_report(core):
     page = lfmod._render_html(shown[0], 50)
     assert page.startswith("<style>") and 'class="lmb"' in page and "⚡ Lambda" in page
     assert '<span class="pill bad">python3.9 (ended)</span>' in page
+    ui.function_info("etl-nightly")
+    page = lfmod._render_html(shown[1], 50)
+    # the configuration is a JSON tree to fold, coloured like code, with each line's path from fn.raw
+    assert '<details class="sec"><summary>Configuration, as Lambda returns it' in page
+    assert '<div class="jt">' in page and ".lmb .jt .jk{" in page
+    assert '<span class="jk">&quot;Timeout&quot;</span>' in page and "title=\"raw[&#x27;Timeout&#x27;]\"" in page
+    assert "hunter2" not in page and "(hidden)" in page
 
 
 def test_help_lists_every_command(ui, capsys):

@@ -31,7 +31,7 @@ from moto import mock_aws
 from PIL import Image
 
 from aws_analyzer import s3 as s3mod
-from aws_analyzer._kit import render
+from aws_analyzer._kit import jsontree, render
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.blocks import _Report
 from aws_analyzer._kit.progress import _progress_text
@@ -2161,7 +2161,7 @@ def test_json_tree_folds_caps_and_reads_json_in_strings():
     assert prompt.kind == "string" and prompt.total == 518 and not prompt.open
     assert tree.capped == {"item"} and not tree.full and not tree.cut
 
-    text = s3mod._json_tree_text(tree)
+    text = jsontree._json_tree_text(tree)
     assert '  "shape": [3, 224, 224],\n' in text and "    0.0, 0.1, 0.2, 0.3, 0.4,\n    … 45 more items\n" in text
     assert '"message": (JSON in a string) {' in text and "(518 characters)" in text
     assert '"rows": [\n    {\n      "id": 0,\n      "ok": null\n    },' in text
@@ -2177,8 +2177,8 @@ def test_json_tree_folds_caps_and_reads_json_in_strings():
     huge = s3mod._JsonTree([[i] for i in range(3000)], items=3000)
     assert huge.full and huge.root.more == 3000 - 1999
     cut = s3mod._JsonTree({"a": [1, 2]}, cut=2)
-    assert s3mod._json_tree_text(cut).splitlines() == ["{", '  "a": [', "    1, 2", s3mod._JSON_END]
-    assert 'data-n="2+ items"' in s3mod._json_tree_html(cut)
+    assert jsontree._json_tree_text(cut).splitlines() == ["{", '  "a": [', "    1, 2", jsontree._JSON_END]
+    assert 'data-n="2+ items"' in jsontree._json_tree_html(cut)
 
 
 def test_json_tree_unfolds_all_and_back():
@@ -2202,7 +2202,7 @@ def test_preview_shows_the_start_of_a_json_file_too_big_to_read(core, aws, capsy
     assert p.data["info"] == {"version": 1} and 10000 < len(p.data["images"]) < 30000
     assert "bigger than the 512.0 KB preview window" in p.note
     out = run(capsys, S3View(core, mode="text").preview, uri)
-    assert "Keys: 2+" in out and "+ more items" in out and s3mod._JSON_END in out
+    assert "Keys: 2+" in out and "+ more items" in out and jsontree._JSON_END in out
     assert "Long arrays show their first 20 items; pass n= for more." in out
     assert f"data = ui.core.read_json('{uri}')" in out
 

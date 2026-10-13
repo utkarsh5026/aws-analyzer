@@ -83,6 +83,7 @@ from ._kit.fmt import (
     human_money, human_size, parse_size, parse_time,
 )
 from ._kit.highlight import _json_source_html, _python_html
+from ._kit.jsontree import _JsonTree, _json_tree_css
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
 from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
@@ -3410,7 +3411,7 @@ _EXTRA_CSS = """\
 .lmb .colbars .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
 .lmb .colbars .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
 .lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}"""
-_CSS = _base_css(_ROOT, _EXTRA_CSS)
+_CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
 
@@ -4125,8 +4126,8 @@ class LambdaView(_BaseView):
         if fn.tags:
             sections["tags"].append(_Table(["Tag", "Value"], [[k, v] for k, v in sorted(fn.tags.items())],
                                            title="Tags", collapsed=True, max_rows=0))
-        sections["raw"].append(_Text(json.dumps(fn.raw, indent=2, default=str), collapsed=True,
-                                     title="Configuration, as Lambda returns it (environment values hidden)"))
+        sections["raw"].append(_JsonTree(fn.raw, items=100, name="raw", collapsed=True,
+                                         title="Configuration, as Lambda returns it (environment values hidden)"))
         steps = []
         if m is not None and m.errors:
             steps.append((self._call_for("errors", fn), "its errors, grouped by cause"))
@@ -4981,7 +4982,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app .lmb .card.bad{border-color:rgba(239,68,68,.75);background:rgba(239,68,68,.08)}
 .lmx-app .lmb .card.ok{border-color:rgba(16,185,129,.55)}
 .lmx-app .lmb .note,.lmx-app .lmb .fi{border-radius:4px 10px 10px 4px}
-.lmx-app .lmb pre{border-radius:10px}
+.lmx-app .lmb pre,.lmx-app .lmb .jt{border-radius:10px}
 .lmx-app .lmb .wire .wn,.lmx-app .lmb .wire .wf{border-radius:12px;background-color:var(--lx-surface)}
 @media (prefers-reduced-motion:reduce){.lmx-app *,.lmx-app *::before{transition:none!important;animation-duration:2.5s!important}}
 """ + _explorer_rules() + "\n</style>"
