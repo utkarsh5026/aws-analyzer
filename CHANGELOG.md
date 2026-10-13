@@ -13,7 +13,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - Lambda's `function_info()` and the explorer's **Settings** tab: the configuration as Lambda returns it is JSON in
   colour that folds, like S3's preview of a `.json` file, instead of plain text. Click an object or a list to fold or
-  unfold it, and hover over a line to see its path in Python (`raw['Environment']['Variables']`).
+  unfold it, and hover over a line to see its path in Python (`raw['Environment']['Variables']`)
+  ([#74](https://github.com/utkarsh5026/aws-analyzer/pull/74)).
 
 ## [0.16.0] - 2026-10-13
 
