@@ -4,7 +4,7 @@ The analyzers share code through src/aws_analyzer/_kit/ (human_size, _require, _
 renderer, since Phase 6 with S3's sortable tables and finding headlines for every service, and since Phase 4 the base
 View and Analyzer: _show, _progress, help, _friendly_errors, ...), and bedrock_kb.py and bedrock_chat.py also through
 _bedrock.py (since Phase 5: the model prices and helpers, passages, filters, the answer's markdown, ...). The rest
-moves phase by phase (.claude/plans/shared-code.md): the explorer windows' parts (Phase 7) are still copied. This
+moved phase by phase (.claude/plans/shared-code.md), the windows' parts last (Phase 7: _kit/window.py). This
 compares every top-level definition (tables too), and every private View / Analyzer method, that two or more
 analyzers define under the same name, and every name an analyzer defines that _kit or the shared module it imports
 has too (rules.py fails on those: a copy to delete).

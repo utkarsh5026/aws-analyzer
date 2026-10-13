@@ -47,10 +47,7 @@ Quick start
 
 from __future__ import annotations
 
-import asyncio
-import dataclasses
 import difflib
-import functools
 import html
 import json
 import mimetypes
@@ -64,7 +61,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Iterable
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
@@ -83,15 +80,18 @@ from ._bedrock import (
 )
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _in_notebook, _require
+from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _utcnow, human_age, human_money,
     human_size, parse_time,
 )
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc, _text_bar
+from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
+from ._kit.window import (
+    _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _skeleton, _window_errors,
+)
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -154,32 +154,6 @@ def file_type(uri: str | None) -> str:
     """The extension a file is read by, lower case: 's3://b/Refund-Policy.PDF' -> 'pdf', 'faq/README' -> ''."""
     name = source_name(uri)
     return name.rsplit(".", 1)[-1].lower() if "." in name.strip(".") else ""
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
 
 
 def sync_command(kb_id: str, data_source_id: str, region: str = "") -> str:
@@ -2804,26 +2778,6 @@ def sort_files(files: Iterable[KBFile], by: str = "problems") -> list[KBFile]:
     if by == "indexed":
         return sorted(files, key=lambda f: (-when(f.indexed), f.key.lower()))
     raise ValueError(f"by= is one of {', '.join(map(repr, _SORTS))}; got {by!r}")
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 # =============================================================================
@@ -6735,10 +6689,7 @@ _STATE_INKS = {"failed": ("#dc2626", "#f87171"), "changed": ("#b45309", "#fbbf24
 def _explorer_rules() -> str:
     """The explorer's tab icons (.kbx-i-<key> sets --kx-icon, which a tab's ::before draws), and each file state's
     colour on the list's dots and chips."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
-    icons = [f'.kbx-app .kbx-i-{key}{{--kx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-             for key, _, _, paths in _EXPLORER_TABS]
+    icons = [f".kbx-app .kbx-i-{key}{{--kx-icon:{_icon_url(paths)}}}" for key, _, _, paths in _EXPLORER_TABS]
     states = [f".kbx-app .dot.s-{state},.kbx-app.kbx-app button.kbx-chip.kbx-s-{state}::before{{background:{colour}}}"
               for state, colour in _STATE_COLOURS.items()]
     inks = [".kbx-app{" + ";".join(f"--kx-s-{state}:{light}" for state, (light, _) in _STATE_INKS.items()) + "}"]
@@ -6986,55 +6937,7 @@ def _window_text(text: str) -> str:
     return _CALL_RE.sub(swap, text)
 
 
-def _for_window(blocks: list[Any]) -> list[Any]:
-    """A report's blocks for the explorer window: no Next block (its calls are for a cell), and the commands its
-    sentences name changed into the tabs that show the same (_window_text)."""
-    out = []
-    for block in blocks:
-        if isinstance(block, _Next):
-            continue
-        if isinstance(block, _Findings):
-            block = dataclasses.replace(block, items=[(level, _window_text(m)) for level, m in block.items],
-                                        empty=_window_text(block.empty))
-        elif isinstance(block, _Note):
-            block = dataclasses.replace(block, text=_window_text(block.text))
-        elif isinstance(block, _Title):
-            block = dataclasses.replace(block, sub=_window_text(block.sub))
-        elif isinstance(block, _Table):
-            rows = [[_window_text(cell) if j in block.prose_cols and isinstance(cell, str) else cell
-                     for j, cell in enumerate(row)] for row in block.rows]
-            block = dataclasses.replace(block, rows=rows, title=_window_text(block.title))
-        out.append(block)
-    return out
-
-
-def _skeleton(text: str) -> str:
-    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
-    return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
-            '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
-            '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
-            "</div></div>")
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
-
-
-class _Chooser:
+class _Chooser(_Picker):
     """The explorer's knowledge base field: a button under its face (the name, ID and a status dot) that opens a list
     over the window, with a search box that finds a knowledge base by any part of its name, ID or description. Enter
     picks the first line, or hands what's typed to on_text when no line has it (an ID or ARN). Plain widgets and CSS:
@@ -7042,42 +6945,11 @@ class _Chooser:
     backdrop takes a click anywhere else and closes it."""
 
     def __init__(self, app: KBExplorer, *, on_pick: Callable[[str], None], on_text: Callable[[str], None]):
-        w, layout = app._w, app._w.Layout
-        self.app, self.on_pick, self.on_text = app, on_pick, on_text
+        super().__init__(app, app._w, "kbx", on_pick=on_pick, on_text=on_text, tooltip="Pick another knowledge base",
+                         placeholder="Search by name, ID or description")
         self.choices: list[KnowledgeBaseInfo] = []
         self.value = ""  # the ID shown
-        self.problem = ""  # why there's nothing to list
-        self.message = ""  # what went wrong with the last Enter
-        self.shown: list[str] = []  # the IDs the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # ID -> (its line, the line's button, its text)
-        self.button = w.Button(tooltip="Pick another knowledge base", layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbx-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbx-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("kbx-trig")
-        self.search = w.Text(placeholder="Search by name, ID or description", continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("kbx-find")
-        self.search.observe(app._safely(lambda _change: self._draw_list()), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(flex="0 0 auto"))
-        close.add_class("kbx-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("kbx-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none"))
-        self.panel.add_class("kbx-pop")
-        self.field = w.VBox([trigger, self.panel])
-        self.field.add_class("kbx-field")
         self.draw()
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     def set_choices(self, kbs: Iterable[KnowledgeBaseInfo]) -> None:
         self.choices = sorted(kbs, key=lambda kb: (kb.name or kb.id).lower())
@@ -7098,52 +6970,21 @@ class _Chooser:
         if self.is_open:
             self._draw_list()
 
-    def open(self) -> None:
-        if self.is_open:
-            return
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.field, "kbx-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
-
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        self.app.backdrop.layout.display = "none"
-        _class_if(self.field, "kbx-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
-
-    def toggle(self) -> None:
-        self.close() if self.is_open else self.open()
-
-    def matches(self) -> list[KnowledgeBaseInfo]:
-        text = str(self.search.value or "")
+    def _query(self, text: str) -> str:
         try:
             kind, value = parse_kb_ref(text)
-            text = value if kind == "arn" else text
         except ValueError:
-            pass
-        ranked = [(rank, i, kb) for i, kb in enumerate(self.choices)
-                  if (rank := search_rank(text, (kb.name, kb.id, kb.description, kb.status))) is not None]
-        return [kb for _, _, kb in sorted(ranked, key=lambda r: r[:2])]
+            return text
+        return value if kind == "arn" else text
+
+    def _fields(self, kb: KnowledgeBaseInfo) -> tuple[str, ...]:
+        return (kb.name, kb.id, kb.description, kb.status)
+
+    def _key(self, kb: KnowledgeBaseInfo) -> str:
+        return kb.id
 
     def _row(self, kb: KnowledgeBaseInfo, words: list[str]) -> Any:
-        if kb.id not in self.rows:
-            w, layout = self.app._w, self.app._w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("kbx-opt-b")
-            button.on_click(self.app._safely(lambda _button, kb_id=kb.id: self._clicked(kb_id)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("kbx-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("kbx-opt")
-            self.rows[kb.id] = (row, button, text)
-        row, button, text = self.rows[kb.id]
+        row, button, text = self._line(kb.id)
         _class_if(row, "kbx-on", kb.id == self.value)
         status = "" if kb.status == "ACTIVE" else kb.status.lower().replace("_", " ")
         note = " · ".join(p for p in (status, kb.description, f"changed {human_age(kb.updated)}" if kb.updated else "")
@@ -7180,23 +7021,6 @@ class _Chooser:
         if kb_id != self.value:
             self.on_pick(kb_id)
 
-    def _entered(self) -> None:
-        text = str(self.search.value or "").strip()
-        if not text:
-            self.close()
-            return
-        found = self.matches()
-        try:
-            if found:
-                self._clicked(found[0].id)
-            else:
-                self.on_text(text)
-                self.close()
-        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
-            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
-            self._draw_list()
-
-
 _PARSER_NAMES = {"BEDROCK_FOUNDATION_MODEL": "Foundation model", "BEDROCK_DATA_AUTOMATION": "Data Automation",
                  "SMART_PARSING": "Smart parsing", "MULTI_MODAL_EMBEDDINGS": "Multimodal embeddings"}
 
@@ -7216,15 +7040,9 @@ class _FileRow:
     it, the name, its folder and state, its size and age), so the whole line is the click target."""
 
     def __init__(self, app: KBExplorer):
-        w, layout = app._w, app._w.Layout
         self.file: KBFile | None = None
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbx-row-b")
-        self.button.on_click(app._safely(lambda _button: app._clicked_row(self)))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbx-row-t")
-        self.box = w.Box([self.button, self.face], layout=layout(width="100%"))
-        self.box.add_class("kbx-row")
+        self.box, self.button, self.face = _row_button(app._w, ("kbx-row", "kbx-row-b", "kbx-row-t"),
+                                                       app._safely(lambda _button: app._clicked_row(self)))
 
 
 def _sync_step(job: IngestionJob, names: dict[str, str]) -> tuple[str, str, str, str]:
@@ -7265,25 +7083,7 @@ def _short_value(value: Any, width: int = 48) -> str:
     return _clip(json.dumps(_plain_json(value), ensure_ascii=False), width)
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is said in the window's status line (or, without the
-    window, as a note) instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: KBExplorer, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except (ClientError, BotoCoreError, ValueError, TypeError) as exc:
-            if self._w is None:
-                self.ui._show([_Note(self._error_text(exc), "warn")])
-            else:
-                self._status(self._error_text(exc), "warn")
-        return None
-
-    return wrapper
-
-
-class KBExplorer:
+class KBExplorer(_Explorer):
     """The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
 
@@ -7309,6 +7109,9 @@ class KBExplorer:
     x.ui is a BedrockKBView for reports in other cells (x.ui.search(...)); x.inventory, x.info, x.chunks hold the
     data behind what's shown."""
 
+    _PREFIX, _THREADS = "kbx", "kb-explorer"
+    _reword = staticmethod(_window_text)
+
     def __init__(
         self,
         kb: str | None = None,
@@ -7324,6 +7127,7 @@ class KBExplorer:
     ):
         if mode not in ("auto", "widgets", "text"):
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
+        super().__init__()
         if view is None:
             view = BedrockKBView(core or BedrockKBAnalyzer(region=region, profile=profile), kb=kb,
                                  mode="text" if mode == "text" else "auto", progress=progress)
@@ -7340,27 +7144,12 @@ class KBExplorer:
         self.probe: FileProbe | None = None  # the last question asked of that file
         self.jobs: list[IngestionJob] | None = None  # the Syncs tab's history, once read
         self.found: Retrieval | None = None  # the Search tab's last search
-        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
-        self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
-        self._w: Any = None
         self._want_file = file  # opened once the files are listed
         self._query, self._state, self._source, self._sort, self._offset = "", "", "", "problems", 0
         self._tab = "overview"
-        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
-        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
-        self._pool: ThreadPoolExecutor | None = None
-        self._counted = 0  # what the background listing has read so far
-        self._said: tuple[str, str, bool] = ("", "", False)  # the status line: text, level, busy
         self._rows: list[_FileRow] = []
         self._visible: list[KBFile] = []  # the files the list's filters let through, in order
-        self._shown_at: Any = object()
-        note = ""
-        if mode != "text" and (mode == "widgets" or _in_notebook()):
-            try:
-                self._w = _require("ipywidgets", "The explorer window")
-            except ImportError as exc:
-                note = (f"{exc}, which SageMaker notebooks normally have: install it and restart the kernel. Until "
-                        "then, the same in reports:")
+        note = self._load_widgets(mode)
         if self._w is None:
             self._reports(kb, note, mode)
             return
@@ -7416,20 +7205,6 @@ class KBExplorer:
 
     # ------------------------------------------------------------------ plumbing
 
-    def _ipython_display_(self) -> None:
-        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
-        its reports were shown when it was made)."""
-        if self._w is not None and _cell_number() != self._shown_at:
-            self._display()
-
-    def _display(self) -> None:
-        self._shown_at = _cell_number()
-        if self._shown_at is None:
-            return  # outside IPython there's nowhere to show widgets
-        from IPython.display import display
-
-        display(self.root)
-
     def _reports(self, kb: str | None, note: str, mode: str) -> None:
         """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
         if note:
@@ -7441,120 +7216,18 @@ class KBExplorer:
         self.ui.files(kb)
         self.kb = next(reversed(self.ui._inventories), None)  # the ID files() listed (None when it couldn't)
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._status(self._error_text(exc), "warn")
-                return None
-
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {_window_text(self.ui._explain(code, message))}"
-        if isinstance(exc, _Hint):
-            return _window_text(str(exc))
-        return f"{type(exc).__name__}: {exc}"
-
-    def _status(self, text: str, level: str = "", busy: bool = False) -> None:
-        self._said = (text, level, busy)
-        spin = '<span class="spin"></span>' if busy else ""
-        self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
-        chunk and JSON object the user opened."""
-        if widget.value != value:
-            widget.value = value
-
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
-        return _render_html(_for_window(blocks), self.ui.max_rows).replace(_CSS, "", 1)
-
-    def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
-        self.shown[page] = blocks
-        self._set(widget, self._html(blocks))
-
-    def _workers(self) -> ThreadPoolExecutor:
-        if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="kb-explorer")
-        return self._pool
-
-    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
-               failed: Callable[[BaseException], None] | None = None, counting: str = "") -> None:
-        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
-        window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
-        A newer job of the same key makes this one's result go unused. counting: the status line to show, with the
-        count read so far, while it runs."""
-        self._jobs[key] = job = self._jobs.get(key, 0) + 1
-        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
-
-        def finish(handler: Callable[[Any], None], value: Any) -> None:
-            if self._jobs.get(key) != job:
-                return
-            try:
-                handler(value)
-            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
-                self._status(self._error_text(exc), "warn")
-
-        loop = _running_loop()
-        if loop is None:
-            try:
-                result = work()
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            return
-
-        async def run() -> None:
-            future = loop.run_in_executor(self._workers(), work)
-            while counting and not future.done():
-                await asyncio.wait([future], timeout=0.4)
-                if self._jobs.get(key) == job and not future.done() and self._counted:
-                    self._status(f"{counting}… {self._counted:,} read so far", busy=True)
-            try:
-                result = await future
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            finally:
-                if self._tasks.get(key) is task:
-                    del self._tasks[key]
-
-        task = loop.create_task(run())
-        self._tasks[key] = task
+        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     # ------------------------------------------------------------------ layout
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
-        style = w.HTML(_CSS + _EXPLORER_CSS, layout=layout(display="none"))
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("kbx-backdrop")
-        self.backdrop.on_click(self._safely(lambda _button: self.chooser.close()))
+        self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
         self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
         self.refresh_button = w.Button(description="↻ Refresh", tooltip="Read the knowledge base again: settings, "
                                        "files and syncs", layout=layout(width="auto", flex="0 0 auto"))
@@ -7568,40 +7241,18 @@ class KBExplorer:
         meta.add_class("kbx-meta")
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("kbx-head")
+        tabs = self._tab_bar(_EXPLORER_TABS)
 
-        self.tab_buttons: dict[str, Any] = {}
-        for key, title, tip, _ in _EXPLORER_TABS:
-            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
-            for name in ("kbx-tab", f"kbx-i-{key}"):
-                button.add_class(name)
-            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
-            self.tab_buttons[key] = button
-        tabs = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
-        tabs.add_class("kbx-tabs")
-
-        height = _css_height(self.height)
         self.overview = w.HTML(layout=layout(width="100%"))
         self.syncs_view = w.HTML(layout=layout(width="100%"))
         self.settings_view = w.HTML(layout=layout(width="100%"))
-        self.pages = {
+        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
             "overview": w.VBox([self.overview]),
             "files": self._files_page(),
             "syncs": w.VBox([self.syncs_view]),
             "search": self._search_page(),
             "settings": w.VBox([self.settings_view]),
-        }
-        for key, page in self.pages.items():
-            page.add_class("kbx-page")
-            page.layout.width = "100%"
-            if height:
-                page.layout.height = height
-            if key != self._tab:
-                page.layout.display = "none"
-        self.status = w.HTML(layout=layout(width="100%"))
-        self.status.add_class("kbx-status")
-        self.root = w.VBox([style, head, tabs, *self.pages.values(), self.status, self.backdrop],
-                           layout=layout(width="100%"))
-        self.root.add_class("kbx-app")
+        })
         self._show_tab(self._tab)
 
     def _files_page(self) -> Any:
@@ -7820,7 +7471,7 @@ class KBExplorer:
         self._status(f"Listing {info.name}'s files: Bedrock's document list next to the files in S3…", busy=True)
         self._later("files", lambda: self.core.file_inventory(
             info.id, info=info, progress=lambda count: setattr(self, "_counted", count)),
-            self._listed, self._files_failed, counting="Listing the files")
+            self._listed, self._files_failed, counting="Listing the files… {n} read so far")
 
     def _files_failed(self, exc: BaseException) -> None:
         text = self._error_text(exc)

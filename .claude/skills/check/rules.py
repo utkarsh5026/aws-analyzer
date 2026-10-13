@@ -257,7 +257,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
 
     # View methods: decorated, documented, render through blocks.
     ui_suffixes = ("View", "Explorer") if parent else ("View",)
-    guards = {"_friendly_errors", "_window_errors"} if parent else {"_friendly_errors"}  # a window guards its own
+    guards = {"_friendly_errors", "_window_errors"} if parent else {"_friendly_errors"}  # a window: _kit's guard
     view = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.endswith(ui_suffixes)), None)
     if view is None:
         if not in_kit and not is_shared:

@@ -45,7 +45,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import fnmatch
-import functools
 import html
 import importlib
 import os
@@ -56,13 +55,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ._kit.deps import _in_notebook
 from ._kit.fmt import _plural
 from ._kit.render import _file_icon
+from ._kit.window import _cell_number, _css_height, _icon_url, _running_loop, _window_errors
 
 # =============================================================================
 # 1. Helpers
@@ -148,12 +148,6 @@ def _parent_prefix(key: str) -> str:
     """The folder part of a key: 'a/b/c.csv' -> 'a/b/', 'c.csv' -> '', '/c.csv' -> '/'."""
     head, sep, _ = key.rpartition("/")
     return head + sep
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
 
 
 def _tip_time(moment: datetime | None) -> str:
@@ -723,29 +717,6 @@ class S3Navigator:
 # =============================================================================
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is shown as a note in the explorer instead of a
-    traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: S3Explorer, *args: Any, **kwargs: Any) -> None:
-        if self.s3 is None:
-            self._say(self._broken)
-            return None
-        try:
-            return method(self, *args, **kwargs)
-        except ClientError as exc:
-            error = exc.response.get("Error", {})
-            self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{method.__name__}]")
-        except ImportError as exc:  # a missing optional package: the message says what to pip install
-            self._fail(f"{str(exc).rstrip('.')}.")
-        except (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError))) as exc:
-            self._fail(f"{type(exc).__name__}: {exc}  [{method.__name__}]")
-        return None
-
-    return wrapper
-
-
 # The toolbar's icons (24 x 24, drawn with lines), shown as masks in the text's colour so they follow the theme.
 _ICON_PATHS = {
     "back": "<path d='M19 12H5M11 18l-6-6 6-6'/>",
@@ -770,10 +741,7 @@ _ICON_PATHS = {
 
 def _icon_rules() -> str:
     """A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
-    return "\n".join(f'.s3x .s3x-i-{name}{{--s3x-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-                     for name, paths in _ICON_PATHS.items())
+    return "\n".join(f".s3x .s3x-i-{name}{{--s3x-icon:{_icon_url(paths)}}}" for name, paths in _ICON_PATHS.items())
 
 
 _CSS = """<style>
@@ -1198,20 +1166,11 @@ class S3Explorer:
         return f"S3Explorer({where})"
 
     def _ipython_display_(self) -> None:
-        if self._execution() != self._shown_at:  # it already showed itself when this cell made it
+        if _cell_number() != self._shown_at:  # it already showed itself when this cell made it
             self._display()
 
-    @staticmethod
-    def _execution() -> Any:
-        try:
-            from IPython.core.getipython import get_ipython
-        except ImportError:
-            return None
-        shell = get_ipython()
-        return getattr(shell, "execution_count", None) if shell is not None else None
-
     def _display(self) -> None:
-        self._shown_at = self._execution()
+        self._shown_at = _cell_number()
         if self.s3 is None or self._widgets is None or self._shown_at is None:
             return  # a text explorer prints as it goes; outside IPython there's nowhere to show widgets
         from IPython.display import display
@@ -1223,7 +1182,7 @@ class S3Explorer:
         if self.s3 is not None:
             self._set_pane([[self.s3._Note(text, "warn")]])
             return
-        if self._execution() is not None:
+        if _cell_number() is not None:
             from IPython.display import HTML, display
 
             display(HTML(f'<div style="padding:6px 10px;border-left:3px solid #f59e0b;'
@@ -1233,6 +1192,26 @@ class S3Explorer:
 
     def _fail(self, text: str) -> None:
         self._set_pane([[self.s3._Note(text, "warn")]])
+
+    def _ready(self) -> bool:
+        """Whether a command can run (see _window_errors): not without s3.py, which says so instead."""
+        if self.s3 is None:
+            self._say(self._broken)
+            return False
+        return True
+
+    def _command_failed(self, exc: Exception, command: str) -> bool:
+        """A command's AWS or input error as a note in the explorer (see _window_errors); False for any other."""
+        if isinstance(exc, ClientError):
+            error = exc.response.get("Error", {})
+            self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{command}]")
+        elif isinstance(exc, ImportError):  # a missing optional package: the message says what to pip install
+            self._fail(f"{str(exc).rstrip('.')}.")
+        elif isinstance(exc, (BotoCoreError, *getattr(self.s3, "_DATA_ERRORS", (ValueError, ImportError, OSError)))):
+            self._fail(f"{type(exc).__name__}: {exc}  [{command}]")
+        else:
+            return False
+        return True
 
     def _capture(self, blocks: list[Any]) -> None:
         """The pane's S3View renders here (see _trim)."""
@@ -1272,7 +1251,7 @@ class S3Explorer:
 
     def _background(self) -> bool:
         """Whether listings go on in the background: in a notebook, where the kernel's event loop runs the clicks."""
-        return self._widgets is not None and self._loop() is not None
+        return self._widgets is not None and _running_loop() is not None
 
     def _goal(self, folder: Folder) -> int:
         """How much of a folder the explorer lists before it stops and offers "Load more from S3"."""
@@ -1299,7 +1278,7 @@ class S3Explorer:
             return
         self._stop_listing()
         self._lister, self._list_error = folder, ()
-        self._list_task = self._loop().create_task(self._list_later(folder, keys))
+        self._list_task = _running_loop().create_task(self._list_later(folder, keys))
 
     def _stop_listing(self) -> None:
         if self._lister is not None:
@@ -1375,7 +1354,7 @@ class S3Explorer:
                    "zip": "Listing every file below this folder, then zipping them…",
                    "picks": f"Zipping the {_plural(len(self._picked), 'selected item')}…"}
         self._wait(waiting.get(action, "Working…"))
-        loop = self._loop() if isinstance(method, str) and action in _BACKGROUND else None
+        loop = _running_loop() if isinstance(method, str) and action in _BACKGROUND else None
         if loop is not None:
             self._task = loop.create_task(self._later(self._job, key, cache, method, self.selected, args, kwargs))
             return
@@ -1383,7 +1362,7 @@ class S3Explorer:
             with self._progress:
                 run(*args, **kwargs)
         finally:
-            if self._execution() is not None:  # outside a kernel, clear_output() prints terminal escape codes
+            if _cell_number() is not None:  # outside a kernel, clear_output() prints terminal escape codes
                 self._progress.clear_output()
         self._keep(key, self._captured, cache)
         self._set_pane(self._captured)
@@ -1394,15 +1373,6 @@ class S3Explorer:
             while len(self._cache) >= 24:
                 self._cache.pop(next(iter(self._cache)))
             self._cache[key] = reports
-
-    @staticmethod
-    def _loop() -> asyncio.AbstractEventLoop | None:
-        """The kernel's event loop, which runs clicks and cells in a notebook; None elsewhere (a script, the
-        tests), where reports load right away as the click waits."""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            return None
 
     async def _later(self, job: int, key: tuple, cache: bool, method: str, selected: str, args: tuple,
                      kwargs: dict) -> None:

@@ -35,9 +35,9 @@ just as well for people. The rules that matter most:
   it's drawn with `@_draws`. Each service's View and analyzer build on `_kit`'s base classes (`_BaseView`,
   `_BaseAnalyzer`), which bring `help()`, progress bars and the error notes. What the two Bedrock modules share
   (prices, models, passages, filters, the answer's markdown) lives once in
-  [`src/aws_analyzer/_bedrock.py`](src/aws_analyzer/_bedrock.py), which only they import. The explorer windows' parts
-  are still copied while they move to `_kit` ([the plan](.claude/plans/shared-code.md)): when you change one of
-  those, change the copies too.
+  [`src/aws_analyzer/_bedrock.py`](src/aws_analyzer/_bedrock.py), which only they import. The notebook windows (the
+  explorers and the chat) build on what [`_kit/window.py`](src/aws_analyzer/_kit/window.py) gives them: the error
+  guard for clicks, reading AWS in the background, the searchable picker and the full-width rows.
 - **Only boto3 and the standard library at import time.** pandas, pyarrow, IPython and the file readers are
   imported inside the function that needs them, through `_require(...)`, so a missing package becomes a note that
   says what to install.

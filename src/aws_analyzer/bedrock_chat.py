@@ -91,10 +91,8 @@ import dataclasses
 import difflib
 import functools
 import html
-import io
 import itertools
 import json
-import keyword
 import math
 import queue
 import re
@@ -102,7 +100,6 @@ import shlex
 import textwrap
 import threading
 import time
-import tokenize
 import uuid
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -110,7 +107,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
-from urllib.parse import quote
 
 import botocore
 import botocore.session
@@ -134,12 +130,14 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Titl
 from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money
+from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import (
     _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _report_html,
     _text_lines,
 )
-from ._kit.text import _clip, _esc
+from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors, _which_prices
+from ._kit.window import _cell_number, _class_if, _css_height, _icon_url, _Picker, _running_loop, _Window
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -1015,26 +1013,6 @@ def describe_files(uris: list[str]) -> str:
         return f"file {source_name(uris[0])!r}"
     names = [repr(source_name(u)) for u in uris]
     return f"files {', '.join(names[:-1])} and {names[-1]}" if len(uris) <= 3 else f"{len(uris)} files"
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 def kb_search_text(text: str) -> str:
@@ -3530,8 +3508,6 @@ def _tab_rules() -> str:
     """The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
     icon while the bar is 480px wide or more (a container query), tighter under 360px. For both ipywidgets 8's (lm-)
     and 7's (p-) class names."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
     rules, narrow, tight = [], [], []
     for x in ("lm", "p"):
         bar = f".kbc-app.kbc-app .kbc-side>.{x}-TabBar"
@@ -3556,8 +3532,8 @@ def _tab_rules() -> str:
             "-webkit-mask:var(--kc-icon) center/contain no-repeat;mask:var(--kc-icon) center/contain no-repeat}",
             f"{tab}.{x}-mod-current .{x}-TabBar-tabIcon{{background:var(--kc-accent)}}",
         ]
-        rules += [f'{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:url("data:image/svg+xml,'
-                  f'{quote(svg.format(paths))}")}}' for k, (_, paths) in enumerate(_TABS, 1)]
+        rules += [f"{tab}:nth-child({k}) .{x}-TabBar-tabIcon{{--kc-icon:{_icon_url(paths)}}}"
+                  for k, (_, paths) in enumerate(_TABS, 1)]
         narrow.append(f"{tab} .{x}-TabBar-tabIcon{{display:none}}")
         tight.append(f"{tab}{{padding:0 5px}}")
     return "\n".join([*rules, f"@container (max-width:479px){{{''.join(narrow)}}}",
@@ -3887,9 +3863,6 @@ _CSS = _base_css(_ROOT, _EXTRA_CSS, theme=_THEME_CSS, restyle=_RESTYLE, after={"
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
 
-_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
-
-
 def _json_text_html(value: Any) -> str:
     """JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped)."""
     return _json_source_html(json.dumps(_plain_json(value), indent=2, ensure_ascii=False))
@@ -3922,75 +3895,6 @@ def _code_block_html(block: _Code, report: _Report) -> str:
 
 
 _draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any other text
-
-
-def _json_source_html(text: str) -> str:
-    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
-    out, last = [], 0
-    for m in _JSON_TOKEN_RE.finditer(text):
-        out.append(_esc(text[last:m.start()]))
-        if m.group(1):
-            css = "jk" if m.group(2) else "js"
-            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
-        else:
-            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
-        last = m.end()
-    return "".join(out) + _esc(text[last:])
-
-
-_PY_LITERALS = frozenset({"True", "False", "None"})
-
-
-def _python_html(code: str) -> str:
-    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
-    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
-    try:
-        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
-                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
-    except (tokenize.TokenError, SyntaxError):
-        return _esc(code)
-    starts = [0]
-    for line in code.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
-    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
-    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
-    out, last = [], 0
-    for t in tokens:
-        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
-        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
-        if a < last or b <= a:
-            continue
-        css = ""
-        if t.type == tokenize.COMMENT:
-            css = "pc"
-        elif t.type == tokenize.STRING:
-            css = "jk" if after.get(id(t)) == ":" else "js"
-        elif t.type == tokenize.NUMBER:
-            css = "jn"
-        elif t.type == tokenize.NAME:
-            if t.string in _PY_LITERALS:
-                css = "jl"
-            elif keyword.iskeyword(t.string):
-                css = "pk"
-            elif after.get(id(t)) == "(":
-                css = "pf"
-            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
-                css = "pa"
-        out.append(_esc(code[last:a]))
-        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
-        last = b
-    return "".join(out) + _esc(code[last:])
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
 
 
 def _sources_html(a: Answer) -> str:
@@ -4217,32 +4121,6 @@ def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
     return out
 
 
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
-
-
 def _kind_text(f: Field) -> str:
     """What a field takes, in words: 'number 0–1', 'HYBRID | SEMANTIC', 'text up to 4,000 characters'."""
     span = ""
@@ -4267,14 +4145,6 @@ def _kind_text(f: Field) -> str:
 
 def _wrap(inner: str) -> str:
     return f'<div class="kbc">{inner}</div>'
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
 
 
 def _waiting(keys: list[str]) -> str:
@@ -4317,7 +4187,7 @@ class _Choice:
         return (self.title, self.value, self.detail, self.note, *self.also)
 
 
-class _Picker:
+class _ChoicePicker(_Picker):
     """A field of the window's header that opens a list to pick from, with a search box over it: the knowledge base,
     data source, model and files pickers. Plain widgets and CSS, like the rest of the window: the field is a button
     under its label and value, the list opens under it over the chat (.kbc-pop), and each line is a button under its
@@ -4336,53 +4206,22 @@ class _Picker:
                  query: Callable[[str], str] | None = None,
                  describe: Callable[[list[str]], tuple[str, str]] | None = None, multi: bool = False,
                  basis: str = "240px", list_width: str = ""):
-        w, layout = app.w, app.w.Layout
-        self.app, self.label, self.noun, self.multi, self.empty = app, label, noun, multi, empty
-        self.on_pick, self.on_text, self.on_open, self.query, self.describe = on_pick, on_text, on_open, query, describe
+        # the header's fields share its row, each from its basis up to 420px, and wrap when they don't fit
+        super().__init__(app, app.w, "kbc", on_pick=on_pick, on_text=on_text, placeholder=placeholder,
+                         close_width="26px", list_width=list_width or None,
+                         field_layout={"flex": f"1 1 {basis}", "min_width": "150px", "max_width": "420px"})
+        self.label, self.noun, self.multi, self.empty = label, noun, multi, empty
+        self.on_open, self.query, self.describe = on_open, query, describe
         self.choices: list[_Choice] = []
         self.picked: list[str] = []  # the value picked (one, unless multi)
-        self.problem = ""  # why there's nothing to list (it couldn't be read), shown under the list
         self.note = ""  # more to say under the list (only part of it was listed)
-        self.message = ""  # what went wrong with the last Enter, until the next key
         self.tip_off = ""  # the field's tooltip while it's disabled
-        self.shown: list[str] = []  # the values of the lines the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # value -> (its line, the line's button, its text)
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("kbc-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("kbc-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("kbc-trig")
-        self.search = w.Text(placeholder=placeholder, continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("kbc-find")
-        self.search.observe(app._safely(self._typed), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(width="26px", flex="0 0 auto"))
-        close.add_class("kbc-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("kbc-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none", min_width=list_width or None))
-        self.panel.add_class("kbc-pop")
-        # the header's fields share its row, each from its basis up to 420px, and wrap when they don't fit
-        self.field = w.VBox([trigger, self.panel], layout=layout(flex=f"1 1 {basis}", min_width="150px",
-                                                                 max_width="420px"))
-        self.field.add_class("kbc-field")
-        app.pickers.append(self)
         self._draw()
 
     @property
     def value(self) -> str:
         """The value picked ('' when none); with multi, see `picked`."""
         return self.picked[0] if self.picked else ""
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     @property
     def visible(self) -> bool:
@@ -4420,48 +4259,21 @@ class _Picker:
         self.picked = [v for v in values if v] if self.multi else values[:1]
         self._draw()
 
-    def open(self) -> None:
-        if self.disabled or self.is_open:
-            return
-        for other in self.app.pickers:  # one list open at a time
-            if other is not self:
-                other.close()
+    def _can_open(self) -> bool:
+        return not self.disabled
+
+    def _opening(self) -> None:
         if self.on_open is not None:
             self.on_open()
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.field, "kbc-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
 
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        if not any(p.is_open for p in self.app.pickers):
-            self.app.backdrop.layout.display = "none"
-        _class_if(self.field, "kbc-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
+    def _query(self, text: str) -> str:
+        return self.query(text) if self.query else text
 
-    def toggle(self) -> None:
-        if self.is_open:
-            self.close()
-        else:
-            self.open()
+    def _fields(self, c: _Choice) -> tuple[str, ...]:
+        return c.fields()
 
-    def matches(self) -> list[_Choice]:
-        """The lines the search box finds, best first; every line, in order, while it's empty."""
-        text = str(self.search.value or "")
-        text = self.query(text) if self.query else text
-        ranked = []
-        for i, c in enumerate(self.choices):
-            rank = search_rank(text, c.fields())
-            if rank is not None:
-                ranked.append((rank, i, c))
-        return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
+    def _key(self, c: _Choice) -> str:
+        return c.value
 
     def _choice(self, value: str) -> _Choice | None:
         return next((c for c in self.choices if c.value == value), None)
@@ -4494,17 +4306,7 @@ class _Picker:
             self._draw_list()
 
     def _row(self, c: _Choice, words: list[str], dots: bool) -> Any:
-        if c.value not in self.rows:
-            w, layout = self.app.w, self.app.w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("kbc-opt-b")
-            button.on_click(self.app._safely(lambda _button, value=c.value: self._clicked(value)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("kbc-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("kbc-opt")
-            self.rows[c.value] = (row, button, text)
-        row, button, text = self.rows[c.value]
+        row, button, text = self._line(c.value)
         on = c.value in self.picked
         _class_if(row, "kbc-on", on)
         tip = " · ".join(part for part in (c.title, c.detail, c.note) if part)
@@ -4609,7 +4411,7 @@ class _Picker:
             self._draw_list()
 
 
-class _ChatApp:
+class _ChatApp(_Window):
     """The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
     log, where nobody looks."""
@@ -4638,7 +4440,7 @@ class _ChatApp:
         self.edit_base = ""  # the request the editor was filled with, to tell whether it's been changed since
         self.problems: list[str] = []  # why a picker couldn't list its choices
         self.unlisted: set[str] = set()  # knowledge bases whose data sources couldn't be listed: not tried again
-        self.pickers: list[_Picker] = []  # the header's fields: one list open at a time
+        self.pickers: list[_ChoicePicker] = []  # the header's fields: one list open at a time
         self._params: dict[str, Any] | None = None
         self.batch: Batch | None = None  # the test run the Test tab shows
         self.batch_rows: list[Any] = []  # an HTML widget per question of it, reused by the next run
@@ -4911,9 +4713,9 @@ class _ChatApp:
                             "</span></div>"))
         return w.VBox([head, self.code_mode, self.code_view], layout=layout(width="100%"))
 
-    def _kb_picker(self) -> _Picker:
+    def _kb_picker(self) -> _ChoicePicker:
         view = self.view
-        picker = _Picker(self, "Knowledge base", "knowledge base", on_pick=self._kb_picked, on_text=self._kb_typed,
+        picker = _ChoicePicker(self, "Knowledge base", "knowledge base", on_pick=self._kb_picked, on_text=self._kb_typed,
                          query=kb_search_text, placeholder="Search by name, ID or description",
                          empty="Pick a knowledge base", basis="250px", list_width="420px")
         kbs: list[KnowledgeBase] | None
@@ -4953,8 +4755,8 @@ class _ChatApp:
         return _Choice(kb.id, kb.name or kb.id, detail=kb.id, tone=tone, also=(kb.status,),
                        note=" · ".join(part for part in (status, kb.description, changed) if part))
 
-    def _source_picker(self) -> _Picker:
-        picker = _Picker(self, "Data source", "data source", on_pick=self._source_picked,
+    def _source_picker(self) -> _ChoicePicker:
+        picker = _ChoicePicker(self, "Data source", "data source", on_pick=self._source_picked,
                          placeholder="Search by name or ID", empty="All data sources", basis="190px")
         self.source_pick = picker
         problem = self._fill_sources()
@@ -4999,11 +4801,11 @@ class _ChatApp:
         picker.visible = len(choices) > 2 or bool(value)
         return problem
 
-    def _files_picker(self) -> _Picker:
+    def _files_picker(self) -> _ChoicePicker:
         """The Files field, and the line under the header that shows the files ticked, as chips."""
         w, layout = self.w, self.w.Layout
         self.files_kb: str | None = None  # the knowledge base whose files the list holds
-        self.files_pick = _Picker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
+        self.files_pick = _ChoicePicker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
                                   on_open=self._list_files, describe=self._files_face, multi=True,
                                   placeholder="Search by file name or folder", empty="All files", basis="140px")
         self.file_chips = w.HBox(layout=layout(width="auto", flex_flow="row wrap", align_items="center"))
@@ -5116,9 +4918,9 @@ class _ChatApp:
         self._set_status(f"The next questions search {describe_files(self.view.picked_files)}; the conversation goes "
                          "on.", "ok")
 
-    def _model_picker(self) -> _Picker:
+    def _model_picker(self) -> _ChoicePicker:
         view = self.view
-        picker = _Picker(self, "Model", "model", on_pick=self._model_picked, on_text=self._model_typed,
+        picker = _ChoicePicker(self, "Model", "model", on_pick=self._model_picked, on_text=self._model_typed,
                          placeholder="Search by name, provider or ID", empty="Pick a model", basis="300px",
                          list_width="420px")
         picker.tip_off = "Retrieve only doesn't use a model: switch to Answer to pick one"
@@ -5177,36 +4979,11 @@ class _ChatApp:
 
     # ---------------------------------------------------------------- plumbing
 
-    def _close_lists(self) -> None:
-        """A click on the backdrop, anywhere in the window but the open list: closes it."""
-        for picker in self.pickers:
-            picker.close()
+    def _explain(self, code: str, message: str) -> str:
+        return self.view._explain(code, message)
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._set_status(self._error_text(exc), "warn")
-                return None
-
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {self.view._explain(code, message)}"
-        if isinstance(exc, _Hint):
-            return str(exc)
-        return f"{type(exc).__name__}: {exc}"
+    def _warn(self, text: str) -> None:
+        self._set_status(text, "warn")
 
     def _set_status(self, text: str, level: str = "") -> None:
         self.status.value = _wrap(f'<div class="st {level}">{_prose(text)}</div>') if text else ""
@@ -5218,21 +4995,6 @@ class _ChatApp:
 
     def _show_log(self) -> None:
         self.log.children = tuple(reversed(self.bubbles))  # the box runs bottom-up, so the newest goes first
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: re-sending the same HTML would fold up every
-        part of a JSON tree the user had opened, and close an open source."""
-        if widget.value != value:
-            widget.value = value
 
     def sync(self) -> None:
         """Follows changes made from another cell (set(), use(), new_chat(), ask())."""

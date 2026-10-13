@@ -57,37 +57,38 @@ import functools
 import hashlib
 import io
 import json
-import keyword
 import math
 import os
 import posixpath
 import re
 import threading
 import time
-import tokenize
 import urllib.request
 import zipfile
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Generator, Iterable
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _in_notebook, _require
+from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
     human_money, human_size, parse_size, parse_time,
 )
+from ._kit.highlight import _json_source_html, _python_html
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc
+from ._kit.text import _clip, _esc, _marked, search_rank
 from ._kit.view import _BaseView, _friendly_errors
+from ._kit.window import (
+    _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _running_loop, _skeleton, _window_errors,
+)
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
@@ -293,32 +294,6 @@ def _in_days(days: int) -> str:
     if days == 1:
         return "tomorrow"
     return f"in {days:,} days" if days > 0 else f"{-days:,} days ago"
-
-
-def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
-    text = "" if height is None else str(height).strip()
-    return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
-
-
-def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where a test run asks its questions while the click waits."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-
-
-def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with chat() shows the window
-    once, not twice."""
-    try:
-        from IPython.core.getipython import get_ipython
-    except ImportError:
-        return None
-    shell = get_ipython()
-    return getattr(shell, "execution_count", None) if shell is not None else None
 
 
 # =============================================================================
@@ -2342,26 +2317,6 @@ def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
             "(__pycache__, tests/, .git/): leave them out to make the package smaller."
         )))
     return found
-
-
-def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
-    0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
-    word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
-    wanted = " ".join(str(text or "").lower().split())
-    if not wanted:
-        return 3
-    values = [" ".join(str(f).lower().split()) for f in fields if f]
-    if wanted in values:
-        return 0
-    if any(v.startswith(wanted) for v in values):
-        return 1
-    if any(wanted in v for v in values):
-        return 2
-    if all(any(word in v for v in values) for word in wanted.split()):
-        return 3
-    return None
 
 
 # =============================================================================
@@ -4700,11 +4655,8 @@ _DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda funct
 
 def _explorer_rules() -> str:
     """The explorer's icons, the tabs' and the Hide files button's: .lmx-i-<key> sets --lx-icon, which ::before draws."""
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
-           "stroke-linecap='round' stroke-linejoin='round'>{}</svg>")
     icons = [(key, paths) for key, _, _, paths in _EXPLORER_TABS] + list(_FILES_ICONS)
-    return "\n".join(f'.lmx-app .lmx-i-{key}{{--lx-icon:url("data:image/svg+xml,{quote(svg.format(paths))}")}}'
-                     for key, paths in icons)
+    return "\n".join(f".lmx-app .lmx-i-{key}{{--lx-icon:{_icon_url(paths)}}}" for key, paths in icons)
 
 
 _EXPLORER_DARK = ("--lx-accent:#60a5fa;--lx-accent-2:#a78bfa;--lx-soft:rgba(96,165,250,.15);--lx-ring:rgba(96,165,250,"
@@ -5074,116 +5026,6 @@ def _window_text(text: str) -> str:
 
 
 _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(the [A-Z]\w* tab|the region field|run [0-9a-f]{8} in the Logs tab)")
-
-
-def _for_window(blocks: list[Any]) -> list[Any]:
-    """A report's blocks for the explorer window: no Next block (its calls are for a cell), and the commands its
-    sentences name changed into the tabs that show the same (_window_text)."""
-    out = []
-    for block in blocks:
-        if isinstance(block, _Next):
-            continue
-        if isinstance(block, _Findings):
-            block = dataclasses.replace(block, items=[(level, _window_text(m)) for level, m in block.items],
-                                        empty=_window_text(block.empty))
-        elif isinstance(block, _Note):
-            block = dataclasses.replace(block, text=_window_text(block.text))
-        elif isinstance(block, _Title):
-            block = dataclasses.replace(block, sub=_window_text(block.sub))
-        elif isinstance(block, _Table):
-            rows = [[_window_text(cell) if j in block.prose_cols and isinstance(cell, str) else cell
-                     for j, cell in enumerate(row)] for row in block.rows]
-            block = dataclasses.replace(block, rows=rows, title=_window_text(block.title))
-        out.append(block)
-    return out
-
-
-def _skeleton(text: str) -> str:
-    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
-    return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
-            '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
-            '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
-            "</div></div>")
-
-
-def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
-    if on and name not in widget._dom_classes:
-        widget.add_class(name)
-    elif not on and name in widget._dom_classes:
-        widget.remove_class(name)
-
-
-def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
-    unique = sorted({w for w in words if w}, key=len, reverse=True)
-    if not unique:
-        return _esc(text)
-    regex = re.compile("(" + "|".join(re.escape(w) for w in unique) + ")", re.IGNORECASE)
-    return "".join(f"<mark>{_esc(piece)}</mark>" if i % 2 else _esc(piece) for i, piece in enumerate(regex.split(text)))
-
-
-_JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b')
-
-
-def _json_source_html(text: str) -> str:
-    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
-    out, last = [], 0
-    for m in _JSON_TOKEN_RE.finditer(text):
-        out.append(_esc(text[last:m.start()]))
-        if m.group(1):
-            css = "jk" if m.group(2) else "js"
-            out.append(f'<span class="{css}">{_esc(m.group(1))}</span>{_esc(m.group(2) or "")}')
-        else:
-            out.append(f'<span class="{"jn" if m.group(3) else "jl"}">{_esc(m.group(0))}</span>')
-        last = m.end()
-    return "".join(out) + _esc(text[last:])
-
-
-_PY_LITERALS = frozenset({"True", "False", "None"})
-
-
-def _python_html(code: str) -> str:
-    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
-    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
-    try:
-        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
-                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
-    except (tokenize.TokenError, SyntaxError):
-        return _esc(code)
-    starts = [0]
-    for line in code.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
-    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
-    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
-    out, last = [], 0
-    for t in tokens:
-        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
-        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
-        if a < last or b <= a:
-            continue
-        css = ""
-        if t.type == tokenize.COMMENT:
-            css = "pc"
-        elif t.type == tokenize.STRING:
-            css = "jk" if after.get(id(t)) == ":" else "js"
-        elif t.type == tokenize.NUMBER:
-            css = "jn"
-        elif t.type == tokenize.NAME:
-            if t.string in _PY_LITERALS:
-                css = "jl"
-            elif keyword.iskeyword(t.string):
-                css = "pk"
-            elif after.get(id(t)) == "(":
-                css = "pf"
-            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
-                css = "pa"
-        out.append(_esc(code[last:a]))
-        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
-        last = b
-    return "".join(out) + _esc(code[last:])
 
 
 @dataclass
@@ -5560,25 +5402,7 @@ def _source_html(path: str, text: str) -> str:
     return f'<div class="src"><pre class="gut">{gutter}</pre><pre class="txt">{body}</pre></div>'
 
 
-def _window_errors(method: Callable) -> Callable:
-    """For the explorer's own commands: an AWS or input error is said in the window's status line (or, without the
-    window, as a note) instead of a traceback."""
-
-    @functools.wraps(method)
-    def wrapper(self: LambdaExplorer, *args: Any, **kwargs: Any) -> None:
-        try:
-            return method(self, *args, **kwargs)
-        except (ClientError, BotoCoreError, ValueError, TypeError) as exc:
-            if self._w is None:
-                self.ui._show([_Note(self._error_text(exc), "warn")])
-            else:
-                self._status(self._error_text(exc), "warn")
-        return None
-
-    return wrapper
-
-
-class _FunctionField:
+class _FunctionField(_Picker):
     """The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
     a list over the window, with a search box that finds a function by any part of its name, description, runtime or
     region. Enter picks the first line, or hands what's typed to on_text when no line has it (an ARN, or a function the
@@ -5586,42 +5410,11 @@ class _FunctionField:
     target. While the list is open, the window's backdrop takes a click anywhere else and closes it."""
 
     def __init__(self, app: LambdaExplorer, *, on_pick: Callable[[Function], None], on_text: Callable[[str], None]):
-        w, layout = app._w, app._w.Layout
-        self.app, self.on_pick, self.on_text = app, on_pick, on_text
+        super().__init__(app, app._w, "lmx", on_pick=on_pick, on_text=on_text, tooltip="Pick another function",
+                         placeholder="Search by name, description, runtime or region")
         self.choices: list[Function] = []
         self.value = ""  # the ARN shown
-        self.problem = ""  # why there's nothing to list
-        self.message = ""  # what went wrong with the last Enter
-        self.shown: list[str] = []  # the ARNs the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # ARN -> (its line, the line's button, its text)
-        self.button = w.Button(tooltip="Pick another function", layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-trig-b")
-        self.button.on_click(app._safely(lambda _button: self.toggle()))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-face")
-        trigger = w.Box([self.button, self.face], layout=layout(width="100%"))
-        trigger.add_class("lmx-trig")
-        self.search = w.Text(placeholder="Search by name, description, runtime or region", continuous_update=True,
-                             layout=layout(flex="1 1 auto", width="auto"))
-        self.search.add_class("lmx-find")
-        self.search.observe(app._safely(lambda _change: self._draw_list()), names="value")
-        self.search.on_msg(app._on_enter(self._entered))
-        close = w.Button(description="✕", tooltip="Close the list", layout=layout(flex="0 0 auto"))
-        close.add_class("lmx-x")
-        close.on_click(app._safely(lambda _button: self.close()))
-        self.list = w.VBox(layout=layout(width="100%"))
-        self.list.add_class("lmx-opts")
-        self.foot = w.HTML(layout=layout(width="100%"))
-        self.panel = w.VBox([w.HBox([self.search, close], layout=layout(width="100%", align_items="center")),
-                             self.list, self.foot], layout=layout(display="none"))
-        self.panel.add_class("lmx-pop")
-        self.box = w.VBox([trigger, self.panel])
-        self.box.add_class("lmx-field")
         self.draw()
-
-    @property
-    def is_open(self) -> bool:
-        return self.panel.layout.display != "none"
 
     def set_choices(self, functions: Iterable[Function]) -> None:
         self.choices = sorted(functions, key=lambda f: (f.name.lower(), f.region))
@@ -5646,52 +5439,21 @@ class _FunctionField:
         if self.is_open:
             self._draw_list()
 
-    def open(self) -> None:
-        if self.is_open:
-            return
-        self.message = ""
-        self.panel.layout.display = ""
-        self.app.backdrop.layout.display = ""
-        _class_if(self.box, "lmx-open", True)
-        self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
-            self.search.focus()
-
-    def close(self) -> None:
-        if not self.is_open:
-            return
-        self.panel.layout.display = "none"
-        self.app.backdrop.layout.display = "none"
-        _class_if(self.box, "lmx-open", False)
-        self.app._quietly(self.search, value="")
-        self.message = ""
-
-    def toggle(self) -> None:
-        self.close() if self.is_open else self.open()
-
-    def matches(self) -> list[Function]:
-        text = str(self.search.value or "")
+    def _query(self, text: str) -> str:
         try:
             name, _, _ = parse_function_ref(text)
-            text = name if text.strip().startswith(("arn:", "http")) else text
         except ValueError:
-            pass
-        ranked = [(rank, i, f) for i, f in enumerate(self.choices)
-                  if (rank := search_rank(text, (f.name, f.description, f.runtime, f.region, f.arn))) is not None]
-        return [f for _, _, f in sorted(ranked, key=lambda r: r[:2])]
+            return text
+        return name if text.strip().startswith(("arn:", "http")) else text
+
+    def _fields(self, fn: Function) -> tuple[str, ...]:
+        return (fn.name, fn.description, fn.runtime, fn.region, fn.arn)
+
+    def _key(self, fn: Function) -> str:
+        return fn.arn
 
     def _row(self, fn: Function, words: list[str]) -> Any:
-        if fn.arn not in self.rows:
-            w, layout = self.app._w, self.app._w.Layout
-            button = w.Button(layout=layout(width="100%", height="100%"))
-            button.add_class("lmx-opt-b")
-            button.on_click(self.app._safely(lambda _button, arn=fn.arn: self._clicked(arn)))
-            text = w.HTML(layout=layout(width="100%"))
-            text.add_class("lmx-opt-t")
-            row = w.Box([button, text], layout=layout(width="100%"))
-            row.add_class("lmx-opt")
-            self.rows[fn.arn] = (row, button, text)
-        row, button, text = self.rows[fn.arn]
+        row, button, text = self._line(fn.arn)
         _class_if(row, "lmx-on", fn.arn == self.value)
         facts = self.app._facts.get(fn.arn)
         m = facts.metrics if facts is not None else None
@@ -5734,23 +5496,6 @@ class _FunctionField:
         if fn is not None and arn != self.value:
             self.on_pick(fn)
 
-    def _entered(self) -> None:
-        text = str(self.search.value or "").strip()
-        if not text:
-            self.close()
-            return
-        found = self.matches()
-        try:
-            if found:
-                self._clicked(found[0].arn)
-            else:
-                self.on_text(text)
-                self.close()
-        except (ValueError, ClientError, BotoCoreError) as exc:  # said under the list, where the eyes are
-            self.message = str(exc) if isinstance(exc, ValueError) else self.app._error_text(exc)
-            self._draw_list()
-
-
 class _Row:
     """One reusable line of a list: a full-width button under its face (HTML), so the whole line is the click target,
     with an optional small action button on its right (the function list's Logs). `item` is what it shows."""
@@ -5759,21 +5504,16 @@ class _Row:
                  action: tuple[str, str, Callable[[Any], None]] | None = None):
         w, layout = app._w, app._w.Layout
         self.item: Any = None
-        self.button = w.Button(layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-row-b")
-        self.button.on_click(app._safely(lambda _button: on_click(self.item) if self.item is not None else None))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-row-t")
-        children = [self.button, self.face]
         self.action = None
         if action is not None:
             label, tip, act = action
             self.action = w.Button(description=label, tooltip=tip, layout=layout(width="auto"))
             self.action.add_class("lmx-act")
             self.action.on_click(app._safely(lambda _button: act(self.item) if self.item is not None else None))
-            children.append(self.action)
-        self.box = w.Box(children, layout=layout(width="100%"))
-        self.box.add_class("lmx-row")
+        self.box, self.button, self.face = _row_button(
+            w, ("lmx-row", "lmx-row-b", "lmx-row-t"),
+            app._safely(lambda _button: on_click(self.item) if self.item is not None else None),
+            after=[self.action] if self.action is not None else [])
         if short:
             self.box.add_class("lmx-short")
 
@@ -5785,19 +5525,15 @@ class _RunRow:
     def __init__(self, app: LambdaExplorer):
         w, layout = app._w, app._w.Layout
         self.run: LogRun | None = None
-        self.button = w.Button(tooltip="Click to see its lines", layout=layout(width="100%", height="100%"))
-        self.button.add_class("lmx-run-b")
-        self.button.on_click(app._safely(lambda _button: app._toggle_run(self)))
-        self.face = w.HTML(layout=layout(width="100%"))
-        self.face.add_class("lmx-run-t")
-        head = w.Box([self.button, self.face], layout=layout(width="100%"))
-        head.add_class("lmx-run-h")
+        head, self.button, self.face = _row_button(w, ("lmx-run-h", "lmx-run-b", "lmx-run-t"),
+                                                   app._safely(lambda _button: app._toggle_run(self)),
+                                                   tooltip="Click to see its lines")
         self.body = w.HTML(layout=layout(width="100%", display="none"))
         self.box = w.VBox([head, self.body], layout=layout(width="100%"))
         self.box.add_class("lmx-run")
 
 
-class LambdaExplorer:
+class LambdaExplorer(_Explorer):
     """The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
 
@@ -5830,6 +5566,9 @@ class LambdaExplorer:
     for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
     hold the data behind what's shown."""
 
+    _PREFIX, _THREADS = "lmx", "lambda-explorer"
+    _reword = staticmethod(_window_text)
+
     def __init__(
         self,
         name: str | None = None,
@@ -5847,6 +5586,7 @@ class LambdaExplorer:
             raise ValueError("mode must be 'auto', 'widgets' or 'text'")
         if tab is not None and tab not in {key for key, *_ in _EXPLORER_TABS}:
             raise ValueError(f"tab= is one of {', '.join(repr(key) for key, *_ in _EXPLORER_TABS)}; got {tab!r}")
+        super().__init__()
         every = isinstance(region, str) and region.strip().lower() == "all"
         if view is None:
             view = LambdaView(core or LambdaAnalyzer(region=None if every else region, profile=profile),
@@ -5864,9 +5604,6 @@ class LambdaExplorer:
         self.perf: Performance | None = None  # the Performance tab
         self.package: CodePackage | None = None  # the Code tab
         self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
-        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
-        self.quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
-        self._w: Any = None
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
         self._want, self._want_tab = name, tab  # opened once the functions are listed...
@@ -5899,20 +5636,8 @@ class LambdaExplorer:
         self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
         self._run_chip_buttons: dict[str, Any] = {}
         self._empties: dict[str, Any] = {}  # list -> the line it shows when it's empty
-        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
-        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
-        self._pool: ThreadPoolExecutor | None = None
-        self._counted = 0  # what the background read has read so far
-        self._said: tuple[str, str, bool, str] = ("", "", False, "")  # the status line: text, level, busy, whose
         self._listing = False  # the functions are being listed
-        self._shown_at: Any = object()
-        note = ""
-        if mode != "text" and (mode == "widgets" or _in_notebook()):
-            try:
-                self._w = _require("ipywidgets", "The explorer window")
-            except ImportError as exc:
-                note = (f"{exc}, which SageMaker notebooks normally have: install it and restart the kernel. Until "
-                        "then, the same in reports:")
+        note = self._load_widgets(mode)
         if self._w is None:
             self._reports(note, mode)
             return
@@ -5999,20 +5724,6 @@ class LambdaExplorer:
 
     # ------------------------------------------------------------------ plumbing
 
-    def _ipython_display_(self) -> None:
-        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
-        its reports were shown when it was made)."""
-        if self._w is not None and _cell_number() != self._shown_at:
-            self._display()
-
-    def _display(self) -> None:
-        self._shown_at = _cell_number()
-        if self._shown_at is None:
-            return  # outside IPython there's nowhere to show widgets
-        from IPython.display import display
-
-        display(self.root)
-
     def _reports(self, note: str, mode: str) -> None:
         """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
         if note:
@@ -6047,118 +5758,10 @@ class LambdaExplorer:
         assert self.function is not None
         return self.detail.function if self.detail is not None else self.function
 
-    def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(handler)
-        def run(*args: Any, **kwargs: Any) -> Any:
-            try:
-                return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
-                self._status(self._error_text(exc), "warn")
-                return None
-
-        return run
-
-    def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
-        safe = self._safely(handler)
-        return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
-
-    def _error_text(self, exc: BaseException) -> str:
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error", {})
-            code, message = error.get("Code", "Error"), error.get("Message", str(exc))
-            return f"{code}: {_window_text(self.ui._explain(code, message))}"
-        if isinstance(exc, _Hint):
-            return _window_text(str(exc))
-        return f"{type(exc).__name__}: {exc}"
-
-    def _status(self, text: str, level: str = "", busy: bool = False, owner: str = "") -> None:
-        """The line under the tabs. owner: the background job a busy line is about (it says the job's last word)."""
-        self._said = (text, level, busy, owner)
-        spin = '<span class="spin"></span>' if busy else ""
-        self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
-
-    def _finish(self, owner: str, text: str, level: str = "", *, tabs: Iterable[str] = (), busy: bool = False) -> None:
-        """A background job's word in the status line (its last, unless busy= says it goes on): said while the line is
-        still that job's (busy), or while one of its tabs is open; otherwise the line stays as it is."""
-        if (self._said[2] and self._said[3] == owner) or self._tab in tabs:
-            self._status(text, level, busy=busy, owner=owner if busy else "")
-
-    def _quietly(self, widget: Any, **values: Any) -> None:
-        self.quiet = True
-        try:
-            for name, value in values.items():
-                setattr(widget, name, value)
-        finally:
-            self.quiet = False
-
-    @staticmethod
-    def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
-        run and table the user opened."""
-        if widget.value != value:
-            widget.value = value
-
     def _html(self, blocks: list[Any]) -> str:
         """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
         report CSS each one carries (the window's style holds it)."""
-        return _render_html(_for_window(blocks), self.ui.max_rows).replace(_CSS, "", 1)
-
-    def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
-        self.shown[page] = blocks
-        self._set(widget, self._html(blocks))
-
-    def _workers(self) -> ThreadPoolExecutor:
-        if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lambda-explorer")
-        return self._pool
-
-    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
-               failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
-        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
-        window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
-        A newer job of the same key makes this one's result go unused. counting: the status line to show while it runs
-        and the line is still owner's, {n} standing for the count read so far."""
-        self._jobs[key] = job = self._jobs.get(key, 0) + 1
-        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
-
-        def finish(handler: Callable[[Any], None], value: Any) -> None:
-            if self._jobs.get(key) != job:
-                return
-            try:
-                handler(value)
-            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
-                self._status(self._error_text(exc), "warn")
-
-        loop = _running_loop()
-        if loop is None:
-            try:
-                result = work()
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            return
-
-        async def run() -> None:
-            future = loop.run_in_executor(self._workers(), work)
-            while counting and not future.done():
-                await asyncio.wait([future], timeout=0.4)
-                if self._jobs.get(key) == job and not future.done() and self._counted and self._said[3] == owner:
-                    self._status(counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=owner)
-            try:
-                result = await future
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            finally:
-                if self._tasks.get(key) is task:
-                    del self._tasks[key]
-
-        task = loop.create_task(run())
-        self._tasks[key] = task
+        return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     def _empty(self, key: str, text: str) -> Any:
         """The line an empty list shows, one widget per list, kept."""
@@ -6167,19 +5770,13 @@ class LambdaExplorer:
         self._set(self._empties[key], f'<div class="lmx-empty">{_esc(text)}</div>')
         return self._empties[key]
 
-    def _drop(self, *keys: str) -> None:
-        """Makes what's still being read for these jobs go unused when it comes back."""
-        for key in keys:
-            self._jobs[key] = self._jobs.get(key, 0) + 1
-
     # ------------------------------------------------------------------ layout
 
     def _build(self) -> None:
         w, layout = self._w, self._w.Layout
-        style = w.HTML(_CSS + _EXPLORER_CSS, layout=layout(display="none"))
         self.backdrop = w.Button(layout=layout(display="none"))
         self.backdrop.add_class("lmx-backdrop")
-        self.backdrop.on_click(self._safely(lambda _button: self.field.close()))
+        self.backdrop.on_click(self._safely(lambda _button: self._close_lists()))
         self.title = w.HTML(layout=layout(flex="1 1 auto", min_width="0"))
         self.region_pick = w.Dropdown(options=[("Region: …", "")], value="", layout=layout(width="auto"))
         self.region_pick.add_class("lmx-region")
@@ -6192,24 +5789,16 @@ class LambdaExplorer:
         top.add_class("lmx-top")
         self.field = _FunctionField(self, on_pick=self._picked, on_text=self._typed)
         self.stats = w.HTML(layout=layout(flex="1 1 360px", min_width="0"))
-        meta = w.HBox([self.field.box, self.stats], layout=layout(width="100%"))
+        meta = w.HBox([self.field.field, self.stats], layout=layout(width="100%"))
         meta.add_class("lmx-meta")
         head = w.VBox([top, meta], layout=layout(width="100%"))
         head.add_class("lmx-head")
 
-        self.tab_buttons: dict[str, Any] = {}
-        for key, title, tip, _ in _EXPLORER_TABS:
-            button = w.Button(description=title, tooltip=tip, layout=layout(width="auto"))
-            for name in ("lmx-tab", f"lmx-i-{key}"):
-                button.add_class(name)
-            button.on_click(self._safely(lambda _button, key=key: self._show_tab(key)))
-            self.tab_buttons[key] = button
-        tabs = w.HBox(list(self.tab_buttons.values()), layout=layout(width="100%"))
-        tabs.add_class("lmx-tabs")
+        tabs = self._tab_bar(_EXPLORER_TABS)
 
         self.overview_view = w.HTML(layout=layout(width="100%"))
         self.settings_view = w.HTML(layout=layout(width="100%"))
-        self.pages = {
+        self._frame(_CSS + _EXPLORER_CSS, head, tabs, {
             "functions": self._functions_page(),
             "overview": self._scroll_page([self.overview_view]),
             "logs": self._logs_page(),
@@ -6217,20 +5806,7 @@ class LambdaExplorer:
             "performance": self._performance_page(),
             "code": self._code_page(),
             "settings": self._scroll_page([self.settings_view]),
-        }
-        height = _css_height(self.height)
-        for key, page in self.pages.items():
-            page.add_class("lmx-page")
-            page.layout.width = "100%"
-            if height:
-                page.layout.height = height
-            if key != self._tab:
-                page.layout.display = "none"
-        self.status = w.HTML(layout=layout(width="100%"))
-        self.status.add_class("lmx-status")
-        self.root = w.VBox([style, head, tabs, *self.pages.values(), self.status, self.backdrop],
-                           layout=layout(width="100%"))
-        self.root.add_class("lmx-app")
+        })
         self._show_tab(self._tab)
 
     def _scroll_page(self, children: list[Any], above: list[Any] | None = None) -> Any:
