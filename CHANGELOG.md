@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-13
+
 ### Changed
 
 - Lambda's `function_info()` and the explorer's **Settings** tab: the configuration as Lambda returns it is JSON in
@@ -16,8 +18,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   unfold it, and hover over a line to see its path in Python (`raw['Environment']['Variables']`)
   ([#74](https://github.com/utkarsh5026/aws-analyzer/pull/74)).
 - Lambda's tables of run times (`overview()`'s Avg run, `metrics()`'s days, `performance()` and its runs) keep the
-  exact milliseconds and say a second or more the way people read it too: `30,000 ms (30s)`, `185,000 ms (3m 05s)`.
-  Those columns now sort by the number, so `1,530 ms` comes after `999 ms`.
+  exact milliseconds and say a second or more the way people read it too: `30,000 ms (30s)`, `185,000 ms (3m 05s)`
+  ([#75](https://github.com/utkarsh5026/aws-analyzer/pull/75)).
+
+### Fixed
+
+- Lambda's tables of run times sort by the number when you click the column's header, so `1,530 ms` comes after
+  `999 ms` instead of before it ([#75](https://github.com/utkarsh5026/aws-analyzer/pull/75)).
 
 ## [0.16.0] - 2026-10-13
 
@@ -519,7 +526,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.13.0...v0.14.0
