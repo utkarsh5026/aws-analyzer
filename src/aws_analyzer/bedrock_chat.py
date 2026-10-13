@@ -1,10 +1,9 @@
 """
 bedrock_chat.py - a chat window for Amazon Bedrock Knowledge Bases, for SageMaker / Jupyter notebooks.
 
-Copy this one file into a notebook cell (or upload it next to your notebook and ``import bedrock_chat``). Nothing else
-from this repo is needed.
+Part of aws-analyzer: ``pip install aws-analyzer``, then
 
-    from bedrock_chat import chat
+    from aws_analyzer import chat
     chat()                                                  # pick a knowledge base and a model, then ask
     chat("support-docs", model="sonnet", n=8, temperature=0.2)
 

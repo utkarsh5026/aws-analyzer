@@ -13,8 +13,8 @@ words laid out to read (headings, paragraphs and lists, without the running head
 "Download .zip" packs the folder you're in into one .zip, within limits that ⚙ (Settings) changes. Tick files (a
 checkbox shows when you point at a row) and "Download selected" zips just those, under a name you can change.
 
-This file builds on s3.py (the previews, the formatting and the AWS calls all come from it): upload both files
-next to your notebook, or paste s3.py into a cell and then this file into the next one. Clicking needs
+It builds on s3.py, beside it in aws-analyzer (the previews, the formatting and the AWS calls all come from it):
+``pip install aws-analyzer``, then ``from aws_analyzer import S3Explorer``. Clicking needs
 ipywidgets, which SageMaker notebooks already have. Without it you get a plain listing and a note on what to
 install. Like s3.py, it only reads from AWS; "Download" and "Download .zip" save a copy on the notebook's disk, in
 s3.py's downloads folder (s3-downloads, next to the notebook), where x.ui.downloads() lists them and
@@ -22,7 +22,7 @@ x.ui.clean_downloads() deletes them.
 
 Quick start
 -----------
-    from s3_explorer import S3Explorer
+    from aws_analyzer import S3Explorer
     S3Explorer()                                    # start from your buckets
     S3Explorer("s3://my-bucket/data/")              # start in a folder (S3 console links work too)
     S3Explorer("s3://my-bucket/data/report.pdf")    # open the folder with that file shown
