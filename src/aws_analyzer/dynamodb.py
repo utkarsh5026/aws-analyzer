@@ -69,7 +69,7 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title,
 from ._kit.deps import _require
 from ._kit.errors import _error_name, _why
 from ._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _band, _count, _fmt_dt, _plural, _share, _utcnow, human_age,
+    HOURS_PER_MONTH, Stat, _as_count, _as_int, _band, _count, _fmt_dt, _plural, _share, _utcnow, human_age,
     human_money, human_size,
 )
 from ._kit.render import _base_css, _call, _report_html
@@ -342,18 +342,6 @@ def get_path(item: dict[str, Any], path: str, default: Any = None) -> Any:
 # =============================================================================
 # 2. Data models (what DynamoDBAnalyzer returns)
 # =============================================================================
-
-
-@dataclass
-class Stat:
-    """Running item count + total bytes."""
-
-    count: int = 0
-    size: int = 0
-
-    def add(self, size: int) -> None:
-        self.count += 1
-        self.size += size
 
 
 @dataclass

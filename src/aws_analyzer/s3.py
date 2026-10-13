@@ -87,7 +87,7 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _error_code
 from ._kit.fmt import (
-    _band, _duration, _fmt_dt, _plural, _share, _utcnow, file_extension, human_age, human_money, human_size,
+    Stat, _band, _duration, _fmt_dt, _plural, _share, _utcnow, file_extension, human_age, human_money, human_size,
     parse_size, parse_time,
 )
 from ._kit.render import _base_css, _call, _prose, _report_html
@@ -1492,18 +1492,6 @@ class ObjectInfo:
         return (
             "-" in self.etag
         )  # multipart ETags look like "<md5-of-md5s>-<part count>"
-
-
-@dataclass
-class Stat:
-    """Running object count + total bytes."""
-
-    count: int = 0
-    size: int = 0
-
-    def add(self, size: int) -> None:
-        self.count += 1
-        self.size += size
 
 
 @dataclass
