@@ -78,6 +78,10 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
   user passed, and no environment changes).
 - **Blocks.** A new block type registers both drawings, `@_draws(_Block, "html")` and `@_draws(_Block, "text")`,
   and shows in a text-mode test: one without a text drawing becomes a "Part of this report isn't shown" note.
+- **Windows.** A change to an explorer or the chat window goes through `_kit/window.py` (CLAUDE.md, "The windows'
+  kit"): callbacks through `_safely`, its commands through `@_window_errors`, AWS read off the loop with `_later`
+  (a stale result dropped by its key), HTML widgets set with `_set`, and nothing copied from another window. Its
+  tests click and type through it, and drive any background path inside `asyncio.run`.
 - **Tests.** Pure logic is tested without moto. There's a text-mode UI test, and a failure-path test where one
   exists. Tests don't depend on the real clock or on network access.
 - **Docs.** Check the README command table, "Getting the data", the pure-function list and the IAM paragraph;
