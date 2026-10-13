@@ -9,20 +9,30 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-13
+
 ### Changed
 
 - Every service's reports: tables sort, filter and choose their columns, as S3's already did. Click a column's header
   to sort by it (largest, newest or A to Z first; again for the other way; a third time for the original order), pick
   a value in a column's **Filter** to see only those rows (a status, a runtime, a data source), and untick the columns
   you don't need under **Columns**. It's plain HTML and CSS, so it still works when you reopen the notebook, and the
-  tables in the knowledge base and Lambda explorers and in the chat's Test and Runs tabs work the same way.
+  tables in the knowledge base and Lambda explorers and in the chat's Test and Runs tabs work the same way
+  ([#70](https://github.com/utkarsh5026/aws-analyzer/pull/70)).
 - Every service's reports: each finding leads with a bold headline that says what's wrong, with why it matters and
   what to do underneath as points, and a note starts with its point in bold, as S3's already did. So their headlines
   read right, a few findings say it in a new order: DynamoDB's idle capacity ("Most of the provisioned capacity goes
   unused: reads peaked at 4% ..."), Lambda's most common error ("The most common error happened 8 times (the last 44m
   ago): KeyError: 'customer_id'"), OpenSearch's k-NN memory ("The vector graphs don't fit in the k-NN plugin's
   memory: ...", "The vector graphs have little room to grow: ...") and the chat's sweeps ("3 questions didn't work
-  with any setup: nothing tried here fixes them (...)").
+  with any setup: nothing tried here fixes them (...)")
+  ([#70](https://github.com/utkarsh5026/aws-analyzer/pull/70)).
+
+### Fixed
+
+- `help(aws_analyzer.s3)` and the other modules' help: the quick start says to `pip install aws-analyzer` and import
+  from `aws_analyzer`, where it still said to copy the file into a notebook cell
+  ([#72](https://github.com/utkarsh5026/aws-analyzer/pull/72)).
 
 ## [0.15.0] - 2026-10-12
 
@@ -499,7 +509,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.12.0...v0.13.0
