@@ -172,7 +172,9 @@ def test_times_and_sizes_read_the_way_people_write_them():
     assert lfmod._lambda_time(None) is None and lfmod._lambda_time("yesterday") is None
     assert [human_ms(v) for v in (0.42, 102.4, 1530, 15300, 75000, 185000)] == [
         "0.42 ms", "102 ms", "1.53 s", "15.3 s", "75.0 s", "3m 05s"]
-    assert lfmod._ms(1530) == "1,530 ms" and lfmod._ms(None) == "-"
+    assert lfmod._ms(1530) == "1,530 ms (1.5s)" and lfmod._ms(None) == "-"
+    assert [lfmod._ms(v) for v in (102.4, 30000, 185000, 3_725_000)] == [
+        "102 ms", "30,000 ms (30s)", "185,000 ms (3m 05s)", "3,725,000 ms (1h 02m)"]
     assert [lfmod._pct(v) for v in (0, 0.0004, 0.024, None)] == ["0%", "<0.1%", "2.4%", "-"]
     assert lfmod._window(900) == "15 minutes" and lfmod._window(3600) == "hour"
     assert lfmod._window(86400) == "24 hours" and lfmod._window(30 * 86400) == "30 days"

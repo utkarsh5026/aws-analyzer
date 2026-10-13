@@ -310,8 +310,9 @@ def _signature(function: Callable) -> str:
 
 # ----------------------------------------------------------------------------- tables: sorting, filters, keys
 
-_SORT_UNITS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, "PB": 1024**5}
-_SORT_NUMBER_RE = re.compile(r"^(-?)(<?)\$?([\d,]*\.?\d+)\+?(?: ?(B|KB|MB|GB|TB|PB|%))?(?: of [\d,]+)?$")
+_SORT_UNITS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, "PB": 1024**5, "ms": 1}
+_SORT_NUMBER_RE = re.compile(
+    r"^(-?)(<?)\$?([\d,]*\.?\d+)\+?(?: ?(B|KB|MB|GB|TB|PB|%|ms))?(?: of [\d,]+| \([^()]*\))?$")
 _SORT_AGE_RE = re.compile(r"^(\d+)(y|mo|d|h|m) ago$")
 _SORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?(?: UTC)?$")
 _AGE_SECONDS = {"y": 365 * 86400, "mo": 30 * 86400, "d": 86400, "h": 3600, "m": 60}

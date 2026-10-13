@@ -15,6 +15,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   colour that folds, like S3's preview of a `.json` file, instead of plain text. Click an object or a list to fold or
   unfold it, and hover over a line to see its path in Python (`raw['Environment']['Variables']`)
   ([#74](https://github.com/utkarsh5026/aws-analyzer/pull/74)).
+- Lambda's tables of run times (`overview()`'s Avg run, `metrics()`'s days, `performance()` and its runs) keep the
+  exact milliseconds and say a second or more the way people read it too: `30,000 ms (30s)`, `185,000 ms (3m 05s)`.
+  Those columns now sort by the number, so `1,530 ms` comes after `999 ms`.
 
 ## [0.16.0] - 2026-10-13
 

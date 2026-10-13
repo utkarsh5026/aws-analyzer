@@ -79,7 +79,7 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _why
 from ._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
+    HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
     human_money, human_size, parse_size, parse_time,
 )
 from ._kit.highlight import _json_source_html, _python_html
@@ -269,10 +269,13 @@ def human_ms(ms: float | None) -> str:
 
 
 def _ms(ms: float | None) -> str:
-    """A run time in a table: always in ms ('1,530 ms'), so a column of them lines up."""
+    """A run time in a table: always in ms, so a column of them lines up, with a second or more also said the way
+    people read it: '102 ms', '1,530 ms (1.5s)', '30,000 ms (30s)', '185,000 ms (3m 05s)'."""
     if ms is None:
         return "-"
-    return f"{ms:.2f} ms" if 0 < ms < 1 else f"{ms:,.0f} ms"
+    if 0 < ms < 1:
+        return f"{ms:.2f} ms"
+    return f"{ms:,.0f} ms" + (f" ({_duration(ms / 1000)})" if ms >= 1000 else "")
 
 
 def _mb(value: float | None) -> str:
