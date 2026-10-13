@@ -22,14 +22,14 @@ List the View commands the scope adds or changes. Those get the output review in
 
 ```bash
 .venv/bin/python .claude/skills/check/rules.py --apis
-.venv/bin/python .claude/skills/sync-helpers/drift.py --summary
 ```
 
 `rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers (and, in the
 Bedrock pair, of `_bedrock.py`'s), banners,
 View decoration and docstrings, and
-IAM permissions missing from the README. Report its errors, and any warnings the change caused. For drift,
-report only the helpers this change touched, where the other analyzer's copy wasn't updated.
+IAM permissions missing from the README. Report its errors, and any warnings the change caused. It can't see a
+helper copied from one service into another: when the change adds a function another service has too, say whether
+it's the same code (it goes in `_kit/`, or `_bedrock.py` for the Bedrock pair) or a different thing under the name.
 
 Don't run the whole test suite here. That's `/check`'s job. Suggest it at the end if it hasn't been run since
 the change.
@@ -78,6 +78,10 @@ Read the output as a data scientist in a notebook who is not an AWS expert. Chec
   user passed, and no environment changes).
 - **Blocks.** A new block type registers both drawings, `@_draws(_Block, "html")` and `@_draws(_Block, "text")`,
   and shows in a text-mode test: one without a text drawing becomes a "Part of this report isn't shown" note.
+- **Windows.** A change to an explorer or the chat window goes through `_kit/window.py` (CLAUDE.md, "The windows'
+  kit"): callbacks through `_safely`, its commands through `@_window_errors`, AWS read off the loop with `_later`
+  (a stale result dropped by its key), HTML widgets set with `_set`, and nothing copied from another window. Its
+  tests click and type through it, and drive any background path inside `asyncio.run`.
 - **Tests.** Pure logic is tested without moto. There's a text-mode UI test, and a failure-path test where one
   exists. Tests don't depend on the real clock or on network access.
 - **Docs.** Check the README command table, "Getting the data", the pure-function list and the IAM paragraph;

@@ -56,8 +56,9 @@ Pick the names first:
 
 Then build the file:
 
-1. **Module docstring.** Same shape as the others: what it is, "Copy this one file...", the requirements, the
-   two layers, and a quick start that shows the commands.
+1. **Module docstring.** Same shape as the others: what it is, "Part of aws-analyzer: ``pip install
+   aws-analyzer``, then ``from aws_analyzer import <Service>View``", the requirements, the two layers, and a quick
+   start that shows the commands.
 2. **Imports.** `from __future__ import annotations`, then only the stdlib, `boto3`, `botocore` and the package's
    own `_kit` at the top (never another analyzer). Anything optional is imported inside functions through
    `_require`.
@@ -96,6 +97,12 @@ Then build the file:
 
 Build each command the way `/add-command` does: the data model, then the pure function and its findings, then
 the analyzer method, then the View method.
+
+A window to click through (an explorer, like `KBExplorer` or `LambdaExplorer`) comes later, if at all, and is built
+on `src/aws_analyzer/_kit/window.py` (CLAUDE.md, "The windows' kit"): subclass `_Explorer` (call its `__init__`
+first, set `_PREFIX`, `_THREADS` and `_reword`, build with `_tab_bar` and `_frame`, read AWS with `_later`), make its
+fields `_Picker`s and its lines `_row_button`s, and guard its commands with `@_window_errors`. Take what it shares
+with the other windows from there, never from another window's file.
 
 ## 4. Tests: `tests/test_<service>.py`
 

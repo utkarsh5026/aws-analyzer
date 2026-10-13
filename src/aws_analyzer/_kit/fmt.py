@@ -1,9 +1,10 @@
-"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; and
-file names' extensions."""
+"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; file names'
+extensions; and Stat, a running count and its total bytes."""
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -181,3 +182,15 @@ def file_extension(key: str) -> str:
     ):
         return f"{parts[-2]}.{ext}"
     return ext
+
+
+@dataclass
+class Stat:
+    """Running count (objects, items) + total bytes."""
+
+    count: int = 0
+    size: int = 0
+
+    def add(self, size: int) -> None:
+        self.count += 1
+        self.size += size

@@ -1,9 +1,8 @@
 """
-lambda_functions.py - self-contained AWS Lambda toolkit for SageMaker / Jupyter notebooks.
+lambda_functions.py - AWS Lambda toolkit for SageMaker / Jupyter notebooks.
 
-Copy this one file into a notebook cell (or upload it next to your notebook and
-``import lambda_functions``). Nothing else from this repo is needed. It isn't called
-lambda.py because `lambda` is a Python keyword, so `import lambda` can't work.
+Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import LambdaView``. It isn't called
+lambda.py because `lambda` is a Python keyword, so `from aws_analyzer import lambda` can't work.
 
 Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich
 HTML output. All are preinstalled on SageMaker.
@@ -38,6 +37,7 @@ Quick start
     ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
     ui.explore()                                      # all of it in a window, by clicking: functions, logs, errors
 
+    from aws_analyzer.lambda_functions import explore
     explore("etl-nightly", tab="logs")                # the window, straight to one function's logs
 
     lam = ui.core                                     # same analyzer, raw data

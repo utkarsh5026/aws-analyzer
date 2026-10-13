@@ -1,8 +1,7 @@
 """
-bedrock_kb.py - self-contained Amazon Bedrock Knowledge Bases toolkit for SageMaker / Jupyter notebooks.
+bedrock_kb.py - Amazon Bedrock Knowledge Bases toolkit for SageMaker / Jupyter notebooks.
 
-Copy this one file into a notebook cell (or upload it next to your notebook and
-``import bedrock_kb``). Nothing else from this repo is needed.
+Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import BedrockKBView``.
 
 Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich
 HTML output. All are preinstalled on SageMaker.

@@ -1,6 +1,6 @@
 ---
 name: check
-description: Run this repo's CI locally - ruff, each module imported with only boto3, pytest - plus project-rule checks CI doesn't have (read-only AWS calls, lazy optional imports, View conventions, IAM permissions listed in README) and drift between the duplicated helpers. Use after changing src/aws_analyzer/ or tests/, before saying the work is done, and before committing.
+description: Run this repo's CI locally - ruff, each module imported with only boto3, pytest - plus project-rule checks CI doesn't have (read-only AWS calls, lazy optional imports, View conventions, IAM permissions listed in README, copies of the shared code). Use after changing src/aws_analyzer/ or tests/, before saying the work is done, and before committing.
 argument-hint: "[matrix] [pytest args, e.g. -k policy]"
 allowed-tools: Bash(.venv/bin/python .claude/skills/check/run.py:*), Bash(python .claude/skills/check/run.py:*), Bash(.venv/bin/python .claude/skills/check/rules.py:*), Bash(python .claude/skills/check/rules.py:*), Bash(.venv/bin/python .claude/skills/check/snapshot.py:*), Bash(python .claude/skills/check/snapshot.py:*)
 ---
@@ -14,7 +14,7 @@ Run everything CI runs, locally, and fix what it finds.
 Use `.venv/bin/python` if it exists, otherwise `python`:
 
 ```bash
-.venv/bin/python .claude/skills/check/run.py                  # ruff, imports, package, rules, pytest, drift
+.venv/bin/python .claude/skills/check/run.py                  # ruff, imports, package, rules, pytest
 .venv/bin/python .claude/skills/check/run.py --matrix         # + pytest on CI's other Python versions (uv)
 .venv/bin/python .claude/skills/check/run.py -- -k policy     # arguments after -- go to pytest
 ```
@@ -37,7 +37,6 @@ after touching anything that uses pandas, IPython or version-specific stdlib, or
 | `rules` | `rules.py` finds an error: a write API call, a top-level non-stdlib import, an import of another analyzer (or `_kit` importing one), a copy of a helper `_kit` has, missing `from __future__ import annotations`, section banners out of order, a public View method without `@_friendly_errors` (a companion window's: `@_window_errors`) or a docstring, or `print` / `display` outside the rendering plumbing | Follow the message. Each one names the rule from CLAUDE.md |
 | `pytest` | a test fails | Find the root cause. Change a test's expectation only when the behaviour change was intended, and say so |
 | `py3.X` | (`--matrix`) a test fails on that Python only | Usually pandas 2 vs 3 (copy-on-write, the default `str` dtype) or stdlib added after 3.10 |
-| `drift` | never; information only | If this change touched a duplicated helper, run `/sync-helpers` |
 
 Rule **warnings** don't fail the run, but deal with each one that the current change caused:
 

@@ -83,8 +83,8 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
-  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`, `_text_bar`,
-  and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
+  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, `Stat`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`,
+  `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
   (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
@@ -120,7 +120,7 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too; an explorer's
   once-per-cell display asks `_cell_number` on `_kit.window`).
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
-  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them, and is left out of `drift.py`. Its
+  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
   public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
   `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
   Nothing imports a companion.
@@ -610,7 +610,8 @@ does both, a page at a time). How the UI works:
   `moto.mock_aws()` and fixtures that seed a bucket / table. A new AWS service needs its moto extra added to
   `moto[...]` in `requirements-dev.txt`. `_kit` is tested through the services, and `tests/test_kit.py` covers what
   no service reaches in normal use (a block nothing draws, `_base_css`'s checks on a restyle, each error kind
-  `@_friendly_errors` meets on a toy View, and that `prices=` given to one analyzer changes no other's).
+  `@_friendly_errors` meets on a toy View, that `prices=` given to one analyzer changes no other's, and the windows'
+  guards on a toy `_Window`: a command that can't run, an error the window doesn't say).
 - Bedrock has little moto support (moto 5.2 only creates / gets / lists / deletes knowledge bases), so
   `tests/test_bedrock_kb.py` uses botocore `Stubber` with injected clients:
   `BedrockKBAnalyzer(client=agent, clients={"bedrock-agent-runtime": ..., "bedrock-runtime": ..., "bedrock": ...})`.

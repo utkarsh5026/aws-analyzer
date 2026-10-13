@@ -1,10 +1,9 @@
 """
-sagemaker_env.py - self-contained SageMaker toolkit for SageMaker / Jupyter notebooks: the notebook you're
-running in, what fills its disk, and everything else in SageMaker that's running and billing.
+sagemaker_env.py - SageMaker toolkit for SageMaker / Jupyter notebooks: the notebook you're running in, what fills
+its disk, and everything else in SageMaker that's running and billing.
 
-Copy this one file into a notebook cell (or upload it next to your notebook and
-``import sagemaker_env``). Nothing else from this repo is needed. It isn't called
-sagemaker.py, so it doesn't hide the SageMaker Python SDK (``import sagemaker``).
+Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import SageMakerView``. It isn't called
+sagemaker.py, so it's never mixed up with the SageMaker Python SDK (``import sagemaker``).
 
 Requirements: boto3 (required). pandas only for DataFrames, IPython only for rich
 HTML output. All are preinstalled on SageMaker.

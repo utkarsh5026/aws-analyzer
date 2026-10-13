@@ -1,8 +1,7 @@
 """
-s3.py - self-contained S3 analysis toolkit for SageMaker / Jupyter notebooks.
+s3.py - S3 analysis toolkit for SageMaker / Jupyter notebooks.
 
-Copy this one file into a notebook cell (or upload it next to your notebook and
-``import s3``). Nothing else from this repo is needed.
+Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import S3View``.
 
 Requirements: boto3 (required). pandas + pyarrow only for DataFrame / parquet
 previews, IPython only for rich HTML output. All are preinstalled on SageMaker.
@@ -34,8 +33,8 @@ Quick start
     ui.download_zip("s3://my-bucket/data/")         # the same as one .zip, once size / disk / access checks pass
     ui.downloads()                                  # what's downloaded, the disk it takes; clean_downloads() deletes it
 
-    For clicking through folders and files instead, put s3_explorer.py next to this file:
-    from s3_explorer import S3Explorer; S3Explorer("s3://my-bucket/data/")
+    For clicking through folders and files instead (s3_explorer.py, which builds on this module):
+    from aws_analyzer import S3Explorer; S3Explorer("s3://my-bucket/data/")
 
     s3 = ui.core                                    # same analyzer, raw data
     summary = s3.summarize("s3://my-bucket/data/")
@@ -87,7 +86,7 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _error_code
 from ._kit.fmt import (
-    _band, _duration, _fmt_dt, _plural, _share, _utcnow, file_extension, human_age, human_money, human_size,
+    Stat, _band, _duration, _fmt_dt, _plural, _share, _utcnow, file_extension, human_age, human_money, human_size,
     parse_size, parse_time,
 )
 from ._kit.render import _base_css, _call, _prose, _report_html
@@ -1492,18 +1491,6 @@ class ObjectInfo:
         return (
             "-" in self.etag
         )  # multipart ETags look like "<md5-of-md5s>-<part count>"
-
-
-@dataclass
-class Stat:
-    """Running object count + total bytes."""
-
-    count: int = 0
-    size: int = 0
-
-    def add(self, size: int) -> None:
-        self.count += 1
-        self.size += size
 
 
 @dataclass
