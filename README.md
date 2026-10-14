@@ -821,6 +821,7 @@ ui.follow_up("And for digital goods?")   # same conversation
 ui.ask("How long do refunds take?", data_source="faq")   # answered from one data source only
 
 ui.files()                         # every file next to Bedrock's record of it: failed, changed, not synced...
+ui.save_file_list()                # every file's s3:// path in a .txt file, one per line, with a link to download it
 ui.file("refund-policy.pdf")       # how one file was indexed: its parser, chunks in order, metadata, what to fix
 ui.search_file("refund-policy.pdf", "How long do refunds take?")   # does the question find it, and where it ranks
 ui.explore()                       # all of it in a window, by clicking (below)
@@ -831,7 +832,8 @@ ui.explore()                       # all of it in a window, by clicking (below)
 > Commands take `kb=` (a name in any case, the 10-character ID, or the ARN); without it they use the one set by
 > `use()` or `BedrockKBView(kb=...)`, else the only knowledge base in the region, else they list the ones there and
 > say how to pick. Nothing in the file changes a knowledge base: where a sync is needed, it shows the
-> `aws bedrock-agent start-ingestion-job ...` command and the boto3 call instead of running them.
+> `aws bedrock-agent start-ingestion-job ...` command and the boto3 call instead of running them. The one file it
+> writes is the list `save_file_list()` (or the explorer's **⬇ List**) saves beside the notebook.
 
 ### Explore by clicking
 
@@ -868,6 +870,7 @@ browser tab). Without it, or outside Jupyter, it shows the same as reports: `fil
 | Pick a knowledge base              | Click the field at the top left: the region's knowledge bases, with a search box that finds one by name, part of its ID or its description. Enter picks the first, and a whole ID or ARN works too. The cards beside it say how it's doing: its files, how many are searchable, failed or waiting for a sync, the last sync and the idle cost of its vector store |
 | See what's wrong                   | **Overview**: its files by state in one bar, findings that say what's wrong and what to do, the commands that sync the data sources that need it (to copy: the window never syncs), how each data source becomes vectors (its location, parser, chunking, embedding model and vector store), and the recent syncs |
 | Find a file                        | **Files**: type part of a name, a folder or Bedrock's reason in the search box, click a state's chip (**Failed**, **Changed**, **Not synced**, **Skipped**, **Deleted**, **Ignored**, **Indexed**) to see only those, pick a data source, or sort by name, folder, size, last change or last indexed. Problems come first, 40 to a page with **«** **‹** **›** **»** under the list |
+| Get the list of files              | **⬇ List**, beside the sort, saves the `s3://` path of every file the list shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt` beside the notebook. **⬇ Download** under the list then saves it on your computer |
 | See how a file was indexed         | Click it. Its page has its state and what to do about it, then each step from S3 into the vector store, the one that failed in red. Its chunks follow as a bar of their sizes (for a .txt or .md file, also where each sits in the file and what no chunk holds), then a line each with its page, size and first words that opens to the chunk's text, the part it repeats from the chunk before marked, and its metadata. Last, its `.metadata.json` next to what its chunks carry, and Bedrock's record of it |
 | Check that a question finds a file | On its page, type a question in **Ask a question…** and press Enter: the file's own best passages for it, and where it ranks among the whole knowledge base's. When an answer, which sees the top 5, wouldn't see it, a finding says what to change |
 | Search the knowledge base          | **Search**: a question's passages with their scores and the question's words highlighted. Pick the number of passages, the search type (**Semantic** or **Hybrid**), a data source and a reranker. **How refund-policy.pdf was indexed ›** under a passage opens its file's page |
@@ -905,6 +908,7 @@ Grouped the way `ui.help()` lists them.
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status (indexed, failed, pending ...), the ones that aren't indexed with Bedrock's reason, and the sync command. `status="INDEXED"` or `"FAILED"` lists only those |
 | `unsynced(kb=None, data_source=None)`                     | S3 files added or changed since each data source's last successful sync, and the command to sync them                                                                           |
 | `files(kb=None, data_source=None, status=None, match=None, n=50)` | Every file next to Bedrock's record of it: indexed, failed (and why), changed in S3 since it was indexed, added after the last sync, skipped by the sync (and the likely reason: a type Bedrock doesn't read, over 50 MB, archived), gone from S3 but still searchable. Problems first, with the commands that sync them. `status="failed"` or `match="refund"` narrows the list |
+| `save_file_list(kb=None, path=None, data_source=None, status=None, match=None, link="s3", expires=3600)` | Saves the files as a text file, one per line, sorted by path: each file's `s3://` path, ready for a script, `aws s3 cp` or a spreadsheet, with a **⬇ Download** link that saves it on your computer and its first lines. `status=`, `match=` and `data_source=` keep the files `files()` lists with them; `link="https"` writes a link that opens each file in a browser (presigned, for `expires` seconds; anyone holding the list can open them until then) and `link="key"` each one's path in the bucket. `path`: default `<knowledge base>-files.txt` beside the notebook; a file of that name is replaced |
 | `file(path, kb=None)`                                     | How one file was indexed, step by step (stored in S3, read by the parser, cut into chunks, embedded, stored as vectors, where it stands now), its chunks in document order with their size, page and the text each shares with the one before, its metadata file checked against what its chunks carry, and what to fix. `path`: its name, its path in the bucket or its `s3://` path |
 | `search_file(path, question, kb=None, n=10)`              | Whether a question finds a file: its own best passages for it, and where it ranks among the whole knowledge base's (an answer sees the top 5), with what to change when it ranks too low |
 
@@ -1003,6 +1007,7 @@ kb.unsynced("support-docs")                         # [SyncFreshness]: changed S
 
 inv = kb.file_inventory("support-docs")             # FileInventory: every file, KBFile.state and why (KBFile.note)
 inv.counts(), inv.to_df()                           # files per state; one row per file
+kb.save_file_list(inv, "files.txt")                 # SavedFileList: a line per file (link="https" or "key" too)
 f = "s3://support-docs-bucket/policies/refund-policy.pdf"
 chunks = kb.document_chunks("support-docs", f)      # DocumentChunks: its chunks in document order, .stats
 kb.metadata_file(f)                                 # MetadataFile: its .metadata.json's attributes and problems
@@ -1035,7 +1040,7 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
 `match_expected`, `compare_retrievals`, `summarize_documents`, `changed_since`, `generation_cost`,
 `vector_store_monthly_cost`, `query_cost`, the file functions: `inventory_files`, `file_state`, `skip_reason`,
 `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`,
-`find_files`, `sort_files`, `parse_file_state`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
+`find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`, and the findings: `kb_findings`, `sync_findings`, `retrieval_findings`,
 `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`.
 
 </details>
@@ -1060,7 +1065,7 @@ The analysis functions are pure (no AWS calls), so they also work on responses a
   plus reranking when you ask for it.
 - `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects by default; both say
   when they stopped early (`.core.documents(..., limit=None)` reads everything).
-- `files()`, `file()` and the explorer read at most 10,000 of Bedrock's documents and 10,000 S3 files per data
+- `files()`, `save_file_list()`, `file()` and the explorer read at most 10,000 of Bedrock's documents and 10,000 S3 files per data
   source, and say when they stopped (`.core.file_inventory(..., limit=None)` reads everything). A file the document
   list didn't reach is looked up on its own when you open it.
 - A file's chunks come from one Retrieve limited to the file (a filter on `x-amz-bedrock-kb-source-uri`), which
@@ -1078,17 +1083,17 @@ Read-only, per command:
 | Permission                                                                                 | Used by                                                            |
 | :----------------------------------------------------------------------------------------- | :----------------------------------------------------------------- |
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`                                   | `kbs`, `kb_info`, and finding a knowledge base by name             |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `file`, `explore`  |
-| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`, `files`, `file`, `search_file`, `explore`             |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource`                                         | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `save_file_list`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`                                     | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `save_file_list`, `file`, `explore` |
+| `bedrock:ListKnowledgeBaseDocuments`                                                       | `documents`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
 | `bedrock:GetKnowledgeBaseDocuments`                                                        | `file` and `explore`, for a file the document list stopped before  |
 | `bedrock:ListTagsForResource`                                                              | `kb_info`                                                          |
 | `bedrock:Retrieve`                                                                         | `search`, `chunk`, `compare`, `evaluate`, `ask(engine="converse")`, and a file's chunks and questions in `file`, `search_file` and `explore` |
 | `bedrock:RetrieveAndGenerate` plus `bedrock:InvokeModel` on the model or inference profile | `ask`, `follow_up`                                                 |
 | `bedrock:InvokeModel`                                                                      | `ask(engine="converse")`, `core.generate`                          |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles`                            | `models`, and turning `model="sonnet"` into an ID                  |
-| `s3:ListBucket` on the data source's bucket                                                | `unsynced`, `files`, `file`, `search_file`, `explore`              |
-| `s3:GetObject` on the data source's files                                                  | `file` and `explore` read a file's `<file>.metadata.json`, and a .txt or .md file's text to place its chunks in it. Opening a file from its link (`link`, and the file names in reports) uses it too, in your browser |
+| `s3:ListBucket` on the data source's bucket                                                | `unsynced`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
+| `s3:GetObject` on the data source's files                                                  | `file` and `explore` read a file's `<file>.metadata.json`, and a .txt or .md file's text to place its chunks in it. Opening a file from its link (`link`, `save_file_list(link="https")`, and the file names in reports) uses it too, in your browser |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. Anything you can't
 read shows up as a note instead of an error. The
@@ -1140,7 +1145,9 @@ browser tab). Without it, or outside Jupyter, every command below still works as
   pass `model=`) and, when the knowledge base has more than one, the **data source** questions search ("All data sources" by default), and the **files**. Click one to open its
   list, with a search box that finds a line by name, part of an ID (`K7QJ` finds `K7QJ2M4XNA`), description or
   provider; Enter picks the first, and a whole knowledge base ID or ARN works even when it isn't listed. Tick files
-  and the next questions search only them (shown as chips; click one to drop it, or **All files**). Another data
+  and the next questions search only them (shown as chips; click one to drop it, or **All files**). **⬇ List**
+  beside the files' search box saves the `s3://` path of every file the list shows, one per line, in
+  `<knowledge base>-indexed-files.txt` beside the notebook, with a **⬇ Download** link under the list. Another data
   source, file or model keeps the conversation; another knowledge base starts a new one.
 - **The conversation.** Answers appear as they're written, their markdown laid out (lists, bold, tables, code). Each
   one shades its cited spans and numbers them, lists its sources (click one to read the passage, with its location
@@ -1241,6 +1248,7 @@ window follows them.
 |:---|:---|
 | `use(kb=None, model=None, data_source=None, files=None)` | Switches the knowledge base (a new conversation), the model, or what questions search (the same one): `use(data_source="faq")`, `use(files=["refund-policy.pdf", "faq/returns.md"])` (names, paths in the bucket or `s3://` paths), or `"all"` |
 | `files(match=None)` | The knowledge base's files to pick from: name, folder, data source, whether it's indexed, when it changed, and which ones questions search. `files("refund")` keeps those whose path contains it |
+| `save_file_list(match=None, path=None, link="s3", expires=3600)` | Saves the knowledge base's files as a text file, one per line, sorted by path, with a **⬇ Download** link that saves it on your computer: each file's `s3://` path, `link="https"` a link that opens it in a browser (presigned, for `expires` seconds) or `link="key"` its path in the bucket. `match=` keeps those whose path contains it; `path` defaults to `<knowledge base>-files.txt` beside the notebook |
 | `kbs(match=None)` | The knowledge bases in the region: name, ID, status, description and when each changed; `match=` finds them by name, ID or description |
 | `models(match=None)` | The models you can chat with: the ID to pass as `model=`, on demand or through an inference profile, and $ per 1M tokens |
 
@@ -1291,6 +1299,7 @@ r = core.retrieve("support-docs", "refund window?", {"n": 8})    # only the sear
 core.request("support-docs", "refund window?", retrieve_only=True)      # the Retrieve request, not sent
 core.data_sources("support-docs")     # [DataSource]: ID, name, status
 core.files("support-docs").documents  # [KBDocument]: s3:// path, status, data source
+core.save_file_list(core.files("support-docs"), "files.txt")   # SavedFileList: a line per file
 core.ask("support-docs", "refund window?", stream=True, on_text=show)    # show(text) gets the answer so far
 core.schema().fields["temperature"]   # Field: path, type, range, what it does
 
@@ -1312,7 +1321,7 @@ The analysis functions don't call AWS: `request_schema`, `normalize_settings`, `
 `build_retrieve_request`, `retrieve_settings`, `settings_from_request`, `validate_request`, `python_call`,
 `parse_rag`, `parse_retrieve`, `collect_stream`, `as_filter`,
 `describe_filter`, `data_source_filter`, `with_data_sources`, `split_data_sources`, `describe_sources`,
-`files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `describe_setting`,
+`files_filter`, `with_files`, `split_condition`, `match_files`, `file_labels`, `describe_files`, `file_list_lines`, `describe_setting`,
 `answer_cost`, `cited_ranks`, and the findings: `settings_findings`, `answer_findings` and `compare_findings` (a
 search and an answer to the same question). For test runs: `parse_questions`, `format_questions`, `question_list`,
 `match_expected`, `expected_at`, `item_verdict`, `batch_estimate`, `batch_findings` and `batch_changes` (two runs of
@@ -1343,6 +1352,8 @@ the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations
   (`max_setups=`). Sweeping search settings with `retrieve_only=True` costs only the questions' embeddings (and
   reranking), so it's the cheap way to pick them before trying models.
 - `save_runs()` writes a local file next to the notebook; it only ever adds lines to it, and nothing goes to AWS.
+- `save_file_list()` and the Files list's **⬇ List** write one `.txt` file next to the notebook (or where you say),
+  replacing a file of that name; nothing goes to AWS.
 
 </details>
 
@@ -1353,7 +1364,8 @@ the same questions). For sweeps and kept runs: `sweep_setups`, `parse_variations
 |:---|:---|
 | `bedrock:ListKnowledgeBases` | The knowledge base list, `kbs`, and finding a knowledge base by name (an ID works without it) |
 | `bedrock:ListDataSources` | The data source list, and `data_source=` by name (an ID works without it) |
-| `bedrock:ListKnowledgeBaseDocuments` | The **Files** list, `files`, and `files=` by name (an `s3://` path works without it) |
+| `bedrock:ListKnowledgeBaseDocuments` | The **Files** list, `files`, `save_file_list`, and `files=` by name (an `s3://` path works without it) |
+| `s3:GetObject` on the knowledge base's files | Only to open the links `save_file_list(link="https")` writes, in your browser |
 | `bedrock:RetrieveAndGenerate` and `bedrock:Retrieve` on the knowledge base, `bedrock:InvokeModel` on the model or inference profile | Asking, in the window or with `ask`. Streamed answers (RetrieveAndGenerateStream) use the same permission; where streaming is refused anyway, answers arrive all at once and the window says why. **Retrieve only** and `retrieve` need only `bedrock:Retrieve` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | The model list, `models`, and turning `model="sonnet"` into an ID |
 

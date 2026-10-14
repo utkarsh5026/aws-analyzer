@@ -49,7 +49,6 @@ from __future__ import annotations
 import difflib
 import html
 import json
-import mimetypes
 import re
 import statistics
 import textwrap
@@ -69,12 +68,16 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 # bedrock_kb.<name> still works.
 from ._bedrock import (
     BEDROCK_PRICES, Citation, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, KBDocument, MODEL_PRICES, ModelInfo, Passage,
-    SEARCHABLE, _Answer, _BEDROCK_META_PREFIX, _Json, _KB_ID_RE, _MARKER_RE, _MODEL_ALIASES, _REFUSAL, _RERANK_ALIASES,
-    _TERM_RE, _family_match, _highlight, _is_bedrock_filter, _match_kb, _match_sources, _model_id, _per_million,
-    _plain_json, _session_expired, _span, best_snippet, build_filter, describe_sources, estimate_tokens,
-    generation_cost, match_expected, parse_document, parse_kb_ref, parse_models, parse_passage, parse_retrieve,
-    query_cost, question_terms, short_model, source_name, with_data_sources, DATA_SOURCE_KEY as DATA_SOURCE_KEY,
-    GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES, data_source_filter as data_source_filter, model_price as model_price,
+    SEARCHABLE, SavedFileList, _Answer, _BEDROCK_META_PREFIX, _Download, _Json, _KB_ID_RE, _LIST_LINK_BYTES,
+    _MARKER_RE, _MODEL_ALIASES, _REFUSAL, _RERANK_ALIASES, _TERM_RE, _browser_type, _data_href, _family_match,
+    _download_css, _file_list_blocks, _highlight, _is_bedrock_filter, _link_life, _link_seconds, _list_target,
+    _looks_like_path,
+    _match_kb, _match_sources, _model_id, _notebook_href, _per_million, _plain_json, _session_expired, _span,
+    best_snippet, build_filter, describe_sources, estimate_tokens, file_list_name, generation_cost, match_expected,
+    parse_document, parse_kb_ref, parse_list_link, parse_models, parse_passage, parse_retrieve, presigned_url,
+    query_cost, question_terms, short_model, source_name, with_data_sources, write_file_list,
+    DATA_SOURCE_KEY as DATA_SOURCE_KEY, FILE_LIST_LINKS as FILE_LIST_LINKS, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES,
+    data_source_filter as data_source_filter, file_list_lines as file_list_lines, model_price as model_price,
     split_metadata as split_metadata,
 )
 from ._kit.analyzer import _BaseAnalyzer
@@ -117,24 +120,6 @@ def _arn_region(arn: str) -> str:
     """'arn:aws:bedrock:eu-west-1:123456789012:knowledge-base/X' -> 'eu-west-1' ('' for anything else)."""
     parts = (arn or "").split(":")
     return parts[3] if len(parts) > 5 and parts[0] == "arn" else ""
-
-
-# Extensions a browser shows as text only when told so (it would save a .md or .csv sent as its own type).
-_TEXT_EXTENSIONS = {"txt", "md", "markdown", "csv", "tsv", "log", "rst", "yaml", "yml", "xml", "jsonl"}
-
-
-def _browser_type(name: str) -> str | None:
-    """The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
-    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download)."""
-    name = name.rsplit("/", 1)[-1]
-    if "." in name and name.rsplit(".", 1)[-1].lower() in _TEXT_EXTENSIONS:
-        return "text/plain; charset=utf-8"
-    guess = mimetypes.guess_type(name)[0] or ""
-    if guess == "text/html":
-        return "text/html; charset=utf-8"
-    if guess in ("application/pdf", "application/json") or guess.split("/")[0] in ("image", "audio", "video"):
-        return guess
-    return None
 
 
 # The file types Bedrock's parsers read from S3: the default parser takes the documents, and a foundation model or
@@ -2779,6 +2764,15 @@ def sort_files(files: Iterable[KBFile], by: str = "problems") -> list[KBFile]:
     raise ValueError(f"by= is one of {', '.join(map(repr, _SORTS))}; got {by!r}")
 
 
+def pick_files(files: Iterable[KBFile], *, state: str = "", match: str | None = None) -> list[KBFile]:
+    """The files in `state` (a FILE_STATES key; '' for any) whose path, name, Bedrock's reason or note hold `match`
+    (search_rank's words), in the order given: what files() lists and save_file_list() saves."""
+    picked = [f for f in files if not state or f.state == state]
+    if match:
+        picked = [f for f in picked if search_rank(match, (f.key, f.name, f.reason, f.note)) is not None]
+    return picked
+
+
 # =============================================================================
 # 4. BedrockKBAnalyzer - pure logic layer (talks to AWS, returns data)
 # =============================================================================
@@ -3671,25 +3665,7 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         for `expires` seconds, only while those credentials are valid, and only if they may read the file
         (s3:GetObject). It makes the browser show a PDF (at `page`), picture, text or HTML file instead of saving it.
         A web, Confluence, SharePoint or Salesforce source links to its own address."""
-        expires = _as_int(expires, "expires")
-        if not 1 <= expires <= 604_800:
-            raise ValueError(
-                f"expires is in seconds, from 1 to 604,800 (7 days, the longest S3 allows); got {expires:,}"
-            )
-        uri = str(uri or "").strip()
-        if uri.lower().startswith(("https://", "http://")):
-            return uri
-        bucket, _, key = uri[5:].partition("/") if uri.startswith("s3://") else ("", "", "")
-        if not bucket or not key:
-            return None
-        params = {"Bucket": bucket, "Key": key, "ResponseContentDisposition": "inline"}
-        shown = _browser_type(key)
-        if shown:
-            params["ResponseContentType"] = shown
-        url = self._s3_client().generate_presigned_url(
-            "get_object", Params=params, ExpiresIn=expires
-        )
-        return f"{url}#page={page}" if page and shown == "application/pdf" else url
+        return presigned_url(self._s3_client, uri, page=page, expires=expires)
 
     def unsynced(
         self,
@@ -3999,6 +3975,31 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
             return None, False
         return list(objects.values()), True
 
+    def save_file_list(
+        self,
+        files: FileInventory | Iterable[KBFile],
+        path: str | None = None,
+        *,
+        link: str = "s3",
+        expires: int = 3600,
+    ) -> SavedFileList:
+        """Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
+        bucket ('key') or a link that opens it in a browser ('https': presigned here with your credentials, no AWS
+        call, working for `expires` seconds). files: a file_inventory() or some of its files. path: the file to write
+        (a folder puts it there), else <knowledge base>-files.txt beside the notebook; a file of that name is
+        replaced. Nothing in AWS changes."""
+        link = parse_list_link(link)
+        default = file_list_name(files.kb_name or files.kb_id) if isinstance(files, FileInventory) else "kb-files.txt"
+        items = files.files if isinstance(files, FileInventory) else files
+        sign = None
+        if link == "https":
+            expires = _link_seconds(expires)
+
+            def sign(uri: str) -> str | None:
+                return self.file_url(uri, expires=expires)
+
+        return write_file_list(items, _list_target(path, default), link=link, sign=sign, expires=expires)
+
     def document_status(self, kb: str, uri: str, data_source: str) -> KBDocument | None:
         """Bedrock's record of one file (GetKnowledgeBaseDocuments), for a file a truncated document list didn't
         reach: its status and reason, or None when Bedrock has none. data_source: its data source's ID or name."""
@@ -4304,7 +4305,7 @@ body[data-jp-theme-light="false"] .kba .jk,body.vscode-dark .kba .jk{color:#c4b5
 body[data-jp-theme-light="false"] .kba .js,body.vscode-dark .kba .js{color:#86efac}
 body[data-jp-theme-light="false"] .kba .jn,body.vscode-dark .kba .jn{color:#fcd34d}
 body[data-jp-theme-light="false"] .kba .jl,body.vscode-dark .kba .jl{color:#93c5fd}"""
-_CSS = _base_css(_ROOT, _EXTRA_CSS)
+_CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _download_css(_ROOT))
 _BADGE = "📚 Bedrock KB"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
 
@@ -4640,10 +4641,7 @@ def _open_label(p: Passage, url: str, expires: int = 3600) -> str:
         return f"Open {name}"
     verb = "Open" if _browser_type(p.uri) else "Download"
     page = f" at page {p.page}" if "#page=" in url else ""
-    for size, unit in ((86_400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
-        if expires % size == 0:
-            break
-    return f"{verb} {name}{page} (link valid for {_plural(expires // size, unit)})"
+    return f"{verb} {name}{page} (link valid for {_link_life(expires)})"
 
 
 def _strip_markers(text: str) -> str:
@@ -4687,7 +4685,7 @@ class BedrockKBView(_BaseView):
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "🧭 Explore by clicking": ("explore",),
         "📚 Knowledge bases": ("kbs", "use", "kb_info"),
-        "📥 What's indexed": ("files", "file", "search_file", "syncs", "documents", "unsynced"),
+        "📥 What's indexed": ("files", "save_file_list", "file", "search_file", "syncs", "documents", "unsynced"),
         "🔎 Search and answer": ("search", "chunk", "link", "ask", "follow_up", "models"),
         "📏 Measure retrieval": ("compare", "evaluate"),
         "❓ Help": ("help",),
@@ -6379,17 +6377,21 @@ class BedrockKBView(_BaseView):
         kb_id = self._kb(kb)
         n = _as_int(n, "n")
         wanted = parse_file_state(status) if status else ""
-        if data_source is not None:
-            with self._progress("Listing files", unit="files") as tick:
-                inv = self.core.file_inventory(kb_id, data_source, progress=tick)
-        else:
-            inv = self._inventory(kb_id, refresh=True)
-        self._show(self._files_blocks(inv, state=wanted, match=match, n=n))
+        inv = self._list_files(kb_id, data_source)
+        self._show(self._files_blocks(inv, state=wanted, match=match, n=n, data_source=data_source))
+
+    def _list_files(self, kb_id: str, data_source: str | None) -> FileInventory:
+        """The knowledge base's files read now (one data source's, or every one's, kept for file())."""
+        if data_source is None:
+            return self._inventory(kb_id, refresh=True)
+        with self._progress("Listing files", unit="files") as tick:
+            return self.core.file_inventory(kb_id, data_source, progress=tick)
 
     def _files_blocks(self, inv: FileInventory, *, state: str = "", match: str | None = None, n: int = 50,
-                      window: bool = False) -> list[Any]:
+                      window: bool = False, data_source: str | None = None) -> list[Any]:
         """files()'s report: cards per state, findings, and the files that need a look first (window=True: the
-        explorer's summary, without the list, which the window has beside it)."""
+        explorer's summary, without the list, which the window has beside it). data_source: as files() was given it,
+        for the next steps' calls."""
         counts = inv.counts()
         several = len({f.data_source_id for f in inv.files}) > 1  # a column for it only when the files tell apart
         sub = [f"{_plural(len(inv.files), 'file')} from {_plural(len(inv.sources), 'data source')}",
@@ -6406,10 +6408,7 @@ class BedrockKBView(_BaseView):
         sync = self._sync_block(inv.kb_id, sync_needed(inv), inv.sources)
         if window:
             return blocks + ([sync] if sync else [])
-        shown = [f for f in inv.files if not state or f.state == state]
-        if match:
-            shown = [f for f in shown if search_rank(match, (f.key, f.name, f.reason, f.note)) is not None]
-        shown = sort_files(shown, "problems")
+        shown = sort_files(pick_files(inv.files, state=state, match=match), "problems")
         rows = []
         for f in shown[:n]:
             label, tone = FILE_STATES.get(f.state, (f.state, ""))
@@ -6433,10 +6432,84 @@ class BedrockKBView(_BaseView):
         if shown:
             first = shown[0]
             on = self._on(inv.kb_id, inv.kb_name)
+            narrowed = {k: v for k, v in (("data_source", data_source), ("status", state), ("match", match)) if v}
+            some = "these files'" if narrowed else "every file's"
             steps = [(_call("file", first.key, **on), "how it was indexed: its chunks, metadata and what to fix"),
                      (_call("search_file", first.key, "a question it should answer", **on),
-                      "whether a question finds it, and where it ranks")]
+                      "whether a question finds it, and where it ranks"),
+                     (_call("save_file_list", **on, **narrowed), f"{some} s3:// path in a .txt file, one per line, "
+                                                                 "to download")]
             blocks.append(_Next(steps))
+        return blocks
+
+    @_friendly_errors
+    def save_file_list(
+        self,
+        kb: str | None = None,
+        path: str | None = None,
+        *,
+        data_source: str | None = None,
+        status: str | None = None,
+        match: str | None = None,
+        link: str = "s3",
+        expires: int = 3600,
+    ) -> None:
+        """Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
+        computer: each file's s3:// path, sorted by path, ready for a script, aws s3 cp or a spreadsheet.
+
+        status= ('failed', 'changed', 'new', ...), match= (part of a name or path) and data_source= keep only the
+        files files() lists with them. link='https' writes a link that opens each file in a browser instead (presigned
+        here with your credentials, no AWS call; each works for `expires` seconds, an hour unless you say, and anyone
+        holding one can open its file until then), and link='key' each one's path in the bucket. path: default
+        <knowledge base>-files.txt beside the notebook ('failed-files' etc. with status=); a folder puts it there, and
+        a file of that name is replaced. Only that file is written: nothing in AWS changes."""
+        if path is None and _looks_like_path(kb):
+            kb, path = None, kb
+        kb_id = self._kb(kb)
+        wanted = parse_file_state(status) if status else ""
+        link = parse_list_link(link)
+        if link == "https":
+            expires = _link_seconds(expires)
+        inv = self._list_files(kb_id, data_source)
+        files = sort_files(pick_files(inv.files, state=wanted, match=match), "folder")
+        name = inv.kb_name or inv.kb_id
+        if not files:
+            some = " and ".join(filter(None, [f"is {FILE_STATES[wanted][0].lower()}" if wanted else "",
+                                              f"matches {match!r}" if match else ""]))
+            raise _Hint(f"No file of {name} {some}, so nothing was saved: files() shows the files there are." if some
+                        else f"{name} has no files to list (no S3 or custom data source, or nothing in them yet), so "
+                             "nothing was saved.")
+        saved = self.core.save_file_list(files, _list_target(path, file_list_name(name, wanted)), link=link,
+                                         expires=expires)
+        narrowed = {"data_source": data_source, "status": wanted, "match": match}
+        self._show(self._saved_list_blocks(saved, inv, href=_notebook_href(saved.path), narrowed=narrowed))
+
+    def _saved_list_blocks(self, saved: SavedFileList, inv: FileInventory, *, href: str = "",
+                           narrowed: dict[str, Any] | None = None) -> list[Any]:
+        """save_file_list()'s report: what was written where, the link that downloads it, its first lines and what's
+        not in it. narrowed: the filters it was given, for the next steps' calls."""
+        notes = []
+        for ds_id, parts in inv.truncated.items():
+            what = " and ".join("Bedrock's document list" if p == "documents" else "the bucket's files" for p in parts)
+            notes.append(_Note(f"Listing {what} for {inv.sources.get(ds_id, ds_id)} stopped at {inv.limit:,}, so it "
+                               "may miss files: pass .core.file_inventory(..., limit=None) to .core.save_file_list() "
+                               "for every one.", "warn"))
+        unread = [inv.sources.get(ds_id, ds_id) for ds_id, errors in inv.errors.items()
+                  if {"settings", "files"} & set(errors)]
+        if unread:
+            notes.append(_Note(f"{' and '.join(unread)}'s files couldn't be listed, so it may miss some of them: "
+                               "files() says why.", "warn"))
+        blocks = _file_list_blocks(saved, inv.kb_name or inv.kb_id, href=href, notes=notes)
+        narrowed = {k: v for k, v in (narrowed or {}).items() if v}
+        on = self._on(inv.kb_id, inv.kb_name)
+        steps = []
+        if saved.link != "https":
+            steps.append((_call("save_file_list", **on, **narrowed, link="https"),
+                          "the same files as links that open each one in a browser, for an hour"))
+        if saved.link != "s3":
+            steps.append((_call("save_file_list", **on, **narrowed), "the same files' s3:// paths"))
+        steps.append((_call("files", **on, **narrowed), "the same files with their state, and why"))
+        blocks.append(_Next(steps))
         return blocks
 
     def _sync_block(self, kb_id: str, ds_ids: list[str], names: dict[str, str]) -> _Text | None:
@@ -6837,6 +6910,10 @@ body[class*=vscode-] .kbx-app.kbx-app .kbx-page{height:620px}
 .kbx-app .kbx-empty{padding:26px 10px;text-align:center;opacity:.62;font-size:12.5px;line-height:1.5}
 .kbx-app.kbx-app .kbx-pager{align-items:center;gap:2px;padding:6px 2px 2px;border-top:1px solid var(--kx-line);margin-top:4px}
 .kbx-app.kbx-app .kbx-pager>*{margin:0}
+.kbx-app.kbx-app .kbx-saved{margin:2px 0 0}
+.kbx-app .kbx-saved .kba .dlw{margin:4px 2px 2px;font-size:12px}
+.kbx-app .kba a.dl{color:var(--kx-accent);border-color:var(--kx-ring)}
+.kbx-app .kba a.dl:hover{background:var(--kx-soft)}
 .kbx-app.kbx-app button.kbx-pg{width:30px;min-width:30px;height:26px;padding:0;border:0;background:transparent;font-size:15px;line-height:1}
 .kbx-app .kbx-pager .widget-html-content,.kbx-app .kbx-pager .jupyter-widget-html-content{font-size:12px;opacity:.72;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kbx-app.kbx-app .kbx-bar{position:sticky;top:0;z-index:3;gap:8px;align-items:center;padding:0 0 10px;margin:0 0 4px;background:var(--kx-bg);border-bottom:1px solid var(--kx-line);flex-wrap:wrap}
@@ -7093,7 +7170,8 @@ class KBExplorer(_Explorer):
                    and click a file to see how it was indexed: the parser, every chunk in document order (with the
                    text it shares with the one before), its metadata file next to what its chunks carry, and what to
                    fix. Ask it a question to see whether it holds the answer, and whether it ranks high enough among
-                   the whole knowledge base's passages for an answer to see it.
+                   the whole knowledge base's passages for an answer to see it. ⬇ List saves the s3:// paths of the
+                   files listed, one per line, in a .txt file beside the notebook, with a link that downloads it.
         Syncs      the sync history: when, how long, what each read, added, changed and deleted, and why it failed
         Search     what a question retrieves, with scores and highlighted words; each passage opens its file's page
         Settings   every setting in plain English, and as AWS returns it (JSON)
@@ -7104,9 +7182,9 @@ class KBExplorer(_Explorer):
     fill the browser window unless set (pixels, or CSS like '80vh'). mode: 'auto' (the window in Jupyter, reports
     elsewhere), 'widgets' or 'text'.
 
-    Nothing here changes the knowledge base: the window only reads (where a sync is needed it shows the command).
-    x.ui is a BedrockKBView for reports in other cells (x.ui.search(...)); x.inventory, x.info, x.chunks hold the
-    data behind what's shown."""
+    Nothing here changes the knowledge base: the window only reads (where a sync is needed it shows the command), and
+    the one file it writes is the list ⬇ List saves. x.ui is a BedrockKBView for reports in other cells
+    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown."""
 
     _PREFIX, _THREADS = "kbx", "kb-explorer"
     _reword = staticmethod(_window_text)
@@ -7143,6 +7221,7 @@ class KBExplorer(_Explorer):
         self.probe: FileProbe | None = None  # the last question asked of that file
         self.jobs: list[IngestionJob] | None = None  # the Syncs tab's history, once read
         self.found: Retrieval | None = None  # the Search tab's last search
+        self.saved: SavedFileList | None = None  # the list ⬇ List saved last
         self._want_file = file  # opened once the files are listed
         self._query, self._state, self._source, self._sort, self._offset = "", "", "", "problems", 0
         self._tab = "overview"
@@ -7273,7 +7352,13 @@ class KBExplorer(_Explorer):
         self.sort_pick = w.Dropdown(options=[(f"Sort: {label}", key) for key, label in _SORTS.items()],
                                     value="problems", layout=layout(flex="1 1 auto", width="auto"))
         self.sort_pick.observe(self._safely(self._sort_changed), names="value")
-        filters = w.HBox([self.source_pick, self.sort_pick], layout=layout(width="100%"))
+        self.list_button = w.Button(description="⬇ List", tooltip="Save the s3:// path of each file the list shows "
+                                    "(its search, state and order), one per line, in a .txt file beside the "
+                                    "notebook, with a link that downloads it",
+                                    layout=layout(flex="0 0 auto", width="auto"))
+        self.list_button.add_class("kbx-small")
+        self.list_button.on_click(self._safely(lambda _button: self._save_list()))
+        filters = w.HBox([self.source_pick, self.sort_pick, self.list_button], layout=layout(width="100%"))
         filters.add_class("kbx-filters")
         self.rows_box = w.VBox(layout=layout(width="100%"))
         self.rows_box.add_class("kbx-rows")
@@ -7287,7 +7372,9 @@ class KBExplorer(_Explorer):
             self.page_buttons[key] = button
         pager = w.HBox([self.pager_text, *self.page_buttons.values()], layout=layout(width="100%"))
         pager.add_class("kbx-pager")
-        left = self.left = w.VBox([finder, self.chips, filters, self.rows_box, pager])
+        self.saved_view = w.HTML(layout=layout(width="100%"))
+        self.saved_view.add_class("kbx-saved")
+        left = self.left = w.VBox([finder, self.chips, filters, self.rows_box, pager, self.saved_view])
         left.add_class("kbx-left")
 
         self.back_button = w.Button(description="‹ All files", tooltip="Back to the summary of every file",
@@ -7424,7 +7511,8 @@ class KBExplorer(_Explorer):
         self.kb = self.ui.kb = kb_id
         self.ui._conversation = None
         self.info = self.inventory = self.selected = self.chunks = self.metadata = self.probe = None
-        self.jobs, self.found, self._want_file = None, None, file
+        self.jobs, self.found, self.saved, self._want_file = None, None, None, file
+        self._set(self.saved_view, "")
         self._query = self._state = self._source = ""
         self._offset = 0
         self._quietly(self.find, value="")
@@ -7826,6 +7914,28 @@ class KBExplorer(_Explorer):
     def _clicked_row(self, row: _FileRow) -> None:
         if row.file is not None:
             self._open_file(row.file)
+
+    def _save_list(self) -> None:
+        """⬇ List: the s3:// paths of the files the list shows, in its order, one per line, in
+        <knowledge base>-files.txt beside the notebook, and a link under the list that downloads it."""
+        inv = self.inventory
+        if inv is None:
+            self._status("The list is saved once the files are listed.")
+            return
+        if not self._visible:
+            self._status("No file in the list to save: clear the search, or pick All above.", "warn")
+            return
+        name = inv.kb_name or inv.kb_id
+        self.saved = saved = self.core.save_file_list(self._visible, file_list_name(name, self._state))
+        href = _data_href(saved.text, _LIST_LINK_BYTES)
+        self._set(self.saved_view, self._html([_Download(saved.path, href)]))
+        left_out = (f" ({_plural(saved.left_out, 'custom document')} {'has' if saved.left_out == 1 else 'have'} no "
+                    "s3:// path)") if saved.left_out else ""
+        where = ("the link under the list downloads it to your computer" if href else
+                 "it's too big to download from here: download it from Jupyter's file browser")
+        self._status(f"Saved the s3:// paths of {_plural(saved.count, 'file')}{left_out}, one per line, in "
+                     f"{saved.name} beside the notebook{', replacing the one there' if saved.replaced else ''}: "
+                     f"{where}.", "ok")
 
     # ------------------------------------------------------------------ one file
 

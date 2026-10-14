@@ -109,6 +109,7 @@ from typing import Any, Callable, Iterable
 
 import botocore
 import botocore.session
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 from botocore.validate import ParamValidator
 
@@ -116,13 +117,16 @@ from botocore.validate import ParamValidator
 # bedrock_chat.<name> still works.
 from ._bedrock import (
     BEDROCK_PRICES, Citation, DATA_SOURCE_KEY, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, KBDocument, MODEL_PRICES,
-    ModelInfo, Passage, SEARCHABLE, _Answer, _Json, _KB_ID_RE, _MODEL_ALIASES, _REFUSAL, _RERANK_ALIASES, _answer_html,
-    _answer_lines, _family_match, _highlight, _is_bedrock_filter, _json_html, _markdown_html, _match_kb,
-    _match_sources, _model_id, _per_million, _plain_json, _session_expired, _span, _with_markers, best_snippet,
-    build_filter, describe_sources, estimate_tokens, generation_cost, match_expected, parse_document, parse_kb_ref,
-    parse_models, parse_passage, parse_retrieve, query_cost, question_terms, short_model, source_name,
-    with_data_sources, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES, data_source_filter as data_source_filter,
-    model_price as model_price, split_metadata as split_metadata,
+    ModelInfo, Passage, SEARCHABLE, SavedFileList, _Answer, _Download, _Json, _KB_ID_RE, _LIST_LINK_BYTES,
+    _MODEL_ALIASES, _REFUSAL, _RERANK_ALIASES, _answer_html, _answer_lines, _data_href, _download_css, _family_match,
+    _file_list_blocks, _highlight, _is_bedrock_filter, _json_html, _link_seconds, _list_target, _markdown_html,
+    _match_kb, _match_sources, _model_id, _notebook_href, _per_million, _plain_json, _session_expired, _span,
+    _with_markers, best_snippet, build_filter, describe_sources, estimate_tokens, file_list_name, generation_cost,
+    match_expected, parse_document, parse_kb_ref, parse_list_link, parse_models, parse_passage, parse_retrieve,
+    presigned_url, query_cost, question_terms, short_model, source_name, with_data_sources, write_file_list,
+    FILE_LIST_LINKS as FILE_LIST_LINKS, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES,
+    data_source_filter as data_source_filter, file_list_lines as file_list_lines, model_price as model_price,
+    split_metadata as split_metadata,
 )
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Title, _Tone, _draws
@@ -2876,6 +2880,47 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
             self._files[kb_id] = listing
         return self._files[kb_id]
 
+    def _s3_client(self) -> Any:
+        """s3: signing links to a knowledge base's files (SigV4, which every region accepts; no AWS call)."""
+        return self._cached_client(
+            "s3",
+            lambda: self.session.client(
+                "s3", region_name=self.region, config=self._config.merge(Config(signature_version="s3v4"))
+            ),
+        )
+
+    def file_url(self, uri: str, *, page: int | None = None, expires: int = 3600) -> str | None:
+        """A link that opens a file in a browser tab, or None when there's no file to open (a custom data source's
+        document). An s3:// file gets a presigned GetObject link, signed here with your credentials (no AWS call): it
+        works for `expires` seconds, only while those credentials are valid, and only if they may read the file
+        (s3:GetObject)."""
+        return presigned_url(self._s3_client, uri, page=page, expires=expires)
+
+    def save_file_list(
+        self,
+        files: FileList | Iterable[KBDocument | str],
+        path: str | None = None,
+        *,
+        link: str = "s3",
+        expires: int = 3600,
+    ) -> SavedFileList:
+        """Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
+        bucket ('key') or a link that opens it in a browser ('https': presigned here with your credentials, no AWS
+        call, working for `expires` seconds). files: a files() list, or some of its documents or s3:// paths. path:
+        the file to write (a folder puts it there), else <knowledge base>-files.txt beside the notebook; a file of
+        that name is replaced. Nothing in AWS changes."""
+        link = parse_list_link(link)
+        default = file_list_name(self.kb_name(files.kb_id)) if isinstance(files, FileList) else "kb-files.txt"
+        items = files.documents if isinstance(files, FileList) else files
+        sign = None
+        if link == "https":
+            expires = _link_seconds(expires)
+
+            def sign(uri: str) -> str | None:
+                return self.file_url(uri, expires=expires)
+
+        return write_file_list(items, _list_target(path, default), link=link, sign=sign, expires=expires)
+
     def resolve_files(self, kb: str, files: Any) -> list[str]:
         """The s3:// paths of the files questions should search, from files=: s3:// paths, paths in the bucket
         ('policies/refund-policy.pdf') or file names ('refund-policy.pdf', any case), or a list of them. None, [] or
@@ -3845,6 +3890,10 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 .kbc-app.kbc-app .kbc-field.kbc-off{opacity:.5}
 .kbc-app.kbc-app .kbc-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:40;width:100%;min-width:340px;max-width:min(560px,calc(100vw - 48px));padding:8px;border:1px solid var(--kc-line-2);border-radius:14px;background:var(--kc-bg);box-shadow:0 14px 36px rgba(15,23,42,.2),0 3px 8px rgba(15,23,42,.08);overflow:visible;--jp-widgets-inline-height:34px}
 .kbc-app.kbc-app .kbc-pop .kbc-x{margin-left:6px}
+.kbc-app.kbc-app .kbc-pop .kbc-list{margin-left:6px;height:30px;flex:0 0 auto}
+.kbc-app .kbc-saved .kbc .dlw{margin:6px 2px 0;font-size:12px}
+.kbc-app .kbc a.dl{color:var(--kc-accent);border-color:var(--kc-ring)}
+.kbc-app .kbc a.dl:hover{background:var(--kc-soft)}
 .kbc-app.kbc-app .kbc-find input,.kbc-app.kbc-app .kbc-find input:focus{padding:4px 11px 4px 32px;border-radius:10px;background:var(--kc-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E") no-repeat 11px center/14px}
 .kbc-app.kbc-app .kbc-opts{max-height:336px;overflow:hidden auto;margin:6px 0 0;padding:0 2px 0 0}
 .kbc-app.kbc-app .kbc-opts>*{flex:0 0 auto}
@@ -3858,7 +3907,8 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-side>.widget-tab-contents>.widget-box
 """ + _tab_rules()
 # Highlighted code to copy (_Code), next to the shared rules for <pre>.
 _PRE_HL = '.kbc pre.hl{white-space:pre;overflow-wrap:normal;word-break:normal;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;line-height:1.55;tab-size:4}'
-_CSS = _base_css(_ROOT, _EXTRA_CSS, theme=_THEME_CSS, restyle=_RESTYLE, after={"pre.code{": _PRE_HL})
+_CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _download_css(_ROOT), theme=_THEME_CSS, restyle=_RESTYLE,
+                 after={"pre.code{": _PRE_HL})
 _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
 
@@ -4819,6 +4869,19 @@ class _ChatApp(_Window):
                                layout=layout(width="100%", align_items="center", flex_flow="row wrap",
                                              display="none"))
         self.file_bar.add_class("kbc-file-bar")
+        self.files_list_button = w.Button(description="⬇ List", tooltip="Save the s3:// path of each file the list "
+                                          "shows (what the search finds, in its order), one per line, in a .txt file "
+                                          "beside the notebook, with a link that downloads it",
+                                          layout=layout(width="auto"))
+        for name in ("kbc-small", "kbc-list"):
+            self.files_list_button.add_class(name)
+        self.files_list_button.on_click(self._safely(lambda _button: self._save_file_list()))
+        self.files_saved = w.HTML(layout=layout(width="100%"))
+        self.files_saved.add_class("kbc-saved")
+        search_row = self.files_pick.panel.children[0]
+        search_row.children = (search_row.children[0], self.files_list_button, *search_row.children[1:])
+        self.files_pick.panel.children = (*self.files_pick.panel.children, self.files_saved)
+        self.saved_list: SavedFileList | None = None  # the list ⬇ List saved last
         problem = self._draw_files()
         if problem:
             self.problems.append(problem)
@@ -4834,6 +4897,8 @@ class _ChatApp(_Window):
         problem = ""
         if self.files_kb is not None and self.files_kb != view.kb:  # another knowledge base: list its files anew
             self.files_kb = None
+            self.saved_list = None
+            self._set(self.files_saved, "")
             self.files_pick.problem = self.files_pick.note = ""
             self.files_pick.close()
             self.files_pick.set_choices([])
@@ -4896,6 +4961,25 @@ class _ChatApp(_Window):
                          "(only S3 and custom data sources keep one)")
         picker.note = ". ".join(notes)
         picker.set_choices(choices)
+
+    def _save_file_list(self) -> None:
+        """⬇ List in the Files list: the s3:// paths of the files it shows (what the search finds, in its order), one
+        per line, in <knowledge base>-indexed-files.txt beside the notebook, and a link under the list that downloads
+        it."""
+        view, picker = self.view, self.files_pick
+        found = picker.matches()
+        if not found:
+            picker.message = "No file in the list to save: change the search."
+            picker._draw_list()
+            return
+        name = view.core.kb_name(view.kb) if view.kb else "knowledge-base"
+        self.saved_list = saved = view.core.save_file_list([c.value for c in found], file_list_name(name, "indexed"))
+        href = _data_href(saved.text, _LIST_LINK_BYTES)
+        self._set(self.files_saved, _wrap(_blocks_html([_Download(saved.path, href)], root=_ROOT)))
+        where = ("the link under the Files list downloads it to your computer" if href else
+                 "it's too big to download from here: download it from Jupyter's file browser")
+        self._set_status(f"Saved the s3:// paths of {_plural(saved.count, 'file')}, one per line, in {saved.name} "
+                         f"beside the notebook{', replacing the one there' if saved.replaced else ''}: {where}.", "ok")
 
     def _file_typed(self, text: str) -> None:
         """Enter on text no listed file holds: a full s3:// path is picked as it is."""
@@ -6308,7 +6392,7 @@ class BedrockChatView(_BaseView):
         "🧪 Test a list of questions": ("ask_all", "sweep", "results"),
         "📈 Keep and compare test runs": ("runs", "compare_runs", "use_run", "save_runs", "load_runs"),
         "⚙️ Settings": ("settings", "set", "unset", "fields", "request", "code"),
-        "📚 Knowledge base, files and model": ("use", "kbs", "files", "models"),
+        "📚 Knowledge base, files and model": ("use", "kbs", "files", "save_file_list", "models"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -8145,9 +8229,60 @@ class BedrockChatView(_BaseView):
             steps.append((_call("use", files="all"), "ask every file again"))
         elif len(docs) > 50 and not match:
             steps.append((_call("files", "refund"), "only the files whose path contains a word"))
+        steps.append((_call("save_file_list", *([match] if match else [])),
+                      "every one's s3:// path in a .txt file, one per line, to download"))
         steps.append(("app()", "tick files in the chat window's Files list"))
-        blocks.append(_Next(steps))
+        blocks.append(_Next(steps[:3]))
         self._show(blocks)
+
+    @_friendly_errors
+    def save_file_list(self, match: str | None = None, path: str | None = None, *, link: str = "s3",
+                       expires: int = 3600) -> None:
+        """Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
+        computer: each file's s3:// path, sorted by path, ready for a script, aws s3 cp or a spreadsheet.
+
+        match= keeps the files whose path contains it, as files() does. link='https' writes a link that opens each
+        file in a browser instead (presigned here with your credentials, no AWS call; each works for `expires`
+        seconds, an hour unless you say, and anyone holding one can open its file until then), and link='key' each
+        one's path in the bucket. path: default <knowledge base>-files.txt beside the notebook (a folder puts it
+        there); a file of that name is replaced. Only that file is written: nothing in AWS changes. The window's Files
+        list has the same as its ⬇ List button."""
+        kb_id = self._kb_id()
+        link = parse_list_link(link)
+        if link == "https":
+            expires = _link_seconds(expires)
+        with self._progress("Listing files", unit="files"):
+            listing = self.core.files(kb_id)
+        wanted = str(match).lower() if match else ""
+        docs = sorted((d for d in listing.documents if not wanted or wanted in d.uri.lower()),
+                      key=lambda d: d.uri.lower())
+        name = self.core.kb_name(kb_id)
+        if not docs:
+            raise _Hint(f"No file's path in {name} contains {match!r}, so nothing was saved: files() lists them all."
+                        if match else f"{name} has no files listed (no S3 or custom data source, or nothing in them "
+                                      "yet), so nothing was saved.")
+        saved = self.core.save_file_list(docs, _list_target(path, file_list_name(name)), link=link, expires=expires)
+        notes = []
+        if listing.truncated:
+            notes.append(_Note(f"Only the first {len(listing.documents):,} files were listed, so it may miss some: "
+                               ".core.files(..., limit=...) lists more, and .core.save_file_list() saves them.", "warn"))
+        if listing.errors:
+            try:
+                names = self.core.data_source_names(kb_id)
+            except (ClientError, BotoCoreError):
+                names = {}
+            sources = " and ".join(names.get(ds_id) or ds_id for ds_id in listing.errors)
+            notes.append(_Note(f"{sources} keeps no file list, so its files aren't in it: files() says why."))
+        blocks = _file_list_blocks(saved, name, href=_notebook_href(saved.path), notes=notes)
+        narrowed = [match] if match else []
+        steps = []
+        if saved.link != "https":
+            steps.append((_call("save_file_list", *narrowed, link="https"),
+                          "the same files as links that open each one in a browser, for an hour"))
+        if saved.link != "s3":
+            steps.append((_call("save_file_list", *narrowed), "the same files' s3:// paths"))
+        steps.append((_call("files", *narrowed), "the same files with their status, and which questions search"))
+        self._show(blocks + [_Next(steps)])
 
     @_friendly_errors
     def kbs(self, match: str | None = None) -> None:
