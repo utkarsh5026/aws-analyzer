@@ -78,6 +78,7 @@ ui.ask("How long do refunds take?")          # an answer with [1][2] citations
 ui.follow_up("And for digital goods?")       # the next question in the same conversation
 ui.evaluate([("refund window?", "refund-policy.pdf")])   # does retrieval find the right file?
 ui.files()                                   # every file next to Bedrock's record of it: failed, changed, not synced...
+ui.save_file_list()                          # every file's s3:// path in a .txt file, one per line, to download
 ui.file("refund-policy.pdf")                 # how one file was indexed: its parser, chunks in order, metadata
 ui.explore()                                 # all of it in a window, by clicking
 ```
@@ -114,6 +115,8 @@ The window needs `ipywidgets`, which SageMaker notebooks already have (elsewhere
 ### Every file, next to Bedrock's record of it
 
 The **Files** tab lists every file in the data sources' S3 buckets (under their inclusion prefixes) next to Bedrock's own record of it, and puts the two together in one state. Problems come first. Type in the search box to find a file by part of its name, its folder or Bedrock's reason; click a state's chip to see only those files (click it again for all of them), pick a data source when there are several, or sort by name, folder, size, last change or when it was last indexed.
+
+**⬇ List**, beside the sort, saves the list as it stands: the `s3://` path of every file it shows (with its search, state chip and data source, in its order), one per line, in `support-docs-files.txt` beside the notebook (`support-docs-failed-files.txt` with the **Failed** chip picked). **⬇ Download** appears under the list and saves the file on your computer.
 
 | State | What it means | What to do |
 |---|---|---|
@@ -275,6 +278,29 @@ ui.search_file("refund-policy.pdf", "How long do refunds take?")  # does the que
 ```
 
 `files()` reads Bedrock's document list next to the bucket's files, so it also catches what `documents()` alone can't: files added after the last sync, files the sync skipped without a record, and files deleted from S3 that answers can still cite. It ends with the command that syncs each data source a sync would change. A name that several files share asks which one you mean, with their paths.
+
+### The list of files, as a text file { #file-list }
+
+`save_file_list()` saves the knowledge base's files as a `.txt` file with one file per line, sorted by path, and shows a **⬇ Download** link that saves it on your computer, with its first lines. It takes the same filters as `files()`, so it can be just the failed files, or the files of one folder or data source:
+
+```python
+ui.save_file_list()                          # support-docs-files.txt: every file's s3:// path, one per line
+ui.save_file_list(status="failed")           # support-docs-failed-files.txt: only the failed ones
+ui.save_file_list(match="policies/")         # files whose name or path holds this
+ui.save_file_list(path="lists/docs.txt")     # somewhere else (a folder puts support-docs-files.txt in it)
+ui.save_file_list(link="key")                # each file's path in the bucket: policies/refund-policy.pdf
+ui.save_file_list(link="https")              # a link that opens each file in a browser, for an hour
+ui.save_file_list(link="https", expires=86400)   # ... for a day (7 days at most)
+```
+
+```text title="support-docs-files.txt"
+s3://support-docs-bucket/faq/account-faq.md
+s3://support-docs-bucket/faq/answer-00.md
+s3://support-docs-bucket/faq/answer-01.md
+...
+```
+
+The `s3://` paths are what `aws s3 cp`, boto3, pandas and Spark take. The `https` links are presigned in the notebook with your credentials (no AWS call), so anyone holding the file can open every file in it until they expire: share it with care. A file of the same name is replaced. Nothing in AWS changes: the list is the only thing these commands write.
 
 ## Search { #search }
 
@@ -491,6 +517,7 @@ report.hit_rate, report.mrr, report.to_df()
 
 inv = kb.file_inventory("support-docs")           # FileInventory: every file, KBFile.state and why (KBFile.note)
 inv.counts(), inv.to_df()                         # files per state; one row per file
+kb.save_file_list(inv, "files.txt")               # SavedFileList: a line per file (link="https" or "key" too)
 f = "s3://support-docs-bucket/policies/refund-policy.pdf"
 chunks = kb.document_chunks("support-docs", f)    # DocumentChunks: its chunks in document order
 chunks.chunks, chunks.stats.overlaps, chunks.stats.coverage
@@ -498,7 +525,7 @@ kb.metadata_file(f)                               # MetadataFile: the .metadata.
 kb.probe_file("support-docs", f, "refund window")   # FileProbe: its passages, and .rank across the knowledge base
 ```
 
-The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
+The analysis functions don't call AWS, so they work on responses and passages you already have: `parse_retrieve`, `parse_rag`, `parse_converse`, `parse_knowledge_base`, `parse_data_source`, `describe_chunking`, `describe_parsing`, `describe_vector_store`, `build_filter`, `data_source_filter`, `with_data_sources`, `describe_sources`, `build_prompt`, `parse_citation_markers`, `best_snippet`, `question_terms`, `retrieval_metrics`, `match_expected`, `compare_retrievals`, `changed_since`, `generation_cost`, `vector_store_monthly_cost`, `query_cost`, the file functions (`inventory_files`, `file_state`, `skip_reason`, `sync_needed`, `parse_metadata_file`, `chunk_overlap`, `place_chunks`, `order_chunks`, `chunk_stats`, `file_steps`, `find_files`, `sort_files`, `parse_file_state`, `pick_files`, `file_list_lines`), and the findings (`kb_findings`, `sync_findings`, `retrieval_findings`, `answer_findings`, `eval_findings`, `inventory_findings`, `file_findings`, `probe_findings`).
 
 ## Cost { #cost }
 
@@ -518,7 +545,7 @@ The analysis functions don't call AWS, so they work on responses and passages yo
 
 - **Listing stops early**
 
-    `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects; `files()` and the explorer read 10,000 documents and 10,000 S3 files per data source. A file shows at most 100 chunks, the most one search returns. They all say when they stopped.
+    `documents()` reads at most 10,000 documents and `unsynced()` lists at most 100,000 objects; `files()`, `save_file_list()` and the explorer read 10,000 documents and 10,000 S3 files per data source. A file shows at most 100 chunks, the most one search returns. They all say when they stopped.
 
 </div>
 
@@ -581,17 +608,17 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | Permission | Used by |
 |---|---|
 | `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase` | `kbs`, `kb_info`, and finding a knowledge base by name |
-| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
-| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `file`, `explore` |
-| `bedrock:ListKnowledgeBaseDocuments` | `documents`, `files`, `file`, `search_file`, `explore` |
+| `bedrock:ListDataSources`, `bedrock:GetDataSource` | `kb_info`, `syncs`, `documents`, `unsynced`, `files`, `save_file_list`, `file`, `explore`; `ListDataSources` also for `data_source=` by name, and to name the data sources in `search` and `ask` |
+| `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob` | `kbs`, `kb_info`, `syncs`, `unsynced`, `files`, `save_file_list`, `file`, `explore` |
+| `bedrock:ListKnowledgeBaseDocuments` | `documents`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
 | `bedrock:GetKnowledgeBaseDocuments` | `file` and `explore`, for a file past the first 10,000 of Bedrock's list |
 | `bedrock:ListTagsForResource` | `kb_info` |
 | `bedrock:Retrieve` | `search`, `compare`, `evaluate`, `ask(engine="converse")`, and a file's chunks and questions in `file`, `search_file` and `explore` |
 | `bedrock:RetrieveAndGenerate` and `bedrock:InvokeModel` | `ask`, `follow_up` |
 | `bedrock:InvokeModel` | `ask(engine="converse")`, `core.generate` |
 | `bedrock:ListFoundationModels`, `bedrock:ListInferenceProfiles` | `models`, and turning `model="sonnet"` into an ID |
-| `s3:ListBucket` on the data source's bucket | `unsynced`, `files`, `file`, `search_file`, `explore` |
-| `s3:GetObject` on the data source's files | `file` and `explore` read a file's `.metadata.json`, and a `.txt` or `.md` file's text to place its chunks in it. Opening a file from its link (`link`, and the file names in reports) uses it too, in your browser |
+| `s3:ListBucket` on the data source's bucket | `unsynced`, `files`, `save_file_list`, `file`, `search_file`, `explore` |
+| `s3:GetObject` on the data source's files | `file` and `explore` read a file's `.metadata.json`, and a `.txt` or `.md` file's text to place its chunks in it. Opening a file from its link (`link`, `save_file_list(link="https")`, and the file names in reports) uses it too, in your browser |
 
 A model also has to be enabled for the account under **Model access** in the Bedrock console. To scope the policy down, replace `*` in the first statement with your knowledge bases' ARNs (`ListKnowledgeBases` itself needs `*`).
 
@@ -673,6 +700,7 @@ Every `BedrockKBView` command. `ui.help()` prints the same list grouped by task,
 | `documents(kb=None, data_source=None, status=None, n=50)` | Documents by status, the ones that aren't indexed with the reason |
 | `unsynced(kb=None, data_source=None)` | S3 files added or changed since the last successful sync |
 | `files(kb=None, data_source=None, status=None, match=None, n=50)` | Every file next to Bedrock's record of it: failed, changed, not synced, skipped, deleted; problems first, with the sync commands |
+| `save_file_list(kb=None, path=None, data_source=None, status=None, match=None, link="s3", expires=3600)` | [The files as a text file](#file-list), one per line (`s3://` paths, links or keys), with a link that downloads it |
 | `file(path, kb=None)` | How one file was indexed: each step, its chunks in document order, its metadata file, and what to fix |
 | `search_file(path, question, kb=None, n=10)` | Whether a question finds a file, and where it ranks among the whole knowledge base's passages |
 | `search(question, n=5, kb=None, data_source=None, where=None, search_type=None, rerank=None)` | Ranked passages with scores, source and page, highlighted words, metadata and findings |

@@ -1,6 +1,7 @@
 """What bedrock_kb.py and bedrock_chat.py share, written once: Bedrock's list prices and model helpers, the
 passages, documents and models Bedrock returns, metadata filters, token and cost estimates, the answer's markdown
-with its citations, and the _Answer and _Json blocks with their drawings.
+with its citations, the _Answer and _Json blocks with their drawings, and files: the links that open them
+(presigned_url) and their list saved as a text file (write_file_list, SavedFileList, the _Download block).
 
 Only those two import it (rules.py checks): it's Bedrock's, not every service's, so it isn't in _kit. Each imports
 the names it uses, so `bedrock_kb.MODEL_PRICES` and `bedrock_chat.Passage` still work, and the price tables are one
@@ -10,19 +11,22 @@ copy them, rather than by editing the tables.
 
 from __future__ import annotations
 
+import base64
 import json
 import math
+import mimetypes
+import os
 import re
 import textwrap
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Iterable
-from urllib.parse import unquote
+from typing import Any, Callable, Iterable
+from urllib.parse import quote, unquote
 
 from botocore.exceptions import ClientError
 
-from ._kit.blocks import _Report, _draws
-from ._kit.fmt import _plural
+from ._kit.blocks import _Cards, _Note, _Report, _Text, _Title, _draws
+from ._kit.fmt import _as_int, _plural, human_size
 from ._kit.render import _SELECT, _prose
 from ._kit.text import _esc
 
@@ -1501,3 +1505,274 @@ def _per_million(price: float | None) -> str:
     if price is None:
         return "-"
     return f"${price:,.2f}" if price >= 0.1 or price == 0 else f"${price:.3f}"
+
+# ----------------------------------------------------------------------------- files: links that open them, and their list as text
+
+# Extensions a browser shows as text only when told so (it would save a .md or .csv sent as its own type).
+_TEXT_EXTENSIONS = {"txt", "md", "markdown", "csv", "tsv", "log", "rst", "yaml", "yml", "xml", "jsonl"}
+
+
+def _browser_type(name: str) -> str | None:
+    """The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
+    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download)."""
+    name = name.rsplit("/", 1)[-1]
+    if "." in name and name.rsplit(".", 1)[-1].lower() in _TEXT_EXTENSIONS:
+        return "text/plain; charset=utf-8"
+    guess = mimetypes.guess_type(name)[0] or ""
+    if guess == "text/html":
+        return "text/html; charset=utf-8"
+    if guess in ("application/pdf", "application/json") or guess.split("/")[0] in ("image", "audio", "video"):
+        return guess
+    return None
+
+
+FILE_LIST_LINKS = {  # what save_file_list(link=) writes on each line
+    "s3": "s3:// path",
+    "https": "link to the file",
+    "key": "path in the bucket",
+}
+_LINK_WORDS = {"s3://": "s3", "uri": "s3", "url": "https", "http": "https", "link": "https", "links": "https",
+               "presigned": "https", "path": "key", "keys": "key"}  # what else link= takes
+
+
+def parse_list_link(text: str) -> str:
+    """link= for save_file_list(): 's3', 'https' or 'key' (FILE_LIST_LINKS), or a word for one ('url', 'path'),
+    in any case -> the key."""
+    word = str(text or "").strip().lower()
+    if word in FILE_LIST_LINKS:
+        return word
+    if word in _LINK_WORDS:
+        return _LINK_WORDS[word]
+    raise ValueError(f"link= is 's3' (each file's s3:// path), 'https' (a link that opens it) or 'key' (its path in "
+                     f"the bucket); got {text!r}")
+
+
+def file_list_lines(files: Iterable[Any], link: str = "s3",
+                    sign: Callable[[str], str | None] | None = None) -> tuple[list[str], int]:
+    """save_file_list()'s lines, one per S3 file in the order given (each file once): its s3:// path (link='s3'), its
+    path in the bucket ('key') or sign(uri), a link that opens it ('https'). files: anything with a .uri (KBFile,
+    KBDocument) or s3:// paths. -> (the lines, how many files have no line of that kind: a custom data source's
+    documents have no s3:// path, a file deleted from S3 (state 'deleted') has no link to open, and sign may give
+    none)."""
+    link = parse_list_link(link)
+    lines: list[str] = []
+    seen: set[str] = set()
+    left_out = 0
+    for f in files:
+        uri = str(getattr(f, "uri", f) or "").strip()
+        if uri in seen:
+            continue
+        seen.add(uri)
+        line = None
+        if uri.startswith("s3://"):
+            if link == "s3":
+                line = uri
+            elif link == "key":
+                line = uri[5:].partition("/")[2]
+            elif getattr(f, "state", "") != "deleted" and sign is not None:
+                line = sign(uri)
+        if line:
+            lines.append(line)
+        else:
+            left_out += 1
+    return lines, left_out
+
+
+def file_list_name(kb_name: str, state: str = "") -> str:
+    """The name save_file_list() gives its file: 'support-docs-files.txt', 'support-docs-failed-files.txt'."""
+    stem = re.sub(r"[^\w.-]+", "-", str(kb_name or "").strip()).strip("-.") or "knowledge-base"
+    return f"{stem}{'-' + state if state else ''}-files.txt"
+
+
+def _link_seconds(expires: Any) -> int:
+    """expires= for a presigned link, checked: whole seconds, from 1 to 604,800 (7 days, the longest S3 allows)."""
+    seconds = _as_int(expires, "expires")
+    if not 1 <= seconds <= 604_800:
+        raise ValueError(f"expires is in seconds, from 1 to 604,800 (7 days, the longest S3 allows); got {seconds:,}")
+    return seconds
+
+
+def _link_life(expires: int) -> str:
+    """How long a presigned link works, in the largest whole unit: '1 hour', '7 days', '90 minutes'."""
+    for size, unit in ((86_400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
+        if expires % size == 0:
+            break
+    return _plural(expires // size, unit)
+
+
+def _looks_like_path(text: Any) -> bool:
+    """Whether a knowledge base argument is a file or folder instead: names, IDs and ARNs have no dot, slash or ~
+    (an ARN's slash aside)."""
+    text = str(text or "").strip()
+    return bool(text) and not text.lower().startswith("arn:") and any(c in text for c in "./\\~")
+
+
+def _list_target(path: str | None, default: str) -> str:
+    """Where save_file_list() writes (absolute): `path`, from the notebook's folder, or `default` inside it when it's a
+    folder; `default` beside the notebook without one."""
+    if path is None or not str(path).strip():
+        return os.path.abspath(default)
+    text = str(path).strip()
+    target = os.path.abspath(os.path.expanduser(text))
+    if os.path.isdir(target) or text.endswith(("/", os.sep)):
+        target = os.path.join(target, default)
+    return target
+
+
+def presigned_url(s3: Callable[[], Any], uri: str, *, page: int | None = None, expires: int = 3600) -> str | None:
+    """A link that opens a file in a browser tab: for an s3:// file a presigned GetObject link, signed by the client
+    s3() returns (SigV4, with its credentials: no AWS call), that works for `expires` seconds and makes the browser
+    show a PDF (at `page`), picture, text or HTML file instead of saving it; an http(s) address as it is; None for
+    anything else (a custom document's ID)."""
+    expires = _link_seconds(expires)
+    uri = str(uri or "").strip()
+    if uri.lower().startswith(("https://", "http://")):
+        return uri
+    bucket, _, key = uri[5:].partition("/") if uri.startswith("s3://") else ("", "", "")
+    if not bucket or not key:
+        return None
+    params = {"Bucket": bucket, "Key": key, "ResponseContentDisposition": "inline"}
+    shown = _browser_type(key)
+    if shown:
+        params["ResponseContentType"] = shown
+    url = s3().generate_presigned_url("get_object", Params=params, ExpiresIn=expires)
+    return f"{url}#page={page}" if page and shown == "application/pdf" else url
+
+
+@dataclass
+class SavedFileList:
+    """A text file of files that save_file_list() wrote: one line per file, each one's s3:// path, its path in the
+    bucket or a link that opens it (`link`, a FILE_LIST_LINKS key)."""
+
+    path: str  # where it was written (absolute)
+    count: int  # its lines: one per file
+    link: str = "s3"
+    size: int = 0  # bytes written
+    replaced: bool = False  # a file of that name was there, and this one took its place
+    left_out: int = 0  # files with no line of that kind (a custom document has no s3:// path)
+    expires: int | None = None  # link='https': how long each link works, in seconds
+    text: str = field(default="", repr=False)  # what was written
+
+    @property
+    def name(self) -> str:
+        return os.path.basename(self.path)
+
+    @property
+    def lines(self) -> list[str]:
+        return self.text.splitlines()
+
+
+@dataclass
+class _Download:
+    """A file saved on the notebook's disk, with a link that downloads it to your computer: `href` is its path from
+    the notebook's folder (Jupyter serves it from there) or a data: URL holding it; '' when there's no link to give.
+    Text mode says where it is."""
+
+    path: str  # where it is (absolute)
+    href: str = ""
+
+
+@_draws(_Download, "html")
+def _download_html(block: _Download, report: _Report) -> str:
+    name, folder = os.path.basename(block.path), os.path.dirname(block.path)
+    if not block.href:
+        return f'<div class="dlw"><span class="dlp">Saved in {_esc(block.path)}</span></div>'
+    return (f'<div class="dlw"><a class="dl" href="{_esc(block.href)}" download="{_esc(name)}" '
+            f'title="Download it to your computer">⬇ Download {_esc(name)}</a>'
+            f'<span class="dlp">saved in {_esc(folder)}</span></div>')
+
+
+@_draws(_Download, "text")
+def _download_lines(block: _Download, report: _Report) -> list[str]:
+    return [f"Saved in {block.path}"]
+
+
+def _notebook_href(path: str) -> str:
+    """A saved file's path from the notebook's folder, as a link Jupyter downloads it from ('' outside that folder,
+    which Jupyter may not serve)."""
+    try:
+        relative = os.path.relpath(path, os.getcwd())
+    except ValueError:  # another drive (Windows)
+        return ""
+    if relative == ".." or relative.startswith((".." + os.sep, "../")) or os.path.isabs(relative):
+        return ""
+    return quote(relative.replace(os.sep, "/"))
+
+
+def _data_href(text: str, limit: int = 1_000_000) -> str:
+    """Text as a data: URL that a link can download (the explorer's widgets can't link to the notebook's files); ''
+    when it's over `limit` bytes, which browsers may refuse in a link."""
+    data = text.encode("utf-8")
+    if len(data) > limit:
+        return ""
+    return "data:text/plain;charset=utf-8;base64," + base64.b64encode(data).decode("ascii")
+
+
+def write_file_list(files: Iterable[Any], target: str, *, link: str = "s3",
+                    sign: Callable[[str], str | None] | None = None, expires: int | None = None) -> SavedFileList:
+    """Writes file_list_lines(files, link, sign) to `target` (absolute; its folder is made when it isn't there), a line
+    each: to <target>.part, then renamed over a file of that name. An OSError becomes a ValueError that says why."""
+    link = parse_list_link(link)
+    lines, left_out = file_list_lines(files, link, sign)
+    text = "".join(line + "\n" for line in lines)
+    folder = os.path.dirname(target)
+    saved = SavedFileList(target, len(lines), link, size=len(text.encode("utf-8")), replaced=os.path.exists(target),
+                          left_out=left_out, expires=expires if link == "https" else None, text=text)
+    part = target + ".part"
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(part, "w", encoding="utf-8", newline="\n") as out:
+            out.write(text)
+        os.replace(part, target)
+    except OSError as exc:
+        if os.path.exists(part):
+            os.remove(part)
+        raise ValueError(f"Couldn't save {os.path.basename(target)} in {folder}: {exc.strerror or exc}") from None
+    return saved
+
+
+_LIST_LINK_BYTES = 1_000_000  # the most a window puts in a download link (a data: URL; browsers limit their length)
+
+
+def _download_css(root: str) -> str:
+    """The _Download block's rules, scoped to a service's root class."""
+    return (f".{root} .dlw{{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:6px 0 8px}}\n"
+            f".{root} a.dl{{display:inline-block;padding:3px 12px;border:1px solid rgba(59,130,246,.45);"
+            f"border-radius:999px;color:#3b82f6;font-weight:600;text-decoration:none}}\n"
+            f".{root} a.dl:hover{{background:rgba(59,130,246,.1)}}\n"
+            f".{root} .dlp{{font-size:12px;opacity:.65;overflow-wrap:anywhere}}")
+
+
+def _file_list_blocks(saved: SavedFileList, kb_name: str, *, href: str = "", sorted_by: str = "sorted by path",
+                      notes: Iterable[Any] = ()) -> list[Any]:
+    """A saved list's report, without its next steps: what was written where, the link that downloads it, its first
+    lines, `notes` (what the listing missed), and what's not in it."""
+    what = FILE_LIST_LINKS[saved.link]
+    cards: list[tuple[str, ...]] = [("Files", f"{saved.count:,}"), ("Each line", what),
+                                    ("Size", human_size(saved.size))]
+    if saved.expires:
+        cards.append(("Links work for", _link_life(saved.expires)))
+    blocks: list[Any] = [
+        _Title(f"Saved a list of {_plural(saved.count, 'file')}",
+               " · ".join(p for p in (kb_name, f"one {what} per line" + (f", {sorted_by}" if sorted_by else "")) if p)),
+        _Cards(cards),
+        _Download(saved.path, href),
+    ]
+    lines = saved.lines
+    if lines:
+        shown = lines[:10]
+        title = (f"Its {_plural(len(lines), 'line')}" if len(lines) == len(shown)
+                 else f"Its first {len(shown)} lines of {len(lines):,}")
+        blocks.append(_Text("\n".join(shown), title=title, code=True))
+    blocks += list(notes)
+    if saved.replaced:
+        blocks.append(_Note(f"It replaced the {saved.name} that was there."))
+    if saved.left_out:
+        why = ("a custom data source's documents have no s3:// path" if saved.link != "https"
+               else "a custom data source's documents and files deleted from S3 have no file to open")
+        blocks.append(_Note(f"{_plural(saved.left_out, 'file')} of the list aren't in it: {why}."))
+    if saved.expires:
+        blocks.append(_Note(f"Each link works for {_link_life(saved.expires)}, and only while the credentials that "
+                            "signed it do and may read the file (s3:GetObject). Anyone holding the list can open "
+                            "every file in it until then, so share it with care.", "warn"))
+    return blocks

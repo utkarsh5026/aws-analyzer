@@ -108,7 +108,9 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   price tables, `DEFAULT_MODEL` and the model helpers (`model_price`, `short_model`, `parse_models`, `ModelInfo`), what
   Bedrock returns (`Passage`, `Citation`, `KBDocument`, `parse_retrieve`, `parse_document`, ...), the filter helpers
   (`build_filter`, `with_data_sources`, `describe_sources`), the cost and token estimates, the question's words and
-  snippets, and the `_Answer` block (with `_Markdown`) and the `_Json` block, with their drawings. It's Bedrock's, so
+  snippets, the `_Answer` block (with `_Markdown`) and the `_Json` block, with their drawings, and a file's link and
+  the list of files saved as text (`presigned_url`, `parse_list_link`, `file_list_lines`, `write_file_list`,
+  `SavedFileList`, `_file_list_blocks`, and the `_Download` block with `_download_css`). It's Bedrock's, so
   it isn't in `_kit`: only those two import it (`SHARED` in `rules.py`), it imports `_kit` and never an analyzer, and
   `rules.py` fails when either defines one of its names. Each imports the names it uses, and the public ones it doesn't
   as `from ._bedrock import model_price as model_price` (a re-export ruff accepts), so `bedrock_chat.model_price` still
@@ -142,8 +144,11 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   folder and the ones above them, even when marked. Local files are only written where the user asks: S3 downloads,
   `lambda_functions`' `download()` and the explorer's Download .zip (`LambdaAnalyzer._save_package`: one .zip, written
   to `<name>.zip.part` then renamed, in `lambda-downloads/` or the path given; a downloads folder it makes gets its own
-  `_DOWNLOADS_MARK`, and nothing in Lambda's module ever deletes a download), and `bedrock_chat`'s `save_runs()` /
-  `log=`, which only append lines.
+  `_DOWNLOADS_MARK`, and nothing in Lambda's module ever deletes a download), `bedrock_chat`'s `save_runs()` /
+  `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
+  chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
+  `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
+  deletes one).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
   the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
@@ -215,7 +220,10 @@ How the View layer works:
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
   document order: a bar of their sizes, and of where each sits in the file when its text was read, then each folded,
   the text it repeats from the one before in `<mark class="ov">`) and `_Shares` (parts of a whole in one bar: files by
-  state), and in both `_Json` (from `_bedrock.py`), and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
+  state), and in both `_Json` and `_Download` (from `_bedrock.py`; a saved file's ⬇ Download link: its path from the
+  notebook's folder, which JupyterLab rewrites to its `/files/` URL and downloads because of the `download`
+  attribute, or in a window a data: URL up to `_LIST_LINK_BYTES`, since JupyterLab doesn't resolve links in widgets),
+  and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
   `_python_html`, from `tokenize`, JSON by `_json_source_html` or an AWS CLI command by `_shell_html`, by its `lang`)
   and `_Results` (a test run's questions, a line each that opens to its answer, `_result_html`)) and pass them to
   `self._show(blocks)`, which renders HTML in Jupyter or plain text elsewhere (`mode="auto" | "html" | "text"`).
@@ -349,7 +357,9 @@ How the View layer works:
   Data source field (`_fill_sources`) shows only when the knowledge base has more than one. Files work the same way
   on `x-amz-bedrock-kb-source-uri`: `view.picked_files` (s3:// paths; `resolve_files` / `match_files` turn names into
   paths from `core.files()`, a cached ListKnowledgeBaseDocuments), `build_request(files=)`, `split_condition()`, and
-  the Files field (`_list_files` fills it only when it's first opened; ticked files are chips, `_draw_files`).
+  the Files field (`_list_files` fills it only when it's first opened; ticked files are chips, `_draw_files`; its
+  ⬇ List, `files_list_button` beside the search box, saves what the list shows with `core.save_file_list` and draws
+  a `_Download` in `files_saved` at the bottom of the panel, `_save_file_list`).
   The header's four fields are `_ChoicePicker`s (`_kit`'s `_Picker`): a button under its face (label, name, ID)
   that opens a list of `_Choice` lines over the chat (`.kbc-pop`, absolutely placed, so the boxes around it are
   `overflow:visible`), each line a
@@ -431,7 +441,8 @@ How the View layer works:
   holds the asyncio tasks (tests await them). `_renew_pane` puts the file page in a new box so it starts at the top,
   `_set` only sends HTML that changed, the status line says what each tab holds when nothing's going on (`_said`,
   `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
-  `_window_errors`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
+  `_window_errors`. ⬇ List (`_save_list`) saves the list's `_visible` files in their order with `core.save_file_list`
+  and draws a `_Download` under the list (`saved_view`; `x.saved`), its link a data: URL up to `_LIST_LINK_BYTES`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
 - `lambda_functions`' explorer window, `LambdaExplorer` (after the View, with `explore()`; `LambdaView.explore()` keeps it
   in `view.explorer`), is the fourth interactive UI, not a companion, and built like `KBExplorer`, on the windows' kit:
   ipywidgets styled by `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript,
@@ -498,7 +509,8 @@ runtime's end of support, block-create and block-update dates from AWS's Lambda 
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in `_bedrock.py`,
-once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, and `SEARCHABLE`.
+once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, `SEARCHABLE`, and
+`presigned_url` (both analyzers' `file_url`, signed by an `s3` client each makes).
 Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
 read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions.py`'s
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and

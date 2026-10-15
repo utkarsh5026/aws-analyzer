@@ -61,6 +61,8 @@ from aws_analyzer.bedrock_kb import (
     estimate_tokens,
     eval_findings,
     file_findings,
+    file_list_lines,
+    file_list_name,
     file_state,
     file_steps,
     generation_cost,
@@ -80,10 +82,12 @@ from aws_analyzer.bedrock_kb import (
     parse_ingestion_job,
     parse_kb_ref,
     parse_knowledge_base,
+    parse_list_link,
     parse_metadata_file,
     parse_models,
     parse_rag,
     parse_retrieve,
+    pick_files,
     place_chunks,
     probe_findings,
     query_cost,
@@ -3591,6 +3595,29 @@ def test_parse_file_state_and_sort_files():
         sort_files(files, "age")
 
 
+def test_pick_files_and_the_lines_of_a_file_list():
+    custom = state(KBFile("doc-7", DS_ID, status="INDEXED"), "indexed")
+    files = [state(kbfile("b.pdf"), "indexed"), state(kbfile("a/z.pdf"), "failed", "The file is encrypted"),
+             state(kbfile("gone.pdf", size=None), "deleted"), custom]
+    assert pick_files(files) == files
+    assert [f.name for f in pick_files(files, state="failed")] == ["z.pdf"]
+    assert [f.name for f in pick_files(files, match="encrypted")] == ["z.pdf"]  # Bedrock's reason or the note count
+    assert [f.name for f in pick_files(files, state="indexed", match="POLICIES")] == ["b.pdf"]
+    assert file_list_lines(files + [files[0]]) == ([FOLDER + "b.pdf", FOLDER + "a/z.pdf", FOLDER + "gone.pdf"], 1)
+    assert file_list_lines(files, "path") == (["policies/b.pdf", "policies/a/z.pdf", "policies/gone.pdf"], 1)
+    signed = file_list_lines(files, "URL", sign=lambda uri: "https://example.com/" + uri[5:])
+    assert signed == (["https://example.com/support-docs-bucket/policies/b.pdf",
+                       "https://example.com/support-docs-bucket/policies/a/z.pdf"], 2)  # gone from S3, and custom
+    assert file_list_lines(files, "https") == ([], 4)  # nothing to sign them with
+    assert [parse_list_link(w) for w in ("s3", " S3:// ", "presigned", "https", "key", "path")] == [
+        "s3", "s3", "https", "https", "key", "key"]
+    with pytest.raises(ValueError, match="link= is 's3' .*, 'https' .* or 'key'"):
+        parse_list_link("ftp")
+    assert file_list_name("support-docs") == "support-docs-files.txt"
+    assert file_list_name("support docs/", "failed") == "support-docs-failed-files.txt"
+    assert file_list_name("") == "knowledge-base-files.txt"
+
+
 def test_window_text_points_at_the_windows_tabs():
     assert kbmod._window_text("documents(status='FAILED') shows which; syncs() the history.") == (
         "the Files tab's Failed filter shows which; the Syncs tab the history.")
@@ -3817,6 +3844,72 @@ def test_ui_files(aws, bucket, ui, capsys):
     narrowed = run(capsys, ui.files, "support-docs", status="not synced")
     assert "Files that are not synced yet" in narrowed and "new.pdf" in narrowed.split("Files that are")[1]
     assert "old.pdf" not in narrowed.split("Files that are")[1].split("To sync")[0]
+
+
+def test_save_file_list_writes_a_line_per_file(aws, bucket, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    stub_inventory(aws)
+    core = aws.analyzer()
+    inv = core.file_inventory("support-docs")
+    saved = core.save_file_list(inv)
+    assert saved.path == str(tmp_path / "support-docs-files.txt") and saved.link == "s3" and not saved.replaced
+    assert (tmp_path / "support-docs-files.txt").read_text() == saved.text == "".join(
+        f.uri + "\n" for f in inv.files)
+    assert saved.count == 4 and saved.size == len(saved.text) and saved.lines[0].startswith("s3://support-docs-bucket/")
+    again = core.save_file_list(inv.files[:1], "lists/", link="key")  # a folder that isn't there yet: made
+    assert again.path == str(tmp_path / "lists" / "kb-files.txt") and again.lines == [inv.files[0].key]
+    links = core.save_file_list(inv, "lists/kb-files.txt", link="https", expires=600)
+    assert links.replaced and links.expires == 600 and links.left_out == 1  # gone.pdf has no file to open
+    assert all(line.startswith("https://support-docs-bucket.s3.amazonaws.com/policies/") for line in links.lines)
+    assert "Expires=" in links.lines[0] and "gone.pdf" not in links.text
+    with pytest.raises(ValueError, match="expires is in seconds"):
+        core.save_file_list(inv, link="https", expires=0)
+    (tmp_path / "blocked").write_text("a file, not a folder")
+    with pytest.raises(ValueError, match="Couldn't save x.txt in .*blocked"):
+        core.save_file_list(inv, "blocked/x.txt")
+    assert not list(tmp_path.glob("**/*.part"))
+
+
+def test_ui_save_file_list(aws, bucket, ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    stub_inventory(aws)
+    out = run(capsys, ui.save_file_list, "support-docs")
+    assert "Saved a list of 4 files" in out and "support-docs · one s3:// path per line, sorted by path" in out
+    assert "Files: 4   Each line: s3:// path" in out and f"Saved in {tmp_path / 'support-docs-files.txt'}" in out
+    assert "-- Its 4 lines --\ns3://support-docs-bucket/policies/broken.pdf\n" in out  # sorted by path
+    assert "save_file_list(kb='support-docs', link='https')" in out and "files(kb='support-docs')" in out
+    lines = (tmp_path / "support-docs-files.txt").read_text().splitlines()
+    assert lines == sorted(lines) and len(lines) == 4
+    stub_inventory(aws, kb=KB_ARN)
+    failed = run(capsys, ui.save_file_list, "support-docs", "failed.txt", status="failed", link="url")
+    assert "Saved a list of 1 file" in failed and "Links work for: 1 hour" in failed
+    assert "Anyone holding the list can open every file in it" in failed
+    assert (tmp_path / "failed.txt").read_text().startswith("https://support-docs-bucket.s3.amazonaws.com/policies/broken")
+    ui.use(KB_ARN)
+    stub_inventory(aws, kb=KB_ARN)
+    again = run(capsys, ui.save_file_list, "lists/", status="failed")  # a folder, given where the kb would go
+    assert f"Saved in {tmp_path / 'lists' / 'support-docs-failed-files.txt'}" in again
+    stub_inventory(aws, kb=KB_ARN)
+    none = run(capsys, ui.save_file_list, status="failed", match="zzz")
+    assert "No file of support-docs is failed and matches 'zzz', so nothing was saved" in none
+    assert run(capsys, ui.save_file_list, link="ftp").startswith("[!] ValueError: link= is 's3'")
+
+
+def test_save_file_list_report_links_the_file_in_html(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    saved = kbmod.SavedFileList(str(tmp_path / "sub dir" / "kb-files.txt"), 1, text="s3://b/<x>.pdf\n")
+    html_ = kbmod._render_html([kbmod._Download(saved.path, kbmod._notebook_href(saved.path))], 50)
+    assert '<a class="dl" href="sub%20dir/kb-files.txt" download="kb-files.txt"' in html_
+    assert kbmod._notebook_href(str(tmp_path.parent / "elsewhere.txt")) == ""  # outside the notebook's folder
+    data = kbmod._data_href(saved.text)
+    assert data == "data:text/plain;charset=utf-8;base64,czM6Ly9iLzx4Pi5wZGYK" and kbmod._data_href(saved.text, 5) == ""
+    assert "Saved in /x/y.txt" in kbmod._render_html([kbmod._Download("/x/y.txt")], 50)
+    inv = FileInventory(KB_ID, "support-docs", sources={DS_ID: "docs-s3", DS2_ID: "more"}, limit=100,
+                        truncated={DS_ID: ["files"]}, errors={DS2_ID: {"files": "AccessDenied"}})
+    text = _render_text(BedrockKBView(mode="text", core=BedrockKBAnalyzer(client=object()))._saved_list_blocks(
+        saved, inv), 50)
+    assert "Listing the bucket's files for docs-s3 stopped at 100, so it may miss files" in text
+    assert "more's files couldn't be listed, so it may miss some of them: files() says why." in text
 
 
 def stub_file_page(aws, chunks=None):
@@ -4158,6 +4251,35 @@ def test_explorer_filters_sorts_and_pages_the_files(world):
     assert [f.name for f in x._visible][:3] == ["added.pdf", "f-00.txt", "f-01.txt"]
     x.sort_pick.value = "size"
     assert x._visible[0].name == "faq.md"
+
+
+def test_explorer_saves_the_list_it_shows(world, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    x = explorer(world)
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()
+    x.list_button.click()
+    assert x.saved.lines == [REFUND.rsplit("/", 1)[0] + "/scanned.pdf"]
+    assert (tmp_path / "support-docs-failed-files.txt").read_text() == x.saved.text
+    assert ('href="data:text/plain;charset=utf-8;base64,' in x.saved_view.value
+            and 'download="support-docs-failed-files.txt"' in x.saved_view.value)
+    assert plain(x.status.value) == ("Saved the s3:// paths of 1 file, one per line, in support-docs-failed-files.txt "
+                                     "beside the notebook: the link under the list downloads it to your computer.")
+    next(c for c in x.chips.children if c.description.startswith("Failed")).click()
+    x.sort_pick.value = "name"
+    x.list_button.click()  # every file, in the list's order
+    assert [line.rsplit("/", 1)[1] for line in x.saved.lines] == [f.name for f in x._visible]
+    assert len(x.saved.lines) == 6 and "replacing" not in plain(x.status.value)
+    x.list_button.click()
+    assert "beside the notebook, replacing the one there" in plain(x.status.value)
+    x.find.value = "no such file"
+    x.list_button.click()
+    assert plain(x.status.value) == "No file in the list to save: clear the search, or pick All above."
+    monkeypatch.setattr(kbmod, "_LIST_LINK_BYTES", 10)
+    x.find.value = ""
+    x.list_button.click()
+    assert "href" not in x.saved_view.value and "download it from Jupyter's file browser" in plain(x.status.value)
+    x.open("sales")
+    assert x.saved is None and x.saved_view.value == ""
 
 
 def test_explorer_switches_knowledge_bases(world):

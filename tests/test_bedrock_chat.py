@@ -1854,6 +1854,32 @@ def test_ui_files_and_use_files(capsys):
     assert ui.picked_files == [RETURNS_MD]
 
 
+def test_ui_save_file_list(capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    web = client_error("ValidationException", "S3 and CUSTOM only", "ListKnowledgeBaseDocuments")
+    clients = fakes(sources=TWO_SOURCES, documents={DS2_ID: web})
+    ui = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="text", progress="off")
+    assert "save_file_list()" in run(capsys, ui.files)  # files() points at it
+    out = run(capsys, ui.save_file_list)
+    assert "Saved a list of 3 files" in out and "support-docs · one s3:// path per line, sorted by path" in out
+    assert f"Saved in {tmp_path / 'support-docs-files.txt'}" in out and "Each line: s3:// path" in out
+    assert "help-site keeps no file list, so its files aren't in it" in out
+    assert "save_file_list(link='https')" in out and "files()" in out
+    assert (tmp_path / "support-docs-files.txt").read_text().splitlines() == [RETURNS_MD, REFUND_PDF, SCAN_PDF]
+    out = run(capsys, ui.save_file_list, "policies", "lists/", link="key")
+    assert f"Saved in {tmp_path / 'lists' / 'support-docs-files.txt'}" in out
+    assert (tmp_path / "lists" / "support-docs-files.txt").read_text() == (
+        "policies/refund-policy.pdf\npolicies/scanned-invoice.pdf\n")
+    out = run(capsys, ui.save_file_list, "refund", "refund.txt", link="https", expires=7200)
+    assert "Links work for: 2 hours" in out and "Anyone holding the list can open every file in it" in out
+    [line] = (tmp_path / "refund.txt").read_text().splitlines()
+    assert line.startswith("https://docs.s3.amazonaws.com/policies/refund-policy.pdf?") and "X-Amz-Expires=7200" in line
+    assert "No file's path in support-docs contains 'nothing'" in run(capsys, ui.save_file_list, "nothing")
+    assert "ValueError: link= is 's3'" in run(capsys, ui.save_file_list, link="ftp")
+    saved = ui.core.save_file_list(ui.core.files(KB_ID))  # the data method, on what files() lists
+    assert saved.count == 3 and saved.name == "support-docs-files.txt" and saved.replaced
+
+
 def test_ui_answer_from_outside_the_picked_files_is_flagged(capsys):
     ui = BedrockChatView(BedrockChatAnalyzer(clients=fakes()), kb="support-docs", mode="text", progress="off",
                          files=[RETURNS_MD])
@@ -2589,6 +2615,32 @@ def test_window_picks_files(window, monkeypatch):
     assert files.picked == [REFUND_PDF]
 
 
+def test_window_saves_the_files_list(window, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    app = window._app
+    files = app.files_pick
+    assert app.files_list_button in files.panel.children[0].children  # beside the Files list's search box
+    files.button.click()
+    app.files_list_button.click()
+    assert app.saved_list.lines == [RETURNS_MD, REFUND_PDF]  # what the list shows: indexed files, in its order
+    assert (tmp_path / "support-docs-indexed-files.txt").read_text() == RETURNS_MD + "\n" + REFUND_PDF + "\n"
+    assert ('href="data:text/plain;charset=utf-8;base64,' in app.files_saved.value
+            and 'download="support-docs-indexed-files.txt"' in app.files_saved.value)
+    assert plain(app.status.value) == ("Saved the s3:// paths of 2 files, one per line, in "
+                                       "support-docs-indexed-files.txt beside the notebook: the link under the Files "
+                                       "list downloads it to your computer.")
+    find(files, "refund")
+    app.files_list_button.click()
+    assert app.saved_list.lines == [REFUND_PDF] and "replacing the one there" in plain(app.status.value)
+    find(files, "nothing-like-it")
+    app.files_list_button.click()
+    assert "No file in the list to save: change the search." in plain(files.foot.value)
+    monkeypatch.setattr(chatmod, "_LIST_LINK_BYTES", 10)
+    find(files, "")
+    app.files_list_button.click()
+    assert "href" not in app.files_saved.value and "download it from Jupyter's file browser" in plain(app.status.value)
+
+
 def test_window_files_reset_with_another_knowledge_base(monkeypatch):
     monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
     clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")])
@@ -2600,9 +2652,11 @@ def test_window_files_reset_with_another_knowledge_base(monkeypatch):
     assert [chip.description for chip in app.file_chips.children] == ["refund-policy.pdf ✕"]
     app.files_pick.button.click()
     assert app.files_kb == KB_ID and app.files_pick.shown
+    app.saved_list, app.files_saved.value = object(), "a list saved for support-docs"
     click_line(app.kb_pick, KB2_ID)
     assert view.picked_files is None and app.file_chips.children == () and not app.files_pick.is_open
     assert app.files_kb is None and app.files_pick.choices == [] and app.files_pick.picked == []
+    assert app.saved_list is None and app.files_saved.value == ""
     bad = BedrockChatView(BedrockChatAnalyzer(clients=fakes()), kb="support-docs", mode="html", files="nope.pdf")
     bad._display = lambda widget: None
     bad.app()

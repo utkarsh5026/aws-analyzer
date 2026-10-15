@@ -9,6 +9,22 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Bedrock Knowledge Bases: `save_file_list()` saves the knowledge base's files as a `.txt` file, one per line and
+  sorted by path, with a **⬇ Download** link that saves it on your computer. Each line is a file's `s3://` path, ready
+  for a script, `aws s3 cp` or a spreadsheet; `link="https"` writes a link that opens each file in a browser instead
+  (presigned, for an hour unless `expires=` says otherwise) and `link="key"` its path in the bucket. `status=`,
+  `match=` and `data_source=` keep only the files `files()` lists with them, so `save_file_list(status="failed")` is
+  the list of failed files.
+- Bedrock Knowledge Bases explorer: **⬇ List** in the **Files** tab saves the `s3://` path of every file the list
+  shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt`
+  beside the notebook, and puts a **⬇ Download** link for it under the list.
+- Bedrock chat: `save_file_list()` does the same for the chat's knowledge base (`match=` keeps the files whose path
+  contains it, as `files()` does), and **⬇ List** beside the **Files** list's search box saves the `s3://` paths of
+  the files the list shows, with a **⬇ Download** link under the list. `BedrockChatAnalyzer.file_url()` makes the
+  same presigned links as the knowledge base analyzer's.
+
 ## [0.16.1] - 2026-10-13
 
 ### Changed
