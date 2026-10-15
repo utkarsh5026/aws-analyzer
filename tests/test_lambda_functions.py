@@ -926,6 +926,8 @@ def test_map_code_handler_problems():
     assert "handler() takes 1 argument, and Lambda passes two (event and context): every call fails with TypeError" in text
     assert "TypeError" not in findings("def handler(*args):\n    return 1\n")[1]
     assert "TypeError" not in findings("def handler(event, context, extra=None):\n    return 1\n")[1]
+    web = "from mangum import Mangum\nfrom fastapi import FastAPI\napp = FastAPI()\nhandler = Mangum(app)\n"
+    assert "TypeError" not in findings(web)[1]  # an object (a web app's adapter) takes (event, context) itself
     cmap, text = findings("def handler(event, context)\n    return 1\n", runtime="python3.10")  # no newer than here
     assert cmap.skipped == [("app.py", "line 1: expected ':'")] and cmap.entry is None
     assert "app.py doesn't parse (line 1: expected ':'): Lambda can't load it either" in text
