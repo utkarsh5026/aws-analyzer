@@ -144,6 +144,9 @@ DEMO_CASES: dict[str, list[tuple[str, str, str]]] = {
         ("instance", "", "ui.instance()"),
         ("disk", "", "ui.disk()"),
         ("running", "", "ui.running()"),
+        ("envs", "", "ui.envs()"),
+        ("new_env_dry_run", "", 'ui.new_env("3.11", dry_run=True)'),
+        ("new_env", "", 'ui.new_env("3.11", packages="pandas")'),
         ("help_one", "", 'ui.help("disk")'),
     ],
     "opensearch": [

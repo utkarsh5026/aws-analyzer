@@ -1,13 +1,13 @@
 ---
 title: SageMaker Guide
-description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, with aws-analyzer's sagemaker_env.py."
+description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, and how to make a Python environment with another version that survives restarts, with aws-analyzer's sagemaker_env.py."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> aws-analyzer · sagemaker_env.py</p>
 
 # Know the SageMaker notebook you're working in
 
-Install it in your notebook and see what the notebook is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and which notebooks, apps and endpoints in the region are still running.
+Install it in your notebook and see what the notebook is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and which notebooks, apps and endpoints in the region are still running. Need another Python? One call makes an environment with the version you want, kept when the notebook stops, with its own Jupyter kernel.
 { .lede }
 
 <ul class="pills">
@@ -64,13 +64,15 @@ The examples run in a Studio JupyterLab space called `churn-analysis`, in the do
 
 ## Five-minute tour { #tour }
 
-Three commands cover most questions. Each prints a report under the cell; none of them change anything.
+A few commands cover most questions. Each prints a report under the cell. None of them change anything, except `new_env()`, which makes the Python environment you ask for.
 
 ```python
 ui.instance()                    # this notebook: type, cost so far, idle shutdown, memory, disk
 ui.disk()                        # what fills the disk, and what's safe to clear
 ui.running()                     # everything billing in the region, and what looks forgotten
 ui.instance("old-experiment")    # another notebook instance, or a Studio space, by name
+ui.envs()                        # the Python environments and Jupyter kernels here
+ui.new_env("3.11")               # a Python 3.11 environment with its own kernel, kept when the notebook stops
 ```
 
 **Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after. Click a column's header to sort by it (again for the other way, a third time for the original order), pick a value in a column's **Filter** to see only those rows (a kind, a status), and untick columns under **Columns** to focus on the ones you need. It's all plain HTML and CSS, so it still works when you reopen the notebook. At the bottom is a **Next** row of two or three commands with the arguments filled in, such as `disk('/home/sagemaker-user/data')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
@@ -179,6 +181,40 @@ When the disk is nearly full, the finding also gives the command that makes the 
 
 `disk()` reads only local files, stays on one disk and doesn't follow links. It stops after 200,000 files by default and says so; `limit=None` measures everything.
 
+## Python environments { #envs }
+
+To try your code on another Python, say 3.11 when the notebook has 3.12, you need an environment with that version and a Jupyter kernel that starts it. On SageMaker there's a catch: most of the machine is reset when the notebook stops. On a notebook instance only `~/SageMaker` is kept, so an environment made the usual way (`conda create -n py311 ...`, which puts it in `~/anaconda3/envs`) is gone after the next restart. In Studio the home folder is kept but `/opt/conda` isn't. `new_env()` takes care of that:
+
+```python
+ui.new_env("3.11")                                   # Python 3.11, as kernel "Python 3.11 (py311)"
+ui.new_env("3.12", packages="pandas boto3")          # with packages ('-r requirements.txt' works too)
+ui.new_env("3.11", name="churn-py311")               # your own name for its folder and kernel
+ui.new_env("3.11", dry_run=True)                     # the commands, to run in a terminal yourself
+ui.envs()                                            # every environment and kernel here
+```
+
+<div class="steps" markdown>
+
+1. **It makes the environment where it's kept**: `~/SageMaker/envs/py311` on a notebook instance, `~/.conda/envs/py311` in Studio. It uses the first of mamba, conda, micromamba and uv on the machine (SageMaker has conda; `tool="uv"` picks uv, which is faster), with Python from conda-forge, which needs no license and no terms to accept.
+2. **It installs what you list** with pip: `packages="pandas boto3"`, a list, or `"-r requirements.txt"`.
+3. **It adds the kernel**, so **Python 3.11 (py311)** is in Jupyter's kernel menu. Pick it with **Kernel > Change Kernel**, or start a notebook with it from the Launcher; it can take a minute to show up. `%pip install` in a notebook on that kernel installs into the new environment.
+
+</div>
+
+It takes a minute or two, with a progress bar while it runs. The report then shows the Python version it got, each step and how long it took, and the commands it ran. If a step fails, it says why (no internet access, a full disk, a Python version or package that doesn't exist) and shows the end of what the step printed, with the commands to run in a terminal and see all of it. Run `new_env()` again on an environment that's already there and it doesn't make it again: it installs only the `packages=` you give and adds the kernel back.
+
+!!! warning ""
+
+    **After a notebook instance restarts**, the environment in `~/SageMaker/envs` is still there, but its kernel isn't: Jupyter's kernels live in `~/.local`, which is reset. `new_env("3.11")` puts it back in seconds. To have it done at every start, the report includes a lifecycle configuration (an on-start script that adds back the kernel of each environment in `~/SageMaker/envs`) and the AWS CLI commands that attach it. A notebook instance takes one lifecycle configuration, so if yours already has one (auto-stop, say), add the script's lines to its on-start script instead. Studio keeps kernels, because they're in the home folder.
+
+`envs()` lists the environments on the machine with their Python version, where each one is and **whether it's kept when the notebook stops**, and the Jupyter kernel that starts each. It warns about:
+
+- environments made since the machine started on the disk that's reset, which will be gone after the next stop, with the call that makes them again where they're kept;
+- kernels that start a Python that isn't there any more, so picking them fails, with the command that takes them off the menu;
+- environments in the kept folder that have no kernel, which is what a notebook instance looks like after a restart.
+
+`new_env()` only writes the environment's folder and its kernel, and never removes anything: a finding that would help by removing something shows the command instead. It needs no AWS permission, but it does download Python and the packages, so a notebook without internet access needs a NAT gateway or a package mirror such as AWS CodeArtifact.
+
 ## Everything that's running { #running }
 
 `running()` lists everything SageMaker bills by the hour in the region: notebook instances, Studio apps (JupyterLab, Code Editor and Studio Classic kernels), endpoints, and training and processing jobs in progress. Each row starts with an icon for its kind (📓 notebook instance, 🧪 Studio app, 🚀 endpoint, 🏋️ training job, ⚙️ processing job), and 📍 marks the notebook you're in. For each one it shows the instance, the price per hour, how long it has been running and whether it stops when idle. For endpoints, it adds how many requests they served over the last 7 days, from CloudWatch. Stopped notebook instances get a table of their own, because their storage is still billed.
@@ -222,9 +258,14 @@ d.to_df()                                             # one row per folder
 
 r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
 r.to_df()                                             # one row per notebook, app, endpoint and job
+
+e = sm.environments()                                 # EnvReport: .envs, .kernels, .tools, .folder
+e.to_df()                                             # one row per Python environment
+plan = sm.env_plan("3.11", packages="pandas")         # EnvPlan: where it goes, what makes it, .steps (the commands)
+result = sm.create_env(plan)                          # EnvResult: runs them; .ok, .python, .failed
 ```
 
-The analysis functions don't call AWS, so they work on responses and text you already have: `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`, `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `idle_shutdown_commands`, `stop_command`, and the findings, `instance_findings`, `disk_findings` and `running_findings`.
+The analysis functions don't call AWS, so they work on responses and text you already have: `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`, `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`, `env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, and the findings, `instance_findings`, `disk_findings`, `running_findings`, `env_findings` and `plan_findings`.
 
 ```python
 from aws_analyzer.sagemaker_env import describe_instance, hourly_price, smaller_type
@@ -310,6 +351,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 | `instance("space name")` | also `ListDomains`, `ListSpaces`, `ListApps` |
 | `running()` | the `List` and `Describe` actions for notebook instances, apps, endpoints and jobs, `DescribeDomain`, and `cloudwatch:GetMetricData` for endpoint traffic |
 | `disk()` | nothing: it reads local files |
+| `envs()`, `new_env()` | nothing: they read local files, and `new_env()` runs conda (or uv) and pip on the notebook |
 
 ## Troubleshooting { #troubleshooting }
 
@@ -333,6 +375,14 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 
     In Studio Classic your home folder is on Amazon EFS, which has no fixed size, so it can't fill up. EFS bills for what's stored, which `disk()` still measures.
 
+??? question "My new kernel isn't in the kernel menu"
+
+    Jupyter reads the kernels when its menu opens, so a new one can take a minute to show up; refresh the browser tab if it doesn't. On a notebook instance, kernels are reset when it stops: run `ui.new_env("3.11")` again (it only adds the kernel back), or attach the lifecycle configuration from the report. `ui.envs()` shows which environments have a kernel.
+
+??? question "new_env() says it couldn't download what it needs"
+
+    The notebook can't reach conda-forge (or, with uv, PyPI and GitHub). A notebook instance or Studio domain with internet access only through your VPC needs a NAT gateway, or a package mirror such as AWS CodeArtifact. `ui.instance()` shows the notebook's internet access.
+
 ??? question "The costs don't match my bill"
 
     The estimates use us-east-1 on-demand list prices. Other regions, Savings Plans and discounts change them: pass your own with `SageMakerAnalyzer(prices={...})`. The "cost so far" of another notebook instance counts from its last change, which is only about when it last started.
@@ -351,6 +401,8 @@ Every `SageMakerView` command. `ui.help()` prints the same list grouped by task,
 |---|---|
 | `instance(name=None)` | This notebook (or another notebook instance or Studio space): type, cost so far, idle shutdown, CPU, memory, disk and GPU use now, role, network, findings |
 | `disk(path=None, top=20, limit="200k")` | How full the disk is, the biggest folders and files, and the caches and trash that are safe to clear |
+| `envs()` | The Python environments and Jupyter kernels here: each one's Python version, where it is, whether it's kept when the notebook stops, and kernels that fail to start |
+| `new_env(python="3.11", name=None, packages=None, path=None, tool="auto", dry_run=False)` | Makes a Python environment with that version where it's kept when the notebook stops, installs `packages=` in it and adds its Jupyter kernel; `dry_run=True` shows the commands instead |
 | `running(metrics=True, days=7)` | Everything billing by the hour in the region, the stopped notebook instances' storage, and what looks forgotten |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 

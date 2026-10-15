@@ -1,6 +1,6 @@
 """
 sagemaker_env.py - SageMaker toolkit for SageMaker / Jupyter notebooks: the notebook you're running in, what fills
-its disk, and everything else in SageMaker that's running and billing.
+its disk, its Python environments, and everything else in SageMaker that's running and billing.
 
 Part of aws-analyzer: ``pip install aws-analyzer``, then ``from aws_analyzer import SageMakerView``. It isn't called
 sagemaker.py, so it's never mixed up with the SageMaker Python SDK (``import sagemaker``).
@@ -16,8 +16,10 @@ The file has two layers:
     SageMakerView      Notebook UI. Calls SageMakerAnalyzer and renders readable
                        cards and tables (HTML in Jupyter, plain text in a terminal).
 
-Nothing in this file changes anything: it never stops a notebook, deletes an app or an
-endpoint, or removes a file. Where one of those would help, it shows the command to run.
+Nothing in this file changes AWS: it never stops a notebook or deletes an app or an endpoint,
+and it never removes a file. Where one of those would help, it shows the command to run. The
+one thing it makes is what new_env() is asked for: a Python environment, in a folder that's
+kept when the notebook stops, and its Jupyter kernel.
 
 Quick start
 -----------
@@ -27,12 +29,15 @@ Quick start
     ui.instance("team-notebook")                      # another notebook instance, or a Studio space by name
     ui.disk()                                         # what fills the disk, and caches or trash you can clear
     ui.disk("~/SageMaker/data")                       # one folder
+    ui.envs()                                         # the Python environments and Jupyter kernels here
+    ui.new_env("3.11")                                # a Python 3.11 environment with its own kernel, kept when it stops
     ui.running()                                      # everything running and billing in the region, and what looks forgotten
 
     sm = ui.core                                      # same analyzer, raw data
     report = sm.instance()                            # InstanceReport: .notebook (settings), .machine (right now)
     df = sm.running().to_df()                         # one row per notebook, app, endpoint and job
     folders = sm.disk().to_df()                       # folder sizes
+    envs = sm.environments().to_df()                  # one row per Python environment
 """
 
 from __future__ import annotations
@@ -63,7 +68,7 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
 from ._kit.deps import _require
-from ._kit.errors import _error_code, _error_name, _why
+from ._kit.errors import _error_code, _error_name, _Hint, _why
 from ._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _fmt_dt, _plural, _utcnow, human_age, human_money, human_size,
 )
@@ -422,6 +427,62 @@ def lifecycle_idle(scripts: Iterable[str]) -> tuple[bool, int | None]:
         return False, None
     match = _IDLE_TIME_RE.search(text)
     return True, (int(match.group(1)) // 60 if match else None)
+
+
+_VERSION_RE = re.compile(r"^(?:python|py)?\s*3\.?(\d{1,2})(?:\.(\d{1,3}))?$", re.IGNORECASE)
+_ENV_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def parse_python_version(value: Any) -> str:
+    """A Python version as conda and uv take it: '3.11', 3.11, 'py311', 'python3.11' -> '3.11'; '3.11.9' stays
+    '3.11.9'. The number 3.10 reads as 3.1, so a number 3.1 means 3.10."""
+    if isinstance(value, float):
+        text = "3.10" if value == 3.1 else repr(value)
+    else:
+        text = str(value).strip()
+    match = _VERSION_RE.match(text)
+    if not match:
+        raise ValueError(f"python takes a version like '3.11' or '3.12.4' (got {value!r}).")
+    minor, patch = match.groups()
+    return f"3.{int(minor)}" + (f".{int(patch)}" if patch is not None else "")
+
+
+def env_name(version: str) -> str:
+    """The name new_env() gives an environment: '3.11' -> 'py311', '3.12.4' -> 'py312'."""
+    return "py" + "".join(version.split(".")[:2])
+
+
+def new_env_call(python: str, name: str = "", **kwargs: Any) -> str:
+    """A new_env() call to copy, leaving out name= when it's the default: ('3.11', 'py311') -> "new_env('3.11')",
+    ('3.11', 'exp', packages='pandas') -> "new_env('3.11', name='exp', packages='pandas')"."""
+    words = [repr(python)] + ([f"name={name!r}"] if name and name != env_name(python) else [])
+    return f"new_env({', '.join(words + [f'{key}={value!r}' for key, value in kwargs.items()])})"
+
+
+def _minor(version: str) -> str:
+    """'3.11.9' -> '3.11' ('' -> '3.11': the version new_env() suggests when it can't tell)."""
+    return ".".join(version.split(".")[:2]) if version else "3.11"
+
+
+def kernel_label(version: str, name: str) -> str:
+    """What Jupyter's kernel menu shows for it: ('3.11.9', 'py311') -> 'Python 3.11 (py311)'."""
+    return f"Python {'.'.join(version.split('.')[:2])} ({name})"
+
+
+def parse_pyvenv_cfg(text: str) -> dict[str, str]:
+    """A virtual environment's pyvenv.cfg -> {'home': ..., 'version': '3.11.9', ...} (uv writes version_info)."""
+    values = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            values[key.strip().lower()] = value.strip()
+    return values
+
+
+def _clean_version(text: str) -> str:
+    """'3.11.9.final.0' -> '3.11.9'."""
+    match = re.match(r"\d+\.\d+(?:\.\d+)?", text.strip())
+    return match.group(0) if match else ""
 
 
 # =============================================================================
@@ -840,6 +901,118 @@ class RunningReport:
                 "this_notebook",
             ],
         )
+
+
+@dataclass
+class PythonEnv:
+    """One Python environment on this machine: a conda environment, or a virtual environment (venv, uv)."""
+
+    name: str  # the folder's name ('base' for a conda installation's own)
+    path: str  # as this machine sees it
+    python: str = ""  # '3.11.9', or '' when it can't tell
+    kind: str = "conda"  # 'conda' | 'venv'
+    kernels: list[str] = field(default_factory=list)  # the Jupyter kernels that start it, by the name Jupyter shows
+    ipykernel: bool = False  # has ipykernel, so it can be a Jupyter kernel
+    kept: bool | None = None  # on the disk that's kept when the notebook stops (None: not on SageMaker)
+    made: datetime | None = None  # when it was made or last changed (conda-meta/history, pyvenv.cfg)
+    this: bool = False  # the environment this kernel runs in
+
+
+@dataclass
+class KernelSpec:
+    """One Jupyter kernel: what Jupyter's kernel menu shows, and the Python it starts."""
+
+    name: str  # its folder: 'py311'
+    display: str  # 'Python 3.11 (py311)'
+    path: str  # its folder, as this machine sees it
+    program: str = ""  # what it starts: argv[0] of kernel.json
+    language: str = ""
+    env: str = ""  # the environment it starts (its path), when known
+    kept: bool | None = None  # on the disk that's kept when the notebook stops
+    missing: bool = False  # what it starts isn't there any more, so the kernel fails to start
+
+
+@dataclass
+class EnvReport:
+    """What environments() found: the Python environments and Jupyter kernels on this machine, the programs that
+    make new environments, and where new_env() puts them. Parts it couldn't read are in `errors` (part -> reason)."""
+
+    kind: str  # Environment.kind: 'notebook instance' | 'studio' | 'other' | 'local'
+    envs: list[PythonEnv] = field(default_factory=list)
+    kernels: list[KernelSpec] = field(default_factory=list)
+    tools: dict[str, str] = field(default_factory=dict)  # 'conda' -> its path, in the order new_env() prefers them
+    folder: str = ""  # where new_env() puts environments
+    folder_kept: bool | None = None
+    python: str = ""  # this kernel's Python
+    executable: str = ""
+    booted: datetime | None = None  # when this machine started (environments made since then on the system disk go)
+    errors: dict[str, str] = field(default_factory=dict)
+
+    def to_df(self):
+        """The environments as a pandas DataFrame: name, Python version, kind, path, kernels, kept, made."""
+        pd = _require("pandas", "EnvReport.to_df()")
+        return pd.DataFrame(
+            [
+                {
+                    "name": e.name,
+                    "python": e.python,
+                    "kind": e.kind,
+                    "path": e.path,
+                    "kernels": ", ".join(e.kernels),
+                    "kept": e.kept,
+                    "made": e.made,
+                    "this_kernel": e.this,
+                }
+                for e in self.envs
+            ],
+            columns=["name", "python", "kind", "path", "kernels", "kept", "made", "this_kernel"],
+        )
+
+
+@dataclass
+class EnvStep:
+    """One command new_env() runs, and once run, how it went."""
+
+    label: str  # 'Make the environment', 'Install packages', 'Add the Jupyter kernel'
+    argv: list[str]
+    env: dict[str, str] = field(default_factory=dict)  # environment variables it needs set
+    command: str = ""  # the same as you'd type it in a terminal
+    seconds: float | None = None
+    code: int | None = None  # its exit status, once run
+    output: str = ""  # the end of what it printed
+
+
+@dataclass
+class EnvPlan:
+    """What new_env() does: the environment it makes (or finds), and the commands that make it."""
+
+    name: str  # 'py311': the environment's folder and its kernel's name
+    python: str  # '3.11'
+    path: str  # where it goes, as this machine sees it
+    tool: str  # 'mamba' | 'conda' | 'micromamba' | 'uv'
+    kernel: str  # 'Python 3.11 (py311)'
+    packages: list[str] = field(default_factory=list)
+    steps: list[EnvStep] = field(default_factory=list)
+    exists: bool = False  # it's there already with this Python: only packages and the kernel are set up
+    found: str = ""  # the Python version of the one that's there
+    kept: bool | None = None  # on the disk that's kept when the notebook stops
+    free: int | None = None  # bytes free on that disk
+    where: str = "local"  # Environment.kind
+    folder: str = ""  # where new_env() puts environments when there's no path=
+    kernel_kept: bool | None = None  # the kernel's folder (~/.local/share/jupyter) is kept when the notebook stops
+    on_start: str = ""  # a notebook instance's: the folder whose environments' kernels to add back at each start
+
+
+@dataclass
+class EnvResult:
+    """What new_env() did: the plan, each step's exit status and output, and the Python the environment got."""
+
+    plan: EnvPlan
+    ok: bool = False
+    python: str = ""  # the version it got: '3.11.10'
+    seconds: float = 0.0
+    failed: EnvStep | None = None
+    leftover: bool = False  # a failed make left a folder that isn't an environment (new_env() won't reuse it)
 
 
 # =============================================================================
@@ -1591,6 +1764,15 @@ def shell_path(path: str, home: str | None = None) -> str:
     return shlex.quote(path)
 
 
+def _tilde(path: str, home: str | None = None) -> str:
+    """A path for a call to copy, under your home folder written as ~/...: '/home/ec2-user/SageMaker/envs' ->
+    '~/SageMaker/envs' (disk() and new_env() read ~)."""
+    home = (home or os.path.expanduser("~")).rstrip("/")
+    if home and (path == home or path.startswith(home + "/")):
+        return "~" + path[len(home):]
+    return path
+
+
 def clear_command(item: Clearable, root: str, home: str | None = None) -> str:
     """The shell command that empties one kind of cache or trash (shown, never run)."""
     template = next((t for _p, what, _w, t in _CLEARABLE if what == item.what), "")
@@ -1862,6 +2044,349 @@ def running_findings(
     return found
 
 
+TOOLS = ("mamba", "conda", "micromamba", "uv")  # what new_env() makes environments with, in the order it prefers
+CHANNEL = "conda-forge"  # conda's defaults channel needs its Terms of Service accepted (and, at bigger companies, a license)
+LOW_DISK = 3 * GB  # less free than this where an environment goes gets a warning
+_SUGGESTED = ("3.11", "3.12", "3.13", "3.10")  # what envs() suggests making, the first one there isn't one of
+KERNELS_FOLDER = ".local/share/jupyter/kernels"  # under your home folder: where `ipykernel install --user` puts a kernel
+LIFECYCLE_NAME = "python-envs"  # the lifecycle configuration that adds a notebook instance's kernels back at each start
+_ANACONDA = "/home/ec2-user/anaconda3"  # a notebook instance's conda: its environments are on the system disk
+_CONDA_ROOTS = ("/opt/conda", _ANACONDA)  # Studio's SageMaker Distribution image, a notebook instance
+_HOME_CONDA_ROOTS = ("miniforge3", "miniconda3", "anaconda3", "micromamba")  # under your home folder
+_TOOL_FOLDERS = (*(f"{root}/{sub}" for root in _CONDA_ROOTS for sub in ("bin", "condabin")), "/usr/local/bin", "/usr/bin")
+_HOME_TOOL_FOLDERS = (".local/bin", ".cargo/bin", *(f"{root}/bin" for root in _HOME_CONDA_ROOTS))
+_JUPYTER_SERVERS = ("/opt/conda", f"{_ANACONDA}/envs/JupyterSystemEnv")  # the environment Jupyter itself runs in
+_HISTORY_RE = re.compile(r"^==> (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) <==", re.MULTILINE)
+
+
+def parse_conda_history(text: str) -> datetime | None:
+    """When a conda environment was made: the first '==> 2025-10-14 09:12:33 <==' in its conda-meta/history,
+    which conda writes in the machine's local time."""
+    match = _HISTORY_RE.search(text)
+    if not match:
+        return None
+    return datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S").astimezone(timezone.utc)
+
+
+def package_list(packages: Any) -> list[str]:
+    """What to pip install: 'pandas boto3>=1.34', 'pandas, boto3', ['pandas'] or '-r requirements.txt' -> a list."""
+    if packages is None:
+        return []
+    words = shlex.split(packages) if isinstance(packages, str) else [str(p) for p in packages]
+    return [w.strip().rstrip(",") for w in words if w.strip().rstrip(",")]
+
+
+def env_steps(
+    tool: str,
+    exe: str,
+    prefix: str | Path,
+    python: str,
+    name: str,
+    packages: Iterable[str] = (),
+    *,
+    exists: bool = False,
+    ipykernel: bool = False,
+    python_dir: str = "",
+) -> list[EnvStep]:
+    """The commands that make an environment at `prefix` with this Python (unless it `exists`), pip install
+    `packages` in it, and add it to Jupyter as kernel `name` -> [EnvStep]. Nothing is run. tool: 'mamba', 'conda',
+    'micromamba' (conda-forge only) or 'uv' (a virtual environment with pip in it; python_dir: where uv keeps the
+    Pythons it downloads)."""
+    python_exe = str(Path(prefix, "bin", "python"))
+    install = list(packages)
+    steps = []
+    if not exists:
+        if tool == "uv":
+            steps.append(
+                EnvStep(
+                    "Make the environment",
+                    [exe, "venv", "--seed", "--python", python, str(prefix)],
+                    {"UV_PYTHON_INSTALL_DIR": python_dir} if python_dir else {},
+                )
+            )
+            install = ["ipykernel", *install]
+        else:
+            steps.append(
+                EnvStep(
+                    "Make the environment",
+                    [exe, "create", "--yes", "--quiet", "--prefix", str(prefix), "--override-channels",
+                     "--channel", CHANNEL, f"python={python}", "ipykernel"],
+                )
+            )
+    elif not ipykernel:
+        install = ["ipykernel", *install]
+    if install:
+        steps.append(
+            EnvStep(
+                "Install packages" if packages else "Install ipykernel",
+                [exe, "pip", "install", "--python", python_exe, *install]
+                if tool == "uv"
+                else [python_exe, "-m", "pip", "install", "--disable-pip-version-check", *install],
+            )
+        )
+    steps.append(
+        EnvStep(
+            "Add the Jupyter kernel",
+            [python_exe, "-m", "ipykernel", "install", "--user", "--name", name,
+             "--display-name", kernel_label(python, name)],
+        )
+    )
+    return steps
+
+
+def step_command(step: EnvStep, shown: Callable[[str], str] | None = None, home: str | None = None) -> str:
+    """A step as you'd type it in a terminal, with your home folder as ~: 'conda create --yes ... --prefix
+    ~/SageMaker/envs/py311 ...'. shown: turns a path into the one this machine sees (tests use a fake root)."""
+    shown = shown or (lambda text: text)
+
+    def word(text: str) -> str:
+        text = shown(text)
+        return shell_path(text, home) if text.startswith("/") else shlex.quote(text)
+
+    variables = [f"{key}={word(value)}" for key, value in step.env.items()]
+    return " ".join(variables + [word(arg) for arg in step.argv])
+
+
+def output_tail(text: str, lines: int = 30) -> str:
+    """The end of what a command printed: its last `lines` lines, each as it was left after progress updates."""
+    kept = [line.rstrip("\r").rsplit("\r", 1)[-1].rstrip() for line in text.split("\n")]
+    kept = [line for line in kept if line]
+    return "\n".join(kept[-lines:])[-4000:]
+
+
+def on_start_script(folder: str) -> str:
+    """A notebook instance's on-start lifecycle script that adds the Jupyter kernel of each environment in `folder`
+    back at every start: the environments are on the notebook volume, which is kept, but kernels are in ~/.local,
+    which is reset when the instance stops."""
+    return "\n".join(
+        [
+            "#!/bin/bash",
+            f"# Adds back the Jupyter kernel of each environment in {folder} at every start.",
+            "sudo -u ec2-user -i <<'EOF'",
+            f"for env in {shlex.quote(folder)}/*/; do",
+            '    env="${env%/}"; name="$(basename "$env")"',
+            '    "$env/bin/python" -c "import ipykernel" 2>/dev/null || continue',
+            "    version=\"$(\"$env/bin/python\" -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])')\"",
+            '    "$env/bin/python" -m ipykernel install --user --name "$name" --display-name "Python $version ($name)"',
+            "done",
+            "EOF",
+        ]
+    )
+
+
+def kernels_lifecycle(folder: str, notebook: str = "") -> str:
+    """The commands that save on_start_script() and attach it to notebook instance `notebook` as a lifecycle
+    configuration, so its kernels come back by themselves after a restart (shown, never run)."""
+    lines = [
+        "# 1. In a terminal here (File > New > Terminal), save the script:",
+        "cat > on-start.sh <<'SCRIPT'",
+        on_start_script(folder),
+        "SCRIPT",
+        "# 2. Make it a lifecycle configuration. A notebook instance has one: if it has one already (auto-stop,",
+        "#    say), add the script's lines to that one's on-start script instead.",
+        "aws sagemaker create-notebook-instance-lifecycle-config \\",
+        f"    --notebook-instance-lifecycle-config-name {LIFECYCLE_NAME} \\",
+        '    --on-start Content="$(base64 -w0 on-start.sh)"',
+    ]
+    if notebook:
+        lines += [
+            "# 3. Attach it while the notebook instance is stopped. Stopping it ends this terminal, so run these",
+            "#    from AWS CloudShell or your laptop:",
+            f"aws sagemaker stop-notebook-instance --notebook-instance-name {notebook}",
+            f"aws sagemaker wait notebook-instance-stopped --notebook-instance-name {notebook}",
+            f"aws sagemaker update-notebook-instance --notebook-instance-name {notebook} "
+            f"--lifecycle-config-name {LIFECYCLE_NAME}",
+            f"aws sagemaker start-notebook-instance --notebook-instance-name {notebook}",
+        ]
+    return "\n".join(lines)
+
+
+def _disks(kind: str) -> tuple[str, str, str]:
+    """(the disk that's kept, the one that's reset, when it's reset) for where this runs."""
+    if kind == "notebook instance":
+        return "notebook volume", "system disk", "the notebook instance stops"
+    if kind == "studio":
+        return "home folder", "app disk", "the app stops"
+    return "", "", ""
+
+
+def _same_python(found: str, wanted: str) -> bool:
+    """Does the Python an environment has ('3.11.9') match the one asked for ('3.11')?"""
+    return found.split(".")[: len(wanted.split("."))] == wanted.split(".")
+
+
+def plan_findings(plan: EnvPlan, home: str | None = None) -> list[tuple[str, str]]:
+    """What to know before new_env() runs a plan: an environment that's there already, a disk too full, a folder
+    that's reset when the notebook stops, a kernel that is -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    _, reset_disk, event = _disks(plan.where)
+    where = shell_path(plan.path, home)
+    if plan.exists:
+        rest = "its packages are installed and its" if plan.packages else "its"
+        found.append(
+            (
+                "info",
+                f"{where} is there already with Python {plan.found or plan.python}, so it isn't made again: only "
+                f"{rest} Jupyter kernel is added.",
+            )
+        )
+    if plan.free is not None and plan.free < LOW_DISK:
+        found.append(
+            (
+                "warn",
+                f"Only {human_size(plan.free)} is free where it goes, and an environment takes from about 300 MB to "
+                "several GB (PyTorch alone is about 4 GB). When the disk fills, the install fails. disk() shows what "
+                "fills it and what's safe to clear.",
+            )
+        )
+    if plan.kept is False and event:
+        found.append(
+            (
+                "warn",
+                f"{where} is on the {reset_disk}, which is reset when {event}: the environment goes with it. Leave "
+                f"out path= to put it in {shell_path(plan.folder, home)}, which is kept.",
+            )
+        )
+    if plan.kept and plan.kernel_kept is False:
+        again = new_env_call(plan.python, plan.name)
+        found.append(
+            (
+                "info",
+                f"Its kernel goes in ~/{KERNELS_FOLDER}, which is reset when {event}, while the environment is kept. "
+                f"After a restart, {again} adds the kernel back in seconds, or the lifecycle configuration below "
+                "does it at every start.",
+            )
+        )
+    return found
+
+
+def lost_envs(report: EnvReport) -> list[PythonEnv]:
+    """The environments made since this machine started on the disk that's reset when the notebook stops: they
+    go then. (The image's own come back; a conda installation's base isn't made, only changed.)"""
+    return [
+        e
+        for e in report.envs
+        if e.kept is False and e.name != "base" and e.made and report.booted and e.made > report.booted
+    ]
+
+
+def env_findings(report: EnvReport, home: str | None = None) -> list[tuple[str, str]]:
+    """What to know about the Python environments and kernels here: environments that go when the notebook stops,
+    kernels that fail to start, environments missing from the kernel menu -> [(level, message)]."""
+    found: list[tuple[str, str]] = []
+    _, reset_disk, event = _disks(report.kind)
+    folder = shell_path(report.folder, home) if report.folder else ""
+    lost = lost_envs(report)
+    if lost and event:
+        e = lost[0]
+        names = ", ".join(x.name for x in lost[:5]) + (" …" if len(lost) > 5 else "")
+        again = new_env_call(_minor(e.python), e.name)
+        found.append(
+            (
+                "warn",
+                f"{_plural(len(lost), 'environment')} made since this machine started "
+                f"{'is' if len(lost) == 1 else 'are'} on the {reset_disk}, which is reset when {event} ({names}): "
+                f"{'it goes' if len(lost) == 1 else 'they go'}, with {'its' if len(lost) == 1 else 'their'} packages "
+                f"and kernels. {again} makes {e.name} again in {folder}, which is kept; then install its packages "
+                "there.",
+            )
+        )
+    broken = [k for k in report.kernels if k.missing]
+    for k in broken[:3]:
+        found.append(
+            (
+                "warn",
+                f"Kernel '{k.display}' starts {shell_path(k.program, home)}, which isn't there any more: picking it "
+                f"in Jupyter fails. To take it off the kernel menu: rm -rf {shell_path(k.path, home)}",
+            )
+        )
+    if len(broken) > 3:
+        found.append(("warn", f"{_plural(len(broken) - 3, 'more kernel')} start a Python that isn't there any more."))
+    unregistered = [
+        e for e in report.envs if not e.kernels and report.folder and Path(e.path).parent == Path(report.folder)
+    ]
+    if unregistered:
+        e = unregistered[0]
+        names = ", ".join(x.name for x in unregistered[:5]) + (" …" if len(unregistered) > 5 else "")
+        again = new_env_call(_minor(e.python), e.name)
+        why = (
+            f" Kernels are in ~/.local, which is reset when {event}, while the environments are kept."
+            if report.kind == "notebook instance"
+            else ""
+        )
+        found.append(
+            (
+                "info",
+                f"{names} in {folder} {'has' if len(unregistered) == 1 else 'have'} no Jupyter kernel, so "
+                f"{'it isn' if len(unregistered) == 1 else 'they aren'}'t in the kernel menu.{why} {again} adds "
+                f"{e.name}'s back in seconds"
+                + (", and the lifecycle configuration below adds them all at every start." if why else "."),
+            )
+        )
+    if not report.tools:
+        found.append(
+            (
+                "info",
+                "There's no conda, mamba, micromamba or uv here, so new_env() can't make an environment. "
+                "%pip install uv adds uv; new_env('3.11') then uses it.",
+            )
+        )
+    if report.errors:
+        found.append(
+            ("info", "Couldn't read " + ", ".join(f"{part} ({why})" for part, why in report.errors.items()) + ".")
+        )
+    return found
+
+
+_FAILURES = [  # (what the output says, what it means and what to do); {python} is the version asked for
+    (
+        re.compile(r"No space left on device", re.IGNORECASE),
+        "The disk filled up. disk() shows what fills it and what's safe to clear.",
+    ),
+    (
+        re.compile(r"No matching distribution found for (\S+)", re.IGNORECASE),
+        "pip can't find {match}: check its name and version on pypi.org.",
+    ),
+    (
+        re.compile(
+            r"PackagesNotFound|nothing provides (?:requested )?python|No interpreter found|No download found|"
+            r"not available from current channels",
+            re.IGNORECASE,
+        ),
+        "Python {python} isn't there to download: ask for a release that exists, like '3.12' or '3.11'.",
+    ),
+    (
+        re.compile(
+            r"resolve host|Name or service not known|name resolution|Failed to establish|Connection (?:refused|reset)|"
+            r"timed? ?out|CondaHTTPError|Failed to download|error sending request|dns error|ProxyError|"
+            r"Network is unreachable",
+            re.IGNORECASE,
+        ),
+        "It couldn't download what it needs. A notebook without direct internet access needs a NAT gateway or a "
+        "package mirror such as AWS CodeArtifact; instance() shows its internet access.",
+    ),
+]
+
+
+def env_failure(step: EnvStep, python: str = "") -> str:
+    """What a failed step's output means and what to do about it."""
+    if step.code == 127:
+        return f"{step.argv[0]} couldn't be run: it isn't there any more. envs() shows what's installed."
+    if step.code == -1:
+        return (
+            "It took too long and was stopped. Run the commands below in a terminal (File > New > Terminal) to see "
+            "where it's stuck."
+        )
+    for pattern, meaning in _FAILURES:
+        match = pattern.search(step.output)
+        if match:
+            return meaning.format(python=python, match=match.group(1) if match.groups() else "")
+    return (
+        "The end of what it printed is below. The commands are below too, to run in a terminal (File > New > "
+        "Terminal) and see all of it."
+    )
+
+
 # =============================================================================
 # 4. SageMakerAnalyzer - pure logic layer (reads this machine, talks to AWS, returns data)
 # =============================================================================
@@ -1877,7 +2402,9 @@ def _missing(exc: ClientError) -> bool:
 
 
 class SageMakerAnalyzer(_BaseAnalyzer):
-    """Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted.
+    """Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted. The one
+    method that makes anything is create_env(), which runs the commands of an env_plan() (a Python environment and its
+    Jupyter kernel).
 
     instance() and disk() read this machine (SageMaker's metadata file, /proc, the disks, nvidia-smi) as well as
     AWS, so they describe the notebook the code runs in. `root` is where that machine's files are ("/"; tests
@@ -2530,6 +3057,359 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         report.seconds = time.monotonic() - started
         return report
 
+    # ----------------------------------------------------- Python environments
+
+    def tools(self) -> dict[str, str]:
+        """The programs here that make Python environments, in the order new_env() prefers them: mamba, conda,
+        micromamba, uv -> the path of each one installed."""
+        home = self._user_home()
+        folders = [*_TOOL_FOLDERS, *(f"{home}/{folder}" for folder in _HOME_TOOL_FOLDERS)]
+        found: dict[str, str] = {}
+        for name in TOOLS:
+            candidates: list[str | None] = []
+            if self.root in ("", "/"):
+                candidates += [
+                    shutil.which(name),
+                    os.environ.get("CONDA_EXE") if name == "conda" else None,
+                    str(Path(sys.executable).parent / name),  # %pip install uv puts it next to this kernel's Python
+                ]
+            candidates += [str(self._real(f"{folder}/{name}")) for folder in folders]
+            path = next((c for c in candidates if c and os.path.isfile(c) and os.access(c, os.X_OK)), None)
+            if path:
+                found[name] = path
+        return found
+
+    def envs_folder(self) -> Path:
+        """Where new_env() puts environments: ~/SageMaker/envs on a notebook instance (the notebook volume is the
+        only disk it keeps when it stops), ~/.conda/envs elsewhere (a Studio home folder is kept)."""
+        if self.environment().kind == "notebook instance":
+            return self.home() / "envs"
+        return self._real("~/.conda/envs")
+
+    def _kept(self, path: str | Path) -> bool | None:
+        """Is `path` (a real path) on the disk that's kept when the notebook stops? None off SageMaker."""
+        if self.environment().kind not in ("notebook instance", "studio"):
+            return None
+        home, path = Path(os.path.normpath(self.home())), Path(os.path.normpath(path))
+        return path == home or home in path.parents
+
+    def _booted(self) -> datetime | None:
+        """When this machine started, from /proc/uptime."""
+        try:
+            seconds = float(self._path("proc/uptime").read_text().split()[0])
+        except (OSError, ValueError, IndexError):
+            return None
+        return _utcnow() - timedelta(seconds=seconds)
+
+    @staticmethod
+    def _env_python(prefix: Path) -> str:
+        """The Python version of the environment at `prefix`: '3.11.9', or '' when it can't tell. Reads its files
+        (conda-meta, pyvenv.cfg, lib/python3.x), never runs it."""
+        for meta in sorted((prefix / "conda-meta").glob("python-[0-9]*.json")):
+            version = _clean_version(meta.name[len("python-"):])
+            if version:
+                return version
+        try:
+            values = parse_pyvenv_cfg((prefix / "pyvenv.cfg").read_text(encoding="utf-8", errors="replace"))
+            version = _clean_version(values.get("version_info") or values.get("version") or "")
+            if version:
+                return version
+        except OSError:
+            pass
+        libs = [p.name[len("python"):] for p in prefix.glob("lib/python3.*")]
+        return max(libs, key=lambda v: tuple(int(n) for n in v.split(".") if n.isdigit()), default="")
+
+    @staticmethod
+    def _env_made(prefix: Path) -> datetime | None:
+        """When the environment at `prefix` was made: conda-meta/history's first entry, else when its pyvenv.cfg was
+        written."""
+        history = prefix / "conda-meta" / "history"
+        try:
+            with open(history, encoding="utf-8", errors="replace") as f:
+                made = parse_conda_history(f.read(4096))
+            if made is not None:
+                return made
+        except OSError:
+            pass
+        for path in (history, prefix / "pyvenv.cfg"):
+            try:
+                return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+            except OSError:
+                continue
+        return None
+
+    def _env_at(self, prefix: Path, name: str = "") -> PythonEnv | None:
+        """The environment at `prefix` (a real path), or None when it isn't one: no conda-meta or pyvenv.cfg, or no
+        bin/python (a link to a Python that's gone still counts)."""
+        conda = (prefix / "conda-meta").is_dir()
+        if not (conda or (prefix / "pyvenv.cfg").is_file()) or not os.path.lexists(prefix / "bin" / "python"):
+            return None
+        return PythonEnv(
+            name or prefix.name,
+            self._shown(prefix),
+            self._env_python(prefix),
+            "conda" if conda else "venv",
+            ipykernel=any(prefix.glob("lib/python3*/site-packages/ipykernel")),
+            kept=self._kept(prefix),
+            made=self._env_made(prefix),
+        )
+
+    def _env_prefixes(self, tools: dict[str, str], folder: Path) -> dict[str, str]:
+        """Where environments may be: each conda installation and its envs/, ~/.conda/envs, new_env()'s folder, what
+        conda noted in ~/.conda/environments.txt, and this kernel's -> {real path: name}."""
+        found: dict[str, str] = {}
+
+        def add(path: Path, name: str = "") -> None:
+            found.setdefault(os.path.normpath(path), name)
+
+        def children(path: Path) -> None:
+            try:
+                for child in sorted(path.iterdir()):
+                    if child.is_dir() and not child.name.startswith("."):
+                        add(child)
+            except OSError:
+                pass
+
+        roots = [Path(tools[t]).parent.parent for t in ("mamba", "conda") if t in tools]
+        roots += [self._real(r) for r in (*_CONDA_ROOTS, *(f"~/{r}" for r in _HOME_CONDA_ROOTS))]
+        for root in roots:
+            if root.is_dir():
+                add(root, "base")
+                children(root / "envs")
+        for path in (folder, self._real("~/.conda/envs")):
+            children(path)
+        try:
+            noted = self._real("~/.conda/environments.txt").read_text(encoding="utf-8", errors="replace")
+            for line in noted.splitlines():
+                if line.strip().startswith("/"):
+                    add(self._real(line.strip()))
+        except OSError:
+            pass
+        if self.root in ("", "/"):
+            add(Path(sys.prefix))
+        return found
+
+    def _kernel_folders(self) -> list[Path]:
+        """The folders Jupyter finds kernels in: yours (~/.local/share/jupyter/kernels), JUPYTER_PATH's, the Jupyter
+        server's environment's, and the system's."""
+        folders = []
+        if self.root in ("", "/"):
+            data = os.environ.get("JUPYTER_DATA_DIR")
+            folders += [Path(data, "kernels")] if data else []
+            folders += [Path(p, "kernels") for p in os.environ.get("JUPYTER_PATH", "").split(os.pathsep) if p]
+        folders.append(self._real(f"~/{KERNELS_FOLDER}"))
+        servers = [self._real(p) for p in _JUPYTER_SERVERS]
+        if self.environment().kind == "local" and self.root in ("", "/"):
+            servers.append(Path(sys.prefix))  # off SageMaker, Jupyter usually runs from this kernel's environment
+        folders += [p / "share/jupyter/kernels" for p in servers]
+        folders += [self._real(p) for p in ("/usr/local/share/jupyter/kernels", "/usr/share/jupyter/kernels")]
+        return folders
+
+    def _kernel_at(self, spec: Path, envs: dict[str, PythonEnv]) -> KernelSpec | None:
+        """The kernel described by `spec` (a kernel.json), or None when it can't be read."""
+        try:
+            data = json.loads(spec.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        argv = data.get("argv") if isinstance(data, dict) else None
+        program = str(argv[0]) if isinstance(argv, list) and argv else ""
+        kernel = KernelSpec(
+            spec.parent.name,
+            str(data.get("display_name") or spec.parent.name),
+            self._shown(spec.parent),
+            program,
+            str(data.get("language") or ""),
+            kept=self._kept(spec.parent),
+        )
+        if program.startswith("/"):
+            real = self._real(program)
+            kernel.missing = not real.exists()
+            env = envs.get(os.path.normpath(real.parent.parent))
+        else:  # 'python': the Python of the environment the kernel's folder is in
+            env = envs.get(os.path.normpath(spec.parents[4])) if len(spec.parents) > 4 else None
+        if env is not None:
+            kernel.env = env.path
+            env.kernels.append(kernel.display)
+        return kernel
+
+    def environments(self) -> EnvReport:
+        """The Python environments on this machine (conda environments and virtual environments) with their Python
+        versions, the Jupyter kernels and the environment each starts, the programs here that make environments,
+        and where new_env() puts them. Reads local files only."""
+        env = self.environment()
+        report = EnvReport(env.kind, python=platform.python_version(), executable=sys.executable)
+        report.tools = self.tools()
+        folder = self.envs_folder()
+        report.folder, report.folder_kept = self._shown(folder), self._kept(folder)
+        report.booted = self._booted()
+        here = os.path.normpath(sys.prefix) if self.root in ("", "/") else ""
+        envs: dict[str, PythonEnv] = {}
+        for path, name in self._env_prefixes(report.tools, folder).items():
+            found = self._env_at(Path(path), name)
+            if found is not None:
+                found.this = path == here
+                envs[path] = found
+        seen: set[str] = set()
+        for kernels in self._kernel_folders():
+            try:
+                specs = sorted(kernels.glob("*/kernel.json"))
+            except OSError as exc:
+                report.errors[self._shown(kernels)] = str(exc)
+                continue
+            for spec in specs:
+                if spec.parent.name.lower() in seen:
+                    continue  # Jupyter uses the first kernel of a name it finds
+                kernel = self._kernel_at(spec, envs)
+                if kernel is not None:
+                    seen.add(kernel.name.lower())
+                    report.kernels.append(kernel)
+        if env.kind == "notebook instance":
+            # A notebook instance's Jupyter lists each conda environment in ~/anaconda3/envs that has ipykernel as
+            # conda_<name> by itself (its EnvironmentKernelSpecManager); there's no kernel.json for those.
+            anaconda = os.path.normpath(self._real(f"{_ANACONDA}/envs"))
+            for path, e in envs.items():
+                if os.path.dirname(path) == anaconda and e.ipykernel and e.name != "JupyterSystemEnv":
+                    label = f"conda_{e.name}"
+                    e.kernels.append(label)
+                    report.kernels.append(
+                        KernelSpec(label, label, "", self._shown(Path(path, "bin", "python")), "python", e.path,
+                                   e.kept)
+                    )
+        report.envs = sorted(envs.values(), key=lambda e: (not e.this, e.path))
+        return report
+
+    def env_plan(
+        self,
+        python: Any = "3.11",
+        name: str | None = None,
+        *,
+        packages: Any = None,
+        path: str | None = None,
+        tool: str = "auto",
+    ) -> EnvPlan:
+        """What new_env() does, without doing it: where the environment goes, what makes it, and the commands.
+        Raises ValueError for a version, name, folder or tool it can't use."""
+        version = parse_python_version(python)
+        prefix = self._real(path) if path else None
+        if prefix is not None and not prefix.is_absolute():
+            prefix = Path.cwd() / prefix  # from the notebook's folder; the kernel needs the whole path
+        name = str(name).strip() if name is not None else (prefix.name if prefix else env_name(version))
+        if not _ENV_NAME_RE.match(name):
+            raise ValueError(f"name takes letters, digits, '.', '_' and '-', like 'py311' (got {name!r}).")
+        folder = self.envs_folder()
+        prefix = prefix or folder / name
+        tools = self.tools()
+        tool = str(tool or "auto").strip().lower()
+        if tool == "auto":
+            if not tools:
+                raise _Hint(
+                    "There's no conda, mamba, micromamba or uv on this machine to make an environment with. "
+                    "%pip install uv adds uv; then run new_env() again."
+                )
+            tool = next(iter(tools))
+        elif tool not in TOOLS:
+            raise ValueError(f"tool takes 'auto', {', '.join(map(repr, TOOLS))} (got {tool!r}).")
+        elif tool not in tools:
+            others = f" ({', '.join(tools)} {'is' if len(tools) == 1 else 'are'}: leave out tool=)" if tools else ""
+            how = " %pip install uv adds it." if tool == "uv" else ""
+            raise _Hint(f"There's no {tool} on this machine{others}.{how}")
+        home = self._user_home()
+        existing = self._env_at(prefix) if prefix.exists() else None
+        if existing is None and prefix.exists() and (not prefix.is_dir() or any(prefix.iterdir())):
+            raise ValueError(
+                f"{shell_path(self._shown(prefix), home)} is there already and isn't a Python environment. "
+                f"Pick another name=, or remove it first: rm -rf {shell_path(self._shown(prefix), home)}"
+            )
+        if existing is not None and existing.python and not _same_python(existing.python, version):
+            raise ValueError(
+                f"{shell_path(existing.path, home)} is there already with Python {existing.python}. Pick another "
+                f"name ({new_env_call(version, name + '-new')}), or remove it first: "
+                f"rm -rf {shell_path(existing.path, home)}"
+            )
+        python_dir = ""
+        if tool == "uv" and self.environment().kind == "notebook instance":
+            python_dir = str(folder / ".python")  # uv's own (~/.local/share/uv) is reset when the instance stops
+        steps = env_steps(
+            tool, tools[tool], prefix, version, name, package_list(packages), exists=existing is not None,
+            ipykernel=bool(existing and existing.ipykernel), python_dir=python_dir,
+        )
+        for step in steps:
+            step.command = step_command(step, self._shown, home)
+        plan = EnvPlan(
+            name, version, self._shown(prefix), tool, kernel_label(version, name), package_list(packages), steps,
+            exists=existing is not None, found=existing.python if existing else "", kept=self._kept(prefix),
+            where=self.environment().kind, folder=self._shown(folder),
+            kernel_kept=self._kept(self._real(f"~/{KERNELS_FOLDER}")),
+        )
+        there = next((p for p in (prefix, *prefix.parents) if p.exists()), None)
+        if there is not None:
+            try:
+                plan.free = self._disk_usage(str(there))[2]
+            except OSError:
+                pass
+        if plan.where == "notebook instance" and plan.kept and plan.kernel_kept is False:
+            plan.on_start = self._shown(prefix.parent)
+        return plan
+
+    def _run(self, argv: list[str], env: dict[str, str], timeout: float) -> tuple[int, str]:
+        """Runs one command -> (its exit status, what it printed). -1 when it ran past `timeout` seconds and was
+        stopped, 127 when it couldn't be started. Tests and the demo replace this."""
+        variables = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")}
+        try:
+            done = subprocess.run(
+                argv,
+                env={**variables, **env},
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output = exc.output or ""
+            text = output.decode("utf-8", "replace") if isinstance(output, bytes) else output
+            return -1, text + f"\nStopped after {human_runtime(timeout)}."
+        except OSError as exc:
+            return 127, f"{argv[0]}: {exc.strerror or exc}"
+        return done.returncode, done.stdout or ""
+
+    def create_env(
+        self,
+        plan: EnvPlan,
+        *,
+        progress: Callable[..., None] | None = None,
+        timeout: float = 1800,
+    ) -> EnvResult:
+        """Runs a plan's commands in order and stops at the first that fails -> EnvResult. Makes the folder the
+        environment goes in, and never removes anything. Each command may run `timeout` seconds; progress is called
+        with (steps done, steps)."""
+        result = EnvResult(plan)
+        started = time.monotonic()
+        prefix = self._real(plan.path)
+        prefix.parent.mkdir(parents=True, exist_ok=True)
+        total = len(plan.steps)
+        for done, step in enumerate(plan.steps):
+            if progress:
+                progress(done, total)
+            began = time.monotonic()
+            code, output = self._run(step.argv, step.env, timeout)
+            step.seconds, step.code, step.output = time.monotonic() - began, code, output_tail(output)
+            if code != 0:
+                result.failed = step
+                break
+        else:
+            if progress:
+                progress(total, total)
+        result.ok = result.failed is None
+        result.python = self._env_python(prefix) if prefix.is_dir() else ""
+        result.leftover = (
+            not result.ok and not plan.exists and prefix.exists() and self._env_at(prefix) is None
+            and (not prefix.is_dir() or any(prefix.iterdir()))
+        )
+        result.seconds = time.monotonic() - started
+        return result
+
     # ----------------------------------------------------------------- running
 
     def _notebook_billables(self, report: RunningReport) -> list[Billable]:
@@ -2846,6 +3726,7 @@ class SageMakerView(_BaseView):
     _render_html = staticmethod(_render_html)  # its look: the stylesheet, root class and badge
     _GROUPS = {  # help() lists the commands in these groups, in this order
         "💻 This notebook": ("instance", "disk"),
+        "🐍 Python environments": ("envs", "new_env"),
         "☁️ Your account": ("running",),
         "❓ Help": ("help",),
     }
@@ -2853,6 +3734,7 @@ class SageMakerView(_BaseView):
         ("instance()", "this notebook: its type, cost, idle shutdown, memory and disk"),
         ("disk()", "what fills the disk, and what's safe to clear"),
         ("running()", "everything running and billing in this region"),
+        ("new_env('3.11')", "a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops"),
     )
 
     def __init__(
@@ -3136,6 +4018,8 @@ class SageMakerView(_BaseView):
             )
         elif m is not None:
             steps.append(("disk()", "what fills the disk, and what's safe to clear"))
+        if m is not None:
+            steps.append(("envs()", "the Python environments and kernels here, and how to add one"))
         steps.append(("running()", f"everything running and billing in {region}"))
         if not report.current:
             steps.append(("instance()", "the notebook this code runs in"))
@@ -3424,6 +4308,274 @@ class SageMakerView(_BaseView):
             steps.append(
                 ("instance()", "this notebook's cost, memory and idle shutdown")
             )
+        blocks.append(_Next(steps))
+        self._show(blocks)
+
+    # ----------------------------------------------------- Python environments
+
+    @_friendly_errors
+    def envs(self) -> None:
+        """The Python environments on this machine and the Jupyter kernels that start them: each one's Python version,
+        where it is and whether it's kept when the notebook stops, and kernels that fail to start.
+
+        new_env('3.11') makes another one. Nothing here removes one; where that would help, the command is shown."""
+        report = self.core.environments()
+        home = self.core._user_home()
+        findings = env_findings(report, home)
+        warned = " ".join(message for level, message in findings if level == "warn")
+        env = self.core.environment()
+        _, _, event = _disks(report.kind)
+        folder = shell_path(report.folder, home)
+        lost = lost_envs(report)
+        broken = sum(k.missing for k in report.kernels)
+        cards: list[tuple[str, ...]] = [
+            ("This kernel", f"Python {report.python}"),
+            ("Environments", f"{len(report.envs):,}"),
+            (
+                "Jupyter kernels",
+                f"{len(report.kernels):,}" + (f", {broken:,} broken" if broken else ""),
+                "warn" if broken and "isn't there any more" in warned else "",
+            ),
+            ("Makes environments with", ", ".join(report.tools) or "nothing installed"),
+            ("New ones go in", folder + (", kept" if report.folder_kept else "")),
+        ]
+        blocks: list[Any] = [
+            _Title(
+                "Python environments",
+                " · ".join(
+                    filter(
+                        None,
+                        [
+                            env.label if env.on_sagemaker else "",
+                            f"kept: still there after {event}" if event else "",
+                            "this tool never removes one",
+                        ],
+                    )
+                ),
+            ),
+            _Cards(cards),
+            _Findings(findings, empty="No issues found by these checks."),
+        ]
+        if report.envs:
+            headers = ["Environment", "Python", "Kind", "Where"] + (["Kept"] if event else [])
+            rows = []
+            for e in report.envs:
+                kept: Any = "-" if e.kept is None else "yes" if e.kept else "no"
+                if e in lost and event:
+                    kept = _Tone("no", "warn")
+                row: list[Any] = [
+                    e.name + ("  📍 this kernel" if e.this else ""),
+                    e.python or "?",
+                    e.kind,
+                    shell_path(e.path, home),
+                ]
+                row += [kept] if event else []
+                row += [", ".join(e.kernels) or ("-" if e.ipykernel else "no ipykernel"), human_age(e.made)]
+                rows.append(row)
+            blocks.append(
+                _Table(headers + ["Jupyter kernel", "Made"], rows, title="Environments", max_rows=0)
+            )
+        else:
+            blocks.append(_Note("No Python environments found in the usual places."))
+        if report.kernels:
+            rows = []
+            for k in report.kernels:
+                if k.missing:
+                    starts: Any = _Tone(f"{shell_path(k.program, home)} (not there)", "bad")
+                elif k.env:
+                    starts = shell_path(k.env, home)
+                else:
+                    starts = shell_path(k.program, home) if k.program.startswith("/") else (k.program or "?")
+                kept = "-" if k.kept is None else "yes" if k.kept else "no"
+                row = [k.display, k.name, starts] + ([kept] if event else [])
+                rows.append(row + [shell_path(k.path, home) if k.path else "(Jupyter lists it by itself)"])
+            headers = ["Kernel", "Name", "Starts"] + (["Kept"] if event else []) + ["Folder"]
+            blocks.append(_Table(headers, rows, title="Jupyter kernels", max_rows=0))
+        ours = [e for e in report.envs if report.folder and os.path.dirname(e.path) == report.folder]
+        if report.kind == "notebook instance" and ours:
+            blocks.append(
+                _Text(
+                    kernels_lifecycle(report.folder, env.name),
+                    title="Add the kernels back at every start (lifecycle configuration)",
+                    code=True,
+                    collapsed=True,
+                )
+            )
+        have = {_minor(v) for v in [report.python] + [e.python for e in report.envs if e.python]}
+        suggest = next((v for v in _SUGGESTED if v not in have), _SUGGESTED[0])
+        steps = [
+            (new_env_call(suggest), f"a Python {suggest} environment with its own kernel, in {folder}"),
+            (new_env_call(suggest, dry_run=True), "the commands that make it, without running them"),
+        ]
+        if ours:
+            steps.append((_call("disk", _tilde(report.folder, home)), "how much disk the environments take"))
+        blocks.append(_Next(steps))
+        self._show(blocks)
+
+    def _again(self, plan: EnvPlan, **extra: Any) -> str:
+        """new_env(...) for this plan again, with only the arguments that differ from the defaults."""
+        kwargs: dict[str, Any] = {}
+        if plan.path != os.path.join(plan.folder, plan.name):
+            kwargs["path"] = _tilde(plan.path, self.core._user_home())
+        if plan.packages:
+            kwargs["packages"] = " ".join(plan.packages)
+        return new_env_call(plan.python, plan.name, **{**kwargs, **extra})
+
+    @_friendly_errors
+    def new_env(
+        self,
+        python: Any = "3.11",
+        name: str | None = None,
+        *,
+        packages: Any = None,
+        path: str | None = None,
+        tool: str = "auto",
+        dry_run: bool = False,
+    ) -> None:
+        """Makes a Python environment with the version you ask for, in a folder that's kept when the notebook stops,
+        and adds it to Jupyter's kernel menu. It takes a minute or two; dry_run=True shows the commands instead.
+
+        python: '3.11', '3.12.4' or 'py311'. name: its folder and kernel ('py311' for 3.11). packages: what to pip
+        install in it ('pandas boto3', a list, or '-r requirements.txt'). path: another folder for it. tool: 'auto'
+        (the first of mamba, conda, micromamba and uv that's here), or one of them; conda ones use conda-forge.
+        Run it again on an environment that's there and only the packages and the kernel are set up: after a
+        notebook instance restarts, new_env('3.11') adds the kernel back in seconds. It writes only the environment's
+        folder and its kernel, and never removes anything."""
+        plan = self.core.env_plan(python, name, packages=packages, path=path, tool=tool)
+        home = self.core._user_home()
+        where = shell_path(plan.path, home)
+        findings = plan_findings(plan, home)
+        warned = " ".join(message for level, message in findings if level == "warn")
+        env = self.core.environment()
+        _, _, event = _disks(plan.where)
+        kept: list[tuple[str, ...]] = []
+        if event and plan.kept is not None:
+            kept = [("Kept when it stops", "yes" if plan.kept else "no", "" if plan.kept or not warned else "warn")]
+        commands = "\n".join(step.command for step in plan.steps)
+        lifecycle = (
+            _Text(
+                kernels_lifecycle(plan.on_start, env.name if env.kind == "notebook instance" else ""),
+                title="Add the kernels back at every start (lifecycle configuration)",
+                code=True,
+                collapsed=True,
+            )
+            if plan.on_start
+            else None
+        )
+        if dry_run:
+            low = plan.free is not None and plan.free < LOW_DISK
+            cards: list[tuple[str, ...]] = [
+                ("Python", plan.python),
+                ("Name", plan.name),
+                ("Where", where),
+                *kept,
+                ("Made with", plan.tool if not plan.exists else "there already"),
+                ("Kernel", plan.kernel),
+            ]
+            if plan.free is not None:
+                cards.append(("Free there", human_size(plan.free), "warn" if low and "free" in warned else ""))
+            blocks: list[Any] = [
+                _Title(f"New environment {plan.name}", "what new_env() would do · nothing has run yet"),
+                _Cards(cards),
+                _Findings(findings),
+                _Text(commands, title="Commands, to run in a terminal", code=True),
+            ]
+            blocks += [lifecycle] if lifecycle else []
+            blocks.append(
+                _Next(
+                    [
+                        (self._again(plan), "run them: make it and add its kernel"),
+                        ("envs()", "the environments and kernels here"),
+                    ]
+                )
+            )
+            self._show(blocks)
+            return
+        with self._progress(f"{'Setting up' if plan.exists else 'Making'} {plan.name}", unit="steps") as tick:
+            result = self.core.create_env(plan, progress=tick)
+        step = result.failed
+        took = human_runtime(result.seconds)
+        if step is None:
+            python = result.python or plan.python
+            blocks = [
+                _Title(
+                    f"{plan.name}: Python {python}, kernel added" if plan.exists
+                    else f"New environment {plan.name}: Python {python}",
+                    " · ".join(
+                        [
+                            f"took {took}" if plan.exists else f"made with {plan.tool} in {took}",
+                            f"'{plan.kernel}' in Jupyter's kernel menu",
+                        ]
+                    ),
+                ),
+                _Cards([("Python", python), ("Kernel", plan.kernel), ("Where", where), *kept, ("Took", took)]),
+                _Note(
+                    f"Ready: pick '{plan.kernel}' in Jupyter's kernel menu (Kernel > Change Kernel), or start a "
+                    "notebook with it from the Launcher; it can take a minute to show up. %pip install in a notebook "
+                    f"on that kernel installs into it, and in a terminal its Python is {where}/bin/python.",
+                    "ok",
+                ),
+                _Findings(findings),
+            ]
+            steps = [
+                (
+                    self._again(plan, packages="-r requirements.txt"),
+                    "install your project's packages in it: only those, since it's there",
+                ),
+                ("envs()", "every environment and kernel here"),
+            ]
+        else:
+            failures = [
+                (
+                    "warn",
+                    f"{step.label} failed"
+                    + (f" (exit status {step.code})" if step.code not in (None, -1) else "")
+                    + f" after {human_runtime(step.seconds)}. {env_failure(step, plan.python)}",
+                )
+            ]
+            if result.leftover:
+                failures.append(
+                    (
+                        "info",
+                        f"It left {where} half made, and new_env() won't use a folder that isn't an environment. "
+                        f"Remove it before trying again: rm -rf {where}",
+                    )
+                )
+            blocks = [
+                _Title(
+                    f"New environment {plan.name}: not made" if not plan.exists
+                    else f"{plan.name}: {step.label.lower()} failed",
+                    f"Python {plan.python} with {plan.tool} · stopped after {took}",
+                ),
+                _Cards(
+                    [("Python", plan.python), ("Where", where), ("Made with", plan.tool), ("Failed at", step.label, "bad")]
+                ),
+                _Findings(failures + [(level, message) for level, message in findings if level == "warn"]),
+            ]
+            if step.output:
+                blocks.append(_Text(step.output, title="The end of what it printed"))
+            steps = [(self._again(plan, dry_run=True), "the commands, without running them")]
+            if "disk()" in failures[0][1]:
+                steps.append((_call("disk", _tilde(plan.folder, home)), "what fills the disk"))
+            steps.append(("envs()", "the environments and kernels here"))
+        rows = []
+        for s in plan.steps:
+            outcome: Any = "not run"
+            if s.code == 0:
+                outcome = _Tone("done", "ok")
+            elif s.code is not None:
+                outcome = _Tone("stopped: too slow" if s.code == -1 else f"failed ({s.code})", "bad")
+            rows.append([s.label, "-" if s.seconds is None else human_runtime(s.seconds), outcome])
+        blocks.append(_Table(["Step", "Took", "Result"], rows, title="Steps", max_rows=0, sortable=False))
+        blocks.append(
+            _Text(
+                commands,
+                title="Commands, to run in a terminal" if step else "Commands it ran",
+                code=True,
+                collapsed=step is None,
+            )
+        )
+        blocks += [lifecycle] if lifecycle and step is None else []
         blocks.append(_Next(steps))
         self._show(blocks)
 
