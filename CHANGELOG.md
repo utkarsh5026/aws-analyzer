@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-16
+
 ### Added
 
 - SageMaker: `new_env("3.11")` makes a Python environment with the version you ask for and adds it to Jupyter's kernel
@@ -17,10 +19,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   ones with conda-forge), and `packages="pandas boto3"` or `packages="-r requirements.txt"` installs what you list.
   Run it again after a notebook instance restarts and it only adds the kernel back; the report also has the lifecycle
   configuration that does that at every start. `dry_run=True` shows the commands instead, and a failed step says why
-  (no internet access, a full disk, a version that doesn't exist) with the end of its output.
+  (no internet access, a full disk, a version that doesn't exist) with the end of its output
+  ([#81](https://github.com/utkarsh5026/aws-analyzer/pull/81)).
 - SageMaker: `envs()` lists the Python environments and Jupyter kernels on the machine, with each one's Python version
   and whether it's kept when the notebook stops. It warns about environments that will be gone after the next stop,
-  kernels whose Python isn't there any more, and environments that lost their kernel in a restart.
+  kernels whose Python isn't there any more, and environments that lost their kernel in a restart
+  ([#81](https://github.com/utkarsh5026/aws-analyzer/pull/81)).
 - Lambda: `how_it_works("orders-etl")` explains how a Python function's code works, read from its package with
   Python's `ast` module and never run. A few sentences sum it up. Then come each step of a call from the handler on,
   with the functions it calls in its own files folded under the lines that call them, and each line tagged with what
@@ -577,7 +581,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...v0.16.0
