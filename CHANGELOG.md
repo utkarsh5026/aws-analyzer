@@ -21,6 +21,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - SageMaker: `envs()` lists the Python environments and Jupyter kernels on the machine, with each one's Python version
   and whether it's kept when the notebook stops. It warns about environments that will be gone after the next stop,
   kernels whose Python isn't there any more, and environments that lost their kernel in a restart.
+- Lambda: `how_it_works("orders-etl")` explains how a Python function's code works, read from its package with
+  Python's `ast` module and never run. A few sentences sum it up. Then come each step of a call from the handler on,
+  with the functions it calls in its own files folded under the lines that call them, and each line tagged with what
+  it does: AWS calls, environment variables, event fields, HTTP requests, logs. After that come its AWS calls with the
+  IAM permissions they need, the environment variables it reads and whether they're set, a test event with the fields
+  it reads, and its imports and where Lambda finds them. Findings catch a variable it needs that isn't set, an import
+  Lambda can't find, a handler that isn't there, HTTP requests without a timeout, list calls that read only their first
+  page, errors it drops, files written outside `/tmp`, secrets written in the code, and AWS calls in a loop that a
+  batch call would make in fewer requests. `map_code()` does the same on code you have on disk.
+- Lambda explorer: **How it works** in the **Code** tab shows the same for a Python function, in place of the source.
 
 ## [0.17.0] - 2026-10-15
 

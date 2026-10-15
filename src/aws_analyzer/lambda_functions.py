@@ -34,6 +34,7 @@ Quick start
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
+    ui.how_it_works("etl-nightly")                    # how its Python code works, step by step from the handler
     ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
     ui.explore()                                      # all of it in a window, by clicking: functions, logs, errors
 
@@ -48,8 +49,10 @@ Quick start
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import base64
+import copy
 import dataclasses
 import difflib
 import fnmatch
@@ -61,6 +64,7 @@ import math
 import os
 import posixpath
 import re
+import sys
 import threading
 import time
 import urllib.request
@@ -904,6 +908,171 @@ class PackageDownload:
     sha256_matches: bool | None = None  # its SHA-256 against the CodeSha256 Lambda reports (None: Lambda gave none)
     replaced: bool = False  # a file of that name was there already, and this replaced it
     marked: bool = False  # the downloads folder was made now, with a .gitignore that keeps it out of git
+
+
+@dataclass
+class CodeStep:
+    """A line of how_it_works()'s outline: a statement of the function's own code that does something worth knowing
+    (calls AWS, the network or one of its own functions, reads the event or an environment variable, logs, returns or
+    raises), or a loop, branch, `with` or `try` around such lines, with what it does in plain English."""
+
+    file: str
+    line: int
+    code: str  # the statement on one line: "for record in event['Records']:"
+    kind: str = "do"  # 'do', 'loop', 'if', 'else', 'with', 'try', 'except', 'return', 'raise', 'def', 'module'
+    notes: list[tuple[str, str]] = field(default_factory=list)  # (kind, what): ('aws-reads', 'S3 GetObject'), ...
+    steps: list[CodeStep] = field(default_factory=list)  # the lines under it: a loop's body, a function's steps
+    calls: list[CodeStep] = field(default_factory=list)  # 'def' steps: its own functions this line calls
+    name: str = ""  # a 'def' step: the function ('db.connect'); a 'module' step: the module ('db')
+    seen: bool = False  # a 'def' step whose steps are shown where it was first called, not again here
+
+    def walk(self) -> Iterable[CodeStep]:
+        """This step and every step under it, in the order they're shown."""
+        yield self
+        for step in [*self.calls, *self.steps]:
+            yield from step.walk()
+
+
+@dataclass
+class AwsCall:
+    """An AWS API call the code makes, found by following its boto3 clients and resources."""
+
+    service: str  # boto3's name: 's3', 'dynamodb'
+    operation: str  # 'GetObject'
+    access: str  # 'reads', 'writes', 'sends' (a message or event), 'runs' (invokes or starts something) or 'signs'
+    # (a presigned link: no request)
+    permission: str  # the IAM action its role needs: 's3:GetObject' ('' when it needs none)
+    file: str
+    line: int
+    function: str  # where: 'etl.handler', or the module ('etl') for code that runs when Lambda starts it
+    code: str  # the call: "s3.get_object(Bucket=body['bucket'], Key=body['key'])"
+    loop: str = ""  # the loop it's in: 'for row in rows:'
+    pages: str = ""  # a list call: 'all' (a paginator, or it follows the next-page token), 'one' (its first page only)
+    guessed: bool = False  # from the method's name alone: its client couldn't be followed
+    startup: bool = False  # made when Lambda loads the code (once per cold start), not on each call
+
+    @property
+    def label(self) -> str:
+        """'S3 GetObject'."""
+        return f"{_service_name(self.service)} {self.operation}"
+
+
+@dataclass
+class EnvRead:
+    """An environment variable the code reads. Its value is never read: only its name."""
+
+    name: str
+    file: str
+    line: int
+    function: str
+    required: bool  # os.environ['X']: a KeyError when it isn't set; os.environ.get / os.getenv give a default
+    default: str = ""  # the default, as code
+    startup: bool = False  # read when Lambda loads the code (once per cold start)
+
+
+@dataclass
+class EventField:
+    """A field the code reads from the event Lambda passes the handler."""
+
+    path: tuple[str, ...]  # ('Records', '[]', 'body', '{json}', 'bucket')
+    file: str
+    line: int
+    required: bool  # event['x'] (a KeyError when it's missing), not event.get('x')
+
+    @property
+    def label(self) -> str:
+        """'Records[].body (JSON) bucket'."""
+        return _event_label(self.path)
+
+
+@dataclass
+class CodeFunction:
+    """One of the package's own functions that runs when the handler does."""
+
+    name: str  # 'db.connect', 'repo.Orders.save'
+    file: str
+    line: int
+    lines: int
+    args: str  # 'host, password'
+    doc: str = ""  # its docstring's first line
+    called_from: list[str] = field(default_factory=list)  # 'etl.handler line 19'
+    depth: int = 0  # calls from the handler (the handler is 0)
+
+
+@dataclass
+class ImportUse:
+    """A module the code imports, and where Lambda finds it."""
+
+    module: str  # as written: 'requests', 'db', 'pkg.sub'
+    source: str  # 'own' (its own files), 'stdlib', 'runtime' (boto3, botocore...), 'package' (a library packed in
+    # it), 'layer' (none of those, and the function has layers), 'missing', or 'removed' (from the runtime's Python)
+    file: str
+    line: int
+    optional: bool = False  # in a try that catches ImportError
+    startup: bool = True  # imported when the module loads, not inside a function
+
+    @property
+    def top(self) -> str:
+        return self.module.split(".")[0]
+
+
+@dataclass
+class CodeSpot:
+    """A line how_it_works()'s findings are about."""
+
+    kind: str  # 'http', 'sleep', 'write', 'secret', 'swallow', 'client', 'command', 'syntax'
+    file: str
+    line: int
+    function: str
+    code: str
+    detail: str = ""  # http: the method; write: the path; secret: its name (never the value); client: the service
+    ok: bool = True  # http: has a timeout; client: made once and reused; write: under /tmp
+    loop: str = ""
+    startup: bool = False  # when Lambda loads the code (once per cold start)
+
+
+@dataclass
+class CodeMap:
+    """How a Python function's code works, read from its deployment package with Python's ast module (nothing in it is
+    run): what runs when Lambda starts it, the steps of each call from the handler on, following its own functions,
+    and what they reach outside: AWS calls, environment variables, the event's fields, libraries and HTTP."""
+
+    function: Function | None
+    handler: str | None  # the handler setting: 'etl.handler'
+    handler_file: str | None = None  # 'etl.py'
+    entry: str | None = None  # the function Lambda calls, as module.name ('etl.handler'); None when it isn't there
+    entry_line: int = 0
+    params: list[str] = field(default_factory=list)  # the handler's parameters: 'event', 'ctx=…', '*args'
+    is_async: bool = False  # async def: the Python runtime doesn't await it
+    startup: list[CodeStep] = field(default_factory=list)  # what runs when Lambda loads the code (once per cold start)
+    steps: list[CodeStep] = field(default_factory=list)  # one 'def' step: the handler's, with every step under it
+    functions: list[CodeFunction] = field(default_factory=list)  # its own functions the handler reaches, in order
+    aws: list[AwsCall] = field(default_factory=list)
+    env: list[EnvRead] = field(default_factory=list)
+    event: list[EventField] = field(default_factory=list)
+    imports: list[ImportUse] = field(default_factory=list)
+    spots: list[CodeSpot] = field(default_factory=list)
+    returns: list[tuple[str, str, int]] = field(default_factory=list)  # what the handler returns: (code, file, line)
+    routes: list[tuple[str, str, str]] = field(default_factory=list)  # web routes: (method, path, function)
+    files: int = 0  # Python files read
+    lines: int = 0  # their lines
+    other_files: int = 0  # its own Python files the handler's code never imports (tests, scripts, other handlers)
+    unreached: int = 0  # functions in the files it read that the handler never reaches
+    skipped: list[tuple[str, str]] = field(default_factory=list)  # (file, why) for files that couldn't be read
+    limited: str = ""  # what was cut short, when something was
+    note: str | None = None  # why there's nothing to map: not Python, a container image, no handler file
+    handlers: list[str] = field(default_factory=list)  # when the handler isn't in its file: the functions there
+    # that take two arguments
+
+    @property
+    def services(self) -> list[str]:
+        """The AWS services it calls, as people name them ('S3', 'DynamoDB'), in the order it first calls them."""
+        return list(dict.fromkeys(_service_name(call.service) for call in self.aws))
+
+    def to_df(self):
+        """Its AWS calls, a row each."""
+        pd = _require("pandas", "CodeMap.to_df()")
+        return pd.DataFrame([{**vars(call), "label": call.label} for call in self.aws])
 
 
 # =============================================================================
@@ -2323,6 +2492,1906 @@ def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
     return found
 
 
+# ----------------------------------------------------------------------------- how_it_works(): the code, read with ast
+
+_MAP_DEPTH = 8  # calls followed from the handler; a function deeper than this is named, not opened
+_MAP_STEPS = 2_500  # outline lines, at most: past that, the functions it calls are named, not opened
+_MAP_RUNS = 3_000  # function bodies read (one function is read again for other arguments), at most
+_MAP_FILES = 400  # its own Python files map_package() reads, at most...
+_MAP_BYTES = 8 * MB  # ...and their size, together
+# What the Python runtime gives every function, so the package needn't carry it.
+_RUNTIME_MODULES = frozenset({"boto3", "botocore", "s3transfer", "jmespath", "dateutil", "urllib3", "six",
+                              "awslambdaric", "bootstrap"})
+# Libraries often packed without their .dist-info folder (which is how the others are told from the code's own
+# files): their files aren't read as its own code.
+_LIBRARIES = frozenset({
+    "requests", "certifi", "idna", "charset_normalizer", "chardet", "pytz", "yaml", "attr", "attrs", "pydantic",
+    "pydantic_core", "typing_extensions", "numpy", "pandas", "aws_lambda_powertools", "aws_xray_sdk", "wrapt",
+    "psycopg2", "pymysql", "sqlalchemy", "jwt", "cryptography", "cffi", "_cffi_backend", "simplejson", "redis",
+    "opensearchpy", "elasticsearch", "requests_aws4auth", "markupsafe", "jinja2", "httpx", "httpcore", "anyio",
+    "sniffio", "h11", "openai", "anthropic", "google", "PIL", "pyarrow", "sklearn", "scipy", "joblib", "fastapi",
+    "starlette", "mangum", "flask", "werkzeug", "click", "itsdangerous", "dotenv", "orjson", "ujson", "pymongo",
+    "bson", "dns", "nacl", "OpenSSL", "rsa", "pyasn1", "jose", "tenacity", "backoff", "structlog", "loguru",
+    "multidict", "yarl", "aiohttp", "aiosignal", "frozenlist", "async_timeout", "awswrangler", "langchain",
+    "langchain_core", "langchain_aws", "tiktoken", "regex", "tqdm", "smart_open", "s3fs", "fsspec", "aiobotocore",
+    "chalice", "zappa", "dateparser", "tzdata", "tzlocal", "packaging", "pkg_resources", "setuptools", "_distutils_hack",
+    "pip", "wheel", "annotated_types", "jsonschema", "fastjsonschema", "pyrsistent", "referencing", "rpds",
+})
+# Standard-library modules a newer Python removed: (the first Python without it). Code that imports one fails with
+# Runtime.ImportModuleError on that runtime, a trap when moving to a newer one.
+_REMOVED_MODULES = {
+    "distutils": (3, 12), "imp": (3, 12), "asynchat": (3, 12), "asyncore": (3, 12), "smtpd": (3, 12),
+    "cgi": (3, 13), "cgitb": (3, 13), "pipes": (3, 13), "crypt": (3, 13), "telnetlib": (3, 13), "nntplib": (3, 13),
+    "imghdr": (3, 13), "sndhdr": (3, 13), "mailcap": (3, 13), "uu": (3, 13), "xdrlib": (3, 13), "aifc": (3, 13),
+    "audioop": (3, 13), "chunk": (3, 13), "msilib": (3, 13), "nis": (3, 13), "ossaudiodev": (3, 13), "spwd": (3, 13),
+    "sunau": (3, 13), "lib2to3": (3, 13),
+}
+_ADDED_MODULES = {"tomllib": (3, 11)}  # standard-library modules a newer Python added: (the first Python with it)
+_SERVICE_NAMES = {  # boto3's name -> what people call it, where botocore's serviceId reads oddly
+    "stepfunctions": "Step Functions", "apigatewaymanagementapi": "API Gateway (WebSocket)", "es": "OpenSearch",
+    "opensearchserverless": "OpenSearch Serverless", "iot-data": "IoT", "sesv2": "SES", "cloudwatch": "CloudWatch",
+    "logs": "CloudWatch Logs", "appconfigdata": "AppConfig", "ApiGatewayManagementApi": "API Gateway (WebSocket)",
+}
+_IAM_PREFIXES = {"cloudwatch": "cloudwatch", "iot-data": "iot", "sesv2": "ses", "appconfigdata": "appconfig"}
+_IAM_ACTIONS = {  # (service, operation) -> the IAM action, where it isn't <prefix>:<operation>
+    ("s3", "ListObjectsV2"): "s3:ListBucket", ("s3", "ListObjects"): "s3:ListBucket", ("s3", "HeadBucket"):
+    "s3:ListBucket", ("s3", "HeadObject"): "s3:GetObject", ("s3", "SelectObjectContent"): "s3:GetObject",
+    ("s3", "CopyObject"): "s3:PutObject", ("s3", "DeleteObjects"): "s3:DeleteObject",
+    ("s3", "CreateMultipartUpload"): "s3:PutObject", ("s3", "UploadPart"): "s3:PutObject",
+    ("s3", "CompleteMultipartUpload"): "s3:PutObject", ("s3", "ListObjectVersions"): "s3:ListBucketVersions",
+    ("s3", "ListBuckets"): "s3:ListAllMyBuckets", ("bedrock-runtime", "Converse"): "bedrock:InvokeModel",
+    ("bedrock-runtime", "ConverseStream"): "bedrock:InvokeModelWithResponseStream",
+    ("apigatewaymanagementapi", "PostToConnection"): "execute-api:ManageConnections",
+    ("apigatewaymanagementapi", "GetConnection"): "execute-api:ManageConnections",
+    ("apigatewaymanagementapi", "DeleteConnection"): "execute-api:ManageConnections",
+    ("sqs", "SendMessageBatch"): "sqs:SendMessage", ("sqs", "DeleteMessageBatch"): "sqs:DeleteMessage",
+    ("sqs", "ChangeMessageVisibilityBatch"): "sqs:ChangeMessageVisibility", ("sns", "PublishBatch"): "sns:Publish",
+    ("dynamodb", "ExecuteStatement"): "dynamodb:PartiQL*", ("sts", "GetCallerIdentity"): "",
+}
+_RUNS_PREFIXES = ("Invoke", "Converse", "RetrieveAndGenerate", "Start", "Detect", "Analyze", "Translate", "Synthesize",
+                  "Classify", "Recognize", "Compare", "Decrypt", "Encrypt", "GenerateDataKey", "Sign", "Verify",
+                  "AssumeRole", "Rerank", "Execute", "Run")
+_SENDS_PREFIXES = ("Send", "Publish", "PostToConnection", "PutEvents")  # a message or an event, sent on
+_READS_PREFIXES = ("Get", "List", "Describe", "Head", "Query", "Scan", "Select", "BatchGet", "Search", "Lookup",
+                   "Retrieve", "Filter", "Check", "Estimate", "Preview", "Receive", "Download")
+_BATCHES = {  # a call that sends one item, made in a loop -> (the call that sends many, how many at a time)
+    ("dynamodb", "PutItem"): ("table.batch_writer() (BatchWriteItem)", 25),
+    ("dynamodb", "DeleteItem"): ("table.batch_writer() (BatchWriteItem)", 25),
+    ("dynamodb", "GetItem"): ("batch_get_item", 100),
+    ("sqs", "SendMessage"): ("send_message_batch", 10),
+    ("sqs", "DeleteMessage"): ("delete_message_batch", 10),
+    ("sns", "Publish"): ("publish_batch", 10),
+    ("s3", "DeleteObject"): ("delete_objects", 1000),
+    ("kinesis", "PutRecord"): ("put_records", 500),
+    ("firehose", "PutRecord"): ("put_record_batch", 500),
+    ("ssm", "GetParameter"): ("get_parameters", 10),
+    ("secretsmanager", "GetSecretValue"): ("batch_get_secret_value", 20),
+}
+_RESOURCE_ACTIONS = {  # a boto3 resource object's methods that aren't the client's -> the operation they call
+    ("s3", "Object"): {"get": "GetObject", "put": "PutObject", "delete": "DeleteObject", "load": "HeadObject",
+                       "reload": "HeadObject", "copy_from": "CopyObject", "upload_file": "PutObject",
+                       "upload_fileobj": "PutObject", "download_file": "GetObject", "download_fileobj": "GetObject"},
+    ("s3", "ObjectSummary"): {"get": "GetObject", "put": "PutObject", "delete": "DeleteObject", "load": "HeadObject"},
+    ("s3", "Bucket"): {"upload_file": "PutObject", "upload_fileobj": "PutObject", "download_file": "GetObject",
+                       "download_fileobj": "GetObject"},
+    ("dynamodb", "Table"): {"load": "DescribeTable", "reload": "DescribeTable"},
+    ("sqs", "Queue"): {"send_messages": "SendMessageBatch", "receive_messages": "ReceiveMessage",
+                       "delete_messages": "DeleteMessageBatch", "load": "GetQueueAttributes"},
+    ("sqs", "Message"): {"delete": "DeleteMessage"},
+    ("sns", "Topic"): {"load": "GetTopicAttributes"},
+}
+_COLLECTIONS = {("s3", "objects"): "ListObjects", ("s3", "object_versions"): "ListObjectVersions",
+                ("s3", "buckets"): "ListBuckets", ("dynamodb", "tables"): "ListTables", ("sqs", "queues"): "ListQueues",
+                ("sns", "topics"): "ListTopics"}  # a resource's collection -> the list call iterating it makes
+_TRANSFERS = {"upload_file": "PutObject", "upload_fileobj": "PutObject", "download_file": "GetObject",
+              "download_fileobj": "GetObject", "copy": "CopyObject"}  # an S3 client's transfer methods
+_GUESSES = {  # a method name only one AWS service has, for a client it couldn't follow
+    "put_item": ("dynamodb", "PutItem"), "get_item": ("dynamodb", "GetItem"), "update_item": ("dynamodb", "UpdateItem"),
+    "delete_item": ("dynamodb", "DeleteItem"), "batch_write_item": ("dynamodb", "BatchWriteItem"),
+    "batch_get_item": ("dynamodb", "BatchGetItem"), "transact_write_items": ("dynamodb", "TransactWriteItems"),
+    "get_object": ("s3", "GetObject"), "put_object": ("s3", "PutObject"), "head_object": ("s3", "HeadObject"),
+    "delete_object": ("s3", "DeleteObject"), "list_objects_v2": ("s3", "ListObjectsV2"),
+    "copy_object": ("s3", "CopyObject"), "send_message": ("sqs", "SendMessage"),
+    "send_message_batch": ("sqs", "SendMessageBatch"), "receive_message": ("sqs", "ReceiveMessage"),
+    "get_secret_value": ("secretsmanager", "GetSecretValue"), "get_parameter": ("ssm", "GetParameter"),
+    "get_parameters_by_path": ("ssm", "GetParametersByPath"), "start_execution": ("stepfunctions", "StartExecution"),
+    "invoke_model": ("bedrock-runtime", "InvokeModel"), "put_events": ("events", "PutEvents"),
+    "start_query_execution": ("athena", "StartQueryExecution"),
+}
+_HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options", "request")
+_HTTP_SESSIONS = {"requests.Session": "requests", "requests.session": "requests", "httpx.Client": "httpx",
+                  "httpx.AsyncClient": "httpx", "urllib3.PoolManager": "urllib3", "aiohttp.ClientSession": "aiohttp",
+                  "http.client.HTTPSConnection": "http.client", "http.client.HTTPConnection": "http.client"}
+_DEFAULT_TIMEOUTS = {"httpx", "aiohttp"}  # HTTP libraries that stop waiting by themselves (5 s and 5 minutes)
+_LOG_LEVELS = {"debug": "logs", "info": "logs", "warning": "logs a warning", "warn": "logs a warning",
+               "error": "logs an error", "exception": "logs an error", "critical": "logs an error", "log": "logs"}
+_JSON_LOADS = {"json.loads", "json.load", "simplejson.loads", "orjson.loads", "ujson.loads"}
+_B64_DECODES = {"base64.b64decode", "base64.standard_b64decode", "base64.urlsafe_b64decode"}
+_COMMANDS = {"subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output",
+             "subprocess.Popen", "os.system", "os.popen"}
+_FILE_WRITERS = {"to_csv", "to_parquet", "to_json", "to_excel", "to_pickle", "to_feather", "savefig"}
+_ROUTE_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "route", "api_route"}
+_DICT_METHODS = {"get", "items", "keys", "values", "copy", "pop", "setdefault", "update"}
+_CACHES = {"lru_cache", "cache", "cached", "cached_property"}
+_SECRET_NAME_RE = re.compile(r"passw(?:or)?d|secret|token|api_?key|apikey|private_?key|access_?key|credential", re.I)
+_NOT_SECRET_NAME_RE = re.compile(
+    r"(?:name|id|arn|path|env|var|url|uri|header|field|param|parameter|file|type|len|length|key_name|prefix|ttl|"
+    r"expiry|expires|timeout)$", re.I)
+_PLACEHOLDERS = {"password", "secret", "token", "changeme", "change-me", "test", "dummy", "example", "none", "null",
+                 "redacted", "todo"}
+_AWS_KEY_RE = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+_LAMBDA_ENV = {  # environment variables Lambda sets itself: reading one needs no setting
+    "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_EXECUTION_ENV", "AWS_LAMBDA_FUNCTION_NAME",
+    "AWS_LAMBDA_FUNCTION_MEMORY_SIZE", "AWS_LAMBDA_FUNCTION_VERSION", "AWS_LAMBDA_INITIALIZATION_TYPE",
+    "AWS_LAMBDA_LOG_GROUP_NAME", "AWS_LAMBDA_LOG_STREAM_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN", "AWS_LAMBDA_RUNTIME_API", "LAMBDA_TASK_ROOT", "LAMBDA_RUNTIME_DIR", "_HANDLER",
+    "_X_AMZN_TRACE_ID", "TZ", "LANG", "PATH", "LD_LIBRARY_PATH", "PYTHONPATH", "AWS_XRAY_CONTEXT_MISSING",
+    "AWS_XRAY_DAEMON_ADDRESS", "AWS_LAMBDA_LOG_FORMAT", "AWS_LAMBDA_LOG_LEVEL", "AWS_LAMBDA_MAX_CONCURRENCY",
+    "HOME", "PWD", "_AWS_XRAY_DAEMON_ADDRESS", "_AWS_XRAY_DAEMON_PORT", "AWS_LAMBDA_EXEC_WRAPPER",
+}
+
+
+def _service_name(service: str) -> str:
+    """'s3' -> 'S3', 'dynamodb' -> 'DynamoDB', 'stepfunctions' -> 'Step Functions': the name people use."""
+    if service in _SERVICE_NAMES:
+        return _SERVICE_NAMES[service]
+    model = _aws_model(service)
+    return model["name"] if model else service
+
+
+@functools.lru_cache(maxsize=1)
+def _botocore_loader() -> Any:
+    from botocore.loaders import create_loader
+
+    return create_loader()
+
+
+def _tokens(value: Any) -> tuple[str, ...]:
+    """A paginator's token setting as names: 'NextMarker || Contents[-1].Key' -> ('NextMarker',)."""
+    values = value if isinstance(value, list) else [value] if value else []
+    return tuple(m.group(0) for v in values if (m := re.match(r"\w+", str(v))))
+
+
+@functools.lru_cache(maxsize=256)
+def _aws_model(service: str) -> dict[str, Any] | None:
+    """What botocore's own copy of a service's API says, read from the files boto3 installs (no AWS call): its
+    operations by method name, which of them come in pages, its name and its IAM prefix. None for a service this
+    boto3 doesn't know."""
+    if not service or not re.fullmatch(r"[a-z0-9-]+", service):
+        return None
+    from botocore import xform_name
+    from botocore.exceptions import BotoCoreError
+
+    loader = _botocore_loader()
+    try:
+        model = loader.load_service_model(service, "service-2")
+    except (BotoCoreError, OSError, ValueError):
+        return None
+    try:
+        pages = loader.load_service_model(service, "paginators-1").get("pagination", {})
+    except (BotoCoreError, OSError, ValueError):
+        pages = {}
+    meta = model.get("metadata", {})
+    return {
+        "ops": {xform_name(op): op for op in model.get("operations", {})},
+        "pages": {op: (frozenset(_tokens(spec.get("input_token"))),
+                       _tokens(spec.get("output_token")) + _tokens(spec.get("more_results")),
+                       str(spec.get("limit_key") or ""))
+                  for op, spec in pages.items()},
+        "name": meta.get("serviceId") or service,
+        "iam": meta.get("signingName") or meta.get("endpointPrefix") or service,
+    }
+
+
+def _access(operation: str) -> str:
+    """What an AWS operation does to what it touches: 'reads', 'writes', 'sends' (a message or an event) or 'runs'
+    (invokes or starts something)."""
+    if operation.startswith(_SENDS_PREFIXES):
+        return "sends"
+    if operation.startswith(_RUNS_PREFIXES):
+        return "runs"
+    return "reads" if operation.startswith(_READS_PREFIXES) else "writes"
+
+
+def _iam_action(service: str, operation: str) -> str:
+    """The IAM action an operation needs: ('s3', 'ListObjectsV2') -> 's3:ListBucket'."""
+    if (service, operation) in _IAM_ACTIONS:
+        return _IAM_ACTIONS[(service, operation)]
+    model = _aws_model(service)
+    prefix = _IAM_PREFIXES.get(service) or (model["iam"] if model else service)
+    return f"{prefix}:{operation}"
+
+
+def _event_label(path: tuple[str, ...]) -> str:
+    """('Records', '[]', 'body', '{json}', 'bucket') -> 'Records[].body (JSON).bucket'."""
+    out = ""
+    for part in path:
+        if part == "[]":
+            out += "[]"
+        elif part in ("{json}", "{base64}"):
+            out += " (JSON)" if part == "{json}" else " (base64)"
+        else:
+            out += ("." if out else "") + part
+    return out
+
+
+def _event_kind(fields: Iterable[EventField]) -> str | None:
+    """What sends the event, from the fields the code reads: 'an SQS batch', 'an HTTP request', ... None when it
+    can't tell."""
+    paths = [tuple(p.lower() for p in f.path) for f in fields]
+
+    def has(*parts: str) -> bool:
+        return any(path[:len(parts)] == parts for path in paths)
+
+    for parts, kind in ((("records", "[]", "s3"), "an S3 event"), (("records", "[]", "sns"), "an SNS message"),
+                        (("records", "[]", "dynamodb"), "a DynamoDB stream batch"),
+                        (("records", "[]", "kinesis"), "a Kinesis batch"), (("records", "[]", "body"), "an SQS batch"),
+                        (("records", "[]", "receipthandle"), "an SQS batch"),
+                        (("records", "[]", "messageid"), "an SQS batch"), (("awslogs",), "CloudWatch Logs"),
+                        (("detail-type",), "an EventBridge event"), (("actiongroup",), "a Bedrock agent action"),
+                        (("apipath",), "a Bedrock agent action")):
+        if has(*parts):
+            return kind
+    if any(has(key) for key in ("httpmethod", "pathparameters", "querystringparameters", "requestcontext", "headers",
+                                "rawpath", "routekey", "multivalueheaders", "rawquerystring")):
+        return "an HTTP request"
+    if has("detail") and has("source"):
+        return "an EventBridge event"
+    if has("records"):
+        return "a batch of records"
+    return None
+
+
+def _sample_event(fields: Iterable[EventField]) -> Any:
+    """A test event with every field the code reads, its values '...': {'Records': [{'body': '{"bucket": "..."}'}]},
+    for the console's Test tab. JSON read from a text field is written as text, the way it arrives."""
+    root: dict[str, Any] = {}
+    for f in fields:
+        if "*" in f.path:
+            continue
+        node = root
+        for part in f.path:
+            node = node.setdefault(part, {})
+
+    def finish(node: dict[str, Any]) -> Any:
+        if not node:
+            return "..."
+        if "{json}" in node:
+            return json.dumps(finish(node["{json}"]))
+        if "{base64}" in node:
+            inner = finish(node["{base64}"])
+            text = inner if isinstance(inner, str) else json.dumps(inner)
+            return base64.b64encode(text.encode()).decode() if text != "..." else "..."
+        keys = [k for k in node if k != "[]"]
+        if not keys and "[]" in node:
+            return [finish(node["[]"])]
+        return {k: finish(node[k]) for k in keys}
+
+    return finish(root)
+
+
+def _secret_spots(node: Any) -> list[tuple[str, Any]]:
+    """The secret-looking literals in a piece of code, with the name each is given to: a password=, token= or key given
+    as text (in an assignment, a call or a dict), and any AWS access key."""
+    found: list[tuple[str, Any]] = []
+    for n in ast.walk(node):
+        pairs: list[tuple[Any, Any]] = []
+        if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None:
+            for target in n.targets if isinstance(n, ast.Assign) else [n.target]:
+                pairs.append((target.id if isinstance(target, ast.Name) else target.attr
+                              if isinstance(target, ast.Attribute) else _const(target.slice)
+                              if isinstance(target, ast.Subscript) else None, n.value))
+        elif isinstance(n, ast.Call):
+            pairs += [(kw.arg, kw.value) for kw in n.keywords if kw.arg]
+        elif isinstance(n, ast.Dict):
+            pairs += [(_const(k), v) for k, v in zip(n.keys, n.values) if k is not None]
+        for name, value in pairs:
+            text = _const(value)
+            if (isinstance(name, str) and isinstance(text, str) and _SECRET_NAME_RE.search(name)
+                    and not _NOT_SECRET_NAME_RE.search(name) and _secret_value(text)):
+                found.append((name, value))
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and _AWS_KEY_RE.search(n.value):
+            found.append(("an AWS access key", n))
+    return found
+
+
+class _Hide(ast.NodeTransformer):
+    """Puts '…' in place of the literals at these places (line, column)."""
+
+    def __init__(self, places: set[tuple[int, int]]):
+        self.places = places
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        if (getattr(node, "lineno", 0), getattr(node, "col_offset", 0)) in self.places:
+            return ast.copy_location(ast.Constant("…"), node)
+        return node
+
+
+def _unparse(node: Any, width: int = 140) -> str:
+    """A piece of code on one line, as Python writes it back from the tree: "s3.get_object(Bucket=b, Key=k)". A
+    secret-looking literal in it shows as '…'."""
+    try:
+        if isinstance(node, ast.AST) and not isinstance(node, (ast.arguments, ast.pattern)):
+            places = {(getattr(v, "lineno", 0), getattr(v, "col_offset", 0)) for _, v in _secret_spots(node)}
+            if places:
+                node = _Hide(places).visit(copy.deepcopy(node))
+        text = ast.unparse(node)
+    except (AttributeError, ValueError, TypeError, RecursionError):
+        return "…"
+    return _clip(" ".join(text.split()), width)
+
+
+def _target(node: Any) -> str:
+    """A loop's target as written: 'i, record', not '(i, record)'."""
+    if isinstance(node, ast.Tuple) and node.elts:
+        return ", ".join(_unparse(elt, 30) for elt in node.elts)
+    return _unparse(node, 40)
+
+
+def _a(name: str) -> str:
+    """'a' or 'an' before a service's name, as it's said: an S3, an SQS, a DynamoDB, an EventBridge, a KMS."""
+    if re.match(r"[A-Z][A-Z0-9]", name):  # said letter by letter
+        return "an" if name[0] in "AEFHILMNORSX" else "a"
+    return "an" if name[:1].lower() in "aeiou" else "a"
+
+
+def _const(node: Any) -> Any:
+    return node.value if isinstance(node, ast.Constant) else None
+
+
+def _names_in(node: Any, names: Iterable[str]) -> bool:
+    """Whether an `except` catches one of these exceptions: except ImportError, except (KeyError, Exception)."""
+    if node is None:
+        return False
+    if isinstance(node, ast.Tuple):
+        return any(_names_in(elt, names) for elt in node.elts)
+    return (node.id if isinstance(node, ast.Name) else getattr(node, "attr", "")) in set(names)
+
+
+def _swallows(handler: ast.ExceptHandler) -> bool:
+    """An `except` that catches every error and does nothing with it: no log line, no raise, nothing returned."""
+    if not (handler.type is None or _names_in(handler.type, ("Exception", "BaseException"))):
+        return False
+    for stmt in handler.body:
+        if isinstance(stmt, (ast.Pass, ast.Continue, ast.Break)):
+            continue
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue
+        if isinstance(stmt, ast.Return) and (stmt.value is None or isinstance(stmt.value, ast.Constant)):
+            continue
+        return False
+    return True
+
+
+def _is_main_guard(test: Any) -> bool:
+    """`if __name__ == "__main__":`, which never runs in Lambda."""
+    return (isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) and test.left.id == "__name__"
+            and any(_const(c) == "__main__" for c in test.comparators))
+
+
+def _doc_line(node: Any) -> str:
+    doc = ast.get_docstring(node) or ""
+    return _clip(doc.strip().split("\n\n")[0].replace("\n", " ").strip(), 160)
+
+
+def _def_line(node: Any) -> str:
+    """'def connect(host, password):'."""
+    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+    return f"{prefix} {node.name}({_unparse(node.args, 100)}):"
+
+
+def _secret_value(value: str) -> bool:
+    """Whether a literal looks like a real secret rather than a name, a path or a placeholder."""
+    text = value.strip()
+    return (len(text) >= 6 and not re.search(r"\s", text) and not re.fullmatch(r"[A-Z0-9_]+", text)
+            and not text.startswith(("arn:", "/", "{", "$", "<", "%", "http", "s3://", "projects/"))
+            and text.lower() not in _PLACEHOLDERS and "xxx" not in text.lower() and len(set(text)) > 2
+            and not text.lower().startswith("your"))
+
+
+@dataclass(frozen=True)
+class _Sym:
+    """What a name holds, as far as how_it_works() can tell without running the code."""
+
+    kind: str  # 'mod' (an outside module or name, dotted), 'own' (one of its own modules), 'func', 'class', 'obj' (an
+    # instance of one of its classes), 'bound' (one's method), 'client', 'resource', 'res' (a resource object: a
+    # Table), 'coll' (a resource collection), 'paginator', 'batch', 'method' (one of theirs), 'meta', 'event',
+    # 'evmethod', 'context', 'env' (os.environ), 'envget', 'envval', 'logger', 'log', 'http', 'httpcall', 'builtin',
+    # 'enumerate'
+    name: str = ""
+    sub: str = ""
+    path: tuple[str, ...] = ()
+    inner: _Sym | None = None
+
+
+@dataclass
+class _Frame:
+    """A function (or a module's top level) being read: what its names hold, and where it is."""
+
+    module: str
+    file: str
+    function: str  # 'etl.handler', or the module ('etl') at its top level
+    scope: dict[str, _Sym | None]
+    node: Any = None  # the function's ast node; None at a module's top level
+    outers: list[dict[str, _Sym | None]] = field(default_factory=list)  # the functions around it (closures)
+    loops: list[str] = field(default_factory=list)  # the loops it's in, its callers' first
+    guards: list[str] = field(default_factory=list)  # the tests of the ifs it's in
+    globals: set[str] = field(default_factory=set)
+    optional: int = 0  # inside a try that catches ImportError
+    cached: bool = False  # @lru_cache and the like: it runs once
+    returns: list[_Sym | None] = field(default_factory=list)
+    depth: int = 0
+    words: set[str] | None = None  # every name and text in it, for spotting a next-page token
+
+    @property
+    def top(self) -> bool:
+        return self.node is None
+
+
+@dataclass
+class _Module:
+    name: str
+    file: str | None
+    tree: Any = None
+    scope: dict[str, _Sym | None] = field(default_factory=dict)
+    steps: list[CodeStep] = field(default_factory=list)
+    loaded: bool = False
+
+
+@dataclass
+class _Collect:
+    """What one statement does, gathered while its expressions are read."""
+
+    notes: list[tuple[str, str]] = field(default_factory=list)
+    calls: list[CodeStep] = field(default_factory=list)
+
+    def note(self, kind: str, text: str) -> None:
+        if (kind, text) not in self.notes:
+            self.notes.append((kind, text))
+
+
+class _CodeReader:
+    """Follows a Python function's code from its handler with the ast module, never running it. It keeps track of what
+    each name holds (a boto3 client, part of the event, one of its own functions, an environment variable...) as far
+    as it can tell, so it knows what each line calls, and fills a CodeMap. One per map_code()."""
+
+    def __init__(self, texts: dict[str, str], names: list[str], root: str, cmap: CodeMap,
+                 version: tuple[int, int] | None, libraries: set[str], layers: bool):
+        self.texts, self.root, self.cmap, self.version, self.layers = texts, root, cmap, version, layers
+        self.tops: set[str] = set()  # what's at the package's top: folders and modules
+        for name in names:
+            if name.startswith(root):
+                first, slash, _ = name[len(root):].partition("/")
+                self.tops.add(first if slash else first.split(".")[0])
+        self.libraries = libraries
+        self.sources: dict[str, str] = {}  # its own modules: name -> file
+        for path in texts:
+            if not path.startswith(root) or not path.endswith(".py"):
+                continue
+            rel = path[len(root):-3]
+            module = rel.replace("/", ".")
+            if module.split(".")[0] in libraries or "-" in module or "site-packages" in module:
+                continue
+            module = module[:-len(".__init__")] if module.endswith(".__init__") else module
+            if module and module != "__init__":
+                self.sources[module] = path
+        self.modules: dict[str, _Module] = {}
+        self.defs: dict[str, tuple[str, Any, str | None]] = {}  # key -> (module, node, class key)
+        self.classes: dict[str, dict[str, Any]] = {}
+        self.closures: dict[str, list[dict[str, _Sym | None]]] = {}
+        self.cached: set[str] = set()
+        self.cur = _Collect()
+        self.stack: list[str] = []
+        self.memo: dict[Any, _Sym | None] = {}
+        self.shown: set[str] = set()
+        self.reached: dict[str, CodeFunction] = {}
+        self.count = 0
+        self.routes: list[tuple[str, str, str, str]] = []  # (method, path, function key, router)
+        self.event_reads: dict[tuple[str, ...], EventField] = {}
+        self.seen: set[Any] = set()
+        self.target: set[str] = set()  # the names the statement being read assigns to
+        self.loading = 0  # modules being loaded: what runs now runs when Lambda starts the code
+        self.runs = 0  # function bodies read
+
+    # ---------------------------------------------------------------- reading
+
+    @contextmanager
+    def _collecting(self) -> Generator[_Collect, None, None]:
+        saved, self.cur = self.cur, _Collect()
+        try:
+            yield self.cur
+        finally:
+            self.cur = saved
+
+    def read(self, handler: str) -> None:
+        cmap = self.cmap
+        module, _, name = handler.rpartition(".")
+        module = module.replace("/", ".")
+        mod = self._load_chain(module)
+        cmap.startup = [step for m in self._chain(module) if m.name != module for step in self._module_step(m)]
+        cmap.startup += mod.steps
+        value = mod.scope.get(name)
+        file = mod.file or cmap.handler_file or ""
+        if value is not None and value.kind in ("func", "bound"):
+            key = value.name
+            node = self.defs[key][1]
+            cmap.entry, cmap.entry_line = key, node.lineno
+            positional = node.args.posonlyargs + node.args.args
+            plain = len(positional) - len(node.args.defaults)
+            cmap.params = [a.arg + ("=…" if i >= plain else "") for i, a in enumerate(positional)]
+            cmap.params += ["*" + node.args.vararg.arg] if node.args.vararg else []
+            cmap.is_async = isinstance(node, ast.AsyncFunctionDef)
+            with self._collecting() as got:
+                self._run(key, [_Sym("event"), _Sym("context")], {}, None, None)
+            cmap.steps = got.calls
+        elif name in mod.scope or self.routes:
+            assigned = next((n for n in (mod.tree.body if mod.tree else []) if isinstance(n, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name for t in n.targets)), None)
+            cmap.entry, cmap.entry_line = f"{mod.name}.{name}", assigned.lineno if assigned else 0
+            step = CodeStep(file, cmap.entry_line, _unparse(assigned) if assigned else f"{name} = …", "def",
+                            name=cmap.entry)
+            frame = _Frame(mod.name, file, cmap.entry, {}, node=assigned)
+            with self._collecting() as got:
+                for method, path, key, _ in self.routes:
+                    self._run(key, [], {}, frame, None, label=f"{method} {path}")
+            step.steps = [CodeStep(c.file, c.line, c.code, "def", c.notes, c.steps, c.calls, c.name, c.seen)
+                          for c in got.calls]
+            if not self.routes:
+                step.notes.append(("more", "an object this can't follow, not a function"))
+            cmap.steps = [step]
+        if cmap.entry is None and mod.tree is not None:
+            cmap.handlers = [f"{n.name}()" for n in mod.tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                             and len(n.args.posonlyargs + n.args.args) == 2]
+        cmap.functions = list(self.reached.values())
+        cmap.event = list(self.event_reads.values())
+        cmap.routes = [(method, path, key) for method, path, key, _ in self.routes]
+        loaded = [m for m in self.modules.values() if m.tree is not None]
+        cmap.other_files = sum(1 for name, path in self.sources.items()
+                               if name not in self.modules and not _JUNK_RE.search(path))
+        for m in loaded:
+            for node in m.tree.body:
+                members = node.body if isinstance(node, ast.ClassDef) else [node]
+                prefix = f"{m.name}.{node.name}." if isinstance(node, ast.ClassDef) else f"{m.name}."
+                cmap.unreached += sum(1 for f in members if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                      and prefix + f.name not in self.reached)
+            self._secrets(m)
+        for name, path in self.sources.items():
+            for match in _AWS_KEY_RE.finditer(self.texts[path]):
+                line = self.texts[path].count("\n", 0, match.start()) + 1
+                self._spot("secret", path, line, name, "", "an AWS access key", ok=False)
+
+    def _module_step(self, mod: _Module) -> list[CodeStep]:
+        if not mod.steps or mod.file is None:
+            return []
+        return [CodeStep(mod.file, 1, f"{mod.file}, run when it's imported", "module", steps=mod.steps, name=mod.name)]
+
+    def _chain(self, module: str) -> list[_Module]:
+        parts = module.split(".")
+        return [self.modules[".".join(parts[:i])] for i in range(1, len(parts) + 1)
+                if ".".join(parts[:i]) in self.modules]
+
+    def _load_chain(self, module: str) -> _Module:
+        """A module and the packages it's in, loaded the way Python imports them: each package's __init__ first."""
+        parts = module.split(".")
+        for i in range(1, len(parts)):
+            if ".".join(parts[:i]) in self.sources:
+                self._load(".".join(parts[:i]))
+        return self._load(module)
+
+    def _load(self, name: str) -> _Module:
+        if name in self.modules:
+            return self.modules[name]
+        mod = self.modules[name] = _Module(name, self.sources.get(name))
+        if mod.file is None:
+            return mod
+        text = self.texts[mod.file]
+        if len(self.modules) > _MAP_FILES:
+            self.cmap.limited = f"read the first {_MAP_FILES} of its modules"
+            return mod
+        try:
+            mod.tree = ast.parse(text, filename=mod.file)
+        except (SyntaxError, ValueError) as exc:
+            where = f"line {exc.lineno}: " if isinstance(exc, SyntaxError) and exc.lineno else ""
+            why = f"{where}{getattr(exc, 'msg', None) or exc}"
+            self.cmap.skipped.append((mod.file, why))
+            self._spot("syntax", mod.file, getattr(exc, "lineno", 0) or 0, name, "", why, ok=False)
+            return mod
+        self.cmap.files += 1
+        self.cmap.lines += text.count("\n") + (0 if text.endswith("\n") else 1)
+        frame = _Frame(name, mod.file, name, mod.scope)
+        mod.scope.setdefault("__name__", None)
+        self.loading += 1
+        try:
+            mod.steps = self._block(mod.tree.body, frame)
+        finally:
+            self.loading -= 1
+        mod.loaded = True
+        return mod
+
+    # ---------------------------------------------------------------- statements
+
+    def _block(self, stmts: list[Any], frame: _Frame) -> list[CodeStep]:
+        out: list[CodeStep] = []
+        for stmt in stmts:
+            out.extend(self._stmt(stmt, frame))
+        return out
+
+    def _step(self, node: Any, frame: _Frame, code: str, kind: str, got: _Collect | None = None,
+              steps: Iterable[CodeStep] = ()) -> CodeStep:
+        self.count += 1
+        notes = got.notes if got else []
+        events = [text for k, text in notes if k == "event"]
+        notes = [(k, text) for k, text in notes if k != "event" or not any(
+            other.startswith((text + "[", text + ".", text + " (")) for other in events)]
+        return CodeStep(frame.file, getattr(node, "lineno", 0), code, kind, notes, list(steps),
+                        got.calls if got else [])
+
+    def _stmt(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            frame.scope[stmt.name] = _Sym("func", self._define(stmt, frame))
+            return []
+        if isinstance(stmt, ast.ClassDef):
+            return self._define_class(stmt, frame)
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            return self._import(stmt, frame)
+        if isinstance(stmt, (ast.Global, ast.Nonlocal)):
+            frame.globals.update(stmt.names)
+            return []
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            return []  # a docstring
+        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            return self._loop(stmt, frame)
+        if isinstance(stmt, ast.If):
+            return self._if(stmt, frame)
+        if isinstance(stmt, (ast.With, ast.AsyncWith)):
+            return self._with(stmt, frame)
+        if isinstance(stmt, ast.Try) or type(stmt).__name__ == "TryStar":
+            return self._try(stmt, frame)
+        if isinstance(stmt, ast.Match):
+            return self._match(stmt, frame)
+        kind = "do"
+        with self._collecting() as got:
+            if isinstance(stmt, ast.Return):
+                kind = "return"
+                value = self._eval(stmt.value, frame)
+                frame.returns.append(value)
+                if frame.function == self.cmap.entry and stmt.value is not None:
+                    self.cmap.returns.append((_unparse(stmt.value, 2000), frame.file, stmt.lineno))
+            elif isinstance(stmt, ast.Raise):
+                kind = "raise"
+                self._eval(stmt.exc, frame)
+                self._eval(stmt.cause, frame)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                self.target = {t.id for t in targets if isinstance(t, ast.Name)}
+                value = self._eval(stmt.value, frame)
+                self.target = set()
+                if stmt.value is not None:
+                    for target in targets:
+                        self._bind(target, value, frame)
+            else:
+                for child in ast.iter_child_nodes(stmt):
+                    if isinstance(child, ast.expr):
+                        self._eval(child, frame)
+        if (kind != "do" and not frame.top) or got.notes or got.calls:
+            return [self._step(stmt, frame, _unparse(stmt), kind, got)]
+        return []
+
+    def _loop(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        with self._collecting() as head:
+            if isinstance(stmt, ast.While):
+                self._eval(stmt.test, frame)
+                header = f"while {_unparse(stmt.test, 110)}:"
+            else:
+                items = self._eval(stmt.iter, frame)
+                self._bind_loop(stmt.target, items, frame)
+                prefix = "async for" if isinstance(stmt, ast.AsyncFor) else "for"
+                header = f"{prefix} {_target(stmt.target)} in {_unparse(stmt.iter, 100)}:"
+        frame.loops.append(header)
+        body = self._block(stmt.body, frame)
+        frame.loops.pop()
+        orelse = self._block(stmt.orelse, frame)
+        out = [self._step(stmt, frame, header, "loop", head, body)] if head.notes or head.calls or body else []
+        if orelse:
+            out.append(CodeStep(frame.file, stmt.orelse[0].lineno - 1, "else:", "else", steps=orelse))
+        return out
+
+    def _if(self, stmt: ast.If, frame: _Frame) -> list[CodeStep]:
+        if frame.top and _is_main_guard(stmt.test):
+            return []  # runs only when the file is run as a script, never in Lambda
+        with self._collecting() as head:
+            self._eval(stmt.test, frame)
+        test = _unparse(stmt.test, 110)
+        frame.guards.append(test)
+        body = self._block(stmt.body, frame)
+        frame.guards.pop()
+        rest: list[CodeStep] = []
+        if len(stmt.orelse) == 1 and isinstance(stmt.orelse[0], ast.If):
+            rest = self._if(stmt.orelse[0], frame)
+            if rest and rest[0].kind == "if" and rest[0].line == stmt.orelse[0].lineno:
+                rest[0].code = "el" + rest[0].code
+        elif stmt.orelse:
+            frame.guards.append(f"not ({test})")
+            orelse = self._block(stmt.orelse, frame)
+            frame.guards.pop()
+            if orelse:
+                rest = [CodeStep(frame.file, stmt.orelse[0].lineno - 1, "else:", "else", steps=orelse)]
+        if head.notes or head.calls or body or rest:
+            return [self._step(stmt, frame, f"if {test}:", "if", head, body), *rest]
+        return []
+
+    def _with(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        with self._collecting() as head:
+            parts = []
+            for item in stmt.items:
+                value = self._eval(item.context_expr, frame)
+                if item.optional_vars is not None:
+                    self._bind(item.optional_vars, value, frame)
+                parts.append(_unparse(item.context_expr, 100) + (
+                    f" as {_unparse(item.optional_vars, 30)}" if item.optional_vars is not None else ""))
+        body = self._block(stmt.body, frame)
+        header = f"{'async with' if isinstance(stmt, ast.AsyncWith) else 'with'} {', '.join(parts)}:"
+        return [self._step(stmt, frame, header, "with", head, body)] if head.notes or head.calls or body else []
+
+    def _try(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        optional = any(h.type is None or _names_in(h.type, ("ImportError", "ModuleNotFoundError", "Exception"))
+                       for h in stmt.handlers)
+        frame.optional += optional
+        body = self._block(stmt.body, frame)
+        frame.optional -= optional
+        handlers = []
+        for h in stmt.handlers:
+            with self._collecting() as head:
+                self._eval(h.type, frame)
+                if h.name:
+                    frame.scope[h.name] = None
+                silent = _swallows(h) and not frame.top
+                if silent:
+                    head.note("warn", "drops the error")
+            hbody = self._block(h.body, frame)
+            header = "except" + (f" {_unparse(h.type, 60)}" if h.type is not None else "") + (
+                f" as {h.name}" if h.name else "") + ":"
+            if silent:
+                code = " ".join([header] + [_unparse(s, 40) for s in h.body])
+                self._spot("swallow", frame.file, h.lineno, frame.function, code)
+            if hbody or head.notes:
+                handlers.append(self._step(h, frame, header, "except", head, hbody))
+        orelse = self._block(stmt.orelse, frame)
+        final = self._block(stmt.finalbody, frame)
+        if not (body or handlers or orelse or final):
+            return []
+        out = [CodeStep(frame.file, stmt.lineno, "try:", "try", steps=body), *handlers]
+        if orelse:
+            out.append(CodeStep(frame.file, stmt.orelse[0].lineno - 1, "else:", "else", steps=orelse))
+        if final:
+            out.append(CodeStep(frame.file, stmt.finalbody[0].lineno - 1, "finally:", "else", steps=final))
+        return out
+
+    def _match(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        with self._collecting() as head:
+            self._eval(stmt.subject, frame)
+        cases = []
+        for case in stmt.cases:
+            with self._collecting() as got:
+                self._eval(case.guard, frame)
+            body = self._block(case.body, frame)
+            if body or got.notes:
+                guard = f" if {_unparse(case.guard, 60)}" if case.guard is not None else ""
+                cases.append(self._step(case.pattern, frame, f"case {_unparse(case.pattern, 80)}{guard}:", "if",
+                                        got, body))
+        if head.notes or cases:
+            return [self._step(stmt, frame, f"match {_unparse(stmt.subject, 100)}:", "if", head, cases)]
+        return []
+
+    # ---------------------------------------------------------------- definitions and imports
+
+    def _define(self, node: Any, frame: _Frame, cls: str | None = None) -> str:
+        key = f"{cls or (frame.module if frame.top else frame.function)}.{node.name}"
+        self.defs[key] = (frame.module, node, cls)
+        if not frame.top:
+            self.closures[key] = [frame.scope, *frame.outers]
+        for d in node.decorator_list:
+            target = d.func if isinstance(d, ast.Call) else d
+            name = target.id if isinstance(target, ast.Name) else getattr(target, "attr", "")
+            if name in _CACHES:
+                self.cached.add(key)
+            if (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr in _ROUTE_METHODS
+                    and d.args and isinstance(_const(d.args[0]), str) and str(_const(d.args[0])).startswith("/")):
+                verb = d.func.attr.upper()
+                if verb in ("ROUTE", "API_ROUTE"):
+                    methods = next((kw.value for kw in d.keywords if kw.arg == "methods"), None)
+                    found = [str(_const(e)) for e in getattr(methods, "elts", []) if isinstance(_const(e), str)]
+                    verb = ", ".join(found) or "GET"
+                self.routes.append((verb, str(_const(d.args[0])), key, _unparse(d.func.value, 60)))
+        return key
+
+    def _define_class(self, node: ast.ClassDef, frame: _Frame) -> list[CodeStep]:
+        key = f"{frame.module if frame.top else frame.function}.{node.name}"
+        info: dict[str, Any] = {"methods": {}, "attrs": {}, "bases": []}
+        self.classes[key] = info
+        frame.scope[node.name] = _Sym("class", key)
+        for base in node.bases:
+            found = self._eval(base, frame)
+            if found is not None and found.kind == "class":
+                info["bases"].append(found.name)
+        steps = []
+        for stmt in node.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                info["methods"][stmt.name] = self._define(stmt, frame, cls=key)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value is not None:
+                with self._collecting() as got:
+                    value = self._eval(stmt.value, frame)
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        info["attrs"][target.id] = value
+                if got.notes or got.calls:
+                    steps.append(self._step(stmt, frame, _unparse(stmt), "do", got))
+        return [CodeStep(frame.file, node.lineno, f"class {node.name}:", "do", steps=steps)] if steps else []
+
+    def _member(self, cls: str, name: str, seen: set[str] | None = None) -> tuple[str, Any] | None:
+        """A class's attribute or method, looked for in its own classes it's made from too."""
+        seen = seen if seen is not None else set()
+        info = self.classes.get(cls)
+        if info is None or cls in seen:
+            return None
+        seen.add(cls)
+        if name in info["attrs"]:
+            return "attr", info["attrs"][name]
+        if name in info["methods"]:
+            return "method", info["methods"][name]
+        for base in info["bases"]:
+            found = self._member(base, name, seen)
+            if found:
+                return found
+        return None
+
+    def _own(self, dotted: str) -> str | None:
+        return dotted if dotted in self.sources else None
+
+    def _import(self, stmt: Any, frame: _Frame) -> list[CodeStep]:
+        before = set(self.modules)
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                own = self._own(alias.name)
+                self._record_import(alias.name, bool(own), stmt, frame)
+                bound = alias.asname or alias.name.split(".")[0]
+                if own:
+                    self._load_chain(own)
+                    frame.scope[bound] = _Sym("own", own if alias.asname else own.split(".")[0])
+                elif alias.name.split(".")[0] in self.sources:
+                    frame.scope[bound] = _Sym("own", alias.name.split(".")[0])
+                else:
+                    frame.scope[bound] = _Sym("mod", alias.name if alias.asname else bound)
+        else:
+            base = stmt.module or ""
+            if stmt.level:
+                package = frame.module.split(".")
+                is_package = (self.sources.get(frame.module) or "").endswith("__init__.py")
+                keep = len(package) - (stmt.level - (1 if is_package else 0))
+                base = ".".join(package[:max(keep, 0)] + ([stmt.module] if stmt.module else []))
+            own = bool(stmt.level) or base in self.sources or base.split(".")[0] in self.sources
+            self._record_import(base or ".", own, stmt, frame)
+            if own and base in self.sources:
+                self._load_chain(base)
+            for alias in stmt.names:
+                if alias.name == "*":
+                    if own and base in self.modules:
+                        frame.scope.update({k: v for k, v in self.modules[base].scope.items() if not k.startswith("_")})
+                    continue
+                sub = f"{base}.{alias.name}" if base else alias.name
+                if own and sub in self.sources:
+                    self._load_chain(sub)
+                    value: _Sym | None = _Sym("own", sub)
+                elif own:
+                    value = self.modules[base].scope.get(alias.name) if base in self.modules else None
+                else:
+                    value = _Sym("mod", sub)
+                frame.scope[alias.asname or alias.name] = value
+        loaded = [self.modules[name] for name in self.modules if name not in before]
+        calls = [step for mod in loaded for step in self._module_step(mod)]
+        if calls:
+            step = self._step(stmt, frame, _unparse(stmt), "do")
+            step.calls = calls
+            return [step]
+        return []
+
+    def _record_import(self, module: str, own: bool, stmt: Any, frame: _Frame) -> None:
+        top = module.split(".")[0]
+        version = self.version or (3, 99)
+        if own or module == ".":
+            source = "own"
+        elif top in _REMOVED_MODULES:
+            source = "removed" if version >= _REMOVED_MODULES[top] else "stdlib"
+        elif top in _ADDED_MODULES:
+            source = "stdlib" if version >= _ADDED_MODULES[top] else "missing"
+        elif top in sys.stdlib_module_names:
+            source = "stdlib"
+        elif top in _RUNTIME_MODULES:
+            source = "runtime"
+        elif top in self.tops:
+            source = "package"
+        else:
+            source = "layer" if self.layers else "missing"
+        key = (module, frame.file, stmt.lineno)
+        if key not in self.seen:
+            self.seen.add(key)
+            self.cmap.imports.append(ImportUse(module, source, frame.file, stmt.lineno, bool(frame.optional),
+                                               frame.top))
+
+    # ---------------------------------------------------------------- names
+
+    def _lookup(self, name: str, frame: _Frame) -> _Sym | None:
+        for scope in (frame.scope, *frame.outers):
+            if name in scope:
+                return scope[name]
+        module = self.modules.get(frame.module)
+        if module is not None and name in module.scope:
+            return module.scope[name]
+        if name in ("print", "open", "enumerate", "sorted", "reversed", "list", "tuple", "iter"):
+            return _Sym("builtin", name)
+        return None
+
+    def _bind(self, target: Any, value: _Sym | None, frame: _Frame) -> None:
+        if isinstance(target, ast.Name):
+            frame.scope[target.id] = value
+            if target.id in frame.globals and not frame.top and frame.module in self.modules:
+                self.modules[frame.module].scope[target.id] = value
+        elif isinstance(target, ast.Attribute):
+            owner = self._eval(target.value, frame)
+            if owner is not None and owner.kind in ("obj", "class") and owner.name in self.classes:
+                self.classes[owner.name]["attrs"][target.attr] = value
+            elif owner is not None and owner.kind == "own" and owner.name in self.modules:
+                self.modules[owner.name].scope[target.attr] = value
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._bind(elt.value if isinstance(elt, ast.Starred) else elt, None, frame)
+
+    def _item(self, items: _Sym | None) -> _Sym | None:
+        """What a loop over `items` gets each time round."""
+        if items is None:
+            return None
+        if items.kind == "event":
+            return _Sym("event", path=items.path + ("[]",))
+        if items.kind == "coll":
+            return _Sym("res", items.name, "ObjectSummary" if items.name == "s3" else "")
+        return None
+
+    def _bind_loop(self, target: Any, items: _Sym | None, frame: _Frame) -> None:
+        if items is not None and items.kind == "enumerate" and isinstance(target, ast.Tuple) and len(target.elts) == 2:
+            self._bind(target.elts[0], None, frame)
+            self._bind(target.elts[1], self._item(items.inner), frame)
+        else:
+            self._bind(target, self._item(items), frame)
+
+    # ---------------------------------------------------------------- expressions
+
+    def _eval(self, node: Any, frame: _Frame) -> _Sym | None:
+        if node is None:
+            return None
+        if isinstance(node, ast.Name):
+            return self._lookup(node.id, frame)
+        if isinstance(node, ast.Attribute):
+            return self._attribute(node, frame)
+        if isinstance(node, ast.Call):
+            return self._call(node, frame)
+        if isinstance(node, ast.Subscript):
+            return self._subscript(node, frame)
+        if isinstance(node, (ast.Await, ast.Starred)):
+            return self._eval(node.value, frame)
+        if isinstance(node, ast.BoolOp):
+            values = [self._eval(v, frame) for v in node.values]
+            return next((v for v in values if v is not None), None)
+        if isinstance(node, ast.IfExp):
+            self._eval(node.test, frame)
+            first, second = self._eval(node.body, frame), self._eval(node.orelse, frame)
+            return first or second
+        if isinstance(node, ast.NamedExpr):
+            value = self._eval(node.value, frame)
+            self._bind(node.target, value, frame)
+            return value
+        if isinstance(node, ast.Lambda):
+            return None
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            saved = dict(frame.scope)
+            depth = len(frame.loops)
+            for gen in node.generators:
+                self._bind_loop(gen.target, self._eval(gen.iter, frame), frame)
+                frame.loops.append(f"for {_target(gen.target)} in {_unparse(gen.iter, 80)}")
+                for cond in gen.ifs:
+                    self._eval(cond, frame)
+            if isinstance(node, ast.DictComp):
+                self._eval(node.key, frame)
+                self._eval(node.value, frame)
+            else:
+                self._eval(node.elt, frame)
+            del frame.loops[depth:]
+            frame.scope.clear()
+            frame.scope.update(saved)
+            return None
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.expr):
+                self._eval(child, frame)
+        return None
+
+    def _attribute(self, node: ast.Attribute, frame: _Frame) -> _Sym | None:
+        base = self._eval(node.value, frame)
+        attr = node.attr
+        if base is None:
+            return None
+        kind = base.kind
+        if kind == "mod":
+            dotted = f"{base.name}.{attr}"
+            return _Sym("env") if dotted == "os.environ" else _Sym("mod", dotted)
+        if kind == "own":
+            sub = f"{base.name}.{attr}"
+            if sub in self.sources:
+                self._load_chain(sub)
+                return _Sym("own", sub)
+            return self._load(base.name).scope.get(attr)
+        if kind in ("obj", "class"):
+            found = self._member(base.name, attr)
+            if found is None:
+                return None
+            what, value = found
+            if what == "attr":
+                return value
+            node_ = self.defs[value][1]
+            static = any(getattr(d, "id", "") == "staticmethod" for d in node_.decorator_list)
+            classmethod_ = any(getattr(d, "id", "") == "classmethod" for d in node_.decorator_list)
+            if static or (kind == "class" and not classmethod_):
+                return _Sym("func", value)
+            return _Sym("bound", value, inner=_Sym("class", base.name) if classmethod_ else base)
+        if kind == "event":
+            if attr in _DICT_METHODS:
+                return _Sym("evmethod", attr, path=base.path)
+            path = base.path + (attr,)
+            self._event_read(path, node, frame, required=True)
+            return _Sym("event", path=path)
+        if kind == "env":
+            return _Sym("envget", attr) if attr in ("get", "setdefault", "pop") else None
+        if kind == "session":
+            return _Sym("mod", f"boto3.{attr}")
+        if kind in ("client", "resource", "res", "coll", "paginator", "batch"):
+            if attr == "meta":
+                return _Sym("meta", base.name)
+            if kind in ("res", "resource") and (base.name, attr) in _COLLECTIONS:
+                return _Sym("coll", base.name, _COLLECTIONS[(base.name, attr)])
+            return _Sym("method", base.name, attr, inner=base)
+        if kind == "meta":
+            return _Sym("client", base.name) if attr == "client" else None
+        if kind == "logger":
+            return _Sym("log", attr)
+        if kind == "http":
+            return _Sym("httpcall", base.name, attr, inner=base)
+        return None
+
+    def _subscript(self, node: ast.Subscript, frame: _Frame) -> _Sym | None:
+        base = self._eval(node.value, frame)
+        key = _const(node.slice)
+        if not isinstance(node.slice, ast.Constant):
+            self._eval(node.slice, frame)
+        if base is None:
+            return None
+        if base.kind == "env" and isinstance(key, str):
+            self._env_read(key, node, frame, required=True)
+            return _Sym("envval", key)
+        if base.kind == "event":
+            if isinstance(key, str):
+                path = base.path + (key,)
+                self._event_read(path, node, frame, required=True)
+                return _Sym("event", path=path)
+            if isinstance(key, int):
+                return _Sym("event", path=base.path + ("[]",))
+            if isinstance(node.slice, ast.Slice):
+                return base
+        return None
+
+    def _call(self, node: ast.Call, frame: _Frame) -> _Sym | None:
+        func = self._eval(node.func, frame)
+        args = [self._eval(a, frame) for a in node.args]
+        kwargs = {}
+        for kw in node.keywords:
+            value = self._eval(kw.value, frame)
+            if kw.arg:
+                kwargs[kw.arg] = value
+        if func is None:
+            return self._unknown_call(node, frame)
+        kind = func.kind
+        if kind == "func":
+            return self._run(func.name, args, kwargs, frame, node)
+        if kind == "bound":
+            return self._run(func.name, args, kwargs, frame, node, bound=func.inner)
+        if kind == "class":
+            init = self._member(func.name, "__init__")
+            obj = _Sym("obj", func.name)
+            if init and init[0] == "method":
+                self._run(init[1], args, kwargs, frame, node, bound=obj)
+            return obj
+        if kind == "mod":
+            return self._outside(func.name, node, args, frame)
+        if kind == "builtin":
+            return self._builtin(func.name, node, args, frame)
+        if kind == "method":
+            return self._aws_method(func, node, frame)
+        if kind == "envget":
+            name = _const(node.args[0]) if node.args else None
+            if isinstance(name, str):
+                default = node.args[1] if len(node.args) > 1 else next(
+                    (kw.value for kw in node.keywords if kw.arg == "default"), None)
+                self._env_read(name, node, frame, required=False,
+                               default=_unparse(default, 60) if default is not None else "")
+                return _Sym("envval", name)
+            return None
+        if kind == "evmethod":
+            key = _const(node.args[0]) if node.args else None
+            if func.name in ("get", "pop", "setdefault") and isinstance(key, str):
+                path = func.path + (key,)
+                self._event_read(path, node, frame, required=False)
+                return _Sym("event", path=path)
+            return None
+        if kind == "log":
+            if func.name in _LOG_LEVELS:
+                self.cur.note("log", _LOG_LEVELS[func.name])
+            return None
+        if kind == "httpcall":
+            if func.sub in _HTTP_METHODS:
+                self._http(func.name, func.sub, node, frame, given="timeout" in (func.inner.path if func.inner else ()))
+            return None
+        return None
+
+    def _unknown_call(self, node: ast.Call, frame: _Frame) -> _Sym | None:
+        """A call to something it couldn't follow: a method name only AWS has, a file written with pandas, a log
+        line, or a web framework's router."""
+        if not isinstance(node.func, ast.Attribute):
+            return None
+        attr = node.func.attr
+        receiver = _unparse(node.func.value, 60)
+        if attr in _GUESSES:
+            service, op = _GUESSES[attr]
+            self._aws(service, op, node, frame, guessed=True)
+        elif attr in _FILE_WRITERS and node.args:
+            self._write(node.args[0], node, frame)
+        elif attr in _LOG_LEVELS and "log" in receiver.lower():
+            self.cur.note("log", _LOG_LEVELS[attr])
+        elif attr == "resolve" and any(router == receiver for *_, router in self.routes):
+            for method, path, key, router in self.routes:
+                if router == receiver:
+                    self._run(key, [], {}, frame, node, label=f"{method} {path}")
+        return None
+
+    def _outside(self, name: str, node: ast.Call, args: list[_Sym | None], frame: _Frame) -> _Sym | None:
+        """A call to something from outside the package: boto3, os, json, requests, logging, time..."""
+        first = args[0] if args else None
+        last = name.rsplit(".", 1)[-1]
+        if name.startswith("boto3") and last in ("client", "resource"):
+            return self._make_client(last, node, frame)
+        if name in ("boto3.Session", "boto3.session.Session"):
+            return _Sym("session")
+        if name == "os.getenv":
+            key = _const(node.args[0]) if node.args else None
+            if isinstance(key, str):
+                default = node.args[1] if len(node.args) > 1 else None
+                self._env_read(key, node, frame, required=False,
+                               default=_unparse(default, 60) if default is not None else "")
+                return _Sym("envval", key)
+            return None
+        if name in _JSON_LOADS or name in _B64_DECODES:
+            if first is not None and first.kind == "event":
+                return _Sym("event", path=first.path + ("{json}" if name in _JSON_LOADS else "{base64}",))
+            return None
+        if name in ("urllib.parse.unquote_plus", "urllib.parse.unquote", "str.strip"):
+            return first
+        if name == "logging.getLogger" or last == "Logger":
+            return _Sym("logger")
+        if name.startswith("logging.") and last in _LOG_LEVELS:
+            self.cur.note("log", _LOG_LEVELS[last])
+            return None
+        top = name.split(".")[0]
+        if name in _HTTP_SESSIONS:
+            given = any(kw.arg == "timeout" for kw in node.keywords) or (top == "http" and len(node.args) >= 3)
+            return _Sym("http", _HTTP_SESSIONS[name], path=("timeout",) if given else ())
+        if top in ("requests", "httpx") and last in _HTTP_METHODS and name.count(".") == 1:
+            self._http(top, last, node, frame)
+            return None
+        if name == "urllib.request.urlopen":
+            self._http("urllib.request", "get", node, frame, given=len(node.args) >= 3)
+            return None
+        if name in ("time.sleep", "asyncio.sleep"):
+            wait = _unparse(node.args[0], 30) if node.args else "?"
+            self._spot("sleep", frame.file, node.lineno, frame.function, _unparse(node, 80), wait, loop=self._loop_of(frame))
+            self.cur.note("sleep", f"waits {wait} s" if isinstance(_const(node.args[0] if node.args else None),
+                                                                  (int, float)) else f"waits ({wait})")
+            return None
+        if name in _COMMANDS:
+            self._spot("command", frame.file, node.lineno, frame.function, _unparse(node, 80))
+            self.cur.note("command", "runs a command")
+            return None
+        if top == "pandas" and last.startswith("read_") and isinstance(_const(node.args[0] if node.args else None), str):
+            if str(_const(node.args[0])).startswith("s3://"):
+                self._aws("s3", "GetObject", node, frame)
+        return None
+
+    def _builtin(self, name: str, node: ast.Call, args: list[_Sym | None], frame: _Frame) -> _Sym | None:
+        if name == "print":
+            self.cur.note("log", "prints")
+        elif name == "open" and node.args:
+            mode = _const(node.args[1]) if len(node.args) > 1 else next(
+                (_const(kw.value) for kw in node.keywords if kw.arg == "mode"), "r")
+            if isinstance(mode, str) and any(c in mode for c in "wax+"):
+                self._write(node.args[0], node, frame)
+            else:
+                path = _const(node.args[0])
+                self.cur.note("file", f"reads {_clip(path, 40)}" if isinstance(path, str) else "reads a file")
+        elif name == "enumerate" and args and args[0] is not None:
+            return _Sym("enumerate", inner=args[0])
+        elif name in ("sorted", "reversed", "list", "tuple", "iter") and args:
+            return args[0]
+        return None
+
+    def _write(self, path_node: Any, node: ast.Call, frame: _Frame) -> None:
+        """A file the code writes: on Lambda's disk only /tmp (and a file system mounted under /mnt) can be."""
+        prefix = None
+        if isinstance(_const(path_node), str):
+            prefix = str(_const(path_node))
+        elif isinstance(path_node, ast.JoinedStr) and path_node.values and isinstance(_const(path_node.values[0]),
+                                                                                       str):
+            prefix = str(_const(path_node.values[0]))
+        if prefix is None:
+            self.cur.note("file", "writes a file")
+            return
+        if prefix.startswith("s3://"):
+            self._aws("s3", "PutObject", node, frame)
+            return
+        ok = prefix.startswith(("/tmp", "/mnt/"))
+        self._spot("write", frame.file, node.lineno, frame.function, _unparse(node, 80), prefix, ok=ok)
+        self.cur.note("file", f"writes {_clip(prefix, 40)}")
+
+    def _make_client(self, kind: str, node: ast.Call, frame: _Frame) -> _Sym:
+        service = _const(node.args[0]) if node.args else next(
+            (_const(kw.value) for kw in node.keywords if kw.arg == "service_name"), None)
+        service = service if isinstance(service, str) else "?"
+        once = (self.loading > 0 or frame.cached or bool(self.target & frame.globals)
+                or any("None" in g or g.startswith("not ") for g in frame.guards))
+        name = _service_name(service) if service != "?" else "an AWS"
+        self._spot("client", frame.file, node.lineno, frame.function, _unparse(node, 80), service, ok=once,
+                   loop=self._loop_of(frame))
+        self.cur.note("client", f"makes {_a(name)} {name} {'client' if kind == 'client' else 'resource'}")
+        return _Sym(kind if kind == "client" else "resource", service)
+
+    def _aws_method(self, func: _Sym, node: ast.Call, frame: _Frame) -> _Sym | None:
+        owner, service, method = func.inner, func.name, func.sub
+        if owner is None:
+            return None
+        if owner.kind == "client":
+            if method == "get_paginator":
+                op = self._op(service, _const(node.args[0]) if node.args else None)
+                return _Sym("paginator", service, op) if op else None
+            if method == "get_waiter":
+                self.cur.note("aws-reads", f"{_service_name(service)} waiter {_const(node.args[0]) if node.args else ''}"
+                              .strip())
+                return None
+            if method in ("generate_presigned_url", "generate_presigned_post"):
+                what = _const(node.args[0]) if node.args and method.endswith("url") else next(
+                    (_const(kw.value) for kw in node.keywords if kw.arg == "ClientMethod"), None)
+                op = self._op(service, what) if isinstance(what, str) else ("PutObject" if method.endswith("post")
+                                                                              else None)
+                if op:
+                    self._aws(service, op, node, frame, access="signs")
+                return None
+            if service == "s3" and method in _TRANSFERS:
+                self._aws(service, _TRANSFERS[method], node, frame)
+                return None
+            if service == "?" and method in _GUESSES:
+                self._aws(*_GUESSES[method], node, frame, guessed=True)
+                return None
+            op = self._op(service, method)
+            if op:
+                self._aws(service, op, node, frame)
+            return None
+        if owner.kind == "resource":
+            if method[:1].isupper():
+                return _Sym("res", service, method)
+            if method == "get_queue_by_name":
+                self._aws("sqs", "GetQueueUrl", node, frame)
+                return _Sym("res", "sqs", "Queue")
+            op = self._op(service, method)
+            if op:
+                self._aws(service, op, node, frame)
+            return None
+        if owner.kind == "res":
+            if method[:1].isupper():
+                return _Sym("res", service, method)
+            if method == "batch_writer":
+                return _Sym("batch", service, "BatchWriteItem")
+            op = _RESOURCE_ACTIONS.get((service, owner.sub), {}).get(method) or self._op(service, method)
+            if op:
+                self._aws(service, op, node, frame)
+            return None
+        if owner.kind == "coll":
+            if method in ("all", "filter", "limit", "page_size", "pages"):
+                self._aws(service, owner.sub, node, frame, pages="all")
+                return owner
+            if method == "delete":
+                self._aws(service, "DeleteObjects", node, frame)
+            return None
+        if owner.kind == "paginator" and method == "paginate":
+            self._aws(service, owner.sub, node, frame, pages="all")
+        elif owner.kind == "batch" and method in ("put_item", "delete_item"):
+            self._aws(service, owner.sub, node, frame)
+        return None
+
+    # ---------------------------------------------------------------- calls into its own code
+
+    def _run(self, key: str, args: list[_Sym | None], kwargs: dict[str, _Sym | None], caller: _Frame | None,
+             call: Any, bound: _Sym | None = None, label: str = "") -> _Sym | None:
+        """One of its own functions, called: its steps (shown the first time), and what it returns."""
+        module, node, cls = self.defs[key]
+        file = self.modules[module].file or ""
+        depth = caller.depth + 1 if caller is not None and caller.function != caller.module else 0
+        info = self.reached.get(key)
+        if info is None:
+            end = getattr(node, "end_lineno", None) or node.lineno
+            info = self.reached[key] = CodeFunction(key, file, node.lineno, end - node.lineno + 1,
+                                                    _unparse(node.args, 100), _doc_line(node), depth=depth)
+        info.depth = min(info.depth, depth)
+        if caller is not None and call is not None:
+            where = f"{caller.function} line {call.lineno}"
+            if where not in info.called_from:
+                info.called_from.append(where)
+        step = CodeStep(file, node.lineno, _def_line(node), "def", name=key)
+        if label:
+            step.notes.append(("route", label))
+        self.cur.calls.append(step)
+        if key in self.stack:
+            step.notes.append(("more", "calls itself: not followed again"))
+            step.seen = True
+            return None
+        if depth > _MAP_DEPTH or self.count > _MAP_STEPS or self.runs > _MAP_RUNS:
+            step.notes.append(("more", "not opened: " + ("too many calls deep" if depth > _MAP_DEPTH
+                                                         else "the outline is long enough")))
+            step.seen = True
+            self.cmap.limited = (f"followed calls {_MAP_DEPTH} deep" if depth > _MAP_DEPTH
+                                 else f"stopped opening functions after {_MAP_STEPS:,} lines" if self.count > _MAP_STEPS
+                                 else f"stopped after reading {_MAP_RUNS:,} function bodies")
+            return None
+        a = node.args
+        params = [p.arg for p in a.posonlyargs + a.args]
+        values = ([bound] if bound is not None else []) + list(args)
+        scope: dict[str, _Sym | None] = dict(zip(params, values))
+        for name in params[len(values):] + [p.arg for p in a.kwonlyargs]:
+            scope.setdefault(name, kwargs.get(name))
+        for extra in (a.vararg, a.kwarg):
+            if extra is not None:
+                scope[extra.arg] = None
+        loops = list(caller.loops) if caller is not None else []
+        memo = (key, bool(loops), tuple(sorted(((k, v) for k, v in scope.items() if v is not None),
+                                               key=lambda kv: kv[0])))
+        if memo in self.memo:
+            step.seen = key in self.shown
+            if not step.seen:
+                self.shown.add(key)
+            return self.memo[memo]
+        self.memo[memo] = None
+        self.runs += 1
+        frame = _Frame(module, file, key, scope, node=node, outers=self.closures.get(key, []), loops=loops,
+                       cached=key in self.cached, depth=depth)
+        self.stack.append(key)
+        try:
+            steps = self._block(node.body, frame)
+        finally:
+            self.stack.pop()
+        value = next((v for v in frame.returns if v is not None), None)
+        self.memo[memo] = value
+        if key in self.shown:
+            step.seen = True
+        else:
+            self.shown.add(key)
+            step.steps = steps
+        return value
+
+    # ---------------------------------------------------------------- what it reaches
+
+    def _loop_of(self, frame: _Frame) -> str:
+        return frame.loops[-1] if frame.loops else ""
+
+    def _op(self, service: str, method: Any) -> str | None:
+        """A client method's operation: ('s3', 'get_object') -> 'GetObject'; None when it isn't one."""
+        if not isinstance(method, str):
+            return None
+        model = _aws_model(service)
+        if model is None:
+            return _GUESSES[method][1] if method in _GUESSES else None
+        return model["ops"].get(method)
+
+    def _aws(self, service: str, op: str, node: ast.Call, frame: _Frame, *, access: str | None = None,
+             pages: str | None = None, guessed: bool = False) -> None:
+        access = access or _access(op)
+        if pages is None:
+            pages = self._pages(service, op, node, frame)
+        key = (service, op, frame.file, node.lineno)
+        if key not in self.seen:
+            self.seen.add(key)
+            self.cmap.aws.append(AwsCall(service, op, access, _iam_action(service, op), frame.file, node.lineno,
+                                         frame.function, _unparse(node, 120), self._loop_of(frame), pages, guessed,
+                                         self.loading > 0))
+        self.cur.note(f"aws-{access}", f"{_service_name(service)} {op}")
+
+    def _pages(self, service: str, op: str, node: ast.Call, frame: _Frame) -> str:
+        """'one' when a list call reads only its first page, 'all' when the code follows the next-page token, ''
+        when the call doesn't come in pages, or asks for a set number."""
+        model = _aws_model(service)
+        if model is None or op not in model["pages"]:
+            return ""
+        inputs, outputs, limit = model["pages"][op]
+        given = {kw.arg for kw in node.keywords if kw.arg}
+        if limit and limit in given:
+            return ""
+        if given & inputs or any(kw.arg is None for kw in node.keywords):
+            return "all"
+        if frame.words is None:
+            tree = frame.node if frame.node is not None else (self.modules[frame.module].tree
+                                                              if frame.module in self.modules else None)
+            frame.words = set()
+            for n in ast.walk(tree) if tree is not None else []:
+                if isinstance(n, ast.Name):
+                    frame.words.add(n.id)
+                elif isinstance(n, ast.Attribute):
+                    frame.words.add(n.attr)
+                elif isinstance(n, ast.Constant) and isinstance(n.value, str):
+                    frame.words.add(n.value)
+        return "all" if any(word in frame.words for word in outputs) else "one"
+
+    def _env_read(self, name: str, node: Any, frame: _Frame, *, required: bool, default: str = "") -> None:
+        key = ("env", name, frame.file, node.lineno)
+        if key not in self.seen:
+            self.seen.add(key)
+            self.cmap.env.append(EnvRead(name, frame.file, node.lineno, frame.function, required, default,
+                                         self.loading > 0))
+        self.cur.note("env", name)
+
+    def _event_read(self, path: tuple[str, ...], node: Any, frame: _Frame, *, required: bool) -> None:
+        if "*" in path:
+            return
+        found = self.event_reads.get(path)
+        if found is None:
+            self.event_reads[path] = EventField(path, frame.file, node.lineno, required)
+        elif required and not found.required:
+            found.required = True
+        self.cur.note("event", _event_label(path))
+
+    def _http(self, library: str, method: str, node: ast.Call, frame: _Frame, given: bool = False) -> None:
+        args = list(node.args)
+        if method == "request" and args:  # requests.request('POST', url), pool.request('GET', url)
+            verb = _const(args[0])
+            method, args = (str(verb).lower() if isinstance(verb, str) else "request"), args[1:]
+        url = args[0] if args else next((kw.value for kw in node.keywords if kw.arg == "url"), None)
+        has_timeout = (given or library in _DEFAULT_TIMEOUTS or any(kw.arg == "timeout" for kw in node.keywords))
+        verb = method.upper() if method in _HTTP_METHODS and method != "request" else "request"
+        target = _unparse(url, 60) if url is not None else ""
+        self._spot("http", frame.file, node.lineno, frame.function, _unparse(node, 100), f"{verb} {target}".strip(),
+                   ok=has_timeout, loop=self._loop_of(frame))
+        shown = _const(url)
+        self.cur.note("http", f"HTTP {verb}" + (f" {_clip(str(shown), 40)}" if isinstance(shown, str) else ""))
+
+    def _spot(self, kind: str, file: str, line: int, function: str, code: str, detail: str = "", *, ok: bool = True,
+              loop: str = "") -> None:
+        key = (kind, file, line, detail)
+        if key not in self.seen:
+            self.seen.add(key)
+            self.cmap.spots.append(CodeSpot(kind, file, line, function, code, detail, ok, loop, self.loading > 0))
+
+    def _secrets(self, mod: _Module) -> None:
+        """Secret-looking values written in the code: a password, token or key given as a literal. Only their names
+        are kept, never the values (an AWS access key is found in every file, by read())."""
+        for name, value in _secret_spots(mod.tree):
+            if name != "an AWS access key":
+                self._spot("secret", mod.file or "", value.lineno, mod.name, "", name, ok=False)
+
+
+def _python_version(runtime: str | None) -> tuple[int, int] | None:
+    """'python3.12' -> (3, 12)."""
+    match = re.fullmatch(r"python(\d+)\.(\d+)", runtime or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def map_code(
+    files: dict[str, str | bytes],
+    handler: str,
+    *,
+    function: Function | None = None,
+    names: Iterable[str] | None = None,
+    libraries: Iterable[str] = (),
+) -> CodeMap:
+    """How Python code works, read with Python's ast module and never run: files is {path: source} (the package's
+    own .py files), handler the handler setting ('app.handler'). Starting at the handler, it follows the code into
+    its own functions and modules, keeping track of what each name holds (a boto3 client, part of the event, an
+    environment variable...), and returns a CodeMap: what runs at start-up and on each call, step by step, its AWS
+    calls with the IAM permission each needs, the environment variables and event fields it reads, the libraries it
+    imports and where they come from. names lists every file in the package (libraries, .so files) when files holds
+    only the Python ones; libraries names packages in it that aren't its own code. function (a Function) adds what
+    the findings check against: the runtime, its environment variables' names and its layers.
+
+        map_code({"app.py": open("app.py").read()}, "app.handler")"""
+    texts = {path: text.decode("utf-8", "replace") if isinstance(text, bytes) else str(text)
+             for path, text in files.items()}
+    names = list(names) if names is not None else list(texts)
+    cmap = CodeMap(function, handler)
+    runtime = function.runtime if function is not None else None
+    if not handler or "." not in handler:
+        cmap.note = f"Its handler setting ({handler or 'none'}) doesn't name a file and a function, like app.handler."
+        return cmap
+    cmap.handler_file = handler_file(handler, runtime if runtime_family(runtime) == "python" else "python3.12", names)
+    if cmap.handler_file is None:
+        module = handler.rsplit(".", 1)[0].replace(".", "/")
+        cmap.note = f"No file in the package matches its handler {handler} (Lambda looks for {module}.py)."
+        return cmap
+    stem = handler.rsplit(".", 1)[0].replace("/", ".").replace(".", "/") + ".py"
+    root = cmap.handler_file[: -len(stem)] if cmap.handler_file.endswith(stem) else ""
+    libs = set(libraries) | _RUNTIME_MODULES | _LIBRARIES
+    for name in names:
+        first = name[len(root):].split("/")[0] if name.startswith(root) else ""
+        if first.endswith((".dist-info", ".egg-info")):
+            libs.add(re.split(r"-\d", first.rsplit(".", 1)[0])[0].replace("-", "_"))
+    libs.discard(handler.rsplit(".", 1)[0].replace("/", ".").split(".")[0])  # its own handler is never a library
+    reader = _CodeReader(texts, names, root, cmap, _python_version(runtime), libs,
+                         bool(function is not None and function.layers))
+    try:
+        reader.read(handler)
+    except RecursionError:
+        cmap.limited = "stopped where the code nests too deep to follow"
+    except Exception as exc:  # code it can't follow: what it found so far, said to be partial, never a traceback
+        cmap.limited = f"stopped partway, at code it couldn't follow ({type(exc).__name__}: {_clip(str(exc), 80)})"
+        cmap.functions, cmap.event = list(reader.reached.values()), list(reader.event_reads.values())
+    return cmap
+
+
+def map_package(fn: Function, data: bytes | None) -> CodeMap:
+    """How a Python function's code works, from its deployment package (the .zip as code() downloads it): its own
+    .py files are read with Python's ast module and never run, libraries packed in it (found by their .dist-info
+    folders) aren't read as its code. See map_code(). A container image, a runtime that isn't Python or a package
+    without the handler's file gives a CodeMap with only a note saying so."""
+    if fn.package_type == "Image":
+        return CodeMap(fn, fn.handler, note=(
+            f"It's a container image ({fn.image_uri or 'image URI not shown'}): its code is in the image, which this "
+            "doesn't pull."))
+    if runtime_family(fn.runtime) != "python":
+        return CodeMap(fn, fn.handler, note=(
+            f"It runs {fn.runtime or 'a custom runtime'}: how_it_works() reads Python code. code() shows its files and "
+            "the handler's source."))
+    if data is None:
+        return CodeMap(fn, fn.handler, note="Lambda gave no link to download its code.")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError(f"The package ({human_size(len(data))}) isn't a readable .zip file") from None
+    with archive:
+        infos = [info for info in archive.infolist() if not info.is_dir()]
+        names = [info.filename for info in infos]
+        libraries: set[str] = set()
+        for info in infos:  # what each library installed: the first part of every path its RECORD lists
+            if info.filename.endswith((".dist-info/RECORD", ".egg-info/top_level.txt", ".dist-info/top_level.txt")):
+                text = archive.read(info).decode("utf-8", "replace")
+                libraries |= {line.split(",")[0].split("/")[0].removesuffix(".py") for line in text.splitlines()
+                              if line.strip() and not line.startswith(("..", "/"))}
+        libraries = {lib for lib in libraries if not lib.endswith((".dist-info", ".egg-info", ".data")) and lib}
+        handler_module = (fn.handler or "").rsplit(".", 1)[0].replace("/", ".").split(".")[0]
+        libraries.discard(handler_module)
+        files: dict[str, str] = {}
+        total = 0
+        limited = ""
+        for info in sorted(infos, key=lambda i: (i.filename.count("/"), i.filename)):
+            path = info.filename
+            top = path.split("/")[0].removesuffix(".py")
+            if not path.endswith(".py") or top in libraries | _RUNTIME_MODULES | (_LIBRARIES - {handler_module}):
+                continue
+            if "site-packages/" in path or _JUNK_RE.search(path):
+                continue
+            if len(files) >= _MAP_FILES or total + info.file_size > _MAP_BYTES:
+                limited = f"read {len(files):,} of its Python files ({human_size(total)})"
+                break
+            files[path] = archive.read(info).decode("utf-8", "replace")
+            total += info.file_size
+    cmap = map_code(files, fn.handler or "", function=fn, names=names, libraries=libraries)
+    cmap.limited = cmap.limited or limited
+    return cmap
+
+
+_PIP_NAMES = {"yaml": "pyyaml", "PIL": "pillow", "sklearn": "scikit-learn", "cv2": "opencv-python-headless",
+              "dateutil": "python-dateutil", "jwt": "PyJWT", "dotenv": "python-dotenv", "bs4": "beautifulsoup4",
+              "psycopg2": "psycopg2-binary", "Crypto": "pycryptodome", "jose": "python-jose", "magic": "python-magic"}
+_REPLACEMENTS = {"distutils": "setuptools, or shutil and sysconfig", "imp": "importlib", "asyncore": "asyncio",
+                 "asynchat": "asyncio", "smtpd": "aiosmtpd", "cgi": "email.message and urllib.parse",
+                 "pipes": "shlex.quote", "crypt": "hashlib", "telnetlib": "telnetlib3", "imghdr": "Pillow or filetype",
+                 "uu": "base64", "xdrlib": "struct"}
+
+
+def _short_name(key: str) -> str:
+    """One of its functions as people say it: 'app.main.handler' -> 'handler', 'app.store.Orders.save' ->
+    'Orders.save', 'app.store.Orders.__init__' -> 'Orders' (what you call to run it)."""
+    parts = key.split(".")
+    if len(parts) >= 2 and parts[-2][:1].isupper():
+        return parts[-2] if parts[-1] == "__init__" else f"{parts[-2]}.{parts[-1]}"
+    return parts[-1]
+
+
+def _where(file: str, line: int, function: str = "") -> str:
+    """'etl.py line 17', or 'etl.py line 17 in handler()'."""
+    return f"{file} line {line}" + (f" in {_short_name(function)}()" if function else "")
+
+
+def _listed(items: list[str], most: int = 3) -> str:
+    """'a', 'a and b', 'a, b and c', 'a, b, c and 2 more'."""
+    if len(items) > most:
+        return ", ".join(items[:most]) + f" and {len(items) - most} more"
+    return " and ".join([", ".join(items[:-1]), items[-1]]) if len(items) > 1 else (items[0] if items else "")
+
+
+def code_map_findings(cmap: CodeMap) -> list[tuple[str, str]]:
+    """What's worth fixing in a function's code, from its CodeMap: a handler that isn't there or can't take (event,
+    context), environment variables it needs that aren't set, imports Lambda can't find, HTTP requests without a
+    timeout, list calls that read only their first page, errors it drops, files written outside /tmp, secrets written
+    in the code, AWS calls in a loop that a batch call would do in fewer requests, and clients made on every call."""
+    found: list[tuple[str, str]] = []
+    if cmap.note:
+        return found
+    fn = cmap.function
+    runtime = fn.runtime if fn is not None else None
+    version = _python_version(runtime)
+    handler_name = (cmap.handler or "").rsplit(".", 1)[-1]
+    timeout = f"its {fn.timeout:,} s timeout" if fn is not None else "its timeout"
+    spots: dict[str, list[CodeSpot]] = defaultdict(list)
+    for spot in cmap.spots:
+        spots[spot.kind].append(spot)
+
+    for spot in spots["syntax"]:
+        mine = sys.version_info[:2]
+        if version and version > mine:
+            found.append(("info", (
+                f"{spot.file} doesn't parse with this notebook's Python {mine[0]}.{mine[1]} ({spot.detail}): it may use "
+                f"syntax only Python {version[0]}.{version[1]} knows, so how_it_works() couldn't follow it. A notebook "
+                f"kernel with Python {version[0]}.{version[1]} reads it."
+            )))
+        else:
+            found.append(("warn", (
+                f"{spot.file} doesn't parse ({spot.detail}): Lambda can't load it either, so calls that import it fail "
+                "with Runtime.UserCodeSyntaxError. Fix that line and deploy again."
+            )))
+    if cmap.entry is None and cmap.handler_file and not any(s.file == cmap.handler_file for s in spots["syntax"]):
+        others = f" ({_listed(cmap.handlers)} take event and context)" if cmap.handlers else ""
+        found.append(("warn", (
+            f"No function {handler_name}() in {cmap.handler_file}: every call fails with Runtime.HandlerNotFound before "
+            f"any of its code runs. Point the handler setting at one of its functions{others}, or add it."
+        )))
+    elif cmap.entry is not None and cmap.is_async:
+        found.append(("warn", (
+            f"{handler_name}() is async def: the Python runtime calls it without awaiting it, so its code never runs "
+            "and the call returns a coroutine. Wrap it in a plain function that runs it: def handler(event, "
+            "context): return asyncio.run(main(event, context))."
+        )))
+    elif cmap.entry is not None and cmap.params is not None and cmap.steps and cmap.steps[0].kind == "def":
+        positional = [p for p in cmap.params if not p.startswith("*")]
+        required = [p for p in positional if "=" not in p]
+        star = any(p.startswith("*") and not p.startswith("**") for p in cmap.params)
+        if len(required) > 2 or (len(positional) < 2 and not star):
+            found.append(("warn", (
+                f"{handler_name}() takes {_plural(len(required), 'argument')}, and Lambda passes two (event and "
+                f"context): every call fails with TypeError. Make it def {handler_name}(event, context)."
+            )))
+
+    if fn is not None and fn.env_error is None:
+        missing: dict[str, list[EnvRead]] = defaultdict(list)
+        for read in cmap.env:
+            if read.required and read.name not in fn.env_names and read.name not in _LAMBDA_ENV:
+                missing[read.name].append(read)
+        if missing:
+            names = list(missing)
+            first = [reads[0] for reads in missing.values()]
+            startup = any(r.startup for r in first)
+            where = _listed([f"{r.file} line {r.line}" for r in first], 2)
+            found.append(("warn", (
+                f"{_listed(names)} {'isn' if len(names) == 1 else 'aren'}'t set on {fn.name}, and its code reads "
+                f"{'it' if len(names) == 1 else 'them'} with os.environ[...] ({where}): that line fails with "
+                f"KeyError: '{names[0]}'" + (", when Lambda loads the code, so every call fails" if startup else "")
+                + f". Add {'it' if len(names) == 1 else 'them'} to its environment variables (the console's "
+                "Configuration tab, Environment variables)."
+            )))
+
+    gone = [i for i in cmap.imports if i.source == "missing" and not i.optional]
+    if gone:
+        tops = list(dict.fromkeys(i.top for i in gone))
+        startup = any(i.startup for i in gone)
+        pip = " ".join(_PIP_NAMES.get(top, top) for top in tops[:5])
+        found.append(("warn", (
+            f"It imports {_listed(tops)}, which {'isn' if len(tops) == 1 else 'aren'}'t in the package, Python's "
+            f"standard library or the Lambda runtime ({gone[0].file} line {gone[0].line}): "
+            + ("every call fails" if startup else "calls that reach that line fail")
+            + f" with Runtime.ImportModuleError: No module named '{tops[0]}'. Add "
+            f"{'it' if len(tops) == 1 else 'them'} to the package (pip install {pip} -t .) or a layer."
+        )))
+    for i in [i for i in cmap.imports if i.source == "removed"]:
+        removed = _REMOVED_MODULES[i.top]
+        found.append(("warn", (
+            f"It imports {i.top} ({i.file} line {i.line}), which Python {removed[0]}.{removed[1]} removed: on "
+            f"{runtime} that fails with Runtime.ImportModuleError. Use {_REPLACEMENTS.get(i.top, 'a replacement')} "
+            "instead."
+        )))
+    family_latest = LATEST_RUNTIMES["python"]
+    latest = _python_version(family_latest)
+    later = [i for i in cmap.imports if i.source == "stdlib" and i.top in _REMOVED_MODULES and latest
+             and _REMOVED_MODULES[i.top] <= latest]
+    if later:
+        tops = list(dict.fromkeys(i.top for i in later))
+        removed = _REMOVED_MODULES[tops[0]]
+        swaps = _listed([f"{top} by {_REPLACEMENTS.get(top, 'a replacement')}" for top in tops], 2)
+        found.append(("info", (
+            f"It imports {_listed(tops)}, which Python {removed[0]}.{removed[1]} removed: moving it to "
+            f"{family_latest} breaks it with Runtime.ImportModuleError until "
+            f"{'that is' if len(tops) == 1 else 'they are'} replaced ({swaps})."
+        )))
+    layered = [i for i in cmap.imports if i.source == "layer" and not i.optional]
+    if layered and fn is not None:
+        tops = list(dict.fromkeys(i.top for i in layered))
+        found.append(("info", (
+            f"{_listed(tops)} {'isn' if len(tops) == 1 else 'aren'}'t in the package, so "
+            f"{'it has' if len(tops) == 1 else 'they have'} to come from its layers "
+            f"({_listed([layer.name for layer in fn.layers], 2)}): if no layer has "
+            f"{'it' if len(tops) == 1 else 'them'}, calls fail with Runtime.ImportModuleError."
+        )))
+
+    slow = [s for s in spots["http"] if not s.ok]
+    if slow:
+        found.append(("warn", (
+            f"{_plural(len(slow), 'HTTP request')} {'has' if len(slow) == 1 else 'have'} no timeout "
+            f"({_listed([f'{s.detail} at {_where(s.file, s.line)}' for s in slow], 2)}): if the server doesn't "
+            f"answer, the run waits until Lambda stops it at {timeout}, and you pay for the wait. Pass timeout=10 "
+            "(or what the call needs)."
+        )))
+    for call in cmap.aws:
+        if call.pages == "one" and call.operation.startswith(("List", "Scan", "Query")) and not call.guessed:
+            first = {"ListObjectsV2": "1,000 keys", "ListObjects": "1,000 keys", "Scan": "1 MB", "Query": "1 MB"}.get(
+                call.operation, "the first page")
+            fix = ("loop while the answer has LastEvaluatedKey, passing it back as ExclusiveStartKey"
+                   if call.service == "dynamodb" else
+                   f"use get_paginator('{_snake(call.operation)}').paginate(...) on its client")
+            found.append(("warn", (
+                f"{call.label} at {_where(call.file, call.line)} reads only its first page: past {first} the rest is "
+                f"left out without an error. To read every page, {fix}."
+            )))
+    for spot in spots["swallow"]:
+        found.append(("warn", (
+            f"Errors are dropped at {_where(spot.file, spot.line, spot.function)} ({spot.code}): a run that failed "
+            "reports success, so Lambda doesn't retry it, CloudWatch doesn't count the error, and its event is lost. "
+            "Log it (logger.exception(...)) and raise it again, or report the failed item."
+        )))
+    for spot in [s for s in spots["write"] if not s.ok]:
+        name = posixpath.basename(spot.detail.rstrip("/")) or "out"
+        found.append(("warn", (
+            f"It writes {spot.detail} at {_where(spot.file, spot.line)}, outside /tmp: Lambda's disk is read-only "
+            f"there, so that line fails with OSError: [Errno 30] Read-only file system. Write under /tmp instead "
+            f"(/tmp/{name})."
+        )))
+    secrets = spots["secret"]
+    if secrets:
+        where = _listed([f"{s.detail} at {s.file} line {s.line}" for s in secrets], 2)
+        found.append(("warn", (
+            f"Secret-looking values are written in the code ({where}; "
+            "the values aren't shown here): anyone allowed lambda:GetFunction can download the package and read them. "
+            "Keep them in Secrets Manager or Parameter Store, and read them when the code starts."
+        )))
+
+    batched = [c for c in cmap.aws if c.loop and (c.service, c.operation) in _BATCHES and not c.guessed]
+    for call in list({(c.service, c.operation): c for c in batched}.values()):
+        alternative, size = _BATCHES[(call.service, call.operation)]
+        found.append(("info", (
+            f"{call.label} runs once per item in {call.loop.rstrip(':')} ({_where(call.file, call.line)}): a request "
+            f"for each. {alternative} sends up to {size:,} at a time, so a run takes fewer round trips."
+        )))
+    for spot in [s for s in spots["client"] if not s.ok]:
+        service = _service_name(spot.detail) if spot.detail != "?" else "AWS"
+        found.append(("info", (
+            f"It makes a new {service} client on every call, at {_where(spot.file, spot.line, spot.function)}"
+            + (" inside a loop" if spot.loop else "")
+            + ": making one takes time, more on a cold start. Make it once at module level (above the handler), "
+            "so warm calls reuse it."
+        )))
+    for spot in spots["sleep"]:
+        if spot.startup:
+            continue
+        found.append(("info", (
+            f"It sleeps at {_where(spot.file, spot.line, spot.function)} ({spot.code}): the function is billed for "
+            "the time it waits. If it waits for something to finish, a Step Functions Wait state or an SQS delay "
+            "costs nothing while it waits."
+        )))
+    return found
+
+
+def _snake(operation: str) -> str:
+    from botocore import xform_name
+
+    return xform_name(operation)
+
+
+def _code_summary(cmap: CodeMap) -> list[str]:
+    """How the code works in a few sentences: what it does when Lambda starts it, then what each call reads from the
+    event, which AWS services it reaches and how, its own functions it calls, and what it returns."""
+    out = []
+    file = cmap.handler_file or ""
+    early = []
+    names = list(dict.fromkeys(_service_name(s.detail) for s in cmap.spots
+                               if s.kind == "client" and s.startup and s.detail != "?"))
+    if names:
+        early.append(f"makes {_a(names[0])} {names[0]} client" if len(names) == 1 else f"makes {_listed(names)} clients")
+    env = list(dict.fromkeys(e.name for e in cmap.env if e.startup))
+    if env:
+        early.append(f"reads {_listed(env)} from its environment")
+    early += _aws_phrase([c for c in cmap.aws if c.startup])
+    if early:
+        out.append(f"When Lambda starts it (once per cold start), the code {_listed(early, 4)}.")
+    if cmap.entry is None:
+        return out
+    entry = cmap.entry.rsplit(".", 1)[-1]
+    out.append(f"Each call runs {entry}() in {file}.")
+    labels = [f.label for f in cmap.event]
+    leaves = [label for label in labels if not any(
+        other.startswith((label + "[", label + ".", label + " (")) for other in labels)]
+    if leaves:
+        kind = _event_kind(cmap.event)
+        out.append(f"It reads {_listed(leaves, 4)} from the event" + (f", which looks like {kind}" if kind else "") + ".")
+    phrase = _aws_phrase([c for c in cmap.aws if not c.startup])
+    http = [s for s in cmap.spots if s.kind == "http" and not s.startup]
+    more = list(phrase)
+    if http:
+        more.append(f"sends {_plural(len(http), 'HTTP request')}")
+    if cmap.routes:
+        more.append(f"answers {_plural(len(cmap.routes), 'web route')} ({_listed([f'{m} {p}' for m, p, _ in cmap.routes])})")
+    if more:
+        out.append(f"It {_listed(more, 6) if len(more) < 3 else '; '.join(more[:-1]) + '; and ' + more[-1]}.")
+    called = [f for f in cmap.functions if f.depth == 1]
+    returns = list(dict.fromkeys(code for code, _, _ in cmap.returns))
+    last = []
+    if called:
+        last.append("calls " + _listed([f"{_short_name(f.name)}()" + (
+            f" from {f.file}" if f.file != file else "") for f in called], 4))
+    if returns:
+        last.append(f"returns {_returned(returns[0])}" + (f" (or {_plural(len(returns) - 1, 'other value')})"
+                                                          if len(returns) > 1 else ""))
+    if last:
+        out.append(f"It {' and '.join(last)}.")
+    if not (leaves or more or last):
+        out.append("It does nothing this can follow: no AWS calls, own functions, HTTP requests or event fields.")
+    return out
+
+
+def _returned(code: str) -> str:
+    """What a return statement gives back, said shortly: "{'statusCode': 200, 'body': ...}" -> 'a dict with
+    statusCode and body'; short code as it is."""
+    try:
+        node = ast.parse(code, mode="eval").body
+    except SyntaxError:
+        return _clip(code, 60)
+    if isinstance(node, ast.Dict) and node.keys and all(isinstance(_const(k), str) for k in node.keys):
+        keys = [str(_const(k)) for k in node.keys]
+        return f"a dict with {_listed(keys, 4)}" if len(code) > 50 else code
+    return _clip(code, 60)
+
+
+def _aws_phrase(calls: list[AwsCall]) -> list[str]:
+    """['reads from S3 (GetObject) and SQS (ListQueues)', 'writes to DynamoDB (PutItem)']."""
+    grouped: dict[str, dict[str, list[AwsCall]]] = {}
+    for call in calls:
+        grouped.setdefault(call.access, {}).setdefault(call.service, []).append(call)
+    verbs = {"reads": "reads from", "writes": "writes to", "sends": "sends to", "runs": "calls",
+             "signs": "signs links for"}
+    parts = []
+    for access, services in grouped.items():
+        each = []
+        for service, group in services.items():
+            ops = list(dict.fromkeys(c.operation for c in group))
+            each.append(f"{_service_name(service)} ({', '.join(ops[:3])}{', …' if len(ops) > 3 else ''})")
+        parts.append(f"{verbs[access]} {_listed(each, 4)}")
+    return parts
+
 # =============================================================================
 # 4. LambdaAnalyzer - pure logic layer (talks to AWS, returns data)
 # =============================================================================
@@ -3304,6 +5373,14 @@ class LambdaAnalyzer(_BaseAnalyzer):
         fn = self.function(ref, region=region)
         return read_package(fn, self._package(fn, max_size), file=file)
 
+    def code_map(self, ref: str, *, max_size: Any = "50MB", region: str | None = None) -> CodeMap:
+        """How a Python function's code works (see map_code()): downloads its package, up to max_size, like code(),
+        and reads its own .py files with Python's ast module, starting at the handler. Nothing in it is run. A function
+        on another runtime, or a container image, gives a CodeMap with only a note saying so."""
+        fn = self.function(ref, region=region)
+        data = self._package(fn, max_size) if runtime_family(fn.runtime) == "python" else None
+        return map_package(fn, data)
+
     def download(self, ref: str, path: str | None = None, *, region: str | None = None) -> PackageDownload:
         """Saves a function's deployment package on the notebook's disk, the .zip as Lambda stores it: at `path` (a
         file, or a folder to put <name>.zip in), else in the downloads folder (see downloads_folder()) as
@@ -3389,6 +5466,17 @@ class _Columns:
     unit: str = ""  # 'ms' shows the scale as run times; '' as counts
 
 
+@dataclass
+class _Outline:
+    """how_it_works()'s steps: the lines of the code that do something, as a tree (a loop's lines under it, each of its
+    own functions folded under the line that calls it), with what each line does. In HTML the code in colour with
+    its line numbers and coloured tags for what it does; in text the lines indented, what they do as a # comment."""
+
+    steps: list[CodeStep]
+    title: str = ""
+    empty: str = "(nothing it can follow)"
+
+
 _ROOT = "lmb"  # the class around each report's HTML: its stylesheet's rules are scoped to it
 _EXTRA_CSS = """\
 .lmb .wire{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,.9fr) 26px minmax(0,1fr);align-items:center;margin:6px 0 10px;max-width:980px}
@@ -3413,7 +5501,48 @@ _EXTRA_CSS = """\
 .lmb .colbars .lim{position:absolute;left:0;right:0;border-top:1.5px dashed rgba(239,68,68,.7);pointer-events:none}
 .lmb .colbars .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
 .lmb .colbars .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
-.lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}"""
+.lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}
+.lmb .flow{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:6px 10px 6px 4px;margin:4px 0 10px;max-width:1180px;max-height:760px;overflow:auto;font-size:12px}
+.lmb .flow .ol{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:2px;padding:1px 4px;border-radius:5px;line-height:1.55;min-width:0}
+.lmb .flow .ol:hover{background:rgba(127,127,127,.08)}
+.lmb .flow .ln{flex:0 0 30px;text-align:right;font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;opacity:.45;user-select:none;-webkit-user-select:none}
+.lmb .flow code.ocd{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:none;padding:0;min-width:0}
+.lmb .flow .k-def>code.ocd{font-weight:600}
+.lmb .flow .k-return>code.ocd,.lmb .flow .k-raise>code.ocd{font-weight:600}
+.lmb .flow .ox{margin-left:38px;padding-left:10px;border-left:1px solid rgba(127,127,127,.28)}
+.lmb .flow .nt{display:inline-block;font-size:10.5px;font-weight:600;line-height:1.6;padding:0 7px;border-radius:9px;white-space:nowrap;background:rgba(127,127,127,.14)}
+.lmb .flow .nt i{font-style:normal;font-weight:500;opacity:.7;margin-left:4px}
+.lmb .flow .n-aws-reads{background:rgba(59,130,246,.16);color:#2f6fdb}
+.lmb .flow .n-aws-writes{background:rgba(234,88,12,.16);color:#d0570c}
+.lmb .flow .n-aws-sends{background:rgba(219,39,119,.14);color:#c42a73}
+.lmb .flow .n-aws-runs{background:rgba(147,51,234,.15);color:#8b3fd9}
+.lmb .flow .n-aws-signs{background:rgba(100,116,139,.18)}
+.lmb .flow .n-env{background:rgba(13,148,136,.16);color:#0f8a7e}
+.lmb .flow .n-event{background:rgba(22,163,74,.15);color:#178a45}
+.lmb .flow .n-http{background:rgba(219,39,119,.14);color:#c42a73}
+.lmb .flow .n-client{background:rgba(59,130,246,.08);color:#2f6fdb}
+.lmb .flow .n-warn,.lmb .flow .n-sleep{background:rgba(245,158,11,.2);color:#b86e04}
+.lmb .flow .n-route{background:rgba(147,51,234,.15);color:#8b3fd9}
+.lmb .flow .n-log,.lmb .flow .n-file,.lmb .flow .n-command,.lmb .flow .n-more{font-weight:500;opacity:.85}
+.lmb .flow details.od{margin:0}
+.lmb .flow details.od>summary{list-style:none;cursor:pointer}
+.lmb .flow details.od>summary::-webkit-details-marker{display:none}
+.lmb .flow .on{white-space:nowrap}
+.lmb .flow .on b{font:600 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.lmb .flow .och{display:inline-block;width:6px;height:6px;margin:0 7px 2px 1px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.6;transition:transform .15s}
+.lmb .flow details.od[open]>summary .och{transform:rotate(45deg);margin-bottom:4px}
+.lmb .flow details.od[open]>summary .os{display:none}
+.lmb .flow .oseen .on{padding-left:15px}
+.lmb .flow .of,.lmb .flow .oq{font-size:11px;opacity:.6}
+.lmb .flow .oq{font-style:italic}
+.lmb .flow .os{display:inline-flex;flex-wrap:wrap;gap:3px 5px}
+.lmb .flow .ob{margin-left:22px}
+.lmb .flow .pk{color:var(--jp-mirror-editor-keyword-color,light-dark(#7c3aed,#c792ea))}
+.lmb .flow .pf{color:var(--jp-mirror-editor-def-color,light-dark(#2563eb,#82aaff))}
+.lmb .flow .js,.lmb .flow .jk{color:var(--jp-mirror-editor-string-color,light-dark(#047857,#a5d6a7))}
+.lmb .flow .jn,.lmb .flow .jl{color:var(--jp-mirror-editor-number-color,light-dark(#c2410c,#f78c6c))}
+.lmb .flow .pa{font-style:italic}
+.lmb .flow .pc{opacity:.6;font-style:italic}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
@@ -3485,6 +5614,202 @@ def _columns_lines(block: _Columns, report: _Report) -> list[str]:
     label, value = max(((label, value) for label, value, _, _ in block.items), key=lambda lv: lv[1])
     most = human_ms(value) if block.unit == "ms" else f"{value:,.0f}"
     return out + [f"  {block.items[0][0]} {spark} {block.items[-1][0]}   (the most: {most}, {label})"]
+
+
+def _called_text(where: str) -> str:
+    """'app.store.Orders.save line 16' -> 'Orders.save() line 16'."""
+    key, _, line = where.rpartition(" line ")
+    return f"{_short_name(key)}() line {line}" if key else where
+
+
+def _segments(path: tuple[str, ...]) -> list[str]:
+    """An event field's path as the levels of the event table: ('Records', '[]', 'body', '{json}', 'bucket') ->
+    ['Records[]', 'body (JSON)', 'bucket']."""
+    out: list[str] = []
+    for part in path:
+        if part == "[]" and out:
+            out[-1] += "[]"
+        elif part in ("{json}", "{base64}") and out:
+            out[-1] += " (JSON)" if part == "{json}" else " (base64)"
+        else:
+            out.append(part)
+    return out
+
+
+def _event_rows(fields: list[EventField]) -> list[list[Any]]:
+    """The event table: each field the code reads under the one it's in, how it's read and where."""
+    labels = [f.label for f in fields]
+    leaves = [f for f in fields if not any(o.startswith((f.label + "[", f.label + ".", f.label + " (")) for o in labels)]
+    tree: dict[str, Any] = {}
+    for f in leaves:
+        node = tree
+        segments = _segments(f.path)
+        for i, segment in enumerate(segments):
+            entry = node.setdefault(segment, [{}, None])
+            if i == len(segments) - 1:
+                entry[1] = f
+            node = entry[0]
+    rows: list[list[Any]] = []
+
+    def walk(node: dict[str, Any], depth: int) -> None:
+        for segment, (children, f) in node.items():
+            how = ("" if f is None else "event[...]: needed" if f.required else ".get(...): optional")
+            rows.append(["  " * depth + segment, how, f"{f.file} line {f.line}" if f else ""])
+            walk(children, depth + 1)
+
+    walk(tree, 0)
+    return rows
+
+
+_IMPORT_ORDER = ("missing", "removed", "layer", "package", "runtime", "stdlib")
+
+
+def _import_rows(cmap: CodeMap) -> list[list[Any]]:
+    """What it imports (its own modules left out), the ones Lambda can't find first."""
+    found: dict[str, ImportUse] = {}
+    for use in cmap.imports:
+        if use.source == "own":
+            continue
+        known = found.get(use.top)
+        if known is None or _IMPORT_ORDER.index(use.source) < _IMPORT_ORDER.index(known.source):
+            found[use.top] = use
+    words = {"package": "the package: packed with its code", "runtime": "the Lambda runtime",
+             "stdlib": "Python's standard library"}
+    rows = []
+    for use in sorted(found.values(), key=lambda u: (_IMPORT_ORDER.index(u.source), u.top.lower())):
+        if use.source == "missing":
+            where: Any = _Tone("nowhere: not in the package or the runtime", "bad")
+        elif use.source == "removed":
+            version = _REMOVED_MODULES[use.top]
+            where = _Tone(f"nowhere: Python {version[0]}.{version[1]} removed it", "bad")
+        elif use.source == "layer":
+            where = _Tone("not in the package: one of its layers?", "warn")
+        else:
+            where = words[use.source]
+        rows.append([use.top, where, f"{use.file} line {use.line}" + (" (optional)" if use.optional else "")
+                     + ("" if use.startup else " (inside a function)")])
+    return rows
+
+
+_NOTE_TIPS = {  # what an outline tag means, on hover
+    "aws-reads": "an AWS call that reads", "aws-writes": "an AWS call that writes",
+    "aws-sends": "an AWS call that sends a message or an event", "aws-runs": "an AWS call that runs something",
+    "aws-signs": "a signed link for this AWS call: no request is sent now", "client": "a boto3 client or resource",
+    "env": "an environment variable it reads", "event": "a field of the event it reads", "http": "an HTTP request",
+    "log": "a log line", "file": "a file on Lambda's disk", "sleep": "a pause the function is billed for",
+    "command": "a command run as another process", "warn": "worth a look: see the findings", "route": "a web route",
+    "more": "",
+}
+_FOLDED_KINDS = ("aws-reads", "aws-writes", "aws-sends", "aws-runs", "aws-signs", "env", "http", "warn", "file", "sleep",
+                 "command")  # the tags a folded function shows of what's inside it
+
+
+def _note_text(kind: str, text: str) -> str:
+    """An outline tag in words: 'S3 GetObject (reads)', 'env DB_HOST', 'event Records[].body'."""
+    if kind.startswith("aws-"):
+        return f"{text} ({kind[4:]})"
+    return f"{kind} {text}" if kind in ("env", "event") else text
+
+
+def _chips_html(notes: Iterable[tuple[str, str]]) -> str:
+    out = []
+    for kind, text in notes:
+        word = f"<i>{_esc(kind[4:])}</i>" if kind.startswith("aws-") else ""
+        label = f"{kind} {text}" if kind in ("env", "event") else text
+        out.append(f'<span class="nt n-{_esc(kind)}" title="{_esc(_NOTE_TIPS.get(kind, ""))}">{_esc(label)}{word}</span>')
+    return "".join(out)
+
+
+def _inside(step: CodeStep) -> list[tuple[str, str]]:
+    """The tags of every line under a step, once each: what a folded function does."""
+    found: list[tuple[str, str]] = []
+    for each in step.walk():
+        for note in each.notes:
+            if each is not step and note[0] in _FOLDED_KINDS and note not in found:
+                found.append(note)
+    return found
+
+
+def _def_html(step: CodeStep) -> str:
+    """One of its functions called on a line (or a module it imports), folded under it: its name, where it is and what
+    it does inside; open, its steps."""
+    if step.kind == "module":
+        label = f'<b>{_esc(step.file)}</b> <span class="of">runs when it\'s imported</span>'
+    else:
+        label = f'<b>{_esc(_short_name(step.name))}()</b> <span class="of">{_esc(step.file)} line {step.line}</span>'
+    own = _chips_html(step.notes)
+    if step.seen or not step.steps:
+        why = ("its steps are shown where it's first called" if step.seen and not any(k == "more" for k, _ in step.notes)
+               else "" if step.notes else "nothing in it to follow")
+        return (f'<div class="ol oseen"><span class="ln"></span><span class="on">↳ {label}</span>{own}'
+                + (f'<span class="oq">{_esc(why)}</span>' if why else "") + "</div>")
+    inside = _inside(step)
+    chips = _chips_html(inside[:6]) + (f'<span class="oq">+{len(inside) - 6} more</span>' if len(inside) > 6 else "")
+    head = (f'<summary class="ol"><span class="ln"></span><span class="on"><span class="och"></span>{label}</span>{own}'
+            f'<span class="os">{chips}</span></summary>')
+    body = (f'<div class="ol k-def"><span class="ln">{step.line}</span><code class="ocd">{_python_html(step.code)}</code>'
+            "</div>" if step.kind == "def" else "")
+    return (f'<details class="od">{head}<div class="ob">{body}'
+            f'<div class="ox">{_flow_html(step.steps)}</div></div></details>')
+
+
+def _flow_html(steps: list[CodeStep], top: bool = False) -> str:
+    out = []
+    for step in steps:
+        if top and step.kind == "def" and step.steps:  # the handler: its steps, always open
+            out.append(f'<div class="ol k-def"><span class="ln">{step.line}</span><code class="ocd">'
+                       f'{_python_html(step.code)}</code><span class="of">{_esc(step.file)}</span>'
+                       f'{_chips_html(step.notes)}</div><div class="ox">{_flow_html(step.steps)}</div>')
+            continue
+        if step.kind in ("def", "module"):
+            out.append(_def_html(step))
+            continue
+        out.append(f'<div class="ol k-{_esc(step.kind)}"><span class="ln">{step.line or ""}</span>'
+                   f'<code class="ocd">{_python_html(step.code)}</code>{_chips_html(step.notes)}</div>')
+        inner = "".join(_def_html(call) for call in step.calls) + _flow_html(step.steps)
+        if inner:
+            out.append(f'<div class="ox">{inner}</div>')
+    return "".join(out)
+
+
+@_draws(_Outline, "html")
+def _outline_html(block: _Outline, report: _Report) -> str:
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    if not block.steps:
+        return title + f'<div class="more">{_esc(block.empty)}</div>'
+    return f'{title}<div class="flow">{_flow_html(block.steps, top=True)}</div>'
+
+
+@_draws(_Outline, "text")
+def _outline_lines(block: _Outline, report: _Report) -> list[str]:
+    out = ["", f"-- {block.title} --"] if block.title else [""]
+    if not block.steps:
+        return out + [block.empty]
+
+    def comment(notes: list[tuple[str, str]], *more: str) -> str:
+        said = [_note_text(kind, text) for kind, text in notes] + [m for m in more if m]
+        return "   # " + " · ".join(said) if said else ""
+
+    def walk(steps: list[CodeStep], pad: int, called: bool) -> None:
+        for step in steps:
+            if step.kind == "module":
+                out.append(f"{'':>5}  {' ' * pad}↳ {step.file}, run when it's imported")
+                walk(step.steps, pad + 4, False)
+                continue
+            if step.kind == "def":
+                more = ("its steps are shown where it's first called" if step.seen and not any(
+                    k == "more" for k, _ in step.notes) else "" if step.steps or step.notes else "nothing in it to follow")
+                out.append(f"{step.line:>5}  {' ' * pad}{'↳ ' if called else ''}{step.code}"
+                           + comment(step.notes, step.file, more))
+                walk(step.steps, pad + (4 if called else 2), False)
+                continue
+            out.append(f"{step.line or '':>5}  {' ' * pad}{step.code}{comment(step.notes)}")
+            for call in step.calls:
+                walk([call], pad + 4, True)
+            walk(step.steps, pad + 2, False)
+
+    walk(block.steps, 0, False)
+    return out
 
 
 def _stamp(moment: datetime | None) -> str:
@@ -3678,7 +6003,7 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
-        "📦 Code": ("code", "download"),
+        "📦 Code": ("code", "how_it_works", "download"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -4516,6 +6841,146 @@ class LambdaView(_BaseView):
         return blocks
 
     @_friendly_errors
+    def how_it_works(self, name: str, *, region: str | None = None, max_size: Any = "50MB") -> None:
+        """How a Python function's code works, read from its package with Python's ast module (nothing in it is run):
+        a few sentences, then each step of a call from the handler on, with the functions it calls in its own files
+        folded under the lines that call them, and what each line does (AWS calls, environment variables, event
+        fields, HTTP requests, logs); then its AWS calls with the IAM permissions they need, a test event with the
+        fields it reads, its libraries and where Lambda finds them, and findings (a variable that isn't set, an import
+        that isn't there, an HTTP call without a timeout, a list call that reads one page, errors it drops).
+        Downloads the .zip, up to max_size, like code()."""
+        with self._named(name, region):
+            cmap = self.core.code_map(name, region=region, max_size=max_size)
+        self._show(self._how_blocks(cmap))
+
+    def _how_blocks(self, cmap: CodeMap) -> list[Any]:
+        """how_it_works()'s report, as blocks (the explorer's How it works shows them too)."""
+        fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
+        read = (f"read from {_plural(cmap.files, 'Python file')} ({cmap.lines:,} lines) with Python's ast, nothing run"
+                if cmap.files else "")
+        blocks: list[Any] = [_Title(f"How {fn.name} works", " · ".join(filter(None, [
+            f"handler {cmap.handler}" if cmap.handler else "", fn.runtime or "", read])))]
+        if cmap.note:
+            return blocks + [_Note(cmap.note), _Next([
+                (self._call_for("code", fn), "the files in its package, and the handler's source"),
+                (self._call_for("function_info", fn), "its settings, triggers and last 30 days")])]
+        found = code_map_findings(cmap)
+        handler_name = (cmap.handler or "").rsplit(".", 1)[-1]
+        entry = _short_name(cmap.entry) if cmap.entry else None
+        names = list(dict.fromkeys(e.name for e in cmap.env))
+        unset = {e.name for e in cmap.env if e.required and fn.env_error is None and cmap.function is not None
+                 and e.name not in fn.env_names and e.name not in _LAMBDA_ENV}
+        ops = list(dict.fromkeys((c.service, c.operation) for c in cmap.aws))
+        services = cmap.services
+        kind = _event_kind(cmap.event)
+        files = len({f.file for f in cmap.functions})
+        blocks.append(_Cards([
+            ("Starts at", f"{entry}() in {cmap.handler_file}" if entry else f"no {handler_name}() in {cmap.handler_file}",
+             "" if entry else "warn"),
+            ("Expects", kind or ("an event" if cmap.event else "-")),
+            ("AWS calls", f"{len(ops)} · {', '.join(services[:3])}{', …' if len(services) > 3 else ''}" if ops
+             else "none it can see"),
+            ("Environment", (f"{_plural(len(names), 'variable')} read" + (f" · {len(unset)} not set" if unset else ""))
+             if names else "none read", "warn" if unset else ""),
+            ("Functions run", f"{len(cmap.functions):,}" + (f" in {files:,} files" if files > 1 else "")),
+        ]))
+        summary = _code_summary(cmap)
+        if summary:
+            blocks.append(_Note(" ".join(summary)))
+        blocks.append(_Findings(found, empty=(
+            "Nothing in the code stands out: the variables it needs are set, what it imports is there, and its HTTP "
+            "and list calls look complete.")))
+        if cmap.startup:
+            blocks.append(_Outline(cmap.startup, "When Lambda starts it (once per cold start, before the first call)"))
+        blocks.append(_Outline(
+            cmap.steps, f"What each call does, step by step from {entry}()" if entry else "What each call does",
+            empty=f"Lambda calls {handler_name}(), which isn't in {cmap.handler_file}." if not entry else
+            "(nothing it can follow)"))
+        if cmap.aws:
+            grouped: dict[tuple[str, str, str], list[AwsCall]] = {}
+            for call in cmap.aws:
+                grouped.setdefault((call.service, call.operation, call.access), []).append(call)
+            rows = []
+            for (service, op, access), calls in grouped.items():
+                where = [f"{c.file} line {c.line}" + (", at start-up" if c.startup else f" in {_short_name(c.function)}()")
+                         + (", in a loop" if c.loop else "") + (", first page only" if c.pages == "one" else "")
+                         + (", guessed from its name" if c.guessed else "") for c in calls]
+                rows.append([_service_name(service), op, access, "\n".join(where[:3]) + (
+                    f"\n+{len(where) - 3} more" if len(where) > 3 else ""), calls[0].permission or "(none needed)"])
+            blocks.append(_Table(["Service", "Call", "Does", "Where", "IAM permission"], rows,
+                                 title="The AWS calls it makes", code_cols=(4,), max_rows=0))
+            actions = sorted({c.permission for c in cmap.aws if c.permission})
+            if actions:
+                policy = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": actions, "Resource": "*"}]}
+                blocks.append(_Text(json.dumps(policy, indent=2), code=True, collapsed=True, title=(
+                    "The permissions those calls need, as an IAM policy to compare with its role's (narrow Resource to "
+                    "its own tables, buckets and queues)")))
+        if names:
+            rows = []
+            for name in names:
+                reads = [e for e in cmap.env if e.name == name]
+                needed = any(e.required for e in reads)
+                default = next((e.default for e in reads if e.default), "")
+                how = ("os.environ[...]: needed" if needed else f"a default: {default}" if default
+                       else "optional: None when it isn't set")
+                if name in _LAMBDA_ENV:
+                    is_set: Any = "set by Lambda"
+                elif cmap.function is None:
+                    is_set = "-"
+                elif fn.env_error:
+                    is_set = "can't tell"
+                elif name in fn.env_names:
+                    is_set = _Tone("yes", "ok")
+                else:
+                    is_set = _Tone("no", "warn") if needed else "no: it uses the default"
+                where = f"{reads[0].file} line {reads[0].line}" + (f" (+{len(reads) - 1} more)" if len(reads) > 1 else "")
+                rows.append([name, how, where, is_set])
+            blocks.append(_Table(["Variable", "Read with", "Where", "Set on the function"], rows, max_rows=0,
+                                 title="The environment variables it reads (their names: values are never read)"))
+        if cmap.event:
+            blocks.append(_Table(["Field", "Read with", "Where"], _event_rows(cmap.event), tree=True, max_rows=0,
+                                 title="What it reads from the event" + (f", which looks like {kind}" if kind else "")))
+            blocks.append(_Text(json.dumps(_sample_event(cmap.event), indent=2), code=True, title=(
+                "A test event with those fields, to paste in the console's Test tab (fill in the values)")))
+        if cmap.functions:
+            rows = [[f"{_short_name(f.name)}()", f"{f.file} line {f.line}", f"{f.lines:,}",
+                     "\n".join(_called_text(c) for c in f.called_from[:3]) + (
+                         f"\n+{len(f.called_from) - 3} more" if len(f.called_from) > 3 else "") or "Lambda",
+                     f.doc or "-"] for f in cmap.functions]
+            blocks.append(_Table(["Function", "Where", "Lines", "Called from", "What its docstring says"], rows,
+                                 title="Its own functions that run"))
+        libraries = _import_rows(cmap)
+        if libraries:
+            blocks.append(_Table(["Module", "Lambda finds it in", "Imported at"], libraries,
+                                 title="What it imports, and where Lambda finds it"))
+        http = [s for s in cmap.spots if s.kind == "http"]
+        if http:
+            blocks.append(_Table(["Request", "Where", "Timeout"], [
+                [s.detail, _where(s.file, s.line, s.function), "set" if s.ok else _Tone("none", "warn")] for s in http],
+                title="The HTTP requests it sends", max_rows=0))
+        said = ["It reads its own code with Python's ast module and runs none of it. It follows the boto3 clients the "
+                "code makes and calls into its own functions; a client handed in from elsewhere or made inside a "
+                "library isn't followed, so there may be AWS calls this doesn't list."]
+        if cmap.other_files:
+            said.append(f"{_plural(cmap.other_files, 'other Python file')} in the package "
+                        f"{'is' if cmap.other_files == 1 else 'are'}n't imported from the handler (scripts, other "
+                        "handlers), so they're left out.")
+        if cmap.unreached:
+            said.append(f"{_plural(cmap.unreached, 'function')} in the files it read never "
+                        f"run{'s' if cmap.unreached == 1 else ''} from the handler.")
+        if cmap.limited:
+            said.append(f"To keep it short, it {cmap.limited}.")
+        blocks.append(_Note(" ".join(said)))
+        steps = [(self._call_for("code", fn, file=cmap.handler_file), "the handler's file, line by line")]
+        other = next((f.file for f in cmap.functions if f.file != cmap.handler_file), None)
+        if other:
+            steps.append((self._call_for("code", fn, file=other), "another of its files that runs"))
+        steps.append((self._call_for("function_info", fn), "its settings: environment variables, role and triggers"))
+        steps.append((self._call_for("errors", fn), "the errors it hit in the last 24 hours, grouped by cause"))
+        blocks.append(_Next(steps[:3]))
+        return blocks
+
+    @_friendly_errors
     def download(self, name: str, path: str | None = None, *, region: str | None = None) -> None:
         """Saves a function's deployment package (the .zip) on the notebook's disk, in lambda-downloads next to the
         notebook, or at path= (a file, or a folder), and says where, how big, and whether it's the code Lambda runs
@@ -4613,9 +7078,12 @@ _EXPLORER_TABS = (
 )
 _FUNCTION_TABS = ("overview", "logs", "errors", "performance", "code", "settings")  # the tabs about one function
 _PANEL = "<rect x='3.5' y='4.5' width='17' height='15' rx='2.5'/>"
-_FILES_ICONS = (  # the Code tab's Hide files / Show files button: a panel whose side folds in, or out
+_FILES_ICONS = (  # the Code tab's Hide files / Show files button (a panel whose side folds in, or out) and How it
+    # works
     ("files-hide", _PANEL + "<path d='M9.5 4.5v15M16 9.5 13.5 12l2.5 2.5'/>"),
     ("files-show", _PANEL + "<path d='M9.5 4.5v15M13.5 9.5 16 12l-2.5 2.5'/>"),
+    ("how", "<circle cx='6' cy='6' r='2.5'/><circle cx='6' cy='18' r='2.5'/><circle cx='18' cy='12' r='2.5'/>"
+            "<path d='M6 8.5v7M8.4 7.2l7.2 3.6M8.4 16.8l7.2-3.6'/>"),  # How it works: steps that branch
 )
 _LOGO = ('<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.3" '
          'stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5h2.3c.9 0 1.6.5 2 1.3l6.7 13.7"/>'
@@ -4913,6 +7381,7 @@ body[class*=vscode-] .lmx-app.lmx-app .lmx-page{height:620px}
 .lmx-app.lmx-app .lmx-codebar{align-items:center;gap:10px;padding:8px 2px 10px;flex-wrap:wrap}
 .lmx-app.lmx-app .lmx-codebar>*{margin:0}
 .lmx-app.lmx-app .lmx-codebar button.lmx-small{font-weight:600;color:var(--lx-accent)}
+.lmx-app.lmx-app .lmx-codebar button.lmx-side.lmx-on{background:var(--lx-soft);border-color:var(--lx-accent);color:var(--lx-accent);font-weight:600}
 .lmx-app.lmx-app .lmx-codebar button.lmx-side{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-width:108px;padding:0 13px 0 11px;font-weight:500;color:inherit}
 .lmx-app.lmx-app .lmx-codebar button.lmx-side::before{content:"";width:15px;height:15px;flex:0 0 auto;background:currentColor;opacity:.75;-webkit-mask:var(--lx-icon) center/contain no-repeat;mask:var(--lx-icon) center/contain no-repeat}
 .lmx-app .cbs{font-size:12px;opacity:.7;line-height:1.4}
@@ -4998,6 +7467,7 @@ _IN_WINDOW = {  # a command a report names -> where the explorer window shows th
     "logs": "the Logs tab",
     "performance": "the Performance tab",
     "code": "the Code tab",
+    "how_it_works": "How it works in the Code tab",
 }
 
 
@@ -5607,6 +8077,7 @@ class LambdaExplorer(_Explorer):
         self.error_report: ErrorReport | None = None  # the Errors tab
         self.perf: Performance | None = None  # the Performance tab
         self.package: CodePackage | None = None  # the Code tab
+        self.code_map: CodeMap | None = None  # the Code tab's How it works, read from the package it downloaded
         self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
@@ -5635,6 +8106,7 @@ class LambdaExplorer(_Explorer):
         self._code_shut: set[str] = set()  # ...and the ones folded while searching, when every other one is open
         self._toggled: tuple[str, float] = ("", 0.0)  # the folder clicked last, and when
         self._files_shown = True  # the tree beside the source; Hide files folds it away (for every function after)
+        self._how = False  # the Code tab shows How it works instead of a file's source
         self._code_rows: list[_Row] = []
         self._pagers: dict[str, tuple[Any, dict[str, Any]]] = {}
         self._function_chips: dict[str, Any] = {}  # chip key -> its button, made once
@@ -5991,7 +8463,11 @@ class LambdaExplorer(_Explorer):
         self.files_toggle.add_class("lmx-small")
         self.files_toggle.add_class("lmx-side")
         self.files_toggle.on_click(self._safely(lambda _button: self._toggle_files()))
-        self.code_bar = w.HBox([self.files_toggle, self.code_save, self.code_saved],
+        self.how_button = w.Button(description="How it works", layout=layout(width="auto", display="none"))
+        for css in ("lmx-small", "lmx-side", "lmx-i-how"):
+            self.how_button.add_class(css)
+        self.how_button.on_click(self._safely(lambda _button: self._toggle_how()))
+        self.code_bar = w.HBox([self.files_toggle, self.how_button, self.code_save, self.code_saved],
                                layout=layout(width="100%", display="none"))
         self.code_bar.add_class("lmx-codebar")
         self.code_find = w.Text(placeholder="Find a file", continuous_update=True,
@@ -6012,6 +8488,7 @@ class LambdaExplorer(_Explorer):
         head = w.VBox([self.code_view, self.code_more], layout=layout(width="100%"))
         head.add_class("lmx-codehead")
         self._draw_files_toggle()
+        self._draw_how_button()
         return w.VBox([head, self.code_bar, self.code_split])
 
     def _show_tab(self, key: str, *, load: bool = True) -> None:
@@ -6069,9 +8546,13 @@ class LambdaExplorer(_Explorer):
             if not self.package.files:
                 return ""
             files = f"{_plural(len(self.package.files), 'file')} in its package"
+            if self._how and self.code_map is not None:
+                return (f"How it works, read from {_plural(self.code_map.files, 'Python file')} with nothing run · "
+                        "click a file to see its source")
+            how = " · How it works explains the code" if self._reads_python() else ""
             if not self._files_shown:
-                return f"{files} · Show files lists them beside the source"
-            return f"{files} · click a folder to open it, a file to see its source"
+                return f"{files} · Show files lists them beside the source{how}"
+            return f"{files} · click a folder to open it, a file to see its source{how}"
         if key == "settings" and self.detail is not None:
             return "Every setting in plain English, then as Lambda returns it (folded, at the end)."
         return ""
@@ -6516,10 +8997,11 @@ class LambdaExplorer(_Explorer):
 
     def _close_function(self) -> None:
         """Back to no function picked: the Functions tab, the header showing the region."""
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
         self.function = self.detail = None
-        self.logs_page = self.found = self.error_report = self.perf = self.package = None
+        self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
+        self._how = False
         self._asked = set()
         self.field.value = ""
         self.field.draw()
@@ -6566,10 +9048,11 @@ class LambdaExplorer(_Explorer):
 
     def _open_function(self, fn: Function, tab: str | None = None, *, search: str | None = None) -> None:
         """Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened."""
-        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "lookup")
+        self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
         self.function, self.detail = fn, None
-        self.logs_page = self.found = self.error_report = self.perf = self.package = None
+        self.logs_page = self.found = self.error_report = self.perf = self.package = self.code_map = None
+        self._how = False
         self._runs, self._found_runs, self._searched, self._log_query = [], [], "", ""
         self._open_runs, self._run_offset, self._run_chip = set(), 0, ""
         self._code_fn = self._package_data = self._code_file = self.saved = None
@@ -7317,7 +9800,10 @@ class LambdaExplorer(_Explorer):
             return
         self._asked.add("code")
         most = None if unlimited else "50MB"
-        self.package = None
+        self.package = self.code_map = None
+        self._how = False
+        self._drop("map")
+        self._draw_how_button()
         self.code_more.layout.display = "none"
         self.code_split.layout.display = self.code_bar.layout.display = "none"
         self._set(self.code_view, _skeleton(f"Downloading {fn.name}'s deployment package"
@@ -7352,6 +9838,7 @@ class LambdaExplorer(_Explorer):
         self._draw("code", self.code_view, blocks)
         self.code_bar.layout.display = "" if data is not None else "none"
         self.files_toggle.layout.display = "" if package.files else "none"
+        self._draw_how_button()
         self._draw_saved()
         if not package.files:
             self.code_split.layout.display = "none"
@@ -7412,6 +9899,67 @@ class LambdaExplorer(_Explorer):
                                      else "Show the package's files beside the source")
         _class_if(self.files_toggle, "lmx-i-files-hide", shown)
         _class_if(self.files_toggle, "lmx-i-files-show", not shown)
+
+    def _reads_python(self) -> bool:
+        """Whether How it works can read the code: a Python function's .zip, downloaded, with files in it."""
+        fn = self._code_fn
+        return (fn is not None and runtime_family(fn.runtime) == "python" and self._package_data is not None
+                and self.package is not None and bool(self.package.files))
+
+    def _draw_how_button(self) -> None:
+        self.how_button.layout.display = "" if self._reads_python() else "none"
+        _class_if(self.how_button, "lmx-on", self._how)
+        self.how_button.tooltip = (
+            "Back to the source of the file picked in the tree" if self._how else
+            "How the code works, read from its files with nothing run: each step from the handler, the AWS calls it "
+            "makes, the environment variables and event fields it reads, and what to fix")
+
+    def _renew_source(self) -> None:
+        """The right side in a new box, which starts at the top."""
+        self.code_right = self._w.VBox([self.source_view])
+        self.code_right.add_class("lmx-right")
+        self.code_split.children = [self.code_left, self.code_right]
+
+    def _toggle_how(self) -> None:
+        """How it works: the code read with ast, in place of the source; again, back to the source."""
+        fn, data = self._code_fn, self._package_data
+        if fn is None or data is None:
+            return
+        if self._how:
+            self._how = False
+            self._drop("map")
+            self._draw_how_button()
+            self._draw_source(read_package(fn, data, file=self._code_file) if self._code_file else self.package)
+            self._renew_source()
+            self._status(self._tab_line("code"))
+            return
+        self._how = True
+        self._draw_how_button()
+        if self.code_map is not None:
+            self._got_map(self.code_map)
+            return
+        self._set(self.source_view, _skeleton(f"Reading {fn.name}'s code, starting at its handler…"))
+        self._renew_source()
+        self._status(f"Reading {fn.name}'s code, starting at its handler…", busy=True, owner="map")
+        self._later("map", lambda: map_package(fn, data), self._got_map, self._map_failed)
+
+    def _got_map(self, cmap: CodeMap) -> None:
+        self.code_map = cmap
+        if not self._how:
+            return
+        self._draw("how", self.source_view, self.ui._how_blocks(cmap))
+        self._renew_source()
+        warnings = sum(level == "warn" for level, _ in code_map_findings(cmap))
+        line = self._tab_line("code") + (f" · {_plural(warnings, 'warning')}" if warnings else "")
+        self._finish("map", line, tabs=("code",))
+
+    def _map_failed(self, exc: BaseException) -> None:
+        self._how = False
+        self._draw_how_button()
+        if self.package is not None and self._code_fn is not None:
+            self._draw_source(read_package(self._code_fn, self._package_data, file=self._code_file)
+                              if self._code_file else self.package)
+        self._finish("map", f"Couldn't read how the code works: {self._error_text(exc)}", "warn", tabs=("code",))
 
     def _code_lines(self) -> list[_TreeLine]:
         package = self.package
@@ -7491,6 +10039,12 @@ class LambdaExplorer(_Explorer):
         if self._code_fn is None:
             return
         self._code_file = f.path
+        if self._how:
+            self._how = False
+            self._drop("map")
+            self._draw_how_button()
+            if not self._said[2] and self._said[1] != "warn":
+                self._status(self._tab_line("code"))
         self._code_open.update(_folders_of(f.path))  # so it's still in sight when the search is cleared
         for row in self._code_rows:
             _class_if(row.box, "lmx-on", row.item is not None and not row.item.folder and row.item.path == f.path)

@@ -1484,6 +1484,99 @@ def handler(event, context):
 '''
 
 
+AGENT_SOURCES = {  # support-agent-actions: a Bedrock agent's action group in three files, for how_it_works()
+    "actions.py": '''"""Action group for the support Bedrock agent: looks up orders and opens tickets."""
+import json
+import logging
+import os
+
+from support import tickets
+from support.orders import find_order
+
+logger = logging.getLogger()
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+def handler(event, context):
+    """Runs the action the agent asked for, and answers in the shape Bedrock agents expect."""
+    api = event["apiPath"]
+    params = {p["name"]: p["value"] for p in event.get("parameters", [])}
+    logger.info("action %s %s", event["actionGroup"], api)
+    if api == "/orders/{id}":
+        body = find_order(params["id"])
+    elif api == "/tickets":
+        body = tickets.open_ticket(params["customer"], params.get("summary", ""))
+    else:
+        raise ValueError(f"unknown action {api}")
+    return {
+        "messageVersion": "1.0",
+        "response": {
+            "actionGroup": event["actionGroup"],
+            "apiPath": api,
+            "httpMethod": event["httpMethod"],
+            "httpStatusCode": 200,
+            "responseBody": {"application/json": {"body": json.dumps(body)}},
+        },
+    }
+''',
+    "support/__init__.py": "",
+    "support/orders.py": '''"""Orders, from the orders table and the shipping partner's API."""
+import os
+
+import boto3
+import requests
+
+orders = boto3.resource("dynamodb").Table(os.environ["ORDERS_TABLE"])
+
+
+def find_order(order_id):
+    """The order, and where its parcel is."""
+    item = orders.get_item(Key={"order_id": order_id}).get("Item")
+    if item is None:
+        return {"found": False}
+    item["tracking"] = tracking(item["parcel"])
+    return item
+
+
+def tracking(parcel):
+    """The parcel's status, from the shipping partner."""
+    answer = requests.get(f"{os.environ['SHIPPING_API']}/parcels/{parcel}")
+    return answer.json().get("status", "unknown")
+
+
+def recent(customer):
+    """Every order a customer placed."""
+    return orders.query(KeyConditionExpression="customer = :c", ExpressionAttributeValues={":c": customer})["Items"]
+''',
+    "support/tickets.py": '''"""Support tickets: a row in the tickets table, and a message to the support team."""
+import os
+import uuid
+
+import boto3
+
+
+def open_ticket(customer, summary):
+    """Opens a ticket, unless the customer has three open already, and tells the team."""
+    ddb = boto3.client("dynamodb")
+    table = os.environ["TICKETS_TABLE"]
+    open_ones = ddb.query(TableName=table, KeyConditionExpression="customer = :c",
+                          ExpressionAttributeValues={":c": {"S": customer}})
+    if open_ones["Count"] >= 3:
+        return {"error": "This customer has three open tickets already."}
+    ticket = str(uuid.uuid4())
+    ddb.put_item(TableName=table, Item={"customer": {"S": customer}, "ticket": {"S": ticket},
+                                        "summary": {"S": summary}})
+    try:
+        boto3.client("sns").publish(TopicArn=os.environ["TEAM_TOPIC"], Message=f"New ticket {ticket}: {summary}")
+    except Exception:
+        pass
+    return {"ticket": ticket}
+''',
+    "requests/__init__.py": "# requests, bundled\n",
+    "requests-2.32.3.dist-info/RECORD": "requests/__init__.py,,\nrequests-2.32.3.dist-info/RECORD,,\n",
+}
+
+
 def _epoch_ms(moment: datetime) -> int:
     """A naive UTC time (NOW's kind) as CloudWatch Logs' epoch milliseconds, whatever the machine's time zone."""
     return int(moment.replace(tzinfo=timezone.utc).timestamp() * 1000)
@@ -1572,7 +1665,7 @@ def seed_lambda_functions() -> dict:
                                           "model/churn.json": '{"trees": []}' + " " * 400_000}),
         "report-api": _lambda_package({"index.mjs": "export const handler = async (event) => ({ statusCode: 200 });\n"}),
         "feature-backfill": _lambda_package({"backfill.py": "def run(event, context):\n    return 'done'\n"}),
-        "support-agent-actions": _lambda_package({"actions.py": "def handler(event, context):\n    return event\n"}),
+        "support-agent-actions": _lambda_package(AGENT_SOURCES),
         "gdpr-export": _lambda_package({"export.py": "def handler(event, context):\n    return 'exported'\n"}),
     }
 
@@ -1593,7 +1686,10 @@ def seed_lambda_functions() -> dict:
     create("feature-backfill", Runtime="python3.10", Handler="backfill.run", MemorySize=3008, Timeout=900,
            Description="One-off backfill of the feature store (2025)")
     create("support-agent-actions", Runtime="python3.13", Handler="actions.handler", Architectures=["arm64"],
-           MemorySize=256, Timeout=30, Description="Action group for the support Bedrock agent")
+           MemorySize=256, Timeout=30, Description="Action group for the support Bedrock agent",
+           Environment={"Variables": {"ORDERS_TABLE": "orders", "TICKETS_TABLE": "support-tickets",
+                                      "SHIPPING_API": "https://api.shipping.example",
+                                      "LOG_LEVEL": "INFO"}})
     create("gdpr-export", region=other, Runtime="python3.11", Handler="export.handler", MemorySize=512, Timeout=120,
            Description="Exports a customer's data on request")
 

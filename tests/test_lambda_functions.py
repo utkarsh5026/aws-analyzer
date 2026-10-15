@@ -49,6 +49,7 @@ from aws_analyzer.lambda_functions import (
     Version,
     account_findings,
     classify_error,
+    code_map_findings,
     error_findings,
     function_findings,
     function_monthly_cost,
@@ -56,6 +57,8 @@ from aws_analyzer.lambda_functions import (
     handler_file,
     human_ms,
     line_level,
+    map_code,
+    map_package,
     masked_config,
     package_file_name,
     package_findings,
@@ -710,6 +713,337 @@ def test_read_package_without_a_download():
     assert package.shown_file == "app.py" and package.handler_file == "utils.py" and package.size == len(CODE)
 
 
+# how_it_works(): a package of three files that does most of what map_code() follows
+APP = {
+    "app/__init__.py": "",
+    "app/main.py": '''"""Handles uploads."""
+import json
+import logging
+import os
+
+import boto3
+import requests
+
+from .store import Orders
+from . import notify
+
+logger = logging.getLogger()
+API_KEY = "sk-live-9f8a7b6c5d4e"
+_s3 = None
+
+
+def _client():
+    global _s3
+    if _s3 is None:
+        _s3 = boto3.client("s3")
+    return _s3
+
+
+def handler(event, context):
+    """Handles an S3 upload."""
+    orders = Orders()
+    for i, record in enumerate(event["Records"]):
+        bucket = record["s3"]["bucket"]["name"]
+        key = record["s3"]["object"]["key"]
+        listing = _client().list_objects_v2(Bucket=bucket, Prefix=key)
+        try:
+            orders.save({"key": key, "size": len(listing.get("Contents", []))})
+        except Exception:
+            pass
+        answer = requests.post(os.environ.get("HOOK_URL", "https://example.com"), json={"key": key})
+        logger.info("posted %s", answer.status_code)
+    notify.tell(event.get("detail", {}).get("user"))
+    with open("report.csv", "w") as out:
+        out.write("done")
+    return {"statusCode": 200, "body": json.dumps({"ok": True})}
+
+
+def unused():
+    return 1
+
+
+if __name__ == "__main__":
+    handler({}, None)
+''',
+    "app/store.py": '''import os
+import boto3
+import pandas as pd
+
+
+class Orders:
+    """Saves orders."""
+
+    def __init__(self):
+        self.table = boto3.resource("dynamodb").Table(os.environ["TABLE"])
+        self.sqs = boto3.client("sqs")
+
+    def save(self, item):
+        self.table.put_item(Item=item)
+        self._queue(item)
+
+    def _queue(self, item):
+        self.sqs.send_message(QueueUrl=os.environ["QUEUE_URL"], MessageBody=str(item))
+        paginator = self.sqs.get_paginator("list_queues")
+        for page in paginator.paginate():
+            pass
+''',
+    "app/notify.py": '''import time
+import boto3
+import yaml
+sns = boto3.client("sns")
+
+
+def tell(user):
+    if user:
+        sns.publish(TopicArn="arn:aws:sns:us-east-1:123456789012:team", Message=user)
+        time.sleep(2)
+''',
+    "scripts/backfill.py": "print('one-off')\n",
+}
+APP_NAMES = list(APP) + ["requests/__init__.py", "requests-2.31.0.dist-info/RECORD"]
+
+
+def outline(steps, depth=0):
+    """An outline as lines of text: each step's code and tags, a function it calls under it."""
+    lines = []
+    for step in steps:
+        tags = ", ".join(text for _, text in step.notes)
+        lines.append("  " * depth + step.code + (f"  [{tags}]" if tags else "") + (" (seen)" if step.seen else ""))
+        for call in step.calls:
+            lines += outline([call], depth + 2)
+        lines += outline(step.steps, depth + 1)
+    return lines
+
+
+def test_map_code_follows_the_handler():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    assert cmap.handler_file == "app/main.py" and cmap.entry == "app.main.handler" and cmap.entry_line == 24
+    assert cmap.params == ["event", "context"] and not cmap.is_async and cmap.note is None
+    assert cmap.files == 4 and cmap.other_files == 1 and cmap.unreached == 1  # scripts/backfill.py, unused()
+    assert outline(cmap.startup) == [
+        "from . import notify",
+        "    app/notify.py, run when it's imported",
+        "      sns = boto3.client('sns')  [makes an SNS client]",
+    ]
+    steps = outline(cmap.steps)
+    assert steps[0] == "def handler(event, context):"
+    assert "  orders = Orders()" in steps and "      def __init__(self):" in steps
+    assert "  for i, record in enumerate(event['Records']):  [Records]" in steps
+    assert "    bucket = record['s3']['bucket']['name']  [Records[].s3.bucket.name]" in steps
+    assert "    listing = _client().list_objects_v2(Bucket=bucket, Prefix=key)  [S3 ListObjectsV2]" in steps
+    assert "    except Exception:  [drops the error]" in steps
+    assert ("    answer = requests.post(os.environ.get('HOOK_URL', 'https://example.com'), json={'key': key})  "
+            "[HOOK_URL, HTTP POST]") in steps
+    assert "    logger.info('posted %s', answer.status_code)  [logs]" in steps
+    assert "  with open('report.csv', 'w') as out:  [writes report.csv]" in steps
+    assert steps[-1] == "  return {'statusCode': 200, 'body': json.dumps({'ok': True})}"
+    assert not any("__main__" in line or "unused" in line for line in steps)
+    # the method a method calls is opened under it, and what a class's __init__ made is followed
+    assert ("                  self.sqs.send_message(QueueUrl=os.environ['QUEUE_URL'], MessageBody=str(item))  "
+            "[QUEUE_URL, SQS SendMessage]") in steps
+    calls = {(c.service, c.operation): c for c in cmap.aws}
+    assert list(calls) == [("s3", "ListObjectsV2"), ("dynamodb", "PutItem"), ("sqs", "SendMessage"),
+                           ("sqs", "ListQueues"), ("sns", "Publish")]
+    assert calls["s3", "ListObjectsV2"].permission == "s3:ListBucket" and calls["s3", "ListObjectsV2"].pages == "one"
+    assert calls["sqs", "ListQueues"].pages == "all" and calls["sqs", "SendMessage"].access == "sends"
+    assert calls["dynamodb", "PutItem"].loop == "for i, record in enumerate(event['Records']):"
+    assert calls["dynamodb", "PutItem"].function == "app.store.Orders.save" and not calls["sns", "Publish"].loop
+    assert [(e.name, e.required, e.default) for e in cmap.env] == [
+        ("TABLE", True, ""), ("QUEUE_URL", True, ""), ("HOOK_URL", False, "'https://example.com'")]
+    assert [(f.label, f.required) for f in cmap.event] == [
+        ("Records", True), ("Records[].s3", True), ("Records[].s3.bucket", True), ("Records[].s3.bucket.name", True),
+        ("Records[].s3.object", True), ("Records[].s3.object.key", True), ("detail", False), ("detail.user", False)]
+    sources = {i.module: i.source for i in cmap.imports}
+    assert sources["requests"] == "package" and sources["pandas"] == sources["yaml"] == "missing"
+    assert sources["boto3"] == "runtime" and sources["json"] == "stdlib" and sources["app.store"] == "own"
+    assert [(f.name, f.depth, f.called_from) for f in cmap.functions] == [
+        ("app.main.handler", 0, []), ("app.store.Orders.__init__", 1, ["app.main.handler line 26"]),
+        ("app.main._client", 1, ["app.main.handler line 30"]), ("app.store.Orders.save", 1, ["app.main.handler line 32"]),
+        ("app.store.Orders._queue", 2, ["app.store.Orders.save line 15"]),
+        ("app.notify.tell", 1, ["app.main.handler line 37"])]
+    assert cmap.functions[0].doc == "Handles an S3 upload." and cmap.functions[0].lines == 17
+    spots = {(s.kind, s.detail): s for s in cmap.spots}
+    assert spots["client", "s3"].ok  # made once: behind `if _s3 is None`, into a global
+    assert not spots["client", "dynamodb"].ok and not spots["client", "sqs"].ok  # Orders() runs on every call
+    assert spots["client", "sns"].ok and spots["client", "sns"].startup
+    assert not spots["http", "POST os.environ.get('HOOK_URL', 'https://example.com')"].ok
+    assert not spots["write", "report.csv"].ok and spots["sleep", "2"].function == "app.notify.tell"
+    assert spots["secret", "API_KEY"].line == 13 and "sk-live" not in repr(cmap)  # the value is never kept
+    assert cmap.returns == [("{'statusCode': 200, 'body': json.dumps({'ok': True})}", "app/main.py", 40)]
+    df = cmap.to_df()
+    assert df["label"].tolist()[0] == "S3 ListObjectsV2" and df["permission"].tolist()[-1] == "sns:Publish"
+
+
+def test_code_map_findings():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    found = code_map_findings(cmap)
+    text = "\n".join(message for _, message in found)
+    assert [level for level, _ in found].count("warn") == 7
+    assert ("QUEUE_URL isn't set on uploads, and its code reads it with os.environ[...] (app/store.py line 18): that "
+            "line fails with KeyError: 'QUEUE_URL'. Add it") in text
+    assert "It imports pandas and yaml, which aren't in the package" in text
+    assert "every call fails with Runtime.ImportModuleError: No module named 'pandas'" in text
+    assert "pip install pandas pyyaml -t ." in text
+    assert "1 HTTP request has no timeout (POST os.environ.get" in text and "at its 30 s timeout" in text
+    assert ("S3 ListObjectsV2 at app/main.py line 30 reads only its first page: past 1,000 keys the rest is left out"
+            in text and "get_paginator('list_objects_v2')" in text)
+    assert "Errors are dropped at app/main.py line 33 in handler() (except Exception: pass)" in text
+    assert "It writes report.csv at app/main.py line 38, outside /tmp" in text and "(/tmp/report.csv)" in text
+    assert "Secret-looking values are written in the code (API_KEY at app/main.py line 13;" in text
+    assert "sk-live" not in text
+    assert "DynamoDB PutItem runs once per item in for i, record in enumerate(event['Records'])" in text
+    assert "table.batch_writer() (BatchWriteItem) sends up to 25 at a time" in text
+    assert "It makes a new DynamoDB client on every call, at app/store.py line 10 in Orders()" in text
+    assert "It sleeps at app/notify.py line 10 in tell() (time.sleep(2))" in text
+    assert "S3 client" not in text  # _client() makes it once
+    summary = " ".join(lfmod._code_summary(cmap))
+    assert summary.startswith("When Lambda starts it (once per cold start), the code makes an SNS client. Each call "
+                              "runs handler() in app/main.py. It reads Records[].s3.bucket.name, ")
+    assert "which looks like an S3 event" in summary
+    assert ("It reads from S3 (ListObjectsV2) and SQS (ListQueues); writes to DynamoDB (PutItem); sends to SQS "
+            "(SendMessage) and SNS (Publish); and sends 1 HTTP request.") in summary
+    assert "It calls Orders() from app/store.py, _client(), Orders.save() from app/store.py and tell()" in summary
+    assert summary.endswith("from app/notify.py and returns a dict with statusCode and body.")
+    assert lfmod._sample_event(cmap.event) == {"Records": [{"s3": {"bucket": {"name": "..."},
+                                                                    "object": {"key": "..."}}}],
+                                               "detail": {"user": "..."}}
+
+
+def test_map_code_handler_problems():
+    def findings(source, handler="app.handler", **kwargs):
+        cmap = map_code({"app.py": source}, handler, function=fn(handler=handler, **kwargs))
+        return cmap, "\n".join(message for _, message in code_map_findings(cmap))
+
+    cmap, text = findings("def main(event, context):\n    return 1\n\ndef helper(x):\n    return x\n")
+    assert cmap.entry is None and cmap.handlers == ["main()"] and cmap.steps == []
+    assert ("No function handler() in app.py: every call fails with Runtime.HandlerNotFound before any of its code "
+            "runs. Point the handler setting at one of its functions (main() take event and context)") in text
+    _, text = findings("async def handler(event, context):\n    return 1\n")
+    assert "handler() is async def: the Python runtime calls it without awaiting it" in text
+    _, text = findings("def handler(event):\n    return 1\n")
+    assert "handler() takes 1 argument, and Lambda passes two (event and context): every call fails with TypeError" in text
+    assert "TypeError" not in findings("def handler(*args):\n    return 1\n")[1]
+    assert "TypeError" not in findings("def handler(event, context, extra=None):\n    return 1\n")[1]
+    cmap, text = findings("def handler(event, context)\n    return 1\n")
+    assert cmap.skipped == [("app.py", "line 1: expected ':'")] and cmap.entry is None
+    assert "app.py doesn't parse (line 1: expected ':'): Lambda can't load it either" in text
+    assert "HandlerNotFound" not in text
+    cmap, text = findings("def handler(event, context):\n    return 1\n", runtime="python3.99")
+    assert text == ""
+    cmap, text = findings("print 'hello'\ndef handler(event, context):\n    return 1\n", runtime="python3.99")
+    assert "doesn't parse with this notebook's Python" in text and "syntax only Python 3.99 knows" in text
+    assert map_code({"app.py": "x = 1\n"}, "nodot").note.startswith("Its handler setting (nodot) doesn't name")
+    assert "Lambda looks for main.py" in map_code({"app.py": "x = 1\n"}, "main.handler").note
+
+
+def test_map_code_imports_and_layers():
+    source = ("import imp\nimport requests\ntry:\n    import ujson as json\nexcept ImportError:\n    import json\n"
+              "import tomllib\n\ndef handler(event, context):\n    return requests.get('https://x', timeout=5).json()\n")
+    old = map_code({"app.py": source}, "app.handler", function=fn(runtime="python3.10"))
+    sources = {(i.module, i.optional): i.source for i in old.imports}
+    assert sources == {("imp", False): "stdlib", ("requests", False): "missing", ("ujson", True): "missing",
+                       ("json", False): "stdlib", ("tomllib", False): "missing"}  # the fallback is needed
+    text = "\n".join(message for _, message in code_map_findings(old))
+    assert "It imports requests and tomllib, which aren't in the package" in text and "ujson" not in text
+    assert "It imports imp, which Python 3.12 removed: moving it to python3.14 breaks it" in text
+    assert "(imp by importlib)" in text and "timeout" not in text
+    new = map_code({"app.py": source}, "app.handler",
+                   function=fn(runtime="python3.13", layers=[Layer(f"arn:aws:lambda:{REGION}:{ACCOUNT}:layer:http:3")]))
+    text = "\n".join(message for _, message in code_map_findings(new))
+    assert "It imports imp (app.py line 1), which Python 3.12 removed: on python3.13 that fails" in text
+    assert "Use importlib instead" in text and "aren't in the package" not in text
+    assert "requests isn't in the package, so it has to come from its layers (http:3)" in text
+
+
+def test_map_code_follows_routes_and_more():
+    source = '''
+import boto3
+from aws_lambda_powertools.event_handler import APIGatewayRestResolver
+
+app = APIGatewayRestResolver()
+table = boto3.resource("dynamodb").Table("orders")
+bucket = boto3.resource("s3").Bucket("acme")
+
+
+@app.get("/orders/<id>")
+def get_order(id):
+    return table.get_item(Key={"id": id})["Item"]
+
+
+@app.route("/orders", methods=["POST"])
+def add_order():
+    with table.batch_writer() as batch:
+        batch.put_item(Item=app.current_event.json_body)
+    for obj in bucket.objects.filter(Prefix="in/"):
+        obj.delete()
+    return {"ok": True}
+
+
+def handler(event, context):
+    return app.resolve(event, context)
+
+
+def countdown(n):
+    if n:
+        countdown(n - 1)
+'''
+    cmap = map_code({"api.py": source}, "api.handler")
+    assert cmap.routes == [("GET", "/orders/<id>", "api.get_order"), ("POST", "/orders", "api.add_order")]
+    assert [(c.operation, c.pages) for c in cmap.aws] == [
+        ("GetItem", ""), ("BatchWriteItem", ""), ("ListObjects", "all"), ("DeleteObject", "")]
+    steps = outline(cmap.steps)
+    assert "      def get_order(id):  [GET /orders/<id>]" in steps
+    assert "        with table.batch_writer() as batch:" in steps
+    summary = " ".join(lfmod._code_summary(cmap))
+    assert "answers 2 web routes (GET /orders/<id> and POST /orders)" in summary
+    assert "It reads from DynamoDB (GetItem) and S3 (ListObjects); writes to DynamoDB (BatchWriteItem) and S3" in summary
+    loop = map_code({"app.py": source.replace("return app.resolve(event, context)", "countdown(3)")}, "app.handler")
+    assert outline(loop.steps)[-1] == "              def countdown(n):  [calls itself: not followed again] (seen)"
+
+
+def test_map_code_never_shows_a_secret():
+    source = ("import boto3\ns3 = boto3.client('s3', aws_access_key_id='AKIAABCDEFGHIJKLMNOP', "
+              "aws_secret_access_key='wJalrXUtnFEMI/K7MDENG')\nDB = {'password': 'hunter2-prod'}\n\n"
+              "def handler(event, context):\n    connect(password='pa55word!')\n"
+              "    return s3.get_object(Bucket='b', Key=event['k'])\n")
+    cmap = map_code({"app.py": source}, "app.handler")
+    assert cmap.startup[0].code == "s3 = boto3.client('s3', aws_access_key_id='…', aws_secret_access_key='…')"
+    assert [(s.detail, s.line) for s in cmap.spots if s.kind == "secret"] == [
+        ("aws_secret_access_key", 2), ("password", 3), ("password", 6), ("an AWS access key", 2)]
+    shown = repr(cmap) + "".join(m for _, m in code_map_findings(cmap))
+    assert not any(secret in shown for secret in ("AKIAABCD", "wJalr", "hunter2", "pa55word"))
+    broken = lfmod._CodeReader._call
+    try:
+        lfmod._CodeReader._call = lambda self, node, frame: 1 / 0  # a bug in following some code
+        partial = map_code({"app.py": source}, "app.handler")
+    finally:
+        lfmod._CodeReader._call = broken
+    assert partial.limited == "stopped partway, at code it couldn't follow (ZeroDivisionError: division by zero)"
+    guessed = map_code({"app.py": "def handler(event, context):\n    for x in event['xs']:\n"
+                                  "        store.put_item(Item=x)\n"}, "app.handler")
+    assert [(c.label, c.guessed) for c in guessed.aws] == [("DynamoDB PutItem", True)]
+    assert code_map_findings(guessed) == []  # a call guessed from its name alone sets off nothing
+
+
+def test_map_package_reads_its_own_files():
+    data = zipped({"app.py": APP["app/main.py"].replace("from .store", "from store").replace("from . import", "import"),
+                   "store.py": APP["app/store.py"], "notify.py": APP["app/notify.py"],
+                   "requests/__init__.py": "def get(url):\n    return boto3.client('s3').get_object()\n",
+                   "requests-2.31.0.dist-info/RECORD": "requests/__init__.py,,\n",
+                   "yaml/__init__.py": "", "tests/test_app.py": "def test(): pass\n"})
+    cmap = map_package(fn(handler="app.handler", env_names=["TABLE", "QUEUE_URL"]), data)
+    assert cmap.files == 3 and cmap.entry == "app.handler" and cmap.other_files == 0
+    assert {i.module: i.source for i in cmap.imports}["yaml"] == "package"
+    assert not any(c.file.startswith("requests/") for c in cmap.aws)  # a library isn't read as its code
+    assert "container image" in map_package(fn(package_type="Image", runtime=None), None).note
+    assert "It runs nodejs20.x: how_it_works() reads Python code" in map_package(fn(runtime="nodejs20.x"), b"").note
+    assert map_package(fn(), None).note == "Lambda gave no link to download its code."
+    with pytest.raises(ValueError, match="isn't a readable .zip"):
+        map_package(fn(), b"not a zip")
+
+
 def test_search_rank_finds_by_any_field():
     assert search_rank("etl", ["etl", "x"]) == 0 and search_rank("orders", ["orders-etl"]) == 1
     assert search_rank("ETL", ["orders-etl"]) == 2 and search_rank("orders nightly", ["orders-etl", "nightly"]) == 3
@@ -1167,6 +1501,25 @@ def test_code_of_a_container_image(core, monkeypatch):
         core.download("etl")
 
 
+HOW = zipped({  # etl-nightly's code for how_it_works(): an S3 event, a variable that isn't set, a client per call
+    "app.py": ("import os\nimport boto3\n\nfrom store import save\n\ns3 = boto3.client('s3')\n\n\n"
+               "def handler(event, context):\n    for record in event['Records']:\n"
+               "        body = s3.get_object(Bucket=os.environ['BUCKET'], Key=record['s3']['object']['key'])['Body'].read()\n"
+               "        save(body)\n    return {'saved': len(event['Records'])}\n"),
+    "store.py": ("import boto3\n\n\ndef save(body):\n    \"\"\"Saves one order.\"\"\"\n"
+                 "    boto3.client('dynamodb').put_item(TableName='orders', Item={'body': {'B': body}})\n"),
+    ".env": "DB_PASSWORD=hunter2\n",
+})
+
+
+def test_code_map_reads_the_package(core):
+    cmap = core.code_map("etl-nightly")
+    assert cmap.entry == "app.handler" and cmap.files == 1 and cmap.other_files == 1  # utils.py isn't imported
+    assert [f.label for f in cmap.event] == ["customer_id"] and cmap.returns == [("event['customer_id']", "app.py", 2)]
+    core._download = lambda url, most: pytest.fail("a function that isn't Python isn't downloaded")
+    assert "It runs nodejs18.x: how_it_works() reads Python code" in core.code_map("eu-fn", region=OTHER).note
+
+
 def seed_runs(now, group="/aws/lambda/etl-nightly", stream="2026/10/06/[$LATEST]def", count=4):
     """count more runs of etl-nightly, a minute apart in a stream of their own; the second one logs an order ID."""
     events, ids = [], []
@@ -1363,6 +1716,41 @@ def test_code_report(ui, capsys):
     secret = run(capsys, ui.code, "etl-nightly", ".env")
     assert ".env looks like a secrets file, so its text isn't shown" in secret and "hunter2" not in secret
     assert "aws lambda get-function --function-name etl-nightly --region us-east-1 --query Code.Location" in secret
+
+
+def test_how_it_works_report(ui, capsys):
+    ui.core._download = lambda url, most: HOW
+    out = run(capsys, ui.how_it_works, "etl-nightly")
+    assert "How etl-nightly works" in out and "read from 2 Python files (19 lines) with Python's ast, nothing run" in out
+    assert "Starts at: handler() in app.py" in out and "Expects: an S3 event" in out
+    assert "AWS calls: 2 · S3, DynamoDB" in out and "Environment: 1 variable read · 1 not set (!)" in out
+    assert ("When Lambda starts it (once per cold start), the code makes an S3 client. Each call runs handler() in "
+            "app.py. It reads Records[].s3.object.key from the event, which looks like an S3 event.") in out
+    assert "[!] BUCKET isn't set on etl-nightly, and its code reads it with os.environ[...] (app.py line 11)" in out
+    assert "[i] It makes a new DynamoDB client on every call, at store.py line 6 in save()" in out
+    assert "-- When Lambda starts it (once per cold start, before the first call) --" in out
+    assert "    6  s3 = boto3.client('s3')   # makes an S3 client" in out
+    assert "-- What each call does, step by step from handler() --" in out
+    assert "    9  def handler(event, context):   # app.py" in out
+    assert "   10    for record in event['Records']:   # event Records" in out
+    assert "   12      save(body)" in out and "    4          ↳ def save(body):   # store.py" in out
+    assert ("    6              boto3.client('dynamodb').put_item(TableName='orders', Item={'body': {'B': body}})   # "
+            "makes a DynamoDB client · DynamoDB PutItem (writes)") in out
+    assert "S3        GetObject  reads   app.py line 11 in handler(), in a loop  s3:GetObject" in out
+    assert '"dynamodb:PutItem",' in out and '"Resource": "*"' in out
+    assert "BUCKET    os.environ[...]: needed  app.py line 11  no" in out
+    assert '"key": "..."' in out and "  object" in out
+    assert "save()     store.py line 4" in out and "Saves one order." in out
+    assert "boto3   the Lambda runtime" in out and "hunter2" not in out
+    assert "code('etl-nightly', file='app.py')" in out and "code('etl-nightly', file='store.py')" in out
+    note = run(capsys, ui.how_it_works, "eu-fn", region=OTHER)
+    assert "It runs nodejs18.x: how_it_works() reads Python code" in note and "code('eu-fn', region='eu-west-1')" in note
+    assert "No function 'etl-nightlx' in us-east-1. Did you mean 'etl-nightly'?" in run(capsys, ui.how_it_works,
+                                                                                       "etl-nightlx")
+    page = lfmod._render_html(ui._how_blocks(ui.core.code_map("etl-nightly")), 50)
+    assert '<details class="od">' in page and '<span class="nt n-aws-reads"' in page
+    assert '<code class="ocd"><span class="pk">def</span> <span class="pf">handler</span>' in page
+    assert "save()</b>" in page and "store.py line 4" in page
 
 
 def test_download_report(ui, capsys, tmp_path, monkeypatch):
@@ -1707,11 +2095,13 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     assert x.code_left.layout.display == "none" and x.code_split.layout.display == ""
     assert toggle.description == "Show files" and toggle.tooltip == "Show the package's files beside the source"
     assert "lmx-i-files-show" in toggle._dom_classes and "lmx-i-files-hide" not in toggle._dom_classes
-    assert plain(x.status.value) == "3 files in its package · Show files lists them beside the source"
+    assert plain(x.status.value) == ("3 files in its package · Show files lists them beside the source · How it works "
+                                     "explains the code")
     assert x.source_view.value == source  # the file shown stays
     toggle.click()
     assert x.code_left.layout.display == "" and toggle.description == "Hide files"
-    assert plain(x.status.value) == "3 files in its package · click a folder to open it, a file to see its source"
+    assert plain(x.status.value) == ("3 files in its package · click a folder to open it, a file to see its source · "
+                                     "How it works explains the code")
     copy = re.search(r'<span class="cpy"[^>]*title="([^"]*)"><span class="cpt">(.*?)</span></span>', source, re.S)
     assert copy and "to copy all of app.py" in copy.group(1) and 'aria-label="Copy app.py"' in source
     held = "def handler(event, context):\n    return event['customer_id']\n\n"  # a browser copies one line break less
@@ -1782,6 +2172,70 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     core._download = lambda url, most: CODE if most is None else too_big(url, most)
     other.code_more.click()
     assert other.package is not None and len(other.package.files) == 3
+
+
+
+def test_explorer_how_it_works(core, explorer, role, monkeypatch):
+    core._download = lambda url, most: HOW
+    x = explorer("etl-nightly", tab="code")
+    button = x.how_button
+    assert button.layout.display == "" and "lmx-i-how" in button._dom_classes and "lmx-on" not in button._dom_classes
+    assert x.code_bar.children[1] is button and "How the code works, read from its files" in button.tooltip
+    assert plain(x.status.value).endswith("a file to see its source · How it works explains the code")
+    source = x.source_view.value
+    button.click()
+    assert x._how and "lmx-on" in button._dom_classes and x.code_map.entry == "app.handler"
+    shown = plain(x.source_view.value)
+    assert "How etl-nightly works" in shown and "BUCKET isn't set on etl-nightly" in shown
+    assert "What each call does, step by step from handler()" in shown and "Next" not in shown
+    assert "code(" not in shown and [type(b).__name__ for b in x.shown["how"]][:2] == ["_Title", "_Cards"]
+    assert plain(x.status.value) == ("How it works, read from 2 Python files with nothing run · click a file to see its "
+                                     "source · 1 warning")
+    assert button.tooltip == "Back to the source of the file picked in the tree"
+    button.click()  # back to the source
+    assert not x._how and x.source_view.value == source and "lmx-on" not in button._dom_classes
+    monkeypatch.setattr(lfmod, "map_package", lambda *args: pytest.fail("the code is read once"))
+    button.click()
+    assert x._how and "How etl-nightly works" in plain(x.source_view.value)
+    x._code_rows[2].button.click()  # a file in the tree: its source, and the button is up again
+    assert not x._how and "def save" in plain(x.source_view.value) and "lmx-on" not in button._dom_classes
+    # a function on another runtime has no How it works
+    create("web", role, Runtime="nodejs20.x", Handler="index.handler")
+    web = explorer("web", tab="code")
+    assert web.how_button.layout.display == "none" and "How it works" not in plain(web.status.value)
+
+
+def test_explorer_how_it_works_in_the_background(core, explorer):
+    held = threading.Event()
+
+    def held_back(fn, data):
+        assert held.wait(10)
+        return lfmod.map_code({"app.py": "def handler(event, context):\n    return event['x']\n"}, "app.handler",
+                              function=fn)
+
+    async def main():
+        x = explorer("etl-nightly", tab="code")
+        while x._tasks:
+            await asyncio.gather(*x._tasks.values())
+        lfmod_map = lfmod.map_package
+        lfmod.map_package = held_back
+        try:
+            x.how_button.click()
+            assert "map" in x._tasks and x.code_map is None and "skw" in x.source_view.value  # it returned at once
+            assert plain(x.status.value) == "Reading etl-nightly's code, starting at its handler…"
+            x.how_button.click()  # back to the source before it's read: what comes back is dropped
+            held.set()
+            while x._tasks:
+                await asyncio.gather(*x._tasks.values())
+            assert not x._how and "customer_id" in plain(x.source_view.value) and x.code_map is None
+            x.how_button.click()
+            while x._tasks:
+                await asyncio.gather(*x._tasks.values())
+            assert x._how and x.code_map.event[0].label == "x" and "How etl-nightly works" in plain(x.source_view.value)
+        finally:
+            lfmod.map_package = lfmod_map
+
+    asyncio.run(main())
 
 
 def test_explorer_function_field_regions_and_commands(core, explorer):

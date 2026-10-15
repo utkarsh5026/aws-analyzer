@@ -165,7 +165,8 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `aws logs put-retention-policy ...` command instead); its `filter_log_events` call lines carry `# read-only:`
   comments (`FilterLogEvents` isn't a Get/List/Describe name), and `code()` and `download()` download the deployment
   package with urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only),
-  which `rules.py` can't see. Environment variable values never reach a report: `parse_function` keeps their names, and
+  which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
+  `exec`s any of it. Environment variable values never reach a report: `parse_function` keeps their names, and
   `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
@@ -218,7 +219,9 @@ How the View layer works:
   document laid out: headings, lists, tables and its pictures in place), in S3 and Lambda `_JsonTree` (`_kit`'s: a
   JSON file or Lambda's configuration as nested `<details>` with coloured tokens, capped and opened breadth-first,
   `collapsed=True` folding it all under its title; not `bedrock_chat`'s `_Json`, which shows a request with its
-  settings marked), and in Bedrock `_Passage` (a retrieved
+  settings marked), in Lambda `_Outline` (`how_it_works()`'s `CodeStep`s as a tree of code lines in colour, each
+  with coloured tags for what it does, and each of its own functions a line calls folded under that line in a
+  `<details>`), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
   cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
@@ -313,6 +316,19 @@ How the View layer works:
   (`_midnight`), so "last called" reads today / yesterday / 3d ago; `_errors_level` is the one rule for when failed
   calls are a warning (in findings, the Error rate card and the table's tone). Log reads go backwards in growing
   slices (`_filter`) so the newest lines are the ones kept when a window holds more than `limit`.
+- `LambdaView.how_it_works()` is `LambdaAnalyzer.code_map()` -> `map_package()` (the package's own `.py` files;
+  libraries are told apart by their `.dist-info` RECORD and `_LIBRARIES`) -> `map_code()`, all pure. A `_CodeReader`
+  loads the handler's module the way Python imports it (its packages' `__init__` first; module-level code is the
+  start-up, `loading > 0`), then follows the handler with `ast`, keeping what each name holds as a `_Sym` (a boto3
+  client, resource or paginator, part of the event, `os.environ`, one of its own functions, classes or objects) so a
+  call resolves to an AWS operation, named from botocore's own service model (`_aws_model`, read from the files boto3
+  installs: no AWS call), or to one of its own functions, which it opens with the arguments' `_Sym`s bound (`_run`,
+  memoized per binding, `_MAP_DEPTH` deep, its steps shown at the first call only). It fills a `CodeMap`: the
+  `startup` and `steps` outlines (`CodeStep`, tags in `notes`), `AwsCall`, `EnvRead`, `EventField`, `ImportUse`,
+  `CodeFunction` and `CodeSpot` (the lines findings are about: HTTP without a timeout, writes outside /tmp, secrets
+  by name only, dropped errors, clients made per call). `code_map_findings` and `_code_summary` read it. Strings in
+  `_GUESSES` / `_BATCHES` are other services' operations: `rules.py` checks only the services this file makes clients
+  for (lambda, logs, cloudwatch, ec2), so a writing operation of those can't be named in a literal.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
   markdown: `_Markdown` (stdlib only, in `_bedrock.py` for both) parses blocks and inline markup
@@ -483,6 +499,9 @@ How the View layer works:
   **Download .zip** (`_save_code`) writes the cached bytes with `_save_package`, no new download; `x.saved` is the
   `PackageDownload`. **Hide files** (`files_toggle`, `_toggle_files`) hides the tree's pane, `code_left`, so the source
   has the tab's width; `_files_shown` isn't reset by `_open_function`, so it stays hidden for the next function.
+  **How it works** (`how_button`, `_toggle_how`) shows `how_it_works()`'s blocks in place of the source, for a Python
+  function: `map_package` on the cached bytes runs as the `map` job (`_later`), `x.code_map` keeps it, and a click on a
+  file in the tree, or on the button again, goes back to the source.
   Background work is `_later` (`_Explorer`'s, as in
   `KBExplorer`), the status line's busy text carries its job (`_status(owner=)`) so only that job, or the user being on
   its tab, replaces it (`_finish`), and `_drop` bumps keys so a function's results that come back after another was
@@ -683,7 +702,9 @@ does both, a page at a time). How the UI works:
   local time). The explorer window's tests build `LambdaExplorer(core=core, mode="widgets")` on the same moto data,
   click and type through it like the KB explorer's (`seed_runs` adds runs to a stream of their own), and drive the
   background path and Live inside `asyncio.run`, with `filter_log_events` held back by a `threading.Event` through a
-  `Patched` Logs client (`clients={"logs": ...}`) and `_LIVE_SECONDS` made short.
+  `Patched` Logs client (`clients={"logs": ...}`) and `_LIVE_SECONDS` made short. `map_code()` is tested on `APP`, a
+  three-file package that does most of what it follows, and `how_it_works()` and the Code tab's How it works on `HOW`;
+  demo.py's `support-agent-actions` has `AGENT_SOURCES`, a Bedrock agent action group that sets off its findings.
 - `tests/test_bedrock_chat.py` uses `Stubber` for the requests the analyzer sends, and a `Fake` client elsewhere
   (answers in any order, checks every request, response and stream event against the service model, and has no
   method for an operation without a handler, like an old boto3). The window's tests build it with `mode="html"`,
