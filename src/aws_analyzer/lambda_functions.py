@@ -5877,52 +5877,90 @@ _EXTRA_CSS = """\
 .lmb .flow .jn,.lmb .flow .jl{color:var(--jp-mirror-editor-number-color,light-dark(#c2410c,#f78c6c))}
 .lmb .flow .pa{font-style:italic}
 .lmb .flow .pc{opacity:.6;font-style:italic}
-.lmb .cg{border:1px solid rgba(127,127,127,.25);border-radius:8px;margin:4px 0 4px;max-width:1180px;overflow:auto}
-.lmb .cg svg{display:block;max-width:100%;height:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-.lmb .cg .nd,.lmb .cg .e{transition:opacity .15s}
-.lmb .cg .nd .bg{fill:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke:none}
-.lmb .cg .nd .fg{fill:rgba(127,127,127,.06);stroke:rgba(127,127,127,.45);stroke-width:1}
-.lmb .cg .nd .ac{fill:rgba(127,127,127,.6);stroke:none}
-.lmb .cg .nd text{fill:currentColor}
-.lmb .cg .nd .lb{font-size:13px;font-weight:650}
-.lmb .cg .k-handler .lb,.lmb .cg .k-function .lb{font:600 12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.lmb .cg .nd .sb{font-size:10.5px;opacity:.62}
-.lmb .cg .nd .li{font-size:11px;opacity:.85}
-.lmb .cg .k-aws .li,.lmb .cg .k-env .li,.lmb .cg .k-event .li,.lmb .cg .k-http .li{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px}
-.lmb .cg .k-handler .fg{fill:rgba(234,88,12,.08);stroke:rgba(234,88,12,.75);stroke-width:1.6}
-.lmb .cg .k-handler .ac{fill:#ea580c}
-.lmb .cg .k-function .ac{fill:rgba(234,88,12,.55)}
-.lmb .cg .k-event .fg{fill:rgba(22,163,74,.07);stroke:rgba(22,163,74,.6)}
-.lmb .cg .k-event .ac{fill:#16a34a}
-.lmb .cg .k-env .fg{fill:rgba(13,148,136,.07);stroke:rgba(13,148,136,.6)}
-.lmb .cg .k-env .ac{fill:#0d9488}
-.lmb .cg .k-start .fg{fill:rgba(100,116,139,.08);stroke:rgba(100,116,139,.55);stroke-dasharray:4 3}
-.lmb .cg .k-aws .fg{fill:rgba(59,130,246,.07);stroke:rgba(59,130,246,.6)}
-.lmb .cg .k-aws .ac{fill:#3b82f6}
-.lmb .cg .k-http .fg{fill:rgba(219,39,119,.06);stroke:rgba(219,39,119,.55)}
-.lmb .cg .k-http .ac{fill:#db2777}
-.lmb .cg .nd.warn .fg{stroke:#f59e0b;stroke-width:2;fill:rgba(245,158,11,.09)}
-.lmb .cg .nd .wm{fill:#f59e0b;font-size:12px;font-weight:800}
-.lmb .cg .e path{fill:none;stroke-width:1.6}
-.lmb .cg .e .hd{stroke:none}
-.lmb .cg .e .hit{stroke:transparent;stroke-width:10;fill:none}
-.lmb .cg .e:hover path.ln{stroke-width:3}
-.lmb .cg .k-call path.ln{stroke:currentColor;opacity:.5}.lmb .cg .k-call .hd{fill:currentColor;opacity:.5}
-.lmb .cg .k-event path.ln{stroke:#16a34a;stroke-width:2.4}.lmb .cg .k-event .hd{fill:#16a34a}
-.lmb .cg .k-env path.ln{stroke:#0d9488;stroke-dasharray:5 4}.lmb .cg .k-env .hd{fill:#0d9488}
-.lmb .cg .k-client path.ln{stroke:rgba(100,116,139,.8);stroke-dasharray:2 4}.lmb .cg .k-client .hd{fill:rgba(100,116,139,.8)}
-.lmb .cg .k-reads path.ln{stroke:#3b82f6}.lmb .cg .k-reads .hd{fill:#3b82f6}
-.lmb .cg .k-writes path.ln{stroke:#ea580c}.lmb .cg .k-writes .hd{fill:#ea580c}
-.lmb .cg .k-sends path.ln,.lmb .cg .k-http path.ln{stroke:#db2777}.lmb .cg .k-sends .hd,.lmb .cg .k-http .hd{fill:#db2777}
-.lmb .cg .k-runs path.ln{stroke:#9333ea}.lmb .cg .k-runs .hd{fill:#9333ea}
-.lmb .cg .k-signs path.ln{stroke:rgba(100,116,139,.9);stroke-dasharray:6 3}.lmb .cg .k-signs .hd{fill:rgba(100,116,139,.9)}
-.lmb .cg .e.warn path.ln{stroke:#f59e0b;stroke-width:2.2}.lmb .cg .e.warn .hd{fill:#f59e0b}
-.lmb .cg .e .lp{font-size:12px;fill:currentColor;opacity:.75}
-.lmb .cgk{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;opacity:.8;margin:0 0 10px;max-width:1180px}
-.lmb .cgk i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
-.lmb .cgk .call{border-color:rgba(127,127,127,.7)}.lmb .cgk .reads{border-color:#3b82f6}
-.lmb .cgk .writes{border-color:#ea580c}.lmb .cgk .sends{border-color:#db2777}.lmb .cgk .runs{border-color:#9333ea}
-.lmb .cgk .env{border-color:#0d9488;border-top-style:dashed}.lmb .cgk .warn{border-color:#f59e0b}"""
+.lmb .cgb{width:fit-content;max-width:min(100%,1180px)}
+.lmb .cg{border:1px solid rgba(127,127,127,.2);border-radius:14px;margin:6px 0 8px;overflow:auto;background-color:rgba(127,127,127,.035);background-attachment:local;background-size:18px 18px;
+ background-image:radial-gradient(circle at 1px 1px,rgba(127,127,127,.3) 1px,transparent 0);background-position:9px 9px}
+.lmb .cg svg{display:block;max-width:100%;height:auto;overflow:visible;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.lmb .cg .cap{font-size:12px;font-weight:650;letter-spacing:1.2px;fill:currentColor;fill-opacity:.45}
+.lmb .cg .capl{stroke:currentColor;stroke-opacity:.14;stroke-width:1;fill:none}
+.lmb .cg .cn,.lmb .cg .ce{transition:opacity .15s}
+.lmb .cg .cn .bg{fill:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke:none;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.07)) drop-shadow(0 6px 16px rgba(15,23,42,.07))}
+.lmb .cg .cn .fg{fill:rgba(255,255,255,.05);stroke:rgba(127,127,127,.32);stroke-width:1}
+.lmb .cg .cn:hover .fg{stroke:rgba(127,127,127,.6)}
+.lmb .cg .cn text{fill:currentColor}
+.lmb .cg .cn .lb{font-size:14px;font-weight:650;letter-spacing:-.1px}
+.lmb .cg .k-handler .lb,.lmb .cg .k-function .lb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:13.5px;font-weight:650;letter-spacing:0}
+.lmb .cg .k-handler .lb{font-size:14px;font-weight:700}
+.lmb .cg .cn .sb{font-size:12.5px;fill-opacity:.62}
+.lmb .cg .cn .sb .dir{fill-opacity:.62}
+.lmb .cg .cn .sb .ac{font-weight:600;fill-opacity:.95}
+.lmb .cg .cn .sb .sep{fill-opacity:.6}
+.lmb .cg .cn .dv{stroke:rgba(127,127,127,.2);stroke-width:1;fill:none}
+.lmb .cg .cn .rw{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill-opacity:.88}
+.lmb .cg .cn .rw.mo{font-family:inherit;font-style:italic;fill-opacity:.55}
+.lmb .cg .cn .pr{font-size:12.5px;fill-opacity:.7}
+.lmb .cg .cn .ns{font-size:12px;font-weight:650;fill:#d97706;letter-spacing:.2px}
+.lmb .cg .cn .bu{fill:var(--c,rgba(127,127,127,.6))}
+.lmb .cg .cn .bdg{fill:var(--t,rgba(127,127,127,.12));stroke:var(--c,rgba(127,127,127,.5));stroke-opacity:.22;stroke-width:1}
+.lmb .cg .cn .ico{fill:none;stroke:var(--c,currentColor);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.lmb .cg .k-event{--c:#16a34a;--t:rgba(22,163,74,.12)}
+.lmb .cg .k-env{--c:#0d9488;--t:rgba(13,148,136,.13)}
+.lmb .cg .k-aws{--c:#3b82f6;--t:rgba(59,130,246,.12)}
+.lmb .cg .k-http{--c:#db2777;--t:rgba(219,39,119,.11)}
+.lmb .cg .k-start{--c:#64748b;--t:rgba(100,116,139,.13)}
+.lmb .cg .k-function{--c:currentColor;--t:rgba(127,127,127,.12)}
+.lmb .cg .k-function .ico{stroke-opacity:.72}
+.lmb .cg .k-aws .bu,.lmb .cg .k-http .bu{fill:rgba(127,127,127,.55)}
+.lmb .cg .k-start .fg{stroke-dasharray:5 4;stroke:rgba(127,127,127,.55);fill:rgba(127,127,127,.04)}
+.lmb .cg .k-start .bg{filter:none}
+.lmb .cg .k-handler .bg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.1)) drop-shadow(0 10px 24px rgba(15,23,42,.12))}
+.lmb .cg .k-handler .fg{stroke:currentColor;stroke-opacity:.6;stroke-width:1.5}
+.lmb .cg .k-handler .bdg{fill:currentColor;stroke:none}
+.lmb .cg .k-handler .ico{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.7}
+.lmb .cg .cn.warn .fg{stroke:#f59e0b;stroke-opacity:1;stroke-width:1.5;fill:rgba(245,158,11,.06)}
+.lmb .cg .wb circle,.lmb .cg .wm circle{fill:#f59e0b;stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.5}
+.lmb .cg .wb path,.lmb .cg .wm path{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:2;stroke-linecap:round;fill:none}
+.lmb .cg .rt rect{fill:rgba(127,127,127,.1);stroke:rgba(127,127,127,.22)}
+.lmb .cg .rt text{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill-opacity:.85}
+.lmb .cg .rt .mt{font-weight:700;fill-opacity:1}
+.lmb .cg .ce path{fill:none}
+.lmb .cg .ce .ln{stroke:var(--c);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.lmb .cg .ce .ah{fill:var(--c);stroke:var(--c);stroke-width:.6;stroke-linejoin:round}
+.lmb .cg .ce .hit{stroke:transparent;stroke-width:12}
+.lmb .cg .ce .halo{stroke:#f59e0b;stroke-opacity:.4;stroke-width:6.5;stroke-linecap:round;stroke-linejoin:round}
+.lmb .cg .ce:hover .ln{stroke-width:2.6}
+.lmb .cg .ce.pt circle{fill:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke:var(--c);stroke-width:1.6}
+.lmb .cg .ce .lpb circle{fill:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke:var(--c);stroke-width:1.3}
+.lmb .cg .ce .lpb path{fill:none;stroke:var(--c);stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.lmb .cg .ek-call,.lmb .cgk .ek-call,.lmb .cgk .ek-guess,.lmb .cgk .ek-via{--c:rgba(127,127,127,.95)}
+.lmb .cg .ek-event{--c:#16a34a}
+.lmb .cg .ek-event .ln{stroke-width:2.2}
+.lmb .cg .ek-env,.lmb .cgk .ek-env{--c:#0d9488}
+.lmb .cg .ek-env .ln,.lmb .cgk .ek-env .ln{stroke-dasharray:5 4}
+.lmb .cg .ek-client,.lmb .cgk .ek-client{--c:rgba(100,116,139,.85)}
+.lmb .cg .ek-client .ln,.lmb .cgk .ek-client .ln{stroke-dasharray:.5 4.5;stroke-width:2}
+.lmb .cg .ek-reads,.lmb .cgk .ek-reads{--c:#3b82f6}
+.lmb .cg .ek-writes,.lmb .cgk .ek-writes{--c:#ea580c}
+.lmb .cg .ek-sends,.lmb .cg .ek-http,.lmb .cgk .ek-sends,.lmb .cgk .ek-http{--c:#db2777}
+.lmb .cg .ek-runs,.lmb .cgk .ek-runs{--c:#9333ea}
+.lmb .cg .ek-signs,.lmb .cgk .ek-signs{--c:rgba(100,116,139,.9)}
+.lmb .cg .ek-signs .ln,.lmb .cgk .ek-signs .ln{stroke-dasharray:6 3}
+.lmb .cg .ce.guess .ln,.lmb .cgk .ek-guess .ln{stroke-dasharray:1 4;stroke-width:2.2}
+.lmb .cg .ce.via .ln,.lmb .cgk .ek-via .ln{stroke-dasharray:9 3 2 3}
+.lmb .cg .cn .ac{fill:var(--c)}
+.lmb .cg .cn .bu.flagged{fill:#f59e0b}
+.lmb .cgk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;width:0;min-width:100%;font-size:12px}
+.lmb .cgk .kp{display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 8px;border:1px solid rgba(127,127,127,.25);border-radius:999px;background:rgba(127,127,127,.05);line-height:16px;white-space:nowrap}
+.lmb .cgk .kp b{font-weight:650;margin-right:3px}
+.lmb .cgk .kh{border-style:dashed;white-space:normal}
+.lmb .cgk .kt{opacity:.55;margin-left:auto;padding:3px 2px}
+.lmb .cgk .sw{display:block;overflow:visible;flex:none}
+.lmb .cgk .sw .ln{fill:none;stroke:var(--c);stroke-width:1.8;stroke-linecap:round}
+.lmb .cgk .sw .ah{fill:var(--c);stroke:var(--c);stroke-width:.6;stroke-linejoin:round}
+.lmb .cgk .kw circle{fill:#f59e0b}
+.lmb .cgk .kw path{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.8;stroke-linecap:round;fill:none}
+.lmb .cgk .kl circle{fill:none;stroke:currentColor;stroke-opacity:.55;stroke-width:1.2}
+.lmb .cgk .kl path{fill:none;stroke:currentColor;stroke-opacity:.8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
 
@@ -6071,31 +6109,220 @@ def _import_rows(cmap: CodeMap) -> list[list[Any]]:
     return rows
 
 
-_GRAPH_W = 184  # a box's width in the graph, in pixels
-_GRAPH_GAP = 66  # between columns: room for the arrows
-_GRAPH_ROW = 14  # between boxes in a column
-_GRAPH_PAD = 14
-_GRAPH_SWEEPS = 6  # passes that reorder each column by where its neighbours are, so fewer arrows cross
 _EDGE_WORDS = {"call": "calls", "event": "passes the event to", "env": "configures", "client": "makes the client for",
                "http": "sends HTTP requests to", "reads": "reads from", "writes": "writes to", "sends": "sends to",
                "runs": "calls", "signs": "signs links for"}
 
 
-def _node_height(node: GraphNode) -> float:
-    return 12 + 16 + (14 if node.sub else 0) + 15 * len(node.lines) + 8
+# how_it_works()'s graph, drawn: cards with an icon badge per kind on a quiet dotted canvas, column captions, arrows that
+# land on the operation (or leave from the variable) they're about, and a legend of pills. The _g names are its helpers.
+_GRAPH_PAD_X = 18  # left and right of the drawing
+_GRAPH_BAND = 44  # the captions' band at the top
+_GRAPH_PAD_B = 22
+_GRAPH_GAP = 56  # between columns: room for the arrows
+_GRAPH_ROW_GAP = 22  # between boxes in a column
+_GRAPH_MIN_W, _GRAPH_MAX_W, _GRAPH_MAX_IN, _GRAPH_MAX_HANDLER = 152, 206, 228, 240  # a column's width, from its boxes
+_GRAPH_LABEL_LINE = 17  # a name too long for one line takes two
+_GRAPH_HEAD, _GRAPH_HEAD_BARE = 56, 50  # a card's header (badge, name, what's under it), and without a line under it
+_GRAPH_ROW = 19  # a listed line: a field, a variable, an operation
+_GRAPH_PROSE = 17  # a line of prose: a docstring, what start-up does
+_GRAPH_ROUTE = 28  # a web route's pill
+_GRAPH_SWEEPS = 6  # passes that reorder each column by where its neighbours are, so fewer arrows cross
+_GRAPH_LISTS = ("event", "env", "aws", "http")  # boxes whose lines are names: fields, variables, operations, requests
+# Arial / Helvetica advance widths (per 1000 em), what the system sans stack draws on most machines; mono is 0.6 em
+_G_SANS = dict(zip(
+    " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~",
+    [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, *[556] * 10, 278, 278, 584, 584,
+     584, 556, 1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611,
+     722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, 333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500,
+     222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584]))
+_G_LAMBDA = "M3.6 2.6h2.1l6 10.8h1.7M8.4 7.4 4.2 13.4"
+_G_ICONS = {  # 16 x 16 line drawings, stroked in the badge's colour
+    "function": _G_LAMBDA,
+    "handler": _G_LAMBDA,
+    "event": "M9.2 1.8 3.6 9h4.2l-1 5.2L12.4 7H8.2z",
+    "env": "M2.5 4.5h1.6M7.1 4.5h6.4M2.5 8h6.4M11.9 8h1.6M2.5 11.5h3M8.5 11.5h5M5.6 3v3M10.4 6.5v3M7 10v3",
+    "start": "M8 2.2v5.2M4.9 4.4a5 5 0 1 0 6.2 0",
+    "http": "M8 2a6 6 0 1 0 0 12A6 6 0 1 0 8 2zM2.2 8h11.6M8 2c-2.1 2.2-2.1 9.8 0 12M8 2c2.1 2.2 2.1 9.8 0 12",
+    "cloud": "M4.6 12.6h6.9a2.8 2.8 0 0 0 .5-5.55A4 4 0 0 0 4.3 6.4a3.1 3.1 0 0 0 .3 6.2z",
+    "database": "M3 4c0-1.1 2.2-2 5-2s5 .9 5 2-2.2 2-5 2-5-.9-5-2zM3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4"
+                "M3 8c0 1.1 2.2 2 5 2s5-.9 5-2",
+    "bucket": "M2.4 4.2c0 1 2.5 1.8 5.6 1.8s5.6-.8 5.6-1.8S11.1 2.4 8 2.4 2.4 3.2 2.4 4.2zM2.4 4.2l1.5 8.5"
+              "c.2 1 1.9 1.6 4.1 1.6s3.9-.6 4.1-1.6l1.5-8.5",
+    "queue": "M2 5.2h3.2v5.6H2zM6.4 5.2h3.2v5.6H6.4zM10.8 5.2H14v5.6h-3.2z",
+    "send": "M13.8 2.2 6.9 9.1M13.8 2.2 9.6 13.8 6.9 9.1 2.2 6.4z",
+    "key": "M10.4 2.6a3 3 0 1 1-2.2 5.1L3 12.9v1.5h1.9v-1.5h1.5v-1.5l1.8-1.8M10.9 5.1h.01",
+    "spark": "M8 1.8l1.5 3.9 3.9 1.5-3.9 1.5L8 12.6 6.5 8.7 2.6 7.2l3.9-1.5zM12.6 11.2l.6 1.5 1.5.6-1.5.6-.6 1.5"
+             "-.6-1.5-1.5-.6 1.5-.6z",
+    "flow": "M4 2.8a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 1 0 0-3.2zM12 10a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 1 0 0-3.2z"
+            "M4 6v2.4c0 1.3 1 2.3 2.3 2.3h4.1",
+}
+_G_SERVICE_ICONS = (  # an AWS service's box id, by what it starts with -> its icon
+    (("aws-dynamodb", "aws-rds", "aws-redshift", "aws-timestream", "aws-docdb", "aws-neptune", "aws-elasticache",
+      "aws-keyspaces", "aws-athena"), "database"),
+    (("aws-s3",), "bucket"),
+    (("aws-sqs", "aws-kinesis", "aws-firehose", "aws-mq"), "queue"),
+    (("aws-sns", "aws-events", "aws-ses", "aws-pinpoint", "aws-iot"), "send"),
+    (("aws-secretsmanager", "aws-ssm", "aws-kms", "aws-sts", "aws-cognito", "aws-iam", "aws-acm"), "key"),
+    (("aws-bedrock", "aws-sagemaker", "aws-comprehend", "aws-textract", "aws-rekognition", "aws-translate",
+      "aws-polly", "aws-transcribe"), "spark"),
+    (("aws-stepfunctions", "aws-states", "aws-glue", "aws-batch", "aws-ecs", "aws-codebuild"), "flow"),
+    (("aws-lambda",), "function"),
+)
+_G_LOOP = "M12.4 9.3A4.6 4.6 0 1 1 11.3 4.7M12.1 2.3v2.8H9.3"
+_G_ACCESS = ("reads", "writes", "sends", "runs", "signs")
+_G_LEGEND = (("call", "calls"), ("reads", "reads"), ("writes", "writes"), ("sends", "sends"), ("runs", "runs"),
+             ("http", "HTTP request"), ("signs", "signs links"), ("env", "configures"), ("client", "makes a client"))
 
 
-def _graph_layout(graph: CodeGraph) -> tuple[dict[str, tuple[float, float, float, float]], dict[int, list[float]],
-                                              float, float]:
+def _g_sans(text: str, size: float, bold: bool = False) -> float:
+    """About how wide `text` is in the sans stack, a little generous (Segoe UI, Roboto and Inter run wider)."""
+    return sum(_G_SANS.get(ch, 1000 if ch == "…" else 600) for ch in text) / 1000 * size * (1.1 if bold else 1.05)
+
+
+def _g_mono(text: str, size: float) -> float:
+    return len(text) * 0.61 * size
+
+
+def _g_fit(text: str, room: float, measure: Callable[[str], float]) -> str:
+    """text, cut with … to fit `room` pixels."""
+    if measure(text) <= room:
+        return text
+    while text and measure(text + "…") > room:
+        text = text[:-1]
+    return text.rstrip() + "…"
+
+
+def _g_wrap(text: str, room: float, measure: Callable[[str], float], most: int = 2) -> list[str]:
+    """Words in lines that fit `room`, at most `most`, the last cut with … when there's more."""
+    words, lines, line = text.split(), [], ""
+    for i, word in enumerate(words):
+        trial = f"{line} {word}".strip()
+        if measure(trial) <= room or not line:
+            line = trial
+            continue
+        lines.append(line)
+        line = word
+        if len(lines) == most:
+            line = ""
+            lines[-1] = _g_fit(lines[-1] + " " + " ".join(words[i:]), room, measure)
+            break
+    if line:
+        lines.append(line)
+    return [_g_fit(x, room, measure) for x in lines[:most]]
+
+
+def _g_icon(n: GraphNode) -> str:
+    if n.kind == "aws":
+        return next((icon for starts, icon in _G_SERVICE_ICONS if n.id.startswith(starts)), "cloud")
+    return n.kind if n.kind in _G_ICONS else "cloud"
+
+
+class _GCard:
+    """A box of the graph being drawn: its node, its size, and what it shows in what order."""
+
+    def __init__(self, node: GraphNode) -> None:
+        self.node = node
+        self.width = self.height = self.body = 0.0
+        self.head = float(_GRAPH_HEAD)
+        self.route = ""  # the web route that leads to it ('GET /orders')
+        self.rows: list[str] = []  # its listed lines, in the order drawn
+        self.prose: list[str] = []
+        self.label: list[str] = []  # its name, in one line or two
+        self.arrows = 0  # the most arrows on one of its sides: a box with many is tall enough to space them
+
+    def row_y(self, text: str) -> float | None:
+        if text in self.rows:
+            return self.body + 6 + _GRAPH_ROW * self.rows.index(text) + _GRAPH_ROW / 2
+        return None
+
+
+def _g_measure_label(n: GraphNode, text: str) -> float:
+    if n.kind in ("handler", "function"):
+        return _g_mono(text, 14 if n.kind == "handler" else 13.5) * 1.03
+    return _g_sans(text, 14, bold=True)
+
+
+def _g_need(card: _GCard) -> float:
+    """How wide its card would like to be: its name, what's under it and its listed lines whole."""
+    n = card.node
+    need = 52 + _g_measure_label(n, n.label) + 16 + (26 if n.tone == "warn" else 0)
+    if n.sub:
+        whole = 52 + _g_sans(n.sub, 12.5) + 14
+        if n.kind in ("handler", "function") and "/" in n.sub:  # past 190px its folder is shortened instead
+            whole = min(whole, max(190.0, 52 + _g_sans(n.sub.rsplit("/", 1)[-1], 12.5) + 14))
+        need = max(need, whole)
+    if card.route:
+        need = max(need, 16 + _g_mono(card.route, 12.5) + 36)
+    if n.kind in _GRAPH_LISTS:
+        need = max([need] + [28 + _g_mono(line, 12.5) + 16 + (_g_sans(n.flags[line], 12) + 12 if line in n.flags else 0)
+                             for line in n.lines if not line.startswith(("+", "("))])
+    return need
+
+
+def _g_cards(graph: CodeGraph) -> dict[str, _GCard]:
+    cards = {n.id: _GCard(n) for n in graph.nodes}
+    sides: dict[tuple[str, int], int] = defaultdict(int)
+    for e in graph.edges:
+        sides[(e.source, 0)] += 1
+        sides[(e.target, 1)] += 1
+    for (node_id, _), count in sides.items():
+        if node_id in cards:
+            cards[node_id].arrows = max(cards[node_id].arrows, count)
+    for e in graph.edges:  # a web app's route goes on the function it leads to
+        if e.kind == "call" and e.label and not e.label.startswith("line ") and e.target in cards:
+            cards[e.target].route = e.label
+    for card in cards.values():
+        if card.node.kind in _GRAPH_LISTS:
+            card.rows = list(card.node.lines)
+    return cards
+
+
+def _g_size(cards: dict[str, _GCard], widths: dict[int, float], column_of: dict[str, int]) -> None:
+    for card in cards.values():
+        n = card.node
+        card.width = widths[column_of[n.id]]
+        room = card.width - 52 - 14 - (24 if n.tone == "warn" else 0)
+        if n.kind in ("handler", "function"):  # code: clipped, never wrapped
+            card.label = [_g_fit(n.label, room, lambda t: _g_measure_label(n, t))]
+        else:
+            card.label = _g_wrap(n.label, room, lambda t: _g_measure_label(n, t))
+        card.head = (_GRAPH_HEAD if n.sub else _GRAPH_HEAD_BARE) + _GRAPH_LABEL_LINE * (len(card.label) - 1)
+        top = card.head + (_GRAPH_ROUTE if card.route else 0)
+        card.body = top
+        if n.kind in _GRAPH_LISTS and card.rows:
+            card.height = top + 6 + _GRAPH_ROW * len(card.rows) + 8
+        else:
+            card.prose = [part for line in n.lines for part in
+                          _g_wrap(line, card.width - 30, lambda t: _g_sans(t, 12.5))][:3]
+            card.height = top + (_GRAPH_PROSE * len(card.prose) + 10 if card.prose else 4)
+            card.height = max(card.height, 24 + 12 * card.arrows)
+
+
+def _graph_layout(graph: CodeGraph, cards: dict[str, _GCard]) -> tuple[
+        dict[str, tuple[float, float, float, float]], dict[int, list[float]], float, float, dict[int, float],
+        dict[int, float], dict[str, int]]:
     """Where each box goes: (x, y, width, height) by its id; for each arrow that skips columns, the heights where it
-    crosses the columns between (a waypoint in each, so it runs between their boxes, not behind them); and the
-    drawing's width and height. Boxes stand in their columns, each column put in the order of its neighbours'
-    heights, a few passes left to right and back (the barycenter method), so arrows cross less; then each box is moved
-    as near its neighbours as the boxes around it let it be."""
+    crosses the columns between (a waypoint in each, so it runs between their boxes, not behind them); the drawing's
+    width and height; and each column's x and width, and each box's column. A column is as wide as its boxes want,
+    within limits. Each column is put in the order of its neighbours' heights, a few passes left to right and back
+    (the barycenter method), so arrows cross less; then each box is moved as near its neighbours as the boxes around
+    it let it be."""
     order = sorted({n.column for n in graph.nodes})
     place = {col: i for i, col in enumerate(order)}
     column_of = {n.id: place[n.column] for n in graph.nodes}
-    height = {n.id: _node_height(n) for n in graph.nodes}
+    widths = {k: 0.0 for k in range(len(order))}
+    for card in cards.values():
+        k = column_of[card.node.id]
+        widths[k] = max(widths[k], _g_need(card))
+    most = {k: float(_GRAPH_MAX_W) for k in widths}
+    for n in graph.nodes:
+        if n.kind in ("event", "env", "handler"):
+            k = column_of[n.id]
+            most[k] = max(most[k], _GRAPH_MAX_HANDLER if n.kind == "handler" else _GRAPH_MAX_IN)
+    widths = {k: min(max(w, _GRAPH_MIN_W), most[k]) for k, w in widths.items()}
+    _g_size(cards, widths, column_of)
+    height = {n.id: cards[n.id].height for n in graph.nodes}
     columns: dict[int, list[str]] = defaultdict(list)
     for node in graph.nodes:
         columns[column_of[node.id]].append(node.id)
@@ -6104,9 +6331,10 @@ def _graph_layout(graph: CodeGraph) -> tuple[dict[str, tuple[float, float, float
     for i, e in enumerate(graph.edges):
         a, b = column_of[e.source], column_of[e.target]
         chain = [e.source]
-        if b - a > 1:  # a waypoint in each column it crosses
-            hops[i] = [f"~{i}.{k}" for k in range(a + 1, b)]
-            for k, hop in zip(range(a + 1, b), hops[i]):
+        if abs(b - a) > 1:  # a waypoint in each column it crosses, either way
+            step = 1 if b > a else -1
+            hops[i] = [f"~{i}.{k}" for k in range(a + step, b, step)]
+            for k, hop in zip(range(a + step, b, step), hops[i]):
                 columns[k].append(hop)
                 column_of[hop] = k
                 height[hop] = 4.0
@@ -6121,10 +6349,10 @@ def _graph_layout(graph: CodeGraph) -> tuple[dict[str, tuple[float, float, float
         top = 0.0
         for item in columns[k]:
             center[item] = top + height[item] / 2
-            top += height[item] + _GRAPH_ROW
+            top += height[item] + _GRAPH_ROW_GAP
 
     def gap(x: str, y: str) -> float:
-        return _GRAPH_ROW if not (x.startswith("~") or y.startswith("~")) else 8.0
+        return _GRAPH_ROW_GAP if not (x.startswith("~") or y.startswith("~")) else 12.0
 
     def settle(items: list[str], wanted: list[float]) -> None:
         """Each box at the height it wants, pushed down so none overlaps, then the column moved back up by how far
@@ -6147,99 +6375,306 @@ def _graph_layout(graph: CodeGraph) -> tuple[dict[str, tuple[float, float, float
             items.sort(key=pull)
             settle(items, [pull(item) for item in items])
     top = min(center[item] - height[item] / 2 for item in center)
-    boxes = {n.id: (_GRAPH_PAD + column_of[n.id] * (_GRAPH_W + _GRAPH_GAP),
-                    center[n.id] - height[n.id] / 2 - top + _GRAPH_PAD, _GRAPH_W, height[n.id]) for n in graph.nodes}
-    routes = {i: [center[hop] - top + _GRAPH_PAD for hop in chain] for i, chain in hops.items()}
-    width = _GRAPH_PAD * 2 + len(order) * _GRAPH_W + (len(order) - 1) * _GRAPH_GAP
+    xs, x = {}, float(_GRAPH_PAD_X)
+    for k in range(len(order)):
+        xs[k] = x
+        x += widths[k] + _GRAPH_GAP
+    boxes = {n.id: (xs[column_of[n.id]], center[n.id] - height[n.id] / 2 - top + _GRAPH_BAND, widths[column_of[n.id]],
+                    height[n.id]) for n in graph.nodes}
+    routes = {i: [center[hop] - top + _GRAPH_BAND for hop in chain] for i, chain in hops.items()}
+    loops = 52 if any(column_of[e.source] >= column_of[e.target] for e in graph.edges) else 0  # room to curl round
+    width = x - _GRAPH_GAP + _GRAPH_PAD_X + loops
     tall = max(max(y + h for _, y, _, h in boxes.values()),
-               max((y for ys in routes.values() for y in ys), default=0)) + _GRAPH_PAD
-    return boxes, routes, width, tall
+               max((y for ys in routes.values() for y in ys), default=0)) + _GRAPH_PAD_B
+    return boxes, routes, width, tall, xs, widths, column_of
 
 
-def _ports(graph: CodeGraph, boxes: dict[str, tuple[float, float, float, float]],
-           routes: dict[int, list[float]]) -> dict[int, tuple[float, float]]:
-    """Where each arrow leaves its box and where it arrives, spread down the box's side in the order of what's at the
-    other end (the next waypoint, for an arrow that skips columns), so arrows that share a box don't start or end on
-    top of each other: edge index -> (y out, y in)."""
-    out: dict[str, list[int]] = defaultdict(list)
-    into: dict[str, list[int]] = defaultdict(list)
-    for i, e in enumerate(graph.edges):
-        out[e.source].append(i)
-        into[e.target].append(i)
+def _g_names(e: GraphEdge) -> list[str]:
+    return [part for part in e.label.split(", ") if part]
 
+
+def _g_anchors(graph: CodeGraph, cards: dict[str, _GCard], boxes: dict[str, tuple[float, float, float, float]]
+               ) -> dict[int, tuple[list[float], list[float]]]:
+    """Where each arrow leaves and arrives, as heights on the page: from the rows of the variables it carries, to the
+    rows of the operations or requests it makes; otherwise spread down the box's side in the order of what's at the
+    other end, outgoing arrows and incoming ones on separate parts of a side they share. Rows are first put in the
+    order of what they're joined to, so arrows cross less."""
     def middle(node_id: str) -> float:
         return boxes[node_id][1] + boxes[node_id][3] / 2
 
-    def spread(node_id: str, edges: list[int], toward: Callable[[int], float]) -> dict[int, float]:
-        _, y, _, h = boxes[node_id]
-        edges = sorted(edges, key=toward)
-        step = min(12.0, (h - 16) / max(len(edges), 1))
-        return {i: y + h / 2 + (k - (len(edges) - 1) / 2) * step for k, i in enumerate(edges)}
+    def rows_for(card: _GCard, e: GraphEdge) -> list[str]:
+        if card.node.kind not in _GRAPH_LISTS or e.kind in ("event", "client"):
+            return []
+        if e.label in card.rows:
+            return [e.label]
+        hit = [name for name in _g_names(e) if name in card.rows]
+        if not hit and any(r.startswith("+") for r in card.rows):
+            hit = [r for r in card.rows if r.startswith("+")]
+        return hit
 
-    leaving: dict[int, float] = {}
-    arriving: dict[int, float] = {}
-    for node_id, edges in out.items():
-        leaving.update(spread(node_id, edges, lambda i: routes[i][0] if i in routes else middle(graph.edges[i].target)))
-    for node_id, edges in into.items():
-        arriving.update(spread(node_id, edges, lambda i: routes[i][-1] if i in routes else middle(graph.edges[i].source)))
-    return {i: (leaving[i], arriving[i]) for i in range(len(graph.edges))}
+    joined: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for e in graph.edges:
+        for here, there in ((e.source, e.target), (e.target, e.source)):
+            for row in rows_for(cards[here], e):
+                joined[here][row].append(middle(there))
+    for node_id, by_row in joined.items():
+        rank = {row: sum(ys) / len(ys) for row, ys in by_row.items()}
+        cards[node_id].rows.sort(key=lambda r: (r.startswith("+"), rank.get(r, 1e9)))
+
+    ends: dict[int, list[list[float]]] = {}
+    loose: dict[tuple[str, str], list[tuple[int, int]]] = defaultdict(list)  # (node, side of the box) -> (edge, end)
+    for i, e in enumerate(graph.edges):
+        pair: list[list[float]] = []
+        for end, node_id in ((0, e.source), (1, e.target)):
+            card = cards[node_id]
+            ys = [boxes[node_id][1] + y for r in rows_for(card, e) if (y := card.row_y(r)) is not None]
+            if not ys:  # which side of the box the arrow touches there: right, unless it arrives from the left
+                forward = boxes[e.target][0] > boxes[e.source][0]
+                side = "left" if (end == 1 and forward) or (end == 0 and boxes[e.target][0] < boxes[e.source][0]) \
+                    else "right"
+                loose[(node_id, side)].append((i, end))
+            pair.append(ys)
+        ends[i] = pair
+
+    def other(i: int, end: int) -> float:
+        far = ends[i][1 - end]
+        e = graph.edges[i]
+        return sum(far) / len(far) if far else middle(e.target if end == 0 else e.source)
+
+    for (node_id, _), items in loose.items():
+        card, (_, y, _, h) = cards[node_id], boxes[node_id]
+        items.sort(key=lambda item: (item[1], other(*item)))  # arrivals above departures on a shared side
+        if card.node.kind in _GRAPH_LISTS:  # at the name: the event as a whole, a client made for the service
+            hub, room = y + 27, 22.0
+        else:
+            hub, room = y + h / 2, h - 22
+        step = min(12.0, room / max(len(items), 1))
+        for k, (i, end) in enumerate(items):
+            ends[i][end] = [hub + (k - (len(items) - 1) / 2) * step]
+    shared: dict[tuple[str, int, float], list[int]] = defaultdict(list)  # arrows that share a row's port
+    for i, e in enumerate(graph.edges):
+        for end, node_id in ((0, e.source), (1, e.target)):
+            for y in ends[i][end]:
+                shared[(node_id, end, round(y, 1))].append(i)
+    for (node_id, end, y), edges in shared.items():
+        if len(edges) > 1:  # side by side
+            edges.sort(key=lambda i: other(i, end))
+            for k, i in enumerate(edges):
+                ends[i][end] = [v + (k - (len(edges) - 1) / 2) * 5.0 if round(v, 1) == y else v for v in ends[i][end]]
+    return {i: (pair[0], pair[1]) for i, pair in ends.items()}
 
 
-def _edge_svg(e: GraphEdge, i: int, boxes: dict[str, tuple[float, float, float, float]], y1: float, y2: float,
-              graph: CodeGraph, hops: list[float] | None = None) -> str:
+def _g_cubic(p0: tuple[float, float], p1: tuple[float, float], p2: tuple[float, float], p3: tuple[float, float],
+             t: float) -> tuple[float, float]:
+    u = 1 - t
+    x, y = (u ** 3 * a + 3 * u * u * t * b + 3 * u * t * t * c + t ** 3 * d for a, b, c, d in zip(p0, p1, p2, p3))
+    return x, y
+
+
+def _g_strand(points: list[tuple[float, float]]) -> tuple[str, tuple[float, float]]:
+    """One line through `points`: (start, then a column's left and right for each column it skips, then the end).
+    Curves in the gaps, straight across each column it skips; returns the path and where its marks go: the middle of
+    its middle straight run, in the clear between a column's boxes, or else the middle of its curve."""
+    (x1, y1) = points[0]
+    parts: list[str] = [f"M{x1:.1f},{y1:.1f}"]
+    runs: list[tuple[float, float]] = []
+    curve: tuple[tuple[float, float], ...] = ()
+    for j in range(1, len(points)):
+        (ax, ay), (bx, by) = points[j - 1], points[j]
+        if j % 2 == 0 and j < len(points) - 1:
+            parts.append(f"L{bx:.1f},{by:.1f}")
+            runs.append(((ax + bx) / 2, by))
+            continue
+        reach = max(18.0, abs(bx - ax) * 0.5) * (1 if bx >= ax else -1)
+        parts.append(f"C{ax + reach:.1f},{ay:.1f} {bx - reach:.1f},{by:.1f} {bx:.1f},{by:.1f}")
+        curve = curve or ((ax, ay), (ax + reach, ay), (bx - reach, by), (bx, by))
+    return " ".join(parts), runs[(len(runs) - 1) // 2] if runs else _g_cubic(*curve, 0.5)
+
+
+def _g_head(x: float, y: float, d: int) -> str:
+    """A slim arrowhead with a notched back, its tip at (x, y), pointing right (d=1) or left (d=-1)."""
+    return (f"M{x:.1f},{y:.1f} L{x - 9 * d:.1f},{y - 4.4:.1f} Q{x - 6.2 * d:.1f},{y:.1f} {x - 9 * d:.1f},{y + 4.4:.1f}"
+            " Z")
+
+
+def _g_edge_tip(e: GraphEdge, graph: CodeGraph) -> str:
+    """What an arrow says on hover, in a sentence."""
+    source, target = graph.node(e.source), graph.node(e.target)
+    src = source.label if source else e.source
+    dst = target.label if target else e.target
+    if e.kind == "event":
+        said = f"Lambda calls {dst} with the event"
+    elif e.kind == "env":
+        said = f"{dst} reads {e.label} from its environment"
+    elif e.kind == "call":
+        said = f"{src} calls {dst}" + (f" ({e.label})" if e.label else "")
+    elif e.kind == "client":
+        said = f"{src} makes the {dst} client"
+    elif e.kind == "http":
+        said = f"{src} sends {e.label}"
+    else:
+        said = f"{src} {_EDGE_WORDS.get(e.kind, e.kind)} {dst}: {e.label}"
+    said += "; in a loop, once per item" if e.loop else ""
+    said += "; known only by the methods' names (their client couldn't be followed)" if e.guessed else ""
+    said += "; in functions further down that the graph leaves out" if e.indirect else ""
+    return said + ("; a warning is about it" if e.tone == "warn" else "")
+
+
+def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, float, float, float]],
+              xs: dict[int, float], widths: dict[int, float], column_of: dict[str, int], ys_out: list[float],
+              ys_in: list[float], hops: list[float] | None, mark_loop: bool = True) -> tuple[str, str]:
+    """An arrow: its lines (one from each row it leaves to each row it reaches), its head, its loop mark; and, drawn
+    over the boxes, the dots where it leaves them."""
     sx, _, sw, _ = boxes[e.source]
     tx, _, tw, _ = boxes[e.target]
-    if tx > sx:  # left to right: from the source's right side to the target's left side, through its waypoints
-        x1, x2, d = sx + sw, tx - 1, 1
-        points = [(x1, y1)]
-        for k, y in enumerate(hops or []):
-            left = sx + (k + 1) * (_GRAPH_W + _GRAPH_GAP)
-            points += [(left, y), (left + _GRAPH_W, y)]
-        points.append((x2 - 7, y2))
-        parts = [f"M{x1:.1f},{y1:.1f}"]
-        for j in range(1, len(points)):
-            (ax, ay), (bx, by) = points[j - 1], points[j]
-            if j % 2 == 0 and j < len(points) - 1:  # straight across a column it skips
-                parts.append(f"L{bx:.1f},{by:.1f}")
+    lines: list[str] = []
+    marks: list[tuple[float, float]] = []
+    start, end = column_of[e.source], column_of[e.target]
+    if end > start:  # left to right: from the source's right side to the target's left side
+        x1, tip, d = sx + sw, tx - 0.6, 1
+        between = [(xs[start + 1 + k], xs[start + 1 + k] + widths[start + 1 + k], y) for k, y in enumerate(hops or [])]
+    elif end < start:  # back to an earlier column: from the source's left side to the target's right side
+        x1, tip, d = sx, tx + tw + 0.6, -1
+        between = [(xs[start - 1 - k] + widths[start - 1 - k], xs[start - 1 - k], y) for k, y in enumerate(hops or [])]
+    else:  # the same column: out of the right side, round, and back into the target's right side
+        x1, tip, d = sx + sw, tx + tw + 0.6, -1
+        between = []
+    for a in ys_out:
+        for b in ys_in:
+            if end == start:
+                bulge = 34 + 8 * len(lines)
+                path = (f"M{x1:.1f},{a:.1f} C{x1 + bulge:.1f},{a:.1f} {tip + 6.6 + bulge:.1f},{b:.1f} "
+                        f"{tip + 6.6:.1f},{b:.1f}")
+                at = _g_cubic((x1, a), (x1 + bulge, a), (tip + bulge, b), (tip, b), 0.5)
             else:
-                reach = max(20.0, (bx - ax) / 2)
-                parts.append(f"C{ax + reach:.1f},{ay:.1f} {bx - reach:.1f},{by:.1f} {bx:.1f},{by:.1f}")
-        path = " ".join(parts)
-        mx, my = (points[0][0] + points[1][0]) / 2, (points[0][1] + points[1][1]) / 2
-    else:  # back to an earlier column, or the same one: out of one side and round into the target's right side
-        x1, x2, d = (sx if tx < sx else sx + sw), tx + tw + 1, -1
-        reach = max(28.0, abs(x2 - x1) / 2) if tx < sx else 46.0
-        c1 = x1 - reach if tx < sx else x1 + reach
-        path = f"M{x1:.1f},{y1:.1f} C{c1:.1f},{y1:.1f} {x2 + reach:.1f},{y2:.1f} {x2 + 7:.1f},{y2:.1f}"
-        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-    head = f"M{x2:.1f},{y2:.1f} L{x2 - 8 * d:.1f},{y2 - 4:.1f} L{x2 - 8 * d:.1f},{y2 + 4:.1f} Z"
-    source, target = graph.node(e.source), graph.node(e.target)
-    words = _EDGE_WORDS.get(e.kind, e.kind)
-    tip = f"{source.label if source else e.source} {words} {target.label if target else e.target}"
-    tip += (f": {e.label}" if e.label else "") + (" (in a loop: once per item)" if e.loop else "")
-    loop = (f'<text class="lp" x="{mx:.1f}" y="{my - 4:.1f}" text-anchor="middle">↻</text>' if e.loop else "")
-    return (f'<g class="e k-{_esc(e.kind)} s-{_esc(e.source)} t-{_esc(e.target)}{" warn" if e.tone == "warn" else ""}">'
-            f'<title>{_esc(tip)}</title><path class="hit" d="{path}"/><path class="ln" d="{path}"/>'
-            f'<path class="hd" d="{head}"/>{loop}</g>')
+                points = [(x1, a)] + [(p, y) for left, right, y in between for p in (left, right)] + [(tip - 6.6 * d, b)]
+                path, at = _g_strand(points)
+            lines.append(path)
+            marks.append(at)
+    heads = [_g_head(tip, b, d) for b in dict.fromkeys(ys_in)]
+    d_attr = " ".join(lines)
+    classes = (f"ce ek-{_esc(e.kind)} s-{_esc(e.source)} t-{_esc(e.target)}" + (" warn" if e.tone == "warn" else "")
+               + (" guess" if e.guessed else "") + (" via" if e.indirect else ""))
+    mark = ""
+    if marks and (e.loop and mark_loop or e.tone == "warn"):
+        cx, cy = marks[0]
+        if e.tone == "warn":
+            mark += (f'<g class="wm" transform="translate({cx:.1f},{cy:.1f})"><circle r="7.5"/>'
+                     '<path d="M0,-3.7V.5M0,3.4V3.5"/></g>')
+            cx += 17 * d
+        if e.loop and mark_loop:
+            mark += (f'<g class="lpb" transform="translate({cx:.1f},{cy:.1f})"><circle r="8.5"/>'
+                     f'<path transform="scale(.66) translate(-8,-8)" d="{_G_LOOP}"/></g>')
+    halo = f'<path class="halo" d="{d_attr}"/>' if e.tone == "warn" else ""
+    body = (f'<g class="{classes}"><title>{_esc(_g_edge_tip(e, graph))}</title><path class="hit" d="{d_attr}"/>{halo}'
+            f'<path class="ln" d="{d_attr}"/>' + "".join(f'<path class="ah" d="{h}"/>' for h in heads) + mark + "</g>")
+    dots = f'<g class="{classes} pt">' + "".join(f'<circle cx="{x1:.1f}" cy="{y:.1f}" r="2.8"/>'
+                                                for y in dict.fromkeys(ys_out)) + "</g>"
+    return body, dots
 
 
-def _node_svg(n: GraphNode, box: tuple[float, float, float, float], neighbours: list[str]) -> str:
+def _g_sub_svg(n: GraphNode, room: float) -> str:
+    if n.kind in ("handler", "function") and "/" in n.sub:  # the folder dimmed, shortened from the left
+        folder, _, rest = n.sub.rpartition("/")
+        folder += "/"
+        if _g_sans(rest, 12.5) > room:
+            return _esc(_g_fit(rest, room, lambda t: _g_sans(t, 12.5)))
+        if _g_sans(folder + rest, 12.5) > room:  # whole folders dropped from the left: '…/orders.py line 10'
+            parts = folder.rstrip("/").split("/")
+            while parts and _g_sans("…/" + "/".join(parts) + "/" + rest, 12.5) > room:
+                parts.pop(0)
+            folder = "…/" + ("/".join(parts) + "/" if parts else "")
+        return (f'<tspan class="dir">{_esc(folder)}</tspan>' if folder else "") + _esc(rest)
+    if n.kind == "aws" and n.sub:  # 'reads · writes', each in its arrows' colour
+        return '<tspan class="sep"> · </tspan>'.join(f'<tspan class="ac ek-{_esc(w)}">{_esc(w)}</tspan>'
+                                                    for w in n.sub.split(" · "))
+    return _esc(_g_fit(n.sub, room, lambda t: _g_sans(t, 12.5)))
+
+
+def _node_svg(card: _GCard, box: tuple[float, float, float, float], neighbours: list[str], access: dict[str, str]
+              ) -> str:
+    """A box: its badge and name, what's under it, a route's pill, its listed lines (an operation's dot in its arrows'
+    colour, a line a warning is about with its flag) or its docstring, and a warning badge."""
+    n = card.node
     x, y, w, h = box
-    chars = int((w - 22) / (7.6 if n.kind in ("handler", "function") else 7.2))
-    texts = [f'<text class="lb" x="14" y="22">{_esc(_clip(n.label, chars))}</text>']
-    line = 22
+    warn = n.tone == "warn"
+    label_y = 27 if n.sub else 31
+    parts = [f'<text class="lb" x="52" y="{label_y + _GRAPH_LABEL_LINE * k}">{_esc(line)}</text>'
+             for k, line in enumerate(card.label)]
     if n.sub:
-        line += 14
-        texts.append(f'<text class="sb" x="14" y="{line}">{_esc(_clip(n.sub, int((w - 22) / 5.9)))}</text>')
-    for item in n.lines:
-        line += 15
-        texts.append(f'<text class="li" x="14" y="{line}">{_esc(_clip(item, int((w - 22) / 6.4)))}</text>')
-    warn = f'<text class="wm" x="{w - 16:.0f}" y="21">!</text>' if n.tone == "warn" else ""
-    classes = " ".join(["nd", f"k-{n.kind}", f"n-{n.id}", *(f"a-{m}" for m in neighbours)]) + (
-        " warn" if n.tone == "warn" else "")
+        parts.append(f'<text class="sb" x="52" y="{45 + _GRAPH_LABEL_LINE * (len(card.label) - 1)}">'
+                     f"{_g_sub_svg(n, w - 52 - 12)}</text>")
+    badge_y = 13 if n.sub else 11
+    parts.append(f'<rect class="bdg" x="12" y="{badge_y}" width="28" height="28" rx="8"/>'
+                 f'<path class="ico" transform="translate(18,{badge_y + 6})" d="{_G_ICONS[_g_icon(n)]}"/>')
+    top = card.head
+    if card.route:
+        method, _, path = card.route.partition(" ")
+        pill_w = min(_g_mono(card.route, 12.5) + 20, w - 28)
+        shown = _g_fit(path, pill_w - 20 - _g_mono(method + " ", 12.5), lambda t: _g_mono(t, 12.5))
+        parts.append(f'<g class="rt"><rect x="14" y="{top:.0f}" width="{pill_w:.0f}" height="21" rx="10.5"/>'
+                     f'<text x="24" y="{top + 14.8:.1f}"><tspan class="mt">{_esc(method)}</tspan> {_esc(shown)}</text>'
+                     "</g>")
+        top += _GRAPH_ROUTE
+    if n.kind in _GRAPH_LISTS and card.rows:
+        parts.append(f'<path class="dv" d="M1,{card.body:.0f}H{w - 1:.0f}"/>')
+        for row in card.rows:
+            ry = card.row_y(row)
+            if ry is None:
+                continue
+            if row.startswith("(") or (row.startswith("+") and row.endswith(" more")):
+                parts.append(f'<text class="rw mo" x="16" y="{ry + 4.3:.1f}">{_esc(row)}</text>')
+                continue
+            tone = (" ac ek-" + _esc(access[row])) if n.kind == "aws" and row in access else ""
+            flag = n.flags.get(row, "")
+            room = w - 28 - 14 - (_g_sans(flag, 12) + 12 if flag else 0)
+            parts.append(f'<circle class="bu{tone}{" flagged" if flag else ""}" cx="17" cy="{ry:.1f}" r="2.6"/>'
+                         f'<text class="rw" x="27" y="{ry + 4.3:.1f}">{_esc(_g_fit(row, room, lambda t: _g_mono(t, 12.5)))}'
+                         "</text>")
+            if flag:
+                parts.append(f'<text class="ns" x="{w - 14:.0f}" y="{ry + 4.3:.1f}" text-anchor="end">{_esc(flag)}</text>')
+    for k, line in enumerate(card.prose):
+        parts.append(f'<text class="pr" x="14" y="{top + 13 + _GRAPH_PROSE * k:.1f}">{_esc(line)}</text>')
+    if warn:
+        parts.append(f'<g class="wb" transform="translate({w - 21:.0f},{badge_y + 14})"><circle r="8.5"/>'
+                     '<path d="M0,-4.2V.6M0,3.9V4"/></g>')
+    classes = " ".join(["cn", f"k-{n.kind}", f"n-{n.id}", *(f"a-{m}" for m in neighbours)]) + (" warn" if warn else "")
     return (f'<g class="{_esc(classes)}" transform="translate({x:.1f},{y:.1f})"><title>{_esc(n.tip or n.label)}</title>'
-            f'<rect class="bg" width="{w}" height="{h:.0f}" rx="9"/><rect class="fg" width="{w}" height="{h:.0f}" rx="9"/>'
-            f'<rect class="ac" x="1" y="9" width="4" height="{max(h - 18, 6):.0f}" rx="2"/>{"".join(texts)}{warn}</g>')
+            f'<rect class="bg" width="{w:.0f}" height="{h:.0f}" rx="11"/>'
+            f'<rect class="fg" x=".5" y=".5" width="{w - 1:.0f}" height="{h - 1:.0f}" rx="10.5"/>{"".join(parts)}</g>')
+
+
+def _g_captions(graph: CodeGraph, xs: dict[int, float], widths: dict[int, float], column_of: dict[str, int]) -> str:
+    """The words over the columns: COMES IN, HANDLER, CALLS, REACHES, each over the columns it covers."""
+    kinds: dict[int, set[str]] = defaultdict(set)
+    for n in graph.nodes:
+        kinds[column_of[n.id]].add(n.kind)
+
+    def word(found: set[str]) -> str:
+        return ("Reaches" if found & {"aws", "http"} else "Handler" if "handler" in found else
+                "Comes in" if found & {"event", "env"} else "Calls" if "function" in found else "Start-up")
+
+    groups: list[list[Any]] = []
+    for k in sorted(kinds):
+        said = word(kinds[k])
+        if groups and groups[-1][0] == said:
+            groups[-1][2] = k
+        else:
+            groups.append([said, k, k])
+    out = []
+    for said, first, last in groups:
+        x, right = xs[first], xs[last] + widths[last]
+        text = said.upper()
+        end = x + _g_sans(text, 12, bold=True) + len(text) * 1.2 + 10
+        out.append(f'<text class="cap" x="{x + 2:.0f}" y="25">{_esc(text)}</text>')
+        if right - end > 12:
+            out.append(f'<path class="capl" d="M{end:.0f},21H{right:.0f}"/>')
+    return "".join(out)
+
+
+def _g_swatch(kind: str) -> str:
+    return (f'<svg class="sw ek-{kind}" width="26" height="10" viewBox="0 0 26 10" aria-hidden="true">'
+            f'<path class="ln" d="M1.5,5H17"/><path class="ah" d="{_g_head(24.5, 5, 1)}"/></svg>')
 
 
 @_draws(_Graph, "html")
@@ -6248,31 +6683,55 @@ def _graph_html(block: _Graph, report: _Report) -> str:
     graph = block.graph
     if not graph.nodes:
         return title + f'<div class="more">{_esc(block.empty)}</div>'
-    boxes, routes, width, tall = _graph_layout(graph)
-    ports = _ports(graph, boxes, routes)
+    cards = _g_cards(graph)
+    boxes, routes, width, tall, xs, widths, column_of = _graph_layout(graph, cards)
+    ends = _g_anchors(graph, cards, boxes)
     near: dict[str, list[str]] = defaultdict(list)
+    access: dict[str, dict[str, str]] = defaultdict(dict)  # an AWS box's operation -> what it does
     for e in graph.edges:
         near[e.source].append(e.target)
         near[e.target].append(e.source)
+        if e.kind in _G_ACCESS:
+            for name in _g_names(e):
+                access[e.target].setdefault(name, e.kind)
+    root = report.root or _ROOT
     for n in graph.nodes:  # pointing at a box leaves only it, its arrows and the boxes they join in sight
-        report.rules.add(f".{report.root} .cg:has(.n-{n.id}:hover) .e:not(.s-{n.id}):not(.t-{n.id}){{opacity:.08}}")
-        report.rules.add(f".{report.root} .cg:has(.n-{n.id}:hover) .nd:not(.n-{n.id}):not(.a-{n.id}){{opacity:.3}}")
-    edges = "".join(_edge_svg(e, i, boxes, *ports[i], graph, routes.get(i)) for i, e in enumerate(graph.edges))
-    nodes = "".join(_node_svg(n, boxes[n.id], list(dict.fromkeys(near[n.id]))) for n in graph.nodes)
+        report.rules.add(f".{root} .cg:has(.n-{n.id}:hover) .ce:not(.s-{n.id}):not(.t-{n.id}){{opacity:.06}}")
+        report.rules.add(f".{root} .cg:has(.n-{n.id}:hover) .cn:not(.n-{n.id}):not(.a-{n.id}){{opacity:.28}}")
+        report.rules.add(f".{root} .cg:has(.n-{n.id}:hover) :is(.s-{n.id},.t-{n.id}) .ln{{stroke-width:2.4}}")
+    marked: set[tuple[str, str]] = set()  # one loop mark between two boxes, even for two arrows
+    drawn = []
+    for i, e in enumerate(graph.edges):
+        drawn.append(_edge_svg(e, graph, boxes, xs, widths, column_of, *ends[i], routes.get(i),
+                               (e.source, e.target) not in marked))
+        if e.loop:
+            marked.add((e.source, e.target))
+    edges = "".join(body for body, _ in drawn)
+    ports = "".join(dots for _, dots in drawn)
+    nodes = "".join(_node_svg(cards[n.id], boxes[n.id], list(dict.fromkeys(near[n.id])), access[n.id])
+                    for n in graph.nodes)
     kinds = {e.kind for e in graph.edges}
-    key = [(k, word) for k, word in (("call", "calls"), ("reads", "reads"), ("writes", "writes"), ("sends", "sends"),
-                                     ("runs", "runs"), ("env", "configures")) if k in kinds]
+    pills = [f'<span class="kp">{_g_swatch(k)}{_esc(word)}</span>' for k, word in _G_LEGEND if k in kinds]
+    if any(e.guessed for e in graph.edges):
+        pills.append(f'<span class="kp">{_g_swatch("guess")}guessed from a method\'s name</span>')
+    if any(e.indirect for e in graph.edges):
+        pills.append(f'<span class="kp">{_g_swatch("via")}through functions not drawn</span>')
     if any(e.tone == "warn" for e in graph.edges) or any(n.tone == "warn" for n in graph.nodes):
-        key.append(("warn", "a warning is about it"))
-    legend = "".join(f'<span><i class="{k}"></i>{_esc(word)}</span>' for k, word in key)
-    legend += "<span>↻ in a loop</span>" if any(e.loop for e in graph.edges) else ""
-    legend += "<span>point at a box to see only what it's joined to</span>"
-    hidden = (f"<span>{_plural(graph.hidden, 'more function')} not drawn (too deep or too many): the steps below "
-              "have them all</span>") if graph.hidden else ""
-    return (f'{title}<div class="cg"><svg viewBox="0 0 {width:.0f} {tall:.0f}" width="{width:.0f}" '
-            f'height="{tall:.0f}" style="min-width:{min(width, width * 0.72):.0f}px" role="img" '
-            f'aria-label="{_esc(block.title or "How the code fits together")}">{edges}{nodes}</svg></div>'
-            f'<div class="cgk">{legend}{hidden}</div>')
+        pills.append('<span class="kp"><svg class="sw kw" width="16" height="16" viewBox="-8 -8 16 16" '
+                     'aria-hidden="true"><circle r="7"/><path d="M0,-3.6V.5M0,3.4V3.5"/></svg>'
+                     "a warning is about it</span>")
+    if any(e.loop for e in graph.edges):
+        pills.append('<span class="kp"><svg class="sw kl" width="16" height="16" viewBox="-8 -8 16 16" '
+                     f'aria-hidden="true"><circle r="7"/><path transform="scale(.6) translate(-8,-8)" d="{_G_LOOP}"/>'
+                     "</svg>in a loop: once per item</span>")
+    hidden = (f'<span class="kp kh"><b>+{graph.hidden}</b>{"more function" if graph.hidden == 1 else "more functions"} '
+              "not drawn (too deep or too many): the steps below have them all</span>") if graph.hidden else ""
+    hint = '<span class="kt">Point at a box to see only what it\'s joined to</span>'
+    return (f'{title}<div class="cgb"><div class="cg"><svg viewBox="0 0 {width:.0f} {tall:.0f}" width="{width:.0f}" '
+            f'height="{tall:.0f}" style="min-width:{width * 0.72:.0f}px" role="img" '
+            f'aria-label="{_esc(block.title or "How the code fits together")}">'
+            f'{_g_captions(graph, xs, widths, column_of)}{edges}{nodes}{ports}</svg></div>'
+            f'<div class="cgk">{"".join(pills)}{hidden}{hint}</div></div>')
 
 
 @_draws(_Graph, "text")
@@ -6285,18 +6744,23 @@ def _graph_lines(block: _Graph, report: _Report) -> list[str]:
     for e in graph.edges:
         leaving[e.source].append(e)
     for n in sorted(graph.nodes, key=lambda n: n.column):
-        if not leaving.get(n.id):
+        if n.kind in ("aws", "http"):
             continue
-        head = n.label + (f": {', '.join(n.lines)}" if n.kind in ("event", "env") and n.lines else
+        lines = [f"{line} ({n.flags[line]})" if line in n.flags else line for line in n.lines]
+        head = n.label + (f": {', '.join(lines)}" if n.kind in ("event", "env") and n.lines else
                           f"  {n.sub}" if n.sub else "")
         out.append(f"  {head}" + (" (!)" if n.tone == "warn" else ""))
-        for e in leaving[n.id]:
+        for e in leaving.get(n.id, []):
             target = graph.node(e.target)
             name = target.label if target else e.target
-            said = {"call": f"calls {name}" + (f" ({e.label})" if e.label else ""),
-                    "event": f"→ {name}", "env": f"→ {name}: {e.label}",
-                    "client": f"makes the {name} client"}.get(e.kind) or f"{_EDGE_WORDS.get(e.kind, e.kind)} {name}: {e.label}"
-            out.append(f"      {said}" + (", in a loop" if e.loop else "") + (" (!)" if e.tone == "warn" else ""))
+            said = {"call": f"calls {name}" + (f" ({e.label})" if e.label else ""), "event": f"→ {name}",
+                    "env": f"→ {name} reads {e.label}", "client": f"makes the {name} client",
+                    "http": f"sends {e.label}"}.get(e.kind) or f"{_EDGE_WORDS.get(e.kind, e.kind)} {name}: {e.label}"
+            said += "".join([", in a loop" if e.loop else "", ", guessed from a method's name" if e.guessed else "",
+                             ", through functions not drawn" if e.indirect else ""])
+            out.append(f"      {said}" + (" (!)" if e.tone == "warn" else ""))
+        if n.kind in ("handler", "function", "start") and not leaving.get(n.id):
+            out.append("      (does nothing this follows: no AWS calls, own functions or HTTP)")
     if graph.hidden:
         out.append(f"  ({_plural(graph.hidden, 'more function')} not drawn: the steps below have them all)")
     return out

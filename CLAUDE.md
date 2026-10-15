@@ -221,10 +221,13 @@ How the View layer works:
   `collapsed=True` folding it all under its title; not `bedrock_chat`'s `_Json`, which shows a request with its
   settings marked), in Lambda `_Outline` (`how_it_works()`'s `CodeStep`s as a tree of code lines in colour, each
   with coloured tags for what it does, and each of its own functions a line calls folded under that line in a
-  `<details>`) and `_Graph` (a `CodeGraph` as an inline SVG: `_graph_layout` puts boxes in columns, orders each
-  column by the barycenter of its neighbours and gives an arrow that skips columns a waypoint in each, so it runs
-  between boxes; `_ports` spreads arrows down a box's side; pointing at a box is per-node `:has()` rules in
-  `report.rules`, and arrowheads are paths, not markers), and in Bedrock `_Passage` (a retrieved
+  `<details>`) and `_Graph` (a `CodeGraph` as an inline SVG of cards under column captions: `_GCard`s, an icon badge per
+  kind, sized from `_G_SANS`'s font widths; `_graph_layout` makes each column as wide as its cards want, orders it by
+  the barycenter of its neighbours and gives an arrow that skips columns, either way, a waypoint in each, so it runs
+  between boxes; `_g_anchors` lands an arrow on the row of the operation it calls, or starts it at the variable it
+  carries, else spreads it down the box's side; a warning's arrow keeps its colour under an amber halo, and its loop and
+  warning marks sit on its straight run; pointing at a box is per-node `:has()` rules in `report.rules`, and
+  arrowheads are paths, not markers), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
   cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
