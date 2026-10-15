@@ -1088,6 +1088,8 @@ class GraphNode:
     tone: str = ""  # 'warn' when a warning in the report is about it
     tip: str = ""  # said on hover
     column: int = 0  # left to right: 0 what comes in, 1 the handler, then its functions by depth, last what it reaches
+    flags: dict[str, str] = field(default_factory=dict)  # a listed line a warning is about -> a word or two:
+    # {'TEAM_TOPIC': 'not set'}, {'Query': 'first page only'}, {'GET https://...': 'no timeout'}
 
 
 @dataclass
@@ -1101,6 +1103,8 @@ class GraphEdge:
     label: str = ""  # what goes along it: 'GetObject, PutItem', 'DB_HOST', 'line 19'
     tone: str = ""  # 'warn' when a warning in the report is about it
     loop: bool = False  # made inside a loop: once per item
+    guessed: bool = False  # AWS calls known only by their method's name: their client couldn't be followed
+    indirect: bool = False  # made in functions the graph leaves out, below the box it starts from
 
 
 @dataclass
@@ -1127,7 +1131,7 @@ class CodeGraph:
         arrows = {"call": "-->", "event": "==>", "env": "-.->"}
         for e in self.edges:
             arrow = arrows.get(e.kind, "-->")
-            label = e.label if e.kind != "call" else ""
+            label = e.label if e.kind != "call" or not e.label.startswith("line ") else ""
             text = f'|"{_mermaid_text(_clip(label, 60))}"|' if label else ""
             out.append(f"  {_mermaid_id(e.source)} {arrow}{text} {_mermaid_id(e.target)}")
         warned = [n.id for n in self.nodes if n.tone == "warn"]
@@ -4104,7 +4108,9 @@ def map_code(
         cmap.limited = "stopped where the code nests too deep to follow"
     except Exception as exc:  # code it can't follow: what it found so far, said to be partial, never a traceback
         cmap.limited = f"stopped partway, at code it couldn't follow ({type(exc).__name__}: {_clip(str(exc), 80)})"
+    if cmap.limited.startswith("stopped"):  # keep what it found before it stopped
         cmap.functions, cmap.event = list(reader.reached.values()), list(reader.event_reads.values())
+        cmap.routes = [(method, path, key) for method, path, key, _ in reader.routes]
     return cmap
 
 
@@ -4444,7 +4450,7 @@ def _mermaid_id(node_id: str) -> str:
 
 def _mermaid_text(text: str) -> str:
     """Text for a Mermaid label: its quotes and brackets as entities, so a label can hold any code."""
-    return (text.replace("&", "#amp;").replace('"', "#quot;").replace("<br/>", "\0").replace("<small>", "\1")
+    return (text.replace("#", "#35;").replace("&", "#amp;").replace('"', "#quot;").replace("<br/>", "\0").replace("<small>", "\1")
             .replace("</small>", "\2").replace("<", "#lt;").replace(">", "#gt;").replace("\0", "<br/>")
             .replace("\1", "<small>").replace("\2", "</small>"))
 
@@ -4466,41 +4472,191 @@ def _listed_lines(items: list[str], most: int = _GRAPH_LINES) -> list[str]:
 
 def code_graph(cmap: CodeMap) -> CodeGraph:
     """How the code fits together, as boxes and arrows, from a CodeMap: on the left what comes in (the event, with the
-    fields it reads, and the environment variables), then the handler and its own functions by how deep they're
-    called (an arrow for each call), and on the right the AWS services and the web it reaches, each arrow coloured by
-    what it does (reads, writes, sends, runs). A box or an arrow a warning is about is marked. At most 24 functions,
-    5 calls deep, the shallowest first; `hidden` counts the rest."""
+    fields it reads, and the environment variables), then the handler, what runs at start-up, and its own functions
+    by how many calls they are from those (an arrow for each call), and on the right the AWS services and the web it
+    reaches, each arrow by what it does (reads, writes, sends, runs). A box or an arrow a warning is about is marked,
+    and says which on hover. At most 24 functions, 5 calls deep, the nearest first; `hidden` counts the rest, and what
+    they do is drawn from the nearest box above them that is."""
     graph = CodeGraph()
     if cmap.note or cmap.entry is None:
         return graph
     fn = cmap.function
+    entry = cmap.entry
     found = code_map_findings(cmap)
-    handler_warned = any(level == "warn" and ("is async def" in m or "Lambda passes two" in m) for level, m in found)
-    spots: dict[str, list[CodeSpot]] = defaultdict(list)
-    for spot in cmap.spots:
-        spots[spot.function].append(spot)
+    by_name = {f.name: f for f in cmap.functions}
+    entry_is_function = entry in by_name
+    start_key = "<start>"  # a module's top level: what runs when Lambda loads the code
 
-    def warned(key: str) -> bool:
-        """A warning is about something in this function: an HTTP call without a timeout, a dropped error, a file
-        written outside /tmp."""
-        return any(s.kind in ("http", "write") and not s.ok or s.kind == "swallow" for s in spots.get(key, []))
-
-    # its own functions, the shallowest first
-    entry_is_function = any(f.name == cmap.entry for f in cmap.functions)
-    functions = sorted(cmap.functions, key=lambda f: f.depth)
-    shown = [f for f in functions if f.depth <= _GRAPH_DEPTH][:_GRAPH_FUNCTIONS]
-    graph.hidden = len(cmap.functions) - len(shown)
-    ids: dict[str, str] = {}
-    for i, f in enumerate(shown):
-        ids[f.name] = f"f{i}"
-    if not entry_is_function:  # a handler that's an object (a web app's adapter): its routes hang off it
-        ids[cmap.entry] = "f-entry"
+    # who calls whom; a caller that isn't one of its functions is a module's top level, which runs at start-up
+    parents: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    children: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for f in cmap.functions:
+        for where in f.called_from:
+            key, _, line = where.rpartition(" line ")
+            caller = key if key in by_name or key == entry else start_key
+            if (caller, line) not in parents[f.name]:
+                parents[f.name].append((caller, line))
+                children[caller].append((f.name, line))
     routes = {key: f"{method} {path}" for method, path, key in cmap.routes}
+    if not entry_is_function:  # a handler that's an object (a web app's adapter) calls each route
+        for key in routes:
+            if key in by_name and (entry, "") not in parents[key]:
+                parents[key].append((entry, ""))
+                children[entry].append((key, ""))
+    level: dict[str, int] = {entry: 0, start_key: 0}
+    todo = [entry, start_key]
+    while todo:
+        key = todo.pop(0)
+        for child, _ in children.get(key, []):
+            if child not in level:
+                level[child] = level[key] + 1
+                todo.append(child)
+    order = {f.name: i for i, f in enumerate(cmap.functions)}
+    rest = sorted((f for f in cmap.functions if f.name != entry and level.get(f.name, f.depth + 1) <= _GRAPH_DEPTH),
+                  key=lambda f: (level.get(f.name, f.depth + 1), order[f.name]))
+    shown = ([by_name[entry]] if entry_is_function else []) + rest[:_GRAPH_FUNCTIONS - 1]
+    graph.hidden = len(cmap.functions) - len(shown)
+    ids = {f.name: f"f{i}" for i, f in enumerate(shown)}
+    if not entry_is_function:
+        ids[entry] = "f-entry"
+
+    def owner(key: str) -> tuple[str | None, bool]:
+        """The box what a function (or a module's top level) does is drawn from, and whether that's a box above it
+        because the graph leaves the function out."""
+        if key in ids:
+            return ids[key], False
+        if key not in by_name:
+            return "start", False
+        seen, queue = {key}, [key]
+        while queue:
+            for parent, _ in parents.get(queue.pop(0), []):
+                if parent in ids:
+                    return ids[parent], True
+                if parent == start_key:
+                    return "start", True
+                if parent not in seen:
+                    seen.add(parent)
+                    queue.append(parent)
+        return None, False
+
+    # why a box or arrow is amber: the warnings about it, said on hover
+    reasons: dict[str, list[str]] = defaultdict(list)
+    for spot in cmap.spots:
+        line = f" (line {spot.line})"
+        why = ("an HTTP request without a timeout" if spot.kind == "http" and not spot.ok else
+               "drops every error" if spot.kind == "swallow" else
+               f"writes {spot.detail} outside /tmp" if spot.kind == "write" and not spot.ok else "")
+        if why:
+            reasons[spot.function].append(why + line)
+    for call in cmap.aws:
+        if call.pages == "one" and call.operation.startswith(("List", "Scan", "Query")) and not call.guessed:
+            reasons[call.function].append(f"{call.label} reads only its first page (line {call.line})")
+    handler_reasons = [m.split(":")[0] for level_, m in found if level_ == "warn" and (
+        "is async def" in m or "Lambda passes two" in m)]
     unset = set()
     if fn is not None and fn.env_error is None:
         unset = {e.name for e in cmap.env if e.required and e.name not in fn.env_names and e.name not in _LAMBDA_ENV}
 
-    # what comes in
+    def warned_tip(tip: str, why: list[str]) -> str:
+        return tip + ("\nA warning is about it: " + "; ".join(why) if why else "")
+
+    edges: list[GraphEdge] = []
+    uses_start = bool(children.get(start_key))
+
+    # calls between its functions, and from start-up
+    entry_id = ids[entry]
+    seen_calls: set[tuple[str, str]] = set()
+    for f in shown:
+        for caller, line in parents.get(f.name, []):
+            source = "start" if caller == start_key else ids.get(caller)
+            if source is None or (source, ids[f.name]) in seen_calls:
+                continue
+            seen_calls.add((source, ids[f.name]))
+            lines = [ln for c, ln in parents[f.name] if c == caller and ln]
+            label = (routes[f.name] if caller == entry and f.name in routes else
+                     "line " + ", ".join(lines[:3]) + (" …" if len(lines) > 3 else "") if lines else "")
+            edges.append(GraphEdge(source, ids[f.name], "call", label))
+    edges.insert(0, GraphEdge("event", entry_id, "event", "the event"))
+
+    # the environment
+    names = list(dict.fromkeys(e.name for e in cmap.env))
+    reads: dict[str, list[str]] = {}
+    for e in cmap.env:
+        source, _ = owner(e.function)
+        if source is not None and e.name not in reads.setdefault(source, []):
+            reads[source].append(e.name)
+    for target, read in reads.items():
+        uses_start |= target == "start"
+        edges.append(GraphEdge("env", target, "env", ", ".join(read),
+                               "warn" if any(name in unset for name in read) else ""))
+
+    # what it reaches: AWS
+    services: dict[str, list[AwsCall]] = {}
+    for call in cmap.aws:
+        services.setdefault(call.service, []).append(call)
+    reach: list[GraphNode] = []
+    for service, calls in services.items():
+        node_id = _aws_node(service)
+        why = [f"{c.operation} reads only its first page ({c.file} line {c.line})" for c in calls
+               if c.pages == "one" and c.operation.startswith(("List", "Scan", "Query")) and not c.guessed]
+        ops = list(dict.fromkeys(c.operation for c in calls))
+        does = list(dict.fromkeys(c.access for c in calls))
+        tip = f"{_service_name(service)}: " + ", ".join(
+            f"{c.operation} ({c.permission or 'no permission needed'})" for c in {c.operation: c for c in calls}.values())
+        if all(c.guessed for c in calls):
+            tip += "\nKnown only by the methods' names: their client couldn't be followed"
+        reach.append(GraphNode(node_id, "aws", _service_name(service), " · ".join(does), _listed_lines(ops),
+                               "warn" if why else "", warned_tip(tip, why), flags={
+                                   c.operation: "first page only" for c in calls if c.pages == "one" and not c.guessed
+                                   and c.operation.startswith(("List", "Scan", "Query"))}))
+        grouped: dict[tuple[str, str, bool], list[AwsCall]] = {}
+        for call in calls:
+            source, indirect = owner(call.function)
+            if source is not None:
+                grouped.setdefault((source, call.access, indirect), []).append(call)
+        for (source, access, indirect), group in grouped.items():
+            uses_start |= source == "start"
+            edges.append(GraphEdge(
+                source, node_id, access, ", ".join(dict.fromkeys(c.operation for c in group)),
+                "warn" if any(c.pages == "one" and c.operation.startswith(("List", "Scan", "Query")) and not c.guessed
+                              for c in group) else "",
+                any(c.loop for c in group), all(c.guessed for c in group), indirect))
+
+    # ...the clients start-up (or a function it runs) makes, for the services they're for
+    clients = [s for s in cmap.spots if s.kind == "client" and s.startup]
+    made = []
+    for spot in clients:
+        source, _ = owner(spot.function)
+        target = _aws_node(spot.detail)
+        if source is None or not any(n.id == target for n in reach):
+            continue
+        if source == "start" and spot.detail != "?":
+            made.append(_service_name(spot.detail))
+        if not any(e.source == source and e.target == target and e.kind == "client" for e in edges):
+            uses_start |= source == "start"
+            edges.append(GraphEdge(source, target, "client", f"makes its {_service_name(spot.detail)} client"))
+
+    # ...and the web
+    http = [s for s in cmap.spots if s.kind == "http"]
+    if http:
+        slow = [s for s in http if not s.ok]
+        reach.append(GraphNode(
+            "http", "http", "The web", "HTTP requests", _listed_lines(list(dict.fromkeys(s.detail for s in http))),
+            "warn" if slow else "", warned_tip("HTTP requests it sends", [
+                f"{s.detail} has no timeout ({s.file} line {s.line})" for s in slow]),
+            flags={s.detail: "no timeout" for s in slow}))
+        by_source: dict[tuple[str, bool], list[CodeSpot]] = {}
+        for spot in http:
+            source, indirect = owner(spot.function)
+            if source is not None:
+                by_source.setdefault((source, indirect), []).append(spot)
+        for (source, indirect), group in by_source.items():
+            uses_start |= source == "start"
+            edges.append(GraphEdge(source, "http", "http", ", ".join(dict.fromkeys(s.detail for s in group)),
+                                   "warn" if any(not s.ok for s in group) else "", any(s.loop for s in group),
+                                   indirect=indirect))
+
+    # the boxes, left to right
     labels = [f.label for f in cmap.event]
     leaves = [label for label in labels if not any(
         other.startswith((label + "[", label + ".", label + " (")) for other in labels)]
@@ -4509,122 +4665,38 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
         "event", "event", kind[0].upper() + kind[1:] if kind else "The event", "Lambda calls it with",
         _listed_lines(leaves) or ["(no fields read)"],
         tip="The event Lambda passes the handler" + (f": the code reads {', '.join(leaves)}" if leaves else "")))
-    names = list(dict.fromkeys(e.name for e in cmap.env))
     if names:
         graph.nodes.append(GraphNode(
-            "env", "env", "Environment", "variables it reads", _listed_lines(names),
-            "warn" if unset else "",
-            "Environment variables it reads (names only)" + (f"; not set: {', '.join(sorted(unset))}" if unset else ""),
-        ))
-    startup = [c for c in cmap.aws if c.startup and c.function not in ids]
-    clients = [s for s in cmap.spots if s.kind == "client" and s.startup]
-    early_env = [e for e in cmap.env if e.startup and e.function not in ids]
-    if startup or clients or early_env:
-        services = list(dict.fromkeys(_service_name(s.detail) for s in clients if s.detail != "?"))
+            "env", "env", "Environment", "variables it reads", _listed_lines(names), "warn" if unset else "",
+            warned_tip("Environment variables it reads (names only)",
+                       [f"{name} isn't set on the function" for name in names if name in unset]),
+            flags={name: "not set" for name in names if name in unset}))
+    if uses_start:
+        services_made = list(dict.fromkeys(made))
         graph.nodes.append(GraphNode(
             "start", "start", "At start-up", "once per cold start",
-            _listed_lines([f"makes {_a(services[0])} {services[0]} client" if len(services) == 1 else
-                           f"makes {_listed(services)} clients"] if services else []),
+            [f"makes {_a(services_made[0])} {services_made[0]} client" if len(services_made) == 1 else
+             f"makes {_listed(services_made)} clients"] if services_made else [],
             tip="What runs when Lambda loads the code, before the first call", column=1))
-
-    # its functions
     entry_file = cmap.handler_file or ""
     if not entry_is_function:
         graph.nodes.append(GraphNode(
-            "f-entry", "handler", f"{cmap.entry.rsplit('.', 1)[-1]}", f"{entry_file} line {cmap.entry_line}",
-            ["an object, not a function"], tip=f"Lambda calls {cmap.entry}", column=1))
+            "f-entry", "handler", entry.rsplit(".", 1)[-1], f"{entry_file} line {cmap.entry_line}",
+            ["an object, not a function"], tip=f"Lambda calls {entry} with the event", column=1))
     for f in shown:
-        is_entry = f.name == cmap.entry
-        tone = "warn" if warned(f.name) or (is_entry and handler_warned) else ""
+        is_entry = f.name == entry
+        why = reasons.get(f.name, []) + (handler_reasons if is_entry else [])
         graph.nodes.append(GraphNode(
             ids[f.name], "handler" if is_entry else "function", f"{_short_name(f.name)}()",
-            f"{f.file} line {f.line}", [_clip(f.doc, 34)] if f.doc else [], tone,
-            (f"{f.name}({f.args}) in {f.file}, {_plural(f.lines, 'line')}" + (f": {f.doc}" if f.doc else "")),
-            column=1 + f.depth))
-    entry_id = ids[cmap.entry]
-    graph.edges.append(GraphEdge("event", entry_id, "event", "the event"))
-
-    # calls between them
-    seen: set[tuple[str, str]] = set()
-    for f in shown:
-        callers = [where.rpartition(" line ") for where in f.called_from]
-        for key, _, line in callers:
-            if key in ids and (ids[key], ids[f.name]) not in seen:
-                seen.add((ids[key], ids[f.name]))
-                lines = [ln for k, _, ln in callers if k == key]
-                graph.edges.append(GraphEdge(ids[key], ids[f.name], "call", routes.get(f.name) or (
-                    "line " + ", ".join(lines[:3]) + (" …" if len(lines) > 3 else ""))))
-        if not f.called_from and f.name in routes and (entry_id, ids[f.name]) not in seen:
-            seen.add((entry_id, ids[f.name]))
-            graph.edges.append(GraphEdge(entry_id, ids[f.name], "call", routes[f.name]))
-
-    def owner(function: str, startup: bool) -> str | None:
-        """The box an AWS call or a variable read belongs to: its function's, else start-up's."""
-        if function in ids:
-            return ids[function]
-        return "start" if startup and graph.node("start") else None
-
-    # the environment
-    if names:
-        reads: dict[str, list[str]] = {}
-        for e in cmap.env:
-            source = owner(e.function, e.startup)
-            if source is not None and e.name not in reads.setdefault(source, []):
-                reads[source].append(e.name)
-        for target, read in reads.items():
-            graph.edges.append(GraphEdge("env", target, "env", ", ".join(read),
-                                         "warn" if any(name in unset for name in read) else ""))
-
-    # what it reaches
+            f"{f.file} line {f.line}", [f.doc] if f.doc else [], "warn" if why else "",
+            warned_tip(f"{f.name}({f.args}) in {f.file}, {_plural(f.lines, 'line')}" + (f": {f.doc}" if f.doc else ""),
+                       why),
+            column=1 + level.get(f.name, f.depth)))
     out_column = 1 + max([n.column for n in graph.nodes if n.kind in ("handler", "function", "start")] + [1])
-    services: dict[str, list[AwsCall]] = {}
-    for call in cmap.aws:
-        services.setdefault(call.service, []).append(call)
-    for service, calls in services.items():
-        one_page = any(c.pages == "one" and c.operation.startswith(("List", "Scan", "Query")) and not c.guessed
-                       for c in calls)
-        ops = list(dict.fromkeys(c.operation for c in calls))
-        does = list(dict.fromkeys(c.access for c in calls))
-        node_id = _aws_node(service)
-        graph.nodes.append(GraphNode(
-            node_id, "aws", _service_name(service), " · ".join(does), _listed_lines(ops), "warn" if one_page else "",
-            f"{_service_name(service)}: " + ", ".join(f"{c.operation} ({c.permission or 'no permission needed'})"
-                                                     for c in {c.operation: c for c in calls}.values()),
-            column=out_column))
-        edges: dict[tuple[str, str], list[AwsCall]] = {}
-        for call in calls:
-            source = owner(call.function, call.startup)
-            if source is not None:
-                edges.setdefault((source, call.access), []).append(call)
-        for (source, access), group in edges.items():
-            graph.edges.append(GraphEdge(
-                source, node_id, access, ", ".join(dict.fromkeys(c.operation for c in group)),
-                "warn" if any(c.pages == "one" and c.operation.startswith(("List", "Scan", "Query")) and not c.guessed
-                              for c in group) else "", any(c.loop for c in group)))
-    if graph.node("start"):  # the clients it makes at start-up, for the services its functions call
-        for service in dict.fromkeys(s.detail for s in clients):
-            if graph.node(_aws_node(service)) and not any(e.source == "start" and e.target == _aws_node(service)
-                                                          for e in graph.edges):
-                graph.edges.append(GraphEdge("start", _aws_node(service), "client",
-                                             f"makes its {_service_name(service)} client"))
-    http = [s for s in cmap.spots if s.kind == "http"]
-    if http:
-        slow = [s for s in http if not s.ok]
-        graph.nodes.append(GraphNode(
-            "http", "http", "The web", "HTTP requests", _listed_lines(list(dict.fromkeys(s.detail for s in http))),
-            "warn" if slow else "", "HTTP requests it sends" + (f"; {len(slow)} without a timeout" if slow else ""),
-            column=out_column))
-        by_source: dict[str, list[CodeSpot]] = {}
-        for spot in http:
-            source = owner(spot.function, spot.startup)
-            if source is not None:
-                by_source.setdefault(source, []).append(spot)
-        for source, group in by_source.items():
-            graph.edges.append(GraphEdge(source, "http", "http", ", ".join(dict.fromkeys(s.detail for s in group)),
-                                         "warn" if any(not s.ok for s in group) else "", any(s.loop for s in group)))
-    for node in graph.nodes:
-        if node.id == "event" or node.id == "env":
-            node.column = 0
+    for node in reach:
+        node.column = out_column
+    graph.nodes += reach
+    graph.edges = edges
     return graph
 
 
