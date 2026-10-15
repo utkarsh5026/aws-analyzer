@@ -4540,7 +4540,7 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
             ids[f.name], "handler" if is_entry else "function", f"{_short_name(f.name)}()",
             f"{f.file} line {f.line}", [_clip(f.doc, 34)] if f.doc else [], tone,
             (f"{f.name}({f.args}) in {f.file}, {_plural(f.lines, 'line')}" + (f": {f.doc}" if f.doc else "")),
-            column=1 + (0 if not entry_is_function and f.depth <= 1 and not f.called_from else f.depth)))
+            column=1 + f.depth))
     entry_id = ids[cmap.entry]
     graph.edges.append(GraphEdge("event", entry_id, "event", "the event"))
 
