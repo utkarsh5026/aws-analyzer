@@ -9,6 +9,14 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Lambda: `how_it_works()` also draws **a graph of how the code fits together**. The event and environment
+  variables come in on the left, the handler and its own functions are in the middle with an arrow for each call, and
+  the AWS services and the web it reaches are on the right, each arrow coloured by what the call does. Boxes and
+  arrows a warning is about are amber, and pointing at a box leaves only what it's joined to in sight. The same graph
+  comes as Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in Python.
+
 ## [0.18.0] - 2026-10-16
 
 ### Added
@@ -37,11 +45,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   ([#82](https://github.com/utkarsh5026/aws-analyzer/pull/82)).
 - Lambda explorer: **How it works** in the **Code** tab shows the same for a Python function, in place of the source
   ([#82](https://github.com/utkarsh5026/aws-analyzer/pull/82)).
-- Lambda: `how_it_works()` also draws **a graph of how the code fits together**. The event and environment
-  variables come in on the left, the handler and its own functions are in the middle with an arrow for each call, and
-  the AWS services and the web it reaches are on the right, each arrow coloured by what the call does. Boxes and
-  arrows a warning is about are amber, and pointing at a box leaves only what it's joined to in sight. The same graph
-  comes as Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in Python.
+
 
 ## [0.17.0] - 2026-10-15
 
