@@ -4231,7 +4231,7 @@ def code_map_findings(cmap: CodeMap) -> list[tuple[str, str]]:
             "and the call returns a coroutine. Wrap it in a plain function that runs it: def handler(event, "
             "context): return asyncio.run(main(event, context))."
         )))
-    elif cmap.entry is not None and cmap.params is not None and cmap.steps and cmap.steps[0].kind == "def":
+    elif cmap.entry is not None and any(f.name == cmap.entry for f in cmap.functions):  # a function, not an object
         positional = [p for p in cmap.params if not p.startswith("*")]
         required = [p for p in positional if "=" not in p]
         star = any(p.startswith("*") and not p.startswith("**") for p in cmap.params)
