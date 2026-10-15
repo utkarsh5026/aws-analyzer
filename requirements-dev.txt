@@ -21,7 +21,7 @@ fastavro==1.12.2
 openpyxl==3.1.5
 # Optional for users (PDF text, and PDF pages drawn as pictures); installed here so the PDF tests run.
 pypdf==6.19.0
-pypdfium2==5.13.0
+pypdfium2==5.14.0
 pillow==12.3.0
 # Optional for users (progress bars); installed here so the tqdm path is tested.
 tqdm==4.70.1
@@ -36,4 +36,4 @@ twine==7.0.0
 readme-renderer[md]==46.0
 
 # Lint
-ruff==0.16.9
+ruff==0.16.10
