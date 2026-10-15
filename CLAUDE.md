@@ -221,7 +221,10 @@ How the View layer works:
   `collapsed=True` folding it all under its title; not `bedrock_chat`'s `_Json`, which shows a request with its
   settings marked), in Lambda `_Outline` (`how_it_works()`'s `CodeStep`s as a tree of code lines in colour, each
   with coloured tags for what it does, and each of its own functions a line calls folded under that line in a
-  `<details>`), and in Bedrock `_Passage` (a retrieved
+  `<details>`) and `_Graph` (a `CodeGraph` as an inline SVG: `_graph_layout` puts boxes in columns, orders each
+  column by the barycenter of its neighbours and gives an arrow that skips columns a waypoint in each, so it runs
+  between boxes; `_ports` spreads arrows down a box's side; pointing at a box is per-node `:has()` rules in
+  `report.rules`, and arrowheads are paths, not markers), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
   cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
@@ -326,7 +329,9 @@ How the View layer works:
   memoized per binding, `_MAP_DEPTH` deep, its steps shown at the first call only). It fills a `CodeMap`: the
   `startup` and `steps` outlines (`CodeStep`, tags in `notes`), `AwsCall`, `EnvRead`, `EventField`, `ImportUse`,
   `CodeFunction` and `CodeSpot` (the lines findings are about: HTTP without a timeout, writes outside /tmp, secrets
-  by name only, dropped errors, clients made per call). `code_map_findings` and `_code_summary` read it. Strings in
+  by name only, dropped errors, clients made per call). `code_map_findings` and `_code_summary` read it, and
+  `code_graph` turns it into a `CodeGraph` (`GraphNode`s in columns: inputs, the handler and its functions by depth,
+  what it reaches; `GraphEdge`s by kind; at most `_GRAPH_FUNCTIONS`, `_GRAPH_DEPTH` deep), with `.mermaid()`. Strings in
   `_GUESSES` / `_BATCHES` are other services' operations: `rules.py` checks only the services this file makes clients
   for (lambda, logs, cloudwatch, ec2), so a writing operation of those can't be named in a literal.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
