@@ -1014,7 +1014,7 @@ def _seed_python_envs(mod, root: Path, now: datetime) -> None:
 
     def kernel(name: str, display: str, program: str) -> None:
         folder = elsewhere / "jupyter/kernels" / name
-        folder.mkdir(parents=True)
+        folder.mkdir(parents=True, exist_ok=True)  # ipykernel install replaces a kernel of that name
         (folder / "kernel.json").write_text(json.dumps({
             "argv": [program, "-m", "ipykernel_launcher", "-f", "{connection_file}"], "display_name": display,
             "language": "python"}))
