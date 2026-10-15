@@ -102,6 +102,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
     - This notebook's type, cost so far and idle shutdown
     - Its CPU, memory, disk and GPU use right now
     - What fills the disk, and what's safe to clear
+    - A Python environment with another version, and its kernel, in one call
     - What's running in the region, and what looks forgotten
 
     [Open the SageMaker guide →](sagemaker_env.md)

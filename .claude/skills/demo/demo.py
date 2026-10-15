@@ -992,6 +992,66 @@ SM_DOMAIN = "d-acme12345678"
 SM_ROLE = f"arn:aws:iam::{ACCOUNT}:role/service-role/AmazonSageMaker-ExecutionRole-20240611"
 
 
+def _seed_python_envs(mod, root: Path, now: datetime) -> None:
+    """The Studio image's conda (base, with mamba), an environment made in /opt/conda/envs since the app started
+    (it goes when the app stops), one in ~/.conda/envs with its kernel, a kernel whose environment was removed, and
+    a stand-in for running commands, so new_env() makes an environment without downloading anything. ~/.conda and
+    ~/.local/share/jupyter are links to folders outside the home folder, so disk() (which doesn't follow links)
+    shows what the docs show."""
+    elsewhere = root / "var/demo"
+
+    def executable(path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+
+    def env(prefix: Path, version: str, made: datetime) -> None:
+        executable(prefix / "bin/python")
+        (prefix / "conda-meta").mkdir(parents=True)
+        (prefix / f"conda-meta/python-{version}-h2d0f4a1_0_cpython.json").write_text("{}")
+        (prefix / "conda-meta/history").write_text(f"==> {made.astimezone():%Y-%m-%d %H:%M:%S} <==\n")
+        (prefix / f"lib/python{version.rsplit('.', 1)[0]}/site-packages/ipykernel").mkdir(parents=True)
+
+    def kernel(name: str, display: str, program: str) -> None:
+        folder = elsewhere / "jupyter/kernels" / name
+        folder.mkdir(parents=True)
+        (folder / "kernel.json").write_text(json.dumps({
+            "argv": [program, "-m", "ipykernel_launcher", "-f", "{connection_file}"], "display_name": display,
+            "language": "python"}))
+
+    env(root / "opt/conda", "3.12.9", now - timedelta(days=60))
+    for tool in ("mamba", "conda"):
+        executable(root / f"opt/conda/bin/{tool}")
+    image_kernels = root / "opt/conda/share/jupyter/kernels/python3"
+    image_kernels.mkdir(parents=True)
+    (image_kernels / "kernel.json").write_text(json.dumps({
+        "argv": ["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"], "display_name": "Python 3 (ipykernel)",
+        "language": "python"}))
+    env(root / "opt/conda/envs/scratch", "3.11.9", now - timedelta(hours=3))
+    env(elsewhere / "conda/envs/py310", "3.10.16", now - timedelta(days=41))
+    kernel("py310", "Python 3.10 (py310)", "/home/sagemaker-user/.conda/envs/py310/bin/python")
+    kernel("legacy", "Python 3.9 (legacy)", "/home/sagemaker-user/.conda/envs/legacy/bin/python")
+    home = root / "home/sagemaker-user"
+    (home / ".local/share").mkdir(parents=True, exist_ok=True)
+    (home / ".conda").symlink_to(elsewhere / "conda")
+    (home / ".local/share/jupyter").symlink_to(elsewhere / "jupyter")
+
+    def run(self, argv: list, environ: dict, timeout: float) -> tuple[int, str]:
+        if argv[1:2] == ["create"]:
+            prefix = Path(argv[argv.index("--prefix") + 1])
+            wanted = next(a for a in argv if a.startswith("python=")).removeprefix("python=")
+            env(prefix, wanted if wanted.count(".") == 2 else f"{wanted}.11", now)
+            return 0, "Preparing transaction: done\nVerifying transaction: done\nExecuting transaction: done\n"
+        if argv[1:4] == ["-m", "ipykernel", "install"]:
+            name = argv[argv.index("--name") + 1]
+            kernel(name, argv[argv.index("--display-name") + 1], self._shown(argv[0]))
+            return 0, f"Installed kernelspec {name} in /home/sagemaker-user/.local/share/jupyter/kernels/{name}\n"
+        names = [a for a in argv[argv.index("install") + 1:] if not a.startswith(("-", "/"))]
+        return 0, "Successfully installed " + " ".join(names) + "\n"
+
+    mod.SageMakerAnalyzer._run = run
+
+
 def seed_sagemaker_env() -> dict:
     """A fake machine (metadata, /proc, a home folder of sparse files) and fake sagemaker / sts / cloudwatch clients.
     moto has no Studio apps, spaces or ListApps."""
@@ -1041,6 +1101,7 @@ def seed_sagemaker_env() -> dict:
             f.truncate(int(size))  # sparse: the size shows, nothing is written
         when = (now - timedelta(days=days)).timestamp()
         os.utime(path, (when, when))
+    _seed_python_envs(mod, root, now)
     gb = 1024**3
     mod.SageMakerAnalyzer._disk_usage = staticmethod(
         lambda path: (50 * gb, 44 * gb, 6 * gb) if "sagemaker-user" in str(path) else (40 * gb, 17 * gb, 23 * gb))

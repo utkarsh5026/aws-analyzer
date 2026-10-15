@@ -84,7 +84,7 @@ report still renders.
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon Bedrock Knowledge Bases** | • Settings in plain English, sync health and failed documents<br>• Search with sources, pages and highlighted passages<br>• Answers with each claim linked to its source<br>• Compare search settings and measure retrieval hit rate                    | [`bedrock_kb.py`](src/aws_analyzer/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html)                       |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Knowledge base explorer**       | • Every file next to Bedrock's record of it: failed and why, changed, not synced, skipped<br>• How a file was indexed: the parser, each chunk in order, its metadata<br>• Whether a question finds a file, and where it ranks<br>• Syncs as a timeline, search, and every setting, by clicking | [`bedrock_kb.py`](src/aws_analyzer/bedrock_kb.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_kb.html#explorer)              |
 | <img src="docs/images/aws/bedrock.svg" width="20" height="20" alt="" align="absmiddle"> **Bedrock knowledge base chat**    | • A chat window: pick the knowledge base and the model<br>• Answers stream in, with citations, sources, request and response<br>• Retrieve only: the search behind an answer, every passage ranked<br>• Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command<br>• Test a list of questions, and see which did better after a change | [`bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)                 |
-| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](src/aws_analyzer/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
+| <img src="docs/images/aws/sagemaker.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon SageMaker**               | • The notebook you're in: type, cost so far, idle shutdown<br>• Its CPU, memory, disk and GPU use right now<br>• What fills the disk, and what's safe to clear<br>• Its Python environments, and a new one (Python 3.11, say) with its own kernel in one call<br>• Everything running and billing in the region, and what looks forgotten              | [`sagemaker_env.py`](src/aws_analyzer/sagemaker_env.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)              |
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](src/aws_analyzer/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, and the code in its package | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
@@ -1378,8 +1378,9 @@ with a note naming the missing permission, and its search box takes an ID instea
 ## Amazon SageMaker
 
 <img src="docs/images/aws/sagemaker.svg" width="22" height="22" alt="" align="absmiddle"> **The notebook you're running in, and everything else SageMaker bills you for.** What this notebook is and what it
-costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, and which
-notebooks, apps and endpoints in the region look forgotten.
+costs, whether it stops when idle, how busy its CPU, memory, disk and GPU are, what fills its disk, its Python
+environments (and a new one with another Python version, in one call), and which notebooks, apps and endpoints in
+the region look forgotten.
 
 📄 [`src/aws_analyzer/sagemaker_env.py`](src/aws_analyzer/sagemaker_env.py) · 📖 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html)
 
@@ -1407,13 +1408,36 @@ ui.instance()                    # this notebook: type, cost so far, idle shutdo
 ui.disk()                        # what fills the disk, and the caches and trash that are safe to clear
 ui.running()                     # everything billing by the hour in the region, and what looks forgotten
 ui.instance("old-experiment")    # another notebook instance, or a Studio space by name
+
+ui.envs()                        # the Python environments and Jupyter kernels here
+ui.new_env("3.11")               # a Python 3.11 environment with its own Jupyter kernel, kept when the notebook stops
+ui.new_env("3.12", packages="pandas boto3")   # with packages in it ('-r requirements.txt' works too)
 ```
 
 > [!NOTE]
-> `instance()` and `disk()` read the machine they run on, so run them in the notebook you want to know about: a
-> notebook instance, or a Studio JupyterLab, Code Editor or Studio Classic app. Anywhere else, `instance("name")` and
-> `running()` still work. Nothing in the file stops, deletes or changes anything; where that would help, the report
-> shows the command.
+> `instance()`, `disk()` and `envs()` read the machine they run on, so run them in the notebook you want to know
+> about: a notebook instance, or a Studio JupyterLab, Code Editor or Studio Classic app. Anywhere else,
+> `instance("name")` and `running()` still work. Nothing in the file stops, deletes or changes anything in AWS, or
+> removes a file; where that would help, the report shows the command. The one thing it makes is the Python
+> environment `new_env()` is asked for, and its Jupyter kernel.
+
+### A new Python environment in one call
+
+To try your code on Python 3.11 (or any other version), `new_env("3.11")` makes the environment, puts it where it
+survives the notebook stopping, and adds it to Jupyter's kernel menu as **Python 3.11 (py311)**. Pick it with
+**Kernel > Change Kernel**, or start a notebook with it from the Launcher. It takes a minute or two.
+
+- **Where it goes**: on a notebook instance only `~/SageMaker` is kept when it stops, so environments go in
+  `~/SageMaker/envs`; in Studio the home folder is kept, so they go in `~/.conda/envs`. One made the usual way
+  (`conda create -n ...`) lands on the disk that's reset, and `envs()` warns about it.
+- **What makes it**: the first of mamba, conda, micromamba and uv it finds (SageMaker has conda; `tool="uv"` picks
+  uv). conda ones use conda-forge, which needs no license or terms to accept. `packages=` pip installs what you list.
+- **After a notebook instance restarts**, the environment is there but its kernel isn't (kernels live in `~/.local`,
+  which is reset). `new_env("3.11")` again only adds the kernel back, in seconds; the report also has a lifecycle
+  configuration that does it at every start.
+- `new_env("3.11", dry_run=True)` shows the commands without running them, to run in a terminal yourself. If a step
+  fails, the report says why (no internet, a full disk, a version or package that doesn't exist) and shows the end of
+  its output.
 
 ### Commands (`SageMakerView`)
 
@@ -1425,6 +1449,13 @@ Grouped the way `ui.help()` lists them.
 | :-------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `instance(name=None)`                   | The notebook you're in: instance type with its vCPUs, memory and GPUs, price per hour, how long it has run and what that cost, what a month of it costs if it's never stopped, and **whether anything stops it when idle** (a notebook instance's auto-stop lifecycle configuration, or the Studio domain's idle shutdown), with the commands that turn it on. Then the machine right now: CPU load, memory, each disk and whether it survives a stop, GPU memory and use, the Jupyter kernels and the memory they hold, the biggest processes, and the Python and package versions. Settings: role, network, lifecycle configuration, image or platform, storage volume, space and domain. Findings: no idle shutdown, a disk or memory nearly full (and the other kernels holding memory), an idle GPU (and the CPU type with the same vCPUs and memory, with the saving), an instance far bigger than what's in use, Amazon Linux 1. `name=` shows another notebook instance or Studio space (`"d-abc123/analysis"` when two domains have one), without its machine |
 | `disk(path=None, top=20, limit="200k")` | How full the disk is and what fills it: the biggest folders as a tree three levels deep, the biggest files and when they last changed, and **the caches and trash that are safe to clear** (Jupyter's trash, pip and conda caches, Hugging Face and PyTorch downloads, notebook checkpoints), each with the command that empties it. Findings: a nearly full disk (with the command that makes the volume bigger and what that costs a month), what can be cleared, big files untouched for 90 days (and what they'd cost in S3). The default folder is where your notebooks live: `~/SageMaker` on a notebook instance, `/home/sagemaker-user` in Studio                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+#### Python environments
+
+| Command                                                                     | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `envs()`                                                                    | The Python environments on this machine (conda environments and virtual environments) with their Python version, where each is and **whether it's kept when the notebook stops**, the Jupyter kernel that starts each, and every kernel with the environment it starts. Findings: environments made since the machine started on the disk that's reset (they go when it stops, with the call that makes them again where they're kept), kernels that start a Python that isn't there any more (with the command that takes them off the menu), environments in the kept folder with no kernel (after a notebook instance restarts), and nothing to make an environment with |
+| `new_env(python="3.11", name=None, packages=None, path=None, tool="auto", dry_run=False)` | **Makes a Python environment with the version you ask for** (`"3.11"`, `"3.12.4"`, `"py311"`) in a folder that's kept when the notebook stops (`~/SageMaker/envs` on a notebook instance, `~/.conda/envs` in Studio), pip installs `packages=` in it (`"pandas boto3"`, a list, `"-r requirements.txt"`), and adds it to Jupyter's kernel menu. Then each step, how long it took, and the commands it ran. Run again on an environment that's there, it only installs `packages=` and adds the kernel back. `dry_run=True` shows the commands instead. On a notebook instance, also the lifecycle configuration that adds the kernels back at every start. A failed step shows why and the end of its output |
 
 #### Your account
 
@@ -1452,6 +1483,11 @@ sm.machine()                                          # Machine: this machine ri
 d = sm.disk("~/SageMaker", limit=None)                # DiskReport: folders, largest files, caches you can clear
 d.to_df()                                             # one row per folder
 
+e = sm.environments()                                 # EnvReport: .envs, .kernels, .tools, .folder
+e.to_df()                                             # one row per Python environment
+plan = sm.env_plan("3.11", packages="pandas")         # EnvPlan: where it goes, what makes it, .steps (the commands)
+result = sm.create_env(plan)                          # EnvResult: runs them; .ok, .python, .failed
+
 r = sm.running(days=30)                               # RunningReport: .resources, .stopped, .errors
 r.to_df()                                             # one row per notebook, app, endpoint and job
 ```
@@ -1460,7 +1496,9 @@ The analysis functions are pure (no AWS calls), so they also work on responses y
 `parse_metadata`, `parse_notebook_instance`, `parse_app`, `apply_studio_settings`, `studio_idle`, `lifecycle_idle`,
 `parse_endpoint`, `parse_training_job`, `parse_processing_job`, `parse_meminfo`, `parse_loadavg`, `parse_gpus`,
 `parse_process`, `hourly_price`, `describe_instance`, `notebook_costs`, `smaller_type`, `folder_tree`,
-`idle_shutdown_commands`, `stop_command`, and the findings: `instance_findings`, `disk_findings`, `running_findings`.
+`idle_shutdown_commands`, `stop_command`, `parse_python_version`, `parse_pyvenv_cfg`, `parse_conda_history`,
+`env_steps`, `on_start_script`, `kernels_lifecycle`, `env_failure`, and the findings: `instance_findings`,
+`disk_findings`, `running_findings`, `env_findings`, `plan_findings`.
 
 </details>
 
@@ -1482,6 +1520,9 @@ The analysis functions are pure (no AWS calls), so they also work on responses y
   configuration script: AWS's auto-stop-idle sample and scripts like it.
 - `disk()` stops after 200,000 files by default and says so (`limit=None` measures everything). It stays on one disk
   and doesn't follow links.
+- `new_env()` downloads Python and the packages (from conda-forge, or with uv from PyPI and GitHub), so the notebook
+  needs internet access or a package mirror. An environment takes from about 300 MB to several GB of the disk it's
+  on. Each command may run for 30 minutes.
 
 </details>
 
@@ -1498,7 +1539,8 @@ Read-only, per command:
 | `sagemaker:ListNotebookInstances`, `sagemaker:ListApps`, `sagemaker:ListEndpoints`, `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, `sagemaker:ListTrainingJobs`, `sagemaker:DescribeTrainingJob`, `sagemaker:ListProcessingJobs`, `sagemaker:DescribeProcessingJob` | `running`                                         |
 | `cloudwatch:GetMetricData`                                                                                                                                                                                                                                                             | `running`: endpoint requests                      |
 
-`sts:GetCallerIdentity` (who you're signed in as) needs no permission, and `disk()` only reads local files. Anything
+`sts:GetCallerIdentity` (who you're signed in as) needs no permission, `disk()` and `envs()` only read local
+files, and `new_env()` only runs conda (or uv) and pip on the notebook. Anything
 you can't read shows up as a note instead of an error. The `AmazonSageMakerFullAccess` managed policy, which many
 execution roles have, includes the `sagemaker:` permissions. The
 [SageMaker guide](https://utkarsh5026.github.io/aws-analyzer/sagemaker_env.html#permissions) has a ready-made IAM

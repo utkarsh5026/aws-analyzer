@@ -9,6 +9,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- SageMaker: `new_env("3.11")` makes a Python environment with the version you ask for and adds it to Jupyter's kernel
+  menu as **Python 3.11 (py311)**, in a folder that's kept when the notebook stops (`~/SageMaker/envs` on a notebook
+  instance, `~/.conda/envs` in Studio). It uses the first of mamba, conda, micromamba and uv on the machine (conda
+  ones with conda-forge), and `packages="pandas boto3"` or `packages="-r requirements.txt"` installs what you list.
+  Run it again after a notebook instance restarts and it only adds the kernel back; the report also has the lifecycle
+  configuration that does that at every start. `dry_run=True` shows the commands instead, and a failed step says why
+  (no internet access, a full disk, a version that doesn't exist) with the end of its output.
+- SageMaker: `envs()` lists the Python environments and Jupyter kernels on the machine, with each one's Python version
+  and whether it's kept when the notebook stops. It warns about environments that will be gone after the next stop,
+  kernels whose Python isn't there any more, and environments that lost their kernel in a restart.
+
 ## [0.17.0] - 2026-10-15
 
 ### Added

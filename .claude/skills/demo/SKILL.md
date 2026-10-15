@@ -30,7 +30,7 @@ service is given, run a short tour:
 - bedrock_chat: `ui.use("support-docs"); ui.ask("How long do refunds take?"); ui.settings(); ui.request();
   ui.ask_all(["How long do refunds take? | refund-policy.pdf", "What does error E1234 mean?"]); ui.code()` (the same
   fake Bedrock as bedrock_kb, which also streams answers; the window itself needs a browser: see `chat_shots.py`)
-- sagemaker_env: `ui.instance(); ui.disk(); ui.running()`
+- sagemaker_env: `ui.instance(); ui.disk(); ui.running(); ui.envs()`
 - opensearch: `ui.overview(); ui.indexes("vectors-prod"); ui.index_info("vectors-prod/support-docs");
   ui.search("how do I get my money back?", index="vectors-prod/support-docs")`
 - lambda_functions: `ui.functions(regions="all"); ui.function_info("orders-etl"); ui.errors("orders-etl");
@@ -72,6 +72,9 @@ service is given, run a short tour:
   - `running()`: notebook instances `old-experiment` (9 days, no auto-stop) and `team-reporting` (auto-stop), stopped
     `archive-2024` and `sandbox`, a Code Editor app in space `forecasting`, endpoints `churn-v1` (no traffic),
     `churn-v2` (busy) and a serverless one, and a spot training job.
+  - `envs()`: the image's conda (`/opt/conda`, with mamba), `scratch` made in `/opt/conda/envs` since the app started
+    (it goes when the app stops), `py310` in `~/.conda/envs` with its kernel, and a kernel whose environment is gone.
+    `new_env("3.11")` "makes" an environment without downloading anything (the seeder replaces `_run`).
 
 - **OpenSearch** (moto for the domains; fake Serverless, CloudWatch and Bedrock, and fake clusters from
   `tests/fake_opensearch.py` behind each endpoint):

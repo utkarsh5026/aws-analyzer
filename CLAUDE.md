@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself and what's running, `opensearch.py` for
+through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch.py` for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
@@ -148,7 +148,11 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
-  deletes one).
+  deletes one), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
+  (`SageMakerAnalyzer.create_env` runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
+  `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
+  kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
+  findings show `rm -rf ...` instead).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
   the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
@@ -492,6 +496,15 @@ How the View layer works:
   that at a folder of fake files, and `_shown()` / `_real()` make paths look and work as the machine sees them
   (`/home/sagemaker-user`, not the temp folder). `_cpu_count`, `_disk_usage` and `_gpu_query` are the other
   hooks tests and the demo replace. Local reads that fail go in `Machine.errors`, like AWS sections in `errors`.
+  `environments()` finds Python environments by their files, never by running them (`conda-meta/python-*.json`,
+  `pyvenv.cfg`, `conda-meta/history`'s first entry for when it was made), in each conda installation (`/opt/conda` in
+  Studio, `~/anaconda3` on a notebook instance), `~/.conda/envs`, `envs_folder()` and `~/.conda/environments.txt`, and
+  kernels in the folders Jupyter reads (yours, the Jupyter server's environment's, the system's; a notebook instance's
+  Jupyter also lists `~/anaconda3/envs/*` as `conda_<name>` by itself). `_kept()` is whether a path is under `home()`,
+  the disk kept when the notebook stops, so `envs_folder()` is `~/SageMaker/envs` on a notebook instance and
+  `~/.conda/envs` elsewhere, and a notebook instance's kernels (in `~/.local`) aren't kept: `new_env()` again adds one
+  back, and `kernels_lifecycle()` is the on-start lifecycle configuration that does it at every start. `tools()` looks
+  for mamba, conda, micromamba and uv under `root` too, and `_run` is the hook tests (`Runner`) and the demo replace.
 
 Cost estimates come from module-level price tables (`S3_PRICES`, `DYNAMODB_PRICES`, `BEDROCK_PRICES`, and
 `MODEL_PRICES` for $ per 1M tokens by model family, with `GLOBAL_MODEL_PRICES` for the cheaper `global.` inference
@@ -644,7 +657,10 @@ does both, a page at a time). How the UI works:
   `DescribeApp` or spaces, so the Studio and `running()` tests use `Stubber` on injected clients
   (`SageMakerAnalyzer(clients={"sagemaker": ..., "sts": ..., "cloudwatch": ...})`, `max_workers = 1`), and
   `write_root()` / `fake_machine()` build the fake machine. demo.py's `seed_sagemaker_env()` returns fake clients
-  and a fake root with sparse files, so the disk shows gigabytes without writing them.
+  and a fake root with sparse files, so the disk shows gigabytes without writing them, and conda environments and
+  kernels (`_seed_python_envs`, linked into the home folder from outside it so `disk()` stays as the docs show it, with
+  a `_run` that makes environments without downloading). The environment tests build a notebook instance's
+  (`notebook_envs()`) and run `new_env()` with `Runner` as `core._run`.
 - OpenSearch: moto covers domains (`create_domain`, `describe_domains`), so `tests/test_opensearch.py` uses it for
   them, but not `DescribeDomainHealth`, Serverless without a KMS key, `GetAccountSettings` or access policies, so
   Serverless, CloudWatch, STS and Bedrock come from a `Fake` client (like `test_bedrock_chat.py`'s) passed in

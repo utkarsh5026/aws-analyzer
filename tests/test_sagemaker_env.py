@@ -2,6 +2,7 @@ import base64
 import json
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import boto3
 import pytest
@@ -21,12 +22,17 @@ from aws_analyzer.sagemaker_env import (
     Clearable,
     DiskEntry,
     DiskReport,
+    EnvPlan,
+    EnvReport,
+    EnvStep,
     Environment,
     GPUInfo,
     InstanceReport,
+    KernelSpec,
     Machine,
     NotebookInfo,
     ProcessInfo,
+    PythonEnv,
     RunningReport,
     SageMakerAnalyzer,
     SageMakerView,
@@ -35,14 +41,26 @@ from aws_analyzer.sagemaker_env import (
     clear_command,
     describe_instance,
     disk_findings,
+    env_failure,
+    env_findings,
+    env_name,
+    env_steps,
     folder_tree,
     hourly_price,
     human_runtime,
     idle_shutdown_commands,
     instance_findings,
+    kernel_label,
+    kernels_lifecycle,
     lifecycle_idle,
+    lost_envs,
+    new_env_call,
     notebook_costs,
+    on_start_script,
+    output_tail,
+    package_list,
     parse_app,
+    parse_conda_history,
     parse_endpoint,
     parse_gpus,
     parse_loadavg,
@@ -51,10 +69,14 @@ from aws_analyzer.sagemaker_env import (
     parse_notebook_instance,
     parse_process,
     parse_processing_job,
+    parse_python_version,
+    parse_pyvenv_cfg,
     parse_training_job,
+    plan_findings,
     running_findings,
     shell_path,
     smaller_type,
+    step_command,
     stop_command,
     studio_idle,
 )
@@ -998,3 +1020,395 @@ def test_view_validates_its_options(tmp_path):
 def test_environment_label_for_other_kinds():
     assert Environment(kind="other", name="x").label == "x"
     assert Environment().label == "this machine"
+
+
+# ----------------------------------------------------------------------------- Python environments
+
+
+def test_parse_python_version_and_names():
+    for given in ("3.11", 3.11, "py311", "python3.11", "Python 3.11", 311, " 3.11 "):
+        assert parse_python_version(given) == "3.11", given
+    assert parse_python_version("3.12.4") == "3.12.4" and parse_python_version(3.1) == "3.10"  # the number 3.10
+    assert parse_python_version("3.10") == "3.10" and parse_python_version("py39") == "3.9"
+    for bad in ("2.7", "3", 3, "latest", "3.11.x", None):
+        with pytest.raises(ValueError, match="python takes a version like '3.11'"):
+            parse_python_version(bad)
+    assert env_name("3.11") == "py311" and env_name("3.12.4") == "py312"
+    assert kernel_label("3.11.9", "py311") == "Python 3.11 (py311)"
+    assert new_env_call("3.11", "py311") == "new_env('3.11')"
+    assert new_env_call("3.11", "exp", packages="pandas") == "new_env('3.11', name='exp', packages='pandas')"
+    assert new_env_call("3.12", dry_run=True) == "new_env('3.12', dry_run=True)"
+    assert package_list("pandas, boto3>=1.3,<2  scikit-learn") == ["pandas", "boto3>=1.3,<2", "scikit-learn"]
+    assert package_list(["pandas", "numpy"]) == ["pandas", "numpy"] and package_list(None) == []
+    assert package_list("-r requirements.txt") == ["-r", "requirements.txt"]
+
+
+def test_env_files():
+    assert parse_pyvenv_cfg("home = /usr/bin\nversion_info = 3.11.9.final.0\nuv = 0.5\n")["version_info"] == (
+        "3.11.9.final.0")
+    made = datetime(2025, 10, 14, 9, 12, 33).astimezone(timezone.utc)
+    assert parse_conda_history("==> 2025-10-14 09:12:33 <==\n# cmd: conda create\n==> 2025-11-01 10:00:00 <==\n") == made
+    assert parse_conda_history("") is None
+    assert output_tail("a\nb\r\n50%\r100%\n\n" + "\n".join(f"line {i}" for i in range(40)), lines=3) == (
+        "line 37\nline 38\nline 39")
+    assert output_tail("Downloading 10%\rDownloading 100%\ndone") == "Downloading 100%\ndone"
+
+
+def test_env_steps_and_commands():
+    home = "/home/ec2-user"
+    conda = env_steps("conda", "/home/ec2-user/anaconda3/bin/conda", "/home/ec2-user/SageMaker/envs/py311", "3.11",
+                      "py311", ["pandas"])
+    assert [s.label for s in conda] == ["Make the environment", "Install packages", "Add the Jupyter kernel"]
+    assert [step_command(s, home=home) for s in conda] == [
+        "~/anaconda3/bin/conda create --yes --quiet --prefix ~/SageMaker/envs/py311 --override-channels --channel "
+        "conda-forge python=3.11 ipykernel",
+        "~/SageMaker/envs/py311/bin/python -m pip install --disable-pip-version-check pandas",
+        "~/SageMaker/envs/py311/bin/python -m ipykernel install --user --name py311 --display-name "
+        "'Python 3.11 (py311)'",
+    ]
+    uv = env_steps("uv", "/usr/local/bin/uv", "/home/ec2-user/SageMaker/envs/py312", "3.12", "py312", [],
+                   python_dir="/home/ec2-user/SageMaker/envs/.python")
+    assert step_command(uv[0], home=home) == (
+        "UV_PYTHON_INSTALL_DIR=~/SageMaker/envs/.python /usr/local/bin/uv venv --seed --python 3.12 "
+        "~/SageMaker/envs/py312")
+    assert uv[1].argv[1:] == ["pip", "install", "--python", "/home/ec2-user/SageMaker/envs/py312/bin/python",
+                              "ipykernel"] and uv[1].label == "Install ipykernel"
+    there = env_steps("conda", "conda", "/x/py311", "3.11", "py311", [], exists=True, ipykernel=True)
+    assert [s.label for s in there] == ["Add the Jupyter kernel"]
+    assert [s.label for s in env_steps("conda", "conda", "/x/py311", "3.11", "py311", [], exists=True)] == [
+        "Install ipykernel", "Add the Jupyter kernel"]
+    script = on_start_script("/home/ec2-user/SageMaker/envs")
+    assert "sudo -u ec2-user -i <<'EOF'" in script and "for env in /home/ec2-user/SageMaker/envs/*/; do" in script
+    assert '--display-name "Python $version ($name)"' in script
+    attach = kernels_lifecycle("/home/ec2-user/SageMaker/envs", "acme-nb")
+    assert attach.startswith("# 1. In a terminal here") and "cat > on-start.sh <<'SCRIPT'" in attach
+    assert "--notebook-instance-lifecycle-config-name python-envs" in attach
+    assert "aws sagemaker wait notebook-instance-stopped --notebook-instance-name acme-nb" in attach
+    assert "stop-notebook-instance" not in kernels_lifecycle("/home/ec2-user/SageMaker/envs")
+
+
+def test_plan_and_env_findings():
+    plan = EnvPlan("py311", "3.11", "/home/ec2-user/SageMaker/envs/py311", "conda", "Python 3.11 (py311)",
+                   where="notebook instance", kept=True, kernel_kept=False, free=50 * GB,
+                   folder="/home/ec2-user/SageMaker/envs")
+    found = plan_findings(plan, "/home/ec2-user")
+    assert found == [("info", "Its kernel goes in ~/.local/share/jupyter/kernels, which is reset when the notebook "
+                              "instance stops, while the environment is kept. After a restart, new_env('3.11') adds "
+                              "the kernel back in seconds, or the lifecycle configuration below does it at every "
+                              "start.")]
+    plan.exists, plan.found, plan.free, plan.packages = True, "3.11.9", 1 * GB, ["pandas"]
+    plan.path, plan.kept = "/home/ec2-user/py311", False
+    levels = [(level, message.split(":")[0]) for level, message in plan_findings(plan, "/home/ec2-user")]
+    assert levels == [("info", "~/py311 is there already with Python 3.11.9, so it isn't made again"),
+                      ("warn", "Only 1.0 GB is free where it goes, and an environment takes from about 300 MB to "
+                               "several GB (PyTorch alone is about 4 GB). When the disk fills, the install fails. "
+                               "disk() shows what fills it and what's safe to clear."),
+                      ("warn", "~/py311 is on the system disk, which is reset when the notebook instance stops")]
+    assert plan_findings(EnvPlan("py311", "3.11", "/root/.conda/envs/py311", "uv", "x")) == []
+
+    booted = ago(hours=5)
+    report = EnvReport(
+        "notebook instance", folder="/home/ec2-user/SageMaker/envs", booted=booted, tools={"conda": "/c"},
+        envs=[PythonEnv("python3", "/home/ec2-user/anaconda3/envs/python3", "3.10.14", kept=False, made=ago(days=90),
+                        kernels=["conda_python3"]),
+              PythonEnv("scratch", "/home/ec2-user/anaconda3/envs/scratch", "3.11.9", kept=False, made=ago(hours=1)),
+              PythonEnv("base", "/home/ec2-user/anaconda3", "3.10.14", kept=False, made=ago(hours=1)),
+              PythonEnv("py312", "/home/ec2-user/SageMaker/envs/py312", "3.12.4", kept=True, made=ago(days=3))],
+        kernels=[KernelSpec("old", "Old", "/home/ec2-user/.local/share/jupyter/kernels/old",
+                            "/home/ec2-user/SageMaker/envs/gone/bin/python", missing=True)])
+    assert [e.name for e in lost_envs(report)] == ["scratch"]
+    found = env_findings(report, "/home/ec2-user")
+    assert [level for level, _ in found] == ["warn", "warn", "info"]
+    assert found[0][1] == (
+        "1 environment made since this machine started is on the system disk, which is reset when the notebook "
+        "instance stops (scratch): it goes, with its packages and kernels. new_env('3.11', name='scratch') makes "
+        "scratch again in ~/SageMaker/envs, which is kept; then install its packages there.")
+    assert found[1][1] == (
+        "Kernel 'Old' starts ~/SageMaker/envs/gone/bin/python, which isn't there any more: picking it in Jupyter "
+        "fails. To take it off the kernel menu: rm -rf ~/.local/share/jupyter/kernels/old")
+    assert found[2][1].startswith("py312 in ~/SageMaker/envs has no Jupyter kernel, so it isn't in the kernel menu. "
+                                  "Kernels are in ~/.local, which is reset when the notebook instance stops")
+    assert "new_env('3.12') adds py312's back in seconds, and the lifecycle configuration below" in found[2][1]
+    assert env_findings(EnvReport("local", errors={"/x": "Permission denied"})) == [
+        ("info", "There's no conda, mamba, micromamba or uv here, so new_env() can't make an environment. "
+                 "%pip install uv adds uv; new_env('3.11') then uses it."),
+        ("info", "Couldn't read /x (Permission denied).")]
+
+
+def test_env_failure():
+    def failed(output, code=1):
+        return env_failure(EnvStep("Make the environment", ["conda"], code=code, output=output), "3.19")
+
+    assert failed("CondaHTTPError: HTTP 000 CONNECTION FAILED for url").startswith("It couldn't download")
+    assert failed("PackagesNotFoundError: python=3.19") == (
+        "Python 3.19 isn't there to download: ask for a release that exists, like '3.12' or '3.11'.")
+    assert failed("ERROR: No matching distribution found for pandsa") == (
+        "pip can't find pandsa: check its name and version on pypi.org.")
+    assert failed("OSError: [Errno 28] No space left on device").startswith("The disk filled up. disk()")
+    assert failed("", code=-1).startswith("It took too long and was stopped")
+    assert failed("", code=127) == "conda couldn't be run: it isn't there any more. envs() shows what's installed."
+    assert failed("Something odd").startswith("The end of what it printed is below")
+
+
+def executable(path, text="#!/bin/sh\n"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(0o755)
+
+
+def make_env(prefix, version, *, conda=True, ipykernel=True, made=None):
+    """A folder that looks like a Python environment: bin/python, and conda-meta or pyvenv.cfg."""
+    executable(prefix / "bin/python")
+    if conda:
+        (prefix / "conda-meta").mkdir(parents=True)
+        (prefix / f"conda-meta/python-{version}-h1234_0_cpython.json").write_text("{}")
+        when = (made or ago(days=90)).astimezone()  # conda writes local time
+        (prefix / "conda-meta/history").write_text(f"==> {when:%Y-%m-%d %H:%M:%S} <==\n# cmd: conda create\n")
+    else:
+        (prefix / "pyvenv.cfg").write_text(f"home = /usr/bin\nversion_info = {version}.final.0\n")
+    if ipykernel:
+        minor = ".".join(version.split(".")[:2])
+        (prefix / f"lib/python{minor}/site-packages/ipykernel").mkdir(parents=True)
+    return prefix
+
+
+def write_kernel(folder, name, program, display=None):
+    (folder / name).mkdir(parents=True, exist_ok=True)
+    (folder / name / "kernel.json").write_text(json.dumps({
+        "argv": [program, "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+        "display_name": display or name, "language": "python"}))
+
+
+def notebook_envs(tmp_path):
+    """A notebook instance with anaconda3 (the image's environments, and one made since it started), an
+    environment in ~/SageMaker/envs whose kernel went with the last stop, and a kernel whose environment is gone."""
+    root = write_root(tmp_path)  # booted 3d 4h ago
+    anaconda = root / "home/ec2-user/anaconda3"
+    make_env(anaconda, "3.10.14", ipykernel=False)
+    executable(anaconda / "bin/conda")
+    make_env(anaconda / "envs/python3", "3.10.14")
+    make_env(anaconda / "envs/JupyterSystemEnv", "3.10.14")
+    make_env(anaconda / "envs/scratch", "3.11.9", made=ago(hours=2))
+    make_env(root / "home/ec2-user/SageMaker/envs/py312", "3.12.4")
+    kernels = root / "home/ec2-user/anaconda3/envs/JupyterSystemEnv/share/jupyter/kernels"
+    write_kernel(kernels, "sparkmagic", "python", "Sparkmagic (PySpark)")
+    write_kernel(root / "home/ec2-user/.local/share/jupyter/kernels", "old",
+                 "/home/ec2-user/SageMaker/envs/gone/bin/python", "Python 3.9 (old)")
+    return root
+
+
+def test_environments_on_a_notebook_instance(tmp_path):
+    core = SageMakerAnalyzer(root=str(notebook_envs(tmp_path)))
+    assert core.tools() == {"conda": str(tmp_path / "home/ec2-user/anaconda3/bin/conda")}
+    report = core.environments()
+    assert report.kind == "notebook instance" and report.folder == "/home/ec2-user/SageMaker/envs"
+    assert report.folder_kept and report.booted is not None and report.errors == {}
+    envs = {e.name: e for e in report.envs}
+    assert set(envs) == {"base", "python3", "JupyterSystemEnv", "scratch", "py312"}
+    assert envs["py312"].python == "3.12.4" and envs["py312"].kept and envs["py312"].kind == "conda"
+    assert envs["py312"].path == "/home/ec2-user/SageMaker/envs/py312" and envs["py312"].kernels == []
+    assert envs["python3"].kernels == ["conda_python3"] and envs["python3"].kept is False
+    assert envs["JupyterSystemEnv"].kernels == ["Sparkmagic (PySpark)"]  # 'python' in its own folder
+    assert envs["base"].ipykernel is False and envs["base"].kernels == []
+    assert [e.name for e in lost_envs(report)] == ["scratch"]
+    kernels = {k.name: k for k in report.kernels}
+    assert set(kernels) == {"old", "sparkmagic", "conda_python3", "conda_scratch"}
+    assert kernels["old"].missing and kernels["old"].kept is False and kernels["old"].env == ""
+    assert kernels["old"].path == "/home/ec2-user/.local/share/jupyter/kernels/old"
+    assert kernels["sparkmagic"].env == "/home/ec2-user/anaconda3/envs/JupyterSystemEnv"
+
+
+def test_env_plan(tmp_path):
+    root = notebook_envs(tmp_path)
+    core = fake_machine(SageMakerAnalyzer(root=str(root)), total=50 * GB, used=48 * GB)
+    plan = core.env_plan("3.11")
+    assert (plan.name, plan.python, plan.tool, plan.kernel) == ("py311", "3.11", "conda", "Python 3.11 (py311)")
+    assert plan.path == "/home/ec2-user/SageMaker/envs/py311" and plan.kept and plan.kernel_kept is False
+    assert not plan.exists and plan.free == 2 * GB and plan.on_start == "/home/ec2-user/SageMaker/envs"
+    assert plan.steps[0].command.startswith("~/anaconda3/bin/conda create --yes --quiet --prefix "
+                                            "~/SageMaker/envs/py311 ")
+    assert plan.steps[0].argv[0] == str(root / "home/ec2-user/anaconda3/bin/conda")  # what runs is the real path
+    there = core.env_plan("py312", packages="pandas")
+    assert there.exists and there.found == "3.12.4" and [s.label for s in there.steps] == [
+        "Install packages", "Add the Jupyter kernel"]
+    named = core.env_plan(3.11, "Exp-1", path="~/SageMaker/elsewhere/exp")
+    assert named.name == "Exp-1" and named.path == "/home/ec2-user/SageMaker/elsewhere/exp" and named.on_start == (
+        "/home/ec2-user/SageMaker/elsewhere")
+    assert core.env_plan("3.11", path="/tmp/exp").kept is False
+    relative = core.env_plan("3.11", path="envs/rel")
+    assert relative.name == "rel" and Path(relative.steps[-1].argv[0]).is_absolute()  # the kernel's Python
+    with pytest.raises(ValueError, match=r"envs/py312 is there already with Python 3\.12\.4\. Pick another name "
+                                         r"\(new_env\('3\.11', name='py312-new'\)\), or remove it first: rm -rf"):
+        core.env_plan("3.11", "py312")
+    (root / "home/ec2-user/SageMaker/envs/notes").mkdir()
+    (root / "home/ec2-user/SageMaker/envs/notes/a.txt").write_text("x")
+    with pytest.raises(ValueError, match="is there already and isn't a Python environment"):
+        core.env_plan("3.11", "notes")
+    with pytest.raises(ValueError, match="name takes letters, digits"):
+        core.env_plan("3.11", "my env")
+    with pytest.raises(ValueError, match="tool takes 'auto', 'mamba'"):
+        core.env_plan("3.11", tool="pipenv")
+    with pytest.raises(smmod._Hint, match=r"There's no uv on this machine \(conda is: leave out tool=\)\. "
+                                          r"%pip install uv adds it\."):
+        core.env_plan("3.11", tool="uv")
+    with pytest.raises(smmod._Hint, match="There's no conda, mamba, micromamba or uv on this machine"):
+        SageMakerAnalyzer(root=str(write_root(tmp_path / "bare"))).env_plan("3.11")
+
+
+class Runner:
+    """Stands in for running commands: records each, and makes what a successful one would have made."""
+
+    def __init__(self, root, fail=None, code=1, output=""):
+        self.root, self.fail, self.code, self.output, self.calls = root, fail, code, output, []
+
+    def __call__(self, argv, env, timeout):
+        self.calls.append((argv, env))
+        if self.fail and self.fail in argv:
+            return self.code, self.output
+        if argv[1:2] in (["create"], ["venv"]):
+            prefix = Path(argv[argv.index("--prefix") + 1] if "--prefix" in argv else argv[-1])
+            version = next(a for a in argv if a.startswith(("python=", "3."))).removeprefix("python=")
+            make_env(prefix, version + ".2", conda=argv[1] == "create", made=NOW)
+        if argv[1:4] == ["-m", "ipykernel", "install"]:
+            name = argv[argv.index("--name") + 1]
+            write_kernel(self.root / "home/ec2-user/.local/share/jupyter/kernels", name, argv[0],
+                         argv[argv.index("--display-name") + 1])
+        return 0, "Collecting things\nSuccessfully installed\n"
+
+
+def test_create_env(tmp_path):
+    root = notebook_envs(tmp_path)
+    core = fake_machine(SageMakerAnalyzer(root=str(root)))
+    core._run = Runner(root)
+    ticks = []
+    result = core.create_env(core.env_plan("3.11", packages=["pandas"]), progress=lambda *a: ticks.append(a))
+    assert result.ok and result.python == "3.11.2" and result.failed is None and not result.leftover
+    assert ticks == [(0, 3), (1, 3), (2, 3), (3, 3)]
+    assert [s.code for s in result.plan.steps] == [0, 0, 0] and result.plan.steps[1].output.endswith("installed")
+    report = core.environments()
+    assert {e.name: e.kernels for e in report.envs}["py311"] == ["Python 3.11 (py311)"]
+    assert not any(e.name == "py311" for e in lost_envs(report))  # made just now, but on the kept volume
+
+    core._run = Runner(root, fail="create", output="CondaHTTPError: HTTP 000 CONNECTION FAILED\n")
+    plan = core.env_plan("3.12", "net")
+    result = core.create_env(plan)
+    assert not result.ok and result.failed is plan.steps[0] and result.failed.code == 1
+    assert [s.code for s in plan.steps] == [1, None] and not result.leftover and result.python == ""
+
+    def half_made(argv, env, timeout):
+        (root / "home/ec2-user/SageMaker/envs/half/conda-meta").mkdir(parents=True)
+        return 1, "Killed"
+
+    core._run = half_made
+    assert core.create_env(core.env_plan("3.12", "half")).leftover
+
+
+def test_run_reports_exit_status_output_and_timeouts(tmp_path):
+    core = SageMakerAnalyzer(root=str(tmp_path))
+    code, output = core._run([sys.executable, "-c", "import os; print('hi', os.environ.get('X'))"], {"X": "1"}, 30)
+    assert (code, output.strip()) == (0, "hi 1")
+    assert core._run([sys.executable, "-c", "import sys; sys.exit(3)"], {}, 30)[0] == 3
+    code, output = core._run([sys.executable, "-c", "import time; print('slow', flush=True); time.sleep(5)"], {}, 0.5)
+    assert code == -1 and output.endswith("Stopped after 0s.")
+    assert core._run([str(tmp_path / "no-such-program")], {}, 30)[0] == 127
+
+
+def test_ui_envs_on_a_notebook_instance(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(smmod.platform, "python_version", lambda: "3.12.3")  # this kernel's, whatever runs the tests
+    core = fake_machine(SageMakerAnalyzer(root=str(notebook_envs(tmp_path))))
+    out = run(capsys, SageMakerView(core, mode="text").envs)
+    for expected in (
+        "Python environments",
+        "This kernel: Python 3.12.3",
+        "notebook instance acme-nb · kept: still there after the notebook instance stops · this tool never removes one",
+        "Environments: 5   Jupyter kernels: 4, 1 broken (!)",
+        "Makes environments with: conda   New ones go in: ~/SageMaker/envs, kept",
+        "-- Findings: 2 warnings, 1 note --",
+        "new_env('3.11', name='scratch') makes scratch again in ~/SageMaker/envs",
+        "rm -rf ~/.local/share/jupyter/kernels/old",
+        "py312 in ~/SageMaker/envs has no Jupyter kernel",
+        "-- Environments --",
+        "scratch           3.11.9   conda  ~/anaconda3/envs/scratch           no    conda_scratch         2h ago",
+        "conda_python3",
+        "-- Jupyter kernels --",
+        "~/SageMaker/envs/gone/bin/python (not there)",
+        "(Jupyter lists it by itself)",
+        "-- Add the kernels back at every start (lifecycle configuration) --",
+        "new_env('3.13')",  # this kernel's Python and the environments here have 3.10 to 3.12
+        "disk('~/SageMaker/envs')",
+    ):
+        assert expected in out, expected
+
+
+def test_ui_new_env(tmp_path, capsys):
+    root = notebook_envs(tmp_path)
+    core = fake_machine(SageMakerAnalyzer(root=str(root)))
+    core._run = Runner(root)
+    ui = SageMakerView(core, mode="text", progress="off")
+    out = run(capsys, ui.new_env, "3.11", dry_run=True)
+    for expected in (
+        "New environment py311\n",
+        "what new_env() would do · nothing has run yet",
+        "Python: 3.11   Name: py311   Where: ~/SageMaker/envs/py311   Kept when it stops: yes   Made with: conda",
+        "Its kernel goes in ~/.local/share/jupyter/kernels, which is reset when the notebook instance stops",
+        "-- Commands, to run in a terminal --",
+        "~/anaconda3/bin/conda create --yes --quiet --prefix ~/SageMaker/envs/py311",
+        "-- Add the kernels back at every start (lifecycle configuration) --",
+        "new_env('3.11')   run them: make it and add its kernel",
+    ):
+        assert expected in out, expected
+    assert core._run.calls == []
+
+    out = run(capsys, ui.new_env, "py311", packages="pandas")
+    for expected in (
+        "New environment py311: Python 3.11.2",
+        "made with conda in 0s · 'Python 3.11 (py311)' in Jupyter's kernel menu",
+        "[ok] Ready: pick 'Python 3.11 (py311)' in Jupyter's kernel menu",
+        "in a terminal its Python is ~/SageMaker/envs/py311/bin/python",
+        "Make the environment      0s  done",
+        "-- Commands it ran --",
+        "new_env('3.11', packages='-r requirements.txt')   install your project's packages in it",
+    ):
+        assert expected in out, expected
+    out = run(capsys, ui.new_env, "3.11", "Exp-1", path="/tmp/exp", dry_run=True)
+    assert "~/tmp/exp" not in out and "is on the system disk, which is reset" in out
+    assert "new_env('3.11', name='Exp-1', path='/tmp/exp')" in out
+
+    core._run = Runner(root, fail="pip", code=1, output="ERROR: No matching distribution found for pandsa\n")
+    out = run(capsys, ui.new_env, "3.12", packages="pandsa")
+    for expected in (
+        "py312: install packages failed",
+        "Failed at: Install packages (!)",
+        "Install packages failed (exit status 1) after 0s. pip can't find pandsa",
+        "-- The end of what it printed --",
+        "Install packages          0s  failed (1)",
+        "Add the Jupyter kernel  -     not run",
+        "-- Commands, to run in a terminal --",
+        "new_env('3.12', packages='pandsa', dry_run=True)",
+    ):
+        assert expected in out, expected
+    assert "lifecycle configuration" not in out  # a failure shows what failed, not the next steps after it
+    assert "ValueError: python takes a version like '3.11'" in run(capsys, ui.new_env, "latest")
+    assert "There's no uv on this machine" in run(capsys, ui.new_env, "3.11", tool="uv")
+
+
+def test_ui_new_env_in_studio(tmp_path, capsys):
+    root = write_root(tmp_path, SPACE_META, home="home/sagemaker-user")
+    executable(root / "opt/conda/bin/mamba")
+    executable(root / "opt/conda/bin/conda")
+    make_env(root / "opt/conda", "3.12.9")
+    core = fake_machine(SageMakerAnalyzer(root=str(root)))
+    plan = core.env_plan("3.11")
+    assert plan.tool == "mamba" and plan.path == "/home/sagemaker-user/.conda/envs/py311"
+    assert plan.kept and plan.kernel_kept and plan.on_start == "" and plan_findings(plan) == []
+    out = run(capsys, SageMakerView(core, mode="text").envs)
+    assert "JupyterLab space churn-analysis · kept: still there after the app stops" in out
+    assert "New ones go in: ~/.conda/envs, kept" in out and "lifecycle" not in out
+    assert "Makes environments with: mamba, conda" in out
+
+
+def test_ui_envs_outside_sagemaker(tmp_path, capsys):
+    out = run(capsys, SageMakerView(SageMakerAnalyzer(root=str(tmp_path)), mode="text").envs)
+    assert "No Python environments found in the usual places." in out and "Kept" not in out
+    assert "There's no conda, mamba, micromamba or uv here" in out
+    assert "Makes environments with: nothing installed" in out
