@@ -78,6 +78,7 @@ ui.errors("orders-etl")                     # its errors in the last 24 hours, g
 ui.logs("orders-etl", search="KeyError")    # the newest lines it logged
 ui.performance("orders-etl")                # run times, memory used and cold starts, and the memory it needs
 ui.code("orders-etl")                       # the files in its package, and the handler's source
+ui.how_it_works("orders-etl")               # how its Python code works, step by step from the handler
 ui.download("orders-etl")                   # its package (.zip) saved in lambda-downloads/, next to the notebook
 ui.explore()                                # all of it in a window, by clicking: functions, logs run by run
 ```
@@ -165,7 +166,7 @@ The **Overview** tab has `function_info()`'s findings, each with what to do. Und
 
 - **Errors** is [`errors()`](#errors): the errors in its logs grouped by cause, with what to do about each, then the newest failed runs. Click one to read every line of it in the Logs tab.
 - **Performance** is [`performance()`](#performance): run times against the timeout, the memory used against what it has and the size that would do, cold starts, and the slowest runs, each a click from its lines.
-- **Code** downloads the deployment package once and shows its files as a tree of folders, folders first, with the handler's folder open (a folder that holds only a folder shares its line, as `botocore/data/` does). Click a folder to open or fold it, and a file to see its source, with line numbers, and Python and JSON in colour; **Copy** beside its name selects all of it, so <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd>+<kbd>C</kbd> on a Mac) copies the file. Typing in **Find a file** shows only the files that match, in their folders. **Hide files** folds the tree away so the source has the whole width, and **Show files** brings it back (it stays hidden for the next function you open). **Download .zip** saves the package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook, like [`download()`](#download). A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
+- **Code** downloads the deployment package once and shows its files as a tree of folders, folders first, with the handler's folder open (a folder that holds only a folder shares its line, as `botocore/data/` does). Click a folder to open or fold it, and a file to see its source, with line numbers, and Python and JSON in colour; **Copy** beside its name selects all of it, so <kbd>Ctrl</kbd>+<kbd>C</kbd> (<kbd>⌘</kbd>+<kbd>C</kbd> on a Mac) copies the file. Typing in **Find a file** shows only the files that match, in their folders. **Hide files** folds the tree away so the source has the whole width, and **Show files** brings it back (it stays hidden for the next function you open). For a Python function, **How it works** shows [how its code works](#how-it-works) in place of the source: the steps of a call from the handler on, its AWS calls, the environment variables and event fields it reads, and what to fix; click it again, or a file in the tree, for the source. **Download .zip** saves the package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook, like [`download()`](#download). A secrets file (`.env`, keys) is listed but its text isn't shown, and a package over 50 MB is downloaded only when you click **Download it anyway**.
 - **Settings** has every setting in plain English, then the configuration as Lambda returns it, folded (open it for the JSON in colour, where a click on an object or a list folds it, and hovering over a line shows its path in `raw`), and the AWS CLI commands that read it. Environment variable values never appear.
 
 The Errors and Performance tabs read the last 24 hours, and have their own time range.
@@ -182,7 +183,7 @@ The Errors and Performance tabs read the last 24 hours, and have their own time 
 **Code**: the package as a tree of folders, the handler's source to copy, and a `.env` file that shouldn't be in the package.
 ///
 
-Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package` and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
+Everything is read in the background: a click shows what's known at once and fills in the rest as it arrives, and the window keeps answering meanwhile. `explore()` returns the window: `x.overview`, `x.function`, `x.detail`, `x.logs_page`, `x.package`, `x.code_map` (what **How it works** read) and `x.saved` (what **Download .zip** saved) hold the data behind what's shown; `x.open("report-api")`, `x.logs(search="KeyError", since="24h")`, `x.run("c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c")` and `x.refresh()` do what the clicks do; and `x.ui` is a `LambdaView` for reports in other cells.
 
 ## Every function { #functions }
 
@@ -335,6 +336,46 @@ ui.code("orders-etl", max_size="200MB")  # packages up to 50 MB are read by defa
 
 The findings: a handler setting no file in the package matches, secrets files packed in it (`.env`, keys, credentials), code and layers near Lambda's 250 MB limit, boto3 bundled although the runtime has it, and caches or tests that never run. A container image isn't pulled: the report names the image instead.
 
+### How the code works { #how-it-works }
+
+`how_it_works()` explains a Python function's code: what happens on each call, step by step from the handler, and what it reaches outside. It reads the package's own `.py` files with Python's `ast` module and runs none of it, the way you'd read the code yourself, keeping track of what each name holds (a boto3 client, part of the event, an environment variable, one of its own functions) so it knows what each line calls.
+
+```python
+ui.how_it_works("support-agent-actions")
+ui.how_it_works("orders-etl", max_size="200MB")   # packages up to 50 MB are read by default
+```
+
+The report starts with a few sentences: what the code does when Lambda starts it (once per cold start), what each call reads from the event and which AWS services it reads from, writes to or sends to, which of its own functions it calls and what it returns. Then the findings, then the steps:
+
+- **When Lambda starts it**: the lines that run when Lambda loads the code, before the first call, such as the boto3 clients made at the top of a file and the environment variables read there, with the modules it imports that do something themselves.
+- **What each call does, step by step**: the handler's lines that do something worth knowing, in order, with the loops, `if`s, `with`s and `try`s around them, each tagged with what it does: an AWS call (blue when it reads, orange when it writes, pink when it sends a message, purple when it runs something), an environment variable, a field of the event, an HTTP request, a log line, a file. The plain lines between them are left out. A call to one of its own functions, in the same file or another, is folded under the line that calls it, showing what happens inside it. Click to open it for its own steps, and so on down, so you can follow a call through the whole package.
+
+Then the detail: the **AWS calls** it makes, with where and the IAM permission each needs, and the same as an IAM policy to compare with the function's role (one it lacks is an `AccessDenied` waiting to happen); the **environment variables** it reads, and whether each is set on the function (names only, never values); **what it reads from the event**, as a tree, and which source sends events like that (an SQS batch, an S3 event, an HTTP request, a Bedrock agent action), with **a test event** holding those fields to paste in the console's **Test** tab; its own functions that run, with their docstrings; and what it imports, and where Lambda finds each module: its own files, the package, the Lambda runtime (boto3), the standard library, or nowhere.
+
+The findings are what would break or cost it:
+
+- An environment variable it reads with `os.environ[...]` that isn't set on the function: a `KeyError`, on every call when it's read at start-up.
+- A module it imports that isn't in the package, the runtime or the standard library (`Runtime.ImportModuleError`), with the `pip install ... -t .` line, or one that a newer Python removed (`imp`, `distutils`, `cgi`), which breaks it when you move it to a newer runtime.
+- A handler that isn't in its file, that's `async def` (the runtime doesn't await it), or that can't take `(event, context)`.
+- An HTTP request without a timeout, which can wait until Lambda stops the run, a list call that reads only its first page (S3's first 1,000 keys, DynamoDB's first MB), and an `except` that drops every error, so a failed run reports success and its event is lost.
+- A file written outside `/tmp`, where Lambda's disk is read-only, and a secret written in the code (its name is shown, never its value).
+- An AWS call in a loop that a batch call would make in fewer requests (`batch_writer()`, `send_message_batch`), a client made on every call instead of once, and `time.sleep`, which the function is billed for.
+
+!!! note ""
+    It follows the clients and resources the code makes with boto3, and the calls into its own functions and classes. A client passed in from somewhere it can't see, or made inside a library, isn't followed, so there may be AWS calls the report doesn't list. Libraries packed in the package (found by their `.dist-info` folders) aren't read as its code. Other runtimes and container images aren't read: `code()` still shows their files.
+
+`map_code()` does the same on code you have on disk, with nothing to download:
+
+```python
+from pathlib import Path
+from aws_analyzer.lambda_functions import code_map_findings, map_code
+
+files = {str(p): p.read_text() for p in Path(".").rglob("*.py")}
+cmap = map_code(files, "app.handler")
+cmap.aws                                          # AwsCall: service, operation, permission, file, line, loop
+code_map_findings(cmap)
+```
+
 ### Download the package { #download }
 
 `download()` saves the deployment package on the notebook's disk, the .zip as Lambda stores it, and says where, how big it is, how many files it holds, and whether its SHA-256 matches the one Lambda reports (so you know it's the code the function runs). Nothing in it is unzipped or run.
@@ -365,10 +406,12 @@ lam.log_events("orders-etl", since="1h", pattern='"KeyError"').to_df()
 runs = lam.log_runs("orders-etl", since="24h").runs   # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                      # CodeFile: path, size, compressed
+cmap = lam.code_map("orders-etl")                 # CodeMap: .steps, .aws, .env, .event, .imports, .functions
+cmap.to_df()                                      # one row per AWS call: service, operation, permission, where
 lam.download("orders-etl").path                   # PackageDownload: where it was saved, size, files, sha256_matches
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `secret_like`, and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `secret_like`, `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
 
 ```python
 from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory
@@ -443,7 +486,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()` and `code()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()`, `how_it_works()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -502,6 +545,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
+| `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, step by step from the handler: its AWS calls and the permissions they need, the environment variables and event fields it reads, a test event, its imports, findings |
 | `download(name, path=None, region=None)` | Its deployment package saved on the notebook's disk, in `lambda-downloads/` (or at `path=`), checked against Lambda's SHA-256 |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |
 
