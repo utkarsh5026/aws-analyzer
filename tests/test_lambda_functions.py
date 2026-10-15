@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import zipfile
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 import boto3
@@ -49,6 +50,7 @@ from aws_analyzer.lambda_functions import (
     Version,
     account_findings,
     classify_error,
+    code_graph,
     code_map_findings,
     error_findings,
     function_findings,
@@ -1027,6 +1029,99 @@ def test_map_code_never_shows_a_secret():
     assert code_map_findings(guessed) == []  # a call guessed from its name alone sets off nothing
 
 
+def test_code_graph():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    graph = code_graph(cmap)
+    nodes = {n.id: (n.kind, n.column, n.label, n.tone) for n in graph.nodes}
+    assert nodes == {
+        "event": ("event", 0, "An S3 event", ""), "env": ("env", 0, "Environment", "warn"),
+        "start": ("start", 1, "At start-up", ""), "f0": ("handler", 1, "handler()", "warn"),
+        "f1": ("function", 2, "Orders()", ""), "f2": ("function", 2, "_client()", ""),
+        "f3": ("function", 2, "Orders.save()", ""), "f4": ("function", 2, "tell()", ""),
+        "f5": ("function", 3, "Orders._queue()", ""), "aws-s3": ("aws", 4, "S3", "warn"),
+        "aws-dynamodb": ("aws", 4, "DynamoDB", ""), "aws-sqs": ("aws", 4, "SQS", ""),
+        "aws-sns": ("aws", 4, "SNS", ""), "http": ("http", 4, "The web", "warn")}
+    assert graph.node("event").lines == ["Records[].s3.bucket.name", "Records[].s3.object.key", "detail.user"]
+    assert graph.node("aws-sqs").sub == "sends · reads" and graph.node("aws-sqs").lines == ["SendMessage", "ListQueues"]
+    assert graph.node("f0").sub == "app/main.py line 24" and graph.node("f0").lines == ["Handles an S3 upload."]
+    edges = {(e.source, e.target, e.kind): (e.label, e.tone, e.loop) for e in graph.edges}
+    assert edges == {
+        ("event", "f0", "event"): ("the event", "", False), ("f0", "f1", "call"): ("line 26", "", False),
+        ("f0", "f2", "call"): ("line 30", "", False), ("f0", "f3", "call"): ("line 32", "", False),
+        ("f0", "f4", "call"): ("line 37", "", False), ("f3", "f5", "call"): ("line 15", "", False),
+        ("env", "f1", "env"): ("TABLE", "", False), ("env", "f5", "env"): ("QUEUE_URL", "warn", False),
+        ("env", "f0", "env"): ("HOOK_URL", "", False), ("f0", "aws-s3", "reads"): ("ListObjectsV2", "warn", True),
+        ("f3", "aws-dynamodb", "writes"): ("PutItem", "", True), ("f5", "aws-sqs", "sends"): ("SendMessage", "", True),
+        ("f5", "aws-sqs", "reads"): ("ListQueues", "", True), ("f4", "aws-sns", "sends"): ("Publish", "", False),
+        ("start", "aws-sns", "client"): ("makes its SNS client", "", False),
+        ("f0", "http", "http"): ("POST os.environ.get('HOOK_URL', 'https://example.com')", "warn", True)}
+    assert graph.hidden == 0
+    mermaid = graph.mermaid()
+    assert mermaid.startswith("flowchart LR\n  event([\"An S3 event<br/><small>Lambda calls it with</small>\"])")
+    assert '  aws_s3[("S3<br/><small>reads</small>")]' in mermaid and "  f0 --> f1" in mermaid
+    assert '  f0 -->|"ListObjectsV2"| aws_s3' in mermaid and '  env -.->|"QUEUE_URL"| f5' in mermaid
+    assert ('  f0 -->|"POST os.environ.get(\'HOOK_URL\', \'https://example.com\')"| http' in mermaid
+            and mermaid.endswith("  class env,f0,aws_s3,http warn"))
+    assert code_graph(map_code({"app.py": "x = 1\n"}, "app.handler")).nodes == []  # no handler: nothing to draw
+
+    # a chain deeper than the graph draws: the rest are counted, not drawn
+    chain = "".join(f"def f{i}():\n    return f{i + 1}()\n\n" for i in range(8)) + "def f8():\n    return 1\n"
+    deep = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"))
+    assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + lfmod._GRAPH_DEPTH
+    assert {e.target for e in deep.edges} <= {n.id for n in deep.nodes}  # no arrow to a box that isn't drawn
+
+    # a handler that's an object (a web app's adapter): its routes hang off it
+    app = ("from mangum import Mangum\nfrom fastapi import FastAPI\nimport boto3\napp = FastAPI()\n"
+           "s3 = boto3.client('s3')\n\n@app.get('/files')\ndef files():\n    return s3.list_objects_v2(Bucket='b')\n\n"
+           "handler = Mangum(app)\n")
+    web = code_graph(map_code({"main.py": app}, "main.handler"))
+    assert web.node("f-entry").label == "handler" and web.node("f-entry").lines == ["an object, not a function"]
+    assert ("f-entry", "f0", "call", "GET /files") in {(e.source, e.target, e.kind, e.label) for e in web.edges}
+
+
+def test_graph_layout_and_drawing():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    graph = code_graph(cmap)
+    boxes, routes, width, tall = lfmod._graph_layout(graph)
+    assert set(boxes) == {n.id for n in graph.nodes} and width == 2 * 14 + 5 * 184 + 4 * 66
+    by_column = defaultdict(list)
+    for n in graph.nodes:
+        by_column[boxes[n.id][0]].append(boxes[n.id])
+    assert sorted(by_column) == [14 + k * 250 for k in range(5)]  # a column every 250 pixels, left to right
+    for column in by_column.values():  # no two boxes in a column overlap
+        column.sort(key=lambda b: b[1])
+        assert all(a[1] + a[3] + 13.9 <= b[1] for a, b in zip(column, column[1:]))
+    assert all(0 < y and y + h <= tall for _, y, _, h in boxes.values())
+    skipping = {i for i, e in enumerate(graph.edges)
+                if (boxes[e.target][0] - boxes[e.source][0]) / 250 > 1}
+    assert set(routes) == skipping and skipping  # an arrow that skips columns has a waypoint in each
+    for i, ys in routes.items():
+        e = graph.edges[i]
+        for k, y in enumerate(ys):  # ...which runs between the boxes of the column it crosses, not behind one
+            x = boxes[e.source][0] + (k + 1) * 250
+            assert not any(by <= y <= by + bh for bx, by, _, bh in boxes.values() if bx == x)
+
+    page = lfmod._render_html([lfmod._Graph(graph, "How it fits together")], 50)
+    assert page.count('<g class="nd ') == len(graph.nodes) and page.count('<g class="e ') == len(graph.edges)
+    assert '<g class="nd k-handler n-f0 a-event a-f1' in page and 'warn" transform=' in page
+    assert '<g class="e k-reads s-f0 t-aws-s3 warn"><title>handler() reads from S3: ListObjectsV2 (in a loop' in page
+    assert ".lmb .cg:has(.n-f0:hover) .e:not(.s-f0):not(.t-f0){opacity:.08}" in page  # pointing at a box
+    assert ".lmb .cg:has(.n-f0:hover) .nd:not(.n-f0):not(.a-f0){opacity:.3}" in page
+    assert '<span><i class="reads"></i>reads</span>' in page and "↻ in a loop" in page
+    assert "<script" not in page and f'viewBox="0 0 {width:.0f} {tall:.0f}"' in page
+    text = _render_text([lfmod._Graph(graph, "How it fits together")], 50)
+    assert "-- How it fits together --" in text
+    assert "  An S3 event: Records[].s3.bucket.name, Records[].s3.object.key, detail.user\n      → handler()" in text
+    assert "  Environment: TABLE, QUEUE_URL, HOOK_URL (!)\n      → Orders(): TABLE\n      → Orders._queue(): QUEUE_URL (!)" in text
+    assert "  handler()  app/main.py line 24 (!)\n      calls Orders() (line 26)" in text
+    assert "      reads from S3: ListObjectsV2, in a loop (!)" in text
+    assert "      makes the SNS client" in text and "Orders._queue()  app/store.py line 17" in text
+    empty = lfmod._Graph(lfmod.CodeGraph(), "How it fits together")
+    assert "(nothing to draw)" in lfmod._render_html([empty], 50) and "(nothing to draw)" in _render_text([empty], 50)
+
+
 def test_map_package_reads_its_own_files():
     data = zipped({"app.py": APP["app/main.py"].replace("from .store", "from store").replace("from . import", "import"),
                    "store.py": APP["app/store.py"], "notify.py": APP["app/notify.py"],
@@ -1743,6 +1838,9 @@ def test_how_it_works_report(ui, capsys):
     assert "save()     store.py line 4" in out and "Saves one order." in out
     assert "boto3   the Lambda runtime" in out and "hunter2" not in out
     assert "code('etl-nightly', file='app.py')" in out and "code('etl-nightly', file='store.py')" in out
+    assert "-- How it fits together: what comes in, who calls whom, and what it reaches --" in out
+    assert "  handler()  app.py line 9\n      calls save() (line 12)\n      reads from S3: GetObject, in a loop" in out
+    assert "flowchart LR" in out and '  f1 -->|"PutItem"| aws_dynamodb' in out
     note = run(capsys, ui.how_it_works, "eu-fn", region=OTHER)
     assert "It runs nodejs18.x: how_it_works() reads Python code" in note and "code('eu-fn', region='eu-west-1')" in note
     assert "No function 'etl-nightlx' in us-east-1. Did you mean 'etl-nightly'?" in run(capsys, ui.how_it_works,
@@ -2189,6 +2287,8 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch):
     assert "How etl-nightly works" in shown and "BUCKET isn't set on etl-nightly" in shown
     assert "What each call does, step by step from handler()" in shown and "Next" not in shown
     assert "code(" not in shown and [type(b).__name__ for b in x.shown["how"]][:2] == ["_Title", "_Cards"]
+    assert "_Graph" in [type(b).__name__ for b in x.shown["how"]] and '<g class="nd k-handler n-f0' in x.source_view.value
+    assert ".lmb .cg:has(.n-f0:hover)" in x.source_view.value  # the pointing rules come with the pane
     assert plain(x.status.value) == ("How it works, read from 2 Python files with nothing run · click a file to see its "
                                      "source · 1 warning")
     assert button.tooltip == "Back to the source of the file picked in the tree"
