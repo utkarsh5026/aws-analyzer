@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-15
+
 ### Added
 
 - Bedrock Knowledge Bases: `save_file_list()` saves the knowledge base's files as a `.txt` file, one per line and
@@ -16,14 +18,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   for a script, `aws s3 cp` or a spreadsheet; `link="https"` writes a link that opens each file in a browser instead
   (presigned, for an hour unless `expires=` says otherwise) and `link="key"` its path in the bucket. `status=`,
   `match=` and `data_source=` keep only the files `files()` lists with them, so `save_file_list(status="failed")` is
-  the list of failed files.
+  the list of failed files
+  ([#77](https://github.com/utkarsh5026/aws-analyzer/pull/77)).
 - Bedrock Knowledge Bases explorer: **⬇ List** in the **Files** tab saves the `s3://` path of every file the list
   shows (with its search, state chip and data source, in its order), one per line, in `<knowledge base>-files.txt`
-  beside the notebook, and puts a **⬇ Download** link for it under the list.
+  beside the notebook, and puts a **⬇ Download** link for it under the list
+  ([#77](https://github.com/utkarsh5026/aws-analyzer/pull/77)).
 - Bedrock chat: `save_file_list()` does the same for the chat's knowledge base (`match=` keeps the files whose path
   contains it, as `files()` does), and **⬇ List** beside the **Files** list's search box saves the `s3://` paths of
   the files the list shows, with a **⬇ Download** link under the list. `BedrockChatAnalyzer.file_url()` makes the
-  same presigned links as the knowledge base analyzer's.
+  same presigned links as the knowledge base analyzer's
+  ([#77](https://github.com/utkarsh5026/aws-analyzer/pull/77)).
 
 ## [0.16.1] - 2026-10-13
 
@@ -542,7 +547,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.14.0...v0.15.0
