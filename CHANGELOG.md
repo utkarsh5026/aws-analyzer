@@ -29,8 +29,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   it reads, and its imports and where Lambda finds them. Findings catch a variable it needs that isn't set, an import
   Lambda can't find, a handler that isn't there, HTTP requests without a timeout, list calls that read only their first
   page, errors it drops, files written outside `/tmp`, secrets written in the code, and AWS calls in a loop that a
-  batch call would make in fewer requests. `map_code()` does the same on code you have on disk.
-- Lambda explorer: **How it works** in the **Code** tab shows the same for a Python function, in place of the source.
+  batch call would make in fewer requests. `map_code()` does the same on code you have on disk
+  ([#82](https://github.com/utkarsh5026/aws-analyzer/pull/82)).
+- Lambda explorer: **How it works** in the **Code** tab shows the same for a Python function, in place of the source
+  ([#82](https://github.com/utkarsh5026/aws-analyzer/pull/82)).
 
 ## [0.17.0] - 2026-10-15
 
