@@ -1836,6 +1836,8 @@ Grouped the way `ui.help()` lists them.
 `ui.core` is the `LambdaAnalyzer`. Every UI command has a data method on it:
 
 ```python
+from aws_analyzer.lambda_functions import code_graph
+
 lam = ui.core                                          # or LambdaAnalyzer(region="eu-west-1", profile="dev")
 
 ov = lam.overview(regions="all")                       # Overview: .functions, .metrics, .triggers, .accounts

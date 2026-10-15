@@ -349,10 +349,18 @@ The report starts with a few sentences: what the code does when Lambda starts it
 
 - On the left, what comes in: the event, with the fields the code reads and the source that sends events like it, and the environment variables, with an arrow to each function that reads them.
 - In the middle, the handler and its own functions, a column for each step down the calls, an arrow for each call, and **At start-up** for what runs when Lambda loads the code.
-- On the right, what it reaches: each AWS service with the operations it calls, and the web, for its HTTP requests. An arrow's colour says what the call does (blue reads, orange writes, pink sends, purple runs), and ↻ marks one made inside a loop, once per item.
-- A box or an arrow a warning is about is amber. Point at a box to leave only it and what it's joined to in sight, and at an arrow for what goes along it (its operations, its variables, its line).
+- On the right, what it reaches: each AWS service with the operations it calls, and the web, for its HTTP requests. An arrow's colour says what the call does (blue reads, orange writes, pink sends, purple runs), and it lands on the operation it calls; an environment variable's arrow leaves from the variable's line. ↻ marks a call made inside a loop, once per item.
+- A box a warning is about has an amber edge and a **!**, and the line it's about says why: a variable that's **not set**, a list call that reads its **first page only**, a request with **no timeout**. An arrow a warning is about keeps its colour under an amber glow, with a **!** on it.
+- A dotted arrow from **At start-up** is a client made there. A dotted arrow in a call's colour is one known only by the method's name, because its client couldn't be followed, and a dash-dot one is a call made in functions further down that the graph leaves out.
+- Point at a box to leave only it and what it's joined to in sight, and at an arrow for what goes along it, in a sentence.
 
-The graph is plain SVG and CSS, so it still works in a reopened notebook, and the same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. It draws at most 24 functions, 5 calls deep; the steps below have them all.
+![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-light.webp#only-light){ width="984" height="448" loading=lazy }
+![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-dark.webp#only-dark){ width="984" height="448" loading=lazy }
+/// caption
+The graph in `ui.how_it_works("support-agent-actions")`: `open_ticket()` reads `TEAM_TOPIC`, which isn't set, and `tracking()` calls the shipping API with no timeout.
+///
+
+The graph is plain SVG and CSS, with no JavaScript, so it's still drawn when you reopen your notebook. JupyterLab doesn't keep a report's drawings and styles in a notebook it doesn't trust, such as one someone else saved, so run the cell again there. The same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. It draws at most 24 functions, 5 calls deep; the steps below have them all.
 
 Then the steps:
 

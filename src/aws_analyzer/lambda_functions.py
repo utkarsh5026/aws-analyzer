@@ -6393,6 +6393,19 @@ def _g_names(e: GraphEdge) -> list[str]:
     return [part for part in e.label.split(", ") if part]
 
 
+def _g_rows(card: _GCard, e: GraphEdge) -> list[str]:
+    """The rows of its box an arrow leaves from or lands on: the variables it carries, the operations it calls (the
+    '+3 more' row for one that isn't listed); none for the event as a whole or a client."""
+    if card.node.kind not in _GRAPH_LISTS or e.kind in ("event", "client"):
+        return []
+    if e.label in card.rows:
+        return [e.label]
+    hit = [name for name in _g_names(e) if name in card.rows]
+    if not hit and any(r.startswith("+") for r in card.rows):
+        hit = [r for r in card.rows if r.startswith("+")]
+    return [r for r in hit if card.row_y(r) is not None]
+
+
 def _g_anchors(graph: CodeGraph, cards: dict[str, _GCard], boxes: dict[str, tuple[float, float, float, float]]
                ) -> dict[int, tuple[list[float], list[float]]]:
     """Where each arrow leaves and arrives, as heights on the page: from the rows of the variables it carries, to the
@@ -6402,16 +6415,7 @@ def _g_anchors(graph: CodeGraph, cards: dict[str, _GCard], boxes: dict[str, tupl
     def middle(node_id: str) -> float:
         return boxes[node_id][1] + boxes[node_id][3] / 2
 
-    def rows_for(card: _GCard, e: GraphEdge) -> list[str]:
-        if card.node.kind not in _GRAPH_LISTS or e.kind in ("event", "client"):
-            return []
-        if e.label in card.rows:
-            return [e.label]
-        hit = [name for name in _g_names(e) if name in card.rows]
-        if not hit and any(r.startswith("+") for r in card.rows):
-            hit = [r for r in card.rows if r.startswith("+")]
-        return hit
-
+    rows_for = _g_rows
     joined: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for e in graph.edges:
         for here, there in ((e.source, e.target), (e.target, e.source)):
@@ -6522,9 +6526,11 @@ def _g_edge_tip(e: GraphEdge, graph: CodeGraph) -> str:
 
 def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, float, float, float]],
               xs: dict[int, float], widths: dict[int, float], column_of: dict[str, int], ys_out: list[float],
-              ys_in: list[float], hops: list[float] | None, mark_loop: bool = True) -> tuple[str, str]:
+              ys_in: list[float], hops: list[float] | None, mark_loop: bool = True,
+              hot: set[tuple[int, int]] | None = None) -> tuple[str, str]:
     """An arrow: its lines (one from each row it leaves to each row it reaches), its head, its loop mark; and, drawn
-    over the boxes, the dots where it leaves them."""
+    over the boxes, the dots where it leaves them. A warned arrow's glow and ! go on the lines in `hot` (by the index
+    of the row each leaves and reaches), or on all of them."""
     sx, _, sw, _ = boxes[e.source]
     tx, _, tw, _ = boxes[e.target]
     lines: list[str] = []
@@ -6539,8 +6545,9 @@ def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, floa
     else:  # the same column: out of the right side, round, and back into the target's right side
         x1, tip, d = sx + sw, tx + tw + 0.6, -1
         between = []
-    for a in ys_out:
-        for b in ys_in:
+    warned: list[str] = []
+    for ia, a in enumerate(ys_out):
+        for ib, b in enumerate(ys_in):
             if end == start:
                 bulge = 34 + 8 * len(lines)
                 path = (f"M{x1:.1f},{a:.1f} C{x1 + bulge:.1f},{a:.1f} {tip + 6.6 + bulge:.1f},{b:.1f} "
@@ -6551,6 +6558,10 @@ def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, floa
                 path, at = _g_strand(points)
             lines.append(path)
             marks.append(at)
+            if e.tone == "warn" and (hot is None or (ia, ib) in hot):
+                if not warned:  # the marks go on the first line the warning is about
+                    marks.insert(0, at)
+                warned.append(path)
     heads = [_g_head(tip, b, d) for b in dict.fromkeys(ys_in)]
     d_attr = " ".join(lines)
     classes = (f"ce ek-{_esc(e.kind)} s-{_esc(e.source)} t-{_esc(e.target)}" + (" warn" if e.tone == "warn" else "")
@@ -6565,7 +6576,7 @@ def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, floa
         if e.loop and mark_loop:
             mark += (f'<g class="lpb" transform="translate({cx:.1f},{cy:.1f})"><circle r="8.5"/>'
                      f'<path transform="scale(.66) translate(-8,-8)" d="{_G_LOOP}"/></g>')
-    halo = f'<path class="halo" d="{d_attr}"/>' if e.tone == "warn" else ""
+    halo = f'<path class="halo" d="{" ".join(warned)}"/>' if warned else ""
     body = (f'<g class="{classes}"><title>{_esc(_g_edge_tip(e, graph))}</title><path class="hit" d="{d_attr}"/>{halo}'
             f'<path class="ln" d="{d_attr}"/>' + "".join(f'<path class="ah" d="{h}"/>' for h in heads) + mark + "</g>")
     dots = f'<g class="{classes} pt">' + "".join(f'<circle cx="{x1:.1f}" cy="{y:.1f}" r="2.8"/>'
@@ -6702,8 +6713,14 @@ def _graph_html(block: _Graph, report: _Report) -> str:
     marked: set[tuple[str, str]] = set()  # one loop mark between two boxes, even for two arrows
     drawn = []
     for i, e in enumerate(graph.edges):
+        hot = None
+        if e.tone == "warn":  # the lines from or to the row the warning is about (TEAM_TOPIC, not set), else all
+            out, into = _g_rows(cards[e.source], e), _g_rows(cards[e.target], e)
+            hot = {(a, b) for a in range(len(ends[i][0])) for b in range(len(ends[i][1]))
+                   if (a < len(out) and out[a] in cards[e.source].node.flags)
+                   or (b < len(into) and into[b] in cards[e.target].node.flags)} or None
         drawn.append(_edge_svg(e, graph, boxes, xs, widths, column_of, *ends[i], routes.get(i),
-                               (e.source, e.target) not in marked))
+                               (e.source, e.target) not in marked, hot))
         if e.loop:
             marked.add((e.source, e.target))
     edges = "".join(body for body, _ in drawn)

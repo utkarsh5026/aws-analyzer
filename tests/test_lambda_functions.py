@@ -1157,6 +1157,15 @@ def test_graph_layout_and_drawing():
     assert '<g class="ce ek-sends s-f3 t-aws-sqs guess">' in page and '<g class="ce ek-sends s-f1 t-aws-sqs via">' in page
     assert "guessed from a method's name</span>" in page and "through functions not drawn</span>" in page
 
+    # a warned arrow that carries two variables glows only on the line from the one the warning is about
+    env = lfmod.GraphNode("env", "env", "Environment", "variables it reads", ["TABLE", "TOPIC"], "warn", column=0,
+                          flags={"TOPIC": "not set"})
+    two = lfmod.CodeGraph([env, nodes[0]], [lfmod.GraphEdge("env", "f0", "env", "TABLE, TOPIC", "warn")])
+    page = lfmod._render_html([lfmod._Graph(two, "")], 50)
+    lines = re.search(r'<path class="ln" d="([^"]*)"', page).group(1)
+    halo = re.search(r'<path class="halo" d="([^"]*)"', page).group(1)
+    assert lines.count("M") == 2 and halo.count("M") == 1 and halo in lines and ">not set</text>" in page
+
 
 def test_map_package_reads_its_own_files():
     data = zipped({"app.py": APP["app/main.py"].replace("from .store", "from store").replace("from . import", "import"),
