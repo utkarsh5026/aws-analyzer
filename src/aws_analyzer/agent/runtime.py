@@ -21,7 +21,7 @@ from .results import _plain
 if TYPE_CHECKING:
     from .toolkits import Toolkit
 
-COVERAGE = ("window", "regions", "region", "cut_short", "covered_from")  # a result's keys the report shows
+COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned")  # a result's keys the report shows
 
 
 def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
@@ -38,7 +38,9 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
             arguments = dict(inspect.signature(fn).bind_partial(*args, **kwargs).arguments)
         except TypeError:
             arguments = dict(kwargs)
-        call = ToolCall(fn.__name__, arguments)
+        defaults = _defaults(fn)  # LangChain passes every default: keep what the model asked for
+        arguments = {k: v for k, v in arguments.items() if k not in defaults or v != defaults[k]}
+        call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn))
         started = time.monotonic()
         with run.lock:
             run.calls.append(call)
@@ -82,3 +84,22 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
         return _plain(result)
 
     return tool
+
+
+def _defaults(fn: Callable[..., Any]) -> dict[str, Any]:
+    """A tool's parameters that have a default, and their defaults."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    return {p.name: p.default for p in params if p.default is not inspect.Parameter.empty}
+
+
+def _first_parameter(fn: Callable[..., Any]) -> str | None:
+    """The name of a tool's first parameter when it has no default ('function', 'location'): the report writes it
+    without its name, as the call reads in Python."""
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return None
+    return params[0].name if params and params[0].default is inspect.Parameter.empty else None

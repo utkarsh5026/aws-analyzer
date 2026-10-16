@@ -51,7 +51,8 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
 
 def _coverage_text(call: ToolCall) -> str:
     """'2026-10-15 18:00 to 2026-10-16 08:00 IST · us-east-1 · cut short' for the table of what it checked: the window
-    in the zone reports show times in (set_timezone()), the regions, and whether it was cut short."""
+    in the zone reports show times in (set_timezone()), the regions, the S3 keys it read, and whether it was cut
+    short."""
     cov = call.coverage
     parts = []
     window = cov.get("window")
@@ -61,6 +62,8 @@ def _coverage_text(call: ToolCall) -> str:
     where = cov.get("regions") or cov.get("region")
     if where:
         parts.append(", ".join(where) if isinstance(where, (list, tuple)) else str(where))
+    if cov.get("scanned"):
+        parts.append(f"{int(cov['scanned']):,} keys read")
     if cov.get("cut_short"):
         parts.append("cut short")
     return " · ".join(parts) or "-"
@@ -107,6 +110,7 @@ class AgentView(_BaseView):
     _START = (
         ("ask('Which Lambda failed last night?')", "the answer, what it checked, and what to run next"),
         ("ask('Why did it fail?')", "a follow-up: it remembers the conversation"),
+        ("ask('Did the files uploaded to acme-raw last night get processed?')", "S3 and Lambda together"),
         ("tools()", "what the agent can call, its model and its budget"),
     )
     _PROGRESS = ("Thinking", "steps")
@@ -139,9 +143,9 @@ class AgentView(_BaseView):
 
     @_friendly_errors
     def ask(self, question: str, *, new: bool = False) -> None:
-        """The agent's answer to a question about your AWS account (Lambda, for now), then what it checked to get it:
-        each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads, the
-        tokens and what it cost, and the LambdaView commands to look closer. Follow-up questions continue the
+        """The agent's answer to a question about your AWS account (Lambda and S3, for now), then what it checked to
+        get it: each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
+        the tokens and what it cost, and the LambdaView and S3View commands to look closer. Follow-up questions continue the
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
         found until then."""
         with self._progress() as tick:
@@ -190,9 +194,13 @@ class AgentView(_BaseView):
         else:
             basis.append(f"Model cost is an estimate: {answer.input_tokens:,} input and {answer.output_tokens:,} "
                          "output tokens at the prices you passed in model_prices=.")
-        if answer.metrics_read:
-            basis.append(f"It read {answer.metrics_read:,} CloudWatch metrics ({human_money(answer.aws_cost)}); its "
-                         "other AWS reads are free.")
+        billed = [f"{answer.metrics_read:,} CloudWatch metrics"] if answer.metrics_read else []
+        requests = sum(n for op, n in answer.aws_calls.items() if op.startswith("s3:"))
+        if requests:
+            billed.append(f"{_plural(requests, 'S3 request')}")
+        if billed:
+            basis.append(f"Its AWS reads cost {human_money(answer.aws_cost)} ({' and '.join(billed)}); the rest are "
+                         "free.")
         blocks.append(_Note(" ".join(basis)))
         if answer.error:
             blocks.append(_Note(answer.error, "warn"))
@@ -268,6 +276,7 @@ class AgentView(_BaseView):
              "the same (only when model_prices= says what its tokens cost)"],
             ["Steps", f"{budget.steps:,}", "the agent stops (LangGraph's recursion limit)"],
             ["Log window", f"{budget.log_days:g} days", "a longer log read is refused; CloudWatch's counts still work"],
+            ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
         ], title="Budget", sortable=False))
         never = " ".join(t.privacy for t in core.toolkits if t.privacy)
         blocks.append(_Note(
@@ -276,6 +285,7 @@ class AgentView(_BaseView):
             + f" The model is your Azure OpenAI deployment ({model}), outside AWS."))
         blocks.append(_Next([
             ("ask('Which Lambda failed last night?')", "an answer, and what it checked"),
+            ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together"),
             ("AgentView(budget={'tool_calls': 50, 'log_days': 7})", "a bigger budget per question"),
         ]))
         self._show(blocks)

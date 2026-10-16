@@ -22,6 +22,7 @@ from .toolkits import Toolkit, make_toolkits
 
 if TYPE_CHECKING:
     from ..lambda_functions import LambdaAnalyzer
+    from ..s3 import S3Analyzer
 
 
 class AgentAnalyzer(_BaseAnalyzer):
@@ -35,10 +36,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     Bedrock, a fake one in tests). model_prices= {'gpt-4o': (2.50, 10.00)} (USD per 1M input and output tokens) puts
     a price on each answer; without it the cost is unknown and only the tokens are counted.
 
-    What it reads: toolkits= picks the services it has tools for (names like 'lambda', or Toolkit objects; the
-    default is DEFAULT_TOOLKITS: Lambda). The Lambda toolkit reads through LambdaAnalyzer: lambda_core= to pass your
-    own, lambda_clients= its clients (for tests), prices= its prices. It looks in `region` (the session's) or
-    `regions` (a list, or 'all'). The user's time zone, so "last night" means their night, is set_timezone()'s (or
+    What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
+    the default is DEFAULT_TOOLKITS: Lambda and S3, with s3_triggers joining them). The Lambda toolkit reads through
+    LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
+    S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It looks in `region` (the
+    session's) or `regions` (a list, or 'all'); buckets are read wherever they are. The user's time zone, so "last night" means their night, is set_timezone()'s (or
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
     IST"). `budget` caps each question (Budget, or a dict of its fields).
@@ -68,6 +70,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         lambda_core: LambdaAnalyzer | None = None,
         lambda_clients: dict[str, Any] | None = None,
         prices: dict[str, float] | None = None,
+        s3_core: S3Analyzer | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.deployment, self.endpoint, self.api_version = azure_settings(deployment, endpoint, api_version)
@@ -86,7 +89,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.max_workers = 8
         self._guard = _Guard()
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
-            toolkits, {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices}})]
+            toolkits, {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
+                       "s3": {"analyzer": s3_core}})]
         self._graph: Any = None
         self._run: _Run | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
@@ -94,7 +98,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.history: list[AgentAnswer] = []  # every question asked, in order
 
     def toolkit(self, name: str) -> Toolkit:
-        """One of the agent's toolkits, by its name ('lambda')."""
+        """One of the agent's toolkits, by its name ('lambda', 's3')."""
         for toolkit in self.toolkits:
             if toolkit.name == name:
                 return toolkit
@@ -194,7 +198,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         answer.aws_calls = dict(self._guard.counts)
         answer.blocked = list(self._guard.blocked)
         answer.metrics_read = run.metrics_read
-        answer.aws_cost = run.aws_cost
+        answer.aws_cost = run.aws_cost + sum(t.request_cost(answer.aws_calls) for t in self.toolkits)
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices)
         answer.seconds = run.elapsed
         if answer.stopped is None:

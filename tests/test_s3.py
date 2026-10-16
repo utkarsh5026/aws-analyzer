@@ -86,6 +86,7 @@ from aws_analyzer.s3 import (
     parse_size,
     parse_time,
     pdf_flow,
+    parse_notifications,
     pdf_furniture,
     policy_findings,
     render_pdf_pages,
@@ -1584,6 +1585,29 @@ def test_policy_findings():
     assert any("NotPrincipal" in m for _, m in policy_findings([everyone]))
 
 
+def test_parse_notifications():
+    etl, queue, bus = parse_notifications({
+        "LambdaFunctionConfigurations": [{
+            "Id": "etl", "LambdaFunctionArn": "arn:aws:lambda:us-east-1:123456789012:function:orders-etl:prod",
+            "Events": ["s3:ObjectCreated:Put"],
+            "Filter": {"Key": {"FilterRules": [{"Name": "Prefix", "Value": "incoming/"},
+                                               {"Name": "suffix", "Value": ".csv"}]}}}],
+        "QueueConfigurations": [{"QueueArn": "arn:aws:sqs:eu-west-1:123456789012:audit",
+                                 "Events": ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"]}],
+        "EventBridgeConfiguration": {},
+    })
+    assert (etl.target, etl.name, etl.region, etl.prefix, etl.suffix) == (
+        "Lambda function", "orders-etl", "us-east-1", "incoming/", ".csv")
+    assert etl.describe() == "PUT uploads under 'incoming/' ending in '.csv' -> Lambda function orders-etl"
+    assert etl.matches("incoming/a.csv") and not etl.matches("incoming/a.CSV") and not etl.matches("in/a.csv")
+    assert etl.on_created() and etl.on_created(multipart=False) and not etl.on_created(multipart=True)
+    assert (queue.name, queue.region) == ("audit", "eu-west-1") and queue.on_created(multipart=True)
+    assert queue.describe() == "new objects and deletions -> SQS queue audit"
+    assert bus.target == "EventBridge" and bus.on_created() and bus.arn is None
+    assert "every event -> EventBridge" in bus.describe()
+    assert parse_notifications(None) == [] and parse_notifications({"ResponseMetadata": {}}) == []
+
+
 def test_objects_to_df():
     df = objects_to_df(sample_objects()[:2])
     assert list(df["key"]) == ["p/a/1.csv", "p/a/2.csv"] and "extension" in df.columns
@@ -1637,6 +1661,19 @@ def bucket(aws):
     put("archive/old.csv", CSV, StorageClass="GLACIER")
     put("big/file.bin", b"x" * (2 * MB))
     return BUCKET
+
+
+def test_notifications(bucket):
+    s3 = S3Analyzer()
+    assert s3.notifications(bucket) == []
+    arn = "arn:aws:lambda:us-east-1:123456789012:function:loader"
+    boto3.client("s3", region_name="us-east-1").put_bucket_notification_configuration(
+        Bucket=bucket, NotificationConfiguration={"LambdaFunctionConfigurations": [
+            {"LambdaFunctionArn": arn, "Events": ["s3:ObjectCreated:*"],
+             "Filter": {"Key": {"FilterRules": [{"Name": "prefix", "Value": "raw/"}]}}}]})
+    [loader] = s3.notifications(f"s3://{bucket}/raw/")
+    assert loader.arn == arn and loader.prefix == "raw/" and loader.suffix == ""
+    assert loader.describe() == "new objects under 'raw/' -> Lambda function loader"
 
 
 @pytest.fixture

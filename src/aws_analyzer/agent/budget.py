@@ -25,6 +25,7 @@ class Budget:
     usd: float | None = 1.00  # estimated model cost per question (only when the model's prices are known)
     steps: int = 80  # LangGraph's recursion limit: model calls, tool calls and the harness's own steps together
     log_days: float = 3.0  # the longest window a log read (errors, logs, performance) may cover
+    s3_keys: int = 100_000  # the most keys one S3 listing may read (find_files, folder_summary, s3_triggers)
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:

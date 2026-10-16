@@ -11,6 +11,10 @@ each tool's AWS reads and the IAM permissions its operations need, and it define
                                   one line) and `_next` ((View call, what it shows) pairs), which the agent takes out
     instructions(budget)          its section of the system prompt: how to use its tools well
     not_found(exc, arguments)     the result for a resource that isn't there (close names), or None
+    request_cost(counts)          what its AWS requests cost (the guard's counts by operation), when they're billed
+
+A tool that joins two services reads the other one through that service's toolkit: peer('lambda') is the agent's
+Lambda toolkit, or None when it hasn't got one (then the toolkit leaves the tool out).
 
 A tool raises what it likes: the agent's runtime (runtime.py) turns every error into the tool's result, and checks the
 question's budget before the tool runs. A tool that reads logs over a window checks the budget's log_days itself
@@ -43,6 +47,8 @@ class Toolkit:
     reads: dict[str, tuple[str, ...]] = {}  # tool name -> the AWS reads it makes (tools() and README list them)
     service: str = ""  # the IAM prefix of most of its operations, for permission_for(): 'lambda'
     services: dict[str, str] = {}  # operation -> its IAM prefix where that's another: {'FilterLogEvents': 'logs'}
+    permissions: dict[str, str] = {}  # operation -> its IAM permission where it isn't <prefix>:<operation>:
+    # {'ListObjectsV2': 's3:ListBucket'}
     view: str = ""  # the View whose commands its tools suggest next: 'LambdaView'
     client_factory: str | None = None  # the analyzer's method that makes clients, which the guard hooks too
 
@@ -79,6 +85,12 @@ class Toolkit:
         says so, and the closest names. None when the error is something else."""
         return None
 
+    def request_cost(self, counts: dict[str, int]) -> float:
+        """USD for the AWS requests in `counts` ('s3:ListObjectsV2' -> 12, every service's, as the guard counted them)
+        that this toolkit's service bills per request. 0 when its reads are free (CloudWatch metrics are counted
+        apart, with _count_metrics)."""
+        return 0.0
+
     # ------------------------------------------------------------------ what it gets
 
     @property
@@ -108,9 +120,18 @@ class Toolkit:
         regions = getattr(self.analyzer, "regions", None)
         return regions(which) if callable(regions) else [self.region]
 
+    def peer(self, name: str) -> Toolkit | None:
+        """Another of the agent's toolkits, by its name ('lambda'), or None when the agent hasn't got it. A toolkit
+        offers the tools that join two services (S3's s3_triggers, which reads Lambda too) only when the agent has
+        both, and reads the other service through that toolkit's analyzer."""
+        toolkits = getattr(self.agent, "toolkits", None) or []
+        return next((t for t in toolkits if t.name == name and t is not self), None)
+
     def permission_for(self, exc: ClientError) -> str:
         """The IAM permission a refused call needed: 'lambda:GetFunction' from the operation that failed."""
         op = getattr(exc, "operation_name", "") or ""
+        if op in self.permissions:
+            return self.permissions[op]
         service = self.services.get(op, self.service)
         return f"{service}:{op}" if op and service else ""
 
@@ -130,10 +151,14 @@ class Toolkit:
 
     def _view_call(self, command: str, *args: Any, region: str | None = None, **kwargs: Any) -> str:
         """A call of the toolkit's View, as it runs in a new cell: "LambdaView().errors('etl', since='24h')". The View
-        reads the notebook's default region, so region= is added when the resource is anywhere else."""
+        reads the notebook's default region, so region= is added when the resource is anywhere else. Arguments that
+        are None are left out: the command's own default applies."""
         if region and region != self._default_region():
             kwargs = {**kwargs, "region": region}
-        return f"{self.view}()." + _call(command, *args, **kwargs)
+        args = list(args)
+        while args and args[-1] is None:
+            args.pop()
+        return f"{self.view}()." + _call(command, *args, **{k: v for k, v in kwargs.items() if v is not None})
 
     @staticmethod
     def _default_region() -> str | None:
