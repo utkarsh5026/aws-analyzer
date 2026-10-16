@@ -19,6 +19,15 @@ for name, value in {
     "AWS_DEFAULT_REGION": "us-east-1",
 }.items():
     os.environ[name] = value
+os.environ.pop("AWS_ANALYZER_TZ", None)  # reports show times in UTC unless a test picks a zone
+
+
+@pytest.fixture(autouse=True)
+def _times_in_utc_again():
+    yield
+    fmt = sys.modules.get("aws_analyzer._kit.fmt")
+    if fmt is not None:  # a test that called set_timezone() leaves the next one in UTC
+        fmt.set_timezone(None)
 
 
 @pytest.fixture(autouse=True, scope="session")

@@ -152,6 +152,18 @@ s3 = ui.core               # the analyzer behind the view: returns data instead 
 
 Every report reads the same way: cards with the numbers that matter (amber or red when something needs a look), findings that each end in what to do, the tables of detail, and a **Next** row of the commands worth running next, with the arguments already filled in. One click on any command in a report selects all of it, ready to copy.
 
+### Times in your time zone { #timezone }
+
+Times are in UTC until you pick a zone. Then every report and window, for every service, shows its times in your zone and says which one (`Last modified (IST)`, `since 2024-05-01 14:02 IST`), and dates you type in (`since="2024-05-01 10:00"`) are read there too:
+
+```python
+from aws_analyzer import set_timezone
+
+set_timezone("Asia/Kolkata")   # or its city, "kolkata"; "America/New_York", "+05:30", "UTC" to go back
+```
+
+`set_timezone("local")` uses the machine's own zone, which on SageMaker is UTC, so name yours there. The `AWS_ANALYZER_TZ` environment variable picks the zone for every notebook (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
+
 <script>
 // This page used to be the S3 guide, so old links to its sections (e.g. /#costs) go to where they are now:
 // any #section that isn't on this page.

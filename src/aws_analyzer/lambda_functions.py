@@ -84,8 +84,8 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _why
 from ._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _plural, _share, _total, _utcnow, human_age,
-    human_money, human_size, parse_size, parse_time,
+    HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _in_zone, _plural, _share, _total, _tz_label,
+    _utcnow, _zone_name, human_age, human_money, human_size, parse_size, parse_time,
 )
 from ._kit.highlight import _json_source_html, _python_html
 from ._kit.jsontree import _JsonTree, _json_tree_css
@@ -6961,9 +6961,10 @@ def _outline_lines(block: _Outline, report: _Report) -> list[str]:
     return out
 
 
-def _stamp(moment: datetime | None) -> str:
-    """A log line's time, to the second, in UTC."""
-    return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
+    """A log line's time, to the second, in the zone reports show times in (UTC unless set_timezone() chose another);
+    zone=True adds the zone's name."""
+    return _fmt_dt(moment, seconds=True, zone=zone)
 
 
 _SECTIONS = {  # what a section of a report is, and the permission that reads it
@@ -7493,7 +7494,7 @@ class LambdaView(_BaseView):
             ["Logs", fn.log_group, _log_meaning(fn, detail.log_group, "log_group" in detail.errors)],
             ["State", _Tone(state, "warn") if state not in ("Active", "-") else state,
              fn.state_reason or ("Ready to run" if state == "Active" else "")],
-            ["Last change", f"{_fmt_dt(fn.last_modified)} UTC ({human_age(fn.last_modified, now)})",
+            ["Last change", f"{_fmt_dt(fn.last_modified, zone=True)} ({human_age(fn.last_modified, now)})",
              f"Last update: {fn.last_update or '-'}" + _reason(fn.last_update_reason)],
         ]
         if detail.runtime_updates:
@@ -7653,7 +7654,7 @@ class LambdaView(_BaseView):
             cards.insert(3, ("Throttled calls", _count(round(m.throttles)), "warn"))
         sub = " · ".join(filter(None, [
             f"log group {report.log_group}",
-            f"the last {window} (since {_fmt_dt(report.since)} UTC)",
+            f"the last {window} (since {_fmt_dt(report.since, zone=True)})",
             fn.region if fn.region != self.core.region else "",
         ]))
         blocks: list[Any] = [_Title(f"Errors in {fn.name}", sub), _Cards(cards)]
@@ -7661,7 +7662,7 @@ class LambdaView(_BaseView):
         if report.truncated:
             blocks.append(_Note(
                 f"Reading stopped at the newest {_count(limit)} error lines, which reach back to "
-                f"{_fmt_dt(report.covered_from)} UTC: pass limit= to read more, or a shorter since=."
+                f"{_fmt_dt(report.covered_from, zone=True)}: pass limit= to read more, or a shorter since=."
             ))
         empty = (f"No errors in the last {window}: no error lines in its logs"
                  + (", and CloudWatch counted no failed calls." if m is not None else "."))
@@ -7677,7 +7678,7 @@ class LambdaView(_BaseView):
             ))
             if not for_window:
                 blocks.append(_Table(
-                    ["Time (UTC)", "Request ID", "Line"],
+                    [f"Time ({_tz_label()})", "Request ID", "Line"],
                     [[_stamp(e.time), e.request_id or "-", _clip(_log_line(e.message).strip().splitlines()[0], 300)]
                      for e in report.newest],
                     title="The newest error lines", max_rows=0,
@@ -7786,8 +7787,8 @@ class LambdaView(_BaseView):
                 ))
         if page.truncated:
             blocks.append(_Note(
-                f"Reading stopped after {_count(len(page.events))} lines, back to {_fmt_dt(page.covered_from)} UTC: "
-                "these are the newest."
+                f"Reading stopped after {_count(len(page.events))} lines, back to "
+                f"{_fmt_dt(page.covered_from, zone=True)}: these are the newest."
             ))
         if shown:
             rows = []
@@ -7799,7 +7800,7 @@ class LambdaView(_BaseView):
                     _Tone(kind[0], "bad") if kind else ("report" if parse_report(e.message) else ""),
                     _log_line(e.message),
                 ])
-            blocks.append(_Table(["Time (UTC)", "Request ID", "Kind", "Line"], rows, max_rows=0,
+            blocks.append(_Table([f"Time ({_tz_label()})", "Request ID", "Kind", "Line"], rows, max_rows=0,
                                  title="Oldest first, the newest at the bottom"))
         steps = []
         if error_lines:
@@ -7869,7 +7870,7 @@ class LambdaView(_BaseView):
         blocks += self._log_notes(perf.errors, fn, perf.log_group)
         if perf.truncated:
             blocks.append(_Note(
-                f"Reading stopped at the newest {_count(limit)} runs, back to {_fmt_dt(perf.covered_from)} UTC: "
+                f"Reading stopped at the newest {_count(limit)} runs, back to {_fmt_dt(perf.covered_from, zone=True)}: "
                 "pass limit= to read more."
             ))
         blocks.append(_Findings(found, empty=(
@@ -7902,7 +7903,7 @@ class LambdaView(_BaseView):
         slowest = sorted(runs, key=lambda r: r.duration, reverse=True)[:10]
         if not for_window:
             blocks.append(_Table(
-                ["Time (UTC)", "Request ID", "Run time", "Billed", "Memory used", "Cold start", "Status"],
+                [f"Time ({_tz_label()})", "Request ID", "Run time", "Billed", "Memory used", "Cold start", "Status"],
                 [[_stamp(r.time), r.request_id, _ms(r.duration), _ms(r.billed), _mb(r.max_memory),
                   _ms(r.init) if r.init is not None else "-",
                   _Tone(r.status + (f" ({r.error_type})" if r.error_type else ""), "bad") if r.status else "ok"]
@@ -8706,8 +8707,8 @@ def _short_day(moment: datetime) -> str:
 
 
 def _run_clock(moment: datetime, today: date) -> str:
-    """A run's start in UTC: '14:02:31' today, 'Oct 5 14:02' another day."""
-    moment = moment.astimezone(timezone.utc)
+    """A run's start in the zone reports show times in: '14:02:31' today, 'Oct 5 14:02' another day."""
+    moment = _in_zone(moment)
     return moment.strftime("%H:%M:%S") if moment.date() == today else f"{_short_day(moment)} {moment:%H:%M}"
 
 
@@ -8788,7 +8789,7 @@ def _run_summary(run: LogRun) -> tuple[str, str]:
 def _run_tip(run: LogRun, opened: bool) -> str:
     """A run's tooltip: what happened, when, its request ID, and what a click does."""
     label = _RUN_STATES.get(run.status, ("", "", run.status))[2]
-    return " · ".join(filter(None, [label[:1].upper() + label[1:], f"started {_stamp(run.start)} UTC",
+    return " · ".join(filter(None, [label[:1].upper() + label[1:], f"started {_stamp(run.start, zone=True)}",
                                     f"request {run.request_id}" if run.request_id else "",
                                     "click to fold its lines" if opened else "click to see its lines"]))
 
@@ -8834,7 +8835,7 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
         extra = (f'<details><summary>{{…}} fields</summary><span class="jf">{_json_source_html(fields)}</span>'
                  "</details>" if fields else "")
         rows.append(f'<div class="rl {level}{" hit" if event.matched else ""}"><span class="lt" title="'
-                    f'{_esc(_stamp(event.time))} UTC">{_esc(when)}</span><span class="lv {level}">{badge}</span>'
+                    f'{_esc(_stamp(event.time, zone=True))}">{_esc(when)}</span><span class="lv {level}">{badge}</span>'
                     f'<span class="lm">{_marked(text, words) or "&nbsp;"}{extra}</span></div>')
     if not lines:
         rows.append('<div class="rmore">It logged nothing of its own: only Lambda\'s START and REPORT lines.</div>')
@@ -10517,8 +10518,8 @@ class LambdaExplorer(_Explorer):
 
         def done(run: LogRun | None) -> None:
             if run is None:
-                self._status(f"Couldn't find run {label}'s lines around {_stamp(moment)} UTC: its log stream may have "
-                             "been deleted, or the logs aren't kept that long.", "warn")
+                self._status(f"Couldn't find run {label}'s lines around {_stamp(moment, zone=True)}: its log stream "
+                             "may have been deleted, or the logs aren't kept that long.", "warn")
                 return
             self.found = LogPage(fn, fn.log_group, run.start, run.end, events=run.events,
                                  pattern=f'"{run.request_id}"' if run.request_id else None)
@@ -10579,7 +10580,7 @@ class LambdaExplorer(_Explorer):
         while len(self._run_rows) < len(page):
             self._run_rows.append(_RunRow(self))
         words = self._words()
-        today = _utcnow().date()
+        today = _in_zone(_utcnow()).date()
         timeout = self._full().timeout if self.function is not None else 0
         for row, run in zip(self._run_rows, page):
             row.run = run
@@ -10638,10 +10639,11 @@ class LambdaExplorer(_Explorer):
         notes: list[Any] = list(self.ui._log_notes(page.errors, fn, page.log_group)) if page.errors else []
         if self.found is None and page.truncated:
             notes.append(_Note(f"These are the newest {_count(_RUN_LINES)} lines, back to "
-                               f"{_stamp(page.covered_from)} UTC: Older runs (under the list) reads further back."))
+                               f"{_stamp(page.covered_from, zone=True)}: Older runs (under the list) reads further "
+                               "back."))
         elif self.found is not None and page.truncated:
             notes.append(_Note(f"CloudWatch stopped at the newest {_count(_SEARCH_HITS)} matching lines, back to "
-                               f"{_stamp(page.covered_from)} UTC: pick a shorter time range to see older ones."))
+                               f"{_stamp(page.covered_from, zone=True)}: pick a shorter time range to see older ones."))
         bits = []
         if visible:
             runs = [r for r in visible if r.request_id]
@@ -10664,7 +10666,8 @@ class LambdaExplorer(_Explorer):
             if cold:
                 bits.append(f"<span><b>{cold:,}</b> cold {'start' if cold == 1 else 'starts'}</span>")
             where = (f"with {self._searched!r}" if self.found is not None else self._range_text())
-            bits.append(f'<span class="lmx-note">Newest first, {where}; times in UTC. Click a run to see its lines'
+            bits.append(f'<span class="lmx-note">Newest first, {where}; times in {_tz_label()}. Click a run to see '
+                        "its lines"
                         + (", the matching ones marked" if self.found is not None or self._log_query else "")
                         + ".</span>")
         summary = f'<div class="lmx-sum">{"".join(bits)}</div>' if bits else ""
@@ -10707,7 +10710,7 @@ class LambdaExplorer(_Explorer):
         if page is None or fn is None or not page.truncated or page.covered_from is None:
             return
         start, end = page.since, page.covered_from - timedelta(milliseconds=1)
-        self._status(f"Reading older lines, before {_stamp(page.covered_from)} UTC…", busy=True, owner="logs")
+        self._status(f"Reading older lines, before {_stamp(page.covered_from, zone=True)}…", busy=True, owner="logs")
         self.older_button.disabled = True
 
         def done(got: tuple[list[LogEvent], bool, datetime | None]) -> None:
@@ -10721,9 +10724,8 @@ class LambdaExplorer(_Explorer):
             self._runs = page.runs
             self._draw_run_chips()
             self._draw_runs()
-            self._finish("logs", f"Read {len(events):,} more lines" + (f", back to {_stamp(covered)} UTC" if truncated
-                                                                       else f": every line of {self._range_text()}"),
-                         tabs=("logs",))
+            more = f", back to {_stamp(covered, zone=True)}" if truncated else f": every line of {self._range_text()}"
+            self._finish("logs", f"Read {len(events):,} more lines{more}", tabs=("logs",))
 
         def failed(exc: BaseException) -> None:
             self.older_button.disabled = False
@@ -10813,7 +10815,8 @@ class LambdaExplorer(_Explorer):
         known = {(e.stream, e.time, e.message) for e in page.events}
         new = [e for e in events if (e.stream, e.time, e.message) not in known]
         page.until = _utcnow()
-        checked = f"checked {page.until:%H:%M:%S} UTC"
+        clock = _in_zone(page.until)
+        checked = f"checked {clock:%H:%M:%S} {_zone_name(clock)}"
         if new:
             before = {run.key for run in self._runs}
             page.events = sorted(page.events + new, key=lambda e: e.time)[-20_000:]
@@ -10867,7 +10870,7 @@ class LambdaExplorer(_Explorer):
         self.error_report = report
         self._draw("errors", self.errors_view, self.ui._errors_blocks(report, since=self._errors_range, for_window=True))
         failed = [e for e in report.newest]
-        today = _utcnow().date()
+        today = _in_zone(_utcnow()).date()
         while len(self._error_rows) < len(failed):
             self._error_rows.append(_Row(self, self._clicked_failure, short=True))
         for row, event in zip(self._error_rows, failed):
@@ -10877,7 +10880,8 @@ class LambdaExplorer(_Explorer):
                                 f"{_esc(_run_clock(event.time, today))}</span><span class=\"ek\">{_esc(kind)}</span>"
                                 f'<span class="es">{_esc(summary.splitlines()[0][:300])}</span>'
                                 '<span class="eo">Read the run ›</span></div>')
-            tip = f"{_stamp(event.time)} UTC · request {event.request_id or 'unknown'} · click to read every line"
+            tip = (f"{_stamp(event.time, zone=True)} · request {event.request_id or 'unknown'} · click to read every "
+                   "line")
             if row.button.tooltip != tip:
                 row.button.tooltip = tip
         self.error_rows_box.children = [row.box for row in self._error_rows[:len(failed)]]
@@ -10916,7 +10920,7 @@ class LambdaExplorer(_Explorer):
         self._draw("performance", self.perf_view, self.ui._performance_blocks(perf, since=self._perf_range,
                                                                               for_window=True))
         slowest = sorted(perf.invocations, key=lambda r: r.duration, reverse=True)[:10]
-        today = _utcnow().date()
+        today = _in_zone(_utcnow()).date()
         while len(self._slow_rows) < len(slowest):
             self._slow_rows.append(_Row(self, self._clicked_slow, short=True))
         for row, inv in zip(self._slow_rows, slowest):

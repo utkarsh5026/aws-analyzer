@@ -9,6 +9,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
+  report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
+  `since 2024-05-01 14:02 IST`). It takes a tz database name, its city alone (`"kolkata"`, `"new york"`), `"local"`
+  for the machine's own zone, an offset (`"+05:30"`) or `"UTC"` to go back, and dates you type in
+  (`since="2024-05-01 10:00"`) are read in the same zone. The `AWS_ANALYZER_TZ` environment variable picks it for every
+  notebook, and `help()` says which zone times are in. CloudWatch's daily numbers stay in UTC days, as AWS adds them up.
+
 ## [0.19.0] - 2026-10-16
 
 ### Added

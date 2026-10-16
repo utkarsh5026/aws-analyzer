@@ -138,7 +138,7 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
-<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
+<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone</summary>
 
 ```python
 from aws_analyzer import S3Analyzer, S3View
@@ -153,6 +153,20 @@ Every View takes the same options. Commands that take a while show a progress ba
 [tqdm](https://github.com/tqdm/tqdm) bar (a widget in Jupyter when `ipywidgets` is installed) with the rate and the
 time left, when tqdm is installed, as it usually is on SageMaker. Without it you get a plain line with the same
 numbers.
+
+Times are in UTC until you pick a zone. Then every report and window shows its times in your zone, and says which
+one in its columns and sentences (`Last modified (IST)`, `since 2024-05-01 14:02 IST`):
+
+```python
+from aws_analyzer import set_timezone
+
+set_timezone("Asia/Kolkata")      # or its city, "kolkata"; "America/New_York", "+05:30", "UTC" to go back
+set_timezone("local")             # this machine's own zone: on SageMaker that's UTC, so name yours there
+```
+
+Dates you type in (`since="2024-05-01 10:00"`, `older_than="2024-05-01"`) are read in the same zone. To pick it for
+every notebook, set the `AWS_ANALYZER_TZ` environment variable (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily
+numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
 
 </details>
 
