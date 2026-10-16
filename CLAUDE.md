@@ -226,7 +226,7 @@ How the View layer works:
   the barycenter of its neighbours and gives an arrow that skips columns, either way, a waypoint in each, so it runs
   between boxes; `_g_anchors` lands an arrow on the row of the operation it calls, or starts it at the variable it
   carries, else spreads it down the box's side; a warning's arrow keeps its colour under an amber halo, and its loop and
-  warning marks sit on its straight run; pointing at a box is per-node `:has()` rules in `report.rules`, and
+  warning marks sit on its straight run, clear of other arrows' marks; pointing at a box is per-node `:has()` rules in `report.rules`, and
   arrowheads are paths, not markers), and in Bedrock `_Passage` (a retrieved
   passage with `<mark>` highlights) and `_Answer` (an answer laid out from its markdown by `_Markdown`, with shaded
   cited spans and `[n]` superscripts), in `bedrock_kb` also `_Steps` (a dot per step on a line: how a file was

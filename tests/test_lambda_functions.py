@@ -1090,7 +1090,8 @@ def test_graph_layout_and_drawing():
     boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(graph, cards)
     assert set(boxes) == {n.id for n in graph.nodes} and sorted(xs) == list(range(5))
     assert all(xs[k + 1] == xs[k] + widths[k] + lfmod._GRAPH_GAP for k in range(4))  # columns left to right
-    assert all(lfmod._GRAPH_MIN_W <= w <= lfmod._GRAPH_MAX_HANDLER for w in widths.values())
+    assert all(lfmod._GRAPH_MIN_W <= w <= lfmod._GRAPH_MAX_FLAGGED for w in widths.values())
+    assert widths[4] > lfmod._GRAPH_MAX_W  # the S3 box's ListObjectsV2 is whole beside its flag
     assert width == xs[4] + widths[4] + lfmod._GRAPH_PAD_X  # no arrow goes back, so no room kept to curl round
     by_column = defaultdict(list)
     for n in graph.nodes:
@@ -1119,6 +1120,7 @@ def test_graph_layout_and_drawing():
     assert ('<g class="ce ek-reads s-f0 t-aws-s3 warn"><title>handler() reads from S3: ListObjectsV2; in a loop, once '
             'per item; a warning is about it</title>') in page and '<path class="halo" d="M' in page
     assert ">QUEUE_URL</text>" in page and ">not set</text>" in page and ">first page only</text>" in page
+    assert ">ListObjectsV2</text>" in page and '<path class="cs" d="M' in page
     assert ">no timeout</text>" in page and '<circle class="bu flagged"' in page  # what a warning is about, marked
     assert ">COMES IN</text>" in page and ">HANDLER</text>" in page and ">REACHES</text>" in page
     assert ".lmb .cg:has(.n-f0:hover) .ce:not(.s-f0):not(.t-f0){opacity:.06}" in page  # pointing at a box
@@ -1152,7 +1154,7 @@ def test_graph_layout_and_drawing():
     cards = lfmod._g_cards(odd)
     boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(odd, cards)
     assert set(routes) == {2, 5} and len(routes[2]) == 1  # the call back to handler() runs between b()'s neighbours
-    assert width == xs[3] + widths[3] + lfmod._GRAPH_PAD_X + 52  # room for the loop from b() round to c()
+    assert width == xs[3] + widths[3] + lfmod._GRAPH_PAD_X  # the loop from b() round to c() curls in a gap
     page = lfmod._render_html([lfmod._Graph(odd, "")], 50)
     assert '<g class="ce ek-sends s-f3 t-aws-sqs guess">' in page and '<g class="ce ek-sends s-f1 t-aws-sqs via">' in page
     assert "guessed from a method's name</span>" in page and "through functions not drawn</span>" in page
@@ -1165,6 +1167,33 @@ def test_graph_layout_and_drawing():
     lines = re.search(r'<path class="ln" d="([^"]*)"', page).group(1)
     halo = re.search(r'<path class="halo" d="([^"]*)"', page).group(1)
     assert lines.count("M") == 2 and halo.count("M") == 1 and halo in lines and ">not set</text>" in page
+
+    # a service reached in four ways: the words under its name are cut to fit, never past the card
+    sfn = lfmod.GraphNode("aws-states", "aws", "Step Functions", "runs · reads · sends · writes", ["StartExecution"],
+                          column=2)
+    page = lfmod._render_html([lfmod._Graph(lfmod.CodeGraph([nodes[0], sfn], [
+        lfmod.GraphEdge("f0", "aws-states", "runs", "StartExecution")]), "")], 50)
+    assert '<tspan class="ac ek-runs">runs</tspan>' in page and '<tspan class="sep"> · </tspan>…</text>' in page
+
+    # two requests, one whose code has ', ' in it: each arrow lands on its own row
+    two = map_code({"app.py": "import os, requests\n\ndef handler(event, context):\n"
+                              "    requests.post(os.environ.get('HOOK', 'https://a.example'), json={})\n"
+                              "    return requests.get('https://b.example', timeout=2)\n"}, "app.handler")
+    graph = code_graph(two)
+    cards = lfmod._g_cards(graph)
+    boxes = lfmod._graph_layout(graph, cards)[0]
+    ends = lfmod._g_anchors(graph, cards, boxes)
+    sent = next(i for i, e in enumerate(graph.edges) if e.kind == "http")
+    assert sorted(ends[sent][1]) == sorted(boxes["http"][1] + cards["http"].row_y(r) for r in cards["http"].rows)
+
+    # a function that answers two routes keeps both
+    web = map_code({"main.py": "from mangum import Mangum\nfrom fastapi import FastAPI\napp = FastAPI()\n\n"
+                               "@app.get('/items')\n@app.head('/items')\ndef items():\n    return []\n\n"
+                               "handler = Mangum(app)\n"}, "main.handler")
+    graph = code_graph(web)
+    assert [e.label for e in graph.edges if e.kind == "call"] == ["GET /items; HEAD /items"]
+    page = lfmod._render_html([lfmod._Graph(graph, "")], 50)
+    assert '<tspan class="mt">GET</tspan> /items +1</text>' in page
 
 
 def test_map_package_reads_its_own_files():
