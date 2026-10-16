@@ -23,6 +23,9 @@ Quick start
     from aws_analyzer import LambdaExplorer  # a window to look through your Lambda functions: their logs run by
     LambdaExplorer("orders-etl", tab="logs") # run, errors, run times, code and settings, by clicking
 
+    from aws_analyzer import set_timezone    # times in your own zone instead of UTC, in every report and window
+    set_timezone("Asia/Kolkata")             # or "local", "+05:30"; AWS_ANALYZER_TZ=Asia/Kolkata does it for good
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
 Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions. Importing
@@ -36,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
+    from ._kit.fmt import set_timezone
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
@@ -68,6 +72,7 @@ __all__ = [
     "LambdaAnalyzer",
     "LambdaView",
     "LambdaExplorer",
+    "set_timezone",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -89,6 +94,7 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
     "LambdaExplorer": "lambda_functions",
+    "set_timezone": "_kit.fmt",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
             "lambda_functions")

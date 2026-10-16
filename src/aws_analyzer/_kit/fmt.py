@@ -1,11 +1,14 @@
-"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; file names'
-extensions; and Stat, a running count and its total bytes."""
+"""Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; the time
+zone reports show times in (set_timezone); file names' extensions; and Stat, a running count and its total bytes."""
 
 from __future__ import annotations
 
+import difflib
+import os
 import re
+import warnings
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 HOURS_PER_MONTH = 730  # how AWS turns an hourly price into a monthly one
@@ -43,11 +46,123 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ----------------------------------------------------------------------------- the time zone reports show
+
+TIMEZONE_ENV = "AWS_ANALYZER_TZ"  # names the zone for every notebook, before any of them calls set_timezone()
+_OFFSET_RE = re.compile(r"^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+_NUMERIC_ZONE_RE = re.compile(r"^(?:UTC|GMT)?[+-][\d:]+$")
+_DEFAULT = object()  # no set_timezone() yet: AWS_ANALYZER_TZ's zone, else UTC
+_chosen: Any = _DEFAULT  # what set_timezone() chose: a tzinfo, or None for this machine's own zone
+_from_env: dict[str, tzinfo | None] = {}  # AWS_ANALYZER_TZ's value -> its zone, worked out once per value
+
+
+def set_timezone(zone: str | tzinfo | None) -> str:
+    """Show times in your own time zone: set_timezone('Asia/Kolkata'). Every report and window from then on shows
+    its times there and says which zone they're in ('Last modified (IST)', '... since 2024-05-01 14:02 IST'), and
+    dates you type in ('2024-05-01', '2024-05-01 10:00') are read there too. Returns the zone's short name, the way
+    reports show it ('IST', 'PST/PDT', 'UTC').
+
+    zone is a tz database name ('Europe/London', 'America/New_York'; its city alone works too: 'kolkata',
+    'new york'), 'local' for this machine's own zone, 'UTC', an offset ('+05:30', 'UTC-4') or a tzinfo. None goes
+    back to the default: the zone the AWS_ANALYZER_TZ environment variable names, else UTC. SageMaker's machines
+    keep their clocks in UTC, so 'local' is UTC there: name your zone instead.
+
+    A few things stay in UTC whatever the zone, and say so: CloudWatch's daily numbers (Lambda's "Day (UTC)"), which
+    AWS adds up by UTC day."""
+    global _chosen
+    _chosen = _DEFAULT if zone is None else _zone_from(zone)
+    return _tz_label()
+
+
+def _zone_from(value: str | tzinfo) -> tzinfo | None:
+    """What set_timezone() takes -> a tzinfo, or None for this machine's own zone. A name it can't find raises a
+    ValueError that says what it takes, with the closest names."""
+    if isinstance(value, tzinfo):
+        return value
+    if not isinstance(value, str):
+        raise TypeError(f"set_timezone() takes a zone's name, like 'Asia/Kolkata', or a tzinfo; got {value!r}")
+    text = value.strip()
+    if text.lower() == "local":
+        return None
+    if text.upper() in ("UTC", "GMT", "Z"):
+        return timezone.utc
+    offset = _OFFSET_RE.match(text)
+    if offset:
+        sign, hours, minutes = offset.groups()
+        delta = timedelta(hours=int(hours), minutes=int(minutes or 0))
+        if delta > timedelta(hours=14) or int(minutes or 0) >= 60:
+            raise ValueError(f"{value!r} isn't an offset from UTC: they run from -12:00 to +14:00")
+        return timezone(-delta if sign == "-" else delta)
+    from zoneinfo import ZoneInfo, available_timezones
+
+    names = available_timezones()
+    if not names:  # Windows has no tz database of its own
+        raise ValueError(f"Can't look up {value!r}: this Python has no time zone database. pip install tzdata, or "
+                         "give an offset, like '+05:30'")
+    places: dict[str, str] = {}  # 'asia/kolkata', 'kolkata', 'america/new york', 'new york' -> its name
+    for name in sorted(names, key=lambda n: (n.count("/"), n)):  # 'louisville': America/, not America/Kentucky/
+        full = name.lower().replace("_", " ")
+        places.setdefault(full, name)
+        places.setdefault(full.rsplit("/", 1)[-1], name)
+    asked = re.sub(r"[\s_]+", " ", text.lower())
+    if asked in places:
+        return ZoneInfo(places[asked])
+    close = dict.fromkeys(places[c] for c in difflib.get_close_matches(asked, list(places), n=3, cutoff=0.7))
+    hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
+    if re.fullmatch(r"[A-Z]{2,5}", text):
+        hint += f" A short name like {text} can mean more than one zone (IST is India's, Ireland's and Israel's)."
+    raise ValueError(f"{value!r} isn't a time zone set_timezone() knows.{hint} Name it the way the tz database does "
+                     "('Asia/Kolkata', 'America/New_York'), by its city ('kolkata'), or by its offset ('+05:30')")
+
+
+def _display_zone() -> tzinfo | None:
+    """The zone reports show times in: set_timezone()'s, else the one AWS_ANALYZER_TZ names, else UTC. None is this
+    machine's own zone."""
+    if _chosen is not _DEFAULT:
+        return _chosen
+    name = os.environ.get(TIMEZONE_ENV, "").strip()
+    if not name:
+        return timezone.utc
+    if name not in _from_env:
+        try:
+            _from_env[name] = _zone_from(name)
+        except ValueError as exc:
+            warnings.warn(f"{TIMEZONE_ENV}={name!r}: {exc}. Times show in UTC.", stacklevel=2)
+            _from_env[name] = timezone.utc
+    return _from_env[name]
+
+
+def _in_zone(moment: datetime) -> datetime:
+    """The moment in the zone reports show times in (UTC unless set_timezone() chose another)."""
+    return moment.astimezone(_display_zone())
+
+
+def _zone_name(moment: datetime) -> str:
+    """The zone of a moment _in_zone() gave, as reports name it: 'UTC', 'IST', 'PDT'; 'UTC+04' or 'UTC+05:45' for a
+    zone that has no name in letters."""
+    name = moment.tzname() or ""
+    if name and not _NUMERIC_ZONE_RE.match(name):
+        return name
+    minutes = round((moment.utcoffset() or timedelta(0)).total_seconds() / 60)
+    hours, rest = divmod(abs(minutes), 60)
+    return "UTC" if not minutes else f"UTC{'-' if minutes < 0 else '+'}{hours:02d}" + (f":{rest:02d}" if rest else "")
+
+
+def _tz_label() -> str:
+    """The name of the zone reports show times in, for a column of times ('Last modified (IST)'): 'UTC', 'IST', or
+    both of a zone's names when it changes its clocks, standard time first ('PST/PDT', 'GMT/BST')."""
+    zone, year = _display_zone(), _utcnow().year
+    moments = [datetime(year, month, 1, 12, tzinfo=timezone.utc).astimezone(zone) for month in (1, 7)]
+    named = sorted((m.utcoffset() or timedelta(0), _zone_name(m)) for m in moments)
+    return "/".join(dict.fromkeys(name for _, name in named))
+
+
 def parse_time(
     value: datetime | date | timedelta | str | None, now: datetime | None = None
 ) -> datetime | None:
     """datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), or a relative
-    age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are UTC."""
+    age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are in the zone reports show times in:
+    UTC, unless set_timezone() chose another."""
     if value is None:
         return None
     if isinstance(value, timedelta):
@@ -62,7 +177,10 @@ def parse_time(
             seconds = float(relative.group(1)) * _UNIT_SECONDS[relative.group(2).lower()]
             return (now or _utcnow()) - timedelta(seconds=seconds)
         moment = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
-    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+    if moment.tzinfo:
+        return moment
+    zone = _display_zone()
+    return moment.astimezone() if zone is None else moment.replace(tzinfo=zone)  # astimezone(): this machine's
 
 
 def human_age(when: datetime | None, now: datetime | None = None) -> str:
@@ -92,8 +210,14 @@ def human_money(usd: float | None) -> str:
     return f"{sign}${usd:,.0f}" if usd >= 1000 else f"{sign}${usd:,.2f}"
 
 
-def _fmt_dt(moment: datetime | None) -> str:
-    return "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+def _fmt_dt(moment: datetime | None, *, seconds: bool = False, zone: bool = False) -> str:
+    """A moment as reports show it, in the zone set_timezone() chose (UTC unless): '2024-05-01 14:02', to the second
+    with seconds=True. zone=True adds the zone's name, for a time in a sentence: '2024-05-01 14:02 UTC'."""
+    if moment is None:
+        return "-"
+    moment = _in_zone(moment)
+    text = moment.strftime("%Y-%m-%d %H:%M:%S" if seconds else "%Y-%m-%d %H:%M")
+    return f"{text} {_zone_name(moment)}" if zone else text
 
 
 def _duration(seconds: float) -> str:

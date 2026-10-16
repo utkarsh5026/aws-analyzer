@@ -15,6 +15,7 @@ import wave
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 import boto3
 import fastavro
@@ -31,6 +32,7 @@ from moto import mock_aws
 from PIL import Image
 
 from aws_analyzer import s3 as s3mod
+from aws_analyzer import set_timezone
 from aws_analyzer._kit import jsontree, render
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.blocks import _Report
@@ -3518,6 +3520,18 @@ def test_ui_text_reports(ui, capsys, aws):
     assert "00000000" in run(capsys, ui.preview, f"{root}docs/blob.bin")
     assert "https://" in run(capsys, ui.link, f"{root}docs/readme.md")
     assert "Block public access" in run(capsys, ui.bucket_info, BUCKET)
+
+
+def test_ui_shows_times_in_the_zone_picked(ui, core, capsys):
+    root = f"s3://{BUCKET}/"
+    [big] = core.find(root, min_size="1MB")
+    assert "Last modified (UTC)" in run(capsys, ui.find, root, min_size="1MB")
+    assert set_timezone("Asia/Kolkata") == "IST"
+    shown = big.last_modified.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M")
+    found = run(capsys, ui.find, root, min_size="1MB")
+    assert "Last modified (IST)" in found and shown in found and "UTC" not in found
+    assert re.search(rf"last_modified +{shown} IST", run(capsys, ui.head, f"{root}big/file.bin"))
+    assert "Created (IST)" in run(capsys, ui.buckets)
     assert "summary(" in run(capsys, ui.help)
 
 

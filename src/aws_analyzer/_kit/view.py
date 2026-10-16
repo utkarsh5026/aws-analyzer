@@ -22,6 +22,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from .blocks import _Next, _Note, _Table, _Text, _Title
 from .deps import _in_notebook
 from .errors import _Hint
+from .fmt import _tz_label
 from .progress import _progress_bar, _progress_bar_class, _progress_text
 from .render import _render_text, _signature
 from .text import _esc
@@ -246,4 +247,9 @@ class _BaseView:
             rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
             if rows:
                 blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
+        zone = _tz_label()
+        change = ("set_timezone('Asia/Kolkata') (from aws_analyzer) shows them in your own zone, set_timezone('local') "
+                  "in this machine's." if zone == "UTC" else
+                  "set_timezone('UTC') (from aws_analyzer) shows them in UTC again.")
+        blocks.append(_Note(f"Times are in {zone}: {change}"))
         self._show(blocks)

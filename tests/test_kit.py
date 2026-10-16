@@ -5,16 +5,22 @@ what no window meets (a command that can't run, an error that should still raise
 reports read, and each window's tests click through it."""
 
 import itertools
+import os
+import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from botocore.exceptions import ClientError
 
-from aws_analyzer import bedrock_chat, bedrock_kb, dynamodb, lambda_functions, opensearch, s3, sagemaker_env
+from aws_analyzer import (
+    bedrock_chat, bedrock_kb, dynamodb, lambda_functions, opensearch, s3, sagemaker_env, set_timezone,
+)
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
 from aws_analyzer._kit.blocks import _Note, _Title
 from aws_analyzer._kit.errors import _Hint
-from aws_analyzer._kit.render import _base_css, _render_text, _report_html
+from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
+from aws_analyzer._kit.render import _base_css, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
 from aws_analyzer._kit.window import _Window, _window_errors
 
@@ -119,6 +125,12 @@ def test_help_lists_the_views_commands_and_its_own(capsys):
     _Toy().help()
     out = capsys.readouterr().out
     assert "_Toy commands" in out and "-- Help --\nCommand" in out and "-- Other --" in out and "fail(exc," in out
+    assert out.rstrip().endswith("[i] Times are in UTC: set_timezone('Asia/Kolkata') (from aws_analyzer) shows them in "
+                                 "your own zone, set_timezone('local') in this machine's.")
+    set_timezone("Asia/Kolkata")
+    _Toy().help()
+    assert "Times are in IST: set_timezone('UTC') (from aws_analyzer) shows them in UTC again." in (
+        capsys.readouterr().out)
     _Toy().help("fial")
     assert "_Toy has no command 'fial'. Did you mean 'fail'?" in capsys.readouterr().out
 
@@ -155,6 +167,76 @@ def test_prices_given_to_one_analyzer_change_nothing_else(module, analyzer, view
         assert module.MODEL_PRICES[model] != (1.0, 2.0) and other.model_prices == module.MODEL_PRICES
         assert view(custom, mode="text")._price_basis(models=True) == "your prices"
         assert view(other, mode="text")._price_basis(models=True) == "us-east-1 list prices"
+
+
+MAY_DAY = datetime(2024, 5, 1, 10, 0, 31, tzinfo=timezone.utc)
+JANUARY = datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc)
+
+
+def test_times_show_in_utc_until_a_zone_is_picked():
+    assert _fmt_dt(MAY_DAY) == "2024-05-01 10:00" and _fmt_dt(MAY_DAY, zone=True) == "2024-05-01 10:00 UTC"
+    assert _fmt_dt(MAY_DAY, seconds=True) == "2024-05-01 10:00:31" and _fmt_dt(None) == "-" and _tz_label() == "UTC"
+    assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("zone, label, may, january", [
+    ("Asia/Kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),
+    ("kolkata", "IST", "2024-05-01 15:30 IST", "2024-01-15 15:30 IST"),  # its city, in any case
+    ("new york", "EST/EDT", "2024-05-01 06:00 EDT", "2024-01-15 05:00 EST"),  # the clock changes: both names
+    ("Australia/Sydney", "AEST/AEDT", "2024-05-01 20:00 AEST", "2024-01-15 21:00 AEDT"),  # standard time first
+    ("Asia/Dubai", "UTC+04", "2024-05-01 14:00 UTC+04", "2024-01-15 14:00 UTC+04"),  # no name in letters
+    ("+05:45", "UTC+05:45", "2024-05-01 15:45 UTC+05:45", "2024-01-15 15:45 UTC+05:45"),
+    ("UTC-4", "UTC-04", "2024-05-01 06:00 UTC-04", "2024-01-15 06:00 UTC-04"),
+    (timezone(timedelta(hours=9)), "UTC+09", "2024-05-01 19:00 UTC+09", "2024-01-15 19:00 UTC+09"),
+    ("utc", "UTC", "2024-05-01 10:00 UTC", "2024-01-15 10:00 UTC"),
+])
+def test_set_timezone_shows_times_in_that_zone(zone, label, may, january):
+    assert set_timezone(zone) == label == _tz_label()
+    assert _fmt_dt(MAY_DAY, zone=True) == may and _fmt_dt(JANUARY, zone=True) == january
+    assert _fmt_dt(MAY_DAY) == may.rsplit(" ", 1)[0]
+    assert _sort_key(may) == (1, may)  # still sorts as a date in a table
+    typed = parse_time("2024-05-01 10:00")  # a time typed in is read in the same zone
+    assert typed is not None and _fmt_dt(typed, zone=True).startswith("2024-05-01 10:00")
+    assert parse_time("2024-05-01T10:00Z") == datetime(2024, 5, 1, 10, tzinfo=timezone.utc)  # one that says its zone
+    set_timezone(None)
+    assert _tz_label() == "UTC" and _fmt_dt(MAY_DAY) == "2024-05-01 10:00"
+
+
+@pytest.mark.parametrize("zone, message", [
+    ("Asia/Kolkatta", "'Asia/Kolkatta' isn't a time zone set_timezone() knows. Did you mean 'Asia/Kolkata'"),
+    ("londno", "Did you mean 'Europe/London'?"),
+    ("IST", "A short name like IST can mean more than one zone (IST is India's, Ireland's and Israel's)."),
+    ("+15:00", "'+15:00' isn't an offset from UTC: they run from -12:00 to +14:00"),
+])
+def test_set_timezone_says_what_it_takes(zone, message):
+    with pytest.raises(ValueError, match="by its offset|from -12:00") as caught:
+        set_timezone(zone)
+    assert message in str(caught.value) and _tz_label() == "UTC"  # nothing changed
+    with pytest.raises(TypeError, match="takes a zone's name"):
+        set_timezone(5.5)
+
+
+def test_the_environment_can_pick_the_zone(monkeypatch):
+    monkeypatch.setenv("AWS_ANALYZER_TZ", "Europe/London")
+    assert _tz_label() == "GMT/BST" and _fmt_dt(MAY_DAY, zone=True) == "2024-05-01 11:00 BST"
+    assert set_timezone("Asia/Tokyo") == "JST"  # set_timezone() wins
+    assert set_timezone(None) == "GMT/BST"  # and None goes back to the environment's
+    monkeypatch.setenv("AWS_ANALYZER_TZ", "Mars/Olympus")
+    with pytest.warns(UserWarning, match="AWS_ANALYZER_TZ='Mars/Olympus': .* Times show in UTC."):
+        assert _tz_label() == "UTC"
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="only Unix can change its zone while running")
+def test_local_is_this_machines_zone():
+    before = os.environ.get("TZ")
+    os.environ["TZ"] = "Asia/Kolkata"
+    time.tzset()
+    try:
+        assert set_timezone("local") == "IST" and _fmt_dt(MAY_DAY, zone=True) == "2024-05-01 15:30 IST"
+        assert parse_time("2024-05-01") == datetime(2024, 5, 1, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    finally:
+        os.environ.pop("TZ") if before is None else os.environ.update(TZ=before)
+        time.tzset()
 
 
 class _ToyWindow(_Window):

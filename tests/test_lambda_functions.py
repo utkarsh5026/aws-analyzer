@@ -9,6 +9,7 @@ import threading
 import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import boto3
 import pytest
@@ -18,6 +19,7 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import lambda_functions as lfmod
+from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
@@ -1876,6 +1878,23 @@ def test_performance_report(ui, capsys):
     assert "has no log group yet" in run(capsys, ui.performance, "api-handler")
 
 
+def test_reports_show_times_in_the_zone_picked(ui, capsys):
+    utc = run(capsys, ui.logs, "etl-nightly")
+    assert "Time (UTC)" in utc
+    first = datetime.strptime(re.search(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d", utc).group(0), "%Y-%m-%d %H:%M:%S")
+    assert set_timezone("Asia/Kolkata") == "IST"
+    out = run(capsys, ui.logs, "etl-nightly")
+    shown = first.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Kolkata"))
+    assert "Time (IST)" in out and f"{shown:%Y-%m-%d %H:%M:%S}" in out and "UTC" not in out
+    errors = run(capsys, ui.errors, "etl-nightly")
+    assert re.search(r"the last 24 hours \(since \d{4}-\d\d-\d\d \d\d:\d\d IST\)", errors)
+    assert "Time (IST)" in errors
+    assert "Time (IST)" in run(capsys, ui.performance, "etl-nightly")
+    info = run(capsys, ui.function_info, "etl-nightly")
+    assert re.search(r"Last change +\d{4}-\d\d-\d\d \d\d:\d\d IST \(", info)
+    assert "Day (UTC)" in info  # CloudWatch adds up its daily numbers by UTC day, so they stay in UTC
+
+
 def test_code_report(ui, capsys):
     out = run(capsys, ui.code, "etl-nightly")
     assert "Code of etl-nightly" in out and "Handler file: app.py" in out and "Files: 3" in out
@@ -2164,6 +2183,19 @@ def test_explorer_logs_tab_shows_runs(core, explorer):
     assert x.found is None and len(x._visible_runs()) == 5
     x.log_find.value = "?ERROR ?WARN"
     assert "That's a CloudWatch Logs filter pattern: press Enter" in plain(x.status.value)
+
+
+def test_explorer_shows_times_in_the_zone_picked(core, explorer):
+    seed_runs(datetime.now(timezone.utc))
+    set_timezone("Asia/Kolkata")
+    x = explorer("etl-nightly", tab="logs")
+    assert "Newest first, the last hour; times in IST" in plain(x.run_head.value)
+    row = x._run_rows[0]
+    clock = row.run.start.astimezone(ZoneInfo("Asia/Kolkata"))
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    face = f"{clock:%H:%M:%S}" if clock.date() == today else f"{clock:%b} {clock.day} {clock:%H:%M}"
+    assert face in plain(row.face.value)
+    assert f"started {clock:%Y-%m-%d %H:%M:%S} IST" in row.button.tooltip
 
 
 def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):

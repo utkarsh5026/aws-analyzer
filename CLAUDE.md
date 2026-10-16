@@ -83,8 +83,12 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
-  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, `Stat`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`,
-  `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
+  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, `Stat`, ..., and the time zone reports show times in:
+  `set_timezone`, public as `aws_analyzer.set_timezone`, or the `AWS_ANALYZER_TZ` environment variable, UTC by default;
+  `_in_zone` converts a moment, `_fmt_dt(moment, zone=True)` names its zone in a sentence and `_tz_label()` in a
+  column's header, so never write "UTC" after a time; CloudWatch's daily numbers stay in UTC days and say so, and naive
+  times `parse_time` reads are in that zone; `tests/conftest.py` sets UTC back after each test), `text.py` (`_esc`,
+  `_clip`, `_pad`, `_width`, `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
   (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
