@@ -135,6 +135,8 @@ FIGURES = [
     Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
     Figure("lambda-performance", "lambda_functions", 'ui.performance("orders-etl")'),
     Figure("lambda-code", "lambda_functions", 'ui.code("orders-etl")', crop=1150),
+    Figure("lambda-how-it-works", "lambda_functions",  # its graph alone: the whole report is too long for one figure
+           'ui._show([b for b in ui._how_blocks(core.code_map("support-agent-actions")) if isinstance(b, mod._Graph)])'),
 ]
 
 

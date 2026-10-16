@@ -7,6 +7,7 @@ import re
 import sys
 import threading
 import zipfile
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 import boto3
@@ -49,6 +50,7 @@ from aws_analyzer.lambda_functions import (
     Version,
     account_findings,
     classify_error,
+    code_graph,
     code_map_findings,
     error_findings,
     function_findings,
@@ -1029,6 +1031,171 @@ def test_map_code_never_shows_a_secret():
     assert code_map_findings(guessed) == []  # a call guessed from its name alone sets off nothing
 
 
+def test_code_graph():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    graph = code_graph(cmap)
+    nodes = {n.id: (n.kind, n.column, n.label, n.tone) for n in graph.nodes}
+    assert nodes == {
+        "event": ("event", 0, "An S3 event", ""), "env": ("env", 0, "Environment", "warn"),
+        "start": ("start", 1, "At start-up", ""), "f0": ("handler", 1, "handler()", "warn"),
+        "f1": ("function", 2, "Orders()", ""), "f2": ("function", 2, "_client()", ""),
+        "f3": ("function", 2, "Orders.save()", ""), "f4": ("function", 2, "tell()", ""),
+        "f5": ("function", 3, "Orders._queue()", ""), "aws-s3": ("aws", 4, "S3", "warn"),
+        "aws-dynamodb": ("aws", 4, "DynamoDB", ""), "aws-sqs": ("aws", 4, "SQS", ""),
+        "aws-sns": ("aws", 4, "SNS", ""), "http": ("http", 4, "The web", "warn")}
+    assert graph.node("event").lines == ["Records[].s3.bucket.name", "Records[].s3.object.key", "detail.user"]
+    assert graph.node("aws-sqs").sub == "sends · reads" and graph.node("aws-sqs").lines == ["SendMessage", "ListQueues"]
+    assert graph.node("f0").sub == "app/main.py line 24" and graph.node("f0").lines == ["Handles an S3 upload."]
+    edges = {(e.source, e.target, e.kind): (e.label, e.tone, e.loop) for e in graph.edges}
+    assert edges == {
+        ("event", "f0", "event"): ("the event", "", False), ("f0", "f1", "call"): ("line 26", "", False),
+        ("f0", "f2", "call"): ("line 30", "", False), ("f0", "f3", "call"): ("line 32", "", False),
+        ("f0", "f4", "call"): ("line 37", "", False), ("f3", "f5", "call"): ("line 15", "", False),
+        ("env", "f1", "env"): ("TABLE", "", False), ("env", "f5", "env"): ("QUEUE_URL", "warn", False),
+        ("env", "f0", "env"): ("HOOK_URL", "", False), ("f0", "aws-s3", "reads"): ("ListObjectsV2", "warn", True),
+        ("f3", "aws-dynamodb", "writes"): ("PutItem", "", True), ("f5", "aws-sqs", "sends"): ("SendMessage", "", True),
+        ("f5", "aws-sqs", "reads"): ("ListQueues", "", True), ("f4", "aws-sns", "sends"): ("Publish", "", False),
+        ("start", "aws-sns", "client"): ("makes its SNS client", "", False),
+        ("f0", "http", "http"): ("POST os.environ.get('HOOK_URL', 'https://example.com')", "warn", True)}
+    assert graph.hidden == 0
+    mermaid = graph.mermaid()
+    assert mermaid.startswith("flowchart LR\n  event([\"An S3 event<br/><small>Lambda calls it with</small>\"])")
+    assert '  aws_s3[("S3<br/><small>reads</small>")]' in mermaid and "  f0 --> f1" in mermaid
+    assert '  f0 -->|"ListObjectsV2"| aws_s3' in mermaid and '  env -.->|"QUEUE_URL"| f5' in mermaid
+    assert ('  f0 -->|"POST os.environ.get(\'HOOK_URL\', \'https://example.com\')"| http' in mermaid
+            and mermaid.endswith("  class env,f0,aws_s3,http warn"))
+    assert code_graph(map_code({"app.py": "x = 1\n"}, "app.handler")).nodes == []  # no handler: nothing to draw
+
+    # a chain deeper than the graph draws: the rest are counted, not drawn
+    chain = "".join(f"def f{i}():\n    return f{i + 1}()\n\n" for i in range(8)) + "def f8():\n    return 1\n"
+    deep = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"))
+    assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + lfmod._GRAPH_DEPTH
+    assert {e.target for e in deep.edges} <= {n.id for n in deep.nodes}  # no arrow to a box that isn't drawn
+
+    # a handler that's an object (a web app's adapter): its routes hang off it
+    app = ("from mangum import Mangum\nfrom fastapi import FastAPI\nimport boto3\napp = FastAPI()\n"
+           "s3 = boto3.client('s3')\n\n@app.get('/files')\ndef files():\n    return s3.list_objects_v2(Bucket='b')\n\n"
+           "handler = Mangum(app)\n")
+    web = code_graph(map_code({"main.py": app}, "main.handler"))
+    assert web.node("f-entry").label == "handler" and web.node("f-entry").lines == ["an object, not a function"]
+    assert ("f-entry", "f0", "call", "GET /files") in {(e.source, e.target, e.kind, e.label) for e in web.edges}
+
+
+def test_graph_layout_and_drawing():
+    cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
+                    function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
+    graph = code_graph(cmap)
+    cards = lfmod._g_cards(graph)
+    boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(graph, cards)
+    assert set(boxes) == {n.id for n in graph.nodes} and sorted(xs) == list(range(5))
+    assert all(xs[k + 1] == xs[k] + widths[k] + lfmod._GRAPH_GAP for k in range(4))  # columns left to right
+    assert all(lfmod._GRAPH_MIN_W <= w <= lfmod._GRAPH_MAX_FLAGGED for w in widths.values())
+    assert widths[4] > lfmod._GRAPH_MAX_W  # the S3 box's ListObjectsV2 is whole beside its flag
+    assert width == xs[4] + widths[4] + lfmod._GRAPH_PAD_X  # no arrow goes back, so no room kept to curl round
+    by_column = defaultdict(list)
+    for n in graph.nodes:
+        assert boxes[n.id][0] == xs[column_of[n.id]] and boxes[n.id][2] == widths[column_of[n.id]]
+        by_column[column_of[n.id]].append(boxes[n.id])
+    for column in by_column.values():  # no two boxes in a column overlap
+        column.sort(key=lambda b: b[1])
+        assert all(a[1] + a[3] + lfmod._GRAPH_ROW_GAP - 0.1 <= b[1] for a, b in zip(column, column[1:]))
+    assert all(lfmod._GRAPH_BAND <= y and y + h <= tall for _, y, _, h in boxes.values())  # under the captions
+    skipping = {i for i, e in enumerate(graph.edges) if abs(column_of[e.target] - column_of[e.source]) > 1}
+    assert set(routes) == skipping and skipping  # an arrow that skips columns has a waypoint in each
+    for i, ys in routes.items():
+        e = graph.edges[i]
+        for k, y in enumerate(ys):  # ...which runs between the boxes of the column it crosses, not behind one
+            crossed = column_of[e.source] + k + 1
+            assert not any(by <= y <= by + bh for bx, by, _, bh in boxes.values() if bx == xs[crossed])
+    ends = lfmod._g_anchors(graph, cards, boxes)
+    writes = next(i for i, e in enumerate(graph.edges) if e.target == "aws-dynamodb")
+    assert ends[writes][1] == [boxes["aws-dynamodb"][1] + cards["aws-dynamodb"].row_y("PutItem")]  # lands on its row
+    reads = next(i for i, e in enumerate(graph.edges) if e.kind == "env" and e.target == "f5")
+    assert ends[reads][0] == [boxes["env"][1] + cards["env"].row_y("QUEUE_URL")]  # leaves from the variable's row
+
+    page = lfmod._render_html([lfmod._Graph(graph, "How it fits together")], 50)
+    assert page.count('<g class="cn ') == len(graph.nodes) and page.count('<g class="ce ek-') == 2 * len(graph.edges)
+    assert '<g class="cn k-handler n-f0 a-event a-f1' in page and '<g class="cn k-env n-env a-f1 a-f5 a-f0 warn"' in page
+    assert ('<g class="ce ek-reads s-f0 t-aws-s3 warn"><title>handler() reads from S3: ListObjectsV2; in a loop, once '
+            'per item; a warning is about it</title>') in page and '<path class="halo" d="M' in page
+    assert ">QUEUE_URL</text>" in page and ">not set</text>" in page and ">first page only</text>" in page
+    assert ">ListObjectsV2</text>" in page and '<path class="cs" d="M' in page
+    assert ">no timeout</text>" in page and '<circle class="bu flagged"' in page  # what a warning is about, marked
+    assert ">COMES IN</text>" in page and ">HANDLER</text>" in page and ">REACHES</text>" in page
+    assert ".lmb .cg:has(.n-f0:hover) .ce:not(.s-f0):not(.t-f0){opacity:.06}" in page  # pointing at a box
+    assert ".lmb .cg:has(.n-f0:hover) .cn:not(.n-f0):not(.a-f0){opacity:.28}" in page
+    assert '<svg class="sw ek-reads"' in page and "</svg>reads</span>" in page and "in a loop: once per item" in page
+    assert "a warning is about it</span>" in page and "guessed" not in page and "not drawn" not in page
+    assert "<script" not in page and f'viewBox="0 0 {width:.0f} {tall:.0f}"' in page
+    text = _render_text([lfmod._Graph(graph, "How it fits together")], 50)
+    assert "-- How it fits together --" in text
+    assert "  An S3 event: Records[].s3.bucket.name, Records[].s3.object.key, detail.user\n      → handler()" in text
+    assert ("  Environment: TABLE, QUEUE_URL (not set), HOOK_URL (!)\n      → Orders() reads TABLE\n"
+            "      → Orders._queue() reads QUEUE_URL (!)") in text
+    assert "  handler()  app/main.py line 24 (!)\n      calls Orders() (line 26)" in text
+    assert "      reads from S3: ListObjectsV2, in a loop (!)" in text and "      makes the SNS client" in text
+    assert "  Orders()  app/store.py line 9\n      (does nothing this follows: no AWS calls, own functions or HTTP)" in text
+    assert "S3  reads" not in text  # what it reaches shows as the arrows that reach it
+    empty = lfmod._Graph(lfmod.CodeGraph(), "How it fits together")
+    assert "(nothing to draw)" in lfmod._render_html([empty], 50) and "(nothing to draw)" in _render_text([empty], 50)
+
+    # a call back to an earlier column, one within a column, a guessed call and one through functions not drawn
+    nodes = [lfmod.GraphNode("f0", "handler", "handler()", "app.py line 1", column=1),
+             lfmod.GraphNode("f1", "function", "a()", "app.py line 5", column=2),
+             lfmod.GraphNode("f2", "function", "b()", "app.py line 9", column=3),
+             lfmod.GraphNode("f3", "function", "c()", "app.py line 13", column=3),
+             lfmod.GraphNode("aws-sqs", "aws", "SQS", "sends", ["SendMessage"], column=4)]
+    edges = [lfmod.GraphEdge("f0", "f1", "call", "line 2"), lfmod.GraphEdge("f1", "f2", "call", "line 6"),
+             lfmod.GraphEdge("f2", "f0", "call", "line 10"), lfmod.GraphEdge("f2", "f3", "call", "line 11"),
+             lfmod.GraphEdge("f3", "aws-sqs", "sends", "SendMessage", guessed=True),
+             lfmod.GraphEdge("f1", "aws-sqs", "sends", "SendMessage", indirect=True)]
+    odd = lfmod.CodeGraph(nodes, edges)
+    cards = lfmod._g_cards(odd)
+    boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(odd, cards)
+    assert set(routes) == {2, 5} and len(routes[2]) == 1  # the call back to handler() runs between b()'s neighbours
+    assert width == xs[3] + widths[3] + lfmod._GRAPH_PAD_X  # the loop from b() round to c() curls in a gap
+    page = lfmod._render_html([lfmod._Graph(odd, "")], 50)
+    assert '<g class="ce ek-sends s-f3 t-aws-sqs guess">' in page and '<g class="ce ek-sends s-f1 t-aws-sqs via">' in page
+    assert "guessed from a method's name</span>" in page and "through functions not drawn</span>" in page
+
+    # a warned arrow that carries two variables glows only on the line from the one the warning is about
+    env = lfmod.GraphNode("env", "env", "Environment", "variables it reads", ["TABLE", "TOPIC"], "warn", column=0,
+                          flags={"TOPIC": "not set"})
+    two = lfmod.CodeGraph([env, nodes[0]], [lfmod.GraphEdge("env", "f0", "env", "TABLE, TOPIC", "warn")])
+    page = lfmod._render_html([lfmod._Graph(two, "")], 50)
+    lines = re.search(r'<path class="ln" d="([^"]*)"', page).group(1)
+    halo = re.search(r'<path class="halo" d="([^"]*)"', page).group(1)
+    assert lines.count("M") == 2 and halo.count("M") == 1 and halo in lines and ">not set</text>" in page
+
+    # a service reached in four ways: the words under its name are cut to fit, never past the card
+    sfn = lfmod.GraphNode("aws-states", "aws", "Step Functions", "runs · reads · sends · writes", ["StartExecution"],
+                          column=2)
+    page = lfmod._render_html([lfmod._Graph(lfmod.CodeGraph([nodes[0], sfn], [
+        lfmod.GraphEdge("f0", "aws-states", "runs", "StartExecution")]), "")], 50)
+    assert '<tspan class="ac ek-runs">runs</tspan>' in page and '<tspan class="sep"> · </tspan>…</text>' in page
+
+    # two requests, one whose code has ', ' in it: each arrow lands on its own row
+    two = map_code({"app.py": "import os, requests\n\ndef handler(event, context):\n"
+                              "    requests.post(os.environ.get('HOOK', 'https://a.example'), json={})\n"
+                              "    return requests.get('https://b.example', timeout=2)\n"}, "app.handler")
+    graph = code_graph(two)
+    cards = lfmod._g_cards(graph)
+    boxes = lfmod._graph_layout(graph, cards)[0]
+    ends = lfmod._g_anchors(graph, cards, boxes)
+    sent = next(i for i, e in enumerate(graph.edges) if e.kind == "http")
+    assert sorted(ends[sent][1]) == sorted(boxes["http"][1] + cards["http"].row_y(r) for r in cards["http"].rows)
+
+    # a function that answers two routes keeps both
+    web = map_code({"main.py": "from mangum import Mangum\nfrom fastapi import FastAPI\napp = FastAPI()\n\n"
+                               "@app.get('/items')\n@app.head('/items')\ndef items():\n    return []\n\n"
+                               "handler = Mangum(app)\n"}, "main.handler")
+    graph = code_graph(web)
+    assert [e.label for e in graph.edges if e.kind == "call"] == ["GET /items; HEAD /items"]
+    page = lfmod._render_html([lfmod._Graph(graph, "")], 50)
+    assert '<tspan class="mt">GET</tspan> /items +1</text>' in page
+
+
 def test_map_package_reads_its_own_files():
     data = zipped({"app.py": APP["app/main.py"].replace("from .store", "from store").replace("from . import", "import"),
                    "store.py": APP["app/store.py"], "notify.py": APP["app/notify.py"],
@@ -1745,6 +1912,9 @@ def test_how_it_works_report(ui, capsys):
     assert "save()     store.py line 4" in out and "Saves one order." in out
     assert "boto3   the Lambda runtime" in out and "hunter2" not in out
     assert "code('etl-nightly', file='app.py')" in out and "code('etl-nightly', file='store.py')" in out
+    assert "-- How it fits together: what comes in, who calls whom, and what it reaches --" in out
+    assert "  handler()  app.py line 9\n      calls save() (line 12)\n      reads from S3: GetObject, in a loop" in out
+    assert "flowchart LR" in out and '  f1 -->|"PutItem"| aws_dynamodb' in out
     note = run(capsys, ui.how_it_works, "eu-fn", region=OTHER)
     assert "It runs nodejs18.x: how_it_works() reads Python code" in note and "code('eu-fn', region='eu-west-1')" in note
     assert "No function 'etl-nightlx' in us-east-1. Did you mean 'etl-nightly'?" in run(capsys, ui.how_it_works,
@@ -2191,6 +2361,8 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch):
     assert "How etl-nightly works" in shown and "BUCKET isn't set on etl-nightly" in shown
     assert "What each call does, step by step from handler()" in shown and "Next" not in shown
     assert "code(" not in shown and [type(b).__name__ for b in x.shown["how"]][:2] == ["_Title", "_Cards"]
+    assert "_Graph" in [type(b).__name__ for b in x.shown["how"]] and '<g class="cn k-handler n-f0' in x.source_view.value
+    assert ".lmb .cg:has(.n-f0:hover)" in x.source_view.value  # the pointing rules come with the pane
     assert plain(x.status.value) == ("How it works, read from 2 Python files with nothing run · click a file to see its "
                                      "source · 1 warning")
     assert button.tooltip == "Back to the source of the file picked in the tree"
