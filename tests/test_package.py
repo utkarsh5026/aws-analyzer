@@ -14,12 +14,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src" / "aws_analyzer"
 
 
+def _modules() -> set[str]:
+    """The package's modules users import, aws_analyzer.<name>: a file (s3.py) or a package of its own (agent/)."""
+    files = {p.stem for p in PACKAGE.glob("*.py")} | {p.parent.name for p in PACKAGE.glob("*/__init__.py")}
+    return {name for name in files if not name.startswith("_")}
+
+
 def test_wheel_ships_the_package_and_exports_every_analyzer():
     tomllib = pytest.importorskip("tomllib")  # stdlib from Python 3.11
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     wheel = config["tool"]["hatch"]["build"]["targets"]["wheel"]
     assert wheel["packages"] == ["src/aws_analyzer"] and "force-include" not in wheel
-    modules = {p.stem for p in PACKAGE.glob("*.py") if not p.stem.startswith("_")}
+    modules = _modules()
     init = (PACKAGE / "__init__.py").read_text(encoding="utf-8")
     listed = re.search(r"^_MODULES = \(([^)]*)\)", init, re.M | re.S)  # what `aws_analyzer.<module>` can load
     assert listed and set(re.findall(r'"(\w+)"', listed.group(1))) == modules
@@ -50,7 +56,8 @@ def test_package_exports_each_analyzer_and_view(package):
     for name in package.__all__[1:]:
         value = getattr(package, name)
         assert value.__name__ == name
-        assert value.__module__ == f"aws_analyzer.{package._EXPORTS[name]}"
+        home = f"aws_analyzer.{package._EXPORTS[name]}"  # a package's classes are in its modules (agent.view)
+        assert value.__module__ == home or value.__module__.startswith(f"{home}.")
     assert set(package.__all__) <= set(dir(package))
     assert {"s3", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch", "lambda_functions",
             "s3_explorer"} <= set(dir(package))
@@ -85,7 +92,7 @@ def test_each_analyzer_loads_alone():
     # Analyzers share code through aws_analyzer._kit (the Bedrock pair also through aws_analyzer._bedrock) and never
     # import each other, so importing one loads no other (s3_explorer builds on s3, which it loads when it first needs
     # it), and a shared module loads no analyzer.
-    modules = sorted(p.stem for p in PACKAGE.glob("*.py") if not p.stem.startswith("_"))
+    modules = sorted(_modules())
     modules += sorted(module for module in SHARED if (PACKAGE / f"{module}.py").exists())
     for module in modules:
         code = f"import sys, aws_analyzer.{module}; print(*sorted(sys.modules))"

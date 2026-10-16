@@ -28,7 +28,7 @@ tqdm==4.70.1
 # Optional for users (s3_explorer.py's clicks, bedrock_chat.py's window, tqdm's notebook bar); installed here so
 # both windows' widgets are tested.
 ipywidgets==8.1.9
-# Optional for users (agent.py: the agent loop and its Azure OpenAI model), which need Python 3.11 or newer;
+# Optional for users (agent/: the agent loop and its Azure OpenAI model), which need Python 3.11 or newer;
 # installed there so the agent's harness is tested. On 3.10 its tests that need them are skipped.
 deepagents==0.7.26; python_version >= "3.11"
 langchain-openai==1.7.2; python_version >= "3.11"

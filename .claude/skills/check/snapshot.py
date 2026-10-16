@@ -280,7 +280,8 @@ def worker(root: Path, source: str, service: str, out: Path, work: Path) -> int:
     with mock_aws():
         kwargs = seed() or {}
         mod = _module(root, service)
-        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        ours = {k: v for k, v in vars(mod).items()  # a package's classes are in its modules (agent.view, ...)
+                if isinstance(v, type) and (v.__module__ == mod.__name__ or v.__module__.startswith(f"{mod.__name__}."))}
         view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
         core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         core = core_cls(**kwargs) if "session" in kwargs else core_cls(region=REGION, **kwargs)
@@ -308,7 +309,9 @@ def names_worker(root: Path, out: Path) -> int:
     module has, and the attributes of each class of ours it has."""
     folder, prefix = _layout(root)
     modules = [path for path in sorted(folder.glob("*.py")) if not path.stem.startswith("_")]
-    ours = {prefix + path.stem for path in modules}
+    modules += [path for path in sorted(folder.glob("*/__init__.py")) if not path.parent.name.startswith("_")]
+    names = {path: path.parent.name if path.name == "__init__.py" else path.stem for path in modules}  # agent/
+    ours = {prefix + name for name in names.values()}
 
     def is_ours(obj) -> bool:
         module = getattr(obj, "__module__", "") or ""
@@ -316,12 +319,12 @@ def names_worker(root: Path, out: Path) -> int:
 
     report: dict[str, dict] = {}
     for path in modules:
-        mod = _module(root, path.stem)
+        mod = _module(root, names[path])
         present = sorted(n for n in dir(mod) if not (n.startswith("__") and n.endswith("__")))
         classes = {n: sorted(a for a in dir(getattr(mod, n)) if not (a.startswith("__") and a.endswith("__")))
                    for n in present if isinstance(getattr(mod, n), type) and is_ours(getattr(mod, n))}
-        report[path.stem] = {"defined": [n for n in _defined(path) if n in present], "present": present,
-                             "classes": classes}
+        report[names[path]] = {"defined": [n for n in _defined(path) if n in present], "present": present,
+                               "classes": classes}
     (out / "names.json").write_text(json.dumps(report, indent=1, sort_keys=True), encoding="utf-8")
     return 0
 

@@ -1,9 +1,9 @@
 ---
 title: Ask in Plain English (Agent) Guide
-description: "How to ask questions about your AWS account in plain English from a SageMaker notebook with aws-analyzer's agent.py: an agent (an Azure OpenAI deployment, run by LangChain's deepagents) answers questions like which Lambda failed last night from read-only tools, says what it checked, and stays within a budget per question."
+description: "How to ask questions about your AWS account in plain English from a SageMaker notebook with aws-analyzer's agent: an agent (an Azure OpenAI deployment, run by LangChain's deepagents) answers questions like which Lambda failed last night from read-only tools, says what it checked, and stays within a budget per question."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · agent.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · agent/</p>
 
 # Ask about your AWS account in plain English
 
@@ -161,6 +161,35 @@ agent = AgentView(core)
 ```
 
 `chat_model=` takes any LangChain chat model instead of Azure OpenAI: for a model on Amazon Bedrock, `ChatBedrockConverse` from langchain-aws. The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, `answer_findings` and `explain_model_error`.
+
+### Your own tools { #toolkits }
+
+The agent's tools come in toolkits, one per AWS service: `toolkits=["lambda"]` is the default. A toolkit of your own adds tools beside them. Give it a name, a sentence for the model on what it covers, and `tools()`: plain functions whose type hints and docstrings tell the model how to call them, each returning a dict.
+
+```python
+from aws_analyzer.agent import AgentView, Toolkit
+
+class Runbooks(Toolkit):
+    """What the team's runbooks say to do when a function fails."""
+
+    name, title = "runbooks", "Runbooks"
+    covers = "the team's runbooks: what to do when a Lambda function fails."
+
+    def make_analyzer(self, session):  # what its tools read through: here a dict, usually an analyzer
+        return {"orders-etl": "Re-run it for the day that failed; page #data-oncall if it fails twice."}
+
+    def tools(self):
+        def runbook(function: str) -> dict:
+            """What the team's runbook says to do when this Lambda function fails."""
+            return {"function": function, "steps": self.analyzer.get(function, "There's no runbook for it.")}
+
+        return [runbook]
+
+agent = AgentView(toolkits=["lambda", Runbooks()])
+agent.ask("orders-etl failed last night: what should I do?")
+```
+
+Its tools get the same budget, error handling and report as the Lambda ones, and `tools()` lists them. When it reads AWS, make its clients in the analyzer `make_analyzer()` returns: the read-only guard covers that analyzer's `client` and the clients it keeps in `_clients`.
 
 ## Cost { #cost }
 

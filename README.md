@@ -90,7 +90,7 @@ report still renders.
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](src/aws_analyzer/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Read-only by construction, with a budget per question (Lambda for now; the model is your Azure OpenAI deployment) | [`agent.py`](src/aws_analyzer/agent.py) (with `lambda_functions.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Read-only by construction, with a budget per question (Lambda for now; the model is your Azure OpenAI deployment) | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -1929,7 +1929,7 @@ it. Every answer says what it checked (the time window, in your time zone, and t
 was stopped from reading, what it cost, and the `LambdaView` commands to look closer. Version 1 covers Lambda; the
 model is your Azure OpenAI deployment, and the agent loop is LangChain's [deepagents](https://pypi.org/project/deepagents/).
 
-📄 [`src/aws_analyzer/agent.py`](src/aws_analyzer/agent.py) · 📖 [Agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html)
+📄 [`src/aws_analyzer/agent/`](src/aws_analyzer/agent/) · 📖 [Agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html)
 
 ### Quick start
 
@@ -2018,6 +2018,7 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3},
+    toolkits=["lambda"],                  # the services it has tools for: the default, and so far the only one
 )
 agent = AgentView(core)
 
@@ -2035,6 +2036,13 @@ langchain-aws, for a model on Amazon Bedrock). The pure functions work without A
 `asked_at`, `system_prompt`, `function_row`, `summarize_functions`, `summarize_health`, `summarize_errors`,
 `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, `answer_findings`, `answer_next`,
 `answer_cost` and `explain_model_error`.
+
+Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
+it covers, and `tools()` returning plain functions whose type hints and docstrings tell the model how to call them.
+Pass it next to the built-in ones, `AgentView(toolkits=["lambda", Runbooks()])`, and its tools get the same budget,
+error handling and report as the Lambda ones; the read-only guard covers the AWS clients of the analyzer it reads
+through (`make_analyzer()`). The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#toolkits) has an
+example.
 
 </details>
 
