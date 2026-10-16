@@ -20,7 +20,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `tools()` show the questions so far and what it can call. Nothing can change your account: a guard refuses any AWS
   call that isn't a read, and each question has a budget (tool calls, time, cost, a 3-day log window) that it stops
   at and says so. Version 1 covers Lambda. Install it with `pip install "aws-analyzer[agent]"` (Python 3.11 or newer;
-  everything else still runs on 3.10 with boto3 alone).
+  everything else still runs on 3.10 with boto3 alone) ([#87](https://github.com/utkarsh5026/aws-analyzer/pull/87)).
 
 - `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
   report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
