@@ -142,7 +142,7 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 > and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
-<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
+<summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars, your time zone</summary>
 
 ```python
 from aws_analyzer import S3Analyzer, S3View
@@ -157,6 +157,20 @@ Every View takes the same options. Commands that take a while show a progress ba
 [tqdm](https://github.com/tqdm/tqdm) bar (a widget in Jupyter when `ipywidgets` is installed) with the rate and the
 time left, when tqdm is installed, as it usually is on SageMaker. Without it you get a plain line with the same
 numbers.
+
+Times are in UTC until you pick a zone. Then every report and window shows its times in your zone, and says which
+one in its columns and sentences (`Last modified (IST)`, `since 2024-05-01 14:02 IST`):
+
+```python
+from aws_analyzer import set_timezone
+
+set_timezone("Asia/Kolkata")      # or its city, "kolkata"; "America/New_York", "+05:30", "UTC" to go back
+set_timezone("local")             # this machine's own zone: on SageMaker that's UTC, so name yours there
+```
+
+Dates you type in (`since="2024-05-01 10:00"`, `older_than="2024-05-01"`) are read in the same zone. To pick it for
+every notebook, set the `AWS_ANALYZER_TZ` environment variable (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily
+numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
 
 </details>
 
@@ -1930,9 +1944,10 @@ os.environ["AZURE_OPENAI_ENDPOINT"] = "https://<resource>.openai.azure.com"
 os.environ["AZURE_OPENAI_API_KEY"] = "..."              # or AgentView(azure_ad_token_provider=...) for Entra ID
 os.environ["AZURE_OPENAI_DEPLOYMENT"] = "gpt-4o"        # your deployment's name, not the model's
 
-from aws_analyzer import AgentView
+from aws_analyzer import AgentView, set_timezone
 
-agent = AgentView(timezone="Asia/Kolkata")              # so "last night" means your night
+set_timezone("Asia/Kolkata")                            # so "last night" means your night (every report follows it too)
+agent = AgentView()
 agent.ask("Which Lambda failed last night?")
 agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
@@ -1999,7 +2014,7 @@ core = AgentAnalyzer(
     api_key="...",                        # or AZURE_OPENAI_API_KEY; azure_ad_token_provider= for Entra ID
     api_version="2024-10-21",             # or OPENAI_API_VERSION; this is the default
     model_prices={"gpt-4o": (2.50, 10.00)},   # USD per 1M input and output tokens, from your Azure price sheet
-    timezone="Asia/Kolkata",              # what "last night" and "today" mean
+    timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3},

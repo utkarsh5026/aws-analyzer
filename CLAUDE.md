@@ -85,8 +85,12 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   one loads no other
   (`tests/test_package.py` checks). `src/aws_analyzer/_kit/` holds what they all need, written once: `fmt.py`
   (`human_size`, `human_money`, `human_age`, `parse_size`, `parse_time`, `_plural`, `_duration`, `_fmt_dt`,
-  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, `Stat`, ...), `text.py` (`_esc`, `_clip`, `_pad`, `_width`,
-  `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
+  `_as_int`, `HOURS_PER_MONTH`, `file_extension`, `Stat`, ..., and the time zone reports show times in:
+  `set_timezone`, public as `aws_analyzer.set_timezone`, or the `AWS_ANALYZER_TZ` environment variable, UTC by default;
+  `_in_zone` converts a moment, `_fmt_dt(moment, zone=True)` names its zone in a sentence and `_tz_label()` in a
+  column's header, so never write "UTC" after a time; CloudWatch's daily numbers stay in UTC days and say so, and naive
+  times `parse_time` reads are in that zone; `tests/conftest.py` sets UTC back after each test), `text.py` (`_esc`,
+  `_clip`, `_pad`, `_width`, `_text_bar`, and the windows' search: `search_rank`, `_marked`), `deps.py` (`_require`, `_in_notebook`), `errors.py`
   (`_error_code`, `_error_name`, `_why`, `_Hint`), `blocks.py` (the
   render blocks every service uses, `_Title`, `_Cards`, `_Table`, `_Note`, `_Text`, `_Findings`, `_Next` and the
   `_Tone` cell, and the registry of how each kind is drawn: `_Report`, `@_draws`) and `render.py` (`_base_css`,
@@ -589,7 +593,8 @@ Same five sections. What it is, end to end:
   LangGraph runs a turn's tool calls side by side, so `_Run` is behind a lock and the budget counts under it.
 - **The harness** (`_harness()`): `deepagents.create_deep_agent` once, with `_chat()` (`AzureChatOpenAI` from
   `deployment` / `endpoint` / `api_key` / `api_version` or `AZURE_OPENAI_*`, or `chat_model=`, any LangChain chat
-  model), the tools, `system_prompt()` (fixed, so it caches; the time goes in each question through `asked_at()`), an
+  model), the tools, `system_prompt()` (fixed, so it caches; the time goes in each question through `asked_at()`, in
+  `AgentAnalyzer.zone`: `timezone=` through `_kit`'s `_zone_from`, else `set_timezone()`'s `_display_zone()`), an
   `InMemorySaver` checkpointer keyed by `self.thread` (follow-ups; `new_conversation()` makes a new thread), and
   `_hide_tools({"task", "execute"})`, a middleware that keeps deepagents' general-purpose subagent and shell away from
   the model. Its file tools stay, on the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox.
@@ -598,7 +603,8 @@ Same five sections. What it is, end to end:
   model or loop error into `AgentAnswer.error` (`explain_model_error`, by the OpenAI client's class names, so no openai
   import) with `.exception` kept. Costs need `model_prices=` (Azure has no list prices here; `answer_cost`), else
   they're unknown. `AgentView.ask()` draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its
-  `_EXTRA_CSS`), cards, `answer_findings()`, the table of tool calls, the AWS reads (folded) and `answer_next()`.
+  `_EXTRA_CSS`), cards, `answer_findings()`, the table of tool calls (each window in the reports' zone, `_fmt_dt`;
+  what the model reads stays ISO UTC), the AWS reads (folded) and `answer_next()`.
 
 ## The S3 explorer (`s3_explorer.py`)
 

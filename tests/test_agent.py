@@ -7,6 +7,7 @@ import pytest
 from moto import mock_aws
 
 from aws_analyzer import agent as agentmod
+from aws_analyzer import set_timezone
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import (
     AgentAnalyzer,
@@ -59,13 +60,24 @@ def test_hide_secrets_leaves_ordinary_lines_alone():
 
 
 def test_asked_at_gives_the_users_time_and_utc():
-    assert asked_at(NOW, None) == "[Asked Friday 2026-10-16 03:42 UTC. The user hasn't set a time zone: use UTC and say so.]"
+    assert asked_at(NOW) == ("[Asked Friday 2026-10-16 03:42 UTC. Times are in UTC (the user can pick their zone with "
+                             "set_timezone()): give them in UTC and say so.]")
     line = asked_at(NOW, "Asia/Kolkata")
     assert "2026-10-16 09:12 in the user's time zone (Asia/Kolkata, UTC+0530)" in line and "03:42 UTC" in line
-    with pytest.raises(ValueError, match="isn't a time zone name"):
+    assert asked_at(NOW, "kolkata") == line  # what set_timezone() takes: a city works too
+    assert "(UTC-04, UTC-0400)" in asked_at(NOW, "-04:00")  # _kit names an offset zone that way
+    with pytest.raises(ValueError, match="isn't a time zone set_timezone"):
         asked_at(NOW, "India/Delhi")
-    with pytest.raises(ValueError, match="isn't a time zone name"):
+    with pytest.raises(ValueError, match="isn't a time zone set_timezone"):
         AgentAnalyzer(timezone="Mars/Olympus")
+
+
+def test_the_agent_follows_set_timezone_unless_given_its_own():
+    set_timezone("Asia/Kolkata")
+    assert AgentAnalyzer(region=REGION).zone.key == "Asia/Kolkata"
+    assert AgentAnalyzer(region=REGION, timezone="Europe/London").zone.key == "Europe/London"
+    set_timezone(None)
+    assert AgentAnalyzer(region=REGION).zone == timezone.utc
 
 
 def test_system_prompt_says_how_to_work_and_answer():
@@ -512,6 +524,15 @@ def test_ask_report_puts_the_answer_first_then_what_it_checked(view, capsys):
     page = agentmod._render_html(view._answer_blocks(view.core.history[-1]), 50)
     assert '<div class="agt">' in page and '<div class="ans"><p><strong>etl-nightly</strong> failed 40 times' in page
     assert "<code>customer_id</code>" in page
+
+
+def test_the_report_shows_windows_in_the_chosen_zone(view, capsys):
+    set_timezone("Asia/Kolkata")
+    out = run(capsys, view.ask, "Which Lambda failed in the last 2 hours?")
+    covered = next(line for line in out.splitlines() if "function_health(since='2h')" in line)
+    assert " IST · us-east-1" in covered and " UTC" not in covered
+    prompt = view.core.chat_model.prompts[0][-1].content
+    assert prompt.startswith("[Asked") and "(Asia/Kolkata, UTC+0530)" in prompt
 
 
 def test_transcript_and_new_conversation(view, capsys):

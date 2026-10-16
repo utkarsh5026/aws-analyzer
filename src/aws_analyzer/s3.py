@@ -86,8 +86,8 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _error_code
 from ._kit.fmt import (
-    Stat, _band, _duration, _fmt_dt, _plural, _share, _utcnow, file_extension, human_age, human_money, human_size,
-    parse_size, parse_time,
+    Stat, _band, _duration, _fmt_dt, _in_zone, _plural, _share, _tz_label, _utcnow, file_extension, human_age,
+    human_money, human_size, parse_size, parse_time,
 )
 from ._kit.jsontree import _JSON_KEYS, _JSON_ROWS, _JsonTree, _json_tree_css
 from ._kit.render import _base_css, _call, _prose, _report_html
@@ -8126,7 +8126,7 @@ def _block_label(settings: dict[str, bool] | None) -> str:
 
 def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Table:
     return _Table(
-        ["Key", "Size", "Last modified (UTC)", "Age", "Storage class"],
+        ["Key", "Size", f"Last modified ({_tz_label()})", "Age", "Storage class"],
         [
             [
                 relative_key(o.key, base),
@@ -8547,7 +8547,7 @@ def _fact_cell(d: FileDetails, key: str) -> Any:
     if key == "channels":
         return {1: "mono", 2: "stereo"}.get(value, f"{value:,}")
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d")
+        return (_in_zone(value) if value.tzinfo else value).strftime("%Y-%m-%d")
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, int):
@@ -8726,7 +8726,7 @@ class S3View(_BaseView):
                     " · ".join(f"{r}: {n}" for r, n in regions.most_common()),
                 ),
                 _Table(
-                    ["Bucket", "Region", "Created (UTC)", "Age"],
+                    ["Bucket", "Region", f"Created ({_tz_label()})", "Age"],
                     [
                         [
                             b.name,
@@ -8853,7 +8853,7 @@ class S3View(_BaseView):
                             [kind, human_size(size), human_money(costs[kind])]
                             for kind, size in usage.size_by_storage_type.items()
                         ],
-                        title=f"Size by storage type (CloudWatch, {_fmt_dt(usage.as_of)} UTC; "
+                        title=f"Size by storage type (CloudWatch, {_fmt_dt(usage.as_of, zone=True)}; "
                         f"all versions; cost {self._price_basis()})",
                         bars=[
                             _share(size, total)
@@ -9225,7 +9225,7 @@ class S3View(_BaseView):
         else:
             blocks.append(
                 _Table(
-                    ["Name", "Size", "Last modified (UTC)", "Storage class"]
+                    ["Name", "Size", f"Last modified ({_tz_label()})", "Storage class"]
                     + (["What's inside"] if report else []),
                     rows,
                     max_rows=0,
@@ -10008,7 +10008,7 @@ class S3View(_BaseView):
                     f"History of {s3_uri(*parse_s3_uri(uri))}",
                     f"{len(history)} versions",
                 ),
-                _Table(["Size", "Modified (UTC)", "Age", "", "Version id"], rows),
+                _Table(["Size", f"Modified ({_tz_label()})", "Age", "", "Version id"], rows),
             ]
         )
 
@@ -10025,7 +10025,7 @@ class S3View(_BaseView):
         bucket, prefix = parse_s3_uri(d.uri)
         restorable = [f for f in d.files if f.restorable]
         since = (
-            f"deleted since {_fmt_dt(parse_time(deleted_after))} UTC"
+            f"deleted since {_fmt_dt(parse_time(deleted_after), zone=True)}"
             if deleted_after is not None
             else ""
         )
@@ -10087,7 +10087,7 @@ class S3View(_BaseView):
             _Table(
                 [
                     "Key",
-                    "Deleted (UTC)",
+                    f"Deleted ({_tz_label()})",
                     "When",
                     "Last version size",
                     "Versions kept",
@@ -10171,7 +10171,7 @@ class S3View(_BaseView):
             )
         blocks.append(
             _Table(
-                ["Key", "Started (UTC)", "Age", "Parts", "Size", "Upload id"],
+                ["Key", f"Started ({_tz_label()})", "Age", "Parts", "Size", "Upload id"],
                 [
                     [
                         u.key,
@@ -10353,7 +10353,7 @@ class S3View(_BaseView):
             _Table(
                 ["Field", "Value"],
                 [
-                    [k, _fmt_dt(v) + " UTC" if isinstance(v, datetime) else v]
+                    [k, _fmt_dt(v, zone=True) if isinstance(v, datetime) else v]
                     for k, v in info.items()
                     if k not in skip
                 ],
@@ -10983,7 +10983,7 @@ class S3View(_BaseView):
         c = self.core.clean_downloads(names, older_than=older_than, dry_run=dry_run)
         removed = [entry for entry in c.removed if entry.name not in c.failed]
         verb = "Would delete" if dry_run else "Deleted"
-        when = f" downloaded before {c.older_than:%Y-%m-%d %H:%M} UTC" if c.older_than else ""
+        when = f" downloaded before {_fmt_dt(c.older_than, zone=True)}" if c.older_than else ""
         try:
             free = human_size(_free_space(c.path))
         except OSError:
@@ -10999,7 +10999,8 @@ class S3View(_BaseView):
             ]),
         ]
         if not c.removed:
-            what = (f"Nothing in the downloads folder was downloaded before {c.older_than:%Y-%m-%d}" if c.older_than
+            what = (f"Nothing in the downloads folder was downloaded before {_in_zone(c.older_than):%Y-%m-%d}"
+                    if c.older_than
                     else "Nothing was named" if c.kept else "The downloads folder is empty")
             blocks.append(_Note(f"{what}; downloads() lists what's there." if c.kept else f"{what}."))
         elif dry_run:

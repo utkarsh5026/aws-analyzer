@@ -29,7 +29,8 @@ Quick start
 -----------
     # export AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com  AZURE_OPENAI_API_KEY=...
     #        AZURE_OPENAI_DEPLOYMENT=<your deployment name>
-    agent = AgentView(timezone="Asia/Kolkata")           # or AgentView(endpoint=..., deployment=..., api_key=...)
+    set_timezone("Asia/Kolkata")                         # (from aws_analyzer) so "last night" means your night
+    agent = AgentView()                                  # or AgentView(endpoint=..., deployment=..., api_key=...)
     agent.ask("Which Lambda failed last night?")
     agent.ask("Why did orders-etl fail?")                # a follow-up: it remembers the conversation
     agent.new_conversation()                             # forget it
@@ -52,7 +53,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import TYPE_CHECKING, Any, Callable
 
 import boto3
@@ -63,7 +64,9 @@ from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
 from ._kit.deps import _require
 from ._kit.errors import _error_code, _Hint, _why
-from ._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, human_money, human_size
+from ._kit.fmt import (
+    _display_zone, _duration, _fmt_dt, _plural, _utcnow, _zone_from, _zone_name, human_money, human_size,
+)
 from ._kit.render import _base_css, _call, _report_html
 from ._kit.text import _clip
 from ._kit.view import _BaseView, _friendly_errors
@@ -157,28 +160,18 @@ def _plain(value: Any, depth: int = 0) -> Any:
     return str(value)
 
 
-def _zone(name: str | None) -> Any:
-    """The tzinfo for an IANA name ('Asia/Kolkata'), or UTC for None. A name zoneinfo doesn't know is an error that
-    says how to spell one."""
-    if not name or str(name).strip().upper() == "UTC":
-        return timezone.utc
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-    try:
-        return ZoneInfo(str(name).strip())
-    except (ZoneInfoNotFoundError, ValueError):
-        raise ValueError(f"timezone={name!r} isn't a time zone name: use one like 'Asia/Kolkata', 'Europe/London' or "
-                         "'America/New_York'") from None
-
-
-def asked_at(now: datetime, tz_name: str | None) -> str:
+def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
     """The line that starts each question sent to the model: when it was asked, in the user's time zone and in UTC,
-    so "last night" and "this morning" mean what the user meant."""
+    so "last night" and "this morning" mean what the user meant. zone is a tzinfo or anything set_timezone() takes
+    ('Asia/Kolkata', 'kolkata', '+05:30'); None is this machine's own zone."""
     utc = now.astimezone(timezone.utc)
-    if not tz_name or str(tz_name).strip().upper() == "UTC":
-        return f"[Asked {utc:%A %Y-%m-%d %H:%M} UTC. The user hasn't set a time zone: use UTC and say so.]"
-    local = now.astimezone(_zone(tz_name))
-    return (f"[Asked {local:%A %Y-%m-%d %H:%M} in the user's time zone ({tz_name}, UTC{local:%z}), "
+    tz = _zone_from(zone) if isinstance(zone, str) else zone
+    local = now.astimezone(tz)
+    if local.utcoffset() == timedelta(0) and _zone_name(local) == "UTC":
+        return (f"[Asked {utc:%A %Y-%m-%d %H:%M} UTC. Times are in UTC (the user can pick their zone with "
+                "set_timezone()): give them in UTC and say so.]")
+    name = getattr(tz, "key", None) or _zone_name(local)  # 'Asia/Kolkata', or 'UTC+05:30' for an offset
+    return (f"[Asked {local:%A %Y-%m-%d %H:%M} in the user's time zone ({name}, UTC{local:%z}), "
             f"which is {utc:%Y-%m-%d %H:%M} UTC.]")
 
 
@@ -448,7 +441,7 @@ def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str
                  "memory_used_mb": report.max_memory if report else None,
                  "memory_mb": report.memory if report else None, "cold_start": run.cold,
                  "error": hide_secrets(run.error[1]) if run.error else None,
-                 "lines": [f"{e.time:%H:%M:%S} {hide_secrets(_clip(e.message.strip(), 400))}"
+                 "lines": [f"{e.time.astimezone(timezone.utc):%H:%M:%SZ} {hide_secrets(_clip(e.message.strip(), 400))}"
                            for e in run.events[-lines:]]}
         if len(run.events) > lines:
             entry["lines_left_out"] = len(run.events) - lines
@@ -646,7 +639,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
         if call.coverage.get("cut_short"):
             reach = call.coverage.get("covered_from")
             found.append(("info", f"{call.name} for {call.args.get('function') or 'the functions'} stopped at its "
-                                  "line limit" + (f": it covers {_fmt_dt(reach)} UTC to the end of the window"
+                                  "line limit" + (f": it covers {_fmt_dt(reach, zone=True)} to the end of the window"
                                                   if isinstance(reach, datetime) else "")
                                   + ". The newest lines were kept."))
     if not answer.calls and not answer.error and answer.stopped is None:
@@ -768,9 +761,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     a price on each answer; without it the cost is unknown and only the tokens are counted.
 
     What it reads: Lambda in `region` (the session's) or `regions` (a list, or 'all'), through LambdaAnalyzer
-    (lambda_core= to pass your own; lambda_clients= its clients, for tests; prices= its prices). `timezone` is the
-    user's ('Asia/Kolkata'), so "last night" means their night. `notes` are facts about the account the agent is
-    told ("orders-etl runs at 02:00 IST"). `budget` caps each question (Budget, or a dict of its fields).
+    (lambda_core= to pass your own; lambda_clients= its clients, for tests; prices= its prices). The user's time
+    zone, so "last night" means their night, is set_timezone()'s (or AWS_ANALYZER_TZ's), the zone every report shows
+    times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets one for the agent alone. `notes` are facts about
+    the account the agent is told ("orders-etl runs at 02:00 IST"). `budget` caps each question (Budget, or a dict
+    of its fields).
     """
 
     _LIST_PRICES: dict[str, Any] = {}  # no list prices: Azure OpenAI's depend on the deployment; see model_prices=
@@ -788,7 +783,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         azure_ad_token_provider: Callable[[], str] | None = None,
         chat_model: Any = None,
         model_prices: dict[str, tuple[float, float]] | None = None,
-        timezone: str | None = None,
+        timezone: str | tzinfo | None = None,
         regions: Any = None,
         notes: str = "",
         budget: Budget | dict[str, Any] | None = None,
@@ -806,8 +801,9 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._token_provider = azure_ad_token_provider
         self.chat_model = chat_model
         self.max_tokens = max_tokens
-        _zone(timezone)  # a misspelled time zone is an error now, not at the first question
-        self.timezone = timezone
+        if timezone is not None:
+            _zone_from(timezone)  # a misspelled time zone is an error now, not at the first question
+        self.timezone = timezone  # None: the zone reports show times in (set_timezone())
         self.regions = regions
         self.notes = notes
         self.budget = Budget.of(budget)
@@ -827,6 +823,12 @@ class AgentAnalyzer(_BaseAnalyzer):
     @property
     def region(self) -> str:
         return self._lambda().region
+
+    @property
+    def zone(self) -> tzinfo | None:
+        """The user's time zone, which "last night" and "today" are read in: timezone= when given, else the zone
+        reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone."""
+        return _zone_from(self.timezone) if self.timezone is not None else _display_zone()
 
     @property
     def client(self) -> Any:
@@ -927,7 +929,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._run = run
         steps = 0
         text = ""
-        message = {"role": "user", "content": f"{asked_at(moment, self.timezone)}\n\n{question}"}
+        message = {"role": "user", "content": f"{asked_at(moment, self.zone)}\n\n{question}"}
         config = {"configurable": {"thread_id": self.thread}, "recursion_limit": self.budget.steps}
         try:
             for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
@@ -1357,19 +1359,27 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
 
 
 def _coverage_text(call: ToolCall) -> str:
-    """'2026-10-15 12:30 to 2026-10-16 02:30 UTC · us-east-1 · cut short' for the table of what it checked."""
+    """'2026-10-15 18:00 to 2026-10-16 08:00 IST · us-east-1 · cut short' for the table of what it checked: the window
+    in the zone reports show times in (set_timezone()), the regions, and whether it was cut short."""
     cov = call.coverage
     parts = []
     window = cov.get("window")
-    if isinstance(window, dict) and window.get("from"):
-        parts.append(f"{str(window['from']).replace('T', ' ').rstrip('Z')} to "
-                     f"{str(window['to']).replace('T', ' ').rstrip('Z')} UTC")
+    if isinstance(window, dict) and window.get("from") and window.get("to"):
+        start, end = (datetime.fromisoformat(str(window[k]).replace("Z", "+00:00")) for k in ("from", "to"))
+        parts.append(f"{_fmt_dt(start)} to {_fmt_dt(end, zone=True)}")
     where = cov.get("regions") or cov.get("region")
     if where:
         parts.append(", ".join(where) if isinstance(where, (list, tuple)) else str(where))
     if cov.get("cut_short"):
         parts.append("cut short")
     return " · ".join(parts) or "-"
+
+
+def _zone_label(zone: tzinfo | None) -> str:
+    """'Asia/Kolkata (IST)', 'UTC', or 'UTC+05:30': a zone as the tools() report names it."""
+    moment = _utcnow().astimezone(zone)
+    short, key = _zone_name(moment), getattr(zone, "key", None)
+    return f"{key} ({short})" if key and key != short else short
 
 
 class AgentView(_BaseView):
@@ -1540,7 +1550,7 @@ class AgentView(_BaseView):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
             _Title("What the agent can do", "Lambda, read-only"),
-            _Cards([("Model", model), ("Regions", regions), ("Time zone", core.timezone or "UTC"),
+            _Cards([("Model", model), ("Regions", regions), ("Time zone", _zone_label(core.zone)),
                     ("Tools", f"{len(core.tools())}")]),
         ]
         rows = [[fn.__name__, _first_line(fn.__doc__), ", ".join(TOOL_READS.get(fn.__name__, ()))]

@@ -46,10 +46,17 @@ Version 1 covers AWS Lambda. The model is your Azure OpenAI deployment, and the 
 3. **Create the view.** It reads AWS with the notebook's IAM execution role and region, like every other view.
 
     ```python
-    from aws_analyzer import AgentView
+    from aws_analyzer import AgentView, set_timezone
 
-    agent = AgentView(timezone="Asia/Kolkata")   # so "last night" and "today" mean your night and your day
+    set_timezone("Asia/Kolkata")   # so "last night" and "today" mean your night and your day
+    agent = AgentView()
     agent.help()
+    ```
+
+    [`set_timezone()`](index.md#timezone) is the package's own: every report then shows its times in your zone too, and the agent's table of what it checked does. `AgentView(timezone="Europe/London")` gives the agent a zone of its own instead. Without either, the agent works in UTC and says so.
+
+    ```python
+    agent = AgentView(timezone="kolkata")   # a tz database name, its city, or an offset like "+05:30"
     ```
 
 </div>
@@ -75,7 +82,7 @@ Each `ask()` shows a report: the answer first, then **What it checked**, a line 
 
 The model gets a set of tools and decides which to call. For "Which Lambda failed last night?" it usually:
 
-1. Turns "last night" into a window in your time zone (18:00 yesterday to 08:00 today, unless you say otherwise) and converts it to UTC, which CloudWatch uses. Each question is sent with the time it was asked, in your time zone and in UTC.
+1. Turns "last night" into a window in your time zone (`set_timezone()`'s; 18:00 yesterday to 08:00 today, unless you say otherwise) and converts it to UTC, which CloudWatch uses. Each question is sent with the time it was asked, in your time zone and in UTC.
 2. Calls `function_health` for that window: CloudWatch's counts for every function at once, in a few seconds.
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
@@ -117,7 +124,7 @@ Each question has limits. Past one, the tools stop running and tell the model to
 | `log_days` | 3 | A longer log read is refused; CloudWatch's counts still cover the window |
 
 ```python
-agent = AgentView(timezone="Asia/Kolkata", budget={"tool_calls": 50, "log_days": 7})
+agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 ```
 
 Log reads are limited because searching weeks of a busy function's logs is slow. For long windows the agent uses CloudWatch's counts, which cover months in seconds, and reads logs only for a short window around what it found.
@@ -145,7 +152,7 @@ from aws_analyzer import AgentAnalyzer, AgentView
 core = AgentAnalyzer(
     deployment="prod-gpt-4o", endpoint="https://acme-ai.openai.azure.com", api_key="...",
     model_prices={"gpt-4o": (2.50, 10.00)},          # USD per 1M input and output tokens, from your price sheet
-    timezone="Asia/Kolkata",
+    timezone="Asia/Kolkata",                         # for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account
     budget={"tool_calls": 25, "log_days": 3},

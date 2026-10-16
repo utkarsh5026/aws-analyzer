@@ -60,7 +60,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from botocore.exceptions import BotoCoreError, ClientError
 
 from ._kit.deps import _in_notebook
-from ._kit.fmt import _plural
+from ._kit.fmt import _fmt_dt, _plural
 from ._kit.render import _file_icon
 from ._kit.window import _cell_number, _css_height, _icon_url, _running_loop, _window_errors
 
@@ -151,7 +151,7 @@ def _parent_prefix(key: str) -> str:
 
 
 def _tip_time(moment: datetime | None) -> str:
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if moment else ""
+    return _fmt_dt(moment, zone=True) if moment else ""
 
 
 # =============================================================================

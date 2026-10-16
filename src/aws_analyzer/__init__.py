@@ -24,8 +24,11 @@ Quick start
     from aws_analyzer import LambdaExplorer  # a window to look through your Lambda functions: their logs run by
     LambdaExplorer("orders-etl", tab="logs") # run, errors, run times, code and settings, by clicking
 
+    from aws_analyzer import set_timezone    # times in your own zone instead of UTC, in every report and window
+    set_timezone("Asia/Kolkata")             # or "local", "+05:30"; AWS_ANALYZER_TZ=Asia/Kolkata does it for good
+
     from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
-    AgentView(timezone="Asia/Kolkata").ask("Which Lambda failed last night?")
+    AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
 
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
@@ -40,6 +43,7 @@ from typing import TYPE_CHECKING, Any
 
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
+    from ._kit.fmt import set_timezone
     from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
@@ -50,7 +54,7 @@ if TYPE_CHECKING:
     from .s3_explorer import S3Explorer, S3Navigator
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 __all__ = [
     "__version__",
@@ -75,6 +79,7 @@ __all__ = [
     "LambdaExplorer",
     "AgentAnalyzer",
     "AgentView",
+    "set_timezone",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -98,6 +103,7 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaExplorer": "lambda_functions",
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
+    "set_timezone": "_kit.fmt",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
             "lambda_functions", "agent")

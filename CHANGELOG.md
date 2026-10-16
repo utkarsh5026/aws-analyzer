@@ -13,7 +13,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - **Ask about your account in plain English**: `AgentView().ask("Which Lambda failed last night?")` answers from the
   package's own read-only tools, run by an agent (LangChain's deepagents) on your Azure OpenAI deployment. It finds
-  which functions failed in your night (`timezone="Asia/Kolkata"`), why, from their logs, and the run that shows it,
+  which functions failed in your night (in `set_timezone()`'s zone, or `AgentView(timezone=...)`'s), why, from their
+  logs, and the run that shows it,
   and every answer says the window and regions it checked, what it couldn't read, the AWS reads, tokens and cost, and
   the `LambdaView` commands to look closer. Follow-up questions continue the conversation; `transcript()` and
   `tools()` show the questions so far and what it can call. Nothing can change your account: a guard refuses any AWS
@@ -21,13 +22,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   at and says so. Version 1 covers Lambda. Install it with `pip install "aws-analyzer[agent]"` (Python 3.11 or newer;
   everything else still runs on 3.10 with boto3 alone).
 
-- Lambda: `how_it_works()` also draws **a graph of how the code fits together**. The event and environment
-  variables come in on the left, the handler and its own functions are in the middle with an arrow for each call, and
-  the AWS services and the web it reaches are on the right. Each arrow is coloured by what the call does and lands on
-  the operation it calls, and the variable, list call or request a warning is about is marked on its line (not set,
-  first page only, no timeout), with its arrow glowing amber. Pointing at a box leaves only what it's joined to in
-  sight. The same graph comes as Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in
-  Python ([#83](https://github.com/utkarsh5026/aws-analyzer/pull/83)).
+- `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
+  report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
+  `since 2024-05-01 14:02 IST`). It takes a tz database name, its city alone (`"kolkata"`, `"new york"`), `"local"`
+  for the machine's own zone, an offset (`"+05:30"`) or `"UTC"` to go back, and dates you type in
+  (`since="2024-05-01 10:00"`) are read in the same zone. The `AWS_ANALYZER_TZ` environment variable picks it for every
+  notebook, and `help()` says which zone times are in. CloudWatch's daily numbers stay in UTC days, as AWS adds them up.
+
+## [0.19.0] - 2026-10-16
+
+### Added
+
+- Lambda: `how_it_works()`, and **How it works** in the explorer's Code tab, also draw **a graph of how the code fits
+  together**, between the findings and the step-by-step outline. The event and environment variables come in on the
+  left, the handler and its own functions are in the middle with an arrow for each call, and the AWS services and the
+  web it reaches are on the right. Each arrow is coloured by what the call does and lands on the operation it calls, and
+  the variable, list call or request a warning is about is marked on its line (not set, first page only, no timeout),
+  with its arrow glowing amber. Pointing at a box leaves only what it's joined to in sight. The same graph comes as
+  Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in Python
+  ([#83](https://github.com/utkarsh5026/aws-analyzer/pull/83)).
 
 ## [0.18.0] - 2026-10-16
 
@@ -597,7 +610,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...v0.16.1

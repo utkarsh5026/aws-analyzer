@@ -85,7 +85,7 @@ from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text
 from ._kit.deps import _require
 from ._kit.errors import _Hint, _error_code, _error_name, _why
 from ._kit.fmt import (
-    HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _plural, _utcnow, human_age, human_money,
+    HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _in_zone, _plural, _utcnow, human_age, human_money,
     human_size, parse_time,
 )
 from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
@@ -1392,7 +1392,7 @@ _SECTIONS = {
 
 def _fmt_day(moment: datetime | None) -> str:
     return (
-        "-" if moment is None else moment.astimezone(timezone.utc).strftime("%Y-%m-%d")
+        "-" if moment is None else _in_zone(moment).strftime("%Y-%m-%d")
     )
 
 

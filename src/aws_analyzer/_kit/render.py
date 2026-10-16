@@ -314,7 +314,9 @@ _SORT_UNITS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, 
 _SORT_NUMBER_RE = re.compile(
     r"^(-?)(<?)\$?([\d,]*\.?\d+)\+?(?: ?(B|KB|MB|GB|TB|PB|%|ms))?(?: of [\d,]+| \([^()]*\))?$")
 _SORT_AGE_RE = re.compile(r"^(\d+)(y|mo|d|h|m) ago$")
-_SORT_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?(?: UTC)?$")
+# '2024-05-01', '2024-05-01 14:02', or a time with its zone's name: '2024-05-01 14:02:31 IST', '... UTC+05:30'
+_SORT_DATE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?: [A-Z]{2,5}(?:[+-]\d{2}(?::\d{2})?)?)?)?$")
 _AGE_SECONDS = {"y": 365 * 86400, "mo": 30 * 86400, "d": 86400, "h": 3600, "m": 60}
 _SORT_WORDS = {  # a column's kind -> what its first and second header click show
     "number": ("largest first", "smallest first"),
