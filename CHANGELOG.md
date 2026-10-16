@@ -11,6 +11,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- **Ask about your account in plain English**: `AgentView().ask("Which Lambda failed last night?")` answers from the
+  package's own read-only tools, run by an agent (LangChain's deepagents) on your Azure OpenAI deployment. It finds
+  which functions failed in your night (`timezone="Asia/Kolkata"`), why, from their logs, and the run that shows it,
+  and every answer says the window and regions it checked, what it couldn't read, the AWS reads, tokens and cost, and
+  the `LambdaView` commands to look closer. Follow-up questions continue the conversation; `transcript()` and
+  `tools()` show the questions so far and what it can call. Nothing can change your account: a guard refuses any AWS
+  call that isn't a read, and each question has a budget (tool calls, time, cost, a 3-day log window) that it stops
+  at and says so. Version 1 covers Lambda. Install it with `pip install "aws-analyzer[agent]"` (Python 3.11 or newer;
+  everything else still runs on 3.10 with boto3 alone).
+
 - Lambda: `how_it_works()` also draws **a graph of how the code fits together**. The event and environment
   variables come in on the left, the handler and its own functions are in the middle with an arrow for each call, and
   the AWS services and the web it reaches are on the right. Each arrow is coloured by what the call does and lands on

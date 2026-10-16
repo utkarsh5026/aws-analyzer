@@ -35,6 +35,8 @@ service is given, run a short tour:
   ui.search("how do I get my money back?", index="vectors-prod/support-docs")`
 - lambda_functions: `ui.functions(regions="all"); ui.function_info("orders-etl"); ui.errors("orders-etl");
   ui.performance("orders-etl")` (the explorer window needs a browser: see `lambda_explorer_shots.py`)
+- agent: `ui.ask("Which Lambda failed in the last 24 hours?"); ui.tools()` (a scripted stand-in for the model, on the
+  Lambda data: see `--help`)
 - other services: `ui.help()` and then the service's overview command
 
 `--help` describes the demo data. Most useful:

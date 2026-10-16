@@ -21,12 +21,12 @@ build-backend = "hatchling.build"
 [project]
 name = "aws-analyzer"
 dynamic = ["version", "readme"]
-description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions, from a Jupyter notebook: what's there, what it costs, and what to do next."
+description = "Readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions, from a Jupyter notebook: what's there, what it costs, and what to do next. And an agent that answers questions about them in plain English."
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Utkarsh Priyadarshi" }]
-keywords = ["aws", "s3", "dynamodb", "bedrock", "knowledge-base", "sagemaker", "opensearch", "vector-search", "lambda", "serverless", "jupyter", "notebook", "cost"]
+keywords = ["aws", "s3", "dynamodb", "bedrock", "knowledge-base", "sagemaker", "opensearch", "vector-search", "lambda", "serverless", "jupyter", "notebook", "cost", "agent", "llm"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: Jupyter",
@@ -62,7 +62,11 @@ files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and sn
     "python-snappy",
 ]
 notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer and the chat window, progress bars
-all = ["aws-analyzer[data,files,notebook]"]
+agent = [  # AgentView: ask about your account in plain English (deepagents needs Python 3.11 or newer)
+    "deepagents>=0.7.26; python_version >= '3.11'",
+    "langchain-openai>=1.7; python_version >= '3.11'",
+]
+all = ["aws-analyzer[data,files,notebook,agent]"]
 
 [project.urls]
 Homepage = "https://github.com/utkarsh5026/aws-analyzer"

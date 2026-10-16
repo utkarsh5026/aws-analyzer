@@ -1,6 +1,7 @@
 """
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
-OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook.
+OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook, and an agent that answers
+questions about them in plain English.
 
 Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
 share (aws_analyzer._bedrock what the two Bedrock modules share), so install the package rather than copying a file.
@@ -23,10 +24,13 @@ Quick start
     from aws_analyzer import LambdaExplorer  # a window to look through your Lambda functions: their logs run by
     LambdaExplorer("orders-etl", tab="logs") # run, errors, run times, code and settings, by clicking
 
+    from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
+    AgentView(timezone="Asia/Kolkata").ask("Which Lambda failed last night?")
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
-Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions. Importing
-this package loads none of them; each loads the first time one of its names is used.
+Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions, agent.
+Importing this package loads none of them; each loads the first time one of its names is used.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
+    from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
@@ -68,6 +73,8 @@ __all__ = [
     "LambdaAnalyzer",
     "LambdaView",
     "LambdaExplorer",
+    "AgentAnalyzer",
+    "AgentView",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -89,9 +96,11 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
     "LambdaExplorer": "lambda_functions",
+    "AgentAnalyzer": "agent",
+    "AgentView": "agent",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-            "lambda_functions")
+            "lambda_functions", "agent")
 
 
 def __getattr__(name: str) -> Any:

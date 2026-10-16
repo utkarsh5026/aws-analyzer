@@ -10,7 +10,8 @@ Install it in your notebook and get readable reports on your S3 buckets, DynamoD
 OpenSearch vector indexes, Lambda functions and the SageMaker notebook itself: what's there, what it costs, and what
 to do next. And windows you use by clicking: an explorer that shows how a
 knowledge base indexed each of its files, a chat window for asking it, with every setting in reach, and an explorer for
-your Lambda functions that reads their logs run by run.
+your Lambda functions that reads their logs run by run. Or just ask: an agent answers questions like "Which Lambda failed
+last night?" from the same read-only tools, and says what it checked.
 
 [![CI](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/utkarsh5026/aws-analyzer/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/aws-analyzer?color=0f766e)](https://pypi.org/project/aws-analyzer/)
@@ -22,7 +23,8 @@ your Lambda functions that reads their logs run by run.
 **[Guides](https://utkarsh5026.github.io/aws-analyzer/)** · [Get started](#get-started) · [S3](#amazon-s3) ·
 [DynamoDB](#amazon-dynamodb) · [Bedrock Knowledge Bases](#amazon-bedrock-knowledge-bases) ·
 [Knowledge base chat](#bedrock-knowledge-base-chat) · [SageMaker](#amazon-sagemaker) · [OpenSearch](#amazon-opensearch) ·
-[Lambda](#aws-lambda) · [Development](#development) · [Changelog](CHANGELOG.md)
+[Lambda](#aws-lambda) · [Ask in plain English](#ask-in-plain-english) · [Development](#development) ·
+[Changelog](CHANGELOG.md)
 
 </div>
 
@@ -88,6 +90,7 @@ report still renders.
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch.py`](src/aws_analyzer/opensearch.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions.py`](src/aws_analyzer/lambda_functions.py)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Read-only by construction, with a budget per question (Lambda for now; the model is your Azure OpenAI deployment) | [`agent.py`](src/aws_analyzer/agent.py) (with `lambda_functions.py`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -99,6 +102,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 ```python
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
+%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents and langchain-openai (Python 3.11+)
 ```
 
 A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
@@ -134,8 +138,8 @@ s3 = ui.core           # the analyzer behind the view: returns data instead of a
 >
 > Each service is a module of the package: `aws_analyzer.s3`, `aws_analyzer.dynamodb`, `aws_analyzer.bedrock_kb`,
 > `aws_analyzer.bedrock_chat`, `aws_analyzer.sagemaker_env`, `aws_analyzer.opensearch`,
-> `aws_analyzer.lambda_functions` and `aws_analyzer.s3_explorer`. The Analyzer and View classes, `S3Explorer`,
-> `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
+> `aws_analyzer.lambda_functions` and `aws_analyzer.s3_explorer`, and the agent is `aws_analyzer.agent`. The Analyzer
+> and View classes, `S3Explorer`, `KBExplorer`, `LambdaExplorer` and `chat` also come straight from `aws_analyzer`.
 
 <details>
 <summary><b>Options</b>: another profile or region, plain text, longer tables, progress bars</summary>
@@ -1900,6 +1904,140 @@ Read-only. Grant what you need:
 read shows up as a note instead of an error. The
 [Lambda guide](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#permissions) has a ready-made IAM
 policy.
+
+</details>
+
+## Ask in plain English
+
+<img src="docs/images/aws/lambda.svg" width="22" height="22" alt="" align="absmiddle"> **Questions about your account, answered by an agent.** Ask "Which Lambda failed last night?" and a model calls
+the package's read-only tools until it can answer: which functions failed and how often, why, and the run that shows
+it. Every answer says what it checked (the time window, in your time zone, and the regions), what it couldn't read or
+was stopped from reading, what it cost, and the `LambdaView` commands to look closer. Version 1 covers Lambda; the
+model is your Azure OpenAI deployment, and the agent loop is LangChain's [deepagents](https://pypi.org/project/deepagents/).
+
+📄 [`src/aws_analyzer/agent.py`](src/aws_analyzer/agent.py) · 📖 [Agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html)
+
+### Quick start
+
+The agent needs two more packages, deepagents and langchain-openai, which need Python 3.11 or newer. Everything else
+in aws-analyzer still works on 3.10 with boto3 alone.
+
+```python
+%pip install "aws-analyzer[agent]"
+
+import os
+os.environ["AZURE_OPENAI_ENDPOINT"] = "https://<resource>.openai.azure.com"
+os.environ["AZURE_OPENAI_API_KEY"] = "..."              # or AgentView(azure_ad_token_provider=...) for Entra ID
+os.environ["AZURE_OPENAI_DEPLOYMENT"] = "gpt-4o"        # your deployment's name, not the model's
+
+from aws_analyzer import AgentView
+
+agent = AgentView(timezone="Asia/Kolkata")              # so "last night" means your night
+agent.ask("Which Lambda failed last night?")
+agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
+agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
+agent.tools()                                           # what it can call, its model and its budget
+agent.transcript()                                      # every question and answer so far, with their cost
+```
+
+> [!NOTE]
+> What leaves AWS: your question and what the tools return (function names, settings, counts, error messages and log
+> lines, with anything that looks like a key or password hidden) go to your Azure OpenAI deployment. Environment
+> variable values are never read. Use a deployment your organisation allows for that data.
+
+### What it can call
+
+Seven tools, each a building block over `LambdaAnalyzer` that returns a compact summary with what it covered. The
+model combines them: "which failed last night?" is `function_health` for the window, then `function_errors` for the
+functions that failed.
+
+| Tool                                                  | What it returns                                                                                                                                       |
+| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `find_functions(match, regions)`                      | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed                                                     |
+| `function_health(since, until, match, regions)`       | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called. Fast: the agent starts here     |
+| `function_errors(function, since, until, region)`     | One function's errors from its logs, grouped by cause, with counts, an example line and request IDs, next to CloudWatch's count of failed calls        |
+| `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error                   |
+| `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs                                                 |
+| `function_details(function, region)`                  | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding with its next step               |
+| `function_code(function, region)`                     | What a Python function's code calls (AWS operations, environment variables by name, event fields, libraries), read with `ast` and never run            |
+
+### Safe and bounded
+
+- **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
+  operation that isn't a Get, List, Describe or Filter call before its request is built, whatever asks for it. There's
+  no shell or code execution: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools
+  only keep notes in memory.
+- **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
+  a log read covers at most 3 days (CloudWatch's counts cover longer windows). Past a limit the tools stop and the
+  model answers with what it has, and the report says what was cut short. `AgentView(budget={"tool_calls": 50,
+  "log_days": 7})` raises them.
+- **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
+  agent is told to say so. A missing permission becomes part of the answer, not an error.
+- **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
+  to follow it, and the tools hide anything that looks like a secret first.
+
+### Commands (`AgentView`)
+
+| Command                     | Shows                                                                                                                                                                                                 |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ask(question, new=False)`  | The answer first, then **what it checked**: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
+| `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
+| `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
+| `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
+
+### Reference
+
+<details>
+<summary><b>Settings and data</b> (<code>AgentAnalyzer</code>): the model, the account, the budget, and answers as Python objects</summary>
+
+```python
+from aws_analyzer import AgentAnalyzer, AgentView
+
+core = AgentAnalyzer(
+    deployment="prod-gpt-4o",             # or AZURE_OPENAI_DEPLOYMENT
+    endpoint="https://acme.openai.azure.com",   # or AZURE_OPENAI_ENDPOINT
+    api_key="...",                        # or AZURE_OPENAI_API_KEY; azure_ad_token_provider= for Entra ID
+    api_version="2024-10-21",             # or OPENAI_API_VERSION; this is the default
+    model_prices={"gpt-4o": (2.50, 10.00)},   # USD per 1M input and output tokens, from your Azure price sheet
+    timezone="Asia/Kolkata",              # what "last night" and "today" mean
+    regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
+    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
+    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3},
+)
+agent = AgentView(core)
+
+answer = core.ask("Which Lambda failed last night?")    # AgentAnswer
+answer.text                    # the answer, in markdown
+answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
+answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
+answer.input_tokens, answer.output_tokens, answer.cost   # cost is None without model_prices=
+answer.stopped, answer.error   # why it stopped early, or what failed
+core.tools()                   # the tools themselves: plain functions, for another agent framework
+```
+
+`chat_model=` takes any LangChain chat model instead of Azure OpenAI (for example `ChatBedrockConverse` from
+langchain-aws, for a model on Amazon Bedrock). The pure functions work without AWS or a model: `hide_secrets`,
+`asked_at`, `system_prompt`, `function_row`, `summarize_functions`, `summarize_health`, `summarize_errors`,
+`summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, `answer_findings`, `answer_next`,
+`answer_cost` and `explain_model_error`.
+
+</details>
+
+<details>
+<summary><b>Permissions and cost</b>: the IAM permissions its tools use, and what a question costs</summary>
+
+The tools read through `LambdaAnalyzer`, so they need the [Lambda permissions](#aws-lambda) above, all read-only:
+`lambda:ListFunctions`, `lambda:GetFunction`, `lambda:ListEventSourceMappings`, `lambda:GetPolicy`,
+`lambda:GetFunctionUrlConfig`, `lambda:GetFunctionEventInvokeConfig`, `lambda:ListAliases`,
+`lambda:ListVersionsByFunction`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`,
+`lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`,
+`logs:FilterLogEvents` and, for `regions="all"`, `ec2:DescribeRegions`. Nothing else, and no permission to change anything. On the Azure side, an API key of the
+resource, or an Entra ID identity with the Cognitive Services OpenAI User role on it.
+
+Each answer counts the model's input and output tokens. Their cost is shown when you pass `model_prices=` (Azure
+OpenAI's prices depend on the model, the region and the deployment type, so there are no built-in ones), and each
+question's budget is checked against it. The CloudWatch metrics it reads cost $0.01 per 1,000 and are counted too;
+reading logs and settings costs nothing.
 
 </details>
 

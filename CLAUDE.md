@@ -17,7 +17,9 @@ would have hidden it), and `lambda_functions.py` isn't `lambda.py` because `lamb
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
 next to a notebook; that's gone, and the package is the one way in.
 `s3_explorer.py` is a **companion** to `s3.py`: a clickable file explorer (ipywidgets) that imports `s3` for its
-previews, formatting and AWS calls.
+previews, formatting and AWS calls. `agent.py` is a companion to `lambda_functions.py`: `AgentView().ask("Which Lambda
+failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
+read-only tools built on `LambdaAnalyzer` (see "The agent" below).
 
 ## Product goal: help the user decide what to do
 
@@ -127,13 +129,17 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
   public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
   `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
-  Nothing imports a companion.
+  `agent.py` is a companion of `lambda_functions.py` the same way (`_lambda_module()`, imported when the first tool
+  runs; its type hints import it under `TYPE_CHECKING`), and the third user of `_bedrock.py` (`SHARED`), for the
+  `_Answer` block its answers are drawn with. Nothing imports a companion.
 - **boto3 + stdlib only at import time.** pandas, pyarrow, IPython, pypdf, pypdfium2, pillow, openpyxl, etc. are
   optional and are imported lazily inside the function that needs them, via `_require(module, purpose)` (raises an
   ImportError that says what to `pip install`; pass `package=` when the pip name differs, `_require("PIL.Image", ...,
   "pillow")`) or a local `from IPython.display import ...`. tqdm (and ipywidgets for its notebook widget) is the
   exception that fails quietly: `_progress_bar_class` (`_kit/progress.py`) loads it with `importlib`, and without it the
-  progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`.
+  progress line is plain text. `bedrock_chat`'s window loads ipywidgets with `_require` in `app()`. The agent's
+  packages (deepagents, langchain-openai, langgraph, langchain's middleware types) load with `_require` in
+  `AgentAnalyzer._harness()`, `_chat()` and `_hide_tools()`, the first time `ask()` runs.
 - **Read-only against AWS.** Nothing writes to a bucket, table or knowledge base (e.g. S3 `deleted()` shows the
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
@@ -167,12 +173,18 @@ cd src && for f in aws_analyzer/[!_]*.py; do python -c "import aws_analyzer.$(ba
   package with urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only),
   which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
   `exec`s any of it. Environment variable values never reach a report: `parse_function` keeps their names, and
-  `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. Keep it that way; README lists the read-only IAM permissions per service, so update that list
+  `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. The agent only calls the
+  analyzers' read methods, and `_Guard` hooks every client `LambdaAnalyzer` makes for it (`attach` wraps its
+  `_service`) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List, Describe,
+  Filter) with `ReadOnlyError` before its request is built; the model is reached through LangChain, not boto3, so
+  `rules.py` sees none of it. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
   operations go unchecked.
 - **Python 3.10 floor.** CI runs 3.10–3.14; ruff `target-version = "py310"`. On 3.10, `requirements-dev.txt`
-  installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors.
+  installs pandas 2 / IPython 8, on 3.11+ pandas 3 / IPython 9, so code must work with both majors. The agent's
+  packages need 3.11 (`_MIN_PYTHON`): `agent.py` still imports on 3.10, `ask()` says what it needs, the `[agent]`
+  extra and the dev pins carry `python_version >= '3.11'`, and its tests that need them skip there.
   Files use `from __future__ import annotations`.
 
 ## Architecture of an analyzer file
@@ -556,6 +568,38 @@ read from threads). What the windows share is in `_kit/window.py` (see "The wind
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and
 `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
 
+## The agent (`agent.py`)
+
+Same five sections. What it is, end to end:
+
+- **Tools** (`AgentAnalyzer.tools()`): seven plain functions closed over the analyzer (`find_functions`,
+  `function_health`, `function_errors`, `function_logs`, `function_performance`, `function_details`, `function_code`),
+  building blocks over `LambdaAnalyzer` methods, not one per question. Their type hints and docstrings are the schema
+  and description the model sees (LangChain reads them), so write a docstring for the model: what it returns, how
+  to pass times (ISO UTC or '24h'), when to use it. Each returns a compact dict from section 3's `summarize_*` (what
+  the model reads: counts, causes, a few lines, secrets hidden by `hide_secrets`) with its coverage (`window`,
+  `regions`, `cut_short`, `covered_from`), plus `_summary` (the report's one line) and `_next` (LambdaView calls),
+  which `_as_tool` takes out before the model sees the result. `TOOL_READS` lists each tool's AWS reads for
+  `tools()` and README.
+- **`_as_tool`** wraps each one: it records a `ToolCall` on the question's `_Run`, checks the `Budget` first
+  (`_check_budget`: tool calls, time, cost; `_log_window`: a log read over `log_days`), turns `_Refused` into a
+  refusal the model reads ("answer now with what you found"), `ClientError` into an error with the permission it
+  needed (`ResourceNotFoundException` into `_not_found`'s close names), and anything else into an error result: a
+  tool never raises into the agent loop. Sections the analyzer couldn't read (`errors` dicts) become the call's error.
+  LangGraph runs a turn's tool calls side by side, so `_Run` is behind a lock and the budget counts under it.
+- **The harness** (`_harness()`): `deepagents.create_deep_agent` once, with `_chat()` (`AzureChatOpenAI` from
+  `deployment` / `endpoint` / `api_key` / `api_version` or `AZURE_OPENAI_*`, or `chat_model=`, any LangChain chat
+  model), the tools, `system_prompt()` (fixed, so it caches; the time goes in each question through `asked_at()`), an
+  `InMemorySaver` checkpointer keyed by `self.thread` (follow-ups; `new_conversation()` makes a new thread), and
+  `_hide_tools({"task", "execute"})`, a middleware that keeps deepagents' general-purpose subagent and shell away from
+  the model. Its file tools stay, on the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox.
+- **`ask()`** streams the graph (`stream_mode="updates"`), adds up each AIMessage's `usage_metadata` (and the served
+  model's name), stops on `stop` (a `threading.Event`), `KeyboardInterrupt` or the hard time limit, and catches a
+  model or loop error into `AgentAnswer.error` (`explain_model_error`, by the OpenAI client's class names, so no openai
+  import) with `.exception` kept. Costs need `model_prices=` (Azure has no list prices here; `answer_cost`), else
+  they're unknown. `AgentView.ask()` draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its
+  `_EXTRA_CSS`), cards, `answer_findings()`, the table of tool calls, the AWS reads (folded) and `answer_next()`.
+
 ## The S3 explorer (`s3_explorer.py`)
 
 Same five sections: pure helpers (`parse_location`, which also takes S3 console links and object URLs,
@@ -644,7 +688,7 @@ does both, a page at a time). How the UI works:
   keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's
   `versioning-strategy: increase-if-necessary` bumps the `==` pins in requirements files but leaves `>=` floors alone.
 - Optional packages are extras: `data` (pandas, pyarrow), `files` (the S3 file readers), `notebook` (IPython,
-  ipywidgets, tqdm), and `all`. A new optional package goes in one of them as well as in README's install lines.
+  ipywidgets, tqdm), `agent` (deepagents, langchain-openai; Python 3.11+), and `all`. A new optional package goes in one of them as well as in README's install lines.
 - PyPI shows README.md, through `hatch-fancy-pypi-readme`, which points its relative links and pictures at GitHub
   and turns `> [!NOTE]` callouts into bold labels (PyPI renders neither). `twine check --strict` with
   `readme-renderer[md]` checks that it renders.
@@ -721,6 +765,11 @@ does both, a page at a time). How the UI works:
   back by a `threading.Event`, as the explorer's tests do (a sweep's too); `python_script`'s output is run with `exec`
   against a `Fake` client put in `sys.modules["boto3"]`. `save_runs()` / `load_runs()` tests `monkeypatch.chdir` into
   `tmp_path`.
+- `tests/test_agent.py` runs the tools on moto (with `test_lambda_functions`' `create`, `put_logs` and
+  `lambda_clients`), and the agent loop with `scripted(...)`, a LangChain chat model that answers with AIMessages in
+  turn (`calls(...)` for tool calls, `says(...)` for text) and records the tools it was given and the messages it was
+  sent; `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as
+  Azure does. Tests that need deepagents or langchain-openai skip without them (Python 3.10).
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper. Each service's help test checks that `set(_commands(<Service>View))` is what its `_GROUPS` list.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
@@ -742,7 +791,7 @@ does both, a page at a time). How the UI works:
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
   README links and old links still work. `index.md` is the home page with one card per service (Material grid
   cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
-  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so does the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to). A new
+  `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
   README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or

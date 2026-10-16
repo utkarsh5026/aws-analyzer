@@ -136,6 +136,20 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the Lambda guide →](lambda_functions.md)
 
+-   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `agent.py`
+
+    **Ask in plain English**
+
+    Questions about your account, answered by an agent.
+    { .what }
+
+    - "Which Lambda failed last night?", answered with the numbers
+    - Every answer says the window and regions it checked
+    - Follow-up questions, and the commands to look closer
+    - Read-only, with a budget per question
+
+    [Open the agent guide →](agent.md)
+
 </div>
 
 ## Every service works the same way { #pattern }

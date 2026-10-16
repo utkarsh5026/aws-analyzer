@@ -78,7 +78,7 @@ def test_explorer_builds_on_the_s3_installed_with_it(package):
 
 
 # Modules a few analyzers share (SHARED in .claude/skills/check/rules.py) -> the analyzers that import them.
-SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
+SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}
 
 
 def test_each_analyzer_loads_alone():

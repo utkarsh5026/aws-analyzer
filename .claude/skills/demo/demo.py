@@ -58,6 +58,9 @@ Demo data (moto, us-east-1, everything synthetic):
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
             and support-agent-actions (a Bedrock agent's action group). eu-west-1: gdpr-export (SQS). The run
             c0ffee00-1d2e-4f3a-9b8c-7d6e5f4a3b2c is one of orders-etl's KeyErrors.
+  agent     the lambda_functions data, and a scripted stand-in for the model (the agent's packages must be installed):
+            whatever the question, it calls function_health for the last 24 hours and function_errors for the two
+            functions that failed most, and answers from what they returned. --live asks your Azure OpenAI deployment.
 """
 
 from __future__ import annotations
@@ -1906,6 +1909,79 @@ def seed_lambda_functions() -> dict:
     return {"clients": {"lambda": lambda_client, "logs": logs_client}}
 
 
+# ----------------------------------------------------------------------------- the agent
+
+
+def seed_agent() -> dict:
+    """The Lambda demo data, and a scripted stand-in for the model (no Azure OpenAI needed, but the agent's packages
+    are): it calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
+    and writes its answer from what they returned, so the report shows the demo data's real numbers. It only knows
+    that one plan; with --live the agent asks your Azure OpenAI deployment instead (AZURE_OPENAI_* variables)."""
+    seeded = seed_lambda_functions()
+    return {"lambda_clients": seeded["clients"], "chat_model": _demo_model()}
+
+
+def _demo_model():
+    try:
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+    except ImportError:
+        print("(the agent demo needs the agent's packages: pip install 'aws-analyzer[agent]', Python 3.11+)",
+              file=sys.stderr)
+        return None
+
+    def answer(health: dict, reports: list[dict]) -> str:
+        failed = health.get("failed") or []
+        if not failed:
+            return (f"No function had failed calls in the last 24 hours ({health.get('functions_checked', 0)} "
+                    f"checked in {', '.join(health.get('regions') or [])}).")
+        causes = {r.get("function"): (r.get("causes") or [{}])[0] for r in reports}
+        rows = ["| Function | Failed calls | Error rate | Most common cause |", "|---|---|---|---|"]
+        for row in failed:
+            cause = causes.get(row["name"]) or {}
+            what = f"{cause['kind']} ×{cause['count']}" if cause.get("kind") else "not read"
+            rows.append(f"| {row['name']} | {row['errors']:,} | {row['error_rate_pct']}% | {what} |")
+        names = " and ".join(f"**{r['name']}**" for r in failed[:2])
+        window = health.get("window") or {}
+        return (f"{names} had failed calls in the last 24 hours.\n\n" + "\n".join(rows)
+                + f"\n\nChecked {window.get('from', '?')} to {window.get('to', '?')} UTC in "
+                + ", ".join(health.get("regions") or []) + ".")
+
+    class DemoModel(BaseChatModel):
+        model_name: str = "demo-model (scripted)"
+
+        @property
+        def _llm_type(self) -> str:
+            return "demo"
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            start = max(i for i, m in enumerate(messages) if m.type == "human")
+            results = [json.loads(m.content) for m in messages[start + 1:] if m.type == "tool"]
+            usage = {"input_tokens": 2400 + 1500 * len(results), "output_tokens": 90, "total_tokens": 0}
+            usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+
+            def calls(*steps):
+                return AIMessage(content="", usage_metadata=usage, tool_calls=[
+                    {"name": name, "args": args, "id": f"{name}-{i}", "type": "tool_call"}
+                    for i, (name, args) in enumerate(steps)])
+
+            if not results:
+                reply = calls(("function_health", {"since": "24h"}))
+            elif len(results) == 1 and results[0].get("failed"):
+                reply = calls(*[("function_errors", {"function": row["name"], "since": "24h",
+                                                     **({"region": row["region"]} if row["region"] != REGION else {})})
+                                for row in results[0]["failed"][:2]])
+            else:
+                reply = AIMessage(content=answer(results[0], results[1:]), usage_metadata=usage)
+            return ChatResult(generations=[ChatGeneration(message=reply)])
+
+    return DemoModel()
+
+
 class _Patched:
     """A moto client with a few operations answered by functions instead (each checked against the service model)."""
 
@@ -1939,7 +2015,7 @@ class _Patched:
 
 SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_kb, "bedrock_chat": seed_bedrock_kb,
            "sagemaker_env": seed_sagemaker_env, "opensearch": seed_opensearch,
-           "lambda_functions": seed_lambda_functions}
+           "lambda_functions": seed_lambda_functions, "agent": seed_agent}
 
 
 # ----------------------------------------------------------------------------- run

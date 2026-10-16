@@ -7,8 +7,9 @@
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzer it
-    builds on (COMPANIONS: s3_explorer.py on s3.py); an import of a module a few analyzers share by any other
-    analyzer (SHARED: _bedrock.py, for bedrock_kb.py and bedrock_chat.py); a shared module importing an analyzer;
+    builds on (COMPANIONS: s3_explorer.py on s3.py, agent.py on lambda_functions.py); an import of a module a few
+    analyzers share by any other analyzer (SHARED: _bedrock.py, for bedrock_kb.py, bedrock_chat.py and agent.py);
+    a shared module importing an analyzer;
     and _kit/ importing any of them
   - an analyzer defining a name that _kit/ has, or the shared module it imports (a copy of a shared helper: import
     it from there instead); and a shared module defining a name that _kit/ has
@@ -41,12 +42,13 @@ ANALYZERS = ROOT / "src" / PACKAGE
 KIT = ANALYZERS / "_kit"  # the code the analyzers share: checked like them, but it has no sections or View
 ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # A companion builds on one analyzer: it imports that analyzer (lazily, so it still imports alone), its UI class
-# is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services.
-COMPANIONS = {"s3_explorer": "s3"}
+# is a <Service>View or <Service>Explorer, and its AWS calls are checked against that analyzer's services. The agent
+# builds on lambda_functions: its tools read through LambdaAnalyzer.
+COMPANIONS = {"s3_explorer": "s3", "agent": "lambda_functions"}
 # Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
 # analyzers that import it don't define its names again.
-SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat"}}
+SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}  # the agent shows its answers with _bedrock's _Answer
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
                  "Retrieve")
