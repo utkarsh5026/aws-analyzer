@@ -10,7 +10,7 @@ sys.path.insert(0, SRC)
 # The analyzer modules, which only ever load as aws_analyzer.<name>. A copy loaded under its bare name too (`import
 # s3`, from some other folder on sys.path) would have its own classes, and isinstance() between the two would fail.
 MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-           "lambda_functions")
+           "lambda_functions", "agent")
 
 for name, value in {
     "AWS_ACCESS_KEY_ID": "testing",

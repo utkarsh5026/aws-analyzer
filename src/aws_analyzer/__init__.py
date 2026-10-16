@@ -1,6 +1,7 @@
 """
 aws-analyzer - readable reports on your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks,
-OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook.
+OpenSearch vector indexes and Lambda functions, from a SageMaker / Jupyter notebook, and an agent that answers
+questions about them in plain English.
 
 Each service is one module (aws_analyzer.s3, aws_analyzer.dynamodb, ...), and aws_analyzer._kit holds the code they
 share (aws_analyzer._bedrock what the two Bedrock modules share), so install the package rather than copying a file.
@@ -26,10 +27,13 @@ Quick start
     from aws_analyzer import set_timezone    # times in your own zone instead of UTC, in every report and window
     set_timezone("Asia/Kolkata")             # or "local", "+05:30"; AWS_ANALYZER_TZ=Asia/Kolkata does it for good
 
+    from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
+    AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
+
     from aws_analyzer.s3 import human_size   # anything else in a module: aws_analyzer.<module>
 
-Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions. Importing
-this package loads none of them; each loads the first time one of its names is used.
+Modules: s3, s3_explorer, dynamodb, bedrock_kb, bedrock_chat, sagemaker_env, opensearch, lambda_functions, agent.
+Importing this package loads none of them; each loads the first time one of its names is used.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from typing import TYPE_CHECKING, Any
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
     from ._kit.fmt import set_timezone
+    from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
@@ -72,6 +77,8 @@ __all__ = [
     "LambdaAnalyzer",
     "LambdaView",
     "LambdaExplorer",
+    "AgentAnalyzer",
+    "AgentView",
     "set_timezone",
 ]
 _EXPORTS = {  # name -> the module it comes from
@@ -94,10 +101,12 @@ _EXPORTS = {  # name -> the module it comes from
     "LambdaAnalyzer": "lambda_functions",
     "LambdaView": "lambda_functions",
     "LambdaExplorer": "lambda_functions",
+    "AgentAnalyzer": "agent",
+    "AgentView": "agent",
     "set_timezone": "_kit.fmt",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
-            "lambda_functions")
+            "lambda_functions", "agent")
 
 
 def __getattr__(name: str) -> Any:

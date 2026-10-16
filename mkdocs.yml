@@ -33,6 +33,7 @@ nav:
   - Amazon SageMaker: sagemaker_env.md
   - Amazon OpenSearch: opensearch.md
   - AWS Lambda: lambda_functions.md
+  - Ask in plain English: agent.md
   - Changelog: https://github.com/utkarsh5026/aws-analyzer/blob/main/CHANGELOG.md
 
 theme:
