@@ -9,15 +9,18 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-16
+
 ### Added
 
-- Lambda: `how_it_works()` also draws **a graph of how the code fits together**. The event and environment
-  variables come in on the left, the handler and its own functions are in the middle with an arrow for each call, and
-  the AWS services and the web it reaches are on the right. Each arrow is coloured by what the call does and lands on
-  the operation it calls, and the variable, list call or request a warning is about is marked on its line (not set,
-  first page only, no timeout), with its arrow glowing amber. Pointing at a box leaves only what it's joined to in
-  sight. The same graph comes as Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in
-  Python ([#83](https://github.com/utkarsh5026/aws-analyzer/pull/83)).
+- Lambda: `how_it_works()`, and **How it works** in the explorer's Code tab, also draw **a graph of how the code fits
+  together**, between the findings and the step-by-step outline. The event and environment variables come in on the
+  left, the handler and its own functions are in the middle with an arrow for each call, and the AWS services and the
+  web it reaches are on the right. Each arrow is coloured by what the call does and lands on the operation it calls, and
+  the variable, list call or request a warning is about is marked on its line (not set, first page only, no timeout),
+  with its arrow glowing amber. Pointing at a box leaves only what it's joined to in sight. The same graph comes as
+  Mermaid to paste in a Markdown file, and `code_graph(cmap).mermaid()` gives it in Python
+  ([#83](https://github.com/utkarsh5026/aws-analyzer/pull/83)).
 
 ## [0.18.0] - 2026-10-16
 
@@ -587,7 +590,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.0...v0.16.1
