@@ -22,6 +22,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   at and says so. Version 1 covers Lambda. Install it with `pip install "aws-analyzer[agent]"` (Python 3.11 or newer;
   everything else still runs on 3.10 with boto3 alone) ([#87](https://github.com/utkarsh5026/aws-analyzer/pull/87)).
 
+- The agent's tools come in **toolkits**, one per AWS service: `AgentView(toolkits=["lambda", Runbooks()])` adds a
+  `Toolkit` of your own (from `aws_analyzer.agent`) beside the Lambda one, and its tools get the same budget, error
+  handling, read-only guard and report. The agent guide's "Your own tools" has an example.
+
 - `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
   report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
   `since 2024-05-01 14:02 IST`). It takes a tz database name, its city alone (`"kolkata"`, `"new york"`), `"local"`

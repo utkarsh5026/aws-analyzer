@@ -136,7 +136,7 @@ Each guide covers setting up in SageMaker, every command with examples of its ou
 
     [Open the Lambda guide →](lambda_functions.md)
 
--   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `agent.py`
+-   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `agent/`
 
     **Ask in plain English**
 

@@ -2044,9 +2044,10 @@ def main() -> int:
     args = parser.parse_args()
 
     package = ROOT / "src" / "aws_analyzer"
-    if args.service.startswith("_") or not (package / f"{args.service}.py").exists():
-        names = ", ".join(sorted(p.stem for p in package.glob("*.py") if not p.stem.startswith("_")))
-        parser.error(f"no src/aws_analyzer/{args.service}.py (have: {names})")
+    modules = sorted({p.stem for p in package.glob("*.py")} | {p.parent.name for p in package.glob("*/__init__.py")})
+    modules = [name for name in modules if not name.startswith("_")]  # a file, or a package like agent/
+    if args.service not in modules:
+        parser.error(f"no src/aws_analyzer/{args.service}.py (have: {', '.join(modules)})")
 
     mock = None
     extra: dict = {}
@@ -2070,7 +2071,8 @@ def main() -> int:
 
     try:
         mod = importlib.import_module(f"aws_analyzer.{args.service}")
-        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        ours = {k: v for k, v in vars(mod).items()  # a package's classes are in its modules (agent.view, ...)
+                if isinstance(v, type) and (v.__module__ == mod.__name__ or v.__module__.startswith(f"{mod.__name__}."))}
         view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
         core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         kwargs = {"region": args.region, "profile": args.profile} if args.live else {"region": "us-east-1"}
