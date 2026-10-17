@@ -26,6 +26,7 @@ class ToolCall:
     error: str | None = None  # why it failed: 'AccessDeniedException; needs logs:FilterLogEvents'
     refused: str | None = None  # why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window', 'stopped'
     next: list[tuple[str, str]] = field(default_factory=list)  # View calls that show more, and what they show
+    first: str | None = "function"  # the tool's first parameter when it has no default: written without its name
 
     @property
     def ok(self) -> bool:
@@ -35,7 +36,7 @@ class ToolCall:
     def call(self) -> str:
         """The call as the model made it: "function_errors('orders-etl', since='2026-10-15T12:30Z')"."""
         args = {k: v for k, v in self.args.items() if v not in ("", None)}
-        first = args.pop("function", None)
+        first = args.pop(self.first, None) if self.first else None
         return _call(self.name, first, **args) if first is not None else _call(self.name, **args)
 
 
@@ -49,7 +50,7 @@ class AgentAnswer:
     aws_calls: dict[str, int] = field(default_factory=dict)  # 'logs:FilterLogEvents' -> 12
     blocked: list[str] = field(default_factory=list)  # AWS calls the read-only guard refused
     metrics_read: int = 0  # CloudWatch metrics requested (GetMetricData bills per 1,000)
-    aws_cost: float = 0.0  # USD for those metrics ($0.01 per 1,000 at list price); its other reads are free
+    aws_cost: float = 0.0  # USD for those metrics ($0.01 per 1,000 at list price) and S3's requests; the rest are free
     model: str = ""  # the deployment or model that answered
     model_calls: int = 0
     input_tokens: int = 0
@@ -99,7 +100,12 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
                                   f"{budget.log_days:g}-day limit for a log read, which keeps questions fast. "
                                   "CloudWatch's counts cover longer windows; to read the logs too, raise the limit: "
                                   f"AgentView(budget={{'log_days': {days}}})."))
-        if call.coverage.get("cut_short"):
+        if call.coverage.get("cut_short") and call.coverage.get("scanned"):
+            keys = int(call.coverage["scanned"])
+            found.append(("info", f"{call.call} stopped after {keys:,} S3 keys (the budget's s3_keys), in key order: "
+                                  "its counts cover those keys only. Ask about a narrower prefix, or raise the limit: "
+                                  f"AgentView(budget={{'s3_keys': {max(keys, budget.s3_keys) * 5}}})."))
+        elif call.coverage.get("cut_short"):
             reach = call.coverage.get("covered_from")
             found.append(("info", f"{call.name} for {call.args.get('function') or 'the functions'} stopped at its "
                                   "line limit" + (f": it covers {_fmt_dt(reach, zone=True)} to the end of the window"
@@ -107,7 +113,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
                                   + ". The newest lines were kept."))
     if not answer.calls and not answer.error and answer.stopped is None:
         found.append(("info", "It answered without calling a tool, so nothing in the answer comes from your account. "
-                              "Ask about your functions, or a time window."))
+                              "Ask about your functions or buckets, or a time window."))
     return found
 
 

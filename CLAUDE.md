@@ -17,9 +17,9 @@ would have hidden it), and `lambda_functions.py` isn't `lambda.py` because `lamb
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
 next to a notebook; that's gone, and the package is the one way in.
 `s3_explorer.py` is a **companion** to `s3.py`: a clickable file explorer (ipywidgets) that imports `s3` for its
-previews, formatting and AWS calls. `agent/` is a companion to `lambda_functions.py`: `AgentView().ask("Which Lambda
-failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
-read-only tools built on `LambdaAnalyzer` (see "The agent" below). It's the one analyzer that is a package rather
+previews, formatting and AWS calls. `agent/` is a companion to `lambda_functions.py` and `s3.py`: `AgentView().ask("Which
+Lambda failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
+read-only tools built on `LambdaAnalyzer` and `S3Analyzer` (see "The agent" below). It's the one analyzer that is a package rather
 than a file, because it grows by toolkits (one module per AWS service it has tools for) and by capabilities of the
 agent itself, each in its own module.
 
@@ -183,9 +183,11 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
   `exec`s any of it. Environment variable values never reach a report: `parse_function` keeps their names, and
   `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. The agent only calls the
-  analyzers' read methods, and `_Guard` hooks every client `LambdaAnalyzer` makes for it (`attach` wraps its
-  `_service`) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List, Describe,
-  Filter) with `ReadOnlyError` before its request is built; the model is reached through LangChain, not boto3, so
+  analyzers' read methods, and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
+  `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
+  hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
+  Describe, Head, Filter) with `ReadOnlyError` before its request is built; the S3 tools read names, sizes, dates and
+  headers, never an object's body; the model is reached through LangChain, not boto3, so
   `rules.py` sees none of it. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
   calls, so create each client with its service name spelled out (see `SageMakerAnalyzer._service`), or its
@@ -596,11 +598,22 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   the result. A toolkit also declares `reads` (each tool's AWS reads, for `tools()` and README: `TOOL_READS`),
   `service` / `services` (the IAM prefix of each operation, for `permission_for`), `covers` (the system prompt's
   first paragraph), `instructions(budget)` (its section of the prompt: Lambda's says start with `function_health`),
-  `privacy` (the tools() note), `not_found` (close names for a resource that isn't there) and `client_factory` (the
-  analyzer method whose clients the guard hooks: Lambda's `_service`). Its `analyzer` is made on the agent's session
-  on first use and hooked to the guard every time. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
+  `privacy` (the tools() note), `not_found` (close names for a resource that isn't there), `permissions` (an
+  operation's IAM permission where it isn't `<prefix>:<operation>`: S3's `ListObjectsV2` is `s3:ListBucket`),
+  `request_cost(counts)` (what its requests cost, from the guard's counts: S3's, at `S3_REQUEST_PRICES`) and
+  `client_factory` (the analyzer method whose clients the guard hooks: Lambda's `_service`). Its `analyzer` is made on
+  the agent's session on first use and hooked to the guard every time.
+  `S3Toolkit` (`s3_tools.py`) has `find_buckets`, `bucket_details`, `list_folder`, `find_files`, `folder_summary` and
+  `file_info` over `S3Analyzer`; listings stop at the budget's `s3_keys` and say so (`scanned`, `cut_short`). **A tool
+  that joins two services** goes in one of their toolkits and reads the other through the agent's toolkit for it,
+  `peer(name)` (None when the agent hasn't got it, and then `tools()` leaves the tool out): S3's `s3_triggers` reads
+  the bucket's notifications (`S3Analyzer.notifications`), lists the files each one covers in the window
+  (`count_arrivals`, pure: by prefix and case-sensitive suffix, and by upload kind, since a multipart upload sends
+  CompleteMultipartUpload, not Put), and reads the function, its resource policy (Lambda's `parse_policy`) and its
+  CloudWatch numbers through `peer("lambda").analyzer`; `trigger_findings` (pure) says what broke each link. Its
+  `covers` and `instructions()` add the S3-and-Lambda part only when the peer is there. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
   agent gets; `AgentAnalyzer(toolkits=[...])` takes names, `Toolkit` subclasses or objects (a user's own too), and
-  `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes. Two toolkits can't share a tool
+  `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`
   (and `DEFAULT_TOOLKITS`), its analyzer in `COMPANIONS["agent"]` in `rules.py`, and its reads in README.
 - **The runtime** (`runtime.py`, `as_tool`) wraps every toolkit's tools alike: it records a `ToolCall` on the
@@ -610,9 +623,14 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `not_found` first, for close names), and anything else into an error result: a tool never raises into the agent
   loop. Sections the analyzer couldn't read (`errors` dicts) become the call's error. LangGraph runs a turn's tool
   calls side by side, so `_Run` is behind a lock and the budget counts under it (`_Run.read_metrics` too: the
-  CloudWatch metrics a tool requested, and their cost).
-- **The guard** (`guard.py`, `_Guard`): `attach` hooks the clients an analyzer has and wraps its client factory, and
-  refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its request is built.
+  CloudWatch metrics a tool requested, and their cost). LangChain passes every default, so the `ToolCall` keeps only
+  the arguments that differ from the tool's defaults, and `first` (its first parameter, when it has no default) is
+  written without its name: `find_files('s3://acme-raw/incoming/', since='2h')`.
+- **The guard** (`guard.py`, `_Guard`): `attach` swaps the analyzer's `session` for a `_GuardedSession` (every client
+  it makes from then on is hooked, whichever method makes it: S3Analyzer makes regional S3, CloudWatch, STS and S3
+  Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
+  and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
+  request is built.
 - **The model** (`llm.py`): `azure_chat_model()` (`AzureChatOpenAI` from `deployment` / `endpoint` / `api_key` /
   `api_version` or `AZURE_OPENAI_*`; `_Hint` names what's missing), or `chat_model=`, any LangChain chat model;
   `model_name`, `answer_cost` (costs need `model_prices=`: Azure has no list prices here, else they're unknown) and
@@ -803,7 +821,8 @@ does both, a page at a time). How the UI works:
   against a `Fake` client put in `sys.modules["boto3"]`. `save_runs()` / `load_runs()` tests `monkeypatch.chdir` into
   `tmp_path`.
 - `tests/test_agent.py` runs the tools on moto (with `test_lambda_functions`' `create`, `put_logs` and
-  `lambda_clients`), a toy `Notes` toolkit with no AWS behind it to show what a new service's toolkit plugs into, and
+  `lambda_clients`, whose `policies=` gives a function the resource policy `s3_triggers` reads; the `buckets` fixture
+  uploads its files before it sets a bucket's notifications, so moto doesn't try to run the function), a toy `Notes` toolkit with no AWS behind it to show what a new service's toolkit plugs into, and
   the agent loop with `scripted(...)`, a LangChain chat model that answers with AIMessages in
   turn (`calls(...)` for tool calls, `says(...)` for text) and records the tools it was given and the messages it was
   sent; `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as

@@ -8,12 +8,41 @@ import threading
 from collections import Counter
 from typing import Any
 
-READ_PREFIXES = ("Get", "List", "Describe", "Filter")  # the AWS operations the tools may call: reads only
-# (FilterLogEvents reads a log group). The guard refuses every other one before its request is built.
+READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")  # the AWS operations the tools may call: reads only
+# (FilterLogEvents reads a log group; HeadObject and HeadBucket read an object's or a bucket's headers). The guard
+# refuses every other one before its request is built.
 
 
 class ReadOnlyError(PermissionError):
-    """An AWS call the read-only guard refused: it isn't a Get, List, Describe or Filter call."""
+    """An AWS call the read-only guard refused: it isn't a Get, List, Describe, Head or Filter call."""
+
+
+def _is_client(value: Any) -> bool:
+    """Whether `value` is a boto3 client (or a stand-in for one, as tests use): it has meta.events to hook."""
+    return getattr(getattr(value, "meta", None), "events", None) is not None
+
+
+class _GuardedSession:
+    """A boto3 session whose every client goes through the guard. An analyzer the guard attaches to reads AWS through
+    one in place of its own session, so a client it makes later (in another region, for another service, in any
+    method) is hooked as it's made. Everything else is the session's own."""
+
+    def __init__(self, session: Any, guard: _Guard):
+        self._session, self._guard = session, guard
+
+    def client(self, *args: Any, **kwargs: Any) -> Any:
+        return self._guard.watch(self._session.client(*args, **kwargs))
+
+    def resource(self, *args: Any, **kwargs: Any) -> Any:
+        resource = self._session.resource(*args, **kwargs)
+        self._guard.watch(resource.meta.client)
+        return resource
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+    def __repr__(self) -> str:
+        return f"<read-only {self._session!r}>"
 
 
 class _Guard:
@@ -22,7 +51,7 @@ class _Guard:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._watched: set[int] = set()
+        self._hook = f"aws-analyzer-read-only-{id(self)}"  # each client's emitter keeps it once, however often asked
         self.counts: Counter[str] = Counter()
         self.blocked: list[str] = []
 
@@ -43,17 +72,20 @@ class _Guard:
             self.counts[op] += 1
 
     def watch(self, client: Any) -> Any:
-        """Hooks one boto3 client (once) and returns it."""
+        """Hooks one boto3 client (once: its event emitter keeps the hook's unique_id, so asking again does nothing)
+        and returns it."""
         events = getattr(getattr(client, "meta", None), "events", None)
-        if events is not None and id(client) not in self._watched:
-            events.register_first("before-parameter-build.*.*", self._check)
-            self._watched.add(id(client))
+        if events is None:
+            return client
+        with self._lock:  # tools run side by side: register each hook once
+            events.register_first("before-parameter-build.*.*", self._check, unique_id=self._hook)
         return client
 
     def attach(self, core: Any, factory: str | None = None) -> Any:
-        """Hooks the clients an analyzer (`core`) has made: its main `client` when it's set in __init__, the ones in
-        its `_clients`, and, when it makes clients through a method (`factory`, LambdaAnalyzer's `_service`), every
-        one it makes from now on. Returns `core`."""
+        """Hooks an analyzer (`core`): its session becomes a _GuardedSession, so every client it makes from now on is
+        hooked; the clients it already has are hooked (its main `client` when it's set in __init__, and the ones it
+        keeps in dicts, like `_clients`); and, when it makes clients through a method (`factory`, LambdaAnalyzer's
+        `_service`), every client that returns, which covers clients passed in (clients=) too. Returns `core`."""
         if factory and not getattr(core, "_agent_guard", None):
             make = getattr(core, factory)
 
@@ -62,8 +94,16 @@ class _Guard:
 
             setattr(core, factory, made)
             core._agent_guard = self
+        session = getattr(core, "session", None)
+        if session is not None and not isinstance(session, _GuardedSession):
+            core.session = _GuardedSession(session, self)
         attributes = getattr(core, "__dict__", {})  # not a `client` property: reading one could make a client
-        for client in [attributes.get("client"), *getattr(core, "_clients", {}).values()]:
-            if client is not None:
-                self.watch(client)
+        for value in list(attributes.values()):
+            try:
+                found = list(value.values()) if isinstance(value, dict) else [value]
+            except RuntimeError:  # a tool running beside this one added a client: it was made hooked
+                continue
+            for client in found:
+                if _is_client(client):
+                    self.watch(client)
         return core

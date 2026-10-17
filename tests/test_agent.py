@@ -20,20 +20,26 @@ from aws_analyzer.agent import (
     Budget,
     LambdaToolkit,
     ReadOnlyError,
+    S3Toolkit,
     Toolkit,
     ToolCall,
+    TriggerLink,
     answer_cost,
     answer_findings,
     answer_next,
     asked_at,
+    count_arrivals,
     explain_model_error,
     hide_secrets,
     summarize_errors,
+    summarize_file,
     summarize_health,
     system_prompt,
+    trigger_findings,
 )
 from aws_analyzer.lambda_functions import ErrorGroup, ErrorReport, Function, FunctionMetrics
-from test_lambda_functions import CODE, OTHER, REGION, RID, create, lambda_clients, put_logs
+from aws_analyzer.s3 import EventNotification, ObjectInfo
+from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, create, lambda_clients, put_logs
 
 NOW = datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc)
 
@@ -183,7 +189,7 @@ def test_answer_findings_say_where_it_stopped_and_what_it_missed():
     assert "stopped at its line limit: it covers 2026-10-16 03:42 UTC" in text
     assert answer_findings(AgentAnswer("q", text="hi")) == [
         ("info", "It answered without calling a tool, so nothing in the answer comes from your account. Ask about "
-                 "your functions, or a time window.")]
+                 "your functions or buckets, or a time window.")]
 
 
 def test_answer_next_prefers_the_latest_calls_without_repeats():
@@ -294,7 +300,8 @@ def test_toolkits_says_what_it_takes():
     with pytest.raises(TypeError, match="toolkits= takes names"):
         AgentAnalyzer(region=REGION, toolkits=[5])
     with pytest.raises(KeyError, match="no 's3' toolkit; it has lambda"):
-        AgentAnalyzer(region=REGION).toolkit("s3")
+        AgentAnalyzer(region=REGION, toolkits=["lambda"]).toolkit("s3")
+    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3"]  # the default: both
     notes = Notes()
     AgentAnalyzer(region=REGION, toolkits=[notes])
     with pytest.raises(ValueError, match="already belongs to another AgentAnalyzer"):
@@ -390,6 +397,8 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
 
     found = tool(core, "find_functions")(regions=f"{REGION},{OTHER}")
     assert found["count"] == 3 and {f["name"] for f in found["functions"]} == {"etl-nightly", "api-handler", "eu-fn"}
+    lam = core.toolkit("lambda")  # the next step leaves out what wasn't given, so the command's defaults apply
+    assert lam._view_call("functions", None, regions=None) == "LambdaView().functions()"
 
 
 def test_a_missing_function_lists_close_names(core):
@@ -419,6 +428,238 @@ def test_the_guard_refuses_anything_but_a_read(core):
         lam.delete_function(FunctionName="etl-nightly")
     assert core._guard.blocked == ["lambda:DeleteFunction"] and core._guard.counts["lambda:ListFunctions"] == 1
     assert boto3.client("lambda", region_name=REGION).get_function(FunctionName="etl-nightly")  # still there
+
+
+# ---- the S3 toolkit, and S3 with Lambda (pure, then on moto)
+
+
+ETL_ARN = f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:etl-nightly"
+
+
+def put_only(prefix="in/", suffix=".csv", arn=ETL_ARN, events=("s3:ObjectCreated:Put",)):
+    return EventNotification("Lambda function", arn, list(events), prefix, suffix, "etl")
+
+
+def s3_object(key, minutes_ago, etag="abc", size=10):
+    return ObjectInfo("raw", key, size, NOW - timedelta(minutes=minutes_ago), etag=etag)
+
+
+def test_count_arrivals_says_which_files_the_notification_missed():
+    objects = [s3_object("in/a.csv", 10), s3_object("in/b.csv", 20, etag="abc-3"), s3_object("in/c.CSV", 5),
+               s3_object("in/old.csv", 600), s3_object("in/notes.txt", 1), s3_object("in/", 0, size=0)]
+    a = count_arrivals(objects, put_only(), NOW - timedelta(hours=1), NOW)
+    assert (a.scanned, a.matched, a.sent, a.multipart_missed, a.whole_missed) == (6, 2, 1, 1, 0)
+    assert a.case_missed == ["in/c.CSV"] and a.missed_keys == ["in/b.csv"] and [o.key for o in a.newest] == ["in/a.csv"]
+    assert a.last_match.key == "in/a.csv" and not a.cut_short
+    every = count_arrivals(objects, put_only(events=["s3:ObjectCreated:*"]), NOW - timedelta(hours=1), NOW)
+    assert (every.sent, every.multipart_missed) == (2, 0)
+    assert count_arrivals(objects, put_only(), NOW - timedelta(hours=1), NOW, limit=2).cut_short
+
+
+def test_trigger_findings_say_what_breaks_the_link_and_what_to_do():
+    window = (NOW - timedelta(hours=1), NOW)
+    a = count_arrivals([s3_object("in/a.csv", 10), s3_object("in/b.csv", 20, etag="abc-3"),
+                        s3_object("in/c.CSV", 5)], put_only(), *window)
+    quiet = FunctionMetrics("etl-nightly", 0.04, 3600)
+    text = " ".join(m for _, m in trigger_findings(TriggerLink("raw", put_only(), True, False, a, quiet, ACCOUNT)))
+    assert ("aws lambda add-permission --function-name etl-nightly --statement-id s3-raw --action "
+            "lambda:InvokeFunction --principal s3.amazonaws.com --source-arn arn:aws:s3:::raw --source-account "
+            f"{ACCOUNT} --region {REGION}") in text
+    assert "1 file under 'in/' ending in '.csv' written in the window was uploaded in parts" in text
+    assert "ends in '.CSV', which the suffix filter '.csv' doesn't match (S3 compares case-sensitively): it never" in text
+    assert "counted no runs" not in text  # the missing permission already explains it
+    allowed = trigger_findings(TriggerLink("raw", put_only(), True, True, a, quiet, ACCOUNT))
+    assert any("CloudWatch counted no runs of it" in m for _, m in allowed)
+    failed = FunctionMetrics("etl-nightly", 0.04, 3600, invocations=5, errors=2)
+    assert any("etl-nightly failed 2 times in 5 runs" in m and "function_errors('etl-nightly')" in m
+               for _, m in trigger_findings(TriggerLink("raw", put_only(), True, True, a, failed)))
+    [(level, gone)] = trigger_findings(TriggerLink("raw", put_only(), exists=False))
+    assert level == "warn" and gone.startswith("Bucket raw sends s3:ObjectCreated:Put for files under 'in/' ending "
+                                               "in '.csv' to Lambda function etl-nightly, which isn't there in us-east-1")
+    nothing = count_arrivals([s3_object("in/a.csv", 600)], put_only(), *window)
+    [(_, why)] = trigger_findings(TriggerLink("raw", put_only(), True, True, nothing))
+    assert "so S3 had nothing to send etl-nightly: if it didn't run, that's why" in why
+    assert "The newest file it covers is in/a.csv, written 2026-10-15T17:42Z" in why
+
+
+def test_summarize_file_says_what_stops_a_reader_and_hides_secrets():
+    out = summarize_file({"uri": "s3://raw/a.csv", "size": 2048, "storage_class": "GLACIER", "encryption": "aws:kms",
+                          "kms_key": "arn:aws:kms:us-east-1:1:key/k1", "metadata": {"db_password": "hunter2"},
+                          "tags": None})
+    assert out["size"] == "2.0 KB" and out["metadata"] == {"db_password": "[hidden]"}
+    assert "archived (GLACIER)" in out["notes"][0] and "kms:Decrypt on that key" in out["notes"][1]
+    assert out["tags"] == "not read: needs s3:GetObjectTagging"
+
+
+S3_POLICY = {"Version": "2012-10-17", "Statement": [
+    {"Sid": "s3-acme-raw", "Effect": "Allow", "Principal": {"Service": "s3.amazonaws.com"},
+     "Action": "lambda:InvokeFunction", "Resource": ETL_ARN,
+     "Condition": {"ArnLike": {"AWS:SourceArn": "arn:aws:s3:::acme-raw"}, "StringEquals": {"AWS:SourceAccount": ACCOUNT}}},
+    {"Sid": "s3-acme-old", "Effect": "Allow", "Principal": {"Service": "s3.amazonaws.com"},
+     "Action": "lambda:InvokeFunction", "Resource": ETL_ARN,
+     "Condition": {"ArnLike": {"AWS:SourceArn": "arn:aws:s3:::acme-old"}}},
+]}
+
+
+def notify(bucket, arn, events=("s3:ObjectCreated:Put",), prefix="incoming/", suffix=".csv"):
+    rules = [{"Name": "prefix", "Value": prefix}, {"Name": "suffix", "Value": suffix}]
+    boto3.client("s3", region_name=REGION).put_bucket_notification_configuration(
+        Bucket=bucket, NotificationConfiguration={"LambdaFunctionConfigurations": [
+            {"Id": "etl", "LambdaFunctionArn": arn, "Events": list(events), "Filter": {"Key": {"FilterRules": rules}}}]})
+
+
+@pytest.fixture
+def buckets(seeded):
+    """acme-raw: three files under incoming/ written just now (a .csv uploaded whole, a .csv uploaded in parts and a
+    .CSV) and a README, and a notification that sends PUT uploads of incoming/*.csv to etl-nightly, whose policy lets
+    it (and acme-old, which sends it nothing); acme-ghost sends events to a function that isn't there; acme-drop to
+    api-handler, which doesn't let S3 invoke it; acme-reports is in eu-west-1."""
+    s3 = boto3.client("s3", region_name=REGION)
+    for name in ("acme-raw", "acme-ghost", "acme-old", "acme-drop"):
+        s3.create_bucket(Bucket=name)
+    s3.put_object(Bucket="acme-raw", Key="incoming/orders-1.csv", Body=b"id,amount\n1,SECRET-ROW\n")
+    s3.put_object(Bucket="acme-raw", Key="incoming/orders-2.CSV", Body=b"id\n2\n")
+    upload = s3.create_multipart_upload(Bucket="acme-raw", Key="incoming/orders-big.csv")
+    part = s3.upload_part(Bucket="acme-raw", Key="incoming/orders-big.csv", PartNumber=1,
+                          UploadId=upload["UploadId"], Body=b"id\n3\n")
+    s3.complete_multipart_upload(Bucket="acme-raw", Key="incoming/orders-big.csv", UploadId=upload["UploadId"],
+                                 MultipartUpload={"Parts": [{"ETag": part["ETag"], "PartNumber": 1}]})
+    s3.put_object(Bucket="acme-raw", Key="README.md", Body=b"# raw", Metadata={"owner": "data-team",
+                                                                              "api-key": "sk-123456"})
+    notify("acme-raw", ETL_ARN)  # after the uploads: moto would try to run the function for each
+    notify("acme-ghost", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:old-loader", events=["s3:ObjectCreated:*"])
+    notify("acme-drop", f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:api-handler")
+    boto3.client("s3", region_name=OTHER).create_bucket(Bucket="acme-reports",
+                                                        CreateBucketConfiguration={"LocationConstraint": OTHER})
+
+
+def with_s3(chat_model=None, **settings):
+    return make(chat_model, clients={"policies": {"etl-nightly": S3_POLICY}}, **settings)
+
+
+def test_s3_tools_read_buckets_folders_and_files_but_never_their_contents(buckets):
+    core = with_s3()
+    found = tool(core, "find_buckets")()
+    assert {b["name"] for b in found["buckets"]} == {"acme-raw", "acme-ghost", "acme-old", "acme-drop", "acme-reports"}
+    assert next(b for b in found["buckets"] if b["name"] == "acme-reports")["region"] == OTHER
+    sized = tool(core, "find_buckets")(match="acme-r*", sizes=True)  # moto keeps no storage metrics: no numbers
+    assert sized["count"] == 2 and "sizes_note" in sized
+
+    details = tool(core, "bucket_details")("acme-raw")
+    assert details["event_notifications"][0]["sends"] == (
+        "PUT uploads under 'incoming/' ending in '.csv' -> Lambda function etl-nightly")
+    assert details["region"] == REGION and details["findings"]
+
+    listing = tool(core, "list_folder")("acme-raw")
+    assert listing["folders"] == ["incoming/"] and [f["key"] for f in listing["files_newest_first"]] == ["README.md"]
+
+    files = tool(core, "find_files")("s3://acme-raw/incoming/", match="*.csv", since="1h")
+    assert files["matched"] == 2 and files["scanned"] == 3 and files["cut_short"] is False
+    assert {f["key"] for f in files["newest_first"]} == {"incoming/orders-1.csv", "incoming/orders-big.csv"}
+    assert next(f for f in files["newest_first"] if f["key"].endswith("big.csv"))["multipart"] is True
+    assert files["window"]["hours"] == 1.0
+
+    summary = tool(core, "folder_summary")("acme-raw")
+    assert summary["files"] == 4 and summary["cut_short"] is False
+
+    info = tool(core, "file_info")("s3://acme-raw/README.md")
+    assert info["metadata"] == {"owner": "data-team", "api-key": "[hidden]"} and info["size"] == "5 B"
+
+    everything = json.dumps([found, details, listing, files, summary, info])
+    assert "SECRET-ROW" not in everything and "sk-123456" not in everything
+
+
+def test_s3_triggers_joins_a_bucket_to_the_function_it_invokes(buckets):
+    core = with_s3()
+    out = tool(core, "s3_triggers")(bucket="acme-raw", since="2h")
+    [link] = out["links"]
+    assert (link["function"], link["function_exists"], link["s3_may_invoke"]) == ("etl-nightly", True, True)
+    files = link["files_in_window"]
+    assert (files["covered_by_filter"], files["invoked_it"], files["missed_by_upload_kind"],
+            files["missed_by_case"]) == (2, 1, 1, 1)
+    assert link["function_in_window"] == {"runs": 1000, "failed": 40, "throttled": 3}
+    text = " ".join(f["message"] for f in out["findings"])
+    assert "was uploaded in parts (multipart)" in text and "incoming/orders-big.csv" in text
+    assert "ends in '.CSV', which the suffix filter '.csv' doesn't match" in text
+    assert "etl-nightly failed 40 times in 1,000 runs" in text
+    assert out["window"]["hours"] == 2.0 and out["scanned"] == 3 and json.dumps(out)  # the keys under incoming/
+
+    past = tool(core, "s3_triggers")(bucket="acme-raw", since="2026-01-01T00:00Z", until="2026-01-02T00:00Z")
+    text = " ".join(f["message"] for f in past["findings"])
+    assert "No file under 'incoming/' ending in '.csv' in bucket acme-raw was written in the window" in text
+    assert "The newest file it covers is incoming/orders-" in text and "failed" not in text
+
+
+def test_s3_triggers_finds_the_buckets_that_invoke_a_function(buckets):
+    core = with_s3()
+    out = tool(core, "s3_triggers")(function="etl-nightly", since="2h")
+    assert [link["bucket"] for link in out["links"]] == ["acme-raw"]
+    assert out["buckets_checked"] == ["acme-raw", "acme-old"]  # the two its policy names
+    assert any("lets bucket acme-old invoke it, but acme-old has no event notification that does" in f["message"]
+               for f in out["findings"])
+
+    dropped = tool(core, "s3_triggers")(function="api-handler")  # no policy: every bucket in its region is checked
+    [link] = dropped["links"]
+    assert (link["bucket"], link["s3_may_invoke"]) == ("acme-drop", False)
+    text = " ".join(f["message"] for f in dropped["findings"])
+    assert "resource policy has no statement that lets S3 invoke it" in text
+    assert "aws lambda add-permission --function-name api-handler" in text
+    assert "acme-reports" not in dropped["buckets_checked"]  # another region's buckets can't invoke it
+
+    ghost = tool(core, "s3_triggers")(bucket="acme-ghost")
+    assert ghost["links"][0]["function_exists"] is False
+    assert "which isn't there in us-east-1" in ghost["findings"][0]["message"]
+    assert tool(core, "s3_triggers")(bucket="acme-reports")["findings"][0]["message"] == (
+        "Bucket acme-reports's event notifications invoke no Lambda function.")
+
+
+def test_s3_tools_name_what_isnt_there(buckets):
+    core = with_s3()
+    missing = tool(core, "bucket_details")("acme-rae")
+    assert missing["close_names"][0] == "acme-raw" and "No bucket named 'acme-rae'" in missing["error"]
+    gone = tool(core, "file_info")("s3://acme-raw/incoming/orders-3.csv")
+    assert gone["error"].startswith("No file at s3://acme-raw/incoming/orders-3.csv")
+    assert gone["close_keys"] and gone["close_keys"][0].startswith("incoming/orders-")
+    assert "is a folder" in tool(core, "file_info")("s3://acme-raw/incoming")["error"]
+    nobody = tool(core, "s3_triggers")(function="etl-nightlyy")
+    assert nobody["close_names"] == ["etl-nightly"]
+    assert "needs a bucket, a function" in tool(core, "s3_triggers")()["message"]
+
+
+def test_s3_listings_stop_at_the_budget(buckets):
+    core = with_s3(budget={"s3_keys": 2})
+    out = tool(core, "find_files")("acme-raw")
+    assert out["scanned"] == 2 and out["cut_short"] is True and "Stopped after 2 keys" in out["note"]
+    assert tool(core, "folder_summary")("acme-raw")["cut_short"] is True
+
+
+def test_the_guard_covers_every_client_the_s3_analyzer_makes(buckets):
+    core = with_s3()
+    s3a = core.toolkit("s3").analyzer
+    for client in (s3a.client, s3a._s3_in(OTHER), s3a.session.client("s3", region_name=REGION)):
+        with pytest.raises(ReadOnlyError, match="s3:DeleteBucket isn't a read"):
+            client.delete_bucket(Bucket="acme-old")
+    assert core._guard.blocked == ["s3:DeleteBucket"] * 3
+    for _ in range(3):  # a client hooked again (and clients made and dropped call by call) counts each read once
+        core._guard.watch(s3a.client)
+    s3a.account_id()
+    assert core._guard.counts["sts:GetCallerIdentity"] == 1
+    assert boto3.client("s3", region_name=REGION).head_bucket(Bucket="acme-old")  # still there
+    assert s3a.head("s3://acme-raw/README.md")["size"] == 5 and core._guard.counts["s3:HeadObject"] == 1
+
+
+def test_without_lambda_the_s3_toolkit_leaves_out_s3_triggers(buckets):
+    core = AgentAnalyzer(region=REGION, toolkits=["s3"])
+    names = [t.__name__ for t in core.tools()]
+    assert "s3_triggers" not in names and names[:3] == ["find_buckets", "bucket_details", "list_folder"]
+    text = core.instructions()
+    assert text.startswith("You answer questions about the user's AWS account for a data scientist working in a "
+                           "notebook. You cover Amazon S3: which buckets exist")
+    assert "S3 and Lambda together" not in text and "invoke which Lambda functions" not in text
+    both = AgentAnalyzer(region=REGION).instructions()
+    assert "\nS3 and Lambda together\n- For a function that S3 events invoke" in both
+    assert both.index("\nAWS Lambda\n") < both.index("\nAmazon S3\n") < both.index("How to answer")
+    assert isinstance(AgentAnalyzer(region=REGION).toolkit("s3"), S3Toolkit)
 
 
 # ---- the agent loop, with a scripted model
@@ -544,6 +785,30 @@ def test_a_stop_request_ends_the_question_with_what_it_found(seeded):
     assert answer.stopped == "stopped" and answer.text == ""
 
 
+def test_ask_about_s3_and_lambda_together(buckets, capsys):
+    model = scripted(
+        calls(("s3_triggers", {"bucket": "acme-raw", "since": "2h"})),
+        calls(("find_files", {"location": "s3://acme-raw/incoming/", "since": "2h"})),
+        says("1 of the 2 new .csv files ran **etl-nightly**: the multipart upload never triggered it."),
+    )
+    view = AgentView(with_s3(model, budget={"s3_keys": 2}), mode="text", progress="off")
+    answer = view.core.ask("Were the files uploaded to acme-raw processed?")
+    assert [c.name for c in answer.calls] == ["s3_triggers", "find_files"]
+    assert answer.calls[0].summary == "1 S3 → Lambda link: acme-raw → etl-nightly; 1 link with warnings"
+    assert answer.aws_calls["s3:GetBucketNotificationConfiguration"] == 1 and answer.aws_calls["s3:ListObjectsV2"]
+    assert answer.aws_cost > answer.metrics_read / 1000 * 0.01  # S3's requests are billed too
+    assert "s3_triggers" in model.bound[0] and "find_buckets" in model.bound[0]
+    assert "S3 and Lambda together" in model.prompts[0][0].content
+    found = " ".join(m for _, m in answer_findings(answer, view.core.budget))
+    assert "find_files('s3://acme-raw/incoming/', since='2h') stopped after 2 S3 keys" in found
+    assert "AgentView(budget={'s3_keys': 10})" in found
+    view._show(view._answer_blocks(answer))
+    out = capsys.readouterr().out
+    assert "UTC · 2 keys read · cut short" in out and "(5 CloudWatch metrics and 4 S3 requests)" in out
+    assert "Look closer (aws_analyzer.S3View, aws_analyzer.LambdaView)" in out
+    assert "S3View().find('s3://acme-raw/incoming/', modified_after=" in out and "None" not in out
+
+
 def test_a_failed_model_call_becomes_the_answers_error(seeded):
     denied = type("AuthenticationError", (Exception,), {"status_code": 401})("Access denied due to invalid key")
     core = make(scripted(denied))
@@ -660,9 +925,12 @@ def test_transcript_and_new_conversation(view, capsys):
 def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
     out = run(capsys, view.tools)
     for name in ("find_functions", "function_health", "function_errors", "function_logs", "function_performance",
-                 "function_details", "function_code"):
+                 "function_details", "function_code", "find_buckets", "bucket_details", "list_folder", "find_files",
+                 "folder_summary", "file_info", "s3_triggers"):
         assert name in out
     assert "logs:FilterLogEvents" in out and "3 days" in out and "outside AWS" in out
+    assert "Lambda, S3, read-only" in out and "s3:GetBucketNotification" in out and "100,000" in out
+    assert "File contents are never read" in out
 
 
 def test_help_lists_every_command():

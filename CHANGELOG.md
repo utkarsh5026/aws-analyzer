@@ -26,6 +26,21 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `Toolkit` of your own (from `aws_analyzer.agent`) beside the Lambda one, and its tools get the same budget, error
   handling, read-only guard and report. The agent guide's "Your own tools" has an example.
 
+- **The agent covers S3 too, and the bucket events that invoke Lambda functions**:
+  `AgentView().ask("Were last night's uploads to acme-raw processed?")` checks the bucket's event notifications, the
+  files that arrived in the window and the function they should have run, and says what broke the link: files ending
+  in `.CSV` when the filter says `.csv`, files uploaded in parts when the notification fires only on PUT uploads, a
+  function that isn't there, a missing permission (with the `aws lambda add-permission` command), or no file arriving
+  at all, next to the function's runs and failures in that window. It also answers about buckets on their own (their
+  setup, size and cost, what's in a folder, which files arrived when, one file's headers), and never reads what's
+  inside a file. `AgentView(toolkits=["s3"])` gives S3 alone, and `budget={"s3_keys": 500_000}` lets a listing read
+  more than its default 100,000 keys.
+
+- S3: `S3Analyzer().notifications("my-bucket")` lists a bucket's **event notifications**: which Lambda functions, SQS
+  queues and SNS topics it sends which events to, for which keys, and whether EventBridge gets them all
+  (`parse_notifications` does the same on a `GetBucketNotificationConfiguration` response). It needs
+  `s3:GetBucketNotification`.
+
 - `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
   report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
   `since 2024-05-01 14:02 IST`). It takes a tz database name, its city alone (`"kolkata"`, `"new york"`), `"local"`

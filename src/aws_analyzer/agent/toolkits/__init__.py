@@ -1,10 +1,12 @@
-"""The agent's toolkits: one module per AWS service (lambda_tools.py), each a Toolkit subclass (base.py) with the tools
-the agent can call about that service. TOOLKITS names the built-in ones; AgentAnalyzer(toolkits=[...]) picks which
+"""The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py), each a Toolkit subclass (base.py)
+with the tools the agent can call about that service. TOOLKITS names the built-in ones; AgentAnalyzer(toolkits=[...]) picks which
 the agent gets, by name or as Toolkit objects (yours too), and DEFAULT_TOOLKITS is what it gets without that.
 
 Adding a service: a module here (`<service>_tools.py`) with a Toolkit subclass that reads through the service's
 analyzer, its name in TOOLKITS (and in DEFAULT_TOOLKITS when every agent should have it), the analyzer in
-COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in README's IAM permissions."""
+COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in README's IAM permissions. A tool that
+joins two services (S3's s3_triggers, which reads Lambda too) goes in one of their toolkits, which offers it when the
+agent has the other (Toolkit.peer())."""
 
 from __future__ import annotations
 
@@ -13,14 +15,15 @@ from typing import Any, Iterable
 
 from .base import Toolkit
 from .lambda_tools import LambdaToolkit
+from .s3_tools import S3Toolkit
 
-TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit}  # name -> the built-in toolkit
-DEFAULT_TOOLKITS = ("lambda",)  # what an agent gets unless toolkits= says otherwise
+TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit}  # name -> the built-in toolkit
+DEFAULT_TOOLKITS = ("lambda", "s3")  # what an agent gets unless toolkits= says otherwise
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
-    """A Toolkit from its name in TOOLKITS ('lambda'), a Toolkit subclass, or a Toolkit (returned as it is). settings
-    are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=)."""
+    """A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
+    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=)."""
     if isinstance(spec, Toolkit):
         return spec
     if isinstance(spec, type) and issubclass(spec, Toolkit):
@@ -32,7 +35,7 @@ def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolki
             hint = f" Did you mean {close[0]!r}?" if close else ""
             raise ValueError(f"There's no {spec!r} toolkit.{hint} The agent has: {', '.join(sorted(TOOLKITS))}")
         return TOOLKITS[name](**settings)
-    raise TypeError(f"toolkits= takes names like 'lambda', Toolkit subclasses or Toolkit objects, not {spec!r}")
+    raise TypeError(f"toolkits= takes names like 'lambda' or 's3', Toolkit subclasses or Toolkit objects, not {spec!r}")
 
 
 def default_toolkits() -> list[Toolkit]:
@@ -58,5 +61,5 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "LambdaToolkit", "Toolkit", "default_toolkits", "make_toolkit",
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "LambdaToolkit", "S3Toolkit", "Toolkit", "default_toolkits", "make_toolkit",
            "make_toolkits"]
