@@ -165,10 +165,11 @@ class _Window:
 
     A window says where an error goes (_warn: its status line) and what an AWS error means (_explain: its View's),
     in its own words (_reword: an explorer turns a report's commands into its tabs). Its pickers (_Picker) go in
-    pickers, and its backdrop, the invisible button under an open list, calls _close_lists.
+    pickers, and its backdrop, the invisible button under an open list, calls _close_lists. `quiet` is set while
+    the code, not a person, changes a widget (_quietly), so the widget's observer does nothing.
     """
 
-    quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
+    quiet = False
     pickers: list[_Picker]
     backdrop: Any
 
@@ -204,11 +205,16 @@ class _Window:
         return False
 
     def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """
+        A widget callback that says any error it raises in the window (_warn): raised, it would only reach the
+        browser's log, and the click would seem to do nothing.
+        """
+
         @functools.wraps(handler)
         def run(*args: Any, **kwargs: Any) -> Any:
             try:
                 return handler(*args, **kwargs)
-            except Exception as exc:  # shown in the window: a widget callback's error would go to the browser log
+            except Exception as exc:  # noqa: BLE001
                 self._warn(self._error_text(exc))
                 return None
 
@@ -256,6 +262,22 @@ class _Window:
             picker.close()
 
 
+@dataclasses.dataclass
+class _Job:
+    """
+    A job _Explorer._later runs in the background: its key and number (a newer job of the same key makes its
+    result go unused), what to do with its result or its error, and the status line it shows while it counts, as
+    long as the line is still owner's.
+    """
+
+    key: str
+    number: int
+    done: Callable[[Any], None]
+    failed: Callable[[BaseException], None]
+    counting: str = ""
+    owner: str = ""
+
+
 class _Explorer(_Window):
     """
     What the knowledge base and Lambda explorers share on top of _Window: the status line under the tabs, AWS read
@@ -266,22 +288,35 @@ class _Explorer(_Window):
     (_tab_bar) and the pages, and _frame puts them in the window. _show_tab(key) opens a tab, and _html(blocks) draws
     a report the way the window shows them. _PREFIX starts its CSS class names (.kbx-app, .kbx-tab, ...), and
     _THREADS names its worker threads.
+
+    What it keeps:
+
+        shown      page -> the blocks drawn there last (for tests, and the curious)
+        _w         ipywidgets, when the window shows (else the explorer shows reports)
+        _jobs      background job -> its latest number: an older one's result is dropped
+        _tasks     background job -> its asyncio task (tests wait for them)
+        _counted   how much the background read has read so far
+        _said      the status line: its text, level, whether it's busy, and whose it is
+        _shown_at  the cell the window was last shown in
+        pickers    the fields that open a list, of which one is open at a time
     """
 
     _PREFIX = "explorer"
     _THREADS = "explorer"
+    _WORKERS = 4
+    _COUNT_EVERY = 0.4
 
     def __init__(self) -> None:
-        self.shown: dict[str, list[Any]] = {}  # page -> the blocks drawn there last (for tests, and the curious)
+        self.shown: dict[str, list[Any]] = {}
         self.quiet = False
-        self._w: Any = None  # ipywidgets, when the window shows (else the explorer shows reports)
-        self._jobs: dict[str, int] = {}  # background job -> its latest number: an older one's result is dropped
-        self._tasks: dict[str, Any] = {}  # background job -> its asyncio task (tests wait for them)
+        self._w: Any = None
+        self._jobs: dict[str, int] = {}
+        self._tasks: dict[str, Any] = {}
         self._pool: ThreadPoolExecutor | None = None
-        self._counted = 0  # what the background read has read so far
-        self._said: tuple[str, str, bool, str] = ("", "", False, "")  # the status line: text, level, busy, whose
+        self._counted = 0
+        self._said: tuple[str, str, bool, str] = ("", "", False, "")
         self._shown_at: Any = object()
-        self.pickers: list[_Picker] = []  # the fields that open a list: one open at a time
+        self.pickers: list[_Picker] = []
 
     def _load_widgets(self, mode: str) -> str:
         """
@@ -305,9 +340,12 @@ class _Explorer(_Window):
             self._display()
 
     def _display(self) -> None:
+        """
+        Shows the window in the running cell's output; outside IPython there's nowhere to show widgets.
+        """
         self._shown_at = _cell_number()
         if self._shown_at is None:
-            return  # outside IPython there's nowhere to show widgets
+            return
         from IPython.display import display
 
         display(self.root)
@@ -397,56 +435,75 @@ class _Explorer(_Window):
 
     def _workers(self) -> ThreadPoolExecutor:
         if self._pool is None:
-            self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix=self._THREADS)
+            self._pool = ThreadPoolExecutor(max_workers=self._WORKERS, thread_name_prefix=self._THREADS)
         return self._pool
 
-    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
+    def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],  # noqa: PLR0913
                failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
         """
         Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
         window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
-        A newer job of the same key makes this one's result go unused. counting: the status line to show while it runs
-        and the line is still owner's, {n} standing for the count read so far.
+        A newer job of the same key makes this one's result go unused. Whatever work() raises goes to failed (by
+        default said in the status line). counting: the status line to show while it runs and the line is still
+        owner's, {n} standing for the count read so far.
         """
-        self._jobs[key] = job = self._jobs.get(key, 0) + 1
-        failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
-
-        def finish(handler: Callable[[Any], None], value: Any) -> None:
-            if self._jobs.get(key) != job:
-                return
-            try:
-                handler(value)
-            except Exception as exc:  # a bug in drawing it: said in the window, like a click's
-                self._status(self._error_text(exc), "warn")
-
+        self._jobs[key] = number = self._jobs.get(key, 0) + 1
+        job = _Job(key, number, done, failed or self._say_error, counting, owner)
         loop = _running_loop()
         if loop is None:
-            try:
-                result = work()
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
+            self._run_now(job, work)
+        else:
+            self._tasks[key] = loop.create_task(self._run_in_background(job, loop, work))
+
+    def _say_error(self, exc: BaseException) -> None:
+        self._status(self._error_text(exc), "warn")
+
+    def _is_latest(self, job: _Job) -> bool:
+        return self._jobs.get(job.key) == job.number
+
+    def _hand_back(self, job: _Job, handler: Callable[[Any], None], value: Any) -> None:
+        """
+        Gives a job's result (or its error) to its handler, unless a newer job of its key started since. A bug in
+        drawing it is said in the window, like a click's.
+        """
+        if not self._is_latest(job):
             return
+        try:
+            handler(value)
+        except Exception as exc:  # noqa: BLE001
+            self._say_error(exc)
 
-        async def run() -> None:
-            future = loop.run_in_executor(self._workers(), work)
-            while counting and not future.done():
-                await asyncio.wait([future], timeout=0.4)
-                if self._jobs.get(key) == job and not future.done() and self._counted and self._said[3] == owner:
-                    self._status(counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=owner)
-            try:
-                result = await future
-            except Exception as exc:
-                finish(failed, exc)
-            else:
-                finish(done, result)
-            finally:
-                if self._tasks.get(key) is task:
-                    del self._tasks[key]
+    def _run_now(self, job: _Job, work: Callable[[], Any]) -> None:
+        try:
+            result = work()
+        except Exception as exc:  # noqa: BLE001
+            self._hand_back(job, job.failed, exc)
+        else:
+            self._hand_back(job, job.done, result)
 
-        task = loop.create_task(run())
-        self._tasks[key] = task
+    async def _run_in_background(self, job: _Job, loop: asyncio.AbstractEventLoop, work: Callable[[], Any]) -> None:
+        future = loop.run_in_executor(self._workers(), work)
+        await self._count_while_waiting(job, future)
+        try:
+            result = await future
+        except Exception as exc:  # noqa: BLE001
+            self._hand_back(job, job.failed, exc)
+        else:
+            self._hand_back(job, job.done, result)
+        finally:
+            if self._tasks.get(job.key) is asyncio.current_task():
+                del self._tasks[job.key]
+
+    async def _count_while_waiting(self, job: _Job, future: asyncio.Future) -> None:
+        """
+        While a job that counts runs, says how much it has read every _COUNT_EVERY seconds, as long as the status
+        line is still its owner's and no newer job of its key started.
+        """
+        while job.counting and not future.done():
+            await asyncio.wait([future], timeout=self._COUNT_EVERY)
+            still_counting = self._is_latest(job) and not future.done() and self._said[3] == job.owner
+            if still_counting and self._counted:
+                self._status(job.counting.replace("{n}", f"{self._counted:,}"), busy=True, owner=job.owner)
 
     def _drop(self, *keys: str) -> None:
         """
@@ -469,19 +526,23 @@ class _Picker:
     A subclass says what the search box finds a choice by (_fields; _query rewrites what's typed first, an ARN into
     its name), a choice's value (_key), and draws the field's face, the list (_draw_list) and its lines, and what a
     click on one does (_clicked). prefix starts the CSS classes (kbx: .kbx-field, .kbx-trig, .kbx-opt, ...).
+
+    What it keeps: `problem`, why there's nothing to list (it couldn't be read), shown under the list; `message`,
+    what went wrong with the last Enter; `shown`, the values of the lines the list shows, top to bottom; and `rows`,
+    value -> (its line, the line's button, its text).
     """
 
-    def __init__(self, app: _Window, w: Any, prefix: str, *, on_pick: Callable[[Any], None],
+    def __init__(self, app: _Window, w: Any, prefix: str, *, on_pick: Callable[[Any], None],  # noqa: PLR0913
                  on_text: Callable[[str], None] | None, placeholder: str, tooltip: str | None = None,
                  close_width: str | None = None, list_width: str | None = None,
                  field_layout: dict[str, str] | None = None):
         layout = w.Layout
         self.app, self.w, self.prefix, self.on_pick, self.on_text = app, w, prefix, on_pick, on_text
         self.choices: list[Any] = []
-        self.problem = ""  # why there's nothing to list (it couldn't be read), shown under the list
-        self.message = ""  # what went wrong with the last Enter
-        self.shown: list[str] = []  # the values of the lines the list shows, top to bottom
-        self.rows: dict[str, tuple[Any, Any, Any]] = {}  # value -> (its line, the line's button, its text)
+        self.problem = ""
+        self.message = ""
+        self.shown: list[str] = []
+        self.rows: dict[str, tuple[Any, Any, Any]] = {}
         trigger, self.button, self.face = _row_button(w, (f"{prefix}-trig", f"{prefix}-trig-b", f"{prefix}-face"),
                                                       app._safely(lambda _button: self.toggle()), tooltip=tooltip)
         self.search = w.Text(placeholder=placeholder, continuous_update=True,
@@ -515,9 +576,13 @@ class _Picker:
         """
 
     def open(self) -> None:
+        """
+        Opens the list, closing any other open one: one list is open at a time. The search box takes the keys
+        (ipywidgets 8 can focus it).
+        """
         if not self._can_open() or self.is_open:
             return
-        for other in self.app.pickers:  # one list open at a time
+        for other in self.app.pickers:
             if other is not self:
                 other.close()
         self._opening()
@@ -526,7 +591,7 @@ class _Picker:
         self.app.backdrop.layout.display = ""
         _class_if(self.field, f"{self.prefix}-open", True)
         self._draw_list()
-        if hasattr(self.search, "focus"):  # ipywidgets 8
+        if hasattr(self.search, "focus"):
             self.search.focus()
 
     def close(self) -> None:

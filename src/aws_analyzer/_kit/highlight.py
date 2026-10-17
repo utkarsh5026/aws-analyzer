@@ -33,6 +33,41 @@ def _json_source_html(text: str) -> str:
 
 
 _PY_LITERALS = frozenset({"True", "False", "None"})
+_LAYOUT_TOKENS = (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)
+_NOT_CODE_TOKENS = (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)
+
+
+def _python_css(token: tokenize.TokenInfo, previous: str, following: str) -> str:
+    """
+    The colour class of one Python token, given the code tokens just before and after it ('' when there's none):
+    a string followed by ':' is a dict key, a name followed by '(' a call, and a name followed by '=' inside a
+    call's brackets a keyword argument.
+    """
+    if token.type == tokenize.COMMENT:
+        return "pc"
+    if token.type == tokenize.STRING:
+        return "jk" if following == ":" else "js"
+    if token.type == tokenize.NUMBER:
+        return "jn"
+    if token.type != tokenize.NAME:
+        return ""
+    if token.string in _PY_LITERALS:
+        return "jl"
+    if keyword.iskeyword(token.string):
+        return "pk"
+    if following == "(":
+        return "pf"
+    if following == "=" and previous in ("(", ","):
+        return "pa"
+    return ""
+
+
+def _source_offset(line_starts: list[int], position: tuple[int, int], code: str) -> int:
+    """
+    Where a token's (line, column) position is in the code, counted in characters.
+    """
+    line, column = position
+    return line_starts[line - 1] + column if line - 1 < len(line_starts) else len(code)
 
 
 def _python_html(code: str) -> str:
@@ -41,39 +76,28 @@ def _python_html(code: str) -> str:
     comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain.
     """
     try:
-        tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
-                  if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]
+        tokens = [token for token in tokenize.generate_tokens(io.StringIO(code).readline)
+                  if token.type not in _LAYOUT_TOKENS]
     except (tokenize.TokenError, SyntaxError):
         return _esc(code)
-    starts = [0]
+
+    line_starts = [0]
     for line in code.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    real = [t for t in tokens if t.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT)]
-    after = {id(t): real[k + 1].string if k + 1 < len(real) else "" for k, t in enumerate(real)}
-    before = {id(t): real[k - 1].string if k else "" for k, t in enumerate(real)}
+        line_starts.append(line_starts[-1] + len(line))
+    code_tokens = [token for token in tokens if token.type not in _NOT_CODE_TOKENS]
+    following = {id(token): code_tokens[k + 1].string if k + 1 < len(code_tokens) else ""
+                 for k, token in enumerate(code_tokens)}
+    previous = {id(token): code_tokens[k - 1].string if k else "" for k, token in enumerate(code_tokens)}
+
     out, last = [], 0
-    for t in tokens:
-        a = starts[t.start[0] - 1] + t.start[1] if t.start[0] - 1 < len(starts) else len(code)
-        b = starts[t.end[0] - 1] + t.end[1] if t.end[0] - 1 < len(starts) else len(code)
-        if a < last or b <= a:
+    for token in tokens:
+        start = _source_offset(line_starts, token.start, code)
+        end = _source_offset(line_starts, token.end, code)
+        if start < last or end <= start:
             continue
-        css = ""
-        if t.type == tokenize.COMMENT:
-            css = "pc"
-        elif t.type == tokenize.STRING:
-            css = "jk" if after.get(id(t)) == ":" else "js"
-        elif t.type == tokenize.NUMBER:
-            css = "jn"
-        elif t.type == tokenize.NAME:
-            if t.string in _PY_LITERALS:
-                css = "jl"
-            elif keyword.iskeyword(t.string):
-                css = "pk"
-            elif after.get(id(t)) == "(":
-                css = "pf"
-            elif after.get(id(t)) == "=" and before.get(id(t)) in ("(", ","):
-                css = "pa"
-        out.append(_esc(code[last:a]))
-        out.append(f'<span class="{css}">{_esc(code[a:b])}</span>' if css else _esc(code[a:b]))
-        last = b
+        css = _python_css(token, previous.get(id(token), ""), following.get(id(token), ""))
+        piece = _esc(code[start:end])
+        out.append(_esc(code[last:start]))
+        out.append(f'<span class="{css}">{piece}</span>' if css else piece)
+        last = end
     return "".join(out) + _esc(code[last:])

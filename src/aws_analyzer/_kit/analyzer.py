@@ -20,20 +20,28 @@ class _BaseAnalyzer:
     """
     What every <Service>Analyzer starts with: a boto3 session (session=, or one made from region= and profile=),
     the retry settings its clients use (self._config), and its prices, the service's list prices with prices= over
-    them. Nothing here talks to AWS until the service asks.
+    them (a copy, so the module's price table never changes). Nothing here talks to AWS until the service asks.
+
+    What the service sets:
+
+        _LIST_PRICES  its price table (S3_PRICES, ...), which prices= overrides
+        client        its main client
+        _clients      the clients _cached_client made, by service name
+        _lock         held while _cached_client makes a client
+        max_workers   how many threads _map uses; 1 runs in order, as a Stubber answers
     """
 
-    _LIST_PRICES: dict[str, Any] = {}  # the service's price table (S3_PRICES, ...), which prices= overrides
-    client: Any  # the service's main client, which the service makes
-    _clients: dict[Any, Any]  # _cached_client's clients by service name (the service sets it up, with its _lock)
-    _lock: Any  # held while _cached_client makes a client: boto3 sessions aren't thread-safe
-    max_workers: int  # how many threads _map uses (the service sets it); 1 runs in order, as a Stubber answers
+    _LIST_PRICES: dict[str, Any] = {}
+    client: Any
+    _clients: dict[Any, Any]
+    _lock: Any
+    max_workers: int
 
     def __init__(self, session: Any = None, *, region: str | None = None, profile: str | None = None,
                  prices: dict[str, Any] | None = None):
         self.session = session or boto3.Session(profile_name=profile, region_name=region)
         self._config = Config(retries={"max_attempts": 10, "mode": "adaptive"}, max_pool_connections=50)
-        self.prices = {**self._LIST_PRICES, **(prices or {})}  # a copy: the module's table never changes
+        self.prices = {**self._LIST_PRICES, **(prices or {})}
 
     @property
     def region(self) -> str:
@@ -41,10 +49,11 @@ class _BaseAnalyzer:
 
     def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
         """
-        The client for `service`, made by make() the first time it's needed (or the one passed in clients=).
+        The client for `service`, made by make() the first time it's needed (or the one passed in clients=). It's
+        made under the lock: boto3 sessions aren't thread-safe, and the windows read from threads.
         """
         if service not in self._clients:
-            with self._lock:  # sessions aren't thread-safe, and the windows read from threads
+            with self._lock:
                 if service not in self._clients:
                     self._clients[service] = make()
         return self._clients[service]

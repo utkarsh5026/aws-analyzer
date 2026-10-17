@@ -15,14 +15,15 @@ from .fmt import _duration, human_size
 
 def _progress_bar_class(notebook: bool) -> Any:
     """
-    tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm.
+    tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm, or with
+    one too old to import cleanly, whatever it raises: the plain progress line takes over.
     """
     try:
         if notebook:
             importlib.import_module("ipywidgets")
             return importlib.import_module("tqdm.notebook").tqdm
         return importlib.import_module("tqdm").tqdm
-    except Exception:  # not installed, or too old to import cleanly: the plain progress line takes over
+    except Exception:  # noqa: BLE001
         return None
 
 

@@ -42,6 +42,13 @@ def _commands(cls: type) -> dict[str, Callable]:
     return commands
 
 
+def _about(command: Callable) -> str:
+    """
+    What help() says a command does: the first paragraph of its docstring, on one line.
+    """
+    return " ".join((inspect.getdoc(command) or "").split("\n\n")[0].split())
+
+
 def _which_prices(prices: dict[str, Any], list_prices: dict[str, Any]) -> str:
     """
     How a report names the prices its costs come from: AWS's list prices, or the ones passed in prices=.
@@ -53,7 +60,9 @@ def _friendly_errors(method: Callable) -> Callable:
     """
     Show AWS and input errors as a readable note instead of a traceback. The view says what an AWS error means
     (_explain_call, which is _explain unless the command's arguments help), which other errors are shown as they are
-    (_DATA_ERRORS) and what to say about its own (_extra_note); anything else still raises.
+    (_DATA_ERRORS) and what to say about its own (_extra_note); anything else still raises. A _Hint is a question
+    back to the user (which knowledge base?), not an error, so it's a plain note, and a missing optional package's
+    ImportError already says what to pip install.
     """
 
     @functools.wraps(method)
@@ -65,9 +74,9 @@ def _friendly_errors(method: Callable) -> Callable:
             code, message = error.get("Code", "Error"), error.get("Message", str(exc))
             explained = self._explain_call(code, message, method.__name__, args, kwargs)
             self._show([_Note(f"{code}: {explained}  [{method.__name__}]", "warn")])
-        except _Hint as exc:  # a question back to the user (which knowledge base?), not an error
+        except _Hint as exc:
             self._show([_Note(str(exc))])
-        except ImportError as exc:  # a missing optional package: the message says what to pip install
+        except ImportError as exc:
             self._show([_Note(f"{str(exc).rstrip('.')}.", "warn")])
         except (BotoCoreError, *self._DATA_ERRORS) as exc:
             self._show([_Note(f"{type(exc).__name__}: {exc}  [{method.__name__}]", "warn")])
@@ -80,22 +89,151 @@ def _friendly_errors(method: Callable) -> Callable:
     return wrapper
 
 
+_LINE_EVERY = 0.5
+
+
+class _ProgressLine:
+    """
+    The progress one _BaseView._progress block shows: a tqdm bar while tqdm works, else a line with the count, time,
+    rate and time left, redrawn at most every _LINE_EVERY seconds, and only once the work has run that long. In a
+    notebook the line is an HTML output that's replaced; elsewhere (or without IPython) it's rewritten in place on
+    stderr.
+
+    Only one shows at a time: the view's _progress_owner is the line showing now, and a line that starts showing
+    clears the one before it. `stopped` is set when the work was interrupted, so a tqdm widget stays, red, where it
+    stopped.
+    """
+
+    def __init__(self, view: _BaseView, label: str, unit: str):
+        self.view, self.label, self.unit = view, label, unit
+        self.notebook = view.use_html and _in_notebook()
+        self.bar_class = _progress_bar_class(self.notebook) if view.progress == "auto" else None
+        self.bar: Any = None
+        self.handle: Any = None
+        self.started: float = time.monotonic()
+        self.total: int | None = None
+        self.shown = 0.0
+        self.width = 0
+        self.stopped = False
+
+    def tick(self, count: int, total: int | None = None) -> None:
+        """
+        tick(count) reports a running count; tick(done, total) a known total, and a new total starts a new bar.
+        """
+        if self.view.progress == "off":
+            return
+        if self.bar_class is not None and self._update_bar(count, total):
+            return
+        self._update_line(count, total)
+
+    def _update_bar(self, count: int, total: int | None) -> bool:
+        """
+        Moves the tqdm bar to `count`. False when tqdm fails, whatever it raises (an old tqdm, or a broken widget
+        front end): the plain line takes over from then on.
+        """
+        try:
+            if self.bar is not None and total != self.bar.total:
+                self._close_bar()
+            if self.bar is None:
+                self._take_over()
+                self.bar = _progress_bar(self.bar_class, self.label, self.unit, total)
+            self.bar.update(count - self.bar.n)
+            return True
+        except Exception:  # noqa: BLE001
+            self.bar_class = None
+            return False
+
+    def _update_line(self, count: int, total: int | None) -> None:
+        now = time.monotonic()
+        if total != self.total:
+            self.started, self.total = now, total
+        if now - self.started < _LINE_EVERY or now - self.shown < _LINE_EVERY:
+            return
+        self.shown = now
+        self._take_over()
+        text = _progress_text(self.label, self.unit, count, total, now - self.started)
+        if self.notebook:
+            self._show_in_notebook(text)
+        else:
+            self.width = max(self.width, len(text))
+            self.view._progress_to_terminal(text.ljust(self.width))
+
+    def _show_in_notebook(self, text: str) -> None:
+        """
+        The line in the cell's output, replacing the last one. Outside IPython display() returns no handle, and
+        nothing shows.
+        """
+        from IPython.display import HTML, display
+
+        if self.handle is None:
+            self.handle = display(HTML(""), display_id=True)
+        if self.handle is not None:
+            self.handle.update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
+
+    def _take_over(self) -> None:
+        """
+        Makes this the line the view shows, clearing the one that showed before.
+        """
+        owner = self.view._progress_owner
+        if owner is not self:
+            if owner is not None:
+                owner.clear()
+            self.view._progress_owner = self
+
+    def _close_bar(self) -> None:
+        """
+        Closes the tqdm bar. One that finished early (a file it couldn't read) is marked done, so it isn't left as a
+        red "failed" widget; one that was interrupted is left as it is.
+        """
+        if self.bar is None:
+            return
+        if not self.stopped and self.bar.total and self.bar.n < self.bar.total:
+            self.bar.total = self.bar.n
+        self.bar.close()
+        self.bar = None
+
+    def clear(self) -> None:
+        """
+        Takes the bar or the line away.
+        """
+        self._close_bar()
+        if self.handle is not None:
+            from IPython.display import HTML
+
+            self.handle.update(HTML(""))
+        elif self.width:
+            self.view._progress_to_terminal(" " * self.width + "\r")
+            self.width = 0
+
+
 class _BaseView:
     """
     What every <Service>View starts with: the mode, max_rows and progress options, how a report is shown,
     progress while a long command runs, help(), and the hooks @_friendly_errors asks. The only command here is
     help(); every other one is the service's, decorated with @_friendly_errors, and renders a report and returns
     nothing.
+
+    What a service's View sets:
+
+        core          its analyzer: the View's __init__ makes one when it isn't given one
+        _render_html  its look: its stylesheet, root class and badge
+        _GROUPS       help() lists the commands in these groups, in this order
+        _START        help()'s "Start here": (call, what it shows)
+        _PROGRESS     the label and unit _progress() shows when it's given none
+        _DATA_ERRORS  errors shown as notes ("ValueError: ..."), besides AWS's
+
+    _render_text, how a report reads as text, is the same for every service, and _progress_owner is the progress
+    line showing now (see _ProgressLine).
     """
 
-    core: Any  # the service's analyzer: the View's __init__ makes one when it isn't given one
-    _render_html: Callable[[list[Any], int], str]  # the service's look: its stylesheet, root class and badge
-    _render_text = staticmethod(_render_text)  # how a report reads as text, the same for every service
-    _GROUPS: dict[str, tuple[str, ...]] = {}  # help() lists the commands in these groups, in this order
-    _START: tuple[tuple[str, str], ...] = ()  # help()'s "Start here": (call, what it shows)
-    _PROGRESS = ("Reading", "items read")  # the label and unit _progress() shows when it's given none
-    _DATA_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError)  # shown as notes: "ValueError: ..."
-    _progress_owner: Callable[[], None] | None = None  # clears the progress bar showing now
+    core: Any
+    _render_html: Callable[[list[Any], int], str]
+    _render_text = staticmethod(_render_text)
+    _GROUPS: dict[str, tuple[str, ...]] = {}
+    _START: tuple[tuple[str, str], ...] = ()
+    _PROGRESS = ("Reading", "items read")
+    _DATA_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError)
+    _progress_owner: _ProgressLine | None = None
 
     def __init__(self, *, mode: str = "auto", max_rows: int = 50, progress: str = "auto"):
         if mode not in ("auto", "html", "text"):
@@ -106,13 +244,15 @@ class _BaseView:
         self.max_rows = max_rows
         self.progress = progress
 
-    # ------------------------------------------------------------------ plumbing
-
     def _show(self, blocks: list[Any]) -> None:
+        """
+        Shows a report: as HTML in Jupyter, else as text. With mode='html' outside Jupyter (no IPython), it's shown
+        as text with a note saying why, and from then on as text.
+        """
         if self.use_html:
             try:
                 from IPython.display import HTML, display
-            except ImportError:  # mode='html' outside Jupyter: show text, and say why (once)
+            except ImportError:
                 self.use_html = False
                 note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
                 blocks = [*blocks, _Note(note, "warn")]
@@ -120,6 +260,13 @@ class _BaseView:
                 display(HTML(self._render_html(blocks, self.max_rows)))
                 return
         print(self._render_text(blocks, self.max_rows))
+
+    @staticmethod
+    def _progress_to_terminal(text: str) -> None:
+        """
+        Rewrites the progress line in place on stderr, outside a notebook.
+        """
+        print("\r" + text, end="", file=sys.stderr, flush=True)
 
     @contextmanager
     def _progress(self, label: str | None = None,
@@ -131,83 +278,17 @@ class _BaseView:
         at a time: when a nested _progress starts showing, the outer one's bar goes away. Without a label or a
         unit, it shows the View's _PROGRESS.
         """
-        label = self._PROGRESS[0] if label is None else label
-        unit = self._PROGRESS[1] if unit is None else unit
-        notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
-        bar_class = [_progress_bar_class(notebook) if self.progress == "auto" else None]
-        bar: list[Any] = [None]
-        handle: list[Any] = [None]
-        started: list[Any] = [time.monotonic(), None]  # when the current total started, and that total
-        shown, width, stopped = [0.0], [0], [False]
-
-        def close_bar() -> None:
-            if bar[0] is not None:
-                if not stopped[0] and bar[0].total and bar[0].n < bar[0].total:
-                    bar[0].total = bar[0].n  # done early (a file it couldn't read): no red "failed" widget
-                bar[0].close()
-                bar[0] = None
-
-        def clear() -> None:
-            close_bar()
-            if handle[0] is not None:
-                from IPython.display import HTML
-
-                handle[0].update(HTML(""))
-            elif width[0]:
-                print("\r" + " " * width[0] + "\r", end="", file=sys.stderr, flush=True)
-                width[0] = 0
-
-        def take_over() -> None:
-            owner = self._progress_owner
-            if owner is not clear:
-                if owner is not None:
-                    owner()
-                self._progress_owner = clear
-
-        def tick(count: int, total: int | None = None) -> None:
-            if self.progress == "off":
-                return
-            if bar_class[0] is not None:
-                try:
-                    if bar[0] is not None and total != bar[0].total:
-                        close_bar()
-                    if bar[0] is None:
-                        take_over()
-                        bar[0] = _progress_bar(bar_class[0], label, unit, total)
-                    bar[0].update(count - bar[0].n)
-                    return
-                except Exception:  # an old tqdm or a broken widget front end: use the plain line instead
-                    bar_class[0] = None
-            now = time.monotonic()
-            if total != started[1]:
-                started[:] = [now, total]
-            if now - started[0] < 0.5 or now - shown[0] < 0.5:
-                return
-            shown[0] = now
-            take_over()
-            text = _progress_text(label, unit, count, total, now - started[0])
-            if notebook:
-                from IPython.display import HTML, display
-
-                if handle[0] is None:
-                    handle[0] = display(HTML(""), display_id=True)
-                if handle[0] is not None:  # display() returns None outside IPython
-                    handle[0].update(HTML(f'<div style="opacity:.6">{_esc(text)}</div>'))
-            else:
-                width[0] = max(width[0], len(text))
-                print("\r" + text.ljust(width[0]), end="", file=sys.stderr, flush=True)
-
+        line = _ProgressLine(self, self._PROGRESS[0] if label is None else label,
+                             self._PROGRESS[1] if unit is None else unit)
         try:
-            yield tick
+            yield line.tick
         except BaseException:
-            stopped[0] = True  # interrupted: a tqdm widget stays, red, where it stopped
+            line.stopped = True
             raise
         finally:
-            clear()
-            if self._progress_owner is clear:
+            line.clear()
+            if self._progress_owner is line:
                 self._progress_owner = None
-
-    # ------------------------------------------------------------------ what @_friendly_errors asks
 
     def _explain(self, code: str, message: str) -> str:
         """
@@ -235,18 +316,12 @@ class _BaseView:
         """
         return _which_prices(self.core.prices, self.core._LIST_PRICES)
 
-    # ------------------------------------------------------------------ help
-
     def help(self, command: Any = None) -> None:
         """
         Every command, grouped by task; help('name') shows one command in full.
         """
         view = type(self).__name__
         commands = _commands(type(self))
-
-        def about(name: str) -> str:  # the docstring's first paragraph, on one line
-            return " ".join((inspect.getdoc(commands[name]) or "").split("\n\n")[0].split())
-
         if command is not None:
             name = getattr(command, "__name__", str(command))
             if name not in commands:
@@ -265,7 +340,8 @@ class _BaseView:
             _Next(list(self._START), title="Start here"),
         ]
         for group, names in groups.items():
-            rows = [[f"{name}{_signature(commands[name])}", about(name)] for name in names if name in commands]
+            rows = [[f"{name}{_signature(commands[name])}", _about(commands[name])] for name in names
+                    if name in commands]
             if rows:
                 blocks.append(_Table(["Command", "What it shows"], rows, title=group, max_rows=0, code_cols=(0,)))
         zone = _tz_label()

@@ -129,8 +129,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   makes (`monkeypatch.setattr(s3mod, "_require", ...)`, `monkeypatch.setattr(chatmod, "_cell_number", ...)`: the
   chat's View asks it), on the `_kit` (or `_bedrock`) module for a call it makes
   (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as viewmod`:
-  `_BaseView._progress` makes that call, and `_BaseView.__init__` asks `_in_notebook` there too; an explorer's
-  once-per-cell display asks `_cell_number` on `_kit.window`).
+  `_ProgressLine`, the line `_BaseView._progress` shows, makes that call, and `_BaseView.__init__` asks
+  `_in_notebook` there too; an explorer's once-per-cell display asks `_cell_number` on `_kit.window`).
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
   public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
