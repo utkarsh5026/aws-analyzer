@@ -1,6 +1,12 @@
 """
 Numbers, sizes, money, times and counts: parsing what users type in, and formatting what reports show; the time
 zone reports show times in (set_timezone); file names' extensions; and Stat, a running count and its total bytes.
+
+HOURS_PER_MONTH is how AWS turns an hourly price into a monthly one.
+
+The zone reports show times in is set_timezone()'s choice (_chosen, which is _DEFAULT until it's called). Until then
+it's the zone the AWS_ANALYZER_TZ environment variable (TIMEZONE_ENV) names, for every notebook, worked out once per
+value (_from_env), else UTC.
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
-HOURS_PER_MONTH = 730  # how AWS turns an hourly price into a monthly one
+HOURS_PER_MONTH = 730
 
 _SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?)i?b?\s*$", re.IGNORECASE)
 _RELATIVE_TIME_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhdw])\s*$", re.IGNORECASE)
@@ -52,14 +58,14 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ----------------------------------------------------------------------------- the time zone reports show
-
-TIMEZONE_ENV = "AWS_ANALYZER_TZ"  # names the zone for every notebook, before any of them calls set_timezone()
+TIMEZONE_ENV = "AWS_ANALYZER_TZ"
 _OFFSET_RE = re.compile(r"^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
 _NUMERIC_ZONE_RE = re.compile(r"^(?:UTC|GMT)?[+-][\d:]+$")
-_DEFAULT = object()  # no set_timezone() yet: AWS_ANALYZER_TZ's zone, else UTC
-_chosen: Any = _DEFAULT  # what set_timezone() chose: a tzinfo, or None for this machine's own zone
-_from_env: dict[str, tzinfo | None] = {}  # AWS_ANALYZER_TZ's value -> its zone, worked out once per value
+_SHORT_ZONE_RE = re.compile(r"[A-Z]{2,5}")
+_LONGEST_OFFSET = timedelta(hours=14)
+_DEFAULT = object()
+_chosen: Any = _DEFAULT
+_from_env: dict[str, tzinfo | None] = {}
 
 
 def set_timezone(zone: str | tzinfo | None) -> str:
@@ -98,28 +104,55 @@ def _zone_from(value: str | tzinfo) -> tzinfo | None:
         return timezone.utc
     offset = _OFFSET_RE.match(text)
     if offset:
-        sign, hours, minutes = offset.groups()
-        delta = timedelta(hours=int(hours), minutes=int(minutes or 0))
-        if delta > timedelta(hours=14) or int(minutes or 0) >= 60:
-            raise ValueError(f"{value!r} isn't an offset from UTC: they run from -12:00 to +14:00")
-        return timezone(-delta if sign == "-" else delta)
-    from zoneinfo import ZoneInfo, available_timezones
+        return _offset_zone(offset, value)
+    return _named_zone(text, value)
 
-    names = available_timezones()
-    if not names:  # Windows has no tz database of its own
-        raise ValueError(f"Can't look up {value!r}: this Python has no time zone database. pip install tzdata, or "
-                         "give an offset, like '+05:30'")
-    places: dict[str, str] = {}  # 'asia/kolkata', 'kolkata', 'america/new york', 'new york' -> its name
-    for name in sorted(names, key=lambda n: (n.count("/"), n)):  # 'louisville': America/, not America/Kentucky/
+
+def _offset_zone(offset: re.Match, value: str) -> tzinfo:
+    """
+    The fixed zone an offset from UTC names ('+05:30', 'UTC-4'). One past +14:00, or with 60 minutes or more,
+    raises a ValueError.
+    """
+    sign, hours, minutes = offset.groups()
+    delta = timedelta(hours=int(hours), minutes=int(minutes or 0))
+    if delta > _LONGEST_OFFSET or int(minutes or 0) >= 60:
+        raise ValueError(f"{value!r} isn't an offset from UTC: they run from -12:00 to +14:00")
+    return timezone(-delta if sign == "-" else delta)
+
+
+def _zone_places(names: set[str]) -> dict[str, str]:
+    """
+    Each way to name a tz database zone, lowercase with spaces for underscores, -> its name: its full name
+    ('asia/kolkata', 'america/new york') and its city alone ('kolkata', 'new york'). Where two zones share a city,
+    the one with fewer parts in its name wins: 'louisville' is America/Louisville, not America/Kentucky/Louisville.
+    """
+    places: dict[str, str] = {}
+    for name in sorted(names, key=lambda n: (n.count("/"), n)):
         full = name.lower().replace("_", " ")
         places.setdefault(full, name)
         places.setdefault(full.rsplit("/", 1)[-1], name)
+    return places
+
+
+def _named_zone(text: str, value: str) -> tzinfo:
+    """
+    The tz database zone named by its full name or its city, in any case. A Python without a tz database (Windows
+    has none of its own) or a name it can't find raises a ValueError that says what it takes, with the closest
+    names.
+    """
+    from zoneinfo import ZoneInfo, available_timezones
+
+    names = available_timezones()
+    if not names:
+        raise ValueError(f"Can't look up {value!r}: this Python has no time zone database. pip install tzdata, or "
+                         "give an offset, like '+05:30'")
+    places = _zone_places(names)
     asked = re.sub(r"[\s_]+", " ", text.lower())
     if asked in places:
         return ZoneInfo(places[asked])
     close = dict.fromkeys(places[c] for c in difflib.get_close_matches(asked, list(places), n=3, cutoff=0.7))
     hint = f" Did you mean {' or '.join(map(repr, close))}?" if close else ""
-    if re.fullmatch(r"[A-Z]{2,5}", text):
+    if _SHORT_ZONE_RE.fullmatch(text):
         hint += f" A short name like {text} can mean more than one zone (IST is India's, Ireland's and Israel's)."
     raise ValueError(f"{value!r} isn't a time zone set_timezone() knows.{hint} Name it the way the tz database does "
                      "('Asia/Kolkata', 'America/New_York'), by its city ('kolkata'), or by its offset ('+05:30')")
@@ -181,7 +214,7 @@ def parse_time(
     """
     datetime/date, ISO string ('2024-05-01', '2024-05-01T10:00Z'), or a relative
     age like '7d', '12h', '30m', '2w' meaning "that long ago". Naive values are in the zone reports show times in:
-    UTC, unless set_timezone() chose another.
+    UTC, unless set_timezone() chose another ('local' is this machine's zone, which astimezone() reads).
     """
     if value is None:
         return None
@@ -200,7 +233,7 @@ def parse_time(
     if moment.tzinfo:
         return moment
     zone = _display_zone()
-    return moment.astimezone() if zone is None else moment.replace(tzinfo=zone)  # astimezone(): this machine's
+    return moment.astimezone() if zone is None else moment.replace(tzinfo=zone)
 
 
 def human_age(when: datetime | None, now: datetime | None = None) -> str:
@@ -326,13 +359,14 @@ _COMPRESSION_EXTS = {
 
 def file_extension(key: str) -> str:
     """
-    'a/data.csv.gz' -> 'csv.gz', 'a/part-0.snappy.parquet' -> 'parquet', 'a/README' -> '(none)'.
+    'a/data.csv.gz' -> 'csv.gz', 'a/part-0.snappy.parquet' -> 'parquet'. A name without an extension ('README',
+    'name.', '.env') is '(none)'.
     """
     if key.endswith("/"):
         return "(folder marker)"
     parts = key.rsplit("/", 1)[-1].lower().split(".")
     if len(parts) < 2 or parts[-1] == "" or (len(parts) == 2 and parts[0] == ""):
-        return "(none)"  # 'README', 'name.', '.env'
+        return "(none)"
     ext = parts[-1]
     if (
         ext in _COMPRESSION_EXTS

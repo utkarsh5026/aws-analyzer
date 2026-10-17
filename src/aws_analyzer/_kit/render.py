@@ -10,6 +10,14 @@ same for every service.
 Tables sort by a click on a header, filter a column of a few repeated values and choose their columns, and a finding
 reads as a headline over its detail. All of it is plain HTML and CSS (radio buttons, selects and checkboxes in a form,
 read by :has() rules), never JavaScript, so it still works in a reopened notebook, where scripts don't run.
+
+_BASE_RULES are the rules every service's reports share. "{root}" in them stands for the service's root class,
+filled in by str.replace, not str.format: the rules are full of braces. A header click can sort by the first
+_SORT_COLUMNS columns, since each needs two CSS rules.
+
+A table's controls carry _HIDE, which hides them until the stylesheet shows them, so a notebook opened without its
+styles (JupyterLab strips <style> from an untrusted notebook) shows a plain table. JupyterLab's sanitizer drops a
+bare `hidden` attribute, but keeps hidden="hidden".
 """
 
 from __future__ import annotations
@@ -25,11 +33,7 @@ from .blocks import (
 from .fmt import _plural, file_extension
 from .text import _clip, _esc, _pad, _text_bar, _width
 
-# ----------------------------------------------------------------------------- the stylesheet
-
-_SORT_COLUMNS = 12  # columns a header click can sort by: each needs two CSS rules
-# The rules every service's reports share. "{root}" stands for the service's root class (filled in by str.replace,
-# not str.format: the rules are full of braces).
+_SORT_COLUMNS = 12
 _BASE_RULES = """\
 .{root}{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .{root} h3{margin:10px 0 2px;font-size:16px}
@@ -189,18 +193,15 @@ def _base_css(root: str, extra: str = "", *, theme: str = "", restyle: dict[str,
     return "\n".join(["<style>", *filter(None, [theme, "\n".join(rules), extra]), "</style>"])
 
 
-# ----------------------------------------------------------------------------- sentences and calls
-
-_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")  # right-aligned in tables
-# A command in a sentence: a call (kb_info(), documents(status='FAILED'), .core.find(...), S3View().preview('s3://..'))
-# or an AWS CLI command with its options (aws dynamodb update-table --table-name orders --deletion-protection-enabled).
+_NUMERIC_RE = re.compile(r"^-?(<?\$)?[\d,]+(\.\d+)?\+?( ?(B|KB|MB|GB|TB|PB|%|s))?$")
 _CALL_RE = re.compile(
     r"((?<![\w.])\.?(?:[A-Za-z_]\w*(?:\(\))?\.)*[A-Za-z_]\w*"
     r"\((?:[^()'\"]|'[^']*'|\"[^\"]*\"|\((?:[^()'\"]|'[^']*'|\"[^\"]*\")*\))*\)"
     r"|\baws [a-z0-9-]+ [a-z0-9-]+(?: --[\w-]+(?: (?!--)[^\s,;]*[^\s,;.])?)*)"
 )
 _TONES = ("warn", "bad", "ok")
-_MARKS = {"warn": "[!] ", "ok": "[ok] "}  # text-mode prefix of a note by level; anything else is "[i] "
+_MARKS = {"warn": "[!] ", "ok": "[ok] "}
+_INFO_MARK = "[i] "
 _SELECT = ' title="Click to select, then copy"'
 
 
@@ -213,6 +214,10 @@ def _prose(value: Any, money: bool = False) -> str:
     Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects
     (and, with money=True, amounts like $12.40/month stressed). The text is split on the calls and every
     piece escaped before it's wrapped, so nothing in it becomes markup.
+
+    A call is what _CALL_RE finds: a Python call (kb_info(), documents(status='FAILED'), .core.find(...),
+    S3View().preview('s3://..')) or an AWS CLI command with its options (aws dynamodb update-table --table-name
+    orders --deletion-protection-enabled).
     """
     pieces = _CALL_RE.split("" if value is None else str(value))
     return "".join(
@@ -227,10 +232,11 @@ def _prose(value: Any, money: bool = False) -> str:
 def _masked(text: str) -> str:
     """
     The text with its commands and anything in brackets blanked out (same length), so a sentence is never
-    split inside them: 'Something went wrong (RuntimeError: boom)' has no lead.
+    split inside them: 'Something went wrong (RuntimeError: boom)' has no lead. Brackets inside brackets are
+    blanked from the innermost out.
     """
     masked, before = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text), None
-    while masked != before:  # innermost brackets first
+    while masked != before:
         before, masked = masked, re.sub(r"[(\[][^()\[\]]*[)\]]", lambda m: "x" * len(m.group(0)), masked)
     return masked
 
@@ -306,18 +312,23 @@ def _call(name: str, *args: Any, **kwargs: Any) -> str:
     """
     _call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy.
     """
+    arguments = [_literal(a) for a in args] + [f"{k}={_literal(v)}" for k, v in kwargs.items()]
+    return f"{name}({', '.join(arguments)})"
 
-    def literal(value: Any) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
-        if type(value).__name__ == "Decimal":
-            return str(value)
-        if isinstance(value, dict):
-            return "{" + ", ".join(f"{literal(k)}: {literal(v)}" for k, v in value.items()) + "}"
-        if isinstance(value, (list, tuple)):
-            inner = ", ".join(map(literal, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
-            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
-        return repr(value)
 
-    return f"{name}({', '.join([literal(a) for a in args] + [f'{k}={literal(v)}' for k, v in kwargs.items()])})"
+def _literal(value: Any) -> str:
+    """
+    A value as Python to copy: its repr, except that DynamoDB numbers read 42 rather than Decimal('42'), inside
+    lists, tuples and dicts too.
+    """
+    if type(value).__name__ == "Decimal":
+        return str(value)
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{_literal(k)}: {_literal(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, (list, tuple)):
+        inner = ", ".join(map(_literal, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
+        return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+    return repr(value)
 
 
 def _signature(function: Callable) -> str:
@@ -329,26 +340,26 @@ def _signature(function: Callable) -> str:
     return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
 
 
-# ----------------------------------------------------------------------------- tables: sorting, filters, keys
-
 _SORT_UNITS = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, "PB": 1024**5, "ms": 1}
 _SORT_NUMBER_RE = re.compile(
     r"^(-?)(<?)\$?([\d,]*\.?\d+)\+?(?: ?(B|KB|MB|GB|TB|PB|%|ms))?(?: of [\d,]+| \([^()]*\))?$")
 _SORT_AGE_RE = re.compile(r"^(\d+)(y|mo|d|h|m) ago$")
-# '2024-05-01', '2024-05-01 14:02', or a time with its zone's name: '2024-05-01 14:02:31 IST', '... UTC+05:30'
 _SORT_DATE_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?: [A-Z]{2,5}(?:[+-]\d{2}(?::\d{2})?)?)?)?$")
 _AGE_SECONDS = {"y": 365 * 86400, "mo": 30 * 86400, "d": 86400, "h": 3600, "m": 60}
-_SORT_WORDS = {  # a column's kind -> what its first and second header click show
+_SORT_WORDS = {
     "number": ("largest first", "smallest first"),
     "age": ("oldest first", "newest first"),
     "date": ("newest first", "oldest first"),
     "text": ("A to Z", "Z to A"),
 }
-_FILTER_VALUES = 12  # a column gets a filter when it holds 2 to this many different values, some repeated
-_FILTER_COLUMNS = 3  # filters per table at most, the leftmost columns first
-# Hides the table controls until the stylesheet shows them, so a notebook opened without its styles (JupyterLab
-# strips <style> from an untrusted notebook) shows a plain table. Its sanitizer drops a bare `hidden`, not this.
+_FILTER_VALUES = 12
+_FILTER_COLUMNS = 3
+_FILTER_MIN_ROWS = 6
+_SORT_MIN_ROWS = 3
+_CHOOSER_MIN_COLUMNS = 3
+_SCROLL_ROWS = 30
+_SHORT_CELL = 16
 _HIDE = ' hidden="hidden"'
 
 
@@ -356,7 +367,8 @@ def _sort_key(text: str) -> tuple[int, Any] | None:
     """
     What a table cell sorts by: (0, number) for sizes, money, counts, percentages and ages ('2.1 GB' is
     bytes, '<$0.01' half a cent, '3d ago' seconds), (1, text) for dates, (2, parts) for the rest in natural
-    order ('epoch-2' before 'epoch-10'). None for an empty cell, which sorts last both ways.
+    order ('epoch-2' before 'epoch-10'). None for an empty cell, which sorts last both ways. A date is
+    '2024-05-01', '2024-05-01 14:02', or a time with its zone's name: '2024-05-01 14:02:31 IST', '... UTC+05:30'.
     """
     text = text.split("\n", 1)[0].strip().removeprefix("📁 ")
     if text in ("", "-", "—"):
@@ -377,7 +389,8 @@ def _sort_key(text: str) -> tuple[int, Any] | None:
 
 def _sort_kind(values: list[str], keys: list[tuple[int, Any]]) -> str:
     """
-    'number', 'age', 'date' or 'text': what most of a column's cells hold, which decides its first sort.
+    'number', 'age', 'date' or 'text': what most of a column's cells hold, which decides its first sort
+    (_SORT_WORDS says what its first and second header click show).
     """
     cls = Counter(key[0] for key in keys).most_common(1)[0][0]
     if cls:
@@ -405,11 +418,14 @@ def _filters(block: _Table, columns: list[list[str]], numeric: list[bool]) -> li
     """
     The columns that get a filter: a few different values, some repeated (a storage class, a status, a
     region), never numbers, dates, keys or sentences -> [(column, [(value, rows), ...] most rows first)].
+
+    A column gets one when it holds 2 to _FILTER_VALUES different values, some repeated, in a table of
+    _FILTER_MIN_ROWS rows or more; at most _FILTER_COLUMNS per table, the leftmost columns first.
     """
     found: list[tuple[int, list[tuple[str, int]]]] = []
     for j, column in enumerate(columns):
         skip = set(block.prose_cols) | set(block.code_cols) | set(block.path_cols) | ({0} if block.tree else set())
-        if len(found) == _FILTER_COLUMNS or len(column) < 6:
+        if len(found) == _FILTER_COLUMNS or len(column) < _FILTER_MIN_ROWS:
             break
         values = [value.strip() for value in column if value.strip()]
         if j in skip or numeric[j] or any("\n" in value or ", " in value for value in values):
@@ -421,7 +437,10 @@ def _filters(block: _Table, columns: list[list[str]], numeric: list[bool]) -> li
     return found
 
 
-_ICONS = {  # extension -> the icon in front of a file's name, in key columns and in s3_explorer's list
+_PATH_CHARACTERS = 86
+_FOLDER_CHARACTERS = 56
+_SHORTEST_FOLDER = 12
+_ICONS = {
     **dict.fromkeys(("csv", "tsv", "tab", "psv", "parquet", "pq", "orc", "feather", "arrow", "ipc", "avro"), "📊"),
     **dict.fromkeys(("xlsx", "xlsm", "xls"), "📗"),
     **dict.fromkeys(("json", "jsonl", "ndjson", "yaml", "yml", "toml", "xml", "ini", "cfg", "conf"), "📋"),
@@ -441,13 +460,14 @@ _ICONS = {  # extension -> the icon in front of a file's name, in key columns an
 
 def _file_icon(key: str) -> str:
     """
-    📁 for a folder, else the file's icon by its extension: 📊 tables, 📕 PDF, 🖼️ pictures, 🧠 models, ...,
-    📄 for anything else. 'data.csv.gz' is a table and 'logs.tar.gz' an archive.
+    📁 for a folder, else the file's icon by its extension (_ICONS, which s3_explorer's list uses too): 📊 tables,
+    📕 PDF, 🖼️ pictures, 🧠 models, ..., 📄 for anything else, a file without an extension too. 'data.csv.gz' is a
+    table and 'logs.tar.gz' an archive.
     """
     if key.endswith("/"):
         return "📁"
     ext = file_extension(key)
-    if ext.startswith("("):  # '(none)'
+    if ext == "(none)":
         return "📄"
     return _ICONS.get(ext.split(".")[0], _ICONS.get(ext.rsplit(".", 1)[-1], "📄"))
 
@@ -456,21 +476,27 @@ def _path_html(text: str) -> str:
     """
     A key in a table cell: its icon (📁 for a folder, 📊 for a table, ... by _file_icon), its folder dimmed and,
     when long, shortened from the left (the nearest folders stay), then the file name in full. Each line of the
-    cell is one key. The icon is only drawn: the cell's text, which sorts and copies, is the key alone.
+    cell is one key; a line that isn't one ('… and 3 more', '(none)') shows as it is. The icon is only drawn: the
+    cell's text, which sorts and copies, is the key alone.
+
+    A folder takes up to _FOLDER_CHARACTERS (its 30em); a long name leaves it less, so the line stays within about
+    _PATH_CHARACTERS, but never less than _SHORTEST_FOLDER.
     """
     lines = []
     for line in text.split("\n"):
+        icon = ""
         if line.startswith("📁 "):
             icon, line = "📁", line[2:]
-        else:
-            icon = "" if line in ("", "-") or line.startswith(("…", "(")) else _file_icon(line)
+        is_key = not line.startswith(("…", "("))
+        if not icon and is_key and line not in ("", "-"):
+            icon = _file_icon(line)
         folder, _, name = line.rstrip("/").rpartition("/")
         name += line[len(line.rstrip("/")):]
-        folder = f"{folder}/" if folder and not line.startswith(("…", "(")) else ""  # not '… and 3 more'
+        folder = f"{folder}/" if folder and is_key else ""
         if not folder:
             name = line
-        room = 86 - len(name)  # a long name leaves less room for its folder (30em, about 56 characters)
-        cap = f' style="max-width:{max(room, 12)}ch"' if room < 56 else ""
+        room = _PATH_CHARACTERS - len(name)
+        cap = f' style="max-width:{max(room, _SHORTEST_FOLDER)}ch"' if room < _FOLDER_CHARACTERS else ""
         lines.append('<span class="pl">' + (f'<span class="pi">{icon}</span>' if icon else "")
                      + (f'<span class="pd"{cap}>{_esc(folder)}</span>' if folder else "")
                      + f'<span class="pn">{_esc(name)}</span></span>')
@@ -486,9 +512,6 @@ def _clip_path(text: str, width: int = 90) -> str:
     tail = text[-(width - 1):]
     cut = tail.find("/")
     return "…" + (tail[cut:] if 0 <= cut < len(tail) - 1 else tail)
-
-
-# ----------------------------------------------------------------------------- the shared blocks
 
 
 def _tone(item: tuple[str, ...]) -> str:
@@ -599,10 +622,184 @@ def _cell_html(cell: Any, text: str) -> str:
     return draw(cell, text) if draw else _esc(text)
 
 
+def _column_texts(block: _Table, rows: list[list[Any]]) -> list[list[str]]:
+    """
+    Each column's cells as text: '' where a row is short of it or the cell is None.
+    """
+    return [["" if j >= len(row) or row[j] is None else str(row[j]) for row in rows]
+            for j in range(len(block.headers))]
+
+
+def _is_numeric(column: list[str]) -> bool:
+    """
+    Whether most of a column's filled cells are numbers, sizes, money or percentages, which are right-aligned.
+    """
+    numbers = sum(bool(_NUMERIC_RE.match(value)) for value in column if value)
+    filled = sum(bool(value) for value in column)
+    return numbers * 2 > filled > 0
+
+
+def _table_sorts(block: _Table, rows: list[list[Any]],
+                 columns: list[list[str]]) -> dict[int, tuple[list[int], list[int], str]]:
+    """
+    The columns a click on their header sorts by -> each row's place sorted up and sorted down, and the column's
+    kind (_sort_kind). A table sorts when it has _SORT_MIN_ROWS rows or more and isn't a tree or a list of calls
+    (help() keeps its order). A column sorts unless it holds sentences or all its cells are the same; the bar column
+    sorts by its bars.
+    """
+    sorts_at_all = block.sortable and not block.tree and 0 not in block.code_cols and len(rows) >= _SORT_MIN_ROWS
+    if not sorts_at_all:
+        return {}
+    width = len(block.headers)
+    sorts: dict[int, tuple[list[int], list[int], str]] = {}
+    for j in range(min(width + (block.bars is not None), _SORT_COLUMNS)):
+        if j in block.prose_cols:
+            continue
+        values = columns[j] if j < width else []
+        keys = [_sort_key(v) for v in values] if j < width else [(0, float(b)) for b in block.bars[: len(rows)]]
+        present = [key for key in keys if key is not None]
+        if len(set(present)) > 1:
+            sorts[j] = (*_ranks(keys), _sort_kind(values, present))
+    return sorts
+
+
+def _sort_labels(header: str, kind: str) -> str:
+    """
+    A sortable header: three labels over radio buttons, one showing at a time, that step through the column's
+    first sort, the other way, and back to the original order.
+    """
+    first, second = _SORT_WORDS[kind]
+    radios = ("ra", "rd") if kind == "text" else ("rd", "ra")
+    steps = ((1, radios[0], f"Sort: {first}"), (2, radios[1], f"Sort: {second}"),
+             (3, "rn", "Back to the original order"))
+    return "".join(f'<label class="o{n}" title="{tip}"{_HIDE if n > 1 else ""}>'
+                   f'<input type="radio" name="s" class="{radio}"{_HIDE}>{_esc(header)}</label>'
+                   for n, radio, tip in steps)
+
+
+def _header_html(j: int, header: str, numeric: bool, sort: tuple[list[int], list[int], str] | None) -> str:
+    """
+    The header of column j: right-aligned over numbers, and the labels a click sorts by when it sorts.
+    """
+    css = ["n"] if numeric else []
+    inner = _esc(header)
+    if sort:
+        inner = _sort_labels(header, sort[2])
+        css = ["srt", f"k{j}", *css]
+    return f'<th class="{" ".join(css)}">{inner}</th>' if css else f"<th>{inner}</th>"
+
+
+def _cell_td(block: _Table, j: int, cell: Any) -> str:
+    """
+    One cell of column j: a tree label, a call to copy, a sentence with its lead in bold, a key, a number
+    (right-aligned), or text, which doesn't wrap when it's _SHORT_CELL characters or fewer.
+    """
+    text = "" if cell is None else str(cell)
+    inner, attrs = _cell_html(cell, text), ""
+    if block.tree and j == 0:
+        css = "tree"
+    elif j in block.code_cols and text:
+        css, inner = "c", f"<code{_SELECT}>{inner}</code>"
+    elif j in block.prose_cols:
+        css, inner = "", _lead(text)
+    elif j in block.path_cols and text:
+        css, inner = "p", _path_html(text)
+        attrs = f' title="{_esc(text)}"' if "/" in text.rstrip("/") else ""
+    elif _NUMERIC_RE.match(text):
+        css = "n"
+    else:
+        css = "s" if len(text) <= _SHORT_CELL and "\n" not in text else ""
+    return f'<td class="{css}"{attrs}>{inner}</td>' if css else f"<td>{inner}</td>"
+
+
+def _bar_td(fraction: float) -> str:
+    """
+    The bar column's cell: the fraction as a bar and a percentage.
+    """
+    pct = max(0.0, min(1.0, fraction)) * 100
+    return (f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
+            f"</span></span>{pct:.1f}%</td>")
+
+
+def _row_cells(block: _Table, i: int, row: list[Any]) -> str:
+    """
+    Row i's cells, and its bar when the table has them.
+    """
+    cells = [_cell_td(block, j, cell) for j, cell in enumerate(row)]
+    if block.bars is not None:
+        cells.append(_bar_td(block.bars[i]))
+    return "".join(cells)
+
+
+def _row_attributes(i: int, columns: list[list[str]], sorts: dict[int, tuple[list[int], list[int], str]],
+                    positions: dict[int, dict[str, int]]) -> str:
+    """
+    Row i's class, naming the value it holds in each filtered column (f<column>v<value's place>), and its style, its
+    place in each sortable column sorted up and down (--a<column>, --d<column>), which the CSS orders rows by.
+    """
+    marks = [f"f{j}v{places[columns[j][i].strip()]}" for j, places in positions.items() if columns[j][i].strip()]
+    order = ";".join(f"--a{j}:{up[i]};--d{j}:{down[i]}" for j, (up, down, _) in sorts.items())
+    return (f' class="{" ".join(marks)}"' if marks else "") + (f' style="{order}"' if order else "")
+
+
+def _columns_menu(heads: list[str], report: _Report) -> str:
+    """
+    The Columns menu: a checkbox per column that hides the column when it's ticked off, and a button that resets
+    the table. The rules that hide them go into report.rules.
+    """
+    root = report.root
+    report.rules.update(f".{root} form.tbl:has(.cv{j}:not(:checked)) tr>:nth-child({j + 1}){{display:none}}"
+                        for j in range(len(heads)))
+    boxes = "".join(f'<label><input type="checkbox" class="cv{j}" checked>{_esc(header)}</label>'
+                    for j, header in enumerate(heads))
+    return ('<details class="cols"><summary title="Choose the columns to show">Columns</summary><div class="menu">'
+            + boxes
+            + '<button type="reset" title="Every column, the original order and no filters">Reset table'
+            "</button></div></details>")
+
+
+def _filter_controls(filters: list[tuple[int, list[tuple[str, int]]]], heads: list[str], report: _Report) -> str:
+    """
+    A select per filtered column, its values with how many rows hold each. The rules that hide the other rows go
+    into report.rules.
+    """
+    root = report.root
+    for j, values in filters:
+        report.rules.update(f".{root} form.tbl:has(.f{j} .v{i}:checked) tbody tr:not(.f{j}v{i}){{display:none}}"
+                            for i in range(len(values)))
+    selects = "".join(
+        f'<label class="flt">{_esc(heads[j])}<select class="f{j}"><option class="all" selected>All</option>'
+        + "".join(f'<option class="v{i}">{_esc(value)} ({count:,})</option>' for i, (value, count) in enumerate(values))
+        + "</select></label>"
+        for j, values in filters
+    )
+    return '<span class="tl">Filter</span>' + selects
+
+
+def _filter_foot(row_count: int) -> str:
+    """
+    The line under a filtered table: how many rows match, and a button that clears the filters.
+    """
+    return (f'<div class="tf"{_HIDE}><span><span class="cnt"></span> of {row_count:,} rows match</span>'
+            '<button type="reset">Clear filters</button></div>')
+
+
+def _table_frame(block: _Table, tools: str, content: str) -> str:
+    """
+    The table under its title, with its controls beside the title, or folded under its title when it's collapsed.
+    """
+    if block.collapsed:
+        return (f'<details class="sec"><summary>{_prose(block.title or "Details")} ({len(block.rows):,})</summary>'
+                f"{tools}{content}</details>")
+    title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
+    head = f'<div class="tt">{title}{tools}</div>' if title and tools else title + tools
+    return head + content
+
+
 @_draws(_Table, "html")
 def _table_html(block: _Table, report: _Report) -> str:
     """
-    A _Table as HTML. Over 30 rows it scrolls under a sticky header. With 3 rows or more, a click on a
+    A _Table as HTML. Over _SCROLL_ROWS rows it scrolls under a sticky header. With 3 rows or more, a click on a
     header sorts by that column (largest, newest or A to Z first; again for the other way; a third click
     for the original order); a column of a few repeated values gets a filter; with 3 columns or more, a
     Columns menu ticks columns off. All plain HTML and CSS: radio buttons, selects and checkboxes in a form,
@@ -611,111 +808,38 @@ def _table_html(block: _Table, report: _Report) -> str:
     """
     if not block.rows:
         return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + '<div class="more">(none)</div>'
+
     rows, hidden = _visible_rows(block, report.max_rows)
-    width = len(block.headers)
-    columns = [["" if j >= len(row) or row[j] is None else str(row[j]) for row in rows] for j in range(width)]
-    numeric = [
-        sum(bool(_NUMERIC_RE.match(v)) for v in column if v) * 2 > sum(bool(v) for v in column) > 0
-        for column in columns
-    ]
-    sorts: dict[int, tuple[list[int], list[int], str]] = {}
-    if block.sortable and not block.tree and 0 not in block.code_cols and len(rows) >= 3:  # help() keeps its order
-        for j in range(min(width + (block.bars is not None), _SORT_COLUMNS)):
-            if j in block.prose_cols:
-                continue
-            values = columns[j] if j < width else []
-            keys = [_sort_key(v) for v in values] if j < width else [(0, float(b)) for b in block.bars[: len(rows)]]
-            present = [key for key in keys if key is not None]
-            if len(set(present)) > 1:
-                sorts[j] = (*_ranks(keys), _sort_kind(values, present))
+    columns = _column_texts(block, rows)
+    numeric = [_is_numeric(column) for column in columns]
+    sorts = _table_sorts(block, rows, columns)
     filters = _filters(block, columns, numeric)
     heads = list(block.headers) + ([block.bar_label] if block.bars is not None else [])
-    cells_th = []
-    for j, header in enumerate(heads):
-        css = ["n"] if j < width and numeric[j] else []
-        inner = _esc(header)
-        if j in sorts:
-            first, second = _SORT_WORDS[sorts[j][2]]
-            radios = ("ra", "rd") if sorts[j][2] == "text" else ("rd", "ra")
-            inner = "".join(
-                f'<label class="o{n}" title="{tip}"{_HIDE if n > 1 else ""}>'
-                f'<input type="radio" name="s" class="{radio}"{_HIDE}>{_esc(header)}</label>'
-                for n, radio, tip in ((1, radios[0], f"Sort: {first}"), (2, radios[1], f"Sort: {second}"),
-                                      (3, "rn", "Back to the original order"))
-            )
-            css = ["srt", f"k{j}", *css]
-        cells_th.append(f'<th class="{" ".join(css)}">{inner}</th>' if css else f"<th>{inner}</th>")
-    position = {j: {value: i for i, (value, _) in enumerate(values)} for j, values in filters}
-    body = []
-    for i, row in enumerate(rows):
-        cells = []
-        for j, cell in enumerate(row):
-            text = "" if cell is None else str(cell)
-            inner, attrs = _cell_html(cell, text), ""
-            if block.tree and j == 0:
-                css = "tree"
-            elif j in block.code_cols and text:
-                css, inner = "c", f"<code{_SELECT}>{inner}</code>"
-            elif j in block.prose_cols:
-                css, inner = "", _lead(text)
-            elif j in block.path_cols and text:
-                css, inner = "p", _path_html(text)
-                attrs = f' title="{_esc(text)}"' if "/" in text.rstrip("/") else ""
-            elif _NUMERIC_RE.match(text):
-                css = "n"
-            else:
-                css = "s" if len(text) <= 16 and "\n" not in text else ""
-            cells.append(f'<td class="{css}"{attrs}>{inner}</td>' if css else f"<td>{inner}</td>")
-        if block.bars is not None:
-            pct = max(0.0, min(1.0, block.bars[i])) * 100
-            cells.append(
-                f'<td class="bar"><span class="track"><span class="fill" style="width:{pct:.1f}%">'
-                f"</span></span>{pct:.1f}%</td>"
-            )
-        marks = [f"f{j}v{position[j][columns[j][i].strip()]}" for j, _ in filters if columns[j][i].strip()]
-        order = ";".join(f"--a{j}:{up[i]};--d{j}:{down[i]}" for j, (up, down, _) in sorts.items())
-        body.append("<tr" + (f' class="{" ".join(marks)}"' if marks else "")
-                    + (f' style="{order}"' if order else "") + f">{''.join(cells)}</tr>")
-    choose = len(heads) >= 3  # a column chooser: tick off the columns you don't need
-    interactive = bool(sorts or filters or choose)
-    grid = f' style="--gc:repeat({len(heads)},auto)"' if interactive else ""
-    table = (
-        f'<div class="tw{" scroll" if len(rows) > 30 else ""}"><table class="t"{grid}><thead><tr>{"".join(cells_th)}'
-        f"</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
-    )
-    tools = foot = more = ""
-    root = report.root
-    if choose:
-        report.rules.update(f".{root} form.tbl:has(.cv{j}:not(:checked)) tr>:nth-child({j + 1}){{display:none}}"
-                            for j in range(len(heads)))
-        tools = ('<details class="cols"><summary title="Choose the columns to show">Columns</summary><div class="menu">'
-                 + "".join(f'<label><input type="checkbox" class="cv{j}" checked>{_esc(header)}</label>'
+    chooses_columns = len(heads) >= _CHOOSER_MIN_COLUMNS
+    interactive = bool(sorts or filters or chooses_columns)
+
+    header_cells = "".join(_header_html(j, header, j < len(block.headers) and numeric[j], sorts.get(j))
                            for j, header in enumerate(heads))
-                 + '<button type="reset" title="Every column, the original order and no filters">Reset table'
-                 "</button></div></details>")
+    positions = {j: {value: i for i, (value, _) in enumerate(values)} for j, values in filters}
+    body = "".join(f"<tr{_row_attributes(i, columns, sorts, positions)}>{_row_cells(block, i, row)}</tr>"
+                   for i, row in enumerate(rows))
+    grid = f' style="--gc:repeat({len(heads)},auto)"' if interactive else ""
+    scroll = " scroll" if len(rows) > _SCROLL_ROWS else ""
+    table = (f'<div class="tw{scroll}"><table class="t"{grid}><thead><tr>{header_cells}'
+             f"</tr></thead><tbody>{body}</tbody></table></div>")
+
+    tools = _columns_menu(heads, report) if chooses_columns else ""
+    foot = ""
     if filters:
-        for j, values in filters:
-            report.rules.update(f".{root} form.tbl:has(.f{j} .v{i}:checked) tbody tr:not(.f{j}v{i}){{display:none}}"
-                                for i in range(len(values)))
-        tools += '<span class="tl">Filter</span>' + "".join(
-            f'<label class="flt">{_esc(heads[j])}<select class="f{j}"><option class="all" selected>All</option>'
-            + "".join(f'<option class="v{i}">{_esc(value)} ({count:,})</option>'
-                      for i, (value, count) in enumerate(values))
-            + "</select></label>"
-            for j, values in filters
-        )
-        foot = (f'<div class="tf"{_HIDE}><span><span class="cnt"></span> of {len(rows):,} rows match</span>'
-                '<button type="reset">Clear filters</button></div>')
+        tools += _filter_controls(filters, heads, report)
+        foot = _filter_foot(len(rows))
     tools = f'<div class="tb"{_HIDE}>{tools}</div>' if tools else ""
+    more = ""
     if hidden:
         also = f"; sorting and filters use the {len(rows):,} shown" if sorts or filters else ""
         more = f'<div class="more">{_esc(_hidden(hidden, block, report.max_rows) + also)}</div>'
-    if block.collapsed:
-        out = (f'<details class="sec"><summary>{_prose(block.title or "Details")} ({len(block.rows):,})</summary>'
-               f"{tools}{table}{foot}{more}</details>")
-    else:
-        title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
-        out = (f'<div class="tt">{title}{tools}</div>' if title and tools else title + tools) + table + foot + more
+
+    out = _table_frame(block, tools, table + foot + more)
     return f'<form class="tbl" method="dialog" autocomplete="off">{out}</form>' if interactive else out
 
 
@@ -752,7 +876,7 @@ def _cards_lines(block: _Cards, report: _Report) -> list[str]:
 
 @_draws(_Note, "text")
 def _note_lines(block: _Note, report: _Report) -> list[str]:
-    return [_MARKS.get(block.level, "[i] ") + block.text]
+    return [_MARKS.get(block.level, _INFO_MARK) + block.text]
 
 
 @_draws(_Findings, "text")
@@ -760,7 +884,7 @@ def _findings_lines(block: _Findings, report: _Report) -> list[str]:
     items = _ordered(block.items)
     if items:
         return ["", f"-- Findings: {_counts(items, ', ')} --"] + [
-            _MARKS.get(level, "[i] ") + message for level, message in items
+            _MARKS.get(level, _INFO_MARK) + message for level, message in items
         ]
     return ["[ok] " + block.empty] if block.empty else []
 
@@ -798,9 +922,6 @@ def _table_lines(block: _Table, report: _Report) -> list[str]:
 @_draws(_Text, "text")
 def _text_lines(block: _Text, report: _Report) -> list[str]:
     return (["", f"-- {block.title} --"] if block.title else []) + [block.text]
-
-
-# ----------------------------------------------------------------------------- whole reports
 
 
 def _block_html(block: Any, report: _Report) -> str:

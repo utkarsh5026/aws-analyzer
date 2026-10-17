@@ -4,6 +4,17 @@ Lambda's configuration draw with. In HTML each object and array is a <details>, 
 script (it still works in a saved notebook); in text it's indented JSON, all of it unfolded.
 
 A service that shows one adds `_json_tree_css(_ROOT)` to the rules it passes to `_base_css`.
+
+How much a tree shows, so the notebook stays small:
+
+    _JSON_KEYS    keys of one object (more when the tree's `items` is bigger)
+    _JSON_ROWS    lines in the whole tree
+    _JSON_OPEN    lines shown unfolded at first: the shallow levels open first, big parts stay folded
+    _JSON_DEPTH   how deep objects and arrays are read; deeper ones stay folded, with nothing inside
+    _JSON_INLINE  characters of an array of plain values shown on one line: [3, 224, 224]
+    _JSON_STRING  characters of a string shown whole; a longer one folds to its start, and a click shows it
+    _JSON_FULL    characters of one string shown at most
+    _TEXT_WIDTH   characters of a line in text mode, where an array of plain values wraps like words
 """
 
 from __future__ import annotations
@@ -17,39 +28,55 @@ from .fmt import _plural
 from .render import _prose
 from .text import _esc
 
-_JSON_KEYS = 100  # keys of one object a JSON tree shows (more when n is bigger)
-_JSON_ROWS = 2_000  # lines one JSON tree shows at most, so the notebook stays small
-_JSON_OPEN = 80  # lines a JSON tree shows unfolded at first: the shallow levels open first, big parts stay folded
-_JSON_DEPTH = 100  # objects and arrays nested deeper than this stay folded, with nothing inside
-_JSON_INLINE = 80  # an array of plain values this short shows on one line: [3, 224, 224]
-_JSON_STRING = 120  # a longer string folds to its start; a click shows all of it
-_JSON_FULL = 20_000  # characters of one string shown at most
+_JSON_KEYS = 100
+_JSON_ROWS = 2_000
+_JSON_OPEN = 80
+_JSON_DEPTH = 100
+_JSON_INLINE = 80
+_JSON_STRING = 120
+_JSON_FULL = 20_000
+_TEXT_WIDTH = 100
+_STRING_START = 80
 
 
 @dataclass
 class _JNode:
     """
     One line of a _JsonTree: a value, or an object / array whose children are the lines under it.
+
+        path      how Python reaches it in the loaded file: data['Records'][0]
+        key       its key in an object, as JSON ('"name"')
+        index     its place in an array
+        kind      'value', 'object', 'array' or 'string' (a long one, folded to its start)
+        tokens    a value as (css class, text) pieces
+        total     an object's keys, an array's items, a long string's characters
+        more      children not shown
+        cut       the file goes on past it: it was cut off at the end of the preview
+        parsed    a string holding JSON, shown as the JSON it holds
+        packed    an array of plain values (an embedding, labels): its items wrap like words
+        text      a long string's text, up to _JSON_FULL characters
+        open      it starts unfolded
     """
 
-    path: str  # how Python reaches it in the loaded file: data['Records'][0]
-    key: str | None = None  # its key in an object, as JSON ('"name"')
-    index: int | None = None  # its place in an array
-    kind: str = "value"  # 'value' | 'object' | 'array' | 'string' (a long one, folded to its start)
-    tokens: list[tuple[str, str]] = field(default_factory=list)  # a value as (css class, text) pieces
+    path: str
+    key: str | None = None
+    index: int | None = None
+    kind: str = "value"
+    tokens: list[tuple[str, str]] = field(default_factory=list)
     children: list[_JNode] = field(default_factory=list)
-    total: int = 0  # an object's keys, an array's items, a long string's characters
-    more: int = 0  # children not shown
-    cut: bool = False  # the file goes on past it: it was cut off at the end of the preview
-    parsed: bool = False  # a string holding JSON, shown as the JSON it holds
-    packed: bool = False  # an array of plain values (an embedding, labels): its items wrap like words
-    text: str = ""  # a long string's text, up to _JSON_FULL characters
-    open: bool = False  # starts unfolded
+    total: int = 0
+    more: int = 0
+    cut: bool = False
+    parsed: bool = False
+    packed: bool = False
+    text: str = ""
+    open: bool = False
 
 
 def _json_tokens(value: Any) -> list[tuple[str, str]]:
     """
-    A plain value (or an empty object or array) as coloured pieces of JSON.
+    A plain value (or an empty object or array) as coloured pieces of JSON. Anything else, which can't come from
+    a JSON file (a date), shows as its text.
     """
     if isinstance(value, str):
         return [("js", json.dumps(value, ensure_ascii=False))]
@@ -59,7 +86,7 @@ def _json_tokens(value: Any) -> list[tuple[str, str]]:
         return [("jd", json.dumps(value))]
     if isinstance(value, (dict, list)):
         return [("jp", "{}" if isinstance(value, dict) else "[]")]
-    return [("js", json.dumps(str(value), ensure_ascii=False))]  # not from a JSON file (a date): its text
+    return [("js", json.dumps(str(value), ensure_ascii=False))]
 
 
 def _json_inline(values: list) -> list[tuple[str, str]] | None:
@@ -107,23 +134,29 @@ class _JsonTree:
     `name` is what the value is called in Python, where each line's path (its tooltip) starts: S3's preview loads a
     file as `data`, Lambda's configuration is a Function's `raw`. `collapsed=True` folds the whole tree under its
     title, a secondary view like a collapsed _Text.
+
+    After it's made: `capped` holds 'item' when an array had more items than it shows and 'key' when an object had
+    more keys, `full` says the tree stopped at _JSON_ROWS lines, and `folded` that an object or array starts folded,
+    so unfold("all") would show more (the S3 explorer's "Expand all").
     """
 
-    def __init__(self, value: Any, items: int = 20, cut: int = 0, title: str = "", *, name: str = "data",
-                 collapsed: bool = False):
+    def __init__(self, value: Any, items: int = 20, cut: int = 0, title: str = "", *,  # noqa: PLR0913
+                 name: str = "data", collapsed: bool = False):
         self.items, self.rows, self.cut, self.title = max(items, 1), 0, cut > 0, title
         self.collapsed = collapsed
-        self.capped: set[str] = set()  # 'item' / 'key': an array / object had more than it shows
-        self.full = False  # the tree stopped at _JSON_ROWS lines
+        self.capped: set[str] = set()
+        self.full = False
         self.root = self._node(value, name, cut, 0)
         self._unfold()
-        # an object or array starts folded: unfold("all") would show more (the S3 explorer's "Expand all")
         self.folded = any(not node.open for node in self._nodes() if node.kind in ("object", "array"))
 
-    def _node(self, value: Any, path: str, cut: int, depth: int, key: str | None = None,
-              index: int | None = None) -> _JNode:
+    def _node(self, value: Any, path: str, cut: int, depth: int) -> _JNode:
+        """
+        The line for a value at `path`, `depth` objects and arrays deep, and the lines under it. `cut` is how many
+        of the objects and arrays along its end were cut off.
+        """
         self.rows += 1
-        node = _JNode(path, key, index)
+        node = _JNode(path)
         if isinstance(value, str):
             inner = _json_inside(value)
             if inner is None:
@@ -148,10 +181,12 @@ class _JsonTree:
                 break
             inner_cut = cut - 1 if cut and i == len(value) - 1 else 0
             if node.kind == "object":
-                node.children.append(self._node(child, f"{node.path}[{name!r}]", inner_cut, depth + 1,
-                                                key=json.dumps(name, ensure_ascii=False)))
+                child_node = self._node(child, f"{node.path}[{name!r}]", inner_cut, depth + 1)
+                child_node.key = json.dumps(name, ensure_ascii=False)
             else:
-                node.children.append(self._node(child, f"{node.path}[{i}]", inner_cut, depth + 1, index=i))
+                child_node = self._node(child, f"{node.path}[{i}]", inner_cut, depth + 1)
+                child_node.index = i
+            node.children.append(child_node)
         node.packed = node.kind == "array" and all(c.kind == "value" and not c.parsed for c in node.children)
         return node
 
@@ -163,7 +198,7 @@ class _JsonTree:
             node.tokens = _json_tokens(value)
             return node
         node.kind, node.total, node.text = "string", len(value), value[:_JSON_FULL]
-        node.tokens = [("js", json.dumps(value[:80].rstrip(), ensure_ascii=False)[:-1] + '…"')]  # its start
+        node.tokens = [("js", json.dumps(value[:_STRING_START].rstrip(), ensure_ascii=False)[:-1] + '…"')]
         return node
 
     def _nodes(self) -> Iterator[_JNode]:
@@ -257,7 +292,8 @@ def _json_tree_html(tree: _JsonTree) -> str:
 
 def _json_tree_text(tree: _JsonTree) -> str:
     """
-    A _JsonTree as indented JSON, all of it unfolded.
+    A _JsonTree as indented JSON, all of it unfolded. An array of plain values wraps its items like words, in
+    lines of _TEXT_WIDTH characters.
     """
     lines: list[str] = []
 
@@ -272,12 +308,12 @@ def _json_tree_text(tree: _JsonTree) -> str:
         else:
             start, end = "{}" if node.kind == "object" else "[]"
             lines.append(f"{pad}{lead}{start}")
-            if node.packed:  # items wrap like words, at 100 characters
+            if node.packed:
                 line = ""
                 for i, child in enumerate(node.children):
                     item = "".join(text for _, text in child.tokens)
                     item += "" if i == len(node.children) - 1 and not node.more else ","
-                    if line and len(pad) + 2 + len(line) + 1 + len(item) > 100:
+                    if line and len(pad) + 2 + len(line) + 1 + len(item) > _TEXT_WIDTH:
                         lines.append(f"{pad}  {line}")
                         line = ""
                     line += (" " if line else "") + item
