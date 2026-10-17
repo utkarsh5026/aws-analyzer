@@ -8,6 +8,28 @@ Only those two import it (rules.py checks): it's Bedrock's, not every service's,
 the names it uses, so `bedrock_kb.MODEL_PRICES` and `bedrock_chat.Passage` still work, and the price tables are one
 dict for both: change prices with BedrockKBAnalyzer(prices=..., model_prices=...) or BedrockChatAnalyzer(...), which
 copy them, rather than by editing the tables.
+
+The prices are USD at us-east-1 list prices, read from aws.amazon.com/bedrock/pricing and
+aws.amazon.com/opensearch-service/pricing on 2026-09-25 and checked against the AWS Price List API on 2026-09-27.
+Other regions differ: pass prices={...} (and model_prices={...}) to either analyzer to use your own.
+
+    BEDROCK_PRICES
+        opensearch_ocu_hour            per OpenSearch Compute Unit hour; indexing and search OCUs cost the same
+        opensearch_min_ocus            a classic vector collection bills 1 indexing + 1 search OCU even when idle
+        rerank_per_1k_queries          Cohere Rerank 3.5, the default reranker (DEFAULT_RERANK_MODEL)
+        amazon_rerank_per_1k_queries   Amazon Rerank 1.0 (amazon.rerank-v1:0; us-west-2's price, it isn't offered in
+                                       us-east-1)
+        embedding_per_million_tokens   Amazon Titan Text Embeddings V2, to embed each question
+    MODEL_PRICES
+        USD per million input / output tokens, on demand (in-region and US cross-region inference profiles). Keys
+        are pieces of Bedrock model IDs, and the longest matching key wins.
+    GLOBAL_MODEL_PRICES
+        The same through a global cross-region profile ('global.' IDs), for the models where it costs less.
+        model_price() uses these for a 'global.' ID unless model_prices= changed that model's price, in which case
+        your price applies to every profile.
+
+DEFAULT_MODEL is Claude Haiku 4.5; resolve_model() finds the ID or profile to call it with. SEARCHABLE are the
+document states that have chunks to search.
 """
 
 from __future__ import annotations
@@ -32,23 +54,14 @@ from ._kit.render import _SELECT, _prose
 from ._kit.text import _esc
 
 
-# ----------------------------------------------------------------------------- helpers: prices, models, names, words
-
-# USD, us-east-1 list prices, read from aws.amazon.com/bedrock/pricing and
-# aws.amazon.com/opensearch-service/pricing on 2026-09-25 and checked against the AWS Price List API on
-# 2026-09-27. Other regions differ; pass prices={...} to BedrockKBAnalyzer or BedrockChatAnalyzer to use your own.
 BEDROCK_PRICES: dict[str, float] = {
-    "opensearch_ocu_hour": 0.24,  # per OpenSearch Compute Unit hour; indexing and search OCUs cost the same
-    "opensearch_min_ocus": 2,  # a classic vector collection bills 1 indexing + 1 search OCU even when idle
-    "rerank_per_1k_queries": 2.00,  # Cohere Rerank 3.5, the default reranker
-    "amazon_rerank_per_1k_queries": 1.00,  # Amazon Rerank 1.0 (us-west-2 price; it isn't offered in us-east-1)
-    "embedding_per_million_tokens": 0.02,  # Amazon Titan Text Embeddings V2, to embed each question
+    "opensearch_ocu_hour": 0.24,
+    "opensearch_min_ocus": 2,
+    "rerank_per_1k_queries": 2.00,
+    "amazon_rerank_per_1k_queries": 1.00,
+    "embedding_per_million_tokens": 0.02,
 }
 
-# USD per million input / output tokens, on demand in us-east-1 (in-region and US cross-region inference
-# profiles), read from aws.amazon.com/bedrock/pricing on 2026-09-25 and checked against the AWS Price List API on
-# 2026-09-27. Global profiles ('global.' IDs) use GLOBAL_MODEL_PRICES below. Keys are pieces of Bedrock model IDs,
-# and the longest matching key wins; pass model_prices={...} to either analyzer to add models or use your own prices.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
     "claude-fable-5-1": (11.00, 55.00),
     "claude-fable-5": (11.00, 55.00),
@@ -81,9 +94,6 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
     "deepseek.r1": (1.35, 5.40),
 }
 
-# USD per million input / output tokens through a global cross-region profile ('global.' IDs), for the models where
-# it costs less than MODEL_PRICES (same source and dates). model_price() uses these for a 'global.' ID unless
-# model_prices= changed that model's price, in which case your price applies to every profile.
 GLOBAL_MODEL_PRICES: dict[str, tuple[float, float]] = {
     "claude-fable-5-1": (10.00, 50.00),
     "claude-fable-5": (10.00, 50.00),
@@ -100,7 +110,7 @@ GLOBAL_MODEL_PRICES: dict[str, tuple[float, float]] = {
     "nova-2-lite": (0.30, 2.50),
 }
 
-DEFAULT_MODEL = "anthropic.claude-haiku-4-5"  # Claude Haiku 4.5; resolve_model() finds the ID or profile to call it with
+DEFAULT_MODEL = "anthropic.claude-haiku-4-5"
 _MODEL_ALIASES = {
     "opus": "claude-opus-5",
     "sonnet": "claude-sonnet-5",
@@ -151,7 +161,8 @@ def _model_id(arn: str | None) -> str:
 def source_name(uri: str | None) -> str:
     """
     The file name in a source location: 's3://docs/policies/refund-policy.pdf' -> 'refund-policy.pdf',
-    'https://example.com/help/refunds?x=1' -> 'refunds', 'https://example.com/' -> 'example.com'.
+    'https://example.com/help/refunds?x=1' -> 'refunds', 'https://example.com/' -> 'example.com' (a web address
+    that's just a host is named by its host).
     """
     if not uri:
         return ""
@@ -163,11 +174,11 @@ def source_name(uri: str | None) -> str:
     if not parts:
         return str(uri)
     if len(parts) == 1 and scheme not in ("s3", ""):
-        return parts[0]  # just a host
+        return parts[0]
     return unquote(parts[-1])
 
 
-SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "METADATA_UPDATE_FAILED"}  # has chunks
+SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "METADATA_UPDATE_FAILED"}
 
 
 def estimate_tokens(text: str | None) -> int:
@@ -272,17 +283,17 @@ def best_snippet(text: str, terms: Iterable[str], width: int = 320) -> str:
     )
 
 
+_NOT_A_VERSION = r"(?!\d)(?!-\d{1,2}(?:[-:.]|$))"
+
+
 def _family_match(family: str, model_id: str) -> bool:
     """
     Whether `model_id` belongs to a model family: 'claude-opus-5' matches 'anthropic.claude-opus-5-v1:0' and
     'us.anthropic.claude-opus-5-20260301-v1:0', but not 'anthropic.claude-opus-5-5' (a newer version, another model);
-    'llama4-maverick' matches 'meta.llama4-maverick-17b-instruct-v1:0' (17b is its size, not a version).
+    'llama4-maverick' matches 'meta.llama4-maverick-17b-instruct-v1:0' (17b is its size, not a version). A
+    version is what may not follow the family: a digit, or '-5' then '-', ':', '.' or the end.
     """
-    version = r"(?!\d)(?!-\d{1,2}(?:[-:.]|$))"  # right after the family, '-5' then '-', ':', '.' or the end
-    return (
-        re.search(re.escape(family.lower()) + version, (model_id or "").lower())
-        is not None
-    )
+    return re.search(re.escape(family.lower()) + _NOT_A_VERSION, (model_id or "").lower()) is not None
 
 
 def model_price(
@@ -322,24 +333,25 @@ def short_model(model: str) -> str:
     return re.sub(r"(-\d{8})?(-v\d+)?(:\d+)*$", "", name) or model
 
 
-DEFAULT_RERANK_MODEL = (
-    "cohere.rerank-v3-5:0"  # rerank=True uses this; Amazon's is 'amazon.rerank-v1:0'
-)
-_RERANK_ALIASES = {"cohere": DEFAULT_RERANK_MODEL, "amazon": "amazon.rerank-v1:0"}
+DEFAULT_RERANK_MODEL = "cohere.rerank-v3-5:0"
+_AMAZON_RERANK_MODEL = "amazon.rerank-v1:0"
+_RERANK_ALIASES = {"cohere": DEFAULT_RERANK_MODEL, "amazon": _AMAZON_RERANK_MODEL}
 
-
-# ----------------------------------------------------------------------------- data models
 
 @dataclass
 class KBDocument:
     """
     One document (file or record) of a data source, and whether it's searchable.
+
+        uri     s3://... for S3 data sources, the document ID for custom ones
+        status  INDEXED, FAILED, PENDING, IN_PROGRESS, IGNORED, PARTIALLY_INDEXED, ...
+        reason  why it failed or was ignored
     """
 
     data_source_id: str
-    uri: str  # s3://... for S3 data sources, the document ID for custom ones
-    status: str  # INDEXED | FAILED | PENDING | IN_PROGRESS | IGNORED | PARTIALLY_INDEXED | ...
-    reason: str = ""  # why it failed or was ignored
+    uri: str
+    status: str
+    reason: str = ""
     updated: datetime | None = None
 
     @property
@@ -351,25 +363,28 @@ class KBDocument:
 class Passage:
     """
     One retrieved chunk of a document, with where it came from.
+
+        rank           1 for the best match
+        score          its relevance, only comparable with other scores of the same search
+        uri            s3://bucket/key, a web page URL, ... (see location_type)
+        location_type  S3, WEB, CONFLUENCE, SALESFORCE, SHAREPOINT, CUSTOM, KENDRA, SQL, ...
+        page           its page number in a PDF, when the parser recorded one
+        metadata       the author's metadata only (what where= filters on)
+        content_type   TEXT, IMAGE, ROW, AUDIO or VIDEO
+        row            a ROW result's columns (SQL knowledge bases): column -> value
     """
 
-    rank: int  # 1 = best match
+    rank: int
     text: str
-    score: float | None = (
-        None  # relevance; only comparable with other scores of the same search
-    )
-    uri: str = ""  # s3://bucket/key, a web page URL, ... (see location_type)
-    location_type: str = ""  # S3 | WEB | CONFLUENCE | SALESFORCE | SHAREPOINT | CUSTOM | KENDRA | SQL | ...
-    page: int | None = None  # page number in a PDF, when the parser recorded one
+    score: float | None = None
+    uri: str = ""
+    location_type: str = ""
+    page: int | None = None
     chunk_id: str = ""
     data_source_id: str = ""
-    metadata: dict[str, Any] = field(
-        default_factory=dict
-    )  # the author's metadata only (what where= filters on)
-    content_type: str = "TEXT"  # TEXT | IMAGE | ROW | AUDIO | VIDEO
-    row: dict[str, Any] | None = (
-        None  # ROW results (SQL knowledge bases): column -> value
-    )
+    metadata: dict[str, Any] = field(default_factory=dict)
+    content_type: str = "TEXT"
+    row: dict[str, Any] | None = None
 
     @property
     def source(self) -> str:
@@ -390,37 +405,39 @@ class Passage:
 @dataclass
 class Citation:
     """
-    A span of an answer and the sources behind it.
+    A span of an answer and the sources behind it: `start` and `end` are character offsets into Answer.text (end
+    is exclusive), and `sources` 1-based numbers into Answer.sources.
     """
 
-    start: int  # character offsets into Answer.text; end is exclusive
+    start: int
     end: int
     text: str
-    sources: list[int] = field(
-        default_factory=list
-    )  # 1-based numbers into Answer.sources
+    sources: list[int] = field(default_factory=list)
 
 
 @dataclass
 class ModelInfo:
     """
     A model ask() can use, and how to call it.
+
+        id         the foundation model ID, e.g. 'anthropic.claude-opus-5'
+        invoke_id  what to pass as model=: the model ID, or the inference profile that serves it
+        arn        the model's ARN, or the inference profile's when it needs one
+        via        'on-demand', 'inference profile' or 'provisioned only'
+        price_in   USD per 1M input tokens (None when it isn't in the price table), and price_out per 1M output
+        status     ACTIVE or LEGACY
     """
 
-    id: str  # the foundation model ID, e.g. 'anthropic.claude-opus-5'
+    id: str
     name: str = ""
     provider: str = ""
-    invoke_id: str = ""  # what to pass as model=: the model ID, or the inference profile that serves it
-    arn: str = ""  # the model's ARN, or the inference profile's when it needs one
-    via: str = "on-demand"  # 'on-demand' | 'inference profile' | 'provisioned only'
-    price_in: float | None = (
-        None  # USD per 1M input tokens (None = not in the price table)
-    )
+    invoke_id: str = ""
+    arn: str = ""
+    via: str = "on-demand"
+    price_in: float | None = None
     price_out: float | None = None
-    status: str = "ACTIVE"  # ACTIVE | LEGACY
+    status: str = "ACTIVE"
 
-
-# ----------------------------------------------------------------------------- reading responses, filters and costs
 
 def parse_document(desc: dict[str, Any]) -> KBDocument:
     """
@@ -534,6 +551,9 @@ def _span(text: str, part: dict[str, Any]) -> tuple[int, int]:
     return max(0, start), min(len(text), end + 1)
 
 
+_GEOGRAPHY_PROFILES = {"us": "us.", "eu": "eu.", "ap": "apac.", "ca": "ca.", "sa": "sa."}
+
+
 def parse_models(
     summaries: list[dict[str, Any]],
     profiles: list[dict[str, Any]] | None,
@@ -547,71 +567,88 @@ def parse_models(
     """
     known = profiles is not None
     profiles = profiles or []
+    served = _served_models(profiles)
+    geo = _GEOGRAPHY_PROFILES.get(region.split("-")[0], "")
+    found = [_model_info(summary, served, geo, known, model_prices) for summary in summaries
+             if _is_text_model(summary)]
+    found += [_application_profile_model(profile, model_prices) for profile in profiles
+              if profile.get("type") == "APPLICATION"]
+    return sorted(found, key=lambda m: (m.provider.lower(), m.name.lower(), m.id))
+
+
+def _is_text_model(summary: dict[str, Any]) -> bool:
+    """
+    Whether a ListFoundationModels summary is a model that answers in text: not a reranker or an embedding model.
+    """
+    is_text = "TEXT" in (summary.get("outputModalities") or ["TEXT"])
+    return is_text and not re.search("rerank|embed", summary.get("modelId", ""))
+
+
+def _served_models(profiles: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Each model ID -> the inference profiles that serve it.
+    """
     served: dict[str, list[dict[str, Any]]] = {}
     for profile in profiles:
-        for model_id in dict.fromkeys(
-            _model_id(m.get("modelArn")) for m in profile.get("models") or []
-        ):
+        for model_id in dict.fromkeys(_model_id(m.get("modelArn")) for m in profile.get("models") or []):
             served.setdefault(model_id, []).append(profile)
-    geo = {"us": "us.", "eu": "eu.", "ap": "apac.", "ca": "ca.", "sa": "sa."}.get(
-        region.split("-")[0], ""
+    return served
+
+
+def _profile_preference(profile: dict[str, Any], geo: str) -> tuple[int, str]:
+    """
+    How a profile sorts among the ones serving a model: this region's geography (`geo`, 'us.') first, then global.
+    """
+    pid = profile.get("inferenceProfileId", "")
+    return 0 if geo and pid.startswith(geo) else 1 if pid.startswith("global.") else 2, pid
+
+
+def _model_info(summary: dict[str, Any], served: dict[str, list[dict[str, Any]]], geo: str, known: bool,
+                model_prices: dict[str, tuple[float, float]] | None) -> ModelInfo:
+    """
+    One model, and how to call it: on demand, or through the best inference profile that serves it. One that
+    neither serves is 'provisioned only', unless the profiles couldn't be listed (`known` is False). Its price is
+    the one for what it's called through, since a global profile can cost less.
+    """
+    model_id = summary.get("modelId", "")
+    options = sorted(served.get(model_id, []), key=lambda profile: _profile_preference(profile, geo))
+    info = ModelInfo(
+        id=model_id,
+        name=summary.get("modelName", ""),
+        provider=summary.get("providerName", ""),
+        invoke_id=model_id,
+        arn=summary.get("modelArn", ""),
+        status=(summary.get("modelLifecycle") or {}).get("status", "ACTIVE"),
     )
+    if "ON_DEMAND" not in (summary.get("inferenceTypesSupported") or []):
+        if options:
+            info.via = "inference profile"
+            info.invoke_id, info.arn = options[0]["inferenceProfileId"], options[0]["inferenceProfileArn"]
+        else:
+            info.via = "provisioned only" if known else "inference profile (unknown)"
+    price = model_price(info.invoke_id, model_prices)
+    if price:
+        info.price_in, info.price_out = price
+    return info
 
-    def preference(profile: dict[str, Any]) -> tuple[int, str]:
-        pid = profile.get("inferenceProfileId", "")
-        return (
-            0 if geo and pid.startswith(geo) else 1 if pid.startswith("global.") else 2,
-            pid,
-        )
 
-    found = []
-    for summary in summaries:
-        model_id = summary.get("modelId", "")
-        if "TEXT" not in (summary.get("outputModalities") or ["TEXT"]) or re.search(
-            "rerank|embed", model_id
-        ):
-            continue
-        options = sorted(served.get(model_id, []), key=preference)
-        info = ModelInfo(
-            id=model_id,
-            name=summary.get("modelName", ""),
-            provider=summary.get("providerName", ""),
-            invoke_id=model_id,
-            arn=summary.get("modelArn", ""),
-            status=(summary.get("modelLifecycle") or {}).get("status", "ACTIVE"),
-        )
-        if "ON_DEMAND" not in (summary.get("inferenceTypesSupported") or []):
-            if options:
-                info.via, info.invoke_id, info.arn = (
-                    "inference profile",
-                    options[0]["inferenceProfileId"],
-                    options[0]["inferenceProfileArn"],
-                )
-            else:
-                info.via = (
-                    "provisioned only" if known else "inference profile (unknown)"
-                )
-        price = model_price(info.invoke_id, model_prices)  # a global profile can cost less
-        if price:
-            info.price_in, info.price_out = price
-        found.append(info)
-    for profile in profiles:
-        if profile.get("type") == "APPLICATION":
-            model = _model_id(((profile.get("models") or [{}])[0]).get("modelArn"))
-            price = model_price(model, model_prices)
-            found.append(
-                ModelInfo(
-                    id=profile["inferenceProfileArn"],
-                    name=profile.get("inferenceProfileName", ""),
-                    provider="your inference profile",
-                    invoke_id=profile["inferenceProfileArn"],
-                    arn=profile["inferenceProfileArn"],
-                    via="inference profile",
-                    price_in=price[0] if price else None,
-                    price_out=price[1] if price else None,
-                )
-            )
-    return sorted(found, key=lambda m: (m.provider.lower(), m.name.lower(), m.id))
+def _application_profile_model(profile: dict[str, Any],
+                               model_prices: dict[str, tuple[float, float]] | None) -> ModelInfo:
+    """
+    An application inference profile the account made, as a model to call, priced as the model it serves.
+    """
+    model = _model_id(((profile.get("models") or [{}])[0]).get("modelArn"))
+    price = model_price(model, model_prices)
+    return ModelInfo(
+        id=profile["inferenceProfileArn"],
+        name=profile.get("inferenceProfileName", ""),
+        provider="your inference profile",
+        invoke_id=profile["inferenceProfileArn"],
+        arn=profile["inferenceProfileArn"],
+        via="inference profile",
+        price_in=price[0] if price else None,
+        price_out=price[1] if price else None,
+    )
 
 
 _FILTER_OPERATORS = {
@@ -670,14 +707,24 @@ def _is_bedrock_filter(where: Any) -> bool:
 
 def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
     """
-    One where= entry -> Bedrock filter conditions (two for 'between').
+    One where= entry -> Bedrock filter conditions: a value must be equal, a list (or set) of allowed values must
+    hold the attribute, and a tuple is (operator, *values) (_operator_conditions).
     """
     if not isinstance(key, str) or not key:
         raise ValueError(f"where= keys are metadata attribute names, got {key!r}")
-    if not isinstance(spec, tuple):
-        if isinstance(spec, (list, set, frozenset)):  # a list of allowed values
-            return [{"in": {"key": key, "value": _filter_value(spec)}}]
-        return [{"equals": {"key": key, "value": _filter_value(spec)}}]
+    if isinstance(spec, tuple):
+        return _operator_conditions(key, spec)
+    if isinstance(spec, (list, set, frozenset)):
+        return [{"in": {"key": key, "value": _filter_value(spec)}}]
+    return [{"equals": {"key": key, "value": _filter_value(spec)}}]
+
+
+def _operator_conditions(key: str, spec: tuple) -> list[dict[str, Any]]:
+    """
+    (operator, *values) on an attribute -> its conditions: two for 'between'. ('in', 'a', 'b') means ('in', ['a',
+    'b']). 'contains' with a number or a boolean is listContains, since one can only be an element of a list
+    attribute.
+    """
     op = spec[0].lower() if spec and isinstance(spec[0], str) else None
     if op not in _FILTER_OPERATORS:
         raise ValueError(
@@ -695,7 +742,7 @@ def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
             {"lessThanOrEquals": {"key": key, "value": _filter_value(args[1])}},
         ]
     if op in ("in", "not_in") and len(args) > 1:
-        args = [args]  # ('in', 'a', 'b') means ('in', ['a', 'b'])
+        args = [args]
     if len(args) != 1:
         raise ValueError(
             f"{op!r} takes one value, like ({op!r}, {'[...]' if 'in' in op else 'x'}); got {spec!r}"
@@ -705,7 +752,7 @@ def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
         value = [value]
     name = _FILTER_OPERATORS[op]
     if op == "contains" and not isinstance(value, str):
-        name = "listContains"  # a number or boolean can only be an element of a list attribute
+        name = "listContains"
     return [{name: {"key": key, "value": value}}]
 
 
@@ -742,7 +789,7 @@ def build_filter(where: Any) -> dict[str, Any] | None:
     return conditions[0] if len(conditions) == 1 else {"andAll": conditions}
 
 
-DATA_SOURCE_KEY = "x-amz-bedrock-kb-data-source-id"  # Bedrock tags every chunk with its data source's ID
+DATA_SOURCE_KEY = "x-amz-bedrock-kb-data-source-id"
 
 
 def data_source_filter(ids: Iterable[str]) -> dict[str, Any] | None:
@@ -841,8 +888,6 @@ def generation_cost(
 _REFUSAL = "unable to assist you with this request"
 
 
-# ----------------------------------------------------------------------------- knowledge bases by name
-
 def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
     """
     The ID in {ID: name} that `value` names (an ID, or a name in any case); None if nothing matches.
@@ -874,23 +919,35 @@ def _match_sources(
     return found, missing
 
 
-# ----------------------------------------------------------------------------- the answer and JSON blocks
-
 @dataclass
 class _Answer:
+    """
+    A render block: an answer laid out from its markdown, with its cited spans shaded and [n] after each.
+    `inline` is True when the text already holds the [n] markers (engine='converse').
+    """
+
     text: str
     citations: list[Citation] = field(default_factory=list)
-    inline: bool = False  # the text already holds [n] markers (engine='converse')
+    inline: bool = False
 
 
 @dataclass
 class _Json:
+    """
+    A render block: JSON with its keys and values in colour, each object and list folding under a click.
+
+        open_depth  levels shown open (HTML); deeper objects are folded
+        marks       path -> why it's highlighted (your settings)
+        notes       path -> a note shown after the value
+        collapsed   folded under its title in HTML
+    """
+
     value: Any
     title: str = ""
-    open_depth: int = 8  # levels shown open; deeper objects are folded (HTML)
-    marks: dict[tuple[str, ...], str] = field(default_factory=dict)  # path -> why it's highlighted (your settings)
-    notes: dict[tuple[str, ...], str] = field(default_factory=dict)  # path -> a note shown after the value
-    collapsed: bool = False  # folded under its title in HTML
+    open_depth: int = 8
+    marks: dict[tuple[str, ...], str] = field(default_factory=dict)
+    notes: dict[tuple[str, ...], str] = field(default_factory=dict)
+    collapsed: bool = False
 
 
 def _plain_json(value: Any) -> Any:
@@ -997,9 +1054,6 @@ def _with_markers(text: str, citations: list[Citation]) -> str:
     return "".join(out) + text[pos:]
 
 
-# Markdown: models often answer in it (lists, **bold**, headings, tables, code). It's laid out with the stdlib, and
-# every piece of text is escaped before it's wrapped: answers can quote untrusted knowledge base content, so raw HTML
-# in them stays text, links go only to http(s) and mailto, and pictures become links (nothing loads from elsewhere).
 _MD_FENCE_RE = re.compile(r"^( {0,3})(`{3,}|~{3,})[ \t]*([^`\s]*)[^`]*$")
 _MD_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+|$)")
 _MD_RULE_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
@@ -1012,9 +1066,9 @@ _MD_AUTOLINK_RE = re.compile(r"<((?:https?://|mailto:)[^\s<>]+)>", re.IGNORECASE
 _MD_PUNCT = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 _MD_TAGS = {"em": ("<em>", "</em>"), "strong": ("<strong>", "</strong>"), "del": ("<del>", "</del>"),
             "strongem": ("<strong><em>", "</em></strong>")}
-_MD_MAX_DEPTH = 8  # nesting (lists in quotes in lists...) beyond this is read as plain paragraphs
+_MD_MAX_DEPTH = 8
 
-_Line = tuple[int, str]  # (where the text starts in the answer, the text): offsets keep citations in place
+_Line = tuple[int, str]
 
 
 def _md_indent(line: str) -> int:
@@ -1097,80 +1151,121 @@ def _md_blocks(lines: list[_Line], depth: int = 0) -> list[tuple[Any, ...]]:
     blocks: list[tuple[Any, ...]] = []
     i = 0
     while i < len(lines):
-        offset, line = lines[i]
-        if not line.strip():
+        if not lines[i][1].strip():
             i += 1
             continue
-        fence = _MD_FENCE_RE.match(line)
-        if fence:
-            mark, body = fence.group(2), []
-            i += 1
-            while i < len(lines):
-                closing = lines[i][1].strip()
-                if closing.startswith(mark) and not closing.strip(mark[0]):
-                    i += 1
-                    break
-                body.append(_md_dedent(lines[i], len(fence.group(1))))
-                i += 1
-            blocks.append(("code", fence.group(3), body))
-            continue
-        heading = _MD_HEADING_RE.match(line)
-        if heading:
-            text = re.sub(r"(?:^|[ \t]+)#+[ \t]*$", "", line[heading.end():]).rstrip()
-            blocks.append(("h", len(heading.group(1)), [(offset + heading.end(), text)]))
-            i += 1
-            continue
-        if _MD_RULE_RE.match(line):
-            blocks.append(("hr",))
-            i += 1
-            continue
-        if _MD_QUOTE_RE.match(line) and depth < _MD_MAX_DEPTH:
-            inner = []
-            while i < len(lines) and lines[i][1].strip():
-                quoted = _MD_QUOTE_RE.match(lines[i][1])
-                if not quoted and _md_starts_block(lines, i):
-                    break
-                inner.append((lines[i][0] + quoted.end(), lines[i][1][quoted.end():]) if quoted
-                             else _md_lstrip(lines[i]))
-                i += 1
-            blocks.append(("quote", _md_blocks(inner, depth + 1)))
-            continue
-        if _MD_ITEM_RE.match(line) and depth < _MD_MAX_DEPTH:
-            block, i = _md_list(lines, i, depth)
-            blocks.append(block)
-            continue
-        if _md_table_start(lines, i):
-            aligns = ["c" if c.startswith(":") and c.endswith(":") else "r" if c.endswith(":") else
-                      "l" if c.startswith(":") else "" for _, c in _md_cells(lines[i + 1])]
-            header, rows = _md_cells(lines[i]), []
-            i += 2
-            while i < len(lines) and "|" in lines[i][1] and lines[i][1].strip():
-                cells = _md_cells(lines[i])[: len(header)]
-                rows.append(cells + [(lines[i][0], "")] * (len(header) - len(cells)))
-                i += 1
-            blocks.append(("table", aligns, header, rows))
-            continue
-        para = [_md_lstrip(lines[i])]
-        i += 1
-        level = 0
-        while i < len(lines) and lines[i][1].strip():
-            setext = _MD_SETEXT_RE.match(lines[i][1])
-            if setext:
-                level = 1 if setext.group(1)[0] == "=" else 2
-                i += 1
-                break
-            if _md_starts_block(lines, i):
-                break
-            para.append(_md_lstrip(lines[i]))
-            i += 1
-        blocks.append(("h", level, para) if level else ("p", para))
+        block, i = _md_block(lines, i, depth)
+        blocks.append(block)
     return blocks
+
+
+def _md_block(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], int]:
+    """
+    The block starting at line i, which isn't blank, and the line after it. Quotes and lists nested more than
+    _MD_MAX_DEPTH deep are read as plain paragraphs.
+    """
+    offset, line = lines[i]
+    fence = _MD_FENCE_RE.match(line)
+    if fence:
+        return _md_code(lines, i, fence)
+    heading = _MD_HEADING_RE.match(line)
+    if heading:
+        text = re.sub(r"(?:^|[ \t]+)#+[ \t]*$", "", line[heading.end():]).rstrip()
+        return ("h", len(heading.group(1)), [(offset + heading.end(), text)]), i + 1
+    if _MD_RULE_RE.match(line):
+        return ("hr",), i + 1
+    if _MD_QUOTE_RE.match(line) and depth < _MD_MAX_DEPTH:
+        return _md_quote(lines, i, depth)
+    if _MD_ITEM_RE.match(line) and depth < _MD_MAX_DEPTH:
+        return _md_list(lines, i, depth)
+    if _md_table_start(lines, i):
+        return _md_table(lines, i)
+    return _md_paragraph(lines, i)
+
+
+def _md_code(lines: list[_Line], i: int, fence: re.Match) -> tuple[tuple[Any, ...], int]:
+    """
+    The fenced code block opening at line i, up to its closing fence (or the end), and the line after it.
+    """
+    mark, body = fence.group(2), []
+    i += 1
+    while i < len(lines):
+        closing = lines[i][1].strip()
+        if closing.startswith(mark) and not closing.strip(mark[0]):
+            i += 1
+            break
+        body.append(_md_dedent(lines[i], len(fence.group(1))))
+        i += 1
+    return ("code", fence.group(3), body), i
+
+
+def _md_quote(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], int]:
+    """
+    The quote starting at line i, its lines read as blocks of their own, and the line after it. An unquoted line
+    goes on the quote's paragraph unless it starts a block.
+    """
+    inner = []
+    while i < len(lines) and lines[i][1].strip():
+        quoted = _MD_QUOTE_RE.match(lines[i][1])
+        if not quoted and _md_starts_block(lines, i):
+            break
+        inner.append((lines[i][0] + quoted.end(), lines[i][1][quoted.end():]) if quoted else _md_lstrip(lines[i]))
+        i += 1
+    return ("quote", _md_blocks(inner, depth + 1)), i
+
+
+def _md_align(rule: str) -> str:
+    """
+    A column's alignment from its cell in the table's rule: ':-:' centre, '-:' right, ':-' left, '-' none.
+    """
+    if rule.startswith(":") and rule.endswith(":"):
+        return "c"
+    if rule.endswith(":"):
+        return "r"
+    return "l" if rule.startswith(":") else ""
+
+
+def _md_table(lines: list[_Line], i: int) -> tuple[tuple[Any, ...], int]:
+    """
+    The table whose header is line i (its rule is the next), each row cut or padded to the header's cells, and
+    the line after it.
+    """
+    aligns = [_md_align(cell) for _, cell in _md_cells(lines[i + 1])]
+    header, rows = _md_cells(lines[i]), []
+    i += 2
+    while i < len(lines) and "|" in lines[i][1] and lines[i][1].strip():
+        cells = _md_cells(lines[i])[: len(header)]
+        rows.append(cells + [(lines[i][0], "")] * (len(header) - len(cells)))
+        i += 1
+    return ("table", aligns, header, rows), i
+
+
+def _md_paragraph(lines: list[_Line], i: int) -> tuple[tuple[Any, ...], int]:
+    """
+    The paragraph starting at line i, up to a blank line or the start of another block, and the line after it. An
+    underline of = or - makes it a heading.
+    """
+    para = [_md_lstrip(lines[i])]
+    i += 1
+    level = 0
+    while i < len(lines) and lines[i][1].strip():
+        setext = _MD_SETEXT_RE.match(lines[i][1])
+        if setext:
+            level = 1 if setext.group(1)[0] == "=" else 2
+            i += 1
+            break
+        if _md_starts_block(lines, i):
+            break
+        para.append(_md_lstrip(lines[i]))
+        i += 1
+    return (("h", level, para) if level else ("p", para)), i
 
 
 def _md_list(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], int]:
     """
     The list starting at line i (its items' lines, nested ones dedented) and the line after it. Lenient where
-    models are: any bullet character continues a bullet list, and nested lists can be indented by 2, 3 or 4.
+    models are: any bullet character continues a bullet list, nested lists can be indented by 2, 3 or 4, and a
+    paragraph's next line needn't be indented.
     """
     first = _MD_ITEM_RE.match(lines[i][1])
     assert first is not None
@@ -1204,7 +1299,7 @@ def _md_list(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], i
                 continue
             if blank or _md_starts_block(lines, i):
                 break
-            body.append(_md_lstrip(lines[i]))  # a paragraph's next line, not indented
+            body.append(_md_lstrip(lines[i]))
             i += 1
         while body and not body[-1][1].strip():
             body.pop()
@@ -1233,6 +1328,43 @@ def _md_source(lines: list[_Line]) -> tuple[str, list[int]]:
     return "".join(parts), where
 
 
+def _md_closing_bracket(s: str, k: int, j: int) -> int:
+    """
+    Where the [ at k closes, past escaped characters and nested brackets; j or more when it doesn't.
+    """
+    depth, n = 0, k
+    while n < j:
+        if s[n] == "\\":
+            n += 2
+            continue
+        if s[n] == "[":
+            depth += 1
+        elif s[n] == "]":
+            depth -= 1
+            if depth == 0:
+                return n
+        n += 1
+    return n
+
+
+def _md_link_target_after(s: str, k: int, n: int, j: int) -> tuple[int, int, str, int] | None:
+    """
+    The link whose text opens at k and closes at n, with its url in the brackets after n: (text start, text end,
+    url, after it), or None when they don't close on that line.
+    """
+    parens, m = 0, n + 1
+    while m < j and s[m] != "\n":
+        if s[m] == "(":
+            parens += 1
+        elif s[m] == ")":
+            parens -= 1
+            if parens == 0:
+                target = s[n + 2:m].strip().split()
+                return k + 1, n, target[0] if target else "", m + 1
+        m += 1
+    return None
+
+
 def _md_link_target(url: str) -> str:
     """
     The URL a link may open: http(s) and mailto only, else '' (shown as text).
@@ -1244,7 +1376,17 @@ def _md_link_target(url: str) -> str:
 class _Markdown:
     """
     Markdown -> HTML, with the cited spans of the answer shaded and the [n] markers placed after them.
-    Citations hold offsets into the raw text, so every character keeps where it came from (`where`).
+    Citations hold offsets into the raw text, so every character keeps where it came from (`where`), and each
+    line is a _Line: (where its text starts in the answer, its text).
+
+    Models often answer in markdown (lists, **bold**, headings, tables, code). It's laid out with the stdlib, and
+    every piece of text is escaped before it's wrapped: answers can quote untrusted knowledge base content, so raw
+    HTML in them stays text, links go only to http(s) and mailto, and pictures become links (nothing loads from
+    elsewhere).
+
+    A marker goes after the cited span's last word, before its closing punctuation or markup. `no_closer` remembers,
+    for each (delimiter, run, end), where a search for its closer started and found none, so it isn't searched
+    again.
     """
 
     def __init__(self, text: str, citations: Iterable[Citation] = (), inline: bool = False):
@@ -1256,14 +1398,14 @@ class _Markdown:
             if not c.sources or end <= start:
                 continue
             self.cited[start:end] = b"\x01" * (end - start)
-            if not inline:  # the marker goes after the span's last word, before its closing punctuation or markup
+            if not inline:
                 k = end
                 while k > start + 1 and text[k - 1] in " \t\r\n.!?:;,*_~`":
                     k -= 1
                 marks.setdefault(k - 1, []).extend(c.sources)
         self.marks = [(at, "".join(f"[{n}]" for n in dict.fromkeys(sources))) for at, sources in sorted(marks.items())]
         self.next_mark = 0
-        self.no_closer: dict[tuple[str, int, int], int] = {}  # (delimiter, run, end) -> searched from here, none found
+        self.no_closer: dict[tuple[str, int, int], int] = {}
 
     def html(self) -> str:
         lines, at = [], 0
@@ -1274,7 +1416,6 @@ class _Markdown:
         rest = self.marks_before(len(self.text) + 1)
         return out + (f"<p>{rest}</p>" if rest else "")
 
-    # -------------------------------------------------------------- text and markers
 
     def marks_before(self, offset: int) -> str:
         """
@@ -1294,11 +1435,12 @@ class _Markdown:
 
     def chars(self, s: str, where: list[int], i: int, j: int, code: bool = False) -> str:
         """
-        s[i:j] escaped, cited runs in <span class="cite">, each marker after the character it follows.
+        s[i:j] escaped, cited runs in <span class="cite">, each marker after the character it follows. A run's HTML
+        is gathered in `run` (shaded throughout, or not at all), with its characters not escaped yet in `text`.
         """
         out: list[str] = []
-        run: list[str] = []  # the HTML of the run so far: shaded throughout, or not at all
-        text: list[str] = []  # its characters not escaped yet
+        run: list[str] = []
+        text: list[str] = []
         shaded = [False]
 
         def add(markup: str = "") -> None:
@@ -1330,7 +1472,6 @@ class _Markdown:
         close()
         return "".join(out)
 
-    # ---------------------------------------------------------------------- blocks
 
     def inline_html(self, lines: list[_Line]) -> str:
         s, where = _md_source(lines)
@@ -1373,7 +1514,6 @@ class _Markdown:
                 out.append(f'<div class="mdt"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>')
         return "".join(out)
 
-    # ---------------------------------------------------------------------- inline
 
     def parse(self, s: str, i: int, j: int, depth: int = 0) -> list[tuple[Any, ...]]:
         """
@@ -1382,61 +1522,93 @@ class _Markdown:
         """
         nodes: list[tuple[Any, ...]] = []
         text_from, k = i, i
-
-        def flush(upto: int) -> None:
-            if upto > text_from:
-                nodes.append(("t", text_from, upto))
-
         while k < j:
-            ch = s[k]
-            found: tuple[tuple[Any, ...], int] | None = None
-            if ch == "\\" and k + 1 < j and s[k + 1] in _MD_PUNCT:
-                found = ("t", k + 1, k + 2), k + 2
-            elif ch == "\n":
-                found = ("br",), k + 1
-            elif ch == "`":
-                run = self.run(s, k, j, "`")
-                close = self.code_close(s, k + run, j, run)
-                if close < 0:
-                    k += run
-                    continue
-                a, b = k + run, close
-                if b - a >= 2 and s[a] == " " and s[b - 1] == " " and s[a:b].strip():
-                    a, b = a + 1, b - 1
-                found = ("code", a, b), close + run
-            elif ch in "*_~" and depth < _MD_MAX_DEPTH:
-                emphasis = self.emphasis(s, k, j)
-                if emphasis is None:
-                    k += self.run(s, k, j, ch)
-                    continue
-                tag, a, b, after = emphasis
-                found = (tag, self.parse(s, a, b, depth + 1)), after
-            elif ch == "[" or (ch == "!" and s.startswith("[", k + 1)):
-                link = self.link(s, k + (ch == "!"), j)
-                if link is not None:
-                    a, b, url, after = link
-                    children = self.parse(s, a, b, depth + 1) if b > a else [("t", k, after)]
-                    found = ("a", _md_link_target(url), children), after
-            elif ch == "<":
-                auto = _MD_AUTOLINK_RE.match(s, k, j)
-                if auto:
-                    found = ("a", _md_link_target(auto.group(1)), [("t", k + 1, auto.end() - 1)]), auto.end()
-            elif ch in "hH" and (k == 0 or not (s[k - 1].isalnum() or s[k - 1] in "/:@")):
-                url = _MD_URL_RE.match(s, k, j)
-                if url:
-                    end = url.end()
-                    while end > k and (s[end - 1] in ".,;:!?*_~" or (s[end - 1] == ")" and
-                                                                     s.count("(", k, end) < s.count(")", k, end))):
-                        end -= 1
-                    found = ("a", _md_link_target(s[k:end]), [("t", k, end)]), end
-            if found is None:
-                k += 1
+            node, after = self._inline_at(s, k, j, depth)
+            if node is None:
+                k = after
                 continue
-            flush(k)
-            nodes.append(found[0])
-            k = text_from = found[1]
-        flush(j)
+            if k > text_from:
+                nodes.append(("t", text_from, k))
+            nodes.append(node)
+            k = text_from = after
+        if j > text_from:
+            nodes.append(("t", text_from, j))
         return nodes
+
+    def _inline_at(self, s: str, k: int, j: int, depth: int) -> tuple[tuple[Any, ...] | None, int]:
+        """
+        The inline node starting at s[k] and where it ends, or (None, where to look next) when there's none.
+        """
+        ch = s[k]
+        if ch == "\\" and k + 1 < j and s[k + 1] in _MD_PUNCT:
+            return ("t", k + 1, k + 2), k + 2
+        if ch == "\n":
+            return ("br",), k + 1
+        if ch == "`":
+            return self._code_span(s, k, j)
+        if ch in "*_~" and depth < _MD_MAX_DEPTH:
+            return self._emphasis_node(s, k, j, depth)
+        if ch == "[" or (ch == "!" and s.startswith("[", k + 1)):
+            return self._link_node(s, k, j, depth)
+        if ch == "<":
+            return self._autolink(s, k, j)
+        if ch in "hH" and (k == 0 or not (s[k - 1].isalnum() or s[k - 1] in "/:@")):
+            return self._bare_url(s, k, j)
+        return None, k + 1
+
+    def _code_span(self, s: str, k: int, j: int) -> tuple[tuple[Any, ...] | None, int]:
+        """
+        `code` opening at k, without the one space each side may pad it with; a run of backticks that doesn't
+        close is text.
+        """
+        run = self.run(s, k, j, "`")
+        close = self.code_close(s, k + run, j, run)
+        if close < 0:
+            return None, k + run
+        a, b = k + run, close
+        if b - a >= 2 and s[a] == " " and s[b - 1] == " " and s[a:b].strip():
+            a, b = a + 1, b - 1
+        return ("code", a, b), close + run
+
+    def _emphasis_node(self, s: str, k: int, j: int, depth: int) -> tuple[tuple[Any, ...] | None, int]:
+        emphasis = self.emphasis(s, k, j)
+        if emphasis is None:
+            return None, k + self.run(s, k, j, s[k])
+        tag, a, b, after = emphasis
+        return (tag, self.parse(s, a, b, depth + 1)), after
+
+    def _link_node(self, s: str, k: int, j: int, depth: int) -> tuple[tuple[Any, ...] | None, int]:
+        """
+        [text](url), or ![picture](url), which becomes a link: nothing loads from elsewhere.
+        """
+        link = self.link(s, k + (s[k] == "!"), j)
+        if link is None:
+            return None, k + 1
+        a, b, url, after = link
+        children = self.parse(s, a, b, depth + 1) if b > a else [("t", k, after)]
+        return ("a", _md_link_target(url), children), after
+
+    @staticmethod
+    def _autolink(s: str, k: int, j: int) -> tuple[tuple[Any, ...] | None, int]:
+        auto = _MD_AUTOLINK_RE.match(s, k, j)
+        if not auto:
+            return None, k + 1
+        return ("a", _md_link_target(auto.group(1)), [("t", k + 1, auto.end() - 1)]), auto.end()
+
+    @staticmethod
+    def _bare_url(s: str, k: int, j: int) -> tuple[tuple[Any, ...] | None, int]:
+        """
+        An http(s) address in the text, as a link: without the punctuation after it, or a closing bracket it
+        doesn't open.
+        """
+        url = _MD_URL_RE.match(s, k, j)
+        if not url:
+            return None, k + 1
+        end = url.end()
+        while end > k and (s[end - 1] in ".,;:!?*_~" or (s[end - 1] == ")" and
+                                                         s.count("(", k, end) < s.count(")", k, end))):
+            end -= 1
+        return ("a", _md_link_target(s[k:end]), [("t", k, end)]), end
 
     @staticmethod
     def run(s: str, k: int, j: int, ch: str) -> int:
@@ -1462,7 +1634,7 @@ class _Markdown:
         """
         *em*, **strong**, ***both***, _em_, __strong__ or ~~del~~ opening at k: (tag, inner start, inner end,
         after it), or None. An opener needs a non-space after it, a closer a non-space before it, and _ doesn't work
-        inside a word (snake_case_names stay as they are).
+        inside a word (snake_case_names stay as they are). A *** closes a shorter run with its last characters.
         """
         ch = s[k]
         run = self.run(s, k, j, ch)
@@ -1489,7 +1661,7 @@ class _Markdown:
                 length = self.run(s, n, j, ch)
                 fits = not s[n - 1].isspace() and (ch != "_" or n + length >= len(s) or not s[n + length].isalnum())
                 if fits and (length == run or (length == 3 and ch != "~")):
-                    close = n + length - run if length == 3 else n  # in ***, this closer is the last `run` of them
+                    close = n + length - run if length == 3 else n
                     tag = "del" if ch == "~" else {1: "em", 2: "strong", 3: "strongem"}[run]
                     return tag, a, close, close + run
                 n += length
@@ -1505,31 +1677,10 @@ class _Markdown:
         """
         if s.find("](", k, j) < 0:
             return None
-        depth, n = 0, k
-        while n < j:
-            if s[n] == "\\":
-                n += 2
-                continue
-            if s[n] == "[":
-                depth += 1
-            elif s[n] == "]":
-                depth -= 1
-                if depth == 0:
-                    break
-            n += 1
+        n = _md_closing_bracket(s, k, j)
         if n >= j or not s.startswith("(", n + 1):
             return None
-        parens, m = 0, n + 1
-        while m < j and s[m] != "\n":
-            if s[m] == "(":
-                parens += 1
-            elif s[m] == ")":
-                parens -= 1
-                if parens == 0:
-                    target = s[n + 2:m].strip().split()
-                    return k + 1, n, target[0] if target else "", m + 1
-            m += 1
-        return None
+        return _md_link_target_after(s, k, n, j)
 
     def nodes(self, s: str, where: list[int], nodes: list[tuple[Any, ...]]) -> str:
         out = []
@@ -1600,8 +1751,6 @@ def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
     return out
 
 
-# ----------------------------------------------------------------------------- View helpers
-
 def _session_expired(exc: ClientError) -> bool:
     error = exc.response.get("Error", {})
     return error.get("Code") in (
@@ -1619,16 +1768,14 @@ def _per_million(price: float | None) -> str:
         return "-"
     return f"${price:,.2f}" if price >= 0.1 or price == 0 else f"${price:.3f}"
 
-# ----------------------------------------------------------------------------- files: links that open them, and their list as text
-
-# Extensions a browser shows as text only when told so (it would save a .md or .csv sent as its own type).
 _TEXT_EXTENSIONS = {"txt", "md", "markdown", "csv", "tsv", "log", "rst", "yaml", "yml", "xml", "jsonl"}
 
 
 def _browser_type(name: str) -> str | None:
     """
     The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
-    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download).
+    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download). The
+    _TEXT_EXTENSIONS are shown as text only when they're sent as text: a .md or .csv sent as its own type is saved.
     """
     name = name.rsplit("/", 1)[-1]
     if "." in name and name.rsplit(".", 1)[-1].lower() in _TEXT_EXTENSIONS:
@@ -1641,19 +1788,19 @@ def _browser_type(name: str) -> str | None:
     return None
 
 
-FILE_LIST_LINKS = {  # what save_file_list(link=) writes on each line
+FILE_LIST_LINKS = {
     "s3": "s3:// path",
     "https": "link to the file",
     "key": "path in the bucket",
 }
 _LINK_WORDS = {"s3://": "s3", "uri": "s3", "url": "https", "http": "https", "link": "https", "links": "https",
-               "presigned": "https", "path": "key", "keys": "key"}  # what else link= takes
+               "presigned": "https", "path": "key", "keys": "key"}
 
 
 def parse_list_link(text: str) -> str:
     """
-    link= for save_file_list(): 's3', 'https' or 'key' (FILE_LIST_LINKS), or a word for one ('url', 'path'),
-    in any case -> the key.
+    link= for save_file_list(): 's3', 'https' or 'key' (FILE_LIST_LINKS: what it writes on each line), or a word
+    for one ('url', 'path', the rest of _LINK_WORDS), in any case -> the key.
     """
     word = str(text or "").strip().lower()
     if word in FILE_LIST_LINKS:
@@ -1775,16 +1922,24 @@ class SavedFileList:
     """
     A text file of files that save_file_list() wrote: one line per file, each one's s3:// path, its path in the
     bucket or a link that opens it (`link`, a FILE_LIST_LINKS key).
+
+        path      where it was written (absolute)
+        count     its lines: one per file
+        size      bytes written
+        replaced  a file of that name was there, and this one took its place
+        left_out  files with no line of that kind (a custom document has no s3:// path)
+        expires   link='https': how long each link works, in seconds
+        text      what was written
     """
 
-    path: str  # where it was written (absolute)
-    count: int  # its lines: one per file
+    path: str
+    count: int
     link: str = "s3"
-    size: int = 0  # bytes written
-    replaced: bool = False  # a file of that name was there, and this one took its place
-    left_out: int = 0  # files with no line of that kind (a custom document has no s3:// path)
-    expires: int | None = None  # link='https': how long each link works, in seconds
-    text: str = field(default="", repr=False)  # what was written
+    size: int = 0
+    replaced: bool = False
+    left_out: int = 0
+    expires: int | None = None
+    text: str = field(default="", repr=False)
 
     @property
     def name(self) -> str:
@@ -1800,10 +1955,10 @@ class _Download:
     """
     A file saved on the notebook's disk, with a link that downloads it to your computer: `href` is its path from
     the notebook's folder (Jupyter serves it from there) or a data: URL holding it; '' when there's no link to give.
-    Text mode says where it is.
+    `path` is where it is (absolute). Text mode says where it is.
     """
 
-    path: str  # where it is (absolute)
+    path: str
     href: str = ""
 
 
@@ -1825,11 +1980,11 @@ def _download_lines(block: _Download, report: _Report) -> list[str]:
 def _notebook_href(path: str) -> str:
     """
     A saved file's path from the notebook's folder, as a link Jupyter downloads it from ('' outside that folder,
-    which Jupyter may not serve).
+    which Jupyter may not serve, or on another drive, on Windows).
     """
     try:
         relative = os.path.relpath(path, os.getcwd())
-    except ValueError:  # another drive (Windows)
+    except ValueError:
         return ""
     if relative == ".." or relative.startswith((".." + os.sep, "../")) or os.path.isabs(relative):
         return ""
@@ -1839,7 +1994,7 @@ def _notebook_href(path: str) -> str:
 def _data_href(text: str, limit: int = 1_000_000) -> str:
     """
     Text as a data: URL that a link can download (the explorer's widgets can't link to the notebook's files); ''
-    when it's over `limit` bytes, which browsers may refuse in a link.
+    when it's over `limit` bytes, which browsers may refuse in a link. A window passes _LIST_LINK_BYTES.
     """
     data = text.encode("utf-8")
     if len(data) > limit:
@@ -1872,7 +2027,7 @@ def write_file_list(files: Iterable[Any], target: str, *, link: str = "s3",
     return saved
 
 
-_LIST_LINK_BYTES = 1_000_000  # the most a window puts in a download link (a data: URL; browsers limit their length)
+_LIST_LINK_BYTES = 1_000_000
 
 
 def _download_css(root: str) -> str:

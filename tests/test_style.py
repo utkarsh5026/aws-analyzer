@@ -28,7 +28,6 @@ COMMENTS_LEFT = {
     ".claude/skills/demo/shots.py": 23,
     ".claude/skills/release/release.py": 4,
     "src/aws_analyzer/__init__.py": 3,
-    "src/aws_analyzer/_bedrock.py": 83,
     "src/aws_analyzer/bedrock_chat.py": 281,
     "src/aws_analyzer/bedrock_kb.py": 235,
     "src/aws_analyzer/dynamodb.py": 82,
