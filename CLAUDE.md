@@ -671,9 +671,10 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
 - **Toolkits** (`toolkits/`): what the agent can read, one `Toolkit` subclass per AWS service (`base.py` says what one
   gives). `LambdaToolkit` (`lambda_tools.py`) has seven tools (`find_functions`, `function_health`, `function_errors`,
   `function_logs`, `function_performance`, `function_details`, `function_code`), building blocks over `LambdaAnalyzer`
-  methods, not one per question: plain functions closed over the toolkit in its `tools()`. Their type hints and
+  methods, not one per question: methods of the toolkit that its `tools()` lists. Their type hints and
   docstrings are the schema and description the model sees (LangChain reads them), so write a docstring for the
-  model: what it returns, how to pass times (ISO UTC or '24h'), when to use it. Each returns a compact dict from the
+  model: what it returns, how to pass times (ISO UTC or '24h'), when to use it, and nothing about how it works
+  inside (that goes in a helper's docstring). Each returns a compact dict from the
   module's pure `summarize_*` (what the model reads: counts, causes, a few lines, secrets hidden by `results.py`'s
   `hide_secrets`) with its coverage (`window`, `regions`, `cut_short`, `covered_from`), plus `_summary` (the report's
   one line) and `_next` (View calls, made by `Toolkit._view_call`), which the runtime takes out before the model sees

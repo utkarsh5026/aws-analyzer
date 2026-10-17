@@ -19,8 +19,8 @@ from .base import Toolkit
 from .lambda_tools import LambdaToolkit
 from .s3_tools import S3Toolkit
 
-TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit}  # name -> the built-in toolkit
-DEFAULT_TOOLKITS = ("lambda", "s3")  # what an agent gets unless toolkits= says otherwise
+TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit}
+DEFAULT_TOOLKITS = ("lambda", "s3")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:

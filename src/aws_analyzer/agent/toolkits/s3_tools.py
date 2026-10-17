@@ -8,6 +8,14 @@ and whether the files written in a window reached them. No tool reads what's ins
 
 The summarize_* functions, count_arrivals() and trigger_findings() are pure: they run on any BucketConfig,
 BucketMetrics, Listing, PrefixSummary, list of ObjectInfo or TriggerLink.
+
+S3_TOOL_READS is what each tool reads (its IAM permissions), for tools() and README; s3_triggers reads Lambda through
+the Lambda toolkit. The analyzers' types are imported for the type hints only, since S3's analyzer loads when the
+first tool runs (_s3_module). S3_REQUEST_PRICES are USD per 1,000 requests at S3's us-east-1 list prices (2026-10):
+LIST requests, and GET, HEAD and the rest; _METRIC_PRICE is USD per 1,000 metrics read with CloudWatch's
+GetMetricData. find_buckets(sizes=True) reads CloudWatch for at most _SIZED_BUCKETS buckets, _SIZE_WORKERS at a time,
+and s3_triggers looks through at most _SEARCHED_BUCKETS buckets for notifications that invoke a function.
+_CONFIG_PERMISSIONS maps a BucketConfig.errors section (and this toolkit's own parts) to the permission it needs.
 """
 
 from __future__ import annotations
@@ -29,13 +37,12 @@ from ..budget import Budget
 from ..results import _iso, _window, _with_permissions, hide_secrets
 from .base import Toolkit
 
-if TYPE_CHECKING:  # for the type hints only: the S3 analyzer loads when the first tool runs
-    from ...lambda_functions import Function, FunctionMetrics
+if TYPE_CHECKING:
+    from ...lambda_functions import Function, FunctionMetrics, LambdaAnalyzer
     from ...s3 import (
         BucketConfig, BucketInfo, BucketMetrics, EventNotification, Listing, ObjectInfo, PrefixSummary, S3Analyzer,
     )
 
-# What each tool reads (IAM permissions), for tools() and README. s3_triggers reads Lambda through the Lambda toolkit.
 S3_TOOL_READS: dict[str, tuple[str, ...]] = {
     "find_buckets": ("s3:ListAllMyBuckets", "s3:GetBucketLocation", "cloudwatch:ListMetrics",
                      "cloudwatch:GetMetricData"),
@@ -52,12 +59,14 @@ S3_TOOL_READS: dict[str, tuple[str, ...]] = {
     "s3_triggers": ("s3:GetBucketNotification", "s3:ListBucket", "s3:ListAllMyBuckets", "s3:GetBucketLocation",
                     "lambda:GetFunction", "lambda:GetPolicy", "cloudwatch:GetMetricData"),
 }
-# USD per 1,000 requests (S3's us-east-1 list prices, 2026-10): LIST requests, and GET, HEAD and the rest.
 S3_REQUEST_PRICES = {"list": 0.005, "get": 0.0004}
-_METRIC_PRICE = 0.01  # USD per 1,000 metrics read with CloudWatch GetMetricData
-_SIZED_BUCKETS = 200  # find_buckets(sizes=True) reads CloudWatch for at most this many buckets
-_SEARCHED_BUCKETS = 50  # s3_triggers looks through at most this many buckets for notifications that call a function
-_CONFIG_PERMISSIONS = {  # BucketConfig.errors section (and this toolkit's own parts) -> the permission it needs
+_REQUESTS_PER_PRICE = 1000
+_METRIC_PRICE = 0.01
+_SIZED_BUCKETS = 200
+_SIZE_WORKERS = 8
+_SEARCHED_BUCKETS = 50
+_MISSED_SHOWN = 3
+_CONFIG_PERMISSIONS = {
     "versioning": "s3:GetBucketVersioning", "encryption": "s3:GetEncryptionConfiguration",
     "public_access_block": "s3:GetBucketPublicAccessBlock", "policy": "s3:GetBucketPolicyStatus",
     "policy_document": "s3:GetBucketPolicy", "ownership": "s3:GetBucketOwnershipControls",
@@ -99,11 +108,6 @@ def _between(since: str, until: str, now: datetime | None = None) -> tuple[datet
     if start is not None and end is not None and start >= end:
         raise ValueError(f"since= ({since!r}) must be before until= ({until or 'now'!r})")
     return start, end or now
-
-
-# =============================================================================
-# What the tools return: S3Analyzer's results as compact JSON (pure)
-# =============================================================================
 
 
 def _shown(values: dict[str, Any]) -> dict[str, str]:
@@ -160,13 +164,15 @@ def summarize_buckets(buckets: list[BucketInfo], metrics: dict[str, BucketMetric
     return out
 
 
-def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None, notifications: list[EventNotification] | None,
-                     *, account_block: dict[str, bool] | None = None, prices: dict[str, float] | None = None,
+def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None,  # noqa: PLR0913
+                     notifications: list[EventNotification] | None, *,
+                     account_block: dict[str, bool] | None = None, prices: dict[str, float] | None = None,
                      errors: dict[str, str] | None = None) -> dict[str, Any]:
     """
     bucket_details()'s answer: a bucket's settings in plain words (public access, encryption, versioning,
     lifecycle rules, replication, logging, tags), its size and estimated monthly storage cost from CloudWatch, the
-    events it sends where (Lambda functions, queues, topics, EventBridge), and the findings about it.
+    events it sends where (Lambda functions, queues, topics, EventBridge), and the findings about it. A finding
+    that a part couldn't be read is left out: that part is in `errors`.
     """
     s3 = _s3_module()
     errors = {**cfg.errors, **(errors or {})}
@@ -201,7 +207,7 @@ def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None, notificat
     if cfg.policy:
         found += s3.policy_findings(s3.explain_policy(cfg.policy))
     out["findings"] = [{"level": level, "message": text} for level, text in found
-                       if not text.startswith("Couldn't read")]  # what couldn't be read is in errors
+                       if not text.startswith("Couldn't read")]
     if errors:
         out["errors"] = _with_permissions(errors, _CONFIG_PERMISSIONS)
     return out
@@ -227,7 +233,7 @@ def summarize_listing(listing: Listing, *, folders: int = 100, files: int = 50) 
     return out
 
 
-def summarize_found(location: str, found: list[ObjectInfo], *, scanned: int, cut_short: bool,
+def summarize_found(location: str, found: list[ObjectInfo], *, scanned: int, cut_short: bool,  # noqa: PLR0913
                     start: datetime | None = None, end: datetime | None = None,
                     filters: dict[str, Any] | None = None, limit: int = 30) -> dict[str, Any]:
     """
@@ -309,40 +315,54 @@ def summarize_file(info: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# ---- S3 and Lambda: the event notifications that invoke functions, checked from both ends
-
-
 @dataclass
 class Arrivals:
     """
     What a listing of a notification's prefix says about the files written in a window (count_arrivals).
+
+        scanned           keys read
+        matched           files written in the window that its prefix and suffix cover
+        sent              of those, the ones uploaded in a way its events fire on: they invoked the function
+        multipart_missed  matched, but uploaded in parts, and it doesn't fire on CompleteMultipartUpload
+        whole_missed      matched, but uploaded whole, and it fires only on multipart uploads
+        missed_keys       a few of the files its events missed
+        case_missed       files in the window whose ending matches only ignoring case
+        newest            the newest files that invoked it (up to 5)
+        last_match        the newest file its filter covers, in the window or before
+        cut_short         the listing stopped at its limit
     """
 
-    scanned: int = 0  # keys read
-    matched: int = 0  # files written in the window that its prefix and suffix cover
-    sent: int = 0  # of those, the ones uploaded in a way its events fire on: they invoked the function
-    multipart_missed: int = 0  # matched, but uploaded in parts, and it doesn't fire on CompleteMultipartUpload
-    whole_missed: int = 0  # matched, but uploaded whole, and it fires only on multipart uploads
-    missed_keys: list[str] = field(default_factory=list)  # a few of the files its events missed
-    case_missed: list[str] = field(default_factory=list)  # files in the window whose ending matches only ignoring case
-    newest: list[ObjectInfo] = field(default_factory=list)  # the newest files that invoked it (up to 5)
-    last_match: ObjectInfo | None = None  # the newest file its filter covers, in the window or before
-    cut_short: bool = False  # the listing stopped at its limit
+    scanned: int = 0
+    matched: int = 0
+    sent: int = 0
+    multipart_missed: int = 0
+    whole_missed: int = 0
+    missed_keys: list[str] = field(default_factory=list)
+    case_missed: list[str] = field(default_factory=list)
+    newest: list[ObjectInfo] = field(default_factory=list)
+    last_match: ObjectInfo | None = None
+    cut_short: bool = False
 
 
 @dataclass
 class TriggerLink:
     """
     One S3 event notification that invokes a Lambda function, checked from both ends (s3_triggers).
+
+        exists    the function is there; None when it couldn't be checked
+        allowed   its resource policy lets this bucket invoke it; None when it couldn't be read
+        arrivals  the files written in the window; None when it doesn't fire on new files, or the listing failed
+        metrics   CloudWatch's counts for the function over the window
+        account   the function's account (for the add-permission command)
     """
 
     bucket: str
     notification: EventNotification
-    exists: bool | None = None  # the function is there; None when it couldn't be checked
-    allowed: bool | None = None  # its resource policy lets this bucket invoke it; None when it couldn't be read
-    arrivals: Arrivals | None = None  # None when it doesn't fire on new files, or the listing failed
-    metrics: FunctionMetrics | None = None  # CloudWatch's counts for the function over the window
-    account: str | None = None  # the function's account (for the add-permission command)
+    exists: bool | None = None
+    allowed: bool | None = None
+    arrivals: Arrivals | None = None
+    metrics: FunctionMetrics | None = None
+    account: str | None = None
 
     @property
     def function(self) -> str:
@@ -353,8 +373,8 @@ class TriggerLink:
         return self.notification.region
 
 
-def count_arrivals(objects: Iterable[ObjectInfo], notification: EventNotification, start: datetime, end: datetime,
-                   *, limit: int | None = None, show: int = 5) -> Arrivals:
+def count_arrivals(objects: Iterable[ObjectInfo], notification: EventNotification,  # noqa: PLR0913
+                   start: datetime, end: datetime, *, limit: int | None = None, show: int = 5) -> Arrivals:
     """
     What a listing of the notification's prefix says about the files written from `start` to `end`: how many its
     prefix and suffix cover, and how many of those it fired on, by how each was uploaded (an ETag with a part count
@@ -374,25 +394,35 @@ def count_arrivals(objects: Iterable[ObjectInfo], notification: EventNotificatio
             continue
         written = start <= obj.last_modified < end
         if obj.key.endswith(suffix):
-            if out.last_match is None or obj.last_modified > out.last_match.last_modified:
-                out.last_match = obj
-            if not written:
-                continue
-            out.matched += 1
-            if notification.on_created(obj.is_multipart):
-                out.sent += 1
-                sent.append(obj)
-                continue
-            if obj.is_multipart:
-                out.multipart_missed += 1
-            else:
-                out.whole_missed += 1
-            if len(out.missed_keys) < 3:
-                out.missed_keys.append(obj.key)
+            _count_covered(out, obj, notification, written, sent)
         elif written and suffix and obj.key.lower().endswith(suffix.lower()):
             out.case_missed.append(obj.key)
     out.newest = heapq.nlargest(show, sent, key=lambda o: o.last_modified)
     return out
+
+
+def _count_covered(out: Arrivals, obj: ObjectInfo, notification: EventNotification, written: bool,
+                   sent: list[ObjectInfo]) -> None:
+    """
+    Counts one file the notification's prefix and suffix cover: it may be the newest such file, and when it was
+    written in the window, whether the way it was uploaded fired the notification (it goes in `sent`) or not (a few
+    of those keys are kept, up to _MISSED_SHOWN).
+    """
+    if out.last_match is None or obj.last_modified > out.last_match.last_modified:
+        out.last_match = obj
+    if not written:
+        return
+    out.matched += 1
+    if notification.on_created(obj.is_multipart):
+        out.sent += 1
+        sent.append(obj)
+        return
+    if obj.is_multipart:
+        out.multipart_missed += 1
+    else:
+        out.whole_missed += 1
+    if len(out.missed_keys) < _MISSED_SHOWN:
+        out.missed_keys.append(obj.key)
 
 
 def _where(n: EventNotification) -> str:
@@ -416,65 +446,20 @@ def trigger_findings(link: TriggerLink) -> list[tuple[str, str]]:
     """
     n, fn, bucket = link.notification, link.function, link.bucket
     where = _where(n)
-    found: list[tuple[str, str]] = []
     if link.exists is False:
-        found.append(("warn", f"Bucket {bucket} sends {_events(n)} for files {where} to Lambda function {fn}, which "
-                              f"isn't there in {link.region}: those events invoke nothing. Point the notification at "
-                              "the function that should run, or remove it (aws s3api "
-                              f"get-bucket-notification-configuration --bucket {bucket} shows it)."))
-        return found
+        return [("warn", f"Bucket {bucket} sends {_events(n)} for files {where} to Lambda function {fn}, which "
+                         f"isn't there in {link.region}: those events invoke nothing. Point the notification at "
+                         "the function that should run, or remove it (aws s3api "
+                         f"get-bucket-notification-configuration --bucket {bucket} shows it).")]
+    found: list[tuple[str, str]] = []
     if link.allowed is False:
-        account = f" --source-account {link.account}" if link.account else ""
-        found.append(("warn", f"{fn}'s resource policy doesn't let bucket {bucket} invoke it: S3 can't deliver the "
-                              f"events for files {where}, so none of them run it. Allow it: aws lambda add-permission "
-                              f"--function-name {fn} --statement-id s3-{bucket} --action lambda:InvokeFunction "
-                              f"--principal s3.amazonaws.com --source-arn arn:aws:s3:::{bucket}{account}"
-                              + (f" --region {link.region}" if link.region else "")))
-    a, m = link.arrivals, link.metrics
-    if a is None and not n.on_created():
+        found.append(_not_allowed(link, where))
+    if link.arrivals is None and not n.on_created():
         found.append(("info", f"Bucket {bucket} invokes {fn} on {_events(n)}, not on new files, so the listing can't "
                               f"show what it sent: CloudWatch's count of {fn}'s runs is the record."))
-    if a is not None:
-        if a.multipart_missed or a.whole_missed:
-            missed = a.multipart_missed + a.whole_missed
-            was, they = ("was", "it") if missed == 1 else ("were", "they")
-            how = ("uploaded in parts (multipart), which sends s3:ObjectCreated:CompleteMultipartUpload" if
-                   a.multipart_missed else "uploaded whole (a PUT), which sends s3:ObjectCreated:Put")
-            found.append(("warn", f"{_plural(missed, 'file')} {where} written in the window {was} {how}, but the "
-                                  f"notification fires only on {_events(n)}: {they} never invoked {fn} (e.g. "
-                                  f"{a.missed_keys[0]}). Make it fire on s3:ObjectCreated:* instead."))
-        if a.case_missed:
-            endings = sorted({key[-len(n.suffix):] for key in a.case_missed})
-            end, they = ("ends", "it") if len(a.case_missed) == 1 else ("end", "they")
-            found.append(("warn", f"{_plural(len(a.case_missed), 'file')} under '{n.prefix}' written in the window "
-                                  f"{end} in {', '.join(repr(e) for e in endings)}, which the suffix filter "
-                                  f"'{n.suffix}' doesn't match (S3 compares case-sensitively): {they} never invoked "
-                                  f"{fn} (e.g. {a.case_missed[0]}). Have the uploader write '{n.suffix}', or add a "
-                                  "notification for the other ending."))
-        if not a.matched and not a.case_missed:
-            last = (f" The newest file it covers is {a.last_match.key}, written {_iso(a.last_match.last_modified)}."
-                    if a.last_match else " No file there matches its filter at all.")
-            found.append(("info", f"No file {where} in bucket {bucket} was written in the window"
-                                  + (" (in the keys read)" if a.cut_short else "")
-                                  + f", so S3 had nothing to send {fn}: if it didn't run, that's why.{last}"))
-        if m is not None and a.sent:
-            calls, throttles = int(m.invocations), int(m.throttles)
-            throttled = f" ({_plural(throttles, 'call')} throttled)" if throttles else ""
-            if not calls and link.allowed is not False:
-                found.append(("warn", f"{_plural(a.sent, 'file')} {where} arrived in the window and should have "
-                                      f"invoked {fn}, but CloudWatch counted no runs of it{throttled}: S3's events "
-                                      f"didn't reach it. function_details('{fn}') shows whether S3 may invoke it "
-                                      "and its reserved concurrency (0 stops every run)."))
-            elif 0 < calls < a.sent:
-                found.append(("info", f"{_plural(a.sent, 'file')} arrived that should have invoked {fn}, but it ran "
-                                      f"{_plural(calls, 'time')} in the window{throttled}: some events may not have "
-                                      "reached it yet, since Lambda queues S3's events and retries them for up to 6 "
-                                      "hours."))
-        if a.cut_short:
-            found.append(("info", f"The listing of bucket {bucket} {where} stopped at {a.scanned:,} keys (the budget's "
-                                  "s3_keys), in key order: the file counts cover those keys only. A notification "
-                                  "with a narrower prefix, or AgentView(budget={'s3_keys': "
-                                  f"{a.scanned * 5}}}), reads more."))
+    if link.arrivals is not None:
+        found += _arrival_findings(link, where)
+    m = link.metrics
     if m is not None and m.errors:
         found.append(("warn", f"{fn} failed {_plural(int(m.errors), 'time')} in {_plural(int(m.invocations), 'run')} "
                               f"in the window: function_errors('{fn}') shows why. S3 invokes it asynchronously, so a "
@@ -483,7 +468,107 @@ def trigger_findings(link: TriggerLink) -> list[tuple[str, str]]:
     return found
 
 
-def summarize_triggers(links: list[TriggerLink], start: datetime, end: datetime, *, bucket: str = "",
+def _not_allowed(link: TriggerLink, where: str) -> tuple[str, str]:
+    """
+    The finding for a function whose resource policy doesn't let the bucket invoke it, with the add-permission
+    command that does.
+    """
+    fn, bucket = link.function, link.bucket
+    account = f" --source-account {link.account}" if link.account else ""
+    return ("warn", f"{fn}'s resource policy doesn't let bucket {bucket} invoke it: S3 can't deliver the "
+                    f"events for files {where}, so none of them run it. Allow it: aws lambda add-permission "
+                    f"--function-name {fn} --statement-id s3-{bucket} --action lambda:InvokeFunction "
+                    f"--principal s3.amazonaws.com --source-arn arn:aws:s3:::{bucket}{account}"
+                    + (f" --region {link.region}" if link.region else ""))
+
+
+def _arrival_findings(link: TriggerLink, where: str) -> list[tuple[str, str]]:
+    """
+    What the files written in the window say about a link: files its event types or the case of their ending
+    missed, no file arriving at all, files that arrived without the function running, and a listing cut short.
+    """
+    a = link.arrivals
+    found: list[tuple[str, str]] = []
+    if a.multipart_missed or a.whole_missed:
+        found.append(_missed_by_upload_kind(link, where))
+    if a.case_missed:
+        found.append(_missed_by_case(link))
+    if not a.matched and not a.case_missed:
+        found.append(_nothing_arrived(link, where))
+    if link.metrics is not None and a.sent:
+        found += _runs_against_arrivals(link, where)
+    if a.cut_short:
+        found.append(("info", f"The listing of bucket {link.bucket} {where} stopped at {a.scanned:,} keys (the "
+                              "budget's s3_keys), in key order: the file counts cover those keys only. A notification "
+                              "with a narrower prefix, or AgentView(budget={'s3_keys': "
+                              f"{a.scanned * 5}}}), reads more."))
+    return found
+
+
+def _missed_by_upload_kind(link: TriggerLink, where: str) -> tuple[str, str]:
+    """
+    The finding for files the notification's event types missed: uploaded in parts when it fires only on whole
+    uploads, or the other way round.
+    """
+    a, n = link.arrivals, link.notification
+    missed = a.multipart_missed + a.whole_missed
+    was, they = ("was", "it") if missed == 1 else ("were", "they")
+    how = ("uploaded in parts (multipart), which sends s3:ObjectCreated:CompleteMultipartUpload" if
+           a.multipart_missed else "uploaded whole (a PUT), which sends s3:ObjectCreated:Put")
+    return ("warn", f"{_plural(missed, 'file')} {where} written in the window {was} {how}, but the "
+                    f"notification fires only on {_events(n)}: {they} never invoked {link.function} (e.g. "
+                    f"{a.missed_keys[0]}). Make it fire on s3:ObjectCreated:* instead.")
+
+
+def _missed_by_case(link: TriggerLink) -> tuple[str, str]:
+    """
+    The finding for files whose ending matches the suffix filter only ignoring case: S3 compares case-sensitively.
+    """
+    a, n = link.arrivals, link.notification
+    endings = sorted({key[-len(n.suffix):] for key in a.case_missed})
+    end, they = ("ends", "it") if len(a.case_missed) == 1 else ("end", "they")
+    return ("warn", f"{_plural(len(a.case_missed), 'file')} under '{n.prefix}' written in the window "
+                    f"{end} in {', '.join(repr(e) for e in endings)}, which the suffix filter "
+                    f"'{n.suffix}' doesn't match (S3 compares case-sensitively): {they} never invoked "
+                    f"{link.function} (e.g. {a.case_missed[0]}). Have the uploader write '{n.suffix}', or add a "
+                    "notification for the other ending.")
+
+
+def _nothing_arrived(link: TriggerLink, where: str) -> tuple[str, str]:
+    """
+    The finding for a window in which no file the notification covers was written, with the newest one it covers.
+    """
+    a = link.arrivals
+    last = (f" The newest file it covers is {a.last_match.key}, written {_iso(a.last_match.last_modified)}."
+            if a.last_match else " No file there matches its filter at all.")
+    return ("info", f"No file {where} in bucket {link.bucket} was written in the window"
+                    + (" (in the keys read)" if a.cut_short else "")
+                    + f", so S3 had nothing to send {link.function}: if it didn't run, that's why.{last}")
+
+
+def _runs_against_arrivals(link: TriggerLink, where: str) -> list[tuple[str, str]]:
+    """
+    Files that should have invoked the function against CloudWatch's count of its runs: none at all (S3's events
+    didn't reach it), or fewer than the files (Lambda queues S3's events and retries them for up to 6 hours).
+    """
+    a, m, fn = link.arrivals, link.metrics, link.function
+    calls, throttles = int(m.invocations), int(m.throttles)
+    throttled = f" ({_plural(throttles, 'call')} throttled)" if throttles else ""
+    if not calls and link.allowed is not False:
+        return [("warn", f"{_plural(a.sent, 'file')} {where} arrived in the window and should have "
+                         f"invoked {fn}, but CloudWatch counted no runs of it{throttled}: S3's events "
+                         f"didn't reach it. function_details('{fn}') shows whether S3 may invoke it "
+                         "and its reserved concurrency (0 stops every run).")]
+    if 0 < calls < a.sent:
+        return [("info", f"{_plural(a.sent, 'file')} arrived that should have invoked {fn}, but it ran "
+                         f"{_plural(calls, 'time')} in the window{throttled}: some events may not have "
+                         "reached it yet, since Lambda queues S3's events and retries them for up to 6 "
+                         "hours.")]
+    return []
+
+
+def summarize_triggers(links: list[TriggerLink], start: datetime, end: datetime, *,  # noqa: PLR0913
+                       bucket: str = "",
                        function: str = "", others: list[EventNotification] | None = None,
                        notes: list[tuple[str, str]] | None = None, errors: dict[str, str] | None = None,
                        searched: list[str] | None = None) -> dict[str, Any]:
@@ -565,9 +650,113 @@ def _s3_may_invoke(triggers: list[Any], bucket: str) -> bool:
     return False
 
 
-# =============================================================================
-# S3Toolkit
-# =============================================================================
+@dataclass
+class _LinkChecker:
+    """
+    Checks S3 -> Lambda links from both ends for s3_triggers: whether each function is there and lets its bucket
+    invoke it, the files written in the window, and the functions' CloudWatch numbers. Each function, resource
+    policy and listing is read once, however many links share it; what couldn't be read goes in `errors`.
+
+        functions  a notification's function ARN -> the function, None when it isn't there
+        unknown    function ARNs that couldn't be looked up
+    """
+
+    s3_core: S3Analyzer
+    lam: LambdaAnalyzer
+    start: datetime
+    end: datetime
+    cap: int
+    errors: dict[str, str]
+    functions: dict[str, Function | None] = field(default_factory=dict)
+    unknown: set[str] = field(default_factory=set)
+    policies: dict[tuple[str, str, str | None], list[Any] | None] = field(default_factory=dict)
+    listings: dict[tuple[str, str], list[ObjectInfo] | None] = field(default_factory=dict)
+
+    def check(self, bucket: str, n: EventNotification) -> TriggerLink:
+        arn = n.arn or ""
+        link = TriggerLink(bucket, n, account=arn.split(":")[4] if arn.count(":") >= 5 else None)
+        target = self._function(arn, n.name)
+        link.exists = None if arn in self.unknown else target is not None
+        if target is not None:
+            link.allowed = self._allowed(target, arn, bucket)
+        if link.exists is not False and n.on_created():
+            link.arrivals = self._arrivals(bucket, n)
+        return link
+
+    def add_metrics(self, links: list[TriggerLink]) -> int:
+        """
+        Gives each link its function's CloudWatch numbers over the window. Returns how many metrics were read.
+        """
+        live = list({f.arn: f for f in self.functions.values() if f is not None}.values())
+        if not live:
+            return 0
+        try:
+            numbers, read = self.lam.metrics(live, since=self.start, until=self.end, logs=False)
+        except (ClientError, BotoCoreError) as exc:
+            self.errors["metrics"] = _code(exc)
+            return 0
+        for link in links:
+            target = self.functions.get(link.notification.arn or "")
+            link.metrics = numbers.get(target.arn) if target is not None else None
+        return read
+
+    def _function(self, arn: str, name: str) -> Function | None:
+        """
+        The function a notification invokes, or None when it isn't there or couldn't be looked up (`unknown`).
+        """
+        if arn not in self.functions:
+            try:
+                self.functions[arn] = self.lam.function(arn)
+            except (ClientError, BotoCoreError) as exc:
+                self.functions[arn] = None
+                if _code(exc) != "ResourceNotFoundException":
+                    self.errors[f"{name}:function"] = _code(exc)
+                    self.unknown.add(arn)
+        return self.functions[arn]
+
+    def _allowed(self, target: Function, arn: str, bucket: str) -> bool | None:
+        """
+        Whether the function's resource policy (for the version or alias the ARN names) lets the bucket invoke it;
+        None when the policy couldn't be read.
+        """
+        lf = _lambda_module()
+        qualifier = lf.parse_function_ref(arn)[1]
+        key = (target.name, target.region, qualifier)
+        if key not in self.policies:
+            try:
+                self.policies[key] = lf.parse_policy(self.lam.policy(target.name, target.region, qualifier=qualifier))
+            except (ClientError, BotoCoreError) as exc:
+                self.errors[f"{target.name}:policy_of_function"] = _code(exc)
+                self.policies[key] = None
+        policy = self.policies[key]
+        return _s3_may_invoke(policy, bucket) if policy is not None else None
+
+    def _arrivals(self, bucket: str, n: EventNotification) -> Arrivals | None:
+        """
+        What a listing of the notification's prefix says about the files written in the window; None when it
+        couldn't be listed. It reads up to `cap` keys, and one more to tell when there were more.
+        """
+        s3 = _s3_module()
+        listed = (bucket, n.prefix)
+        if listed not in self.listings:
+            try:
+                self.listings[listed] = list(self.s3_core.iter_objects(s3.s3_uri(bucket, n.prefix),
+                                                                       limit=self.cap + 1))
+            except (ClientError, BotoCoreError) as exc:
+                self.errors[f"{bucket}:list"] = _code(exc)
+                self.listings[listed] = None
+        objects = self.listings[listed]
+        return count_arrivals(objects, n, self.start, self.end, limit=self.cap) if objects is not None else None
+
+
+def _triggers_summary(links: list[TriggerLink]) -> str:
+    """
+    s3_triggers' one line in the report: its links, and how many have warnings.
+    """
+    warned = [link for link in links if any(level == "warn" for level, _ in trigger_findings(link))]
+    pairs_text = sorted({f"{link.bucket} → {link.function}" for link in links})
+    return (_plural(len(links), "S3 → Lambda link") + (f": {_clip(', '.join(pairs_text), 120)}" if links else "")
+            + (f"; {_plural(len(warned), 'link')} with warnings" if warned else ""))
 
 
 class S3Toolkit(Toolkit):
@@ -641,214 +830,164 @@ S3 and Lambda together
         """
         lists = sum(n for op, n in counts.items() if op.startswith("s3:List"))
         others = sum(n for op, n in counts.items() if op.startswith("s3:") and not op.startswith("s3:List"))
-        return (lists * S3_REQUEST_PRICES["list"] + others * S3_REQUEST_PRICES["get"]) / 1000
-
-    # ------------------------------------------------------------------ the tools
+        return (lists * S3_REQUEST_PRICES["list"] + others * S3_REQUEST_PRICES["get"]) / _REQUESTS_PER_PRICE
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_buckets, bucket_details, list_folder, find_files, folder_summary and file_info, and s3_triggers when
-        the agent has the Lambda toolkit too: plain functions (their type hints and docstrings tell the model how to
-        call them), each reading through S3Analyzer and returning a compact, JSON-ready summary.
+        the agent has the Lambda toolkit too: methods whose type hints and docstrings tell the model how to call
+        them, each reading through S3Analyzer and returning a compact, JSON-ready summary.
         """
-
-        def find_buckets(match: str = "", sizes: bool = False) -> dict[str, Any]:
-            """
-            Lists the S3 buckets in the account: name, region and when each was made. match: a name glob like
-            'acme-*'. sizes=True also reads each bucket's object count and size from CloudWatch's daily storage
-            metrics and sorts the biggest first (two reads per bucket: slower when there are many).
-            """
-            core = self.analyzer
-            buckets = [b for b in core.list_buckets() if not match or fnmatch.fnmatchcase(b.name, match)]
-            metrics: dict[str, BucketMetrics] | None = None
-            errors: dict[str, str] = {}
-            if sizes:
-                metrics, errors = self._sizes(buckets[:_SIZED_BUCKETS])
-            out = summarize_buckets(buckets, metrics, errors)
-            if sizes and len(buckets) > _SIZED_BUCKETS:
-                out["sizes_note"] += f" Sizes were read for the first {_SIZED_BUCKETS} only: narrow with match=."
-            out["_summary"] = f"{_plural(len(buckets), 'bucket')}" + (
-                f" in {', '.join(out['regions'][:4])}" if out["regions"] else "")
-            out["_next"] = [(self._view_call("overview", match or None),
-                             "every bucket: size, cost, encryption, public access and warnings")]
-            return out
-
-        def bucket_details(bucket: str) -> dict[str, Any]:
-            """
-            Everything about one bucket's setup: public access, encryption, versioning, object lock, lifecycle
-            rules in plain words, replication, access logging, tags, its event notifications (which Lambda
-            functions, queues and topics it sends which events to, for which keys), its object count, size and
-            estimated monthly storage cost from CloudWatch, and the findings about it with what to do.
-            """
-            s3 = _s3_module()
-            core = self.analyzer
-            name, _ = s3.parse_s3_uri(bucket)
-            core.bucket_region(name)  # a bucket that isn't there fails here, with close names
-            cfg = core.bucket_config(name)
-            errors: dict[str, str] = {}
-            notifications = metrics = account = None
-            try:
-                notifications = core.notifications(name)
-            except (ClientError, BotoCoreError) as exc:
-                errors["notifications"] = _code(exc)
-            try:
-                metrics = core.bucket_metrics(name)
-                self._count_metrics(_metrics_read(metrics), _METRIC_PRICE)
-            except (ClientError, BotoCoreError) as exc:
-                errors["metrics"] = _code(exc)
-            try:
-                account = core.account_public_access_block()
-            except (ClientError, BotoCoreError, ValueError):
-                account = None  # unknown: the findings say account-level settings may still apply
-            out = summarize_bucket(cfg, metrics, notifications, account_block=account, prices=core.prices,
-                                   errors=errors)
-            size = out.get("size", {}).get("total")
-            out["_summary"] = ", ".join(filter(None, [
-                size and f"{size}", out["public_access"], f"encryption {out['encryption']}",
-                f"{_plural(len(notifications), 'event notification')}" if notifications is not None else "",
-                _plural(len(out["findings"]), "finding")]))
-            out["_next"] = [(self._view_call("bucket_info", name), "its settings, policy and size as a report")]
-            if cfg.policy:
-                out["_next"].append((self._view_call("policy", name), "its bucket policy in plain English"))
-            return out
-
-        def list_folder(location: str) -> dict[str, Any]:
-            """
-            What's directly in a folder (one level, like `aws s3 ls`): its subfolders, and its files newest first
-            with size, when each was written and storage class. Fast even on huge buckets. location:
-            's3://bucket/prefix/' or 'bucket/prefix/'; a bucket name alone lists its top level.
-            """
-            listing = self.analyzer.ls(location, limit=1000)
-            out = summarize_listing(listing)
-            out["_summary"] = (f"{_plural(len(listing.folders), 'folder')}, {_plural(len(listing.objects), 'file')}"
-                               + (" (more not listed)" if listing.truncated else ""))
-            out["_next"] = [(self._view_call("ls", listing.uri), "the same folder as a report")]
-            return out
-
-        def find_files(location: str, match: str = "", since: str = "", until: str = "", min_size: str = "",
-                       max_size: str = "", limit: int = 30) -> dict[str, Any]:
-            """
-            The files under a location (every level below it) that match a filter: how many, their total size,
-            when the oldest and newest were written, and the newest `limit` of them. match: a glob on the file name,
-            or on the whole key when it has a '/' ('*.csv', 'orders_2026-10-1*'). since/until: only files last
-            written in that window, as ISO UTC times ('2026-10-15T18:00Z') or relative ('24h', '7d'). min_size /
-            max_size: '10MB', '1GB'. Reads the keys one listing page at a time, up to the budget's limit.
-            """
-            s3 = _s3_module()
-            core = self.analyzer
-            start, end = _between(since, until)
-            keep = s3.make_filter(pattern=match or None, min_size=min_size or None, max_size=max_size or None,
-                                  modified_after=start, modified_before=end if until else None)
-            cap = self.budget.s3_keys
-            scanned, found, more = 0, [], False
-            for obj in core.iter_objects(location, limit=cap + 1):  # one past the cap says there's more
-                if scanned >= cap:
-                    more = True
-                    break
-                scanned += 1
-                if keep(obj):
-                    found.append(obj)
-            bucket, prefix = s3.parse_s3_uri(location)
-            out = summarize_found(s3.s3_uri(bucket, prefix), found, scanned=scanned, cut_short=more, start=start,
-                                  end=end, limit=max(1, min(int(limit or 30), 200)),
-                                  filters={"match": match, "min_size": min_size, "max_size": max_size})
-            out["_summary"] = (f"{_plural(len(found), 'file')} ({out['total_size']})"
-                               + (f" of {scanned:,} keys" if scanned != len(found) else "")
-                               + (", cut short" if out["cut_short"] else ""))
-            out["_next"] = [(self._view_call("find", s3.s3_uri(bucket, prefix), pattern=match or None,
-                                             min_size=min_size or None, max_size=max_size or None,
-                                             modified_after=_iso(start), modified_before=_iso(end) if until else None),
-                             "the same search as a report")]
-            return out
-
-        def folder_summary(location: str) -> dict[str, Any]:
-            """
-            What a location holds, every level below it: how many files and how much, by file type, storage
-            class and folder, the oldest and newest file, the largest ones, the estimated monthly storage cost and
-            findings (many small files, files in Glacier, files untouched for 90+ days...). Reads every key, up to
-            the budget's limit: use the narrowest location you can.
-            """
-            core = self.analyzer
-            summary = core.summarize(location, top_n=5, folder_depth=1, limit=self.budget.s3_keys)
-            out = summarize_prefix(summary, core.prices)
-            out["_summary"] = (f"{_plural(summary.object_count, 'file')}, {out['total_size']}, about "
-                               f"{human_money(summary.monthly_cost)}/month" + (", cut short" if summary.truncated
-                                                                               else ""))
-            out["_next"] = [(self._view_call("summary", summary.uri), "the same as a dashboard"),
-                            (self._view_call("tree", summary.uri), "its folders' sizes as a tree")]
-            return out
-
-        def file_info(location: str) -> dict[str, Any]:
-            """
-            One file's headers, never its content: size, when it was written, content type, storage class (a
-            file in Glacier must be restored before anything can read it), encryption (a KMS key means readers need
-            kms:Decrypt on it), version, restore and lock status, its metadata and tags. location:
-            's3://bucket/key'.
-            """
-            core = self.analyzer
-            info = core.head(location)
-            out = summarize_file(info)
-            out["_summary"] = f"{out['size']}, {info.get('storage_class', 'STANDARD')}, written " + (
-                _iso(info.get("last_modified")) or "?")
-            out["_next"] = [(self._view_call("head", info["uri"]), "every header as a report"),
-                            (self._view_call("preview", info["uri"]), "what's in it, in your notebook only")]
-            return out
-
-        tools = [find_buckets, bucket_details, list_folder, find_files, folder_summary, file_info]
+        tools = [self.find_buckets, self.bucket_details, self.list_folder, self.find_files, self.folder_summary,
+                 self.file_info]
         if self.peer("lambda") is not None:
-            tools.append(self._triggers_tool())
+            tools.append(self.s3_triggers)
         return tools
 
-    def _triggers_tool(self) -> Callable[..., dict[str, Any]]:
-        def s3_triggers(bucket: str = "", function: str = "", since: str = "24h", until: str = "",
-                        region: str = "") -> dict[str, Any]:
-            """
-            How S3 and Lambda are wired: the bucket event notifications that invoke Lambda functions. Give a
-            bucket (the functions its events invoke), a function (the buckets whose events invoke it, from its
-            resource policy and those buckets' notifications) or both. For each link: the events and the key
-            prefix and suffix it fires on, whether the function exists and lets that bucket invoke it, how many files
-            the filter covers were written in the window and how many of them invoked it (and which it missed, by
-            upload kind or by the case of their ending), and how often the function ran, failed and was throttled in
-            that window (CloudWatch). Use it for "which Lambda processes files in X", "why didn't Y run after the
-            upload" or "were last night's files processed". since/until: ISO UTC times or relative ('24h'). region:
-            the function's region when it isn't the default.
-            """
-            return self._triggers(bucket, function, since, until, region)
-
-        return s3_triggers
-
-    # ------------------------------------------------------------------ what the tools share
-
-    def _sizes(self, buckets: list[BucketInfo]) -> tuple[dict[str, BucketMetrics], dict[str, str]]:
+    def find_buckets(self, match: str = "", sizes: bool = False) -> dict[str, Any]:
         """
-        Each bucket's CloudWatch size and object count, read side by side; errors by 'bucket:metrics'.
+        Lists the S3 buckets in the account: name, region and when each was made. match: a name glob like
+        'acme-*'. sizes=True also reads each bucket's object count and size from CloudWatch's daily storage
+        metrics and sorts the biggest first (two reads per bucket: slower when there are many).
         """
         core = self.analyzer
-        for region in {b.region for b in buckets if b.region}:
-            core._cloudwatch_in(region)  # boto3 sessions aren't thread-safe: make the clients before the threads
-
-        def size(bucket: BucketInfo) -> tuple[str, BucketMetrics | None, str | None]:
-            try:
-                return bucket.name, core.bucket_metrics(bucket.name), None
-            except (ClientError, BotoCoreError) as exc:
-                return bucket.name, None, _code(exc)
-
-        metrics: dict[str, BucketMetrics] = {}
+        buckets = [b for b in core.list_buckets() if not match or fnmatch.fnmatchcase(b.name, match)]
+        metrics: dict[str, BucketMetrics] | None = None
         errors: dict[str, str] = {}
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            for name, found, error in pool.map(size, buckets):
-                if found is not None:
-                    metrics[name] = found
-                    self._count_metrics(_metrics_read(found), _METRIC_PRICE)
-                if error:
-                    errors[f"{name}:metrics"] = error
-        return metrics, errors
+        if sizes:
+            metrics, errors = self._sizes(buckets[:_SIZED_BUCKETS])
+        out = summarize_buckets(buckets, metrics, errors)
+        if sizes and len(buckets) > _SIZED_BUCKETS:
+            out["sizes_note"] += f" Sizes were read for the first {_SIZED_BUCKETS} only: narrow with match=."
+        out["_summary"] = f"{_plural(len(buckets), 'bucket')}" + (
+            f" in {', '.join(out['regions'][:4])}" if out["regions"] else "")
+        out["_next"] = [(self._view_call("overview", match or None),
+                         "every bucket: size, cost, encryption, public access and warnings")]
+        return out
 
-    def _triggers(self, bucket: str, function: str, since: str, until: str, region: str) -> dict[str, Any]:
+    def bucket_details(self, bucket: str) -> dict[str, Any]:
         """
-        s3_triggers: the links for a bucket, a function or both, each checked from both ends (see its docstring).
+        Everything about one bucket's setup: public access, encryption, versioning, object lock, lifecycle
+        rules in plain words, replication, access logging, tags, its event notifications (which Lambda
+        functions, queues and topics it sends which events to, for which keys), its object count, size and
+        estimated monthly storage cost from CloudWatch, and the findings about it with what to do.
         """
-        s3, lf = _s3_module(), _lambda_module()
+        s3 = _s3_module()
+        core = self.analyzer
+        name, _ = s3.parse_s3_uri(bucket)
+        self._require_bucket(name)
+        cfg = core.bucket_config(name)
+        errors: dict[str, str] = {}
+        notifications = metrics = None
+        try:
+            notifications = core.notifications(name)
+        except (ClientError, BotoCoreError) as exc:
+            errors["notifications"] = _code(exc)
+        try:
+            metrics = core.bucket_metrics(name)
+            self._count_metrics(_metrics_read(metrics), _METRIC_PRICE)
+        except (ClientError, BotoCoreError) as exc:
+            errors["metrics"] = _code(exc)
+        account = self._account_block()
+        out = summarize_bucket(cfg, metrics, notifications, account_block=account, prices=core.prices,
+                               errors=errors)
+        size = out.get("size", {}).get("total")
+        out["_summary"] = ", ".join(filter(None, [
+            size and f"{size}", out["public_access"], f"encryption {out['encryption']}",
+            f"{_plural(len(notifications), 'event notification')}" if notifications is not None else "",
+            _plural(len(out["findings"]), "finding")]))
+        out["_next"] = [(self._view_call("bucket_info", name), "its settings, policy and size as a report")]
+        if cfg.policy:
+            out["_next"].append((self._view_call("policy", name), "its bucket policy in plain English"))
+        return out
+
+    def list_folder(self, location: str) -> dict[str, Any]:
+        """
+        What's directly in a folder (one level, like `aws s3 ls`): its subfolders, and its files newest first
+        with size, when each was written and storage class. Fast even on huge buckets. location:
+        's3://bucket/prefix/' or 'bucket/prefix/'; a bucket name alone lists its top level.
+        """
+        listing = self.analyzer.ls(location, limit=1000)
+        out = summarize_listing(listing)
+        out["_summary"] = (f"{_plural(len(listing.folders), 'folder')}, {_plural(len(listing.objects), 'file')}"
+                           + (" (more not listed)" if listing.truncated else ""))
+        out["_next"] = [(self._view_call("ls", listing.uri), "the same folder as a report")]
+        return out
+
+    def find_files(self, location: str, match: str = "", since: str = "", until: str = "",  # noqa: PLR0913
+                   min_size: str = "", max_size: str = "", limit: int = 30) -> dict[str, Any]:
+        """
+        The files under a location (every level below it) that match a filter: how many, their total size,
+        when the oldest and newest were written, and the newest `limit` of them. match: a glob on the file name,
+        or on the whole key when it has a '/' ('*.csv', 'orders_2026-10-1*'). since/until: only files last
+        written in that window, as ISO UTC times ('2026-10-15T18:00Z') or relative ('24h', '7d'). min_size /
+        max_size: '10MB', '1GB'. Reads the keys one listing page at a time, up to the budget's limit.
+        """
+        s3 = _s3_module()
+        start, end = _between(since, until)
+        keep = s3.make_filter(pattern=match or None, min_size=min_size or None, max_size=max_size or None,
+                              modified_after=start, modified_before=end if until else None)
+        found, scanned, more = self._matching(location, keep)
+        bucket, prefix = s3.parse_s3_uri(location)
+        out = summarize_found(s3.s3_uri(bucket, prefix), found, scanned=scanned, cut_short=more, start=start,
+                              end=end, limit=max(1, min(int(limit or 30), 200)),
+                              filters={"match": match, "min_size": min_size, "max_size": max_size})
+        out["_summary"] = (f"{_plural(len(found), 'file')} ({out['total_size']})"
+                           + (f" of {scanned:,} keys" if scanned != len(found) else "")
+                           + (", cut short" if out["cut_short"] else ""))
+        out["_next"] = [(self._view_call("find", s3.s3_uri(bucket, prefix), pattern=match or None,
+                                         min_size=min_size or None, max_size=max_size or None,
+                                         modified_after=_iso(start), modified_before=_iso(end) if until else None),
+                         "the same search as a report")]
+        return out
+
+    def folder_summary(self, location: str) -> dict[str, Any]:
+        """
+        What a location holds, every level below it: how many files and how much, by file type, storage
+        class and folder, the oldest and newest file, the largest ones, the estimated monthly storage cost and
+        findings (many small files, files in Glacier, files untouched for 90+ days...). Reads every key, up to
+        the budget's limit: use the narrowest location you can.
+        """
+        core = self.analyzer
+        summary = core.summarize(location, top_n=5, folder_depth=1, limit=self.budget.s3_keys)
+        out = summarize_prefix(summary, core.prices)
+        out["_summary"] = (f"{_plural(summary.object_count, 'file')}, {out['total_size']}, about "
+                           f"{human_money(summary.monthly_cost)}/month" + (", cut short" if summary.truncated
+                                                                           else ""))
+        out["_next"] = [(self._view_call("summary", summary.uri), "the same as a dashboard"),
+                        (self._view_call("tree", summary.uri), "its folders' sizes as a tree")]
+        return out
+
+    def file_info(self, location: str) -> dict[str, Any]:
+        """
+        One file's headers, never its content: size, when it was written, content type, storage class (a
+        file in Glacier must be restored before anything can read it), encryption (a KMS key means readers need
+        kms:Decrypt on it), version, restore and lock status, its metadata and tags. location:
+        's3://bucket/key'.
+        """
+        core = self.analyzer
+        info = core.head(location)
+        out = summarize_file(info)
+        out["_summary"] = f"{out['size']}, {info.get('storage_class', 'STANDARD')}, written " + (
+            _iso(info.get("last_modified")) or "?")
+        out["_next"] = [(self._view_call("head", info["uri"]), "every header as a report"),
+                        (self._view_call("preview", info["uri"]), "what's in it, in your notebook only")]
+        return out
+
+    def s3_triggers(self, bucket: str = "", function: str = "", since: str = "24h",  # noqa: PLR0913
+                    until: str = "", region: str = "") -> dict[str, Any]:
+        """
+        How S3 and Lambda are wired: the bucket event notifications that invoke Lambda functions. Give a
+        bucket (the functions its events invoke), a function (the buckets whose events invoke it, from its
+        resource policy and those buckets' notifications) or both. For each link: the events and the key
+        prefix and suffix it fires on, whether the function exists and lets that bucket invoke it, how many files
+        the filter covers were written in the window and how many of them invoked it (and which it missed, by
+        upload kind or by the case of their ending), and how often the function ran, failed and was throttled in
+        that window (CloudWatch). Use it for "which Lambda processes files in X", "why didn't Y run after the
+        upload" or "were last night's files processed". since/until: ISO UTC times or relative ('24h'). region:
+        the function's region when it isn't the default.
+        """
+        s3 = _s3_module()
         lam_kit = self.peer("lambda")
         if lam_kit is None:
             raise ValueError("s3_triggers needs the Lambda toolkit too: AgentView(toolkits=['lambda', 's3'])")
@@ -858,90 +997,71 @@ S3 and Lambda together
             raise ValueError("s3_triggers needs a bucket, a function, or both")
         start, end = _between(since or "24h", until)
         name = s3.parse_s3_uri(bucket)[0] if bucket else ""
-        fn = lam.function(function, region=region or None) if function else None  # missing: its close names
+        fn = lam.function(function, region=region or None) if function else None
         errors: dict[str, str] = {}
         notes: list[tuple[str, str]] = []
         others: list[EventNotification] = []
         pairs: list[tuple[str, EventNotification]] = []
         searched: list[str] = []
         if name:
-            for n in core.notifications(name):  # a missing bucket fails here: its close names
-                if n.target != "Lambda function":
-                    others.append(n)
-                elif fn is None or _points_at(n, fn):
-                    pairs.append((name, n))
+            pairs, others = self._pairs_in_bucket(name, fn)
         elif fn is not None:
-            searched, named, notes = self._buckets_for(fn, errors)
-            for candidate in searched:
-                try:
-                    pairs += [(candidate, n) for n in core.notifications(candidate) if _points_at(n, fn)]
-                except (ClientError, BotoCoreError) as exc:
-                    errors[f"{candidate}:notifications"] = _code(exc)
-            for leftover in sorted(set(named) - {b for b, _ in pairs}):
-                notes.append(("info", f"{fn.name}'s resource policy lets bucket {leftover} invoke it, but "
-                                      f"{leftover} has no event notification that does: a leftover permission, or a "
-                                      "notification that was removed."))
+            pairs, searched, notes = self._pairs_for_function(fn, errors)
 
-        functions: dict[str, Function | None] = {}  # notification ARN -> the function, None when it isn't there
-        unknown: set[str] = set()  # ARNs that couldn't be looked up
-        policies: dict[tuple[str, str, str | None], list[Any] | None] = {}
-        listings: dict[tuple[str, str], list[ObjectInfo] | None] = {}
-        links: list[TriggerLink] = []
-        cap = self.budget.s3_keys
-        for where, n in pairs:
-            arn = n.arn or ""
-            link = TriggerLink(where, n, account=arn.split(":")[4] if arn.count(":") >= 5 else None)
-            if arn not in functions:
-                try:
-                    functions[arn] = lam.function(arn)
-                except (ClientError, BotoCoreError) as exc:
-                    functions[arn] = None
-                    if _code(exc) != "ResourceNotFoundException":
-                        errors[f"{n.name}:function"] = _code(exc)
-                        unknown.add(arn)
-            target = functions[arn]
-            link.exists = None if arn in unknown else target is not None
-            if target is not None:
-                qualifier = lf.parse_function_ref(arn)[1]
-                key = (target.name, target.region, qualifier)
-                if key not in policies:
-                    try:
-                        policies[key] = lf.parse_policy(lam.policy(target.name, target.region, qualifier=qualifier))
-                    except (ClientError, BotoCoreError) as exc:
-                        errors[f"{target.name}:policy_of_function"] = _code(exc)
-                        policies[key] = None
-                if policies[key] is not None:
-                    link.allowed = _s3_may_invoke(policies[key], where)
-            if link.exists is not False and n.on_created():
-                listed = (where, n.prefix)
-                if listed not in listings:
-                    try:
-                        listings[listed] = list(core.iter_objects(s3.s3_uri(where, n.prefix), limit=cap + 1))
-                    except (ClientError, BotoCoreError) as exc:
-                        errors[f"{where}:list"] = _code(exc)
-                        listings[listed] = None
-                if listings[listed] is not None:
-                    link.arrivals = count_arrivals(listings[listed], n, start, end, limit=cap)
-            links.append(link)
-
-        live = list({f.arn: f for f in functions.values() if f is not None}.values())
-        if live:
-            try:
-                numbers, read = lam.metrics(live, since=start, until=end, logs=False)
-                self._count_metrics(read, lam.prices["metric_request"])
-                for link in links:
-                    target = functions.get(link.notification.arn or "")
-                    link.metrics = numbers.get(target.arn) if target is not None else None
-            except (ClientError, BotoCoreError) as exc:
-                errors["metrics"] = _code(exc)
+        checker = _LinkChecker(core, lam, start, end, self.budget.s3_keys, errors)
+        links = [checker.check(where, n) for where, n in pairs]
+        read = checker.add_metrics(links)
+        if read:
+            self._count_metrics(read, lam.prices["metric_request"])
 
         out = summarize_triggers(links, start, end, bucket=name, function=fn.name if fn else "", others=others,
                                  notes=notes, errors=errors, searched=searched)
-        warned = [link for link in links if any(level == "warn" for level, _ in trigger_findings(link))]
-        pairs_text = sorted({f"{link.bucket} → {link.function}" for link in links})
-        out["_summary"] = (_plural(len(links), "S3 → Lambda link") + (f": {_clip(', '.join(pairs_text), 120)}"
-                                                                      if links else "")
-                           + (f"; {_plural(len(warned), 'link')} with warnings" if warned else ""))
+        out["_summary"] = _triggers_summary(links)
+        out["_next"] = self._triggers_next(links, checker.functions, lam_kit, start)
+        return out
+
+    def _pairs_in_bucket(self, bucket: str, fn: Function | None) -> tuple[list[tuple[str, EventNotification]],
+                                                                         list[EventNotification]]:
+        """
+        (bucket, notification) for each of a bucket's notifications that invokes a Lambda function (`fn` only, when
+        it's given), and its notifications to anything else. A bucket that isn't there fails here, and the tool's
+        answer gives its close names.
+        """
+        pairs, others = [], []
+        for n in self.analyzer.notifications(bucket):
+            if n.target != "Lambda function":
+                others.append(n)
+            elif fn is None or _points_at(n, fn):
+                pairs.append((bucket, n))
+        return pairs, others
+
+    def _pairs_for_function(self, fn: Function, errors: dict[str, str]) -> tuple[
+            list[tuple[str, EventNotification]], list[str], list[tuple[str, str]]]:
+        """
+        (bucket, notification) for each notification that invokes a function, from the buckets that may (_buckets_for),
+        the buckets looked through, and notes: a bucket the function's resource policy names that has no
+        notification for it is a leftover permission, or a notification that was removed.
+        """
+        searched, named, notes = self._buckets_for(fn, errors)
+        pairs: list[tuple[str, EventNotification]] = []
+        for candidate in searched:
+            try:
+                pairs += [(candidate, n) for n in self.analyzer.notifications(candidate) if _points_at(n, fn)]
+            except (ClientError, BotoCoreError) as exc:
+                errors[f"{candidate}:notifications"] = _code(exc)
+        for leftover in sorted(set(named) - {b for b, _ in pairs}):
+            notes.append(("info", f"{fn.name}'s resource policy lets bucket {leftover} invoke it, but "
+                                  f"{leftover} has no event notification that does: a leftover permission, or a "
+                                  "notification that was removed."))
+        return pairs, searched, notes
+
+    def _triggers_next(self, links: list[TriggerLink], functions: dict[str, Function | None], lam_kit: Toolkit,
+                       start: datetime) -> list[tuple[str, str]]:
+        """
+        The View calls worth running after s3_triggers: for each link, why its function's runs failed, the files
+        written in the window, and the function itself.
+        """
+        s3 = _s3_module()
         nxt: list[tuple[str, str]] = []
         for link in links:
             target = functions.get(link.notification.arn or "")
@@ -954,8 +1074,66 @@ S3 and Lambda together
                                             modified_after=_iso(start)), "the files written in the window"))
             if target is not None:
                 nxt.append((lam_kit._next_for(target, "function_info"), "the function, its triggers and settings"))
-        out["_next"] = nxt
-        return out
+        return nxt
+
+    def _require_bucket(self, name: str) -> None:
+        """
+        Fails when the bucket isn't there, so the tool's answer is its close names (not_found) rather than a
+        report of every part that couldn't be read.
+        """
+        self.analyzer.bucket_region(name)
+
+    def _account_block(self) -> dict[str, bool] | None:
+        """
+        The account's public access block, or None when it can't be read: the findings then say account-level
+        settings may still apply.
+        """
+        try:
+            return self.analyzer.account_public_access_block()
+        except (ClientError, BotoCoreError, ValueError):
+            return None
+
+    def _matching(self, location: str, keep: Callable[[ObjectInfo], bool]) -> tuple[list[ObjectInfo], int, bool]:
+        """
+        (the files under a location that `keep` accepts, how many keys were read, whether there were more): it reads
+        up to the budget's s3_keys, and one more to tell when there were more.
+        """
+        cap = self.budget.s3_keys
+        scanned, found, more = 0, [], False
+        for obj in self.analyzer.iter_objects(location, limit=cap + 1):
+            if scanned >= cap:
+                more = True
+                break
+            scanned += 1
+            if keep(obj):
+                found.append(obj)
+        return found, scanned, more
+
+    def _sizes(self, buckets: list[BucketInfo]) -> tuple[dict[str, BucketMetrics], dict[str, str]]:
+        """
+        Each bucket's CloudWatch size and object count, read side by side; errors by 'bucket:metrics'. boto3
+        sessions aren't thread-safe, so the CloudWatch clients are made before the threads start.
+        """
+        core = self.analyzer
+        for region in {b.region for b in buckets if b.region}:
+            core._cloudwatch_in(region)
+
+        def size(bucket: BucketInfo) -> tuple[str, BucketMetrics | None, str | None]:
+            try:
+                return bucket.name, core.bucket_metrics(bucket.name), None
+            except (ClientError, BotoCoreError) as exc:
+                return bucket.name, None, _code(exc)
+
+        metrics: dict[str, BucketMetrics] = {}
+        errors: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=_SIZE_WORKERS) as pool:
+            for name, found, error in pool.map(size, buckets):
+                if found is not None:
+                    metrics[name] = found
+                    self._count_metrics(_metrics_read(found), _METRIC_PRICE)
+                if error:
+                    errors[f"{name}:metrics"] = error
+        return metrics, errors
 
     def _buckets_for(self, fn: Function, errors: dict[str, str]) -> tuple[list[str], list[str],
                                                                           list[tuple[str, str]]]:

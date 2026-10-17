@@ -3,6 +3,9 @@ The agent loop: LangChain's deepagents, built once with the model, the tools and
 question streamed through it (stream_turn), counting the model's calls and tokens and stopping when asked or out of
 time. What changes how the agent works rather than what it can read (a subagent, a middleware, another memory)
 goes in build_graph(); everything about LangGraph's messages stays in this file.
+
+_MIN_PYTHON is deepagents' floor; the package's own is 3.10, and everything but the agent itself runs there.
+HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools).
 """
 
 from __future__ import annotations
@@ -15,9 +18,10 @@ from .answers import AgentAnswer
 from .budget import _Run
 from .llm import answer_cost, explain_model_error
 
-_MIN_PYTHON = (3, 11)  # deepagents' floor (the package's own is 3.10: everything but the agent itself runs there)
-HIDDEN_TOOLS = frozenset({"task", "execute"})  # deepagents' tools the model never sees: its general-purpose
-# subagent, which the agent doesn't need, and shell commands, which its in-memory files can't run anyway
+_MIN_PYTHON = (3, 11)
+HIDDEN_TOOLS = frozenset({"task", "execute"})
+_OVERTIME_SECONDS = 60
+_AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
 
 def check_ready() -> None:
@@ -51,55 +55,79 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     )
 
 
-def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,
+def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
                 model_prices: dict[str, tuple[float, float]] | None = None,
                 progress: Callable[..., None] | None = None) -> str:
     """
     Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
     text. Fills `answer` as it goes (model calls, tokens, the model that served it) and keeps `run.cost` current
-    for the tools' cost budget. Stops when `run.stop` is set, the kernel is interrupted or the time budget is well
-    past; a model or loop that fails sets answer.error and answer.exception instead of raising.
+    for the tools' cost budget. Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button:
+    it keeps what it found) or the time budget is well past. A model or loop that fails, whatever it raises, sets
+    answer.error and answer.exception instead of raising.
     """
-    budget = run.budget
     base = answer.model
     steps = 0
     text = ""
     message = {"role": "user", "content": content}
-    config = {"configurable": {"thread_id": thread}, "recursion_limit": budget.steps}
+    config = {"configurable": {"thread_id": thread}, "recursion_limit": run.budget.steps}
     try:
         for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
-            for node in (update or {}).values():
-                for msg in _update_messages(node):
-                    if type(msg).__name__ not in ("AIMessage", "AIMessageChunk"):
-                        continue
-                    answer.model_calls += 1
-                    usage = getattr(msg, "usage_metadata", None) or {}
-                    answer.input_tokens += int(usage.get("input_tokens") or 0)
-                    answer.output_tokens += int(usage.get("output_tokens") or 0)
-                    served = (getattr(msg, "response_metadata", None) or {}).get("model_name")
-                    if served:  # the model behind the deployment: 'prod-gpt-4o (gpt-4o-2024-11-20)'
-                        answer.model = served if base in ("", served) else f"{base} ({served})"
-                    cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, model_prices)
-                    with run.lock:
-                        run.cost = cost or 0.0
-                    if not getattr(msg, "tool_calls", None):
-                        text = _message_text(msg) or text
+            for msg in _model_messages(update):
+                _count_usage(msg, answer, base, run, model_prices)
+                if not getattr(msg, "tool_calls", None):
+                    text = _message_text(msg) or text
             steps += 1
             if progress:
                 progress(steps)
-            if run.stop.is_set():
-                answer.stopped = "stopped"
+            reason = _stop_reason(run)
+            if reason:
+                answer.stopped = reason
                 break
-            if run.elapsed > budget.seconds + 60:  # the tools stopped at the budget; the model kept going
-                answer.stopped = "time"
-                break
-    except KeyboardInterrupt:  # the notebook's stop button: keep what it found
+    except KeyboardInterrupt:
         answer.stopped = "stopped"
-    except Exception as exc:  # a model or loop error: the answer says what went wrong
+    except Exception as exc:  # noqa: BLE001
         answer.stopped = "steps" if type(exc).__name__ == "GraphRecursionError" else "error"
         answer.error = explain_model_error(exc)
         answer.exception = exc
     return text
+
+
+def _model_messages(update: Any) -> list[Any]:
+    """
+    The model's messages in one LangGraph stream update, from every node in it.
+    """
+    return [msg for node in (update or {}).values() for msg in _update_messages(node)
+            if type(msg).__name__ in _AI_MESSAGES]
+
+
+def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
+                 model_prices: dict[str, tuple[float, float]] | None) -> None:
+    """
+    Adds one model message to the answer: a model call, its tokens, and the model that served it, which for a
+    deployment reads 'prod-gpt-4o (gpt-4o-2024-11-20)'. Keeps run.cost current for the tools' cost budget.
+    """
+    answer.model_calls += 1
+    usage = getattr(message, "usage_metadata", None) or {}
+    answer.input_tokens += int(usage.get("input_tokens") or 0)
+    answer.output_tokens += int(usage.get("output_tokens") or 0)
+    served = (getattr(message, "response_metadata", None) or {}).get("model_name")
+    if served:
+        answer.model = served if base in ("", served) else f"{base} ({served})"
+    cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, model_prices)
+    with run.lock:
+        run.cost = cost or 0.0
+
+
+def _stop_reason(run: _Run) -> str:
+    """
+    Why the loop stops now: 'stopped' when run.stop is set, 'time' once the time budget is _OVERTIME_SECONDS past
+    (the tools stopped at the budget, but the model kept going); '' to go on.
+    """
+    if run.stop.is_set():
+        return "stopped"
+    if run.elapsed > run.budget.seconds + _OVERTIME_SECONDS:
+        return "time"
+    return ""
 
 
 def _update_messages(node: Any) -> list[Any]:

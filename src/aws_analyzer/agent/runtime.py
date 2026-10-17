@@ -11,7 +11,7 @@ import inspect
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 
 from .._kit.errors import _error_code, _why
 from .._kit.text import _clip
@@ -23,7 +23,10 @@ from .results import _plain
 if TYPE_CHECKING:
     from .toolkits import Toolkit
 
-COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned")  # a result's keys the report shows
+COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned")
+_ERROR_CHARACTERS = 200
+_MESSAGE_CHARACTERS = 400
+_AWS_MESSAGE_CHARACTERS = 300
 
 
 def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
@@ -38,12 +41,7 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
     @functools.wraps(fn)
     def tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
         run = current()
-        try:
-            arguments = dict(inspect.signature(fn).bind_partial(*args, **kwargs).arguments)
-        except TypeError:
-            arguments = dict(kwargs)
-        defaults = _defaults(fn)  # LangChain passes every default: keep what the model asked for
-        arguments = {k: v for k, v in arguments.items() if k not in defaults or v != defaults[k]}
+        arguments = _asked_for(fn, args, kwargs)
         call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn))
         started = time.monotonic()
         with run.lock:
@@ -52,42 +50,78 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
         try:
             check_budget(run, used)
             result = fn(*args, **kwargs)
-        except _Refused as exc:
-            call.refused, call.summary = exc.reason, _REFUSED.get(exc.reason, "not run")
-            result = {"refused": exc.reason, "message": exc.message, **exc.extra}
-        except ClientError as exc:
-            try:
-                missing = toolkit.not_found(exc, arguments)
-            except Exception:  # looking for close names failed too: report the error itself
-                missing = None
-            if missing is not None:
-                result = missing
-                call.summary = str(missing.get("error") or "")
-            else:
-                code = _error_code(exc)
-                permission = toolkit.permission_for(exc)
-                call.error = _why(code, permission) if permission else code
-                result = {"error": call.error,
-                          "message": _clip(exc.response.get("Error", {}).get("Message", str(exc)), 300)}
-        except ReadOnlyError as exc:
-            call.error = str(exc)
-            result = {"error": "blocked", "message": str(exc)}
-        except (BotoCoreError, ValueError, TypeError) as exc:  # bad input, a region or time it can't read
-            call.error = f"{type(exc).__name__}: {_clip(str(exc), 200)}"
-            result = {"error": type(exc).__name__, "message": _clip(str(exc), 400)}
-        except Exception as exc:  # a tool never brings the agent down; the answer says what failed
-            call.error = f"{type(exc).__name__}: {_clip(str(exc), 200)}"
-            result = {"error": type(exc).__name__, "message": _clip(str(exc), 400)}
+        except Exception as exc:  # noqa: BLE001
+            result = _failed(exc, call, toolkit, arguments)
         call.seconds = time.monotonic() - started
-        unread = result.get("errors") if isinstance(result.get("errors"), dict) else None
-        if unread and not call.error:
-            call.error = "; ".join(f"{section}: {why}" for section, why in unread.items())
-        call.next = list(result.pop("_next", []) or [])
-        call.summary = result.pop("_summary", None) or call.summary or (call.error or "")
-        call.coverage = {k: result[k] for k in COVERAGE if k in result}
-        return _plain(result)
+        return _reported(call, result)
 
     return tool
+
+
+def _asked_for(fn: Callable[..., Any], args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    The arguments a tool was called with, by name, leaving out the ones equal to their default: LangChain passes
+    every default, so what's left is what the model asked for.
+    """
+    try:
+        arguments = dict(inspect.signature(fn).bind_partial(*args, **kwargs).arguments)
+    except TypeError:
+        arguments = dict(kwargs)
+    defaults = _defaults(fn)
+    return {k: v for k, v in arguments.items() if k not in defaults or v != defaults[k]}
+
+
+def _failed(exc: Exception, call: ToolCall, toolkit: Toolkit, arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    What a tool that raised hands the model, recorded on its call. A tool never raises into the agent loop: a
+    refused call says why, an AWS error is the toolkit's to explain (_aws_error), a call the guard blocked says so,
+    and anything else (bad input, a region or time it can't read, a bug) says what failed.
+    """
+    if isinstance(exc, _Refused):
+        call.refused, call.summary = exc.reason, _REFUSED.get(exc.reason, "not run")
+        return {"refused": exc.reason, "message": exc.message, **exc.extra}
+    if isinstance(exc, ClientError):
+        return _aws_error(exc, call, toolkit, arguments)
+    if isinstance(exc, ReadOnlyError):
+        call.error = str(exc)
+        return {"error": "blocked", "message": str(exc)}
+    call.error = f"{type(exc).__name__}: {_clip(str(exc), _ERROR_CHARACTERS)}"
+    return {"error": type(exc).__name__, "message": _clip(str(exc), _MESSAGE_CHARACTERS)}
+
+
+def _aws_error(exc: ClientError, call: ToolCall, toolkit: Toolkit, arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    An AWS error as the tool's result: a resource that isn't there as the toolkit's close names, else the error's
+    code with the permission a refused call needed. When looking for close names fails too, whatever it raises, the
+    error itself is reported.
+    """
+    try:
+        missing = toolkit.not_found(exc, arguments)
+    except Exception:  # noqa: BLE001
+        missing = None
+    if missing is not None:
+        call.summary = str(missing.get("error") or "")
+        return missing
+    code = _error_code(exc)
+    permission = toolkit.permission_for(exc)
+    call.error = _why(code, permission) if permission else code
+    message = exc.response.get("Error", {}).get("Message", str(exc))
+    return {"error": call.error, "message": _clip(message, _AWS_MESSAGE_CHARACTERS)}
+
+
+def _reported(call: ToolCall, result: dict[str, Any]) -> dict[str, Any]:
+    """
+    Fills in the call from the tool's result, and returns the result as the model reads it: JSON-ready, with the
+    report's `_summary` and `_next` taken out. Sections the analyzer couldn't read (its `errors`) become the call's
+    error, and the result's COVERAGE keys (its window, regions, whether it was cut short) are what the report shows.
+    """
+    unread = result.get("errors") if isinstance(result.get("errors"), dict) else None
+    if unread and not call.error:
+        call.error = "; ".join(f"{section}: {why}" for section, why in unread.items())
+    call.next = list(result.pop("_next", []) or [])
+    call.summary = result.pop("_summary", None) or call.summary or (call.error or "")
+    call.coverage = {k: result[k] for k in COVERAGE if k in result}
+    return _plain(result)
 
 
 def _defaults(fn: Callable[..., Any]) -> dict[str, Any]:

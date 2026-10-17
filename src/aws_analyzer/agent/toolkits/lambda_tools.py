@@ -4,6 +4,11 @@ there are (find_functions), how every function did in a window, from CloudWatch 
 errors, runs, run times, settings and code (function_errors, function_logs, function_performance, function_details,
 function_code). The summarize_* functions turn what LambdaAnalyzer returns into the compact dicts the model reads;
 they're pure, so they run on any Function, ErrorReport, LogPage, Performance, FunctionDetail or CodeMap.
+
+TOOL_READS is what each tool reads, for tools() and README: what its LambdaAnalyzer method calls. The analyzer's
+types are imported for the type hints only, since the analyzer loads when the first tool runs (_lambda_module).
+_PERMISSIONS maps a result's error sections to the permission each needs, and _OVERVIEW_PERMISSIONS the sections of
+overview()'s 'region:section' errors.
 """
 
 from __future__ import annotations
@@ -23,12 +28,11 @@ from ..budget import Budget, _Refused
 from ..results import _iso, _window, _with_permissions, hide_secrets
 from .base import Toolkit
 
-if TYPE_CHECKING:  # for the type hints only: the Lambda analyzer loads when the first tool runs
+if TYPE_CHECKING:
     from ...lambda_functions import (
         CodeMap, ErrorReport, Function, FunctionDetail, FunctionMetrics, LambdaAnalyzer, LogPage, Performance,
     )
 
-# What each tool reads, for tools() and README. A tool's own reads are what its analyzer method makes.
 TOOL_READS: dict[str, tuple[str, ...]] = {
     "find_functions": ("lambda:ListFunctions", "lambda:ListEventSourceMappings", "lambda:GetAccountSettings",
                        "logs:DescribeLogGroups"),
@@ -57,9 +61,7 @@ def _lambda_module() -> Any:
     return lambda_functions
 
 
-# =============================================================================
-# What the tools return: LambdaAnalyzer's results as compact JSON (pure)
-# =============================================================================
+_NEAR_TIMEOUT = 0.9
 
 
 def _metrics_dict(m: FunctionMetrics | None) -> dict[str, Any] | None:
@@ -107,12 +109,11 @@ def summarize_functions(functions: list[Function], regions: list[str], errors: d
     return out
 
 
-def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetrics], start: datetime,
-                     end: datetime, regions: list[str], errors: dict[str, str] | None = None,
-                     *, limit: int = 25) -> dict[str, Any]:
+def _health_groups(functions: list[Function],
+                   metrics: dict[str, FunctionMetrics]) -> tuple[list[dict], list[dict], list[dict], list[str]]:
     """
-    function_health()'s answer: CloudWatch's counts for every function in a window, grouped into the ones that
-    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called.
+    (failed, throttled, near_timeout, not_called): each function with CloudWatch numbers, as a row of them, in
+    every group it belongs to. Near its timeout is a longest run of _NEAR_TIMEOUT of the timeout or more.
     """
     failed, throttled, near, idle = [], [], [], []
     for fn in functions:
@@ -126,10 +127,21 @@ def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetri
             failed.append(row)
         if m.throttles:
             throttled.append(row)
-        if m.duration_max is not None and m.duration_max >= 0.9 * fn.timeout * 1000:
+        if m.duration_max is not None and m.duration_max >= _NEAR_TIMEOUT * fn.timeout * 1000:
             near.append(row)
         if not m.invocations:
             idle.append(fn.name)
+    return failed, throttled, near, idle
+
+
+def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetrics],  # noqa: PLR0913
+                     start: datetime, end: datetime, regions: list[str], errors: dict[str, str] | None = None,
+                     *, limit: int = 25) -> dict[str, Any]:
+    """
+    function_health()'s answer: CloudWatch's counts for every function in a window, grouped into the ones that
+    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called.
+    """
+    failed, throttled, near, idle = _health_groups(functions, metrics)
     failed.sort(key=lambda r: (-r["errors"], r["name"]))
     throttled.sort(key=lambda r: (-r["throttles"], r["name"]))
     near.sort(key=lambda r: -(r["longest_ms"] or 0) / max(r["timeout_ms"], 1))
@@ -295,22 +307,19 @@ def summarize_code(cmap: CodeMap) -> dict[str, Any]:
     }
 
 
-_PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}  # error section -> permission
+_PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}
 _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:ListEventSourceMappings",
                          "account": "lambda:GetAccountSettings", "logs": "logs:DescribeLogGroups",
-                         "metrics": "cloudwatch:GetMetricData"}  # overview()'s 'region:section' errors
-
-
-
-# =============================================================================
-# LambdaToolkit
-# =============================================================================
+                         "metrics": "cloudwatch:GetMetricData"}
 
 
 class LambdaToolkit(Toolkit):
     """
     The agent's tools for AWS Lambda, reading through LambdaAnalyzer: `analyzer` is one to use (else one is made
-    on the agent's session), `clients` its clients (for tests) and `prices` its prices.
+    on the agent's session), `clients` its clients (for tests) and `prices` its prices. LambdaAnalyzer makes a
+    client per service and region through its _service, which the guard hooks.
+
+    Each tool is a method: its name, type hints and docstring are what the model reads.
     """
 
     name = "lambda"
@@ -324,7 +333,7 @@ class LambdaToolkit(Toolkit):
     services = {"FilterLogEvents": "logs", "DescribeLogGroups": "logs", "DescribeLogStreams": "logs",
                 "GetMetricData": "cloudwatch", "DescribeRegions": "ec2"}
     view = "LambdaView"
-    client_factory = "_service"  # LambdaAnalyzer makes a client per service and region through it
+    client_factory = "_service"
 
     def __init__(self, analyzer: LambdaAnalyzer | None = None, *, clients: dict[str, Any] | None = None,
                  prices: dict[str, float] | None = None):
@@ -352,162 +361,151 @@ AWS Lambda
   counts (function_health) cover longer windows. If a tool refuses a window, explain why and what the user can do.
 - Name functions exactly as the tools return them."""
 
-    # ------------------------------------------------------------------ the tools
-
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_functions, function_health, function_errors, function_logs, function_performance, function_details
-        and function_code: plain functions (their type hints and docstrings tell the model how to call them), each
+        and function_code: methods whose type hints and docstrings tell the model how to call them, each
         reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
+        return [self.find_functions, self.function_health, self.function_errors, self.function_logs,
+                self.function_performance, self.function_details, self.function_code]
 
-        def find_functions(match: str = "", regions: str = "") -> dict[str, Any]:
-            """
-            Lists the Lambda functions in the account: name, region, runtime (and whether AWS still supports
-            it), memory, timeout, when each was last changed and its description. match: a name glob like 'etl-*'.
-            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
-            """
-            core = self.analyzer
-            ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
-            out = summarize_functions(ov.functions, ov.regions, ov.errors)
-            out["_summary"] = f"{_plural(len(ov.functions), 'function')} in {', '.join(ov.regions)}"
-            out["_next"] = [(self._view_call("functions", match or None, regions=regions or None),
-                             "every function with its calls, errors, cost and warnings")]
-            return out
+    def find_functions(self, match: str = "", regions: str = "") -> dict[str, Any]:
+        """
+        Lists the Lambda functions in the account: name, region, runtime (and whether AWS still supports
+        it), memory, timeout, when each was last changed and its description. match: a name glob like 'etl-*'.
+        regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
+        """
+        core = self.analyzer
+        ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
+        out = summarize_functions(ov.functions, ov.regions, ov.errors)
+        out["_summary"] = f"{_plural(len(ov.functions), 'function')} in {', '.join(ov.regions)}"
+        out["_next"] = [(self._view_call("functions", match or None, regions=regions or None),
+                         "every function with its calls, errors, cost and warnings")]
+        return out
 
-        def function_health(since: str = "24h", until: str = "", match: str = "", regions: str = "") -> dict[str, Any]:
-            """
-            How every Lambda function did in a time window, from CloudWatch: calls, failed calls, throttles and
-            the longest run against its timeout, sorted into failed, throttled, near_timeout and not_called. Fast and
-            cheap: start here for "what failed", "what's slow" or "what's unused". since/until: ISO UTC times
-            ('2026-10-15T18:00Z') or relative ('24h', '7d'); until defaults to now. match: a name glob like 'etl-*'.
-            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
-            """
-            core = self.analyzer
-            start, end = core._window(since or "24h", until or None)
-            ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
-            found, read, _, errors = core._numbers(ov.functions, since=start, until=end)
-            self._count_metrics(read, core.prices["metric_request"])
-            out = summarize_health(ov.functions, found, start, end, ov.regions, {**ov.errors, **errors})
-            failed = out["failed"]
-            out["_summary"] = (f"{len(failed) + out.get('failed_more', 0)} of {_plural(len(ov.functions), 'function')} "
-                               "had failed calls" + (": " + ", ".join(f"{r['name']} ({r['errors']:,})" for r in failed[:3])
-                                                     if failed else ""))
-            out["_next"] = [(self._next_for(fn, "errors", since=_since(start)), "its errors, grouped by cause")
-                            for fn in ov.functions if fn.name in {r["name"] for r in failed[:2]}]
-            return out
+    def function_health(self, since: str = "24h", until: str = "", match: str = "",
+                        regions: str = "") -> dict[str, Any]:
+        """
+        How every Lambda function did in a time window, from CloudWatch: calls, failed calls, throttles and
+        the longest run against its timeout, sorted into failed, throttled, near_timeout and not_called. Fast and
+        cheap: start here for "what failed", "what's slow" or "what's unused". since/until: ISO UTC times
+        ('2026-10-15T18:00Z') or relative ('24h', '7d'); until defaults to now. match: a name glob like 'etl-*'.
+        regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
+        """
+        core = self.analyzer
+        start, end = core._window(since or "24h", until or None)
+        ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
+        found, read, _, errors = core._numbers(ov.functions, since=start, until=end)
+        self._count_metrics(read, core.prices["metric_request"])
+        out = summarize_health(ov.functions, found, start, end, ov.regions, {**ov.errors, **errors})
+        failed = out["failed"]
+        out["_summary"] = (f"{len(failed) + out.get('failed_more', 0)} of {_plural(len(ov.functions), 'function')} "
+                           "had failed calls" + (": " + ", ".join(f"{r['name']} ({r['errors']:,})" for r in failed[:3])
+                                                 if failed else ""))
+        out["_next"] = [(self._next_for(fn, "errors", since=_since(start)), "its errors, grouped by cause")
+                        for fn in ov.functions if fn.name in {r["name"] for r in failed[:2]}]
+        return out
 
-        def function_errors(function: str, since: str = "24h", until: str = "", region: str = "") -> dict[str, Any]:
-            """
-            One function's errors in a time window, read from its logs and grouped by cause (Timeout, KeyError,
-            AccessDenied, ...), with CloudWatch's count of failed and throttled calls over the same window. Each
-            cause has a count, when it first and last happened, an example line and request IDs to look up with
-            function_logs. since/until: ISO UTC times or relative ('24h'); the window can't be longer than the log
-            limit. region: empty for the default region.
-            """
-            core = self.analyzer
-            start, end = self._log_window(function, since, until, region or None)
-            report = core.errors(function, since=start, until=end, region=region or None)
-            out = summarize_errors(report)
-            causes = out["causes"]
-            kinds = Counter(c["kind"] for c in causes[:3])
+    def function_errors(self, function: str, since: str = "24h", until: str = "",
+                        region: str = "") -> dict[str, Any]:
+        """
+        One function's errors in a time window, read from its logs and grouped by cause (Timeout, KeyError,
+        AccessDenied, ...), with CloudWatch's count of failed and throttled calls over the same window. Each
+        cause has a count, when it first and last happened, an example line and request IDs to look up with
+        function_logs. since/until: ISO UTC times or relative ('24h'); the window can't be longer than the log
+        limit. region: empty for the default region.
+        """
+        core = self.analyzer
+        start, end = self._log_window(function, since, until, region or None)
+        report = core.errors(function, since=start, until=end, region=region or None)
+        out = summarize_errors(report)
+        causes = out["causes"]
+        kinds = Counter(c["kind"] for c in causes[:3])
+        out["_summary"] = (f"{_plural(sum(c['count'] for c in causes), 'error')}, {_plural(len(causes), 'cause')}"
+                           + (": " + ", ".join(_cause_label(c, kinds) for c in causes[:3]) if causes else ""))
+        out["_next"] = [(self._next_for(report.function, "errors", since=_since(start)),
+                         "the same errors as a report, with each cause's findings")]
+        if causes and causes[0]["request_ids"]:
+            out["_next"].insert(0, (self._next_for(report.function, "logs", request_id=causes[0]["request_ids"][0]),
+                                    f"one {causes[0]['kind']} run, start to end"))
+        return out
 
-            def label(cause: dict[str, Any]) -> str:  # the kind, and what tells it apart when two share a kind
-                kind = cause["kind"]
-                rest = re.sub(rf"^\W*{re.escape(kind)}\W*", "", cause["message"] or "").strip()
-                if kinds[kind] > 1 and rest:
-                    return f"{kind} ({_clip(rest, 40)}) ×{cause['count']}"
-                return f"{kind} ×{cause['count']}"
+    def function_logs(self, function: str, since: str = "1h", until: str = "", search: str = "",
+                      region: str = "") -> dict[str, Any]:
+        """
+        One function's runs in a time window, newest first, from its logs: each run's status (ok, failed,
+        timeout, logged an error), run time, memory, whether it was a cold start, and its last lines. search:
+        text the runs' lines must contain, such as a request ID, an order ID or 'KeyError' (case-sensitive).
+        since/until: ISO UTC times or relative ('1h'); the window can't be longer than the log limit. region:
+        empty for the default region.
+        """
+        core = self.analyzer
+        start, end = self._log_window(function, since, until, region or None)
+        page = core.log_runs(function, since=start, until=end, search=search or None, region=region or None)
+        out = summarize_runs(page)
+        statuses = out["statuses"]
+        out["_summary"] = (f"{_plural(out['runs_found'], 'run')}"
+                           + (f" ({', '.join(f'{n} {s}' for s, n in statuses.items())})" if statuses else ""))
+        out["_next"] = [(self._next_for(page.function, "logs", since=_since(start), search=search or None),
+                         "the same lines, as a report")]
+        return out
 
-            out["_summary"] = (f"{_plural(sum(c['count'] for c in causes), 'error')}, {_plural(len(causes), 'cause')}"
-                               + (": " + ", ".join(label(c) for c in causes[:3]) if causes else ""))
-            out["_next"] = [(self._next_for(report.function, "errors", since=_since(start)),
-                             "the same errors as a report, with each cause's findings")]
-            if causes and causes[0]["request_ids"]:
-                out["_next"].insert(0, (self._next_for(report.function, "logs", request_id=causes[0]["request_ids"][0]),
-                                        f"one {causes[0]['kind']} run, start to end"))
-            return out
+    def function_performance(self, function: str, since: str = "24h", until: str = "",
+                             region: str = "") -> dict[str, Any]:
+        """
+        One function's run times and memory in a time window, from the REPORT line Lambda logs after every
+        run: median, p95, p99 and longest run against its timeout, timeouts, cold starts, the most memory a run
+        used and the memory size it needs. since/until: ISO UTC times or relative ('24h'); the window can't be
+        longer than the log limit. region: empty for the default region.
+        """
+        core = self.analyzer
+        start, end = self._log_window(function, since, until, region or None)
+        perf = core.performance(function, since=start, until=end, region=region or None)
+        out = summarize_performance(perf, core.prices)
+        p95 = out["p95_ms"]
+        out["_summary"] = (f"{_plural(out['runs'], 'run')}"
+                           + (f", p95 {p95 / 1000:.1f}s of a {perf.function.timeout}s timeout" if p95 else ""))
+        out["_next"] = [(self._next_for(perf.function, "performance", since=_since(start)),
+                         "run times, memory and cold starts as a report")]
+        return out
 
-        def function_logs(function: str, since: str = "1h", until: str = "", search: str = "",
-                          region: str = "") -> dict[str, Any]:
-            """
-            One function's runs in a time window, newest first, from its logs: each run's status (ok, failed,
-            timeout, logged an error), run time, memory, whether it was a cold start, and its last lines. search:
-            text the runs' lines must contain, such as a request ID, an order ID or 'KeyError' (case-sensitive).
-            since/until: ISO UTC times or relative ('1h'); the window can't be longer than the log limit. region:
-            empty for the default region.
-            """
-            core = self.analyzer
-            start, end = self._log_window(function, since, until, region or None)
-            page = core.log_runs(function, since=start, until=end, search=search or None, region=region or None)
-            out = summarize_runs(page)
-            statuses = out["statuses"]
-            out["_summary"] = (f"{_plural(out['runs_found'], 'run')}"
-                               + (f" ({', '.join(f'{n} {s}' for s, n in statuses.items())})" if statuses else ""))
-            out["_next"] = [(self._next_for(page.function, "logs", since=_since(start), search=search or None),
-                             "the same lines, as a report")]
-            return out
+    def function_details(self, function: str, region: str = "") -> dict[str, Any]:
+        """
+        Everything about one function: its settings (runtime and its support dates, memory, timeout,
+        reserved concurrency), what triggers it, its aliases and versions, its last 30 days from CloudWatch, its
+        log group's retention and size, the estimated monthly cost by part, and every finding about it with the
+        next step. region: empty for the default region.
+        """
+        core = self.analyzer
+        detail = core.describe(function, region=region or None, days=30)
+        out = summarize_detail(detail, core.prices)
+        total = out["monthly_cost_usd"].get("total")
+        out["_summary"] = (f"{detail.function.runtime or 'container image'}, {detail.function.memory:,} MB, "
+                           f"{detail.function.timeout}s; {_plural(len(out['findings']), 'finding')}"
+                           + (f"; about {human_money(total)}/month" if total is not None else ""))
+        out["_next"] = [(self._next_for(detail.function, "function_info"), "the function in plain English")]
+        return out
 
-        def function_performance(function: str, since: str = "24h", until: str = "",
-                                 region: str = "") -> dict[str, Any]:
-            """
-            One function's run times and memory in a time window, from the REPORT line Lambda logs after every
-            run: median, p95, p99 and longest run against its timeout, timeouts, cold starts, the most memory a run
-            used and the memory size it needs. since/until: ISO UTC times or relative ('24h'); the window can't be
-            longer than the log limit. region: empty for the default region.
-            """
-            core = self.analyzer
-            start, end = self._log_window(function, since, until, region or None)
-            perf = core.performance(function, since=start, until=end, region=region or None)
-            out = summarize_performance(perf, core.prices)
-            p95 = out["p95_ms"]
-            out["_summary"] = (f"{_plural(out['runs'], 'run')}"
-                               + (f", p95 {p95 / 1000:.1f}s of a {perf.function.timeout}s timeout" if p95 else ""))
-            out["_next"] = [(self._next_for(perf.function, "performance", since=_since(start)),
-                             "run times, memory and cold starts as a report")]
-            return out
-
-        def function_details(function: str, region: str = "") -> dict[str, Any]:
-            """
-            Everything about one function: its settings (runtime and its support dates, memory, timeout,
-            reserved concurrency), what triggers it, its aliases and versions, its last 30 days from CloudWatch, its
-            log group's retention and size, the estimated monthly cost by part, and every finding about it with the
-            next step. region: empty for the default region.
-            """
-            core = self.analyzer
-            detail = core.describe(function, region=region or None, days=30)
-            out = summarize_detail(detail, core.prices)
-            total = out["monthly_cost_usd"].get("total")
-            out["_summary"] = (f"{detail.function.runtime or 'container image'}, {detail.function.memory:,} MB, "
-                               f"{detail.function.timeout}s; {_plural(len(out['findings']), 'finding')}"
-                               + (f"; about {human_money(total)}/month" if total is not None else ""))
-            out["_next"] = [(self._next_for(detail.function, "function_info"), "the function in plain English")]
-            return out
-
-        def function_code(function: str, region: str = "") -> dict[str, Any]:
-            """
-            What a Python function's code does, read from its deployment package with Python's ast module
-            (nothing is run): the AWS calls it makes, the environment variables it reads (names only), the event
-            fields it uses, the libraries it imports and findings such as HTTP calls without a timeout. Other
-            runtimes and container images give a note. region: empty for the default region.
-            """
-            core = self.analyzer
-            cmap = core.code_map(function, region=region or None)
-            out = summarize_code(cmap)
-            if "note" in out:
-                out["_summary"] = _clip(str(out["note"]), 80)
-            else:
-                out["_summary"] = (f"{_plural(len(out['aws_calls']), 'AWS call')}"
-                                   + (f" ({', '.join(out['aws_services'][:4])})" if out["aws_services"] else "")
-                                   + f", {_plural(len(out['env_vars_read']), 'environment variable')}")
-            if cmap.function is not None:
-                out["_next"] = [(self._next_for(cmap.function, "how_it_works"), "how the code works, step by step")]
-            return out
-
-        return [find_functions, function_health, function_errors, function_logs, function_performance,
-                function_details, function_code]
-
-    # ------------------------------------------------------------------ what the tools share
+    def function_code(self, function: str, region: str = "") -> dict[str, Any]:
+        """
+        What a Python function's code does, read from its deployment package with Python's ast module
+        (nothing is run): the AWS calls it makes, the environment variables it reads (names only), the event
+        fields it uses, the libraries it imports and findings such as HTTP calls without a timeout. Other
+        runtimes and container images give a note. region: empty for the default region.
+        """
+        core = self.analyzer
+        cmap = core.code_map(function, region=region or None)
+        out = summarize_code(cmap)
+        if "note" in out:
+            out["_summary"] = _clip(str(out["note"]), 80)
+        else:
+            out["_summary"] = (f"{_plural(len(out['aws_calls']), 'AWS call')}"
+                               + (f" ({', '.join(out['aws_services'][:4])})" if out["aws_services"] else "")
+                               + f", {_plural(len(out['env_vars_read']), 'environment variable')}")
+        if cmap.function is not None:
+            out["_next"] = [(self._next_for(cmap.function, "how_it_works"), "how the code works, step by step")]
+        return out
 
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -560,6 +558,18 @@ AWS Lambda
         A LambdaView call about a function, as it runs in a new cell (region= added when it's elsewhere).
         """
         return self._view_call(command, fn.name, *args, region=fn.region, **kwargs)
+
+
+def _cause_label(cause: dict[str, Any], kinds: Counter) -> str:
+    """
+    A cause of errors as the report's one line says it: its kind and count ('KeyError ×12'), with what tells it
+    apart when another of the causes shown has the same kind ('KeyError (order_id) ×12').
+    """
+    kind = cause["kind"]
+    rest = re.sub(rf"^\W*{re.escape(kind)}\W*", "", cause["message"] or "").strip()
+    if kinds[kind] > 1 and rest:
+        return f"{kind} ({_clip(rest, 40)}) ×{cause['count']}"
+    return f"{kind} ×{cause['count']}"
 
 
 def _since(start: datetime) -> str:

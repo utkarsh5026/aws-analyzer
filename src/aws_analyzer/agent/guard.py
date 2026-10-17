@@ -2,6 +2,10 @@
 The read-only guard: every AWS client a toolkit's analyzer makes for the agent is hooked, and any operation that
 isn't a read is refused before its request is built, whatever asks for it (the model, a tool, a bug). It also counts
 the reads it lets through, for the report's "AWS reads it made".
+
+READ_PREFIXES are the AWS operations the tools may call: reads only (FilterLogEvents reads a log group; HeadObject
+and HeadBucket read an object's or a bucket's headers). The guard refuses every other one before its request is
+built.
 """
 
 from __future__ import annotations
@@ -10,9 +14,7 @@ import threading
 from collections import Counter
 from typing import Any
 
-READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")  # the AWS operations the tools may call: reads only
-# (FilterLogEvents reads a log group; HeadObject and HeadBucket read an object's or a bucket's headers). The guard
-# refuses every other one before its request is built.
+READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")
 
 
 class ReadOnlyError(PermissionError):
@@ -56,12 +58,13 @@ class _GuardedSession:
 class _Guard:
     """
     Refuses every AWS call a tool's client would make that isn't a read, before its request is built, and counts
-    the ones it lets through. A toolkit hooks it onto its analyzer (attach) or onto a client it made (watch).
+    the ones it lets through. A toolkit hooks it onto its analyzer (attach) or onto a client it made (watch). Its
+    hook has one ID, so each client's event emitter keeps it once, however often it's asked to.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._hook = f"aws-analyzer-read-only-{id(self)}"  # each client's emitter keeps it once, however often asked
+        self._hook = f"aws-analyzer-read-only-{id(self)}"
         self.counts: Counter[str] = Counter()
         self.blocked: list[str] = []
 
@@ -84,12 +87,12 @@ class _Guard:
     def watch(self, client: Any) -> Any:
         """
         Hooks one boto3 client (once: its event emitter keeps the hook's unique_id, so asking again does nothing)
-        and returns it.
+        and returns it. Tools run side by side, so the hook is registered under the lock.
         """
         events = getattr(getattr(client, "meta", None), "events", None)
         if events is None:
             return client
-        with self._lock:  # tools run side by side: register each hook once
+        with self._lock:
             events.register_first("before-parameter-build.*.*", self._check, unique_id=self._hook)
         return client
 
@@ -99,6 +102,9 @@ class _Guard:
         hooked; the clients it already has are hooked (its main `client` when it's set in __init__, and the ones it
         keeps in dicts, like `_clients`); and, when it makes clients through a method (`factory`, LambdaAnalyzer's
         `_service`), every client that returns, which covers clients passed in (clients=) too. Returns `core`.
+
+        It reads the analyzer's attributes as they're stored, never a `client` property, since reading one could
+        make a client. A tool running beside this one can add a client while they're read; that one was made hooked.
         """
         if factory and not getattr(core, "_agent_guard", None):
             make = getattr(core, factory)
@@ -111,11 +117,11 @@ class _Guard:
         session = getattr(core, "session", None)
         if session is not None and not isinstance(session, _GuardedSession):
             core.session = _GuardedSession(session, self)
-        attributes = getattr(core, "__dict__", {})  # not a `client` property: reading one could make a client
+        attributes = getattr(core, "__dict__", {})
         for value in list(attributes.values()):
             try:
                 found = list(value.values()) if isinstance(value, dict) else [value]
-            except RuntimeError:  # a tool running beside this one added a client: it was made hooked
+            except RuntimeError:
                 continue
             for client in found:
                 if _is_client(client):

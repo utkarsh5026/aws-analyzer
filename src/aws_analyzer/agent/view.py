@@ -2,6 +2,9 @@
 AgentView: the agent's notebook UI. ask() shows the answer first, then what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
 View commands to look closer; transcript() and tools() show the questions so far and what the agent can call.
+
+Its reports sit in a box of the class _ROOT, which scopes its stylesheet's rules, and each title starts with
+_BADGE, so its reports are easy to tell from other analyzers'.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
 
-_ROOT = "agt"  # the class around each report's HTML: its stylesheet's rules are scoped to it
+_ROOT = "agt"
 _EXTRA_CSS = """\
 .agt .ans{font-size:14px;line-height:1.6;margin:8px 0 12px;max-width:900px;overflow-wrap:anywhere}
 .agt .ans>:first-child{margin-top:0}
@@ -43,7 +46,7 @@ _EXTRA_CSS = """\
 .agt .ans tbody tr:last-child td{border-bottom:0}
 .agt .ans th.r,.agt .ans td.r{text-align:right;font-variant-numeric:tabular-nums}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS)
-_BADGE = "🤖 Agent"  # the chip before each report's title, so reports from different analyzers are easy to tell apart
+_BADGE = "🤖 Agent"
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
@@ -113,8 +116,8 @@ class AgentView(_BaseView):
     progress: 'auto' (a progress bar while it works, when tqdm is installed), 'plain' or 'off'.
     """
 
-    _render_html = staticmethod(_render_html)  # its look: the stylesheet, root class and badge
-    _GROUPS = {  # help() lists the commands in these groups, in this order
+    _render_html = staticmethod(_render_html)
+    _GROUPS = {
         "💬 Ask": ("ask", "new_conversation"),
         "🔎 Look back": ("transcript",),
         "🧰 What it can do": ("tools",),
@@ -143,7 +146,6 @@ class AgentView(_BaseView):
                             f"{', '.join(f'{k}=...' for k in settings)})")
         self.core: AgentAnalyzer = core or AgentAnalyzer(**settings)
 
-    # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
         """
@@ -154,7 +156,6 @@ class AgentView(_BaseView):
             return f"{text} README lists the read-only IAM permissions each tool needs."
         return message
 
-    # ------------------------------------------------------------------ asking
 
     @_friendly_errors
     def ask(self, question: str, *, new: bool = False) -> None:
@@ -235,7 +236,6 @@ class AgentView(_BaseView):
         self.core.new_conversation()
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
-    # ------------------------------------------------------------------ looking back
 
     @_friendly_errors
     def transcript(self) -> None:
@@ -267,7 +267,6 @@ class AgentView(_BaseView):
                           _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
         self._show(blocks)
 
-    # ------------------------------------------------------------------ what it can do
 
     @_friendly_errors
     def tools(self) -> None:

@@ -6,8 +6,8 @@ hooked to the agent's read-only guard. It declares, as class attributes, how rep
 each tool's AWS reads and the IAM permissions its operations need, and it defines:
 
     make_analyzer(session)        the analyzer its tools read through
-    tools()                       its tools: plain functions whose names, type hints and docstrings are what the model
-                                  reads. Each returns a dict the model can read (results.py's helpers), with
+    tools()                       its tools: functions or methods whose names, type hints and docstrings are
+                                  what the model reads. Each returns a dict the model can read (results.py's helpers), with
                                   coverage keys (window, regions, cut_short, covered_from), and `_summary` (the report's
                                   one line) and `_next` ((View call, what it shows) pairs), which the agent takes out
     instructions(budget)          its section of the system prompt: how to use its tools well
@@ -40,23 +40,35 @@ class Toolkit:
     """
     The tools the agent has for one AWS service. A subclass sets the class attributes below and defines
     make_analyzer(), tools() and, when it helps, instructions() and not_found(); see this module's docstring.
-    `analyzer` is one to read through instead of the one make_analyzer() would make.
+    `analyzer` is one to read through instead of the one make_analyzer() would make, and `agent` is the
+    AgentAnalyzer that took the toolkit (bind()).
+
+        name            its key in TOOLKITS and AgentAnalyzer(toolkits=[...]): 'lambda'
+        title           how reports name it: 'Lambda'
+        covers          what it lets the agent answer, for the system prompt's first paragraph
+        privacy         what it never reads or sends to the model, for the tools() report's note
+        reads           tool name -> the AWS reads it makes (tools() and README list them)
+        service         the IAM prefix of most of its operations, for permission_for(): 'lambda'
+        services        operation -> its IAM prefix where that's another: {'FilterLogEvents': 'logs'}
+        permissions     operation -> its IAM permission where it isn't <prefix>:<operation>:
+                        {'ListObjectsV2': 's3:ListBucket'}
+        view            the View whose commands its tools suggest next: 'LambdaView'
+        client_factory  the analyzer's method that makes clients, which the guard hooks too
     """
 
-    name: str = ""  # its key in TOOLKITS and AgentAnalyzer(toolkits=[...]): 'lambda'
-    title: str = ""  # how reports name it: 'Lambda'
-    covers: str = ""  # what it lets the agent answer, for the system prompt's first paragraph
-    privacy: str = ""  # what it never reads or sends to the model, for the tools() report's note
-    reads: dict[str, tuple[str, ...]] = {}  # tool name -> the AWS reads it makes (tools() and README list them)
-    service: str = ""  # the IAM prefix of most of its operations, for permission_for(): 'lambda'
-    services: dict[str, str] = {}  # operation -> its IAM prefix where that's another: {'FilterLogEvents': 'logs'}
-    permissions: dict[str, str] = {}  # operation -> its IAM permission where it isn't <prefix>:<operation>:
-    # {'ListObjectsV2': 's3:ListBucket'}
-    view: str = ""  # the View whose commands its tools suggest next: 'LambdaView'
-    client_factory: str | None = None  # the analyzer's method that makes clients, which the guard hooks too
+    name: str = ""
+    title: str = ""
+    covers: str = ""
+    privacy: str = ""
+    reads: dict[str, tuple[str, ...]] = {}
+    service: str = ""
+    services: dict[str, str] = {}
+    permissions: dict[str, str] = {}
+    view: str = ""
+    client_factory: str | None = None
 
     def __init__(self, analyzer: Any = None):
-        self.agent: AgentAnalyzer | None = None  # set by bind(), when an AgentAnalyzer takes the toolkit
+        self.agent: AgentAnalyzer | None = None
         self._analyzer = analyzer
 
     def __repr__(self) -> str:
@@ -71,7 +83,6 @@ class Toolkit:
         self.agent = agent
         return self
 
-    # ------------------------------------------------------------------ what a toolkit defines
 
     def make_analyzer(self, session: Any) -> Any:
         """
@@ -81,7 +92,7 @@ class Toolkit:
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
-        Its tools, as plain functions (see this module's docstring).
+        Its tools, as functions or methods (see this module's docstring).
         """
         raise NotImplementedError
 
@@ -105,7 +116,6 @@ class Toolkit:
         apart, with _count_metrics).
         """
         return 0.0
-
 
     @property
     def analyzer(self) -> Any:
@@ -159,7 +169,6 @@ class Toolkit:
         service = self.services.get(op, self.service)
         return f"{service}:{op}" if op and service else ""
 
-    # ------------------------------------------------------------------ helpers for its tools
 
     def _regions(self, regions: str) -> Any:
         """

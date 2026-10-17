@@ -20,17 +20,24 @@ from .budget import Budget
 class ToolCall:
     """
     One call a tool made for a question: what it was asked, what it covered and found, or why it didn't run.
+
+        summary   one line: what it found
+        coverage  its window, regions, whether it was cut short, ...
+        error     why it failed: 'AccessDeniedException; needs logs:FilterLogEvents'
+        refused   why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window' or 'stopped'
+        next      View calls that show more, and what they show
+        first     the tool's first parameter when it has no default, which the call is written without the name of
     """
 
     name: str
     args: dict[str, Any] = field(default_factory=dict)
     seconds: float = 0.0
-    summary: str = ""  # one line: what it found
-    coverage: dict[str, Any] = field(default_factory=dict)  # window, regions, cut_short, ...
-    error: str | None = None  # why it failed: 'AccessDeniedException; needs logs:FilterLogEvents'
-    refused: str | None = None  # why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window', 'stopped'
-    next: list[tuple[str, str]] = field(default_factory=list)  # View calls that show more, and what they show
-    first: str | None = "function"  # the tool's first parameter when it has no default: written without its name
+    summary: str = ""
+    coverage: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    refused: str | None = None
+    next: list[tuple[str, str]] = field(default_factory=list)
+    first: str | None = "function"
 
     @property
     def ok(self) -> bool:
@@ -50,26 +57,38 @@ class ToolCall:
 class AgentAnswer:
     """
     One question and its answer, with every tool call it made, the AWS reads, the tokens and what it cost.
+
+        text          the answer, in markdown
+        aws_calls     the AWS reads it made: 'logs:FilterLogEvents' -> 12
+        blocked       AWS calls the read-only guard refused
+        metrics_read  CloudWatch metrics requested (GetMetricData bills per 1,000)
+        aws_cost      USD for those metrics ($0.01 per 1,000 at list price) and S3's requests; the rest are free
+        model         the deployment or model that answered
+        cost          estimated USD for the model's tokens; None when its prices aren't known
+        stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
+        error         what went wrong with the model or the agent loop, when something did
+        thread        the conversation it belongs to
+        exception     the error itself, to raise when debugging
     """
 
     question: str
-    text: str = ""  # the answer, in markdown
+    text: str = ""
     calls: list[ToolCall] = field(default_factory=list)
-    aws_calls: dict[str, int] = field(default_factory=dict)  # 'logs:FilterLogEvents' -> 12
-    blocked: list[str] = field(default_factory=list)  # AWS calls the read-only guard refused
-    metrics_read: int = 0  # CloudWatch metrics requested (GetMetricData bills per 1,000)
-    aws_cost: float = 0.0  # USD for those metrics ($0.01 per 1,000 at list price) and S3's requests; the rest are free
-    model: str = ""  # the deployment or model that answered
+    aws_calls: dict[str, int] = field(default_factory=dict)
+    blocked: list[str] = field(default_factory=list)
+    metrics_read: int = 0
+    aws_cost: float = 0.0
+    model: str = ""
     model_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    cost: float | None = None  # estimated USD for the model's tokens; None when its prices aren't known
+    cost: float | None = None
     seconds: float = 0.0
-    stopped: str | None = None  # None (it finished) | 'tool_calls' | 'time' | 'cost' | 'steps' | 'stopped' | 'error'
-    error: str | None = None  # what went wrong with the model or the agent loop, when something did
-    thread: str = ""  # the conversation it belongs to
+    stopped: str | None = None
+    error: str | None = None
+    thread: str = ""
     asked: datetime | None = None
-    exception: BaseException | None = field(default=None, repr=False)  # the error itself, to raise when debugging
+    exception: BaseException | None = field(default=None, repr=False)
 
 
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
@@ -130,11 +149,11 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
 def answer_next(answer: AgentAnswer, n: int = 3) -> list[tuple[str, str]]:
     """
     The commands worth running next: the View calls behind the tools the answer used, the most specific first,
-    without repeats.
+    without repeats: one per command and function (errors('etl') once, with the latest window).
     """
     seen: dict[str, tuple[str, str]] = {}
     for call in reversed(answer.calls):
-        for command, what in call.next:  # one per command and function: errors('etl') once, the latest window
+        for command, what in call.next:
             key = re.match(r"(?:\w+\(\)\.)?(\w+)\(('[^']*')?", command)
             seen.setdefault(key.group(0) if key else command, (command, what))
     return list(seen.values())[:n]
