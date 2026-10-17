@@ -435,7 +435,9 @@ def test_explorer_path_box(explorer):
 
 
 def pages(x):
-    """The bar under the list: its text, and which of « ‹ › » can be clicked."""
+    """
+    The bar under the list: its text, and which of « ‹ › » can be clicked.
+    """
     return x._range.value, [name for name, b in x._page_btns.items() if not b.disabled]
 
 
@@ -603,7 +605,9 @@ def test_explorer_filter_from_code(explorer, core, capsys):
 
 
 def test_explorer_searches_all_of_a_big_folder(explorer):
-    """The search covers the whole folder, not only the first page S3 returned (here 10 entries a page)."""
+    """
+    The search covers the whole folder, not only the first page S3 returned (here 10 entries a page).
+    """
     x = explorer("s3://lake/many/")
     x.nav.page_size = 10
     x.refresh()  # the rest is listed too, up to list_limit
@@ -661,8 +665,10 @@ def test_explorer_opens_a_file_past_what_is_listed(explorer):
 
 
 def test_explorer_lists_the_rest_in_the_background(explorer, core, monkeypatch):
-    """In a notebook, a big folder shows its first page at once and lists the rest on a worker thread; the list,
-    the counts and the search catch up as each page comes in."""
+    """
+    In a notebook, a big folder shows its first page at once and lists the rest on a worker thread; the list,
+    the counts and the search catch up as each page comes in.
+    """
     gate, real = threading.Event(), S3Navigator._request
 
     def slow(nav, folder, token, keys):
@@ -856,7 +862,9 @@ def test_s3_module_is_found_where_s3_py_is(monkeypatch):
 
 
 def pdf_bytes(*pages):
-    """A PDF with one page per text, xref offsets and all."""
+    """
+    A PDF with one page per text, xref offsets and all.
+    """
     count = len(pages)
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
                b"<< /Type /Pages /Kids [%s] /Count %d >>" % (b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(count)),
@@ -976,7 +984,9 @@ def test_explorer_expands_every_part_of_a_json_file(explorer, aws):
 
 
 def test_explorer_loads_previews_in_the_background(explorer, core, monkeypatch):
-    """In a notebook (a running event loop), a click returns at once; a file clicked since wins."""
+    """
+    In a notebook (a running event loop), a click returns at once; a file clicked since wins.
+    """
     monkeypatch.setattr(sx, "_WORKERS", 1)
     gate, real, asked = threading.Event(), core.preview, []
 

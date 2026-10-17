@@ -1,6 +1,8 @@
-"""What a question gives back (AgentAnswer, with a ToolCall per tool call), and what the reader should know about
+"""
+What a question gives back (AgentAnswer, with a ToolCall per tool call), and what the reader should know about
 how it was reached: answer_findings() and the commands worth running next, answer_next(). All pure: no AWS, no
-model."""
+model.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +18,9 @@ from .budget import Budget
 
 @dataclass
 class ToolCall:
-    """One call a tool made for a question: what it was asked, what it covered and found, or why it didn't run."""
+    """
+    One call a tool made for a question: what it was asked, what it covered and found, or why it didn't run.
+    """
 
     name: str
     args: dict[str, Any] = field(default_factory=dict)
@@ -34,7 +38,9 @@ class ToolCall:
 
     @property
     def call(self) -> str:
-        """The call as the model made it: "function_errors('orders-etl', since='2026-10-15T12:30Z')"."""
+        """
+        The call as the model made it: "function_errors('orders-etl', since='2026-10-15T12:30Z')".
+        """
         args = {k: v for k, v in self.args.items() if v not in ("", None)}
         first = args.pop(self.first, None) if self.first else None
         return _call(self.name, first, **args) if first is not None else _call(self.name, **args)
@@ -42,7 +48,9 @@ class ToolCall:
 
 @dataclass
 class AgentAnswer:
-    """One question and its answer, with every tool call it made, the AWS reads, the tokens and what it cost."""
+    """
+    One question and its answer, with every tool call it made, the AWS reads, the tokens and what it cost.
+    """
 
     question: str
     text: str = ""  # the answer, in markdown
@@ -65,9 +73,11 @@ class AgentAnswer:
 
 
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
-    """What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
+    """
+    What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
     was refused, a call the guard blocked, and an answer that used no tool. (level, message) pairs, each with what
-    to do about it."""
+    to do about it.
+    """
     budget = budget or Budget()
     found: list[tuple[str, str]] = []
     stops = {
@@ -118,8 +128,10 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
 
 
 def answer_next(answer: AgentAnswer, n: int = 3) -> list[tuple[str, str]]:
-    """The commands worth running next: the View calls behind the tools the answer used, the most specific first,
-    without repeats."""
+    """
+    The commands worth running next: the View calls behind the tools the answer used, the most specific first,
+    without repeats.
+    """
     seen: dict[str, tuple[str, str]] = {}
     for call in reversed(answer.calls):
         for command, what in call.next:  # one per command and function: errors('etl') once, the latest window

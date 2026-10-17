@@ -74,7 +74,9 @@ OPEN_POLICY = json.dumps({"Version": "2012-10-17", "Statement": [
 
 
 def mapping(engine="faiss", space="cosinesimil", dims=DIMS, **extra_fields):
-    """A typical vector index: text with a keyword sub-field, a vector, filterable metadata."""
+    """
+    A typical vector index: text with a keyword sub-field, a vector, filterable metadata.
+    """
     return {"properties": {
         "text": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
         "embedding": {"type": "knn_vector", "dimension": dims, "method": {
@@ -87,7 +89,9 @@ def mapping(engine="faiss", space="cosinesimil", dims=DIMS, **extra_fields):
 
 
 def corpus(n=60, *, missing=(5, 9), duplicate=True, seed=1):
-    """Documents about four topics: their vectors sit near one axis per topic, so neighbours share a topic."""
+    """
+    Documents about four topics: their vectors sit near one axis per topic, so neighbours share a topic.
+    """
     rng = random.Random(seed)
     docs = []
     for i in range(n):
@@ -120,8 +124,10 @@ def cluster(**kwargs):
 
 
 class Fake:
-    """A boto3 client answering from functions in any order. Every request and response is checked against the
-    service model, and calls are recorded. Operations without a handler don't exist on it, like on an old boto3."""
+    """
+    A boto3 client answering from functions in any order. Every request and response is checked against the
+    service model, and calls are recorded. Operations without a handler don't exist on it, like on an old boto3.
+    """
 
     def __init__(self, service, handlers):
         model = boto3.client(service, region_name=REGION).meta.service_model
@@ -164,7 +170,9 @@ def collection_detail(name="kb-vectors", cid="abc123def456ghi789jk", kind="VECTO
 
 
 def serverless(collections=(), policies=None, capacity=(10.0, 10.0), fail=None):
-    """A fake opensearchserverless client: collections (collection_detail dicts) and network policies."""
+    """
+    A fake opensearchserverless client: collections (collection_detail dicts) and network policies.
+    """
     details = list(collections)
     policies = policies if policies is not None else {
         "public-access": [{"Rules": [{"ResourceType": "collection", "Resource": ["collection/kb-*"]}],
@@ -216,8 +224,10 @@ def sts():
 
 
 def bedrock(cohere=False):
-    """A fake bedrock-runtime: InvokeModel returns a unit vector pointing at topic 0 ('refunds'), of the size the
-    model returns by default unless the request asks for another."""
+    """
+    A fake bedrock-runtime: InvokeModel returns a unit vector pointing at topic 0 ('refunds'), of the size the
+    model returns by default unless the request asks for another.
+    """
     def invoke(modelId, body, contentType=None, accept=None):
         request = json.loads(body)
         default = 1536 if "v4" in modelId or modelId.endswith("text-v1") else 1024
@@ -254,7 +264,9 @@ def make_domain(aws, name="vectors-prod", **kwargs):
 
 @pytest.fixture
 def core(aws):
-    """One domain (vectors-prod) over a fake cluster, and no Serverless collections."""
+    """
+    One domain (vectors-prod) over a fake cluster, and no Serverless collections.
+    """
     make_domain(aws)
     fake = cluster()
     analyzer = OpenSearchAnalyzer(region=REGION, http=fake, clients={

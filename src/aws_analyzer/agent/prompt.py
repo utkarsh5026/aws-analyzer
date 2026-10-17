@@ -1,5 +1,7 @@
-"""What the model is told: the system prompt (the rules every answer follows, then a section per toolkit on using its
-tools well, then how to answer) and the line that starts each question, saying when it was asked."""
+"""
+What the model is told: the system prompt (the rules every answer follows, then a section per toolkit on using its
+tools well, then how to answer) and the line that starts each question, saying when it was asked.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +16,11 @@ if TYPE_CHECKING:
 
 
 def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
-    """The line that starts each question sent to the model: when it was asked, in the user's time zone and in UTC,
+    """
+    The line that starts each question sent to the model: when it was asked, in the user's time zone and in UTC,
     so "last night" and "this morning" mean what the user meant. zone is a tzinfo or anything set_timezone() takes
-    ('Asia/Kolkata', 'kolkata', '+05:30'); None is this machine's own zone."""
+    ('Asia/Kolkata', 'kolkata', '+05:30'); None is this machine's own zone.
+    """
     utc = now.astimezone(timezone.utc)
     tz = _zone_from(zone) if isinstance(zone, str) else zone
     local = now.astimezone(tz)
@@ -30,10 +34,12 @@ def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
 
 def system_prompt(regions: list[str], *, notes: str = "", budget: Budget | None = None,
                   toolkits: Iterable[Toolkit] | None = None) -> str:
-    """The instructions the agent starts every conversation with: what it covers, the rules every answer follows,
+    """
+    The instructions the agent starts every conversation with: what it covers, the rules every answer follows,
     each toolkit's advice on using its tools (toolkits: the agent's; None for the default ones), and how to answer.
     It never changes between questions (the time goes in each question instead), so a model that caches prompts
-    reuses it."""
+    reuses it.
+    """
     if toolkits is None:
         from .toolkits import default_toolkits
 

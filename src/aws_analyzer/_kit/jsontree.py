@@ -1,4 +1,5 @@
-"""JSON as a tree you can fold, coloured like code: the _JsonTree block, which S3's preview of a .json file and
+"""
+JSON as a tree you can fold, coloured like code: the _JsonTree block, which S3's preview of a .json file and
 Lambda's configuration draw with. In HTML each object and array is a <details>, so a click folds or unfolds it with no
 script (it still works in a saved notebook); in text it's indented JSON, all of it unfolded.
 
@@ -27,7 +28,9 @@ _JSON_FULL = 20_000  # characters of one string shown at most
 
 @dataclass
 class _JNode:
-    """One line of a _JsonTree: a value, or an object / array whose children are the lines under it."""
+    """
+    One line of a _JsonTree: a value, or an object / array whose children are the lines under it.
+    """
 
     path: str  # how Python reaches it in the loaded file: data['Records'][0]
     key: str | None = None  # its key in an object, as JSON ('"name"')
@@ -45,7 +48,9 @@ class _JNode:
 
 
 def _json_tokens(value: Any) -> list[tuple[str, str]]:
-    """A plain value (or an empty object or array) as coloured pieces of JSON."""
+    """
+    A plain value (or an empty object or array) as coloured pieces of JSON.
+    """
     if isinstance(value, str):
         return [("js", json.dumps(value, ensure_ascii=False))]
     if isinstance(value, bool) or value is None:
@@ -58,7 +63,9 @@ def _json_tokens(value: Any) -> list[tuple[str, str]]:
 
 
 def _json_inline(values: list) -> list[tuple[str, str]] | None:
-    """A short array of plain values as one line ([3, 224, 224]); None when it's long or holds objects."""
+    """
+    A short array of plain values as one line ([3, 224, 224]); None when it's long or holds objects.
+    """
     if len(values) > _JSON_INLINE // 3 or any(isinstance(v, (dict, list)) and v for v in values):
         return None
     pieces = [("jp", "[")]
@@ -69,7 +76,9 @@ def _json_inline(values: list) -> list[tuple[str, str]] | None:
 
 
 def _json_inside(text: str) -> Any:
-    """The JSON object or array a string holds (an SNS message, an SQS body, a Step Functions input), else None."""
+    """
+    The JSON object or array a string holds (an SNS message, an SQS body, a Step Functions input), else None.
+    """
     text = text.strip()
     if len(text) < 3 or text[0] + text[-1] not in ("{}", "[]"):
         return None
@@ -80,13 +89,16 @@ def _json_inside(text: str) -> Any:
 
 
 def _json_more(node: _JNode) -> str:
-    """'… 980 more items', or '… 980+ more items' in an array that was cut off (the file has more)."""
+    """
+    '… 980 more items', or '… 980+ more items' in an array that was cut off (the file has more).
+    """
     more = _plural(node.more, "more key" if node.kind == "object" else "more item")
     return "… " + (more.replace(" ", "+ ", 1) if node.cut else more)
 
 
 class _JsonTree:
-    """A render block: a JSON value as a tree you can fold, coloured like code. It holds the value's lines, each
+    """
+    A render block: a JSON value as a tree you can fold, coloured like code. It holds the value's lines, each
     array capped at `items`, each object at _JSON_KEYS (or `items` when that's bigger) and the whole tree at
     _JSON_ROWS. A string that holds a JSON object or array shows
     as the JSON it holds. `cut` is how many of the objects and arrays along the end were cut off (the start of a
@@ -94,7 +106,8 @@ class _JsonTree:
 
     `name` is what the value is called in Python, where each line's path (its tooltip) starts: S3's preview loads a
     file as `data`, Lambda's configuration is a Function's `raw`. `collapsed=True` folds the whole tree under its
-    title, a secondary view like a collapsed _Text."""
+    title, a secondary view like a collapsed _Text.
+    """
 
     def __init__(self, value: Any, items: int = 20, cut: int = 0, title: str = "", *, name: str = "data",
                  collapsed: bool = False):
@@ -143,7 +156,9 @@ class _JsonTree:
         return node
 
     def _string(self, node: _JNode, value: str) -> _JNode:
-        """A string; a long one folds to its start, and unfolds to its text as it reads (line breaks, not \\n)."""
+        """
+        A string; a long one folds to its start, and unfolds to its text as it reads (line breaks, not \\n).
+        """
         if len(value) <= _JSON_STRING:
             node.tokens = _json_tokens(value)
             return node
@@ -159,16 +174,20 @@ class _JsonTree:
             nodes += node.children
 
     def unfold(self, how: str = "all") -> None:
-        """Unfold every object and array ('all'), or fold the tree back to how it starts ('start'). Long strings
-        stay folded to their start either way: a click shows one."""
+        """
+        Unfold every object and array ('all'), or fold the tree back to how it starts ('start'). Long strings
+        stay folded to their start either way: a click shows one.
+        """
         for node in self._nodes():
             node.open = how == "all" and node.kind in ("object", "array")
         if how != "all":
             self._unfold()
 
     def _unfold(self) -> None:
-        """Unfolds the shallow levels first: each object or array whose lines still fit in _JSON_OPEN. In an array
-        of more than three, only the first item can unfold, as a sample: the rest stay one line each."""
+        """
+        Unfolds the shallow levels first: each object or array whose lines still fit in _JSON_OPEN. In an array
+        of more than three, only the first item can unfold, as a sample: the rest stay one line each.
+        """
         shown, level = 1, [self.root]
         while level:
             below: list[_JNode] = []
@@ -187,9 +206,11 @@ _JSON_END = "… the file goes on past what the preview read"
 
 
 def _json_tree_html(tree: _JsonTree) -> str:
-    """A _JsonTree as nested <details>: a click on an object's or array's line folds or unfolds it. The browser
+    """
+    A _JsonTree as nested <details>: a click on an object's or array's line folds or unfolds it. The browser
     does that itself, so it needs no script and still works in a saved notebook. Counts and array indexes are CSS
-    content (attr()), so a copied selection is plain JSON; each line's tooltip is its path in Python."""
+    content (attr()), so a copied selection is plain JSON; each line's tooltip is its path in Python.
+    """
     out: list[str] = []
 
     def walk(node: _JNode, last: bool) -> None:
@@ -235,7 +256,9 @@ def _json_tree_html(tree: _JsonTree) -> str:
 
 
 def _json_tree_text(tree: _JsonTree) -> str:
-    """A _JsonTree as indented JSON, all of it unfolded."""
+    """
+    A _JsonTree as indented JSON, all of it unfolded.
+    """
     lines: list[str] = []
 
     def walk(node: _JNode, depth: int, last: bool) -> None:
@@ -285,7 +308,9 @@ def _json_tree_lines(block: _JsonTree, report: _Report) -> list[str]:
 
 
 def _json_tree_css(root: str) -> str:
-    """The rules a _JsonTree is drawn with, for the service whose reports' root class is `root`."""
+    """
+    The rules a _JsonTree is drawn with, for the service whose reports' root class is `root`.
+    """
     return _JSON_TREE_CSS.replace("{root}", root)
 
 

@@ -1,6 +1,8 @@
-"""AgentAnalyzer: the agent's logic layer. It holds the settings and puts the parts together (the toolkits and their
+"""
+AgentAnalyzer: the agent's logic layer. It holds the settings and puts the parts together (the toolkits and their
 tools, the read-only guard, the budget, the model and the deepagents loop) and answers questions as AgentAnswer data.
-It never prints; AgentView shows what it returns."""
+It never prints; AgentView shows what it returns.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +28,8 @@ if TYPE_CHECKING:
 
 
 class AgentAnalyzer(_BaseAnalyzer):
-    """Answers questions about your AWS account with an agent: a model (an Azure OpenAI deployment) calling read-only
+    """
+    Answers questions about your AWS account with an agent: a model (an Azure OpenAI deployment) calling read-only
     tools built on the package's analyzers, in LangChain's deepagents loop. Every method returns data; nothing is
     printed.
 
@@ -98,7 +101,9 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.history: list[AgentAnswer] = []  # every question asked, in order
 
     def toolkit(self, name: str) -> Toolkit:
-        """One of the agent's toolkits, by its name ('lambda', 's3')."""
+        """
+        One of the agent's toolkits, by its name ('lambda', 's3').
+        """
         for toolkit in self.toolkits:
             if toolkit.name == name:
                 return toolkit
@@ -106,38 +111,52 @@ class AgentAnalyzer(_BaseAnalyzer):
 
     @property
     def region(self) -> str:
-        """The region its first toolkit reads by default (the session's)."""
+        """
+        The region its first toolkit reads by default (the session's).
+        """
         return self.toolkits[0].region
 
     @property
     def client(self) -> Any:
-        """The main client of its first toolkit (Lambda's, in the default region)."""
+        """
+        The main client of its first toolkit (Lambda's, in the default region).
+        """
         return self.toolkits[0].client
 
     def default_regions(self) -> list[str]:
-        """The regions it checks unless a question names others: regions= as its first toolkit reads it."""
+        """
+        The regions it checks unless a question names others: regions= as its first toolkit reads it.
+        """
         return self.toolkits[0].regions(self.regions)
 
     @property
     def zone(self) -> tzinfo | None:
-        """The user's time zone, which "last night" and "today" are read in: timezone= when given, else the zone
-        reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone."""
+        """
+        The user's time zone, which "last night" and "today" are read in: timezone= when given, else the zone
+        reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone.
+        """
         return _zone_from(self.timezone) if self.timezone is not None else _display_zone()
 
     @property
     def reads(self) -> dict[str, tuple[str, ...]]:
-        """Each tool's AWS reads, from every toolkit: {'function_health': ('lambda:ListFunctions', ...), ...}."""
+        """
+        Each tool's AWS reads, from every toolkit: {'function_health': ('lambda:ListFunctions', ...), ...}.
+        """
         return {name: reads for toolkit in self.toolkits for name, reads in toolkit.reads.items()}
 
     # ------------------------------------------------------------------ the model and the loop
 
     @property
     def model(self) -> str:
-        """The deployment or model that answers: the Azure deployment name, or the chat model's own name."""
+        """
+        The deployment or model that answers: the Azure deployment name, or the chat model's own name.
+        """
         return model_name(self.chat_model, self.deployment)
 
     def _chat(self) -> Any:
-        """The LangChain chat model: chat_model= when given, else AzureChatOpenAI from the settings."""
+        """
+        The LangChain chat model: chat_model= when given, else AzureChatOpenAI from the settings.
+        """
         if self.chat_model is None:
             self.chat_model = azure_chat_model(endpoint=self.endpoint, deployment=self.deployment,
                                                api_version=self.api_version, api_key=self._api_key,
@@ -145,12 +164,16 @@ class AgentAnalyzer(_BaseAnalyzer):
         return self.chat_model
 
     def instructions(self) -> str:
-        """The system prompt the agent starts every conversation with (system_prompt() for its toolkits)."""
+        """
+        The system prompt the agent starts every conversation with (system_prompt() for its toolkits).
+        """
         return system_prompt(self.default_regions(), notes=self.notes, budget=self.budget, toolkits=self.toolkits)
 
     def _harness(self) -> Any:
-        """The deepagents agent: the model, the tools, the instructions and a memory of the conversation. Made once;
-        new_conversation() starts a new thread in it."""
+        """
+        The deepagents agent: the model, the tools, the instructions and a memory of the conversation. Made once;
+        new_conversation() starts a new thread in it.
+        """
         if self._graph is None:
             harness.check_ready()  # says what's missing before anything else is made
             prompt = self.instructions()
@@ -158,7 +181,9 @@ class AgentAnalyzer(_BaseAnalyzer):
         return self._graph
 
     def new_conversation(self) -> str:
-        """Starts a new conversation: the next question won't see the earlier ones. Returns its ID."""
+        """
+        Starts a new conversation: the next question won't see the earlier ones. Returns its ID.
+        """
         self.thread = uuid.uuid4().hex[:12]
         return self.thread
 
@@ -173,10 +198,12 @@ class AgentAnalyzer(_BaseAnalyzer):
         progress: Callable[..., None] | None = None,
         now: datetime | None = None,
     ) -> AgentAnswer:
-        """Answers a question: the model calls the tools until it can answer, within the budget. Follow-up questions
+        """
+        Answers a question: the model calls the tools until it can answer, within the budget. Follow-up questions
         continue the conversation (new=True starts a new one). Set `stop` (a threading.Event) to stop it early, or
         interrupt the kernel: either way the answer covers what it read until then. progress(count) is told each
-        step. A model or loop that fails gives an answer with .error set (and .exception) instead of raising."""
+        step. A model or loop that fails gives an answer with .error set (and .exception) instead of raising.
+        """
         question = str(question or "").strip()
         if not question:
             raise ValueError("ask() needs a question, like ask('Which Lambda failed last night?')")
@@ -210,10 +237,12 @@ class AgentAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ the tools
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
-        """The tools the agent can call, from every toolkit: plain Python functions (type hints and docstrings say how
+        """
+        The tools the agent can call, from every toolkit: plain Python functions (type hints and docstrings say how
         to call them), each reading through a package analyzer and returning a compact, JSON-ready summary with what
         it covered. Each one counts against the question's budget, and an error becomes part of its answer rather
-        than an exception."""
+        than an exception.
+        """
         if self._tools is None:
             tools: list[Callable[..., dict[str, Any]]] = []
             owners: dict[str, str] = {}
@@ -228,5 +257,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         return list(self._tools)
 
     def _current_run(self) -> _Run:
-        """The question being answered, or a run of its own for a tool called outside ask()."""
+        """
+        The question being answered, or a run of its own for a tool called outside ask().
+        """
         return self._run or _Run(self.budget)

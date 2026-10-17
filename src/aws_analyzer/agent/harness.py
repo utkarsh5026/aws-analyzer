@@ -1,7 +1,9 @@
-"""The agent loop: LangChain's deepagents, built once with the model, the tools and the system prompt, and one
+"""
+The agent loop: LangChain's deepagents, built once with the model, the tools and the system prompt, and one
 question streamed through it (stream_turn), counting the model's calls and tokens and stopping when asked or out of
 time. What changes how the agent works rather than what it can read (a subagent, a middleware, another memory)
-goes in build_graph(); everything about LangGraph's messages stays in this file."""
+goes in build_graph(); everything about LangGraph's messages stays in this file.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +21,9 @@ HIDDEN_TOOLS = frozenset({"task", "execute"})  # deepagents' tools the model nev
 
 
 def check_ready() -> None:
-    """ImportError saying what's missing when this Python or its packages can't run the agent."""
+    """
+    ImportError saying what's missing when this Python or its packages can't run the agent.
+    """
     if sys.version_info < _MIN_PYTHON:
         raise ImportError("The agent needs Python 3.11 or newer: it runs on deepagents, which does. This is "
                           f"Python {sys.version_info.major}.{sys.version_info.minor}")
@@ -29,9 +33,11 @@ def check_ready() -> None:
 
 def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,
                 hidden: Iterable[str] = HIDDEN_TOOLS) -> Any:
-    """The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
+    """
+    The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
     InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
-    is never shown."""
+    is never shown.
+    """
     check_ready()
     deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
     memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
@@ -48,10 +54,12 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
 def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,
                 model_prices: dict[str, tuple[float, float]] | None = None,
                 progress: Callable[..., None] | None = None) -> str:
-    """Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
+    """
+    Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
     text. Fills `answer` as it goes (model calls, tokens, the model that served it) and keeps `run.cost` current
     for the tools' cost budget. Stops when `run.stop` is set, the kernel is interrupted or the time budget is well
-    past; a model or loop that fails sets answer.error and answer.exception instead of raising."""
+    past; a model or loop that fails sets answer.error and answer.exception instead of raising.
+    """
     budget = run.budget
     base = answer.model
     steps = 0
@@ -95,7 +103,9 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
 
 
 def _update_messages(node: Any) -> list[Any]:
-    """The messages a LangGraph stream update carries for one node (a list, or an Overwrite wrapping one)."""
+    """
+    The messages a LangGraph stream update carries for one node (a list, or an Overwrite wrapping one).
+    """
     if not isinstance(node, dict):
         return []
     messages = node.get("messages") or []
@@ -104,7 +114,9 @@ def _update_messages(node: Any) -> list[Any]:
 
 
 def _message_text(message: Any) -> str:
-    """The text of a model message: its content when that's a string, else its text blocks joined."""
+    """
+    The text of a model message: its content when that's a string, else its text blocks joined.
+    """
     content = getattr(message, "content", "")
     if isinstance(content, str):
         return content.strip()
@@ -114,9 +126,11 @@ def _message_text(message: Any) -> str:
 
 
 def _hide_tools(names: set[str]) -> Any:
-    """A deepagents middleware that keeps these tools away from the model (and refuses a call to one anyway):
+    """
+    A deepagents middleware that keeps these tools away from the model (and refuses a call to one anyway):
     'task' (deepagents' general-purpose subagent, which the agent doesn't need) and 'execute' (shell commands, which
-    the in-memory files deepagents uses can't run anyway)."""
+    the in-memory files deepagents uses can't run anyway).
+    """
     types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
     messages = _require("langchain_core.messages", "The agent", package="aws-analyzer[agent]")
 

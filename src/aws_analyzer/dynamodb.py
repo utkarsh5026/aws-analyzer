@@ -109,14 +109,18 @@ DYNAMODB_PRICES: dict[str, float] = {
 
 
 def _units(value: float | None) -> str:
-    """Capacity units for display: 12.0 -> '12', 0.5 -> '0.5', 14457041.1 -> '14,457,041'."""
+    """
+    Capacity units for display: 12.0 -> '12', 0.5 -> '0.5', 14457041.1 -> '14,457,041'.
+    """
     if value is None:
         return "-"
     return f"{value:,.0f}" if abs(value) >= 100 else f"{value:,.1f}".removesuffix(".0")
 
 
 def _number(text: str) -> int | float:
-    """DynamoDB number string -> int when it's whole, else float: '42' -> 42, '1.50' -> 1.5."""
+    """
+    DynamoDB number string -> int when it's whole, else float: '42' -> 42, '1.50' -> 1.5.
+    """
     value = Decimal(text)
     return int(value) if value == value.to_integral_value() else float(value)
 
@@ -132,8 +136,10 @@ def _raw_bytes(value: Any) -> bytes:
 
 
 def from_dynamo(value: dict[str, Any]) -> Any:
-    """One DynamoDB-JSON value -> plain Python: {'N': '42'} -> 42, {'SS': ['a']} -> {'a'},
-    {'M': {'city': {'S': 'Pune'}}} -> {'city': 'Pune'}."""
+    """
+    One DynamoDB-JSON value -> plain Python: {'N': '42'} -> 42, {'SS': ['a']} -> {'a'},
+    {'M': {'city': {'S': 'Pune'}}} -> {'city': 'Pune'}.
+    """
     [(kind, raw)] = value.items()
     if kind == "M":
         return {name: from_dynamo(child) for name, child in raw.items()}
@@ -155,7 +161,9 @@ def from_dynamo(value: dict[str, Any]) -> Any:
 
 
 def from_dynamo_item(item: dict[str, dict]) -> dict[str, Any]:
-    """A whole item in DynamoDB JSON (the low-level API, or a line of an S3 export) -> plain dict."""
+    """
+    A whole item in DynamoDB JSON (the low-level API, or a line of an S3 export) -> plain dict.
+    """
     return {name: from_dynamo(value) for name, value in item.items()}
 
 
@@ -163,7 +171,9 @@ _SERIALIZER = TypeSerializer()
 
 
 def _decimals(value: Any) -> Any:
-    """floats -> Decimal, recursively (boto3 refuses floats)."""
+    """
+    floats -> Decimal, recursively (boto3 refuses floats).
+    """
     if isinstance(value, float):
         return Decimal(str(value))
     if isinstance(value, dict):
@@ -176,7 +186,9 @@ def _decimals(value: Any) -> Any:
 
 
 def to_dynamo(value: Any) -> dict[str, Any]:
-    """Plain Python -> DynamoDB-JSON value: 42 -> {'N': '42'}, 'x' -> {'S': 'x'}. Floats are fine."""
+    """
+    Plain Python -> DynamoDB-JSON value: 42 -> {'N': '42'}, 'x' -> {'S': 'x'}. Floats are fine.
+    """
     try:
         return _SERIALIZER.serialize(_decimals(value))
     except TypeError as exc:
@@ -187,7 +199,9 @@ def to_dynamo(value: Any) -> dict[str, Any]:
 
 
 def dynamo_type(value: Any) -> str:
-    """DynamoDB type code of a plain Python value: 'S', 'N', 'B', 'BOOL', 'NULL', 'M', 'L', 'SS', 'NS' or 'BS'."""
+    """
+    DynamoDB type code of a plain Python value: 'S', 'N', 'B', 'BOOL', 'NULL', 'M', 'L', 'SS', 'NS' or 'BS'.
+    """
     if value is None:
         return "NULL"
     if isinstance(value, bool):
@@ -215,7 +229,9 @@ def _number_size(value: Any) -> int:
 
 
 def value_size(value: Any) -> int:
-    """Bytes DynamoDB counts for one attribute value (without its name), following its sizing rules."""
+    """
+    Bytes DynamoDB counts for one attribute value (without its name), following its sizing rules.
+    """
     if value is None or isinstance(value, bool):
         return 1
     if isinstance(value, str):
@@ -238,26 +254,34 @@ def value_size(value: Any) -> int:
 
 
 def item_size(item: dict[str, Any]) -> int:
-    """Approximate item size as DynamoDB counts it (attribute names + values). The limit is 400 KB;
-    a read unit covers 4 KB (strongly consistent) and a write unit 1 KB."""
+    """
+    Approximate item size as DynamoDB counts it (attribute names + values). The limit is 400 KB;
+    a read unit covers 4 KB (strongly consistent) and a write unit 1 KB.
+    """
     return sum(
         len(name.encode("utf-8")) + value_size(value) for name, value in item.items()
     )
 
 
 def read_units(size: int, *, consistent: bool = True) -> float:
-    """Capacity units to read one item of `size` bytes with GetItem (eventually consistent is half)."""
+    """
+    Capacity units to read one item of `size` bytes with GetItem (eventually consistent is half).
+    """
     units = max(1, math.ceil(size / (4 * KB)))
     return units if consistent else units / 2
 
 
 def write_units(size: int) -> int:
-    """Capacity units to write one item of `size` bytes."""
+    """
+    Capacity units to write one item of `size` bytes.
+    """
     return max(1, math.ceil(size / KB))
 
 
 def _plain(value: Any) -> Any:
-    """JSON-friendly copy: sets -> sorted lists, binary -> base64 text."""
+    """
+    JSON-friendly copy: sets -> sorted lists, binary -> base64 text.
+    """
     if isinstance(value, dict):
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -276,13 +300,17 @@ def _plain(value: Any) -> Any:
 
 
 def to_json(value: Any, *, indent: int | None = None) -> str:
-    """Item or value -> JSON text (sets become sorted lists, binary becomes base64)."""
+    """
+    Item or value -> JSON text (sets become sorted lists, binary becomes base64).
+    """
     return json.dumps(_plain(value), indent=indent, ensure_ascii=False, default=str)
 
 
 def format_value(value: Any, width: int = 80, *, oneline: bool = True) -> str:
-    """Short display text for one attribute value: strings as they are ('' shows as ""), maps,
-    lists and sets as compact JSON, binary as base64."""
+    """
+    Short display text for one attribute value: strings as they are ('' shows as ""), maps,
+    lists and sets as compact JSON, binary as base64.
+    """
     if value is None:
         text = "null"
     elif isinstance(value, bool):
@@ -303,8 +331,10 @@ def format_value(value: Any, width: int = 80, *, oneline: bool = True) -> str:
 def flatten_item(
     item: dict[str, Any], *, max_depth: int | None = None
 ) -> dict[str, Any]:
-    """Nested maps -> dotted columns: {'address': {'city': 'Pune'}} -> {'address.city': 'Pune'}.
-    Lists, sets and empty maps stay as values."""
+    """
+    Nested maps -> dotted columns: {'address': {'city': 'Pune'}} -> {'address.city': 'Pune'}.
+    Lists, sets and empty maps stay as values.
+    """
     flat: dict[str, Any] = {}
 
     def walk(path: str, value: Any, depth: int) -> None:
@@ -327,7 +357,9 @@ _MISSING = object()
 
 
 def get_path(item: dict[str, Any], path: str, default: Any = None) -> Any:
-    """item['address']['city'] for path 'address.city'. An attribute literally named 'address.city' wins."""
+    """
+    item['address']['city'] for path 'address.city'. An attribute literally named 'address.city' wins.
+    """
     if path in item:
         return item[path]
     value: Any = item
@@ -345,7 +377,9 @@ def get_path(item: dict[str, Any], path: str, default: Any = None) -> Any:
 
 @dataclass
 class ReadStats:
-    """What a read did and cost."""
+    """
+    What a read did and cost.
+    """
 
     scanned: int = 0  # items DynamoDB read (and billed), before `where` filtered them
     matched: int = 0  # items that came back (= scanned when there is no filter)
@@ -363,7 +397,9 @@ class ReadStats:
 
 @dataclass
 class IndexInfo:
-    """One global or local secondary index."""
+    """
+    One global or local secondary index.
+    """
 
     name: str
     kind: str  # 'global' | 'local'
@@ -387,8 +423,10 @@ class IndexInfo:
 
 @dataclass
 class TableInfo:
-    """A table's settings. item_count and size_bytes are DynamoDB's own estimates, refreshed about
-    every 6 hours. Parts that couldn't be read are listed in `errors` (section -> error code)."""
+    """
+    A table's settings. item_count and size_bytes are DynamoDB's own estimates, refreshed about
+    every 6 hours. Parts that couldn't be read are listed in `errors` (section -> error code).
+    """
 
     name: str
     status: str = ""
@@ -445,7 +483,9 @@ class TableInfo:
 
 @dataclass
 class TableMetrics:
-    """CloudWatch usage of a table (not its indexes) over the last `hours`, in `period`-second buckets."""
+    """
+    CloudWatch usage of a table (not its indexes) over the last `hours`, in `period`-second buckets.
+    """
 
     table: str
     hours: int
@@ -466,7 +506,9 @@ class TableMetrics:
 
 @dataclass
 class TableReport:
-    """One table in the all-tables overview."""
+    """
+    One table in the all-tables overview.
+    """
 
     info: TableInfo
     metrics: TableMetrics | None = None
@@ -475,7 +517,9 @@ class TableReport:
 
 @dataclass
 class ItemPage:
-    """Items from one scan, query, sample or PartiQL call, and what reading them cost."""
+    """
+    Items from one scan, query, sample or PartiQL call, and what reading them cost.
+    """
 
     table: str
     items: list[dict[str, Any]] = field(default_factory=list)
@@ -492,7 +536,9 @@ class ItemPage:
         return self.last_key is not None
 
     def to_df(self, *, flatten: bool = True):
-        """The items as a pandas DataFrame, key attributes first (see items_to_df)."""
+        """
+        The items as a pandas DataFrame, key attributes first (see items_to_df).
+        """
         return items_to_df(self.items, self.keys, flatten=flatten)
 
 
@@ -501,7 +547,9 @@ DISTINCT_CAP = 10_000  # distinct values tracked per attribute while profiling
 
 
 def _fingerprint(kind: str, value: Any) -> Any:
-    """Small hashable stand-in for a value, to count distinct values without keeping big ones."""
+    """
+    Small hashable stand-in for a value, to count distinct values without keeping big ones.
+    """
     if kind == "S":
         return (kind, value if len(value) <= 64 else hash(value))
     if kind == "B":
@@ -514,7 +562,9 @@ def _fingerprint(kind: str, value: Any) -> Any:
 
 @dataclass
 class AttributeProfile:
-    """How one attribute (or a field inside a map, path 'parent.child') looks across profiled items."""
+    """
+    How one attribute (or a field inside a map, path 'parent.child') looks across profiled items.
+    """
 
     path: str
     name: str
@@ -565,7 +615,9 @@ class AttributeProfile:
 
 @dataclass
 class TableProfile:
-    """What `profile_items` learned from a sample of items."""
+    """
+    What `profile_items` learned from a sample of items.
+    """
 
     table: str
     index: str | None = None
@@ -593,7 +645,9 @@ class TableProfile:
         return self.total_size / self.items if self.items else 0.0
 
     def to_df(self):
-        """One row per attribute: type(s), how many items have it, distinct values, range, examples."""
+        """
+        One row per attribute: type(s), how many items have it, distinct values, range, examples.
+        """
         pd = _require("pandas", "TableProfile.to_df")
         return pd.DataFrame(
             [
@@ -620,7 +674,9 @@ class TableProfile:
 
 @dataclass
 class ValueCounts:
-    """How often each value of one attribute occurs, and the total size of those items."""
+    """
+    How often each value of one attribute occurs, and the total size of those items.
+    """
 
     attribute: str
     table: str = ""
@@ -635,8 +691,10 @@ class ValueCounts:
 def items_table(
     items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatten: bool = True
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """(columns, rows) for showing items side by side: key attributes first, then the other attributes
-    by how many items have them. With flatten=True nested maps become 'parent.child' columns."""
+    """
+    (columns, rows) for showing items side by side: key attributes first, then the other attributes
+    by how many items have them. With flatten=True nested maps become 'parent.child' columns.
+    """
     counts: Counter = Counter()
     first_seen: dict[str, int] = {}
     for item in items:
@@ -667,8 +725,10 @@ def items_table(
 def items_to_df(
     items: list[dict[str, Any]], keys: Iterable[str] = (), *, flatten: bool = True
 ):
-    """Items -> pandas DataFrame, key attributes first. flatten=True turns nested maps into
-    'parent.child' columns; lists and sets stay as Python objects in their cell."""
+    """
+    Items -> pandas DataFrame, key attributes first. flatten=True turns nested maps into
+    'parent.child' columns; lists and sets stay as Python objects in their cell.
+    """
     pd = _require("pandas", "items_to_df")
     columns, rows = items_table(items, keys, flatten=flatten)
     return pd.DataFrame(rows, columns=columns)
@@ -718,8 +778,10 @@ def _segment_shape(part: str, literal_ok: bool) -> str:
 
 
 def key_pattern(value: Any) -> str:
-    """Shape of a key value, to spot the entity types of a single-table design:
-    'USER#42' -> 'USER#<number>', 'ORDER#2024-05-01#a1b2' -> 'ORDER#<date>#<id>', 'PROFILE' -> 'PROFILE'."""
+    """
+    Shape of a key value, to spot the entity types of a single-table design:
+    'USER#42' -> 'USER#<number>', 'ORDER#2024-05-01#a1b2' -> 'ORDER#<date>#<id>', 'PROFILE' -> 'PROFILE'.
+    """
     if not isinstance(value, str):
         return {"N": "<number>", "B": "<binary>"}.get(
             dynamo_type(value), f"<{dynamo_type(value)}>"
@@ -739,9 +801,11 @@ def profile_items(
     max_depth: int = 2,
     top_n: int = 10,
 ) -> TableProfile:
-    """One pass over items -> TableProfile: every attribute (and map field down to max_depth) with its
+    """
+    One pass over items -> TableProfile: every attribute (and map field down to max_depth) with its
     types, fill rate, distinct values, range and examples, plus key shapes and item sizes.
-    Works on any plain dicts, e.g. from_dynamo_item() rows of a DynamoDB export in S3."""
+    Works on any plain dicts, e.g. from_dynamo_item() rows of a DynamoDB export in S3.
+    """
     keys = list(dict.fromkeys(keys))
     profile = TableProfile(table=table, keys=keys)
     found: dict[str, AttributeProfile] = {}
@@ -807,8 +871,10 @@ def _hashable(value: Any) -> Any:
 
 
 def count_values(items: Iterable[dict[str, Any]], attribute: str) -> ValueCounts:
-    """How many items hold each value of `attribute` (a dotted path reaches into maps), and their
-    total size. Maps, lists and sets are counted by their JSON text."""
+    """
+    How many items hold each value of `attribute` (a dotted path reaches into maps), and their
+    total size. Maps, lists and sets are counted by their JSON text.
+    """
     result = ValueCounts(attribute)
     counts: dict[Any, Stat] = defaultdict(Stat)
     for item in items:
@@ -847,7 +913,9 @@ _SORT_KEY_OPERATORS = {"eq", "lt", "lte", "gt", "gte", "between", "begins_with"}
 
 
 def _condition(attr: Attr | Key, spec: Any, *, key: bool = False) -> ConditionBase:
-    """A plain value (equality) or an (operator, *values) tuple -> a boto3 condition on `attr`."""
+    """
+    A plain value (equality) or an (operator, *values) tuple -> a boto3 condition on `attr`.
+    """
     if not isinstance(spec, tuple):
         return attr.eq(spec)
     op = spec[0] if spec and isinstance(spec[0], str) else None
@@ -875,7 +943,8 @@ def _condition(attr: Attr | Key, spec: Any, *, key: bool = False) -> ConditionBa
 
 
 def build_filter(where: Any) -> ConditionBase | None:
-    """`where` -> a boto3 condition. Takes None, a boto3 condition (Attr('a').gt(1) | Attr('b').exists()),
+    """
+    `where` -> a boto3 condition. Takes None, a boto3 condition (Attr('a').gt(1) | Attr('b').exists()),
     or a dict of attribute -> value or (operator, *values), which must all match:
 
         {'status': 'failed'}                    status = 'failed'
@@ -895,7 +964,9 @@ def build_filter(where: Any) -> ConditionBase | None:
 
 
 def describe_condition(name: str, spec: Any) -> str:
-    """('total', ('>', 100)) -> 'total > 100', ('sk', ('between', 'a', 'c')) -> "sk between 'a' and 'c'"."""
+    """
+    ('total', ('>', 100)) -> 'total > 100', ('sk', ('between', 'a', 'c')) -> "sk between 'a' and 'c'".
+    """
     if not isinstance(spec, tuple):
         return f"{name} = {spec!r}"
     if not spec:
@@ -906,7 +977,9 @@ def describe_condition(name: str, spec: Any) -> str:
 
 
 def describe_filter(where: Any) -> str:
-    """`where` as text: {'status': 'failed', 'total': ('>', 100)} -> "status = 'failed', total > 100"."""
+    """
+    `where` as text: {'status': 'failed', 'total': ('>', 100)} -> "status = 'failed', total > 100".
+    """
     if where is None:
         return ""
     if isinstance(where, ConditionBase):
@@ -918,7 +991,9 @@ _PATH_PART_RE = re.compile(r"^([^\[\]]+)((?:\[\d+\])*)$")
 
 
 def _path_expression(path: str, names: dict[str, str]) -> str:
-    """'address.city' -> '#p0.#p1' (placeholders avoid clashes with DynamoDB's reserved words)."""
+    """
+    'address.city' -> '#p0.#p1' (placeholders avoid clashes with DynamoDB's reserved words).
+    """
     parts = []
     for part in path.split("."):
         match = _PATH_PART_RE.match(part)
@@ -936,7 +1011,9 @@ def _expression_params(
     where: ConditionBase | None = None,
     attributes: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """KeyConditionExpression / FilterExpression / ProjectionExpression with shared placeholders."""
+    """
+    KeyConditionExpression / FilterExpression / ProjectionExpression with shared placeholders.
+    """
     builder = ConditionExpressionBuilder()
     params: dict[str, Any] = {}
     names: dict[str, str] = {}
@@ -964,7 +1041,9 @@ def _expression_params(
 
 
 def parse_table(desc: dict[str, Any]) -> TableInfo:
-    """A DescribeTable 'Table' dict -> TableInfo (TTL, backups and tags need their own calls: see describe)."""
+    """
+    A DescribeTable 'Table' dict -> TableInfo (TTL, backups and tags need their own calls: see describe).
+    """
     keys = {k["KeyType"]: k["AttributeName"] for k in desc.get("KeySchema", [])}
     info = TableInfo(
         name=desc["TableName"],
@@ -1036,9 +1115,11 @@ def table_monthly_cost(
     prices: dict[str, float] | None = None,
     metrics: TableMetrics | None = None,
 ) -> dict[str, float]:
-    """Estimated USD per month: 'storage' (table + indexes), 'capacity' (provisioned tables: table and
+    """
+    Estimated USD per month: 'storage' (table + indexes), 'capacity' (provisioned tables: table and
     global indexes at today's settings), 'requests' (on-demand tables, given `metrics`: the reads and
-    writes of that window, extended to a month) and 'backup' (point-in-time recovery, when on)."""
+    writes of that window, extended to a month) and 'backup' (point-in-time recovery, when on).
+    """
     prices = DYNAMODB_PRICES if prices is None else prices
     stored = (
         (info.size_bytes or 0) + sum(i.size_bytes or 0 for i in info.indexes)
@@ -1073,7 +1154,9 @@ def request_cost(
     write_units: float = 0.0,
     prices: dict[str, float] | None = None,
 ) -> float:
-    """USD for on-demand reads and writes (request units, e.g. ReadStats.read_units)."""
+    """
+    USD for on-demand reads and writes (request units, e.g. ReadStats.read_units).
+    """
     prices = DYNAMODB_PRICES if prices is None else prices
     return (
         read_units * prices["read_request"] + write_units * prices["write_request"]
@@ -1085,7 +1168,9 @@ def capacity_cost(
     write_capacity: float = 0,
     prices: dict[str, float] | None = None,
 ) -> float:
-    """USD per month for provisioned read and write capacity units."""
+    """
+    USD per month for provisioned read and write capacity units.
+    """
     prices = DYNAMODB_PRICES if prices is None else prices
     return HOURS_PER_MONTH * (
         read_capacity * prices["read_capacity_hour"]
@@ -1114,7 +1199,9 @@ def _table_ref(table: str) -> str:
 
 
 def profile_findings(profile: TableProfile) -> list[tuple[str, str]]:
-    """Plain-language data-quality and cost notes about profiled items -> [(level, message)]."""
+    """
+    Plain-language data-quality and cost notes about profiled items -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     if not profile.items:
         return found
@@ -1186,7 +1273,9 @@ def profile_findings(profile: TableProfile) -> list[tuple[str, str]]:
 def _capacity_findings(
     info: TableInfo, metrics: TableMetrics, prices: dict[str, float]
 ) -> list[tuple[str, str]]:
-    """Provisioned capacity against CloudWatch's busiest period: near the limit, or paying for unused units."""
+    """
+    Provisioned capacity against CloudWatch's busiest period: near the limit, or paying for unused units.
+    """
     found: list[tuple[str, str]] = []
     minutes = metrics.period // 60
     low: list[str] = []
@@ -1251,7 +1340,9 @@ def table_findings(
     metrics: TableMetrics | None = None,
     prices: dict[str, float] | None = None,
 ) -> list[tuple[str, str]]:
-    """Plain-language risks and cost notes for a table, each with what to do about it -> [(level, message)]."""
+    """
+    Plain-language risks and cost notes for a table, each with what to do about it -> [(level, message)].
+    """
     prices = DYNAMODB_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     pk = info.partition_key or "<partition key>"
@@ -1336,7 +1427,8 @@ _FROM_RE = re.compile(
 
 
 class DynamoDBAnalyzer(_BaseAnalyzer):
-    """Pure-logic DynamoDB analysis: every method returns data; nothing is printed or written.
+    """
+    Pure-logic DynamoDB analysis: every method returns data; nothing is printed or written.
 
     Items are plain dicts of Python values (see from_dynamo). Methods that read items take `where`
     (a filter, see build_filter), `index` (read a secondary index instead of the table) and
@@ -1364,7 +1456,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The DynamoDB client, made on first use so a missing region shows up as a readable error."""
+        """
+        The DynamoDB client, made on first use so a missing region shows up as a readable error.
+        """
         if self._client is None:
             try:
                 self._client = self.session.client("dynamodb", config=self._config)
@@ -1392,7 +1486,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         ]
 
     def list_tables(self, *, details: bool = True) -> list[TableInfo]:
-        """Every table in the region. details=True describes each one (in parallel) for keys, counts and billing."""
+        """
+        Every table in the region. details=True describes each one (in parallel) for keys, counts and billing.
+        """
         names = self.list_table_names()
         if not details:
             return [TableInfo(name) for name in names]
@@ -1413,8 +1509,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         max_workers: int = 8,
         progress: Callable[[int], None] | None = None,
     ) -> list[TableReport]:
-        """describe() (and CloudWatch usage unless metrics=False) for every table, checked in parallel.
-        match: only tables whose name matches this glob, e.g. 'prod-*'."""
+        """
+        describe() (and CloudWatch usage unless metrics=False) for every table, checked in parallel.
+        match: only tables whose name matches this glob, e.g. 'prod-*'.
+        """
         names = [
             n
             for n in self.list_table_names()
@@ -1446,7 +1544,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         return reports
 
     def table(self, table: str, *, refresh: bool = False) -> TableInfo:
-        """Keys, indexes, billing and DynamoDB's item count / size estimate (one DescribeTable call, cached)."""
+        """
+        Keys, indexes, billing and DynamoDB's item count / size estimate (one DescribeTable call, cached).
+        """
         if refresh or table not in self._tables:
             self._tables[table] = parse_table(
                 self.client.describe_table(TableName=table)["Table"]
@@ -1454,7 +1554,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         return self._tables[table]
 
     def describe(self, table: str) -> TableInfo:
-        """Everything about a table: table() plus TTL, point-in-time recovery and tags."""
+        """
+        Everything about a table: table() plus TTL, point-in-time recovery and tags.
+        """
         info = self.table(table, refresh=True)
 
         def get(section: str, call: Callable[[], Any]) -> Any:
@@ -1498,8 +1600,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
                 return tags
 
     def table_metrics(self, table: str, *, hours: int = 24) -> TableMetrics:
-        """Read / write units consumed (in total and in the busiest period) and throttle events from
-        CloudWatch, for the table itself (not its indexes). Needs cloudwatch:GetMetricData."""
+        """
+        Read / write units consumed (in total and in the busiest period) and throttle events from
+        CloudWatch, for the table itself (not its indexes). Needs cloudwatch:GetMetricData.
+        """
         period = max(
             300, math.ceil(hours * 3600 / 1440 / 60) * 60
         )  # at most ~1,440 points per metric
@@ -1556,20 +1660,26 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
     # -------------------------------------------------------------------- keys
 
     def keys(self, table: str, index: str | None = None) -> list[str]:
-        """[partition key, sort key] of the table, or of `index`."""
+        """
+        [partition key, sort key] of the table, or of `index`.
+        """
         info = self.table(table)
         return info.index(index).keys if index else info.keys
 
     def key_attributes(self, table: str, index: str | None = None) -> list[str]:
-        """Every key attribute an item read from the table / index carries, the index's first. Tables of
-        items show these first, and they make up the start key of the next page."""
+        """
+        Every key attribute an item read from the table / index carries, the index's first. Tables of
+        items show these first, and they make up the start key of the next page.
+        """
         info = self.table(table)
         return list(
             dict.fromkeys((info.index(index).keys if index else []) + info.keys)
         )
 
     def _key_value(self, table: str, name: str, value: Any) -> Any:
-        """Match a key value to its declared type, so '42' works for a number key and 42 for a string key."""
+        """
+        Match a key value to its declared type, so '42' works for a number key and 42 for a string key.
+        """
         kind = self.table(table).attribute_types.get(name)
         if kind == "N" and isinstance(value, str):
             try:
@@ -1587,7 +1697,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         return value
 
     def primary_key(self, table: str, key: tuple | list | dict) -> dict[str, Any]:
-        """('USER#1', 'ORDER#7') or {'pk': 'USER#1', 'sk': 'ORDER#7'} -> the key dict GetItem needs."""
+        """
+        ('USER#1', 'ORDER#7') or {'pk': 'USER#1', 'sk': 'ORDER#7'} -> the key dict GetItem needs.
+        """
         names = self.table(table).keys
         if isinstance(key, dict):
             given = dict(key)
@@ -1609,8 +1721,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
     def get(
         self, table: str, *key: Any, consistent: bool = False
     ) -> dict[str, Any] | None:
-        """One item by primary key: get('orders', 'USER#1', 'ORDER#7') or get('orders', {'pk': ..., 'sk': ...}).
-        None when there's no such item."""
+        """
+        One item by primary key: get('orders', 'USER#1', 'ORDER#7') or get('orders', {'pk': ..., 'sk': ...}).
+        None when there's no such item.
+        """
         primary = self.primary_key(table, key)
         resp = self.client.get_item(
             TableName=table,
@@ -1622,7 +1736,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
     def _projection(
         self, table: str, index: str | None, attributes: str | Iterable[str] | None
     ) -> list[str] | None:
-        """Attributes to read, always with the key attributes (tables need them, and so does the next page)."""
+        """
+        Attributes to read, always with the key attributes (tables need them, and so does the next page).
+        """
         if attributes is None:
             return None
         attributes = [attributes] if isinstance(attributes, str) else list(attributes)
@@ -1662,8 +1778,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         consistent: bool = False,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """Up to n items from the start of the table (or index), or after `start_key` (a page's last_key).
-        With `where`, keeps reading until n items match; scan_limit caps how many items are read."""
+        """
+        Up to n items from the start of the table (or index), or after `start_key` (a page's last_key).
+        With `where`, keeps reading until n items match; scan_limit caps how many items are read.
+        """
         params = self._scan_params(table, index, where, attributes, consistent)
         return self._read(
             "scan",
@@ -1692,9 +1810,11 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         consistent: bool = False,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """Items whose partition key is `partition`, in sort-key order (on the table, or on `index`).
+        """
+        Items whose partition key is `partition`, in sort-key order (on the table, or on `index`).
         sort narrows the sort key: a value, or ('begins_with', 'ORDER#'), ('between', a, b), ('>=', x) ...
-        descending=True starts from the highest sort key."""
+        descending=True starts from the highest sort key.
+        """
         keys = self.keys(table, index)
         condition = Key(keys[0]).eq(self._key_value(table, keys[0], partition))
         if sort is not None:
@@ -1744,9 +1864,11 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         scan_limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """Page through a scan or query until n items came back, the data ran out, or scan_limit items were
+        """
+        Page through a scan or query until n items came back, the data ran out, or scan_limit items were
         read. Stopping inside a page sets last_key to the last item returned, so passing it back as
-        start_key resumes right after that item."""
+        start_key resumes right after that item.
+        """
         n, scan_limit = _as_count(n, "n"), _as_count(scan_limit, "scan_limit")
         if n is not None and n < 1:
             raise ValueError("n must be at least 1 (or None for everything)")
@@ -1809,10 +1931,12 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         scan_limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """About n items spread over the whole table. scan() starts at the beginning, where the first
+        """
+        About n items spread over the whole table. scan() starts at the beginning, where the first
         items can all share a few partition keys; this reads a few items from each of `segments` slices
         of the key space (parallel-scan segments, fetched in parallel; default one per item, up to 100).
-        scan_limit caps the items read."""
+        scan_limit caps the items read.
+        """
         n, scan_limit = _as_int(n, "n"), _as_count(scan_limit, "scan_limit")
         if n < 1:
             raise ValueError("n must be at least 1")
@@ -1883,9 +2007,11 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         consistent: bool = False,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """Run a PartiQL statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#1'). Parameters fill
+        """
+        Run a PartiQL statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#1'). Parameters fill
         the ? placeholders in order. Pages are kept whole (so you may get a few more than n) and last_key
-        continues exactly, as next_token=. Without the partition key in WHERE, a SELECT scans the table."""
+        continues exactly, as next_token=. Without the partition key in WHERE, a SELECT scans the table.
+        """
         n = _as_count(n, "n")
         params: dict[str, Any] = {
             "Statement": statement,
@@ -1933,7 +2059,9 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> Iterator[dict[str, Any]]:
-        """Scan responses (up to 1 MB each) until the end of the table or until `limit` items were read."""
+        """
+        Scan responses (up to 1 MB each) until the end of the table or until `limit` items were read.
+        """
         limit = _as_count(limit, "limit")
         params = dict(params, ReturnConsumedCapacity="TOTAL")
         started = time.monotonic()
@@ -1970,8 +2098,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         progress: Callable[[int], None] | None = None,
         stats: ReadStats | None = None,
     ) -> Iterator[dict[str, Any]]:
-        """Stream a scan's items without keeping them in memory. `limit` caps the items read; pass
-        stats=ReadStats() to see afterwards what the scan read and cost."""
+        """
+        Stream a scan's items without keeping them in memory. `limit` caps the items read; pass
+        stats=ReadStats() to see afterwards what the scan read and cost.
+        """
         stats = ReadStats() if stats is None else stats
         params = self._scan_params(table, index, where, attributes)
         for resp in self._pages(params, stats, limit=limit, progress=progress):
@@ -1987,9 +2117,11 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         index: str | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> ReadStats:
-        """Exact item count (of items matching `where`) as ReadStats.matched: a full scan with Select=COUNT.
+        """
+        Exact item count (of items matching `where`) as ReadStats.matched: a full scan with Select=COUNT.
         No items come back, but every item is still read and billed. table(t).item_count is an instant
-        estimate, refreshed about every 6 hours."""
+        estimate, refreshed about every 6 hours.
+        """
         stats = ReadStats()
         params = dict(self._scan_params(table, index, where, None), Select="COUNT")
         for resp in self._pages(params, stats, progress=progress):
@@ -2006,8 +2138,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         index: str | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> ValueCounts:
-        """How often each value of `attribute` (a dotted path reaches into maps) occurs among the first
-        `limit` items read (None = the whole table). On the partition key: the size of each item collection."""
+        """
+        How often each value of `attribute` (a dotted path reaches into maps) occurs among the first
+        `limit` items read (None = the whole table). On the partition key: the size of each item collection.
+        """
         stats = ReadStats()
         items = self.iter_items(
             table, where=where, index=index, limit=limit, progress=progress, stats=stats
@@ -2026,8 +2160,10 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         index: str | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> ItemPage:
-        """The n biggest items (by DynamoDB's sizing rules), biggest first, among the first `limit` items
-        read (None = the whole table)."""
+        """
+        The n biggest items (by DynamoDB's sizing rules), biggest first, among the first `limit` items
+        read (None = the whole table).
+        """
         n = _as_int(n, "n")
         page = ItemPage(
             table=table,
@@ -2062,9 +2198,11 @@ class DynamoDBAnalyzer(_BaseAnalyzer):
         max_depth: int = 2,
         progress: Callable[[int], None] | None = None,
     ) -> TableProfile:
-        """Profile about n items: attribute names, types, fill rate, distinct values, ranges, examples,
+        """
+        Profile about n items: attribute names, types, fill rate, distinct values, ranges, examples,
         key shapes and item sizes. spread=True samples across the whole table (see sample);
-        spread=False reads from the start of it."""
+        spread=False reads from the start of it.
+        """
         if spread:
             page = self.sample(table, n, where=where, index=index, progress=progress)
         else:
@@ -2089,7 +2227,9 @@ _BADGE = "🗄️ DynamoDB"  # the chip before each report's title, so reports f
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
@@ -2098,7 +2238,9 @@ def _target(table: str, index: str | None) -> str:
 
 
 def _keys_label(info: TableInfo | IndexInfo, types: dict[str, str]) -> str:
-    """'pk (string) + sk (number)'."""
+    """
+    'pk (string) + sk (number)'.
+    """
     return (
         " + ".join(
             f"{k} ({TYPE_NAMES.get(types.get(k, ''), '?')})" for k in info.keys if k
@@ -2189,7 +2331,9 @@ def _item_rows(
     max_depth: int = 6,
     max_elements: int = 100,
 ) -> list[list[str]]:
-    """Attribute / type / value rows for one item, with maps (and lists holding maps or lists) expanded."""
+    """
+    Attribute / type / value rows for one item, with maps (and lists holding maps or lists) expanded.
+    """
     rows: list[list[str]] = []
     roles = dict(zip(keys, ("partition key", "sort key")))
 
@@ -2234,7 +2378,8 @@ def _item_rows(
 
 
 class DynamoDBView(_BaseView):
-    """Notebook UI over DynamoDBAnalyzer. Each method renders a report and returns nothing;
+    """
+    Notebook UI over DynamoDBAnalyzer. Each method renders a report and returns nothing;
     for the underlying data call the same-named method on `view.core` (a DynamoDBAnalyzer).
 
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
@@ -2274,13 +2419,17 @@ class DynamoDBView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain_call(self, code: str, message: str, command: str, args: tuple, kwargs: dict) -> str:
-        """A table that wasn't found is named, with the closest names in the region (_not_found)."""
+        """
+        A table that wasn't found is named, with the closest names in the region (_not_found).
+        """
         if code == "ResourceNotFoundException":
             return self._not_found(command, args, kwargs)
         return super()._explain_call(code, message, command, args, kwargs)
 
     def _not_found(self, command: str, args: tuple, kwargs: dict) -> str:
-        """Why a table wasn't found, with the closest names in the region ('Orders' -> 'orders')."""
+        """
+        Why a table wasn't found, with the closest names in the region ('Orders' -> 'orders').
+        """
         name = kwargs.get(
             "statement" if command == "sql" else "table", args[0] if args else ""
         )
@@ -2315,7 +2464,9 @@ class DynamoDBView(_BaseView):
     def _items_blocks(
         self, items: list[dict[str, Any]], keys: list[str], title: str = ""
     ) -> list[Any]:
-        """A table of items (one row each, one column per attribute) plus a note about hidden columns."""
+        """
+        A table of items (one row each, one column per attribute) plus a note about hidden columns.
+        """
         columns, rows = items_table(items, keys)
         shown = columns[: self.max_columns] if self.max_columns else columns
         blocks: list[Any] = [
@@ -2350,7 +2501,9 @@ class DynamoDBView(_BaseView):
         start: Any = None,
         number: int = 1,
     ) -> None:
-        """Fetch one page of items, show it, and remember how to continue for more()."""
+        """
+        Fetch one page of items, show it, and remember how to continue for more().
+        """
         with self._progress() as tick:
             page = fetch(start, tick)
         self._pager = (
@@ -2392,7 +2545,9 @@ class DynamoDBView(_BaseView):
         self._show(blocks)
 
     def _item_steps(self, page: ItemPage) -> list[tuple[str, str]]:
-        """Next steps after a page of items: the first item in full, and what the table's items look like."""
+        """
+        Next steps after a page of items: the first item in full, and what the table's items look like.
+        """
         try:
             keys = self.core.keys(page.table) if page.table else []
         except (ClientError, BotoCoreError, ValueError):
@@ -2419,8 +2574,10 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def tables(self, match: str | None = None, *, metrics: bool = True) -> None:
-        """Every table in the region: key, items, size, billing, estimated monthly cost and warnings.
-        match='prod-*' checks only matching table names."""
+        """
+        Every table in the region: key, items, size, billing, estimated monthly cost and warnings.
+        match='prod-*' checks only matching table names.
+        """
         with self._progress("Checking tables", unit="tables") as tick:
             reports = sorted(
                 self.core.table_reports(match=match, metrics=metrics, progress=tick),
@@ -2564,8 +2721,10 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def table_info(self, table: str, *, metrics: bool = True, hours: int = 24) -> None:
-        """Keys, indexes and how to query each, capacity, usage, backups, cost and risks.
-        Also TTL, stream, encryption and tags; usage is CloudWatch's last `hours`."""
+        """
+        Keys, indexes and how to query each, capacity, usage, backups, cost and risks.
+        Also TTL, stream, encryption and tags; usage is CloudWatch's last `hours`.
+        """
         info = self.core.describe(table)
         blocks: list[Any] = [_Title(f"Table {info.name}", info.arn or self.core.region)]
         usage = None
@@ -2765,8 +2924,10 @@ class DynamoDBView(_BaseView):
         attributes: str | Iterable[str] | None = None,
         scan_limit: int | None = 100_000,
     ) -> None:
-        """Items from the start of the table (or an index) as a table; more() shows the next page.
-        where= filters, e.g. where={'status': 'failed', 'total': ('>', 100)}."""
+        """
+        Items from the start of the table (or an index) as a table; more() shows the next page.
+        where= filters, e.g. where={'status': 'failed', 'total': ('>', 100)}.
+        """
 
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
             return self.core.scan(
@@ -2806,8 +2967,10 @@ class DynamoDBView(_BaseView):
         attributes: str | Iterable[str] | None = None,
         descending: bool = False,
     ) -> None:
-        """Items sharing one partition key, in sort-key order: query('orders', 'USER#42', sort=('begins_with', 'ORDER#')).
-        index= queries a secondary index; descending=True starts from the highest sort key."""
+        """
+        Items sharing one partition key, in sort-key order: query('orders', 'USER#42', sort=('begins_with', 'ORDER#')).
+        index= queries a secondary index; descending=True starts from the highest sort key.
+        """
         keys = self.core.keys(table, index)
 
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
@@ -2858,7 +3021,9 @@ class DynamoDBView(_BaseView):
         attributes: str | Iterable[str] | None = None,
         scan_limit: int | None = 100_000,
     ) -> None:
-        """About n items spread across the whole table (scan() only shows its start): a better first look."""
+        """
+        About n items spread across the whole table (scan() only shows its start): a better first look.
+        """
 
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
             return self.core.sample(
@@ -2883,7 +3048,9 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def more(self) -> None:
-        """Next page of the last scan / query / sql."""
+        """
+        Next page of the last scan / query / sql.
+        """
         if self._pager is None:
             self._show(
                 [
@@ -2899,8 +3066,10 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def get(self, table: str, *key: Any, as_json: bool = False) -> None:
-        """One item by primary key with nested maps and lists expanded: get('orders', 'USER#42', 'ORDER#0017').
-        The key can also be a dict: get('orders', {'pk': ..., 'sk': ...}). as_json=True adds a JSON copy."""
+        """
+        One item by primary key with nested maps and lists expanded: get('orders', 'USER#42', 'ORDER#0017').
+        The key can also be a dict: get('orders', {'pk': ..., 'sk': ...}). as_json=True adds a JSON copy.
+        """
         primary = self.core.primary_key(table, key)
         item = self.core.get(table, primary)
         blocks: list[Any] = [
@@ -2971,8 +3140,10 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def sql(self, statement: str, *parameters: Any, n: int = 50) -> None:
-        """Run a SQL-like (PartiQL) statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#42'); more() continues.
-        Without the partition key in WHERE, a SELECT scans the whole table."""
+        """
+        Run a SQL-like (PartiQL) statement: sql('SELECT * FROM "orders" WHERE pk = ?', 'USER#42'); more() continues.
+        Without the partition key in WHERE, a SELECT scans the whole table.
+        """
 
         def fetch(start: Any, tick: Callable[[int], None]) -> ItemPage:
             return self.core.sql(
@@ -2997,8 +3168,10 @@ class DynamoDBView(_BaseView):
         spread: bool = True,
         max_depth: int = 2,
     ) -> None:
-        """What the items look like: every attribute's types, fill rate, examples and range, key patterns.
-        Map fields are nested under their map. Reads about n items spread across the table."""
+        """
+        What the items look like: every attribute's types, fill rate, examples and range, key patterns.
+        Map fields are nested under their map. Reads about n items spread across the table.
+        """
         with self._progress("Sampling") as tick:
             p = self.core.profile(
                 table,
@@ -3149,8 +3322,10 @@ class DynamoDBView(_BaseView):
         index: str | None = None,
         top: int = 30,
     ) -> None:
-        """How often each value of an attribute occurs ('address.city' reaches into maps).
-        On the partition key this is each item collection's size: hot or oversized partitions stand out."""
+        """
+        How often each value of an attribute occurs ('address.city' reaches into maps).
+        On the partition key this is each item collection's size: hot or oversized partitions stand out.
+        """
         limit, top = _as_count(limit, "limit"), _as_int(top, "top")
         with self._progress() as tick:
             vc = self.core.value_counts(
@@ -3248,7 +3423,9 @@ class DynamoDBView(_BaseView):
         where: Any = None,
         index: str | None = None,
     ) -> None:
-        """The biggest items (DynamoDB's size rules; the limit is 400 KB) among the first `limit` items read."""
+        """
+        The biggest items (DynamoDB's size rules; the limit is 400 KB) among the first `limit` items read.
+        """
         n, limit = _as_int(n, "n"), _as_count(limit, "limit")
         with self._progress() as tick:
             page = self.core.largest(
@@ -3295,7 +3472,9 @@ class DynamoDBView(_BaseView):
 
     @_friendly_errors
     def count(self, table: str, *, where: Any = None, index: str | None = None) -> None:
-        """Exact item count (optionally of items matching where=): reads, and pays for, every item."""
+        """
+        Exact item count (optionally of items matching where=): reads, and pays for, every item.
+        """
         with self._progress("Counting") as tick:
             st = self.core.count(table, where=where, index=index, progress=tick)
         info = self.core.table(table)

@@ -1,4 +1,5 @@
-"""A small in-memory OpenSearch REST endpoint for the opensearch.py tests and the demo (.claude/skills/demo/demo.py).
+"""
+A small in-memory OpenSearch REST endpoint for the opensearch.py tests and the demo (.claude/skills/demo/demo.py).
 
 FakeCluster answers what OpenSearchAnalyzer sends: _cat/indices, _mapping, _settings, _count, _search (k-NN with
 OpenSearch's score formulas, filters, nested fields, random sampling, ids), _stats/segments, _cluster/health and
@@ -63,7 +64,9 @@ def _compare(value: Any, op: str, bound: Any) -> bool:
 
 
 def matches(doc_id: str, source: dict[str, Any], query: dict[str, Any] | None) -> bool:
-    """Evaluate the query DSL this file needs against one document."""
+    """
+    Evaluate the query DSL this file needs against one document.
+    """
     if not query:
         return True
     (kind, spec), = query.items()
@@ -110,7 +113,9 @@ def matches(doc_id: str, source: dict[str, Any], query: dict[str, Any] | None) -
 
 
 def _strip(query: Any, prefix: str) -> Any:
-    """Field names inside a nested query are full paths; inside one nested document they're relative."""
+    """
+    Field names inside a nested query are full paths; inside one nested document they're relative.
+    """
     if isinstance(query, list):
         return [_strip(q, prefix) for q in query]
     if not isinstance(query, dict):
@@ -129,7 +134,9 @@ def _strip(query: Any, prefix: str) -> Any:
 
 
 def score(space: str, query: list[float], vector: list[float]) -> float:
-    """OpenSearch's k-NN score for one vector (the formulas opensearch.score_to_similarity undoes)."""
+    """
+    OpenSearch's k-NN score for one vector (the formulas opensearch.score_to_similarity undoes).
+    """
     if space == "cosinesimil":
         norm = math.sqrt(sum(x * x for x in query)) * math.sqrt(sum(x * x for x in vector))
         cosine = sum(a * b for a, b in zip(query, vector)) / norm if norm else 0.0
@@ -143,7 +150,9 @@ def score(space: str, query: list[float], vector: list[float]) -> float:
 
 
 class FakeCluster:
-    """Call it like a transport: cluster(method, url, body, headers) -> (status, body bytes)."""
+    """
+    Call it like a transport: cluster(method, url, body, headers) -> (status, body bytes).
+    """
 
     def __init__(self, indexes: list[FakeIndex] | None = None, *, serverless: bool = False, nodes: int = 3,
                  knn_memory_kb: int = 0, circuit_breaker: bool = False, evictions: int = 0, deny: int | None = None):
@@ -349,7 +358,9 @@ class FakeCluster:
 
     @staticmethod
     def _knn_parts(query: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None]:
-        """(the knn clause, its nested path, a filter applied after it) from a k-NN query, or (None, None, None)."""
+        """
+        (the knn clause, its nested path, a filter applied after it) from a k-NN query, or (None, None, None).
+        """
         if "knn" in query:
             return query["knn"], None, None
         if "nested" in query and "knn" in query["nested"]["query"]:
@@ -370,8 +381,10 @@ def unit(vector: list[float]) -> list[float]:
 
 
 def topic_vector(topic: int, dims: int, rng: random.Random, noise: float = 0.6) -> list[float]:
-    """A unit vector near the axis of `topic`: documents about the same topic are close to each other. `noise` is
-    the typical length of the random part, whatever the number of dimensions."""
+    """
+    A unit vector near the axis of `topic`: documents about the same topic are close to each other. `noise` is
+    the typical length of the random part, whatever the number of dimensions.
+    """
     vector = [rng.gauss(0, noise / math.sqrt(dims)) for _ in range(dims)]
     vector[topic % dims] += 1.0
     return unit(vector)

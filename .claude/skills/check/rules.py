@@ -1,4 +1,5 @@
-"""Check the analyzers against the hard constraints in CLAUDE.md that ruff and pytest don't catch.
+"""
+Check the analyzers against the hard constraints in CLAUDE.md that ruff and pytest don't catch.
 
     python .claude/skills/check/rules.py            # errors and warnings; exit 1 on any error
     python .claude/skills/check/rules.py --apis     # also list every AWS operation each analyzer calls
@@ -93,7 +94,9 @@ IAM_PREFIX = {"bedrock-agent": "bedrock", "bedrock-agent-runtime": "bedrock", "b
 
 
 def iam_action(candidate: str) -> str | None:
-    """'s3:ListObjectsV2' -> 's3:ListBucket', 'bedrock-agent:GetKnowledgeBase' -> 'bedrock:GetKnowledgeBase'."""
+    """
+    's3:ListObjectsV2' -> 's3:ListBucket', 'bedrock-agent:GetKnowledgeBase' -> 'bedrock:GetKnowledgeBase'.
+    """
     if candidate in IAM_ACTION:
         return IAM_ACTION[candidate]
     service, _, name = candidate.partition(":")
@@ -119,11 +122,13 @@ def _module_root(node: ast.Import | ast.ImportFrom) -> list[str]:
 
 
 def _analyzers_imported(node: ast.Import | ast.ImportFrom, inside: tuple[str, ...] = ()) -> list[str]:
-    """The modules an import loads, by their name in the package: `import s3`, `from .s3 import x`,
+    """
+    The modules an import loads, by their name in the package: `import s3`, `from .s3 import x`,
     `from aws_analyzer import s3` and `import aws_analyzer.s3` all give ["s3"]. `inside` is the package the
     importing file is in, below aws_analyzer (("agent", "toolkits") for agent/toolkits/x.py): a relative import is
     read from there, so `from ...lambda_functions import x` gives ["lambda_functions"] and `from ..budget import x`
-    gives ["agent"]."""
+    gives ["agent"].
+    """
     if isinstance(node, ast.Import):
         return [alias.name.split(".")[1] if alias.name.startswith(f"{PACKAGE}.") else alias.name.split(".")[0]
                 for alias in node.names]
@@ -145,8 +150,10 @@ def _is_stdlib(name: str) -> bool:
 
 
 def _operations(services: set[str]) -> dict[str, list[tuple[str, str]]]:
-    """snake_case operation name -> [(service, OperationName)] for the services the analyzer creates clients for.
-    A name can belong to several (s3 and s3control both have get_public_access_block)."""
+    """
+    snake_case operation name -> [(service, OperationName)] for the services the analyzer creates clients for.
+    A name can belong to several (s3 and s3control both have get_public_access_block).
+    """
     try:
         import botocore.session
         from botocore import xform_name
@@ -165,7 +172,9 @@ def _operations(services: set[str]) -> dict[str, list[tuple[str, str]]]:
 
 
 def _top_level_names(tree: ast.Module) -> list[tuple[str, int]]:
-    """(name, line) of every function, class and variable a module defines at its top level."""
+    """
+    (name, line) of every function, class and variable a module defines at its top level.
+    """
     names = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -177,7 +186,9 @@ def _top_level_names(tree: ast.Module) -> list[tuple[str, int]]:
 
 
 def kit_names() -> dict[str, str]:
-    """Every name _kit/ defines -> the module it's in (fmt, text, ...)."""
+    """
+    Every name _kit/ defines -> the module it's in (fmt, text, ...).
+    """
     names: dict[str, str] = {}
     for path in sorted(KIT.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -186,7 +197,9 @@ def kit_names() -> dict[str, str]:
 
 
 def shared_names() -> dict[str, set[str]]:
-    """Every name each shared module defines: {"_bedrock": {"MODEL_PRICES", ...}} (none for one not written yet)."""
+    """
+    Every name each shared module defines: {"_bedrock": {"MODEL_PRICES", ...}} (none for one not written yet).
+    """
     names: dict[str, set[str]] = {}
     for module in SHARED:
         path = ANALYZERS / f"{module}.py"
@@ -352,8 +365,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
 
 
 def _owner(path: Path) -> tuple[str, tuple[str, ...]]:
-    """(the analyzer a file belongs to, the package it's in below aws_analyzer): s3.py -> ("s3", ()),
-    _kit/fmt.py -> ("_kit", ("_kit",)), agent/toolkits/lambda_tools.py -> ("agent", ("agent", "toolkits"))."""
+    """
+    (the analyzer a file belongs to, the package it's in below aws_analyzer): s3.py -> ("s3", ()),
+    _kit/fmt.py -> ("_kit", ("_kit",)), agent/toolkits/lambda_tools.py -> ("agent", ("agent", "toolkits")).
+    """
     try:
         parts = path.resolve().relative_to(ANALYZERS.resolve()).parts
     except ValueError:  # a file outside the package: checked as an analyzer of its own
@@ -362,12 +377,16 @@ def _owner(path: Path) -> tuple[str, tuple[str, ...]]:
 
 
 def package_files(package: str) -> list[Path]:
-    """Every module of an analyzer that is a package (agent/), its __init__.py included."""
+    """
+    Every module of an analyzer that is a package (agent/), its __init__.py included.
+    """
     return sorted((ANALYZERS / package).rglob("*.py"))
 
 
 def check_package(package: str, report: Report) -> None:
-    """What a package must have as a whole: a <Service>View class in one of its modules."""
+    """
+    What a package must have as a whole: a <Service>View class in one of its modules.
+    """
     for path in package_files(package):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         if any(isinstance(n, ast.ClassDef) and n.name.endswith("View") for n in tree.body):
@@ -376,7 +395,9 @@ def check_package(package: str, report: Report) -> None:
 
 
 def _client_services(tree: ast.AST) -> set[str]:
-    """The services a file creates clients for: session.client("s3", ...) -> {"s3"}."""
+    """
+    The services a file creates clients for: session.client("s3", ...) -> {"s3"}.
+    """
     return {n.args[0].value for n in ast.walk(tree) if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Attribute) and n.func.attr == "client" and n.args
             and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)}
@@ -390,7 +411,7 @@ def _documented(action: str, readme: str) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip().split("\n\n")[0])
     parser.add_argument("files", nargs="*", type=Path,
                         help="files to check (default: src/aws_analyzer/*.py, its packages and _kit/*.py)")
     parser.add_argument("--apis", action="store_true", help="list the AWS operations each analyzer calls")

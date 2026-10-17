@@ -1,4 +1,5 @@
-"""What every service's View shares: how a report is shown (HTML in Jupyter, text elsewhere), progress while a long
+"""
+What every service's View shares: how a report is shown (HTML in Jupyter, text elsewhere), progress while a long
 command runs, help(), and @_friendly_errors, which shows an error as a note instead of a traceback.
 
 A service's <Service>View subclasses _BaseView, makes its analyzer in __init__ (self.core) and sets what's its own as
@@ -29,8 +30,10 @@ from .text import _esc
 
 
 def _commands(cls: type) -> dict[str, Callable]:
-    """A View's commands, name -> function: the public methods of its class and of the classes it's made from (so
-    _BaseView's help() too), the View's own first, in the order they're defined."""
+    """
+    A View's commands, name -> function: the public methods of its class and of the classes it's made from (so
+    _BaseView's help() too), the View's own first, in the order they're defined.
+    """
     commands: dict[str, Callable] = {}
     for klass in cls.__mro__:
         for name, member in vars(klass).items():
@@ -40,14 +43,18 @@ def _commands(cls: type) -> dict[str, Callable]:
 
 
 def _which_prices(prices: dict[str, Any], list_prices: dict[str, Any]) -> str:
-    """How a report names the prices its costs come from: AWS's list prices, or the ones passed in prices=."""
+    """
+    How a report names the prices its costs come from: AWS's list prices, or the ones passed in prices=.
+    """
     return "us-east-1 list prices" if prices == list_prices else "your prices"
 
 
 def _friendly_errors(method: Callable) -> Callable:
-    """Show AWS and input errors as a readable note instead of a traceback. The view says what an AWS error means
+    """
+    Show AWS and input errors as a readable note instead of a traceback. The view says what an AWS error means
     (_explain_call, which is _explain unless the command's arguments help), which other errors are shown as they are
-    (_DATA_ERRORS) and what to say about its own (_extra_note); anything else still raises."""
+    (_DATA_ERRORS) and what to say about its own (_extra_note); anything else still raises.
+    """
 
     @functools.wraps(method)
     def wrapper(self: _BaseView, *args: Any, **kwargs: Any) -> None:
@@ -74,10 +81,12 @@ def _friendly_errors(method: Callable) -> Callable:
 
 
 class _BaseView:
-    """What every <Service>View starts with: the mode, max_rows and progress options, how a report is shown,
+    """
+    What every <Service>View starts with: the mode, max_rows and progress options, how a report is shown,
     progress while a long command runs, help(), and the hooks @_friendly_errors asks. The only command here is
     help(); every other one is the service's, decorated with @_friendly_errors, and renders a report and returns
-    nothing."""
+    nothing.
+    """
 
     core: Any  # the service's analyzer: the View's __init__ makes one when it isn't given one
     _render_html: Callable[[list[Any], int], str]  # the service's look: its stylesheet, root class and badge
@@ -115,11 +124,13 @@ class _BaseView:
     @contextmanager
     def _progress(self, label: str | None = None,
                   unit: str | None = None) -> Generator[Callable[..., None], None, None]:
-        """Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
+        """
+        Progress while a long call runs. tick(count) reports a running count; tick(done, total) a known total,
         and a new total starts a new bar. unit='B' counts bytes. A tqdm bar when tqdm is installed (a widget in
         Jupyter when ipywidgets is too), otherwise a line with the count, time, rate and time left. One bar shows
         at a time: when a nested _progress starts showing, the outer one's bar goes away. Without a label or a
-        unit, it shows the View's _PROGRESS."""
+        unit, it shows the View's _PROGRESS.
+        """
         label = self._PROGRESS[0] if label is None else label
         unit = self._PROGRESS[1] if unit is None else unit
         notebook = self.use_html and _in_notebook()  # elsewhere (or without IPython) the plain line goes to stderr
@@ -199,27 +210,37 @@ class _BaseView:
     # ------------------------------------------------------------------ what @_friendly_errors asks
 
     def _explain(self, code: str, message: str) -> str:
-        """What an AWS error means, and what to do about it. The service's View says more where it can; here, AWS's
-        message as it is."""
+        """
+        What an AWS error means, and what to do about it. The service's View says more where it can; here, AWS's
+        message as it is.
+        """
         return message
 
     def _explain_call(self, code: str, message: str, command: str, args: tuple, kwargs: dict) -> str:
-        """What a command's AWS error means: _explain's, unless the View needs the command's arguments to say more
-        (DynamoDB names the table that wasn't found, and the closest names)."""
+        """
+        What a command's AWS error means: _explain's, unless the View needs the command's arguments to say more
+        (DynamoDB names the table that wasn't found, and the closest names).
+        """
         return self._explain(code, message)
 
     def _extra_note(self, exc: Exception, command: str) -> _Note | None:
-        """The note for an error of the service's own (OpenSearch's failed requests), or None to let it raise."""
+        """
+        The note for an error of the service's own (OpenSearch's failed requests), or None to let it raise.
+        """
         return None
 
     def _price_basis(self) -> str:
-        """The prices a report's costs are worked out with: AWS's list prices, or the analyzer's prices=."""
+        """
+        The prices a report's costs are worked out with: AWS's list prices, or the analyzer's prices=.
+        """
         return _which_prices(self.core.prices, self.core._LIST_PRICES)
 
     # ------------------------------------------------------------------ help
 
     def help(self, command: Any = None) -> None:
-        """Every command, grouped by task; help('name') shows one command in full."""
+        """
+        Every command, grouped by task; help('name') shows one command in full.
+        """
         view = type(self).__name__
         commands = _commands(type(self))
 

@@ -1,4 +1,5 @@
-"""Remake the knowledge base explorer's screenshots: bedrock_kb.py's explore() window, used in a real JupyterLab,
+"""
+Remake the knowledge base explorer's screenshots: bedrock_kb.py's explore() window, used in a real JupyterLab,
 light and dark.
 
     .venv/bin/python .claude/skills/demo/kb_explorer_shots.py                  # every figure
@@ -56,7 +57,9 @@ x = bedrock_kb.KBExplorer("support-docs", core=core, height=620)"""
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:
-    """Open the notebook, run it, use the window, and screenshot each wanted figure into `out`."""
+    """
+    Open the notebook, run it, use the window, and screenshot each wanted figure into `out`.
+    """
     for kernel in api(base, token, "/api/kernels"):  # a fresh kernel, so the newest bedrock_kb.py is imported
         api(base, token, f"/api/kernels/{kernel['id']}", "DELETE")
     api(base, token, "/lab/api/settings/@jupyterlab/apputils-extension:themes", "PUT",
@@ -92,7 +95,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         time.sleep(0.4)
 
     def settled() -> None:
-        """Waits until nothing in the window is loading."""
+        """
+        Waits until nothing in the window is loading.
+        """
         page.wait_for_function("![...document.querySelectorAll('.kbx-app .skw')].some(el => el.offsetParent) && "
                                "!document.querySelector('.kbx-app .kbx-status .spin')", timeout=30_000)
 
@@ -139,7 +144,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip().split("\n\n")[0])
     parser.add_argument("names", nargs="*", help=f"figures to make (default all: {', '.join(FIGURES)})")
     parser.add_argument("--out", type=Path, help="write PNGs to this folder instead of the docs' WebP images")
     parser.add_argument("--theme", choices=["light", "dark", "both"], default="both")

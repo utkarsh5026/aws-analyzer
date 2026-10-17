@@ -1,8 +1,10 @@
-"""The code every service shares (aws_analyzer._kit): what the renderer does with a block nothing draws, the
+"""
+The code every service shares (aws_analyzer._kit): what the renderer does with a block nothing draws, the
 stylesheet every report starts with, and what the base View and Analyzer do that no service shows in normal use
 (an error none of them raises, a command no group lists, prices passed to one analyzer), and the windows' guards for
 what no window meets (a command that can't run, an error that should still raise). Each service's tests cover how its
-reports read, and each window's tests click through it."""
+reports read, and each window's tests click through it.
+"""
 
 import itertools
 import os
@@ -79,7 +81,9 @@ class _Core(_BaseAnalyzer):
 
 
 class _Toy(_BaseView):
-    """A View with one command that raises what it's given, and its own answers to the hooks."""
+    """
+    A View with one command that raises what it's given, and its own answers to the hooks.
+    """
 
     _render_html = staticmethod(lambda blocks, max_rows: "")
     _PROGRESS = ("Toying", "toys")
@@ -98,7 +102,9 @@ class _Toy(_BaseView):
 
     @_friendly_errors
     def fail(self, exc: BaseException, *args, **kwargs) -> None:
-        """Raises exc."""
+        """
+        Raises exc.
+        """
         raise exc
 
 
@@ -240,7 +246,9 @@ def test_local_is_this_machines_zone():
 
 
 class _ToyWindow(_Window):
-    """A window that writes down what it says, and says a ValueError from a command but nothing else."""
+    """
+    A window that writes down what it says, and says a ValueError from a command but nothing else.
+    """
 
     def __init__(self, ready=True):
         self.said, self.ran, self.ready = [], [], ready
@@ -266,7 +274,9 @@ class _ToyWindow(_Window):
 
     @_window_errors
     def go(self, exc=None):
-        """A command: raises exc when given one."""
+        """
+        A command: raises exc when given one.
+        """
         self.ran.append(exc)
         if exc is not None:
             raise exc

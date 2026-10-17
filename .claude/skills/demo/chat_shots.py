@@ -1,4 +1,5 @@
-"""Remake the chat guide's screenshots: bedrock_chat.py's window, used in a real JupyterLab, light and dark.
+"""
+Remake the chat guide's screenshots: bedrock_chat.py's window, used in a real JupyterLab, light and dark.
 
     .venv/bin/python .claude/skills/demo/chat_shots.py                 # every figure
     .venv/bin/python .claude/skills/demo/chat_shots.py chat-request    # just these (image names, no -light/-dark)
@@ -91,7 +92,9 @@ def api(base: str, token: str, path: str, method: str = "GET", body: dict | None
 
 
 def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out: Path) -> dict[str, Path]:
-    """Open the notebook, run it, use the window, and screenshot each wanted figure into `out`."""
+    """
+    Open the notebook, run it, use the window, and screenshot each wanted figure into `out`.
+    """
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
     for kernel in api(base, token, "/api/kernels"):  # a fresh kernel, so the newest bedrock_chat.py is imported
@@ -128,8 +131,10 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
             timeout=30_000)
 
     def scroll_to(element: str) -> None:
-        """Scrolls the open tab so the element (a JS expression) is at its top: each tab scrolls on its own, in the
-        box inside the tab's frame."""
+        """
+        Scrolls the open tab so the element (a JS expression) is at its top: each tab scrolls on its own, in the
+        box inside the tab's frame.
+        """
         page.evaluate(f"""() => {{ const el = {element};
             const box = el.closest('.widget-tab-contents > .widget-box, .jupyter-widget-tab-contents > .jupyter-widget-box');
             box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 4; }}""")
@@ -177,7 +182,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
         page.locator(tab.format("Settings")).first.click()
 
     def field(label: str):
-        """The header field (a _Picker's button) with this label."""
+        """
+        The header field (a _Picker's button) with this label.
+        """
         return page.locator(".kbc-app .kbc-field", has=page.locator(f".fxl:text-is('{label}')")).locator(
             "button.kbc-trig-b").first
 

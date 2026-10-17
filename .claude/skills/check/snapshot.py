@@ -1,4 +1,5 @@
-"""Snapshot what every View shows, to prove that a refactor changed nothing a user sees.
+"""
+Snapshot what every View shows, to prove that a refactor changed nothing a user sees.
 
     python .claude/skills/check/snapshot.py run OUT                     # this checkout, into OUT
     python .claude/skills/check/snapshot.py run OUT --root ../main      # another checkout (e.g. a git worktree of main)
@@ -184,8 +185,10 @@ NORMALIZE: list[tuple[re.Pattern[str], str]] = [
 
 
 def _layout(root: Path) -> tuple[Path, str]:
-    """(the folder the analyzers are in, the prefix their modules import under) for this checkout: the package in
-    src/aws_analyzer/, or the analyzers/ folder of the files before 0.14 (a stale analyzers/__pycache__ doesn't count)."""
+    """
+    (the folder the analyzers are in, the prefix their modules import under) for this checkout: the package in
+    src/aws_analyzer/, or the analyzers/ folder of the files before 0.14 (a stale analyzers/__pycache__ doesn't count).
+    """
     if (root / "src" / "aws_analyzer" / "s3.py").exists():
         return root / "src" / "aws_analyzer", "aws_analyzer."
     return root / "analyzers", ""
@@ -208,7 +211,9 @@ def _normalize(text: str, root: Path, work: Path) -> str:
 
 
 def _capture(view_cls, core, mode: str, setup: str, code: str) -> str:
-    """What one case shows: the text it prints in text mode, or the HTML it hands display() in html mode."""
+    """
+    What one case shows: the text it prints in text mode, or the HTML it hands display() in html mode.
+    """
     import IPython.display
 
     shown: list[str] = []
@@ -235,10 +240,12 @@ def _capture(view_cls, core, mode: str, setup: str, code: str) -> str:
 
 
 def _hold_still() -> None:
-    """Take out what changes from run to run, before the demo data, moto or an analyzer is imported: stop the wall
+    """
+    Take out what changes from run to run, before the demo data, moto or an analyzer is imported: stop the wall
     clock at NOW (every age, date and signed link), stop the monotonic clock (every duration reads 0), and fix the
     process ID (sagemaker_env's "this kernel") and the random bytes and numbers that IDs are made from (moto's
-    upload IDs, the PDF pages' zoom buttons, uuid4()). The worker also runs with PYTHONHASHSEED=0."""
+    upload IDs, the PDF pages' zoom buttons, uuid4()). The worker also runs with PYTHONHASHSEED=0.
+    """
     try:
         import time_machine
     except ImportError:
@@ -254,7 +261,9 @@ def _hold_still() -> None:
 
 
 def worker(root: Path, source: str, service: str, out: Path, work: Path) -> int:
-    """Run one service's cases in this process, against one scene; write <out>/<source>/<service>/<case>.<mode>."""
+    """
+    Run one service's cases in this process, against one scene; write <out>/<source>/<service>/<case>.<mode>.
+    """
     _hold_still()
     for name, value in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                         "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": REGION}.items():
@@ -293,7 +302,9 @@ def worker(root: Path, source: str, service: str, out: Path, work: Path) -> int:
 
 
 def _defined(path: Path) -> list[str]:
-    """The names a file defines at its top level (in if / try blocks too): what a user can import from it."""
+    """
+    The names a file defines at its top level (in if / try blocks too): what a user can import from it.
+    """
     names: list[str] = []
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.col_offset == 0:
@@ -305,8 +316,10 @@ def _defined(path: Path) -> list[str]:
 
 
 def names_worker(root: Path, out: Path) -> int:
-    """names.json, per module: the names its file defines (what a user may import from it), every name the imported
-    module has, and the attributes of each class of ours it has."""
+    """
+    names.json, per module: the names its file defines (what a user may import from it), every name the imported
+    module has, and the attributes of each class of ours it has.
+    """
     folder, prefix = _layout(root)
     modules = [path for path in sorted(folder.glob("*.py")) if not path.stem.startswith("_")]
     modules += [path for path in sorted(folder.glob("*/__init__.py")) if not path.parent.name.startswith("_")]
@@ -443,7 +456,7 @@ def main() -> int:
         return worker(Path(root), source, service, Path(out), Path(work))
     if len(sys.argv) > 1 and sys.argv[1] == "_names":
         return names_worker(Path(sys.argv[2]), Path(sys.argv[3]))
-    intro, _, rest = (__doc__ or "").partition("\n\n")
+    intro, _, rest = (__doc__ or "").strip().partition("\n\n")
     parser = argparse.ArgumentParser(description=intro, epilog=rest, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     run_cmd = commands.add_parser("run", help="snapshot a checkout")

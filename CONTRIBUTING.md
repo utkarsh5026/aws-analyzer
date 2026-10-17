@@ -18,7 +18,7 @@ cd aws-analyzer
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt    # pinned versions of everything the tests use
 python -m pytest                       # every test; moto stands in for AWS, so no account is needed
-ruff check .                           # lint (real errors only, see ruff.toml)
+ruff check .                           # lint: real errors and the code style rules (see ruff.toml)
 ```
 
 For the guide site: `pip install -r requirements-docs.txt`, then `mkdocs serve`.

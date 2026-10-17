@@ -1,4 +1,5 @@
-"""Regenerate the guides' screenshots: every figure in docs/*.md, light and dark, as the tool renders it.
+"""
+Regenerate the guides' screenshots: every figure in docs/*.md, light and dark, as the tool renders it.
 
     .venv/bin/python .claude/skills/demo/shots.py                     # every figure
     .venv/bin/python .claude/skills/demo/shots.py summary what-if     # just these (image names, no -light/-dark)
@@ -162,10 +163,12 @@ def _tar_gz(files: dict[str, bytes], when: datetime) -> bytes:
 
 
 def _pdf(pages: list[list[str]], title: str, author: str, header: str = "") -> bytes:
-    """A PDF with a title and author, laid out like a document. Each page is a list of lines, drawn one under the
+    """
+    A PDF with a title and author, laid out like a document. Each page is a list of lines, drawn one under the
     other: '# Title' in 20 pt bold, '## Heading' in 14 pt bold, '- item' as a bullet ('  more' carries its text on),
     '' as a gap, and the rest in 11 pt. `header` goes at the top of every page and 'Page 1 of 2' at the bottom,
-    drawn last, as many apps do."""
+    drawn last, as many apps do.
+    """
     def text(x: float, y: float, size: float, bold: bool, words: str) -> str:
         words = words.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         return f"BT /F{2 if bold else 1} {size} Tf {x} {y} Td ({words}) Tj ET"
@@ -234,8 +237,10 @@ def _core(title: str, author: str) -> str:
 
 
 def _docx(parts: list[tuple[str, Any]], title: str, author: str) -> bytes:
-    """parts: (style, text) paragraphs (style '' = body, 'Bullet' = a numbered list item), ('table', rows) or
-    ('picture', (PNG bytes, alt text))."""
+    """
+    parts: (style, text) paragraphs (style '' = body, 'Bullet' = a numbered list item), ('table', rows) or
+    ('picture', (PNG bytes, alt text)).
+    """
     def para(style: str, text: str) -> str:
         props = ('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>' if style == "Bullet"
                  else f'<w:pStyle w:val="{style}"/>' if style else "")
@@ -262,7 +267,9 @@ def _docx(parts: list[tuple[str, Any]], title: str, author: str) -> bytes:
 
 
 def _bar_chart(title: str, bars: list[tuple[str, float]]) -> bytes:
-    """A PNG bar chart, like one pasted into a Word document."""
+    """
+    A PNG bar chart, like one pasted into a Word document.
+    """
     from PIL import Image, ImageDraw
 
     image = Image.new("RGB", (1200, 560), "white")
@@ -281,8 +288,10 @@ def _bar_chart(title: str, bars: list[tuple[str, float]]) -> bytes:
 
 
 def _scanned_pdf(pages: list[list[str]], seed: int) -> bytes:
-    """A PDF of page images with no text layer, like one from an office scanner: slightly grey, speckled,
-    a little crooked and soft."""
+    """
+    A PDF of page images with no text layer, like one from an office scanner: slightly grey, speckled,
+    a little crooked and soft.
+    """
     from PIL import Image, ImageDraw, ImageFilter
 
     rng, scans = random.Random(seed), []
@@ -300,7 +309,9 @@ def _scanned_pdf(pages: list[list[str]], seed: int) -> bytes:
 
 
 def _pptx(slides: list[tuple[str, str, str]], title: str, author: str) -> bytes:
-    """slides: (title, body, speaker notes)."""
+    """
+    slides: (title, body, speaker notes).
+    """
     def shape(text: str, placeholder: str | None = None) -> str:
         nv = f'<p:nvPr><p:ph type="{placeholder}"/></p:nvPr>' if placeholder else "<p:nvPr/>"
         paragraphs = "".join(f"<a:p><a:r><a:t>{line}</a:t></a:r></a:p>" for line in text.split("\n"))
@@ -325,8 +336,10 @@ def _pptx(slides: list[tuple[str, str, str]], title: str, author: str) -> bytes:
 
 
 def _safetensors_header() -> tuple[bytes, int]:
-    """The header of a small decoder-only model and the file's full size. Only the header is read, so the weights
-    can be left out."""
+    """
+    The header of a small decoder-only model and the file's full size. Only the header is read, so the weights
+    can be left out.
+    """
     tensors, offset = {}, 0
 
     def add(name: str, shape: list[int], dtype: str = "BF16") -> None:
@@ -352,8 +365,10 @@ def _safetensors_header() -> tuple[bytes, int]:
 
 
 class S3Overlay:
-    """moto's S3 client, plus objects that are only in listings. moto holds the files a figure opens; the listing
-    adds the terabytes around them (keys, sizes, dates, storage classes, ETags) that moto couldn't hold."""
+    """
+    moto's S3 client, plus objects that are only in listings. moto holds the files a figure opens; the listing
+    adds the terabytes around them (keys, sizes, dates, storage classes, ETags) that moto couldn't hold.
+    """
 
     def __init__(self, client, listed: dict[str, list[dict]], sizes: dict[tuple[str, str], int]):
         self._client, self._listed, self._sizes = client, listed, sizes
@@ -367,7 +382,9 @@ class S3Overlay:
         return response
 
     def get_bucket_policy_status(self, **params):
-        """What AWS says of acme-ml-data's policy, which lets anyone read public-samples/ (moto says private)."""
+        """
+        What AWS says of acme-ml-data's policy, which lets anyone read public-samples/ (moto says private).
+        """
         response = self._client.get_bucket_policy_status(**params)
         response["PolicyStatus"]["IsPublic"] = params["Bucket"] == "acme-ml-data"
         return response
@@ -414,7 +431,9 @@ class S3Overlay:
 
 
 class S3Metrics:
-    """CloudWatch's daily S3 storage metrics for the scene's buckets (moto derives its own from what it holds)."""
+    """
+    CloudWatch's daily S3 storage metrics for the scene's buckets (moto derives its own from what it holds).
+    """
 
     def __init__(self, sizes: dict[str, dict[str, float]], counts: dict[str, int]):
         self._sizes, self._counts = sizes, counts
@@ -449,7 +468,9 @@ class S3Metrics:
 
 
 class S3Session:
-    """A boto3 session whose S3 clients are overlays and whose CloudWatch is the fake above."""
+    """
+    A boto3 session whose S3 clients are overlays and whose CloudWatch is the fake above.
+    """
 
     def __init__(self, listed, sizes, cloudwatch):
         import boto3
@@ -475,7 +496,9 @@ def _listed(key: str, size: float, age_days: float, storage: str = "STANDARD", e
 
 
 def _lake_listing(rng: random.Random) -> list[dict]:
-    """acme-ml-data's objects that are only listed: ~15,000 keys and 1.2 TB."""
+    """
+    acme-ml-data's objects that are only listed: ~15,000 keys and 1.2 TB.
+    """
     out = []
     jobs = [("churn-xgb", 420), ("ltv-lgbm", 350), ("fraud-gnn", 300), ("reco-two-tower", 240), ("forecast-tft", 200),
             ("churn-xgb", 150), ("llm-finetune", 120), ("fraud-gnn", 75), ("reco-two-tower", 45), ("llm-finetune", 20),
@@ -519,7 +542,9 @@ def _lake_listing(rng: random.Random) -> list[dict]:
 
 
 def seed_s3_docs() -> dict:
-    """The acme scene: returns the S3Analyzer's session and client."""
+    """
+    The acme scene: returns the S3Analyzer's session and client.
+    """
     import boto3
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -688,7 +713,9 @@ def seed_s3_docs() -> dict:
 
 
 def _backdate_buckets(ages: dict[str, float]) -> None:
-    """moto stamps buckets with the time they're made; the explorer's list of buckets shows how old each one is."""
+    """
+    moto stamps buckets with the time they're made; the explorer's list of buckets shows how old each one is.
+    """
     from moto.core.models import DEFAULT_ACCOUNT_ID
     from moto.s3.models import s3_backends
 
@@ -700,7 +727,9 @@ def _backdate_buckets(ages: dict[str, float]) -> None:
 
 
 def _backdate_markers(bucket: str, rng: random.Random) -> None:
-    """Put the deletes of the scene's deleted files a few days back, after their last upload."""
+    """
+    Put the deletes of the scene's deleted files a few days back, after their last upload.
+    """
     from moto.core.models import DEFAULT_ACCOUNT_ID
     from moto.s3.models import s3_backends
 
@@ -718,7 +747,9 @@ def _backdate_markers(bucket: str, rng: random.Random) -> None:
 
 
 class DescribeOverlay:
-    """moto's DynamoDB client, with DescribeTable reporting a production table's item counts, sizes and age."""
+    """
+    moto's DynamoDB client, with DescribeTable reporting a production table's item counts, sizes and age.
+    """
 
     def __init__(self, client, stats: dict[str, dict]):
         self._client, self._stats = client, stats
@@ -736,8 +767,10 @@ class DescribeOverlay:
         return response
 
     def _priced(self, response: dict, table: str) -> dict:
-        """The read units of what a scan or query read (moto says 1 per call): items of the table's average size,
-        eventually consistent, so half a unit per 4 KB."""
+        """
+        The read units of what a scan or query read (moto says 1 per call): items of the table's average size,
+        eventually consistent, so half a unit per 4 KB.
+        """
         stats = self._stats.get(table, {})
         average = stats.get("size", 0) / max(stats.get("items", 0), 1) or 400
         if "ConsumedCapacity" in response:
@@ -753,7 +786,9 @@ class DescribeOverlay:
 
 
 def seed_dynamodb_docs() -> dict:
-    """The acme scene: returns the DynamoDBAnalyzer's client."""
+    """
+    The acme scene: returns the DynamoDBAnalyzer's client.
+    """
     from decimal import Decimal
 
     import boto3
@@ -923,7 +958,9 @@ SCENES = {"s3": seed_s3_docs, "dynamodb": seed_dynamodb_docs, "bedrock_kb": seed
 
 
 def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
-    """Every figure's report(s) as notebook HTML fragments, from one moto session with the service's scene."""
+    """
+    Every figure's report(s) as notebook HTML fragments, from one moto session with the service's scene.
+    """
     for name, value in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                         "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": REGION}.items():
         os.environ[name] = value
@@ -972,7 +1009,9 @@ def shoot(html_path: Path, png_path: Path, browser: str) -> None:
 
 
 def trim(png_path: Path, crop: int | None):
-    """The screenshot cut just below the last thing drawn (and at `crop` CSS px, when given)."""
+    """
+    The screenshot cut just below the last thing drawn (and at `crop` CSS px, when given).
+    """
     from PIL import Image, ImageChops
 
     image = Image.open(png_path).convert("RGB")
@@ -997,7 +1036,7 @@ def set_height(service: str, name: str, height: int) -> None:
 
 
 def main() -> int:
-    intro, _, rest = (__doc__ or "").partition("\n\n")
+    intro, _, rest = (__doc__ or "").strip().partition("\n\n")
     parser = argparse.ArgumentParser(description=intro, epilog=rest, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="figures to make (image names); default: all")
     parser.add_argument("--list", action="store_true", help="list the figures and exit")

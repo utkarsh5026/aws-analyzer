@@ -1,4 +1,5 @@
-"""The mechanical parts of a release: where main stands since the last one, the CHANGELOG's Unreleased entries moved
+"""
+The mechanical parts of a release: where main stands since the last one, the CHANGELOG's Unreleased entries moved
 under a new version with __version__ set to match, and one version's entry as the GitHub release notes.
 
     python .claude/skills/release/release.py status          # the last release, what's on main since, ready or not
@@ -41,7 +42,9 @@ KINDS = (
 
 
 def run(*command: str) -> str:
-    """A command's output, or '' if it failed or isn't installed."""
+    """
+    A command's output, or '' if it failed or isn't installed.
+    """
     try:
         proc = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.TimeoutExpired):
@@ -69,13 +72,17 @@ def parse(version: str) -> tuple[int, int, int]:
 
 
 def released() -> list[str]:
-    """Released versions from the v* tags, newest first."""
+    """
+    Released versions from the v* tags, newest first.
+    """
     tags = run("git", "tag", "--list", "v*", "--sort=-v:refname").splitlines()
     return [tag[1:] for tag in tags if SEMVER.match(tag[1:])]
 
 
 def sections(text: str) -> list[tuple[str, str | None, int, int]]:
-    """(name, date, where its heading starts, where it ends) for each '## [...]' section of the changelog."""
+    """
+    (name, date, where its heading starts, where it ends) for each '## [...]' section of the changelog.
+    """
     heads = list(HEADING.finditer(text))
     found = []
     for i, head in enumerate(heads):
@@ -89,7 +96,9 @@ def sections(text: str) -> list[tuple[str, str | None, int, int]]:
 
 
 def section(text: str, name: str) -> tuple[str, int, int] | None:
-    """(body, start, end) of one section, by its name ('Unreleased' or a version)."""
+    """
+    (body, start, end) of one section, by its name ('Unreleased' or a version).
+    """
     for found, _, start, end in sections(text):
         if found.lower() == name.lower():
             return text[start:end].partition("\n")[2].strip(), start, end
@@ -97,7 +106,9 @@ def section(text: str, name: str) -> tuple[str, int, int] | None:
 
 
 def drop_empty_groups(body: str) -> str:
-    """The body without '### Added' style headings that have nothing under them."""
+    """
+    The body without '### Added' style headings that have nothing under them.
+    """
     parts = re.split(r"(?m)^(?=### )", body)
     return "".join(part for part in parts if not part.startswith("### ") or part.partition("\n")[2].strip()).strip()
 
@@ -118,7 +129,9 @@ def pypi_version() -> str | None:
 
 
 def changes_since(last: str | None) -> list[str]:
-    """One line per pull request (or direct commit) on origin/main since the last release."""
+    """
+    One line per pull request (or direct commit) on origin/main since the last release.
+    """
     span = f"v{last}..origin/main" if last else "origin/main"
     lines = []
     for record in run("git", "log", "--first-parent", "--format=%h%x1f%s%x1f%b%x1e", span).split("\x1e"):
@@ -145,7 +158,9 @@ def changed_kinds(last: str | None) -> dict[str, int]:
 
 
 def ci_on_main() -> tuple[str, str]:
-    """(result, url) of the CI run on origin/main's newest commit."""
+    """
+    (result, url) of the CI run on origin/main's newest commit.
+    """
     head = run("git", "rev-parse", "origin/main")
     out = run("gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--commit", head, "--limit", "1",
               "--json", "status,conclusion,url")
@@ -265,7 +280,9 @@ def bump(target: str, date: str) -> int:
 
 
 def unwrap(body: str) -> str:
-    """The entry with its hard-wrapped lines joined: GitHub shows every newline in a release's notes as a break."""
+    """
+    The entry with its hard-wrapped lines joined: GitHub shows every newline in a release's notes as a break.
+    """
     lines: list[str] = []
     fenced = False
     for line in body.splitlines():
@@ -295,7 +312,7 @@ def notes(version: str | None) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip(), formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="the last release, what's on main since, and whether it's ready")
     bumping = commands.add_parser("bump", help="move the Unreleased entries under a new version and set __version__")

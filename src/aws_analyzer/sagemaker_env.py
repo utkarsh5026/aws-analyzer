@@ -275,7 +275,9 @@ _APP_SETTINGS = {
 
 
 def human_runtime(seconds: float | None) -> str:
-    """How long something has run: 42 -> '42s', 3000 -> '50m', 7500 -> '2h 05m', 273600 -> '3d 4h'."""
+    """
+    How long something has run: 42 -> '42s', 3000 -> '50m', 7500 -> '2h 05m', 273600 -> '3d 4h'.
+    """
     if seconds is None:
         return "-"
     seconds = max(int(seconds), 0)
@@ -289,29 +291,39 @@ def human_runtime(seconds: float | None) -> str:
 
 
 def _since(when: datetime | None, now: datetime | None = None) -> float | None:
-    """Seconds from `when` until now (None stays None)."""
+    """
+    Seconds from `when` until now (None stays None).
+    """
     return None if when is None else ((now or _utcnow()) - when).total_seconds()
 
 
 def _arn_part(arn: str, index: int) -> str:
-    """'arn:aws:sagemaker:us-east-1:123:notebook-instance/nb', 3 -> 'us-east-1'."""
+    """
+    'arn:aws:sagemaker:us-east-1:123:notebook-instance/nb', 3 -> 'us-east-1'.
+    """
     parts = (arn or "").split(":", 5)
     return parts[index] if len(parts) > index else ""
 
 
 def _arn_name(arn: str) -> str:
-    """The last part of an ARN's resource: '.../role/service-role/MyRole' -> 'MyRole'."""
+    """
+    The last part of an ARN's resource: '.../role/service-role/MyRole' -> 'MyRole'.
+    """
     return (arn or "").rstrip("/").rsplit("/", 1)[-1]
 
 
 def instance_spec(instance_type: str) -> tuple[int, float, int] | None:
-    """'ml.m5.xlarge' -> (4, 16, 0): vCPUs, memory in GiB and GPUs. None for a type INSTANCE_TYPES doesn't list."""
+    """
+    'ml.m5.xlarge' -> (4, 16, 0): vCPUs, memory in GiB and GPUs. None for a type INSTANCE_TYPES doesn't list.
+    """
     spec = INSTANCE_TYPES.get(instance_type)
     return spec[1:] if spec else None
 
 
 def describe_instance(instance_type: str) -> str:
-    """'ml.g5.xlarge' -> '4 vCPU · 16 GiB · 1 GPU'. '' for a type INSTANCE_TYPES doesn't list."""
+    """
+    'ml.g5.xlarge' -> '4 vCPU · 16 GiB · 1 GPU'. '' for a type INSTANCE_TYPES doesn't list.
+    """
     if instance_type == "system":
         return "a small shared instance, no charge"
     spec = instance_spec(instance_type)
@@ -326,20 +338,26 @@ def describe_instance(instance_type: str) -> str:
 def hourly_price(
     instance_type: str, prices: dict[str, float] | None = None
 ) -> float | None:
-    """USD per hour for one instance of this type. 0 for Studio Classic's free 'system' instance, None when the
-    price table doesn't have the type (pass prices={'ml.x.y': usd_per_hour})."""
+    """
+    USD per hour for one instance of this type. 0 for Studio Classic's free 'system' instance, None when the
+    price table doesn't have the type (pass prices={'ml.x.y': usd_per_hour}).
+    """
     if instance_type == "system":
         return 0.0
     return (SAGEMAKER_PRICES if prices is None else prices).get(instance_type)
 
 
 def app_label(app_type: str) -> str:
-    """'CodeEditor' -> 'Code Editor', 'KernelGateway' -> 'Studio Classic kernel'."""
+    """
+    'CodeEditor' -> 'Code Editor', 'KernelGateway' -> 'Studio Classic kernel'.
+    """
     return _APP_LABELS.get(app_type, app_type)
 
 
 def _image_label(spec: dict[str, Any]) -> str:
-    """A Studio ResourceSpec's image as 'sagemaker-distribution-cpu 2.6' (or '... v15' from a version ARN)."""
+    """
+    A Studio ResourceSpec's image as 'sagemaker-distribution-cpu 2.6' (or '... v15' from a version ARN).
+    """
     version_arn = spec.get("SageMakerImageVersionArn") or ""
     image = _arn_name(spec.get("SageMakerImageArn") or "")
     if version_arn:
@@ -353,7 +371,9 @@ def _image_label(spec: dict[str, Any]) -> str:
 
 
 def parse_meminfo(text: str) -> dict[str, int]:
-    """/proc/meminfo -> {'MemTotal': bytes, 'MemAvailable': bytes, ...}."""
+    """
+    /proc/meminfo -> {'MemTotal': bytes, 'MemAvailable': bytes, ...}.
+    """
     values: dict[str, int] = {}
     for line in text.splitlines():
         name, _, rest = line.partition(":")
@@ -366,14 +386,18 @@ def parse_meminfo(text: str) -> dict[str, int]:
 
 
 def parse_loadavg(text: str) -> tuple[float, float, float]:
-    """/proc/loadavg -> the 1, 5 and 15-minute load averages (processes running or waiting to run)."""
+    """
+    /proc/loadavg -> the 1, 5 and 15-minute load averages (processes running or waiting to run).
+    """
     one, five, fifteen = (float(value) for value in text.split()[:3])
     return one, five, fifteen
 
 
 def parse_gpus(text: str) -> list[GPUInfo]:
-    """nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits
-    -> [GPUInfo]. '[N/A]' values become None."""
+    """
+    nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits
+    -> [GPUInfo]. '[N/A]' values become None.
+    """
 
     def number(value: str) -> float | None:
         try:
@@ -399,7 +423,9 @@ def parse_gpus(text: str) -> list[GPUInfo]:
 
 
 def parse_process(pid: int, status: str, cmdline: bytes) -> ProcessInfo | None:
-    """One process from /proc/<pid>/status and /proc/<pid>/cmdline. None for kernel threads (no memory)."""
+    """
+    One process from /proc/<pid>/status and /proc/<pid>/cmdline. None for kernel threads (no memory).
+    """
     fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
     rss = fields.get("VmRSS", "").split()
     if not rss or not rss[0].isdigit():
@@ -420,8 +446,10 @@ _IDLE_TIME_RE = re.compile(r"(?:IDLE_TIME\s*=\s*|--time[ =])[\"']?(\d+)")
 
 
 def lifecycle_idle(scripts: Iterable[str]) -> tuple[bool, int | None]:
-    """Whether a notebook instance's lifecycle scripts stop it when idle (the usual way is AWS's auto-stop-idle
-    sample), and after how many idle minutes when the script says -> (stops_when_idle, minutes)."""
+    """
+    Whether a notebook instance's lifecycle scripts stop it when idle (the usual way is AWS's auto-stop-idle
+    sample), and after how many idle minutes when the script says -> (stops_when_idle, minutes).
+    """
     text = "\n".join(scripts)
     if not _AUTOSTOP_RE.search(text):
         return False, None
@@ -434,8 +462,10 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def parse_python_version(value: Any) -> str:
-    """A Python version as conda and uv take it: '3.11', 3.11, 'py311', 'python3.11' -> '3.11'; '3.11.9' stays
-    '3.11.9'. The number 3.10 reads as 3.1, so a number 3.1 means 3.10."""
+    """
+    A Python version as conda and uv take it: '3.11', 3.11, 'py311', 'python3.11' -> '3.11'; '3.11.9' stays
+    '3.11.9'. The number 3.10 reads as 3.1, so a number 3.1 means 3.10.
+    """
     if isinstance(value, float):
         text = "3.10" if value == 3.1 else repr(value)
     else:
@@ -448,29 +478,39 @@ def parse_python_version(value: Any) -> str:
 
 
 def env_name(version: str) -> str:
-    """The name new_env() gives an environment: '3.11' -> 'py311', '3.12.4' -> 'py312'."""
+    """
+    The name new_env() gives an environment: '3.11' -> 'py311', '3.12.4' -> 'py312'.
+    """
     return "py" + "".join(version.split(".")[:2])
 
 
 def new_env_call(python: str, name: str = "", **kwargs: Any) -> str:
-    """A new_env() call to copy, leaving out name= when it's the default: ('3.11', 'py311') -> "new_env('3.11')",
-    ('3.11', 'exp', packages='pandas') -> "new_env('3.11', name='exp', packages='pandas')"."""
+    """
+    A new_env() call to copy, leaving out name= when it's the default: ('3.11', 'py311') -> "new_env('3.11')",
+    ('3.11', 'exp', packages='pandas') -> "new_env('3.11', name='exp', packages='pandas')".
+    """
     words = [repr(python)] + ([f"name={name!r}"] if name and name != env_name(python) else [])
     return f"new_env({', '.join(words + [f'{key}={value!r}' for key, value in kwargs.items()])})"
 
 
 def _minor(version: str) -> str:
-    """'3.11.9' -> '3.11' ('' -> '3.11': the version new_env() suggests when it can't tell)."""
+    """
+    '3.11.9' -> '3.11' ('' -> '3.11': the version new_env() suggests when it can't tell).
+    """
     return ".".join(version.split(".")[:2]) if version else "3.11"
 
 
 def kernel_label(version: str, name: str) -> str:
-    """What Jupyter's kernel menu shows for it: ('3.11.9', 'py311') -> 'Python 3.11 (py311)'."""
+    """
+    What Jupyter's kernel menu shows for it: ('3.11.9', 'py311') -> 'Python 3.11 (py311)'.
+    """
     return f"Python {'.'.join(version.split('.')[:2])} ({name})"
 
 
 def parse_pyvenv_cfg(text: str) -> dict[str, str]:
-    """A virtual environment's pyvenv.cfg -> {'home': ..., 'version': '3.11.9', ...} (uv writes version_info)."""
+    """
+    A virtual environment's pyvenv.cfg -> {'home': ..., 'version': '3.11.9', ...} (uv writes version_info).
+    """
     values = {}
     for line in text.splitlines():
         key, sep, value = line.partition("=")
@@ -480,7 +520,9 @@ def parse_pyvenv_cfg(text: str) -> dict[str, str]:
 
 
 def _clean_version(text: str) -> str:
-    """'3.11.9.final.0' -> '3.11.9'."""
+    """
+    '3.11.9.final.0' -> '3.11.9'.
+    """
     match = re.match(r"\d+\.\d+(?:\.\d+)?", text.strip())
     return match.group(0) if match else ""
 
@@ -492,7 +534,9 @@ def _clean_version(text: str) -> str:
 
 @dataclass
 class Environment:
-    """Where this code runs, from SageMaker's metadata file (/opt/ml/metadata/resource-metadata.json)."""
+    """
+    Where this code runs, from SageMaker's metadata file (/opt/ml/metadata/resource-metadata.json).
+    """
 
     kind: str = "local"  # 'notebook instance' | 'studio' | 'other' | 'local' (no metadata file: not on SageMaker)
     name: str = ""  # the notebook instance's name, or the Studio app's ('default' for JupyterLab and Code Editor)
@@ -521,7 +565,9 @@ class Environment:
 
     @property
     def label(self) -> str:
-        """'notebook instance nb', 'JupyterLab space analysis', 'Studio Classic kernel app datascience-...'."""
+        """
+        'notebook instance nb', 'JupyterLab space analysis', 'Studio Classic kernel app datascience-...'.
+        """
         if self.kind == "notebook instance":
             return f"notebook instance {self.name}"
         if self.space:
@@ -541,8 +587,10 @@ _BILLED = {
 
 @dataclass
 class NotebookInfo:
-    """One SageMaker notebook: a notebook instance, or a Studio app (JupyterLab, Code Editor, Studio Classic) with
-    its space and domain settings. Parts that couldn't be read are listed in `errors` (section -> error code)."""
+    """
+    One SageMaker notebook: a notebook instance, or a Studio app (JupyterLab, Code Editor, Studio Classic) with
+    its space and domain settings. Parts that couldn't be read are listed in `errors` (section -> error code).
+    """
 
     kind: str  # 'notebook instance' | 'studio app'
     name: str  # the notebook instance's name, or the app's ('default' for a space's JupyterLab / Code Editor app)
@@ -581,7 +629,9 @@ class NotebookInfo:
 
     @property
     def billing(self) -> bool:
-        """Running (or starting / stopping), so its instance is billed by the hour."""
+        """
+        Running (or starting / stopping), so its instance is billed by the hour.
+        """
         return self.status in _BILLED
 
     @property
@@ -592,7 +642,9 @@ class NotebookInfo:
 
     @property
     def label(self) -> str:
-        """'notebook instance nb', 'JupyterLab space analysis', 'Studio Classic kernel app x (user alice)'."""
+        """
+        'notebook instance nb', 'JupyterLab space analysis', 'Studio Classic kernel app x (user alice)'.
+        """
         if self.kind == "notebook instance":
             return f"notebook instance {self.name}"
         if self.space:
@@ -603,7 +655,9 @@ class NotebookInfo:
 
 @dataclass
 class GPUInfo:
-    """One GPU, as nvidia-smi sees it right now."""
+    """
+    One GPU, as nvidia-smi sees it right now.
+    """
 
     name: str
     busy: float | None = None  # % of the last sample period a kernel ran on it
@@ -612,7 +666,9 @@ class GPUInfo:
 
     @property
     def idle(self) -> bool:
-        """Nothing running on it and (almost) nothing loaded into its memory."""
+        """
+        Nothing running on it and (almost) nothing loaded into its memory.
+        """
         loaded = (
             (self.memory_used or 0) / self.memory_total if self.memory_total else 0.0
         )
@@ -621,7 +677,9 @@ class GPUInfo:
 
 @dataclass
 class Volume:
-    """How full one disk is."""
+    """
+    How full one disk is.
+    """
 
     path: str
     label: str  # 'notebook volume', 'system disk', ...
@@ -632,7 +690,9 @@ class Volume:
 
     @property
     def title(self) -> str:
-        """'notebook volume (kept when the instance stops)'."""
+        """
+        'notebook volume (kept when the instance stops)'.
+        """
         return f"{self.label} ({self.note})" if self.note else self.label
 
     @property
@@ -641,13 +701,17 @@ class Volume:
 
     @property
     def elastic(self) -> bool:
-        """A file system that grows as needed (EFS reports 8 EiB), so 'full' doesn't apply."""
+        """
+        A file system that grows as needed (EFS reports 8 EiB), so 'full' doesn't apply.
+        """
         return self.total >= 2**50
 
 
 @dataclass
 class ProcessInfo:
-    """One process on this machine and the memory it holds."""
+    """
+    One process on this machine and the memory it holds.
+    """
 
     pid: int
     name: str
@@ -659,8 +723,10 @@ class ProcessInfo:
 
 @dataclass
 class Machine:
-    """This machine right now, read locally: /proc, the disks and nvidia-smi. Parts it couldn't read are listed in
-    `errors` (part -> reason)."""
+    """
+    This machine right now, read locally: /proc, the disks and nvidia-smi. Parts it couldn't read are listed in
+    `errors` (part -> reason).
+    """
 
     cpus: int | None = None
     load: tuple[float, float, float] | None = None  # 1, 5 and 15-minute load averages
@@ -697,14 +763,18 @@ class Machine:
 
     @property
     def cpu_share(self) -> float | None:
-        """The 15-minute load average as a share of the vCPUs."""
+        """
+        The 15-minute load average as a share of the vCPUs.
+        """
         return self.load[2] / self.cpus if self.load and self.cpus else None
 
 
 @dataclass
 class InstanceReport:
-    """What instance() found: the notebook's settings from SageMaker, and, for the notebook this code runs in, the
-    machine itself right now. Sections that couldn't be read are listed in `errors` (section -> error code)."""
+    """
+    What instance() found: the notebook's settings from SageMaker, and, for the notebook this code runs in, the
+    machine itself right now. Sections that couldn't be read are listed in `errors` (section -> error code).
+    """
 
     env: Environment
     notebook: NotebookInfo | None = None
@@ -716,7 +786,9 @@ class InstanceReport:
 
     @property
     def role_name(self) -> str:
-        """'AmazonSageMaker-ExecutionRole-2024...' from the notebook's role, or the signed-in session."""
+        """
+        'AmazonSageMaker-ExecutionRole-2024...' from the notebook's role, or the signed-in session.
+        """
         if self.notebook and self.notebook.role_arn:
             return _arn_name(self.notebook.role_arn)
         if ":assumed-role/" in self.identity:
@@ -726,7 +798,9 @@ class InstanceReport:
 
 @dataclass
 class DiskEntry:
-    """Files under one folder (or one file): how many, how big, and when the newest changed."""
+    """
+    Files under one folder (or one file): how many, how big, and when the newest changed.
+    """
 
     path: str  # relative to the folder measured
     size: int = 0
@@ -742,7 +816,9 @@ class DiskEntry:
 
 @dataclass
 class Clearable:
-    """Caches or trash found while measuring: safe to empty, and the command that does it."""
+    """
+    Caches or trash found while measuring: safe to empty, and the command that does it.
+    """
 
     what: str  # 'Jupyter trash', 'pip cache', ...
     why: str  # what it holds and why emptying it is safe
@@ -754,7 +830,9 @@ class Clearable:
 
 @dataclass
 class DiskReport:
-    """What disk() measured under one folder."""
+    """
+    What disk() measured under one folder.
+    """
 
     path: str  # the folder measured
     volume: Volume | None = None  # the disk it's on
@@ -776,7 +854,9 @@ class DiskReport:
     seconds: float = 0.0
 
     def to_df(self):
-        """The folders measured as a pandas DataFrame: path, size in bytes, files, newest change."""
+        """
+        The folders measured as a pandas DataFrame: path, size in bytes, files, newest change.
+        """
         pd = _require("pandas", "DiskReport.to_df()")
         return pd.DataFrame(
             [
@@ -794,8 +874,10 @@ class DiskReport:
 
 @dataclass
 class Billable:
-    """One thing SageMaker bills by the hour while it runs: a notebook instance, a Studio app, an endpoint or a
-    training / processing job."""
+    """
+    One thing SageMaker bills by the hour while it runs: a notebook instance, a Studio app, an endpoint or a
+    training / processing job.
+    """
 
     kind: str  # 'notebook instance' | 'Studio app' | 'endpoint' | 'training job' | 'processing job'
     name: str
@@ -829,7 +911,9 @@ class Billable:
     this: bool = False  # the notebook this code runs in
 
     def hourly(self, prices: dict[str, float] | None = None) -> float | None:
-        """USD per hour for all its instances; None when the price table lacks one of the types."""
+        """
+        USD per hour for all its instances; None when the price table lacks one of the types.
+        """
         total = 0.0
         for instance_type, count in self.instances:
             price = hourly_price(instance_type, prices)
@@ -840,7 +924,9 @@ class Billable:
 
     @property
     def instance_label(self) -> str:
-        """'ml.m5.xlarge', 'ml.g5.xlarge × 2', 'serverless'."""
+        """
+        'ml.m5.xlarge', 'ml.g5.xlarge × 2', 'serverless'.
+        """
         if self.serverless and not self.instances:
             return "serverless"
         return (
@@ -850,8 +936,10 @@ class Billable:
 
 @dataclass
 class RunningReport:
-    """What running() found: everything billing by the hour in one region, plus stopped notebook instances (their
-    storage is still billed). Sections that couldn't be read are listed in `errors` (section -> error code)."""
+    """
+    What running() found: everything billing by the hour in one region, plus stopped notebook instances (their
+    storage is still billed). Sections that couldn't be read are listed in `errors` (section -> error code).
+    """
 
     region: str
     resources: list[Billable] = field(default_factory=list)
@@ -860,7 +948,9 @@ class RunningReport:
     errors: dict[str, str] = field(default_factory=dict)
 
     def to_df(self, prices: dict[str, float] | None = None):
-        """Everything running (and the stopped notebook instances) as a pandas DataFrame, one row each."""
+        """
+        Everything running (and the stopped notebook instances) as a pandas DataFrame, one row each.
+        """
         pd = _require("pandas", "RunningReport.to_df()")
         rows = []
         for b in self.resources + self.stopped:
@@ -905,7 +995,9 @@ class RunningReport:
 
 @dataclass
 class PythonEnv:
-    """One Python environment on this machine: a conda environment, or a virtual environment (venv, uv)."""
+    """
+    One Python environment on this machine: a conda environment, or a virtual environment (venv, uv).
+    """
 
     name: str  # the folder's name ('base' for a conda installation's own)
     path: str  # as this machine sees it
@@ -920,7 +1012,9 @@ class PythonEnv:
 
 @dataclass
 class KernelSpec:
-    """One Jupyter kernel: what Jupyter's kernel menu shows, and the Python it starts."""
+    """
+    One Jupyter kernel: what Jupyter's kernel menu shows, and the Python it starts.
+    """
 
     name: str  # its folder: 'py311'
     display: str  # 'Python 3.11 (py311)'
@@ -934,8 +1028,10 @@ class KernelSpec:
 
 @dataclass
 class EnvReport:
-    """What environments() found: the Python environments and Jupyter kernels on this machine, the programs that
-    make new environments, and where new_env() puts them. Parts it couldn't read are in `errors` (part -> reason)."""
+    """
+    What environments() found: the Python environments and Jupyter kernels on this machine, the programs that
+    make new environments, and where new_env() puts them. Parts it couldn't read are in `errors` (part -> reason).
+    """
 
     kind: str  # Environment.kind: 'notebook instance' | 'studio' | 'other' | 'local'
     envs: list[PythonEnv] = field(default_factory=list)
@@ -949,7 +1045,9 @@ class EnvReport:
     errors: dict[str, str] = field(default_factory=dict)
 
     def to_df(self):
-        """The environments as a pandas DataFrame: name, Python version, kind, path, kernels, kept, made."""
+        """
+        The environments as a pandas DataFrame: name, Python version, kind, path, kernels, kept, made.
+        """
         pd = _require("pandas", "EnvReport.to_df()")
         return pd.DataFrame(
             [
@@ -971,7 +1069,9 @@ class EnvReport:
 
 @dataclass
 class EnvStep:
-    """One command new_env() runs, and once run, how it went."""
+    """
+    One command new_env() runs, and once run, how it went.
+    """
 
     label: str  # 'Make the environment', 'Install packages', 'Add the Jupyter kernel'
     argv: list[str]
@@ -984,7 +1084,9 @@ class EnvStep:
 
 @dataclass
 class EnvPlan:
-    """What new_env() does: the environment it makes (or finds), and the commands that make it."""
+    """
+    What new_env() does: the environment it makes (or finds), and the commands that make it.
+    """
 
     name: str  # 'py311': the environment's folder and its kernel's name
     python: str  # '3.11'
@@ -1005,7 +1107,9 @@ class EnvPlan:
 
 @dataclass
 class EnvResult:
-    """What new_env() did: the plan, each step's exit status and output, and the Python the environment got."""
+    """
+    What new_env() did: the plan, each step's exit status and output, and the Python the environment got.
+    """
 
     plan: EnvPlan
     ok: bool = False
@@ -1021,8 +1125,10 @@ class EnvResult:
 
 
 def parse_metadata(data: dict[str, Any]) -> Environment:
-    """SageMaker's resource-metadata.json -> Environment. Notebook instances write ResourceArn and ResourceName;
-    Studio apps also write DomainId, AppType, and SpaceName or UserProfileName."""
+    """
+    SageMaker's resource-metadata.json -> Environment. Notebook instances write ResourceArn and ResourceName;
+    Studio apps also write DomainId, AppType, and SpaceName or UserProfileName.
+    """
     arn = data.get("ResourceArn") or ""
     resource = _arn_part(arn, 5)
     env = Environment(
@@ -1059,7 +1165,9 @@ def parse_metadata(data: dict[str, Any]) -> Environment:
 
 
 def parse_notebook_instance(desc: dict[str, Any]) -> NotebookInfo:
-    """A DescribeNotebookInstance response (or a ListNotebookInstances summary) -> NotebookInfo."""
+    """
+    A DescribeNotebookInstance response (or a ListNotebookInstances summary) -> NotebookInfo.
+    """
     repos = (
         [desc["DefaultCodeRepository"]] if desc.get("DefaultCodeRepository") else []
     ) + list(desc.get("AdditionalCodeRepositories") or [])
@@ -1091,8 +1199,10 @@ def parse_notebook_instance(desc: dict[str, Any]) -> NotebookInfo:
 
 
 def parse_app(desc: dict[str, Any]) -> NotebookInfo:
-    """A DescribeApp response (or a ListApps item) -> NotebookInfo, without the space and domain settings
-    (apply_studio_settings adds those)."""
+    """
+    A DescribeApp response (or a ListApps item) -> NotebookInfo, without the space and domain settings
+    (apply_studio_settings adds those).
+    """
     spec = desc.get("ResourceSpec") or {}
     return NotebookInfo(
         kind="studio app",
@@ -1125,9 +1235,11 @@ def studio_idle(
     profile: dict[str, Any] | None = None,
     space: dict[str, Any] | None = None,
 ) -> tuple[str, int | None, str]:
-    """Whether SageMaker shuts a Studio app down when it sits idle -> (state, minutes, where it's set).
+    """
+    Whether SageMaker shuts a Studio app down when it sits idle -> (state, minutes, where it's set).
     state is 'on', 'off', 'unknown' (the domain couldn't be read) or 'n/a' (a free app). The domain (or the
-    user profile) turns idle shutdown on; the space, the user profile or the domain sets the timeout."""
+    user profile) turns idle shutdown on; the space, the user profile or the domain sets the timeout.
+    """
     if app_type == "JupyterServer":
         return "n/a", None, ""  # Studio Classic's own server runs on a free instance
     key = _APP_SETTINGS.get(app_type)
@@ -1173,8 +1285,10 @@ def apply_studio_settings(
     profile: dict[str, Any] | None = None,
     space: dict[str, Any] | None = None,
 ) -> NotebookInfo:
-    """Fill in a Studio app's settings from DescribeDomain, DescribeUserProfile and DescribeSpace responses:
-    idle shutdown, role, network, storage volume, sharing and code repositories."""
+    """
+    Fill in a Studio app's settings from DescribeDomain, DescribeUserProfile and DescribeSpace responses:
+    idle shutdown, role, network, storage volume, sharing and code repositories.
+    """
     if space:
         settings = space.get("SpaceSettings") or {}
         nb.volume_gb = (
@@ -1220,7 +1334,9 @@ def apply_studio_settings(
 def parse_endpoint(
     desc: dict[str, Any], config: dict[str, Any] | None = None
 ) -> Billable:
-    """DescribeEndpoint (+ DescribeEndpointConfig for the instance types) -> Billable."""
+    """
+    DescribeEndpoint (+ DescribeEndpointConfig for the instance types) -> Billable.
+    """
     b = Billable(
         "endpoint",
         desc["EndpointName"],
@@ -1261,7 +1377,9 @@ def parse_endpoint(
 
 
 def parse_training_job(desc: dict[str, Any]) -> Billable:
-    """DescribeTrainingJob -> Billable."""
+    """
+    DescribeTrainingJob -> Billable.
+    """
     resources = desc.get("ResourceConfig") or {}
     groups = resources.get("InstanceGroups") or []
     if groups:
@@ -1289,7 +1407,9 @@ def parse_training_job(desc: dict[str, Any]) -> Billable:
 
 
 def parse_processing_job(desc: dict[str, Any]) -> Billable:
-    """DescribeProcessingJob -> Billable."""
+    """
+    DescribeProcessingJob -> Billable.
+    """
     cluster = (desc.get("ProcessingResources") or {}).get("ClusterConfig") or {}
     instance_type = (
         cluster.get("SelectedInstanceType") or cluster.get("InstanceType") or ""
@@ -1308,8 +1428,10 @@ def parse_processing_job(desc: dict[str, Any]) -> Billable:
 def notebook_costs(
     nb: NotebookInfo, prices: dict[str, float] | None = None
 ) -> dict[str, float | None]:
-    """Estimated USD for a notebook: 'hourly' (its instance), 'month_if_on' (running around the clock) and
-    'storage' (its volume per month, billed whether it runs or not; None for Studio Classic's EFS home)."""
+    """
+    Estimated USD for a notebook: 'hourly' (its instance), 'month_if_on' (running around the clock) and
+    'storage' (its volume per month, billed whether it runs or not; None for Studio Classic's EFS home).
+    """
     prices = SAGEMAKER_PRICES if prices is None else prices
     hourly = hourly_price(nb.instance_type, prices) if nb.instance_type else None
     return {
@@ -1331,9 +1453,11 @@ def smaller_type(
     allowed: Iterable[str] | None = None,
     burstable: bool = True,
 ) -> str | None:
-    """The cheapest type with at least `vcpus`, `memory_gib` and `gpus` (and no GPUs when gpus=0) that costs at least
+    """
+    The cheapest type with at least `vcpus`, `memory_gib` and `gpus` (and no GPUs when gpus=0) that costs at least
     a quarter less than `instance_type`. allowed: the types this kind of notebook can use; burstable=False leaves out
-    the t3 types, which slow down under steady load. None when nothing fits."""
+    the t3 types, which slow down under steady load. None when nothing fits.
+    """
     prices = SAGEMAKER_PRICES if prices is None else prices
     current = hourly_price(instance_type, prices)
     if not current:
@@ -1399,7 +1523,9 @@ LONG_RUNNING = (
 def _couldnt_read(
     errors: dict[str, str], consequences: dict[str, str] | None = None
 ) -> str:
-    """ "Couldn't read the domain (AccessDeniedException; needs sagemaker:DescribeDomain), so ..."."""
+    """
+    "Couldn't read the domain (AccessDeniedException; needs sagemaker:DescribeDomain), so ...".
+    """
     parts = [
         f"{_SECTIONS.get(k, (k, ''))[0]} ({_why(v, _SECTIONS[k][1]) if k in _SECTIONS else v})"
         for k, v in errors.items()
@@ -1414,14 +1540,18 @@ def _couldnt_read(
 
 
 def _money_per_hour(hourly: float | None) -> str:
-    """'$0.23/hour, up to $168/month' (or 'an unknown price per hour')."""
+    """
+    '$0.23/hour, up to $168/month' (or 'an unknown price per hour').
+    """
     if hourly is None:
         return "an unknown price per hour"
     return f"{human_money(hourly)}/hour, up to {human_money(hourly * HOURS_PER_MONTH)}/month"
 
 
 def stop_command(b: Billable | NotebookInfo) -> str:
-    """The AWS CLI command that stops a notebook instance or a Studio app, or deletes an endpoint."""
+    """
+    The AWS CLI command that stops a notebook instance or a Studio app, or deletes an endpoint.
+    """
     kind = b.kind
     if kind == "notebook instance":
         return f"aws sagemaker stop-notebook-instance --notebook-instance-name {b.name}"
@@ -1450,8 +1580,10 @@ AUTOSTOP_SAMPLE = (
 
 
 def idle_shutdown_commands(nb: NotebookInfo, minutes: int = 60) -> str:
-    """The commands that turn on idle shutdown for this notebook (shown, never run), or '' when there's no setting
-    for it."""
+    """
+    The commands that turn on idle shutdown for this notebook (shown, never run), or '' when there's no setting
+    for it.
+    """
     if nb.kind == "notebook instance":
         return "\n".join(
             [
@@ -1494,7 +1626,9 @@ def _full(share: float | None) -> bool:
 
 
 def _other_kernels(machine: Machine) -> tuple[int, int]:
-    """(count, bytes) of the Jupyter kernels other than this one."""
+    """
+    (count, bytes) of the Jupyter kernels other than this one.
+    """
     others = machine.kernels - (1 if machine.this_memory is not None else 0)
     return max(others, 0), max(machine.kernels_memory - (machine.this_memory or 0), 0)
 
@@ -1505,8 +1639,10 @@ def instance_findings(
     allowed: Iterable[str] | None = None,
     now: datetime | None = None,
 ) -> list[tuple[str, str]]:
-    """Plain-language risks and cost notes for a notebook (and, when it's this one, its machine), each with what to
-    do about it -> [(level, message)]. allowed: the instance types this kind of notebook can switch to."""
+    """
+    Plain-language risks and cost notes for a notebook (and, when it's this one, its machine), each with what to
+    do about it -> [(level, message)]. allowed: the instance types this kind of notebook can switch to.
+    """
     prices = SAGEMAKER_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     nb, m = report.notebook, report.machine
@@ -1746,7 +1882,9 @@ _CLEARABLE = [
 
 
 def clearable_kind(path: str) -> int | None:
-    """Index into _CLEARABLE of the cache or trash folder at `path`, or None."""
+    """
+    Index into _CLEARABLE of the cache or trash folder at `path`, or None.
+    """
     for i, (pattern, *_rest) in enumerate(_CLEARABLE):
         if pattern.search(path.replace(os.sep, "/")):
             return i
@@ -1754,8 +1892,10 @@ def clearable_kind(path: str) -> int | None:
 
 
 def shell_path(path: str, home: str | None = None) -> str:
-    """A path ready for a shell command, under your home folder written as ~/...: '/home/ec2-user/SageMaker/x y'
-    -> "~/SageMaker/'x y'"."""
+    """
+    A path ready for a shell command, under your home folder written as ~/...: '/home/ec2-user/SageMaker/x y'
+    -> "~/SageMaker/'x y'".
+    """
     home = (home or os.path.expanduser("~")).rstrip("/")
     if home and path == home:
         return "~"
@@ -1765,8 +1905,10 @@ def shell_path(path: str, home: str | None = None) -> str:
 
 
 def _tilde(path: str, home: str | None = None) -> str:
-    """A path for a call to copy, under your home folder written as ~/...: '/home/ec2-user/SageMaker/envs' ->
-    '~/SageMaker/envs' (disk() and new_env() read ~)."""
+    """
+    A path for a call to copy, under your home folder written as ~/...: '/home/ec2-user/SageMaker/envs' ->
+    '~/SageMaker/envs' (disk() and new_env() read ~).
+    """
     home = (home or os.path.expanduser("~")).rstrip("/")
     if home and (path == home or path.startswith(home + "/")):
         return "~" + path[len(home):]
@@ -1774,7 +1916,9 @@ def _tilde(path: str, home: str | None = None) -> str:
 
 
 def clear_command(item: Clearable, root: str, home: str | None = None) -> str:
-    """The shell command that empties one kind of cache or trash (shown, never run)."""
+    """
+    The shell command that empties one kind of cache or trash (shown, never run).
+    """
     template = next((t for _p, what, _w, t in _CLEARABLE if what == item.what), "")
     where = shell_path(root, home)
     if "{path}" not in template:
@@ -1787,8 +1931,10 @@ def clear_command(item: Clearable, root: str, home: str | None = None) -> str:
 def folder_tree(
     report: DiskReport, *, top: int = 15, min_share: float = 0.1
 ) -> list[tuple[int, DiskEntry]]:
-    """The folders worth showing, as (depth, entry) in tree order: the `top` biggest top-level folders, and inside
-    any folder holding at least `min_share` of the total, its biggest few (5, then 3)."""
+    """
+    The folders worth showing, as (depth, entry) in tree order: the `top` biggest top-level folders, and inside
+    any folder holding at least `min_share` of the total, its biggest few (5, then 3).
+    """
     total = report.total.size or 1
     children: dict[str, list[DiskEntry]] = {}
     for entry in report.folders.values():
@@ -1812,8 +1958,10 @@ def disk_findings(
     prices: dict[str, float] | None = None,
     now: datetime | None = None,
 ) -> list[tuple[str, str]]:
-    """Plain-language notes about what fills a folder and its disk, each with what to do -> [(level, message)].
-    env: where this runs, to show the right command for a bigger volume."""
+    """
+    Plain-language notes about what fills a folder and its disk, each with what to do -> [(level, message)].
+    env: where this runs, to show the right command for a bigger volume.
+    """
     prices = SAGEMAKER_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     volume = report.volume
@@ -1909,7 +2057,9 @@ def disk_findings(
 
 
 def _forgotten(b: Billable, now: datetime | None = None) -> bool:
-    """A notebook or app (not this one) running for LONG_RUNNING or more with nothing to stop it when idle."""
+    """
+    A notebook or app (not this one) running for LONG_RUNNING or more with nothing to stop it when idle.
+    """
     return (
         b.kind in ("notebook instance", "Studio app")
         and b.idle == "off"
@@ -1919,7 +2069,9 @@ def _forgotten(b: Billable, now: datetime | None = None) -> bool:
 
 
 def _unused_endpoint(b: Billable, now: datetime | None = None) -> bool:
-    """An endpoint on instances, at least a day old, that got no requests in the window counted."""
+    """
+    An endpoint on instances, at least a day old, that got no requests in the window counted.
+    """
     return (
         b.kind == "endpoint"
         and not b.serverless
@@ -1933,8 +2085,10 @@ def running_findings(
     prices: dict[str, float] | None = None,
     now: datetime | None = None,
 ) -> list[tuple[str, str]]:
-    """Plain-language notes about what's running: what looks forgotten and what it costs, with the command that
-    stops it -> [(level, message)]."""
+    """
+    Plain-language notes about what's running: what looks forgotten and what it costs, with the command that
+    stops it -> [(level, message)].
+    """
     prices = SAGEMAKER_PRICES if prices is None else prices
     now = now or _utcnow()
     found: list[tuple[str, str]] = []
@@ -2060,8 +2214,10 @@ _HISTORY_RE = re.compile(r"^==> (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) <==", re.MULTIL
 
 
 def parse_conda_history(text: str) -> datetime | None:
-    """When a conda environment was made: the first '==> 2025-10-14 09:12:33 <==' in its conda-meta/history,
-    which conda writes in the machine's local time."""
+    """
+    When a conda environment was made: the first '==> 2025-10-14 09:12:33 <==' in its conda-meta/history,
+    which conda writes in the machine's local time.
+    """
     match = _HISTORY_RE.search(text)
     if not match:
         return None
@@ -2069,7 +2225,9 @@ def parse_conda_history(text: str) -> datetime | None:
 
 
 def package_list(packages: Any) -> list[str]:
-    """What to pip install: 'pandas boto3>=1.34', 'pandas, boto3', ['pandas'] or '-r requirements.txt' -> a list."""
+    """
+    What to pip install: 'pandas boto3>=1.34', 'pandas, boto3', ['pandas'] or '-r requirements.txt' -> a list.
+    """
     if packages is None:
         return []
     words = shlex.split(packages) if isinstance(packages, str) else [str(p) for p in packages]
@@ -2088,10 +2246,12 @@ def env_steps(
     ipykernel: bool = False,
     python_dir: str = "",
 ) -> list[EnvStep]:
-    """The commands that make an environment at `prefix` with this Python (unless it `exists`), pip install
+    """
+    The commands that make an environment at `prefix` with this Python (unless it `exists`), pip install
     `packages` in it, and add it to Jupyter as kernel `name` -> [EnvStep]. Nothing is run. tool: 'mamba', 'conda',
     'micromamba' (conda-forge only) or 'uv' (a virtual environment with pip in it; python_dir: where uv keeps the
-    Pythons it downloads)."""
+    Pythons it downloads).
+    """
     python_exe = str(Path(prefix, "bin", "python"))
     install = list(packages)
     steps = []
@@ -2135,8 +2295,10 @@ def env_steps(
 
 
 def step_command(step: EnvStep, shown: Callable[[str], str] | None = None, home: str | None = None) -> str:
-    """A step as you'd type it in a terminal, with your home folder as ~: 'conda create --yes ... --prefix
-    ~/SageMaker/envs/py311 ...'. shown: turns a path into the one this machine sees (tests use a fake root)."""
+    """
+    A step as you'd type it in a terminal, with your home folder as ~: 'conda create --yes ... --prefix
+    ~/SageMaker/envs/py311 ...'. shown: turns a path into the one this machine sees (tests use a fake root).
+    """
     shown = shown or (lambda text: text)
 
     def word(text: str) -> str:
@@ -2148,16 +2310,20 @@ def step_command(step: EnvStep, shown: Callable[[str], str] | None = None, home:
 
 
 def output_tail(text: str, lines: int = 30) -> str:
-    """The end of what a command printed: its last `lines` lines, each as it was left after progress updates."""
+    """
+    The end of what a command printed: its last `lines` lines, each as it was left after progress updates.
+    """
     kept = [line.rstrip("\r").rsplit("\r", 1)[-1].rstrip() for line in text.split("\n")]
     kept = [line for line in kept if line]
     return "\n".join(kept[-lines:])[-4000:]
 
 
 def on_start_script(folder: str) -> str:
-    """A notebook instance's on-start lifecycle script that adds the Jupyter kernel of each environment in `folder`
+    """
+    A notebook instance's on-start lifecycle script that adds the Jupyter kernel of each environment in `folder`
     back at every start: the environments are on the notebook volume, which is kept, but kernels are in ~/.local,
-    which is reset when the instance stops."""
+    which is reset when the instance stops.
+    """
     return "\n".join(
         [
             "#!/bin/bash",
@@ -2175,8 +2341,10 @@ def on_start_script(folder: str) -> str:
 
 
 def kernels_lifecycle(folder: str, notebook: str = "") -> str:
-    """The commands that save on_start_script() and attach it to notebook instance `notebook` as a lifecycle
-    configuration, so its kernels come back by themselves after a restart (shown, never run)."""
+    """
+    The commands that save on_start_script() and attach it to notebook instance `notebook` as a lifecycle
+    configuration, so its kernels come back by themselves after a restart (shown, never run).
+    """
     lines = [
         "# 1. In a terminal here (File > New > Terminal), save the script:",
         "cat > on-start.sh <<'SCRIPT'",
@@ -2202,7 +2370,9 @@ def kernels_lifecycle(folder: str, notebook: str = "") -> str:
 
 
 def _disks(kind: str) -> tuple[str, str, str]:
-    """(the disk that's kept, the one that's reset, when it's reset) for where this runs."""
+    """
+    (the disk that's kept, the one that's reset, when it's reset) for where this runs.
+    """
     if kind == "notebook instance":
         return "notebook volume", "system disk", "the notebook instance stops"
     if kind == "studio":
@@ -2211,13 +2381,17 @@ def _disks(kind: str) -> tuple[str, str, str]:
 
 
 def _same_python(found: str, wanted: str) -> bool:
-    """Does the Python an environment has ('3.11.9') match the one asked for ('3.11')?"""
+    """
+    Does the Python an environment has ('3.11.9') match the one asked for ('3.11')?
+    """
     return found.split(".")[: len(wanted.split("."))] == wanted.split(".")
 
 
 def plan_findings(plan: EnvPlan, home: str | None = None) -> list[tuple[str, str]]:
-    """What to know before new_env() runs a plan: an environment that's there already, a disk too full, a folder
-    that's reset when the notebook stops, a kernel that is -> [(level, message)]."""
+    """
+    What to know before new_env() runs a plan: an environment that's there already, a disk too full, a folder
+    that's reset when the notebook stops, a kernel that is -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     _, reset_disk, event = _disks(plan.where)
     where = shell_path(plan.path, home)
@@ -2261,8 +2435,10 @@ def plan_findings(plan: EnvPlan, home: str | None = None) -> list[tuple[str, str
 
 
 def lost_envs(report: EnvReport) -> list[PythonEnv]:
-    """The environments made since this machine started on the disk that's reset when the notebook stops: they
-    go then. (The image's own come back; a conda installation's base isn't made, only changed.)"""
+    """
+    The environments made since this machine started on the disk that's reset when the notebook stops: they
+    go then. (The image's own come back; a conda installation's base isn't made, only changed.)
+    """
     return [
         e
         for e in report.envs
@@ -2271,8 +2447,10 @@ def lost_envs(report: EnvReport) -> list[PythonEnv]:
 
 
 def env_findings(report: EnvReport, home: str | None = None) -> list[tuple[str, str]]:
-    """What to know about the Python environments and kernels here: environments that go when the notebook stops,
-    kernels that fail to start, environments missing from the kernel menu -> [(level, message)]."""
+    """
+    What to know about the Python environments and kernels here: environments that go when the notebook stops,
+    kernels that fail to start, environments missing from the kernel menu -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     _, reset_disk, event = _disks(report.kind)
     folder = shell_path(report.folder, home) if report.folder else ""
@@ -2369,7 +2547,9 @@ _FAILURES = [  # (what the output says, what it means and what to do); {python} 
 
 
 def env_failure(step: EnvStep, python: str = "") -> str:
-    """What a failed step's output means and what to do about it."""
+    """
+    What a failed step's output means and what to do about it.
+    """
     if step.code == 127:
         return f"{step.argv[0]} couldn't be run: it isn't there any more. envs() shows what's installed."
     if step.code == -1:
@@ -2393,7 +2573,9 @@ def env_failure(step: EnvStep, python: str = "") -> str:
 
 
 def _missing(exc: ClientError) -> bool:
-    """A 'no such notebook' error (DescribeNotebookInstance answers ValidationException: RecordNotFound)."""
+    """
+    A 'no such notebook' error (DescribeNotebookInstance answers ValidationException: RecordNotFound).
+    """
     message = str(exc.response.get("Error", {}).get("Message", "")).lower()
     return _error_code(exc) in ("ResourceNotFound", "ValidationException") and any(
         words in message
@@ -2402,7 +2584,8 @@ def _missing(exc: ClientError) -> bool:
 
 
 class SageMakerAnalyzer(_BaseAnalyzer):
-    """Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted. The one
+    """
+    Pure-logic SageMaker analysis: every method returns data; nothing is printed, stopped or deleted. The one
     method that makes anything is create_env(), which runs the commands of an env_plan() (a Python environment and its
     Jupyter kernel).
 
@@ -2442,8 +2625,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ clients
 
     def _service(self, name: str) -> Any:
-        """A boto3 client, made on first use. Without a region set, the notebook's own region is used (from its
-        metadata), so a missing region only matters outside SageMaker."""
+        """
+        A boto3 client, made on first use. Without a region set, the notebook's own region is used (from its
+        metadata), so a missing region only matters outside SageMaker.
+        """
         if name not in self._clients:
             region = self.session.region_name or self.environment().region or None
             makers = {  # named one by one so the project's read-only check can see which services are used
@@ -2468,12 +2653,16 @@ class SageMakerAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The sagemaker client."""
+        """
+        The sagemaker client.
+        """
         return self._service("sagemaker")
 
     def allowed_types(self, kind: str) -> set[str]:
-        """The instance types a notebook instance ('notebook instance') or a Studio app ('studio app') can use,
-        from botocore's service model."""
+        """
+        The instance types a notebook instance ('notebook instance') or a Studio app ('studio app') can use,
+        from botocore's service model.
+        """
         model = self.client.meta.service_model
         shape = (
             model.operation_model("CreateNotebookInstance").input_shape.members[
@@ -2490,7 +2679,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return Path(self.root, relative)
 
     def _shown(self, path: str | Path) -> str:
-        """A path as this machine sees it: under a fake root (tests, demos), without the root's prefix."""
+        """
+        A path as this machine sees it: under a fake root (tests, demos), without the root's prefix.
+        """
         text = str(path)
         if self.root in ("", "/"):
             return text
@@ -2500,14 +2691,18 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return text[len(root) :] if text.startswith(root + os.sep) else text
 
     def _user_home(self) -> str:
-        """Your home folder (~) as this machine sees it."""
+        """
+        Your home folder (~) as this machine sees it.
+        """
         if self.root in ("", "/"):
             return os.path.expanduser("~")
         home = self._shown(self.home())
         return home[: -len("/SageMaker")] if home.endswith("/SageMaker") else home
 
     def _real(self, path: str | Path) -> Path:
-        """A path you give (~ is your home folder) -> the folder to read, under the fake root when there is one."""
+        """
+        A path you give (~ is your home folder) -> the folder to read, under the fake root when there is one.
+        """
         text = str(path)
         if text == "~" or text.startswith("~/"):
             text = self._user_home() + text[1:]
@@ -2523,7 +2718,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return real
 
     def environment(self, *, refresh: bool = False) -> Environment:
-        """Where this code runs, from SageMaker's metadata file. kind='local' when there isn't one."""
+        """
+        Where this code runs, from SageMaker's metadata file. kind='local' when there isn't one.
+        """
         if self._env is None or refresh:
             path = self._path(METADATA_FILE)
             try:
@@ -2538,8 +2735,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return self._env
 
     def home(self) -> Path:
-        """The folder your notebooks and data live in: a notebook instance's volume (/home/ec2-user/SageMaker), a
-        Studio space's home (/home/sagemaker-user), otherwise your home folder."""
+        """
+        The folder your notebooks and data live in: a notebook instance's volume (/home/ec2-user/SageMaker), a
+        Studio space's home (/home/sagemaker-user), otherwise your home folder.
+        """
         for relative in _HOMES:
             path = self._path(relative)
             if path.is_dir():
@@ -2548,7 +2747,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
 
     @staticmethod
     def _volume_labels(env: Environment) -> tuple[tuple[str, str], tuple[str, str]]:
-        """(label, note) for the home disk and the system disk, saying what survives a stop."""
+        """
+        (label, note) for the home disk and the system disk, saying what survives a stop.
+        """
         if env.kind == "notebook instance":
             return ("notebook volume", "kept when the instance stops"), (
                 "system disk",
@@ -2581,12 +2782,16 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return usage.total, usage.used, usage.free
 
     def volume(self, path: str | Path, label: str = "disk", note: str = "") -> Volume:
-        """How full the disk holding `path` is."""
+        """
+        How full the disk holding `path` is.
+        """
         total, used, free = self._disk_usage(str(path))
         return Volume(self._shown(path), label, total, used, free, note)
 
     def volumes(self) -> list[Volume]:
-        """The disks that matter here: where notebooks live, and the system disk (once each)."""
+        """
+        The disks that matter here: where notebooks live, and the system disk (once each).
+        """
         home_label, system_label = self._volume_labels(self.environment())
         seen: set[int] = set()
         found = []
@@ -2605,7 +2810,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return found
 
     def _gpu_query(self) -> str | None:
-        """nvidia-smi's CSV line per GPU, or None when there's no NVIDIA driver."""
+        """
+        nvidia-smi's CSV line per GPU, or None when there's no NVIDIA driver.
+        """
         exe = shutil.which("nvidia-smi")
         if not exe:
             return None
@@ -2646,8 +2853,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return processes
 
     def machine(self, *, top: int = 8) -> Machine:
-        """This machine right now: vCPUs and load, memory, disks, GPUs, the biggest processes (and how much memory
-        the Jupyter kernels hold), Python and the common data packages. Reads local files only."""
+        """
+        This machine right now: vCPUs and load, memory, disks, GPUs, the biggest processes (and how much memory
+        the Jupyter kernels hold), Python and the common data packages. Reads local files only.
+        """
         m = Machine(
             cpus=self._cpu_count(),
             python=platform.python_version(),
@@ -2701,12 +2910,16 @@ class SageMakerAnalyzer(_BaseAnalyzer):
     # --------------------------------------------------------------- notebooks
 
     def identity(self) -> dict[str, str]:
-        """{'Account': ..., 'Arn': ...}: who AWS sees (in a notebook, its execution role). Needs no permission."""
+        """
+        {'Account': ..., 'Arn': ...}: who AWS sees (in a notebook, its execution role). Needs no permission.
+        """
         resp = self._service("sts").get_caller_identity()
         return {"Account": resp.get("Account", ""), "Arn": resp.get("Arn", "")}
 
     def _lifecycle_idle(self, name: str) -> tuple[bool, int | None]:
-        """Does lifecycle configuration `name` stop the notebook when idle? (cached)"""
+        """
+        Does lifecycle configuration `name` stop the notebook when idle? (cached)
+        """
         if name not in self._lifecycle:
             desc = self.client.describe_notebook_instance_lifecycle_config(
                 NotebookInstanceLifecycleConfigName=name
@@ -2725,8 +2938,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return self._lifecycle[name]
 
     def notebook_instance(self, name: str, *, lifecycle: bool = True) -> NotebookInfo:
-        """A notebook instance's settings, and (lifecycle=True) whether its lifecycle configuration stops it when
-        idle. Raises ClientError when there's no such notebook instance."""
+        """
+        A notebook instance's settings, and (lifecycle=True) whether its lifecycle configuration stops it when
+        idle. Raises ClientError when there's no such notebook instance.
+        """
         nb = parse_notebook_instance(
             self.client.describe_notebook_instance(NotebookInstanceName=name)
         )
@@ -2750,7 +2965,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return self._domains[domain_id]
 
     def _with_studio_settings(self, nb: NotebookInfo) -> NotebookInfo:
-        """Add the domain's, the user profile's and the space's settings; unreadable ones go in nb.errors."""
+        """
+        Add the domain's, the user profile's and the space's settings; unreadable ones go in nb.errors.
+        """
 
         def get(section: str, call: Callable[[], Any]) -> Any:
             try:
@@ -2798,8 +3015,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         space: str = "",
         user_profile: str = "",
     ) -> NotebookInfo:
-        """A Studio app with its space's, user profile's and domain's settings. Raises ClientError when the app
-        can't be described."""
+        """
+        A Studio app with its space's, user profile's and domain's settings. Raises ClientError when the app
+        can't be described.
+        """
         owner = {"SpaceName": space} if space else {"UserProfileName": user_profile}
         desc = self.client.describe_app(
             DomainId=domain_id, AppType=app_type, AppName=app_name, **owner
@@ -2809,7 +3028,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
     def _space_app(
         self, domain_id: str, space: str, summary: dict[str, Any] | None = None
     ) -> NotebookInfo:
-        """The app running in a space (or, when none is, the space with the app it would start)."""
+        """
+        The app running in a space (or, when none is, the space with the app it would start).
+        """
         apps = [
             a
             for a in self._paginate(
@@ -2836,8 +3057,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return self._with_studio_settings(nb)
 
     def notebook(self, name: str) -> NotebookInfo:
-        """A notebook by name: a notebook instance, a Studio space ('analysis', or 'd-abc123/analysis' when spaces
-        in two domains share the name), or an app or notebook instance ARN."""
+        """
+        A notebook by name: a notebook instance, a Studio space ('analysis', or 'd-abc123/analysis' when spaces
+        in two domains share the name), or an app or notebook instance ARN.
+        """
         name = str(name).strip()
         if ":notebook-instance/" in name:
             return self.notebook_instance(_arn_name(name))
@@ -2894,8 +3117,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         )
 
     def current_notebook(self) -> NotebookInfo | None:
-        """The notebook this code runs in, with its settings (None outside SageMaker). What can't be read is in
-        its errors, so this doesn't raise for a missing permission."""
+        """
+        The notebook this code runs in, with its settings (None outside SageMaker). What can't be read is in
+        its errors, so this doesn't raise for a missing permission.
+        """
         env = self.environment()
         if env.kind == "notebook instance":
             try:
@@ -2935,8 +3160,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
     def instance(
         self, name: str | None = None, *, machine: bool = True
     ) -> InstanceReport:
-        """The notebook this code runs in (or the one named: see notebook()): its settings and, for this one and
-        machine=True, the machine right now."""
+        """
+        The notebook this code runs in (or the one named: see notebook()): its settings and, for this one and
+        machine=True, the machine right now.
+        """
         env = self.environment()
         report = InstanceReport(env=env, current=name is None)
         try:
@@ -2962,9 +3189,11 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         limit: int | None = 200_000,
         progress: Callable[[int], None] | None = None,
     ) -> DiskReport:
-        """Sizes under a folder (default: home()): per folder up to 3 levels deep, the `top` biggest files, and the
+        """
+        Sizes under a folder (default: home()): per folder up to 3 levels deep, the `top` biggest files, and the
         caches and trash in it. Stays on the folder's disk and doesn't follow links. Stops after `limit` files
-        (None: no limit); progress is called with the running count of files."""
+        (None: no limit); progress is called with the running count of files.
+        """
         started = time.monotonic()
         root = self._real(path) if path else self.home()
         if not root.exists():
@@ -3060,8 +3289,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
     # ----------------------------------------------------- Python environments
 
     def tools(self) -> dict[str, str]:
-        """The programs here that make Python environments, in the order new_env() prefers them: mamba, conda,
-        micromamba, uv -> the path of each one installed."""
+        """
+        The programs here that make Python environments, in the order new_env() prefers them: mamba, conda,
+        micromamba, uv -> the path of each one installed.
+        """
         home = self._user_home()
         folders = [*_TOOL_FOLDERS, *(f"{home}/{folder}" for folder in _HOME_TOOL_FOLDERS)]
         found: dict[str, str] = {}
@@ -3080,21 +3311,27 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return found
 
     def envs_folder(self) -> Path:
-        """Where new_env() puts environments: ~/SageMaker/envs on a notebook instance (the notebook volume is the
-        only disk it keeps when it stops), ~/.conda/envs elsewhere (a Studio home folder is kept)."""
+        """
+        Where new_env() puts environments: ~/SageMaker/envs on a notebook instance (the notebook volume is the
+        only disk it keeps when it stops), ~/.conda/envs elsewhere (a Studio home folder is kept).
+        """
         if self.environment().kind == "notebook instance":
             return self.home() / "envs"
         return self._real("~/.conda/envs")
 
     def _kept(self, path: str | Path) -> bool | None:
-        """Is `path` (a real path) on the disk that's kept when the notebook stops? None off SageMaker."""
+        """
+        Is `path` (a real path) on the disk that's kept when the notebook stops? None off SageMaker.
+        """
         if self.environment().kind not in ("notebook instance", "studio"):
             return None
         home, path = Path(os.path.normpath(self.home())), Path(os.path.normpath(path))
         return path == home or home in path.parents
 
     def _booted(self) -> datetime | None:
-        """When this machine started, from /proc/uptime."""
+        """
+        When this machine started, from /proc/uptime.
+        """
         try:
             seconds = float(self._path("proc/uptime").read_text().split()[0])
         except (OSError, ValueError, IndexError):
@@ -3103,8 +3340,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
 
     @staticmethod
     def _env_python(prefix: Path) -> str:
-        """The Python version of the environment at `prefix`: '3.11.9', or '' when it can't tell. Reads its files
-        (conda-meta, pyvenv.cfg, lib/python3.x), never runs it."""
+        """
+        The Python version of the environment at `prefix`: '3.11.9', or '' when it can't tell. Reads its files
+        (conda-meta, pyvenv.cfg, lib/python3.x), never runs it.
+        """
         for meta in sorted((prefix / "conda-meta").glob("python-[0-9]*.json")):
             version = _clean_version(meta.name[len("python-"):])
             if version:
@@ -3121,8 +3360,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
 
     @staticmethod
     def _env_made(prefix: Path) -> datetime | None:
-        """When the environment at `prefix` was made: conda-meta/history's first entry, else when its pyvenv.cfg was
-        written."""
+        """
+        When the environment at `prefix` was made: conda-meta/history's first entry, else when its pyvenv.cfg was
+        written.
+        """
         history = prefix / "conda-meta" / "history"
         try:
             with open(history, encoding="utf-8", errors="replace") as f:
@@ -3139,8 +3380,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return None
 
     def _env_at(self, prefix: Path, name: str = "") -> PythonEnv | None:
-        """The environment at `prefix` (a real path), or None when it isn't one: no conda-meta or pyvenv.cfg, or no
-        bin/python (a link to a Python that's gone still counts)."""
+        """
+        The environment at `prefix` (a real path), or None when it isn't one: no conda-meta or pyvenv.cfg, or no
+        bin/python (a link to a Python that's gone still counts).
+        """
         conda = (prefix / "conda-meta").is_dir()
         if not (conda or (prefix / "pyvenv.cfg").is_file()) or not os.path.lexists(prefix / "bin" / "python"):
             return None
@@ -3155,8 +3398,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         )
 
     def _env_prefixes(self, tools: dict[str, str], folder: Path) -> dict[str, str]:
-        """Where environments may be: each conda installation and its envs/, ~/.conda/envs, new_env()'s folder, what
-        conda noted in ~/.conda/environments.txt, and this kernel's -> {real path: name}."""
+        """
+        Where environments may be: each conda installation and its envs/, ~/.conda/envs, new_env()'s folder, what
+        conda noted in ~/.conda/environments.txt, and this kernel's -> {real path: name}.
+        """
         found: dict[str, str] = {}
 
         def add(path: Path, name: str = "") -> None:
@@ -3190,8 +3435,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return found
 
     def _kernel_folders(self) -> list[Path]:
-        """The folders Jupyter finds kernels in: yours (~/.local/share/jupyter/kernels), JUPYTER_PATH's, the Jupyter
-        server's environment's, and the system's."""
+        """
+        The folders Jupyter finds kernels in: yours (~/.local/share/jupyter/kernels), JUPYTER_PATH's, the Jupyter
+        server's environment's, and the system's.
+        """
         folders = []
         if self.root in ("", "/"):
             data = os.environ.get("JUPYTER_DATA_DIR")
@@ -3206,7 +3453,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return folders
 
     def _kernel_at(self, spec: Path, envs: dict[str, PythonEnv]) -> KernelSpec | None:
-        """The kernel described by `spec` (a kernel.json), or None when it can't be read."""
+        """
+        The kernel described by `spec` (a kernel.json), or None when it can't be read.
+        """
         try:
             data = json.loads(spec.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -3233,9 +3482,11 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return kernel
 
     def environments(self) -> EnvReport:
-        """The Python environments on this machine (conda environments and virtual environments) with their Python
+        """
+        The Python environments on this machine (conda environments and virtual environments) with their Python
         versions, the Jupyter kernels and the environment each starts, the programs here that make environments,
-        and where new_env() puts them. Reads local files only."""
+        and where new_env() puts them. Reads local files only.
+        """
         env = self.environment()
         report = EnvReport(env.kind, python=platform.python_version(), executable=sys.executable)
         report.tools = self.tools()
@@ -3287,8 +3538,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         path: str | None = None,
         tool: str = "auto",
     ) -> EnvPlan:
-        """What new_env() does, without doing it: where the environment goes, what makes it, and the commands.
-        Raises ValueError for a version, name, folder or tool it can't use."""
+        """
+        What new_env() does, without doing it: where the environment goes, what makes it, and the commands.
+        Raises ValueError for a version, name, folder or tool it can't use.
+        """
         version = parse_python_version(python)
         prefix = self._real(path) if path else None
         if prefix is not None and not prefix.is_absolute():
@@ -3352,8 +3605,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return plan
 
     def _run(self, argv: list[str], env: dict[str, str], timeout: float) -> tuple[int, str]:
-        """Runs one command -> (its exit status, what it printed). -1 when it ran past `timeout` seconds and was
-        stopped, 127 when it couldn't be started. Tests and the demo replace this."""
+        """
+        Runs one command -> (its exit status, what it printed). -1 when it ran past `timeout` seconds and was
+        stopped, 127 when it couldn't be started. Tests and the demo replace this.
+        """
         variables = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")}
         try:
             done = subprocess.run(
@@ -3381,9 +3636,11 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         progress: Callable[..., None] | None = None,
         timeout: float = 1800,
     ) -> EnvResult:
-        """Runs a plan's commands in order and stops at the first that fails -> EnvResult. Makes the folder the
+        """
+        Runs a plan's commands in order and stops at the first that fails -> EnvResult. Makes the folder the
         environment goes in, and never removes anything. Each command may run `timeout` seconds; progress is called
-        with (steps done, steps)."""
+        with (steps done, steps).
+        """
         result = EnvResult(plan)
         started = time.monotonic()
         prefix = self._real(plan.path)
@@ -3554,8 +3811,10 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         return self._map(detail, summaries)
 
     def endpoint_invocations(self, endpoints: list[Billable], days: int = 7) -> None:
-        """Set each endpoint's `invocations`: requests over the last `days` days, from CloudWatch (every variant).
-        Needs cloudwatch:GetMetricData."""
+        """
+        Set each endpoint's `invocations`: requests over the last `days` days, from CloudWatch (every variant).
+        Needs cloudwatch:GetMetricData.
+        """
         queries: list[dict[str, Any]] = []
         owners: list[Billable] = []
         for b in endpoints:
@@ -3605,10 +3864,12 @@ class SageMakerAnalyzer(_BaseAnalyzer):
         days: int = 7,
         progress: Callable[..., None] | None = None,
     ) -> RunningReport:
-        """Everything SageMaker bills by the hour in the region right now: notebook instances, Studio apps (not the
+        """
+        Everything SageMaker bills by the hour in the region right now: notebook instances, Studio apps (not the
         free 'system' ones), endpoints and training / processing jobs in progress, plus stopped notebook instances
         (their volumes are still billed). metrics=True counts each endpoint's requests over the last `days` days.
-        A section that can't be read is recorded in `errors`; progress is called with (done, total) sections."""
+        A section that can't be read is recorded in `errors`; progress is called with (done, total) sections.
+        """
         self.client  # noqa: B018 - made before any threads start (boto3 sessions aren't thread-safe)
         report = RunningReport(self.region, days=days)
         steps: list[tuple[str, Callable[[RunningReport], list[Billable]]]] = [
@@ -3642,7 +3903,9 @@ class SageMakerAnalyzer(_BaseAnalyzer):
 
 
 def _is_current(b: Billable, env: Environment) -> bool:
-    """Is this the notebook the code runs in?"""
+    """
+    Is this the notebook the code runs in?
+    """
     if b.kind == "notebook instance":
         return env.kind == "notebook instance" and b.name == env.name
     if b.kind == "Studio app":
@@ -3667,12 +3930,16 @@ _BADGE = "🧪 SageMaker"  # the chip before each report's title, so reports fro
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
 def _idle_label(state: str, minutes: int | None) -> str:
-    """'after 60 idle min', 'off', 'not needed (free)', '?'."""
+    """
+    'after 60 idle min', 'off', 'not needed (free)', '?'.
+    """
     if state == "on":
         return f"after {minutes} idle min" if minutes else "on"
     return {"off": "off", "n/a": "not needed (free)"}.get(state, "?")
@@ -3688,14 +3955,18 @@ _KIND_ICONS = {  # Billable.kind -> the icon in front of it in running(), so the
 
 
 def _kind_label(b: Billable) -> str:
-    """'📓 notebook instance', '🧪 JupyterLab app', '🚀 endpoint': what it is, with its icon."""
+    """
+    '📓 notebook instance', '🧪 JupyterLab app', '🚀 endpoint': what it is, with its icon.
+    """
     label = f"{app_label(b.app_type)} app" if b.kind == "Studio app" else b.kind
     icon = _KIND_ICONS.get(b.kind)
     return f"{icon} {label}" if icon else label
 
 
 def _where(b: Billable) -> str:
-    """'space analysis · d-abc123' for a Studio app."""
+    """
+    'space analysis · d-abc123' for a Studio app.
+    """
     owner = (
         f"space {b.space}"
         if b.space
@@ -3705,7 +3976,9 @@ def _where(b: Billable) -> str:
 
 
 def _notebook_ref(b: Billable) -> str | None:
-    """What instance() takes to describe this notebook: its name, or the space ('d-abc/analysis' form)."""
+    """
+    What instance() takes to describe this notebook: its name, or the space ('d-abc/analysis' form).
+    """
     if b.kind == "notebook instance":
         return b.name
     if b.kind == "Studio app" and b.space:
@@ -3714,7 +3987,8 @@ def _notebook_ref(b: Billable) -> str | None:
 
 
 class SageMakerView(_BaseView):
-    """Notebook UI over SageMakerAnalyzer. Each method renders a report and returns nothing; for the underlying
+    """
+    Notebook UI over SageMakerAnalyzer. Each method renders a report and returns nothing; for the underlying
     data call the same-named method on `view.core` (a SageMakerAnalyzer).
 
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
@@ -3751,7 +4025,9 @@ class SageMakerView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """The AWS error message plus what to do about it."""
+        """
+        The AWS error message plus what to do about it.
+        """
         lowered = message.lower()
         text = message.rstrip() + (
             "" if message.rstrip().endswith((".", "!", "?")) else "."
@@ -3779,7 +4055,9 @@ class SageMakerView(_BaseView):
 
     @staticmethod
     def _runtime(report: InstanceReport) -> tuple[float | None, bool]:
-        """(seconds the notebook has been running, whether that's only approximate)."""
+        """
+        (seconds the notebook has been running, whether that's only approximate).
+        """
         nb, m = report.notebook, report.machine
         if nb is None or not nb.billing:
             return None, False
@@ -3793,11 +4071,13 @@ class SageMakerView(_BaseView):
 
     @_friendly_errors
     def instance(self, name: str | None = None) -> None:
-        """The notebook you're running in: its instance type and what it costs, how long it has been running,
+        """
+        The notebook you're running in: its instance type and what it costs, how long it has been running,
         whether it stops when idle, its CPU, memory, disk and GPU use right now, and its role and network.
 
         name: another notebook instance, or a Studio space ('analysis', or 'd-abc123/analysis' when two domains
-        have one), to see its settings and cost. Its machine can only be read from inside it."""
+        have one), to see its settings and cost. Its machine can only be read from inside it.
+        """
         report = self.core.instance(name)
         env, nb, m = report.env, report.notebook, report.machine
         prices = self.core.prices
@@ -4028,7 +4308,9 @@ class SageMakerView(_BaseView):
 
     @staticmethod
     def _machine_blocks(m: Machine) -> list[Any]:
-        """'This machine right now': CPU, memory, disks, GPUs and kernels, each with how much is used."""
+        """
+        'This machine right now': CPU, memory, disks, GPUs and kernels, each with how much is used.
+        """
         rows: list[list[Any]] = []
         bars: list[float] = []
         if m.cpus:
@@ -4169,11 +4451,13 @@ class SageMakerView(_BaseView):
     def disk(
         self, path: str | None = None, *, top: int = 20, limit: Any = "200k"
     ) -> None:
-        """What fills the disk: how full it is, the biggest folders and files, and the caches and trash that are safe
+        """
+        What fills the disk: how full it is, the biggest folders and files, and the caches and trash that are safe
         to clear, with the command for each (this tool never deletes anything).
 
         path: the folder to measure (default: where your notebooks live, ~/SageMaker on a notebook instance and
-        /home/sagemaker-user in Studio). limit: stop after this many files ('200k'; None measures everything)."""
+        /home/sagemaker-user in Studio). limit: stop after this many files ('200k'; None measures everything).
+        """
         limit = _as_count(limit, "limit")
         top = _as_int(top, "top")
         with self._progress("Measuring", unit="files") as tick:
@@ -4315,10 +4599,12 @@ class SageMakerView(_BaseView):
 
     @_friendly_errors
     def envs(self) -> None:
-        """The Python environments on this machine and the Jupyter kernels that start them: each one's Python version,
+        """
+        The Python environments on this machine and the Jupyter kernels that start them: each one's Python version,
         where it is and whether it's kept when the notebook stops, and kernels that fail to start.
 
-        new_env('3.11') makes another one. Nothing here removes one; where that would help, the command is shown."""
+        new_env('3.11') makes another one. Nothing here removes one; where that would help, the command is shown.
+        """
         report = self.core.environments()
         home = self.core._user_home()
         findings = env_findings(report, home)
@@ -4413,7 +4699,9 @@ class SageMakerView(_BaseView):
         self._show(blocks)
 
     def _again(self, plan: EnvPlan, **extra: Any) -> str:
-        """new_env(...) for this plan again, with only the arguments that differ from the defaults."""
+        """
+        new_env(...) for this plan again, with only the arguments that differ from the defaults.
+        """
         kwargs: dict[str, Any] = {}
         if plan.path != os.path.join(plan.folder, plan.name):
             kwargs["path"] = _tilde(plan.path, self.core._user_home())
@@ -4432,7 +4720,8 @@ class SageMakerView(_BaseView):
         tool: str = "auto",
         dry_run: bool = False,
     ) -> None:
-        """Makes a Python environment with the version you ask for, in a folder that's kept when the notebook stops,
+        """
+        Makes a Python environment with the version you ask for, in a folder that's kept when the notebook stops,
         and adds it to Jupyter's kernel menu. It takes a minute or two; dry_run=True shows the commands instead.
 
         python: '3.11', '3.12.4' or 'py311'. name: its folder and kernel ('py311' for 3.11). packages: what to pip
@@ -4440,7 +4729,8 @@ class SageMakerView(_BaseView):
         (the first of mamba, conda, micromamba and uv that's here), or one of them; conda ones use conda-forge.
         Run it again on an environment that's there and only the packages and the kernel are set up: after a
         notebook instance restarts, new_env('3.11') adds the kernel back in seconds. It writes only the environment's
-        folder and its kernel, and never removes anything."""
+        folder and its kernel, and never removes anything.
+        """
         plan = self.core.env_plan(python, name, packages=packages, path=path, tool=tool)
         home = self.core._user_home()
         where = shell_path(plan.path, home)
@@ -4583,11 +4873,13 @@ class SageMakerView(_BaseView):
 
     @_friendly_errors
     def running(self, *, metrics: bool = True, days: int = 7) -> None:
-        """Everything SageMaker bills by the hour in the region right now: notebook instances, Studio apps,
+        """
+        Everything SageMaker bills by the hour in the region right now: notebook instances, Studio apps,
         endpoints and jobs, with what each costs, which ones look forgotten, and the command that stops each.
 
         Endpoint traffic comes from CloudWatch over the last `days` days (metrics=False skips it). Stopped notebook
-        instances are listed too, because their storage is still billed."""
+        instances are listed too, because their storage is still billed.
+        """
         days = _as_int(days, "days")
         with self._progress("Checking", unit="kinds of resource") as tick:
             report = self.core.running(metrics=metrics, days=days, progress=tick)

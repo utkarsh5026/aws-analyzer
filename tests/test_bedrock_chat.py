@@ -137,7 +137,9 @@ ANSWER = "Refunds take 5-7 business days. Bank transfers can take up to 10 days.
 
 def rag_resp(text=ANSWER, citations=(("Refunds take 5-7 business days.", [REFUND]),
                                      ("Bank transfers can take up to 10 days.", [BANK])), session="session-1"):
-    """A RetrieveAndGenerate response; each citation is (the answer text it covers, [refs]). Spans end inclusively."""
+    """
+    A RetrieveAndGenerate response; each citation is (the answer text it covers, [refs]). Spans end inclusively.
+    """
     cites = []
     for piece, refs in citations:
         start = text.index(piece)
@@ -162,9 +164,11 @@ def client_error(code, message, operation="RetrieveAndGenerate"):
 
 
 class Fake:
-    """A boto3 client stand-in answering from functions in any order (the window's flows don't keep Stubber's
+    """
+    A boto3 client stand-in answering from functions in any order (the window's flows don't keep Stubber's
     order). Every request, response and stream event is checked against the service model, and calls are recorded.
-    Operations without a handler don't exist on it, like on an old boto3."""
+    Operations without a handler don't exist on it, like on an old boto3.
+    """
 
     def __init__(self, service, handlers):
         model = boto3.client(service, region_name="us-east-1").meta.service_model
@@ -226,10 +230,12 @@ def doc(uri, status="INDEXED", ds_id=DS_ID, kb_id=KB_ID):
 
 
 def fakes(kbs=None, rag=None, stream=None, sources=None, documents=None, retrieve=None):
-    """bedrock-agent (the knowledge base list, each one's data sources and their files), bedrock (models) and
+    """
+    bedrock-agent (the knowledge base list, each one's data sources and their files), bedrock (models) and
     bedrock-agent-runtime fakes. sources: {knowledge base ID: [data source summaries]}; one data source each by
     default. documents: {data source ID: [document details] or an exception}; three files each by default. retrieve
-    answers Retrieve (RETRIEVED by default: the two passages rag_resp() cites, then one it doesn't)."""
+    answers Retrieve (RETRIEVED by default: the two passages rag_resp() cites, then one it doesn't).
+    """
     kbs = [kb_summary()] if kbs is None else kbs
     rag = rag or (lambda **params: rag_resp())
     retrieve = retrieve or (lambda **params: RETRIEVED)
@@ -633,7 +639,9 @@ def test_python_call_is_python_that_makes_the_same_call():
 
 
 def plain(markup):
-    """HTML -> the text it shows."""
+    """
+    HTML -> the text it shows.
+    """
     return html.unescape(re.sub(r"<[^>]+>", "", markup))
 
 
@@ -826,7 +834,9 @@ REFUSED = "Sorry, I am unable to assist you with this request."
 
 
 def asked(question, a=None, expected=None, **kwargs):
-    """A test question that came back with `a` (an answer citing refund-policy.pdf p.3 and p.4 by default)."""
+    """
+    A test question that came back with `a` (an answer citing refund-policy.pdf p.3 and p.4 by default).
+    """
     a = a or answer()
     a.question = question
     return BatchItem(question, expected, answer=a, **kwargs)
@@ -1208,7 +1218,9 @@ def test_code_is_highlighted_and_escaped():
 
 
 class Stubs:
-    """Real clients with a botocore Stubber on each: calls must be queued in order, and parameters are checked."""
+    """
+    Real clients with a botocore Stubber on each: calls must be queued in order, and parameters are checked.
+    """
 
     def __init__(self):
         names = ("bedrock-agent", "bedrock-agent-runtime", "bedrock")
@@ -1463,7 +1475,9 @@ def test_missing_region_is_a_readable_error(monkeypatch):
 
 
 def by_question(**params):
-    """RetrieveAndGenerate that can't help with a question about the moon until it retrieves 8 passages or more."""
+    """
+    RetrieveAndGenerate that can't help with a question about the moon until it retrieves 8 passages or more.
+    """
     vector = params[KB[0]][KB[1]].get("retrievalConfiguration", {}).get("vectorSearchConfiguration", {})
     if "moon" in params["input"]["text"] and vector.get("numberOfResults", 5) < 8:
         return rag_resp(REFUSED, citations=())
@@ -2123,7 +2137,9 @@ widgets = pytest.importorskip("ipywidgets")
 
 @pytest.fixture
 def window(core, monkeypatch):
-    """A view in HTML mode with its window built, as app() would show it in Jupyter."""
+    """
+    A view in HTML mode with its window built, as app() would show it in Jupyter.
+    """
     monkeypatch.setattr(chatmod, "_cell_number", lambda: 7)
     view = BedrockChatView(core, kb="support-docs", mode="html", progress="off")
     view._shown = []
@@ -2138,14 +2154,18 @@ def texts(app):
 
 
 def click_line(picker, value):
-    """Opens a picker and clicks the line holding `value`, as a person would."""
+    """
+    Opens a picker and clicks the line holding `value`, as a person would.
+    """
     if not picker.is_open:
         picker.button.click()
     picker.rows[value][1].click()
 
 
 def find(picker, text):
-    """Opens a picker and types in its search box -> the values of the lines it shows."""
+    """
+    Opens a picker and types in its search box -> the values of the lines it shows.
+    """
     if not picker.is_open:
         picker.button.click()
     picker.search.value = text
@@ -2738,14 +2758,18 @@ def open_window(monkeypatch, clients=None, **kwargs):
 
 
 def only_table_rules(value):
-    """Whether every <style> in a pane holds only the rules its own tables add (their filters and columns), which ship
-    with them: the report CSS is the window's style's, once."""
+    """
+    Whether every <style> in a pane holds only the rules its own tables add (their filters and columns), which ship
+    with them: the report CSS is the window's style's, once.
+    """
     return all(rule.startswith(".kbc form.tbl:has(") for style in value.split("<style>")[1:]
                for rule in style.split("</style>")[0].split("\n"))
 
 
 def html_widgets(widget):
-    """Every widget in a window that shows HTML."""
+    """
+    Every widget in a window that shows HTML.
+    """
     found, todo = [], [widget]
     while todo:
         item = todo.pop()
@@ -2756,7 +2780,9 @@ def html_widgets(widget):
 
 
 def code_text(app):
-    """What the Code tab's code block shows, as text."""
+    """
+    What the Code tab's code block shows, as text.
+    """
     return plain(re.search(r"<pre[^>]*>(.*)</pre>", app.code_view.value, re.S).group(1))
 
 
