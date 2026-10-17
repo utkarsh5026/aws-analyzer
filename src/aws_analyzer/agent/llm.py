@@ -2,6 +2,9 @@
 The model the agent answers with: an Azure OpenAI deployment made from settings or the environment (or any
 LangChain chat model passed in), its name, what its tokens cost, and what a failed call to it means. Another
 provider (a model on Amazon Bedrock, OpenAI itself) gets its own maker here, next to azure_chat_model().
+
+AZURE_API_VERSION is the Azure OpenAI API version used when neither api_version= nor the environment
+(OPENAI_API_VERSION, AZURE_OPENAI_API_VERSION) names one: a GA version that supports tool calling.
 """
 
 from __future__ import annotations
@@ -12,8 +15,9 @@ from typing import Any, Callable
 from .._kit.deps import _require
 from .._kit.errors import _Hint
 
-AZURE_API_VERSION = "2024-10-21"  # the Azure OpenAI API version used when neither api_version= nor the environment
-# (OPENAI_API_VERSION, AZURE_OPENAI_API_VERSION) names one: a GA version that supports tool calling
+AZURE_API_VERSION = "2024-10-21"
+_RETRIES = 3
+_ERROR_CHARACTERS = 300
 
 
 def azure_settings(deployment: str | None = None, endpoint: str | None = None,
@@ -28,8 +32,9 @@ def azure_settings(deployment: str | None = None, endpoint: str | None = None,
             or AZURE_API_VERSION)
 
 
-def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_version: str, api_key: str | None = None,
-                     token_provider: Callable[[], str] | None = None, max_tokens: int | None = None) -> Any:
+def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_version: str,  # noqa: PLR0913
+                     api_key: str | None = None, token_provider: Callable[[], str] | None = None,
+                     max_tokens: int | None = None) -> Any:
     """
     LangChain's AzureChatOpenAI for a deployment. The key is api_key, else AZURE_OPENAI_API_KEY, or a Microsoft
     Entra ID token_provider instead. _Hint (a note, not a traceback) says which settings are missing.
@@ -47,7 +52,7 @@ def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_versio
         )
     openai = _require("langchain_openai", "The agent's Azure OpenAI model", package="langchain-openai")
     settings: dict[str, Any] = {"azure_endpoint": endpoint, "azure_deployment": deployment,
-                                "api_version": api_version, "max_retries": 3}
+                                "api_version": api_version, "max_retries": _RETRIES}
     if max_tokens:
         settings["max_tokens"] = max_tokens
     if api_key:
@@ -94,8 +99,8 @@ def explain_model_error(exc: BaseException) -> str:
     """
     name = type(exc).__name__
     text = " ".join(str(exc).split())
-    if len(text) > 300:
-        text = text[:299] + "…"
+    if len(text) > _ERROR_CHARACTERS:
+        text = text[:_ERROR_CHARACTERS - 1] + "…"
     status = getattr(exc, "status_code", None)
     if name == "AuthenticationError" or status == 401:
         why = ("Azure OpenAI refused the key: check AZURE_OPENAI_API_KEY (or api_key=) is a key of this resource, "

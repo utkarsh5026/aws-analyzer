@@ -2,6 +2,10 @@
 What a tool hands the model: JSON-ready values, time windows in UTC, text with anything that looks like a secret
 hidden, and the parts it couldn't read with the permission each one needs. Every toolkit builds its results with
 these, so the model reads the same shapes whichever service a tool is about.
+
+_SECRETS is what hide_secrets() takes out of a log line before the model sees it, as (pattern, replacement) pairs:
+AWS access key IDs, JWTs, Bearer and Basic credentials, private keys, values after secret-sounding names, and the
+password in a user:password@host URL.
 """
 
 from __future__ import annotations
@@ -12,15 +16,15 @@ from typing import Any
 
 from .._kit.errors import _why
 
-_SECRETS = (  # (pattern, replacement): what hide_secrets() takes out of a log line before the model sees it
+_SECRETS = (
     (re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "[access key hidden]"),
-    (re.compile(r"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"), "[token hidden]"),  # a JWT
+    (re.compile(r"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"), "[token hidden]"),
     (re.compile(r"(?i)\b(bearer|basic)\s+[\w.~+/=-]{12,}"), r"\1 [hidden]"),
     (re.compile(r"(?i)(-----BEGIN [A-Z ]*PRIVATE KEY-----).*?(-----END [A-Z ]*PRIVATE KEY-----|$)", re.S),
      r"\1 [hidden]"),
     (re.compile(r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|"
                 r"credential)[\w-]*)(\"?\s*[:=]\s*\"?)([^\s\"',;&}]+)"), r"\1\2[hidden]"),
-    (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)(@)"), r"\1[hidden]\3"),  # user:password@host
+    (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)(@)"), r"\1[hidden]\3"),
 )
 
 

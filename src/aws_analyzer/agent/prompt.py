@@ -19,7 +19,8 @@ def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
     """
     The line that starts each question sent to the model: when it was asked, in the user's time zone and in UTC,
     so "last night" and "this morning" mean what the user meant. zone is a tzinfo or anything set_timezone() takes
-    ('Asia/Kolkata', 'kolkata', '+05:30'); None is this machine's own zone.
+    ('Asia/Kolkata', 'kolkata', '+05:30'); None is this machine's own zone. The zone is named as the tz database
+    does ('Asia/Kolkata'), or by its offset ('UTC+05:30').
     """
     utc = now.astimezone(timezone.utc)
     tz = _zone_from(zone) if isinstance(zone, str) else zone
@@ -27,7 +28,7 @@ def asked_at(now: datetime, zone: tzinfo | str | None = timezone.utc) -> str:
     if local.utcoffset() == timedelta(0) and _zone_name(local) == "UTC":
         return (f"[Asked {utc:%A %Y-%m-%d %H:%M} UTC. Times are in UTC (the user can pick their zone with "
                 "set_timezone()): give them in UTC and say so.]")
-    name = getattr(tz, "key", None) or _zone_name(local)  # 'Asia/Kolkata', or 'UTC+05:30' for an offset
+    name = getattr(tz, "key", None) or _zone_name(local)
     return (f"[Asked {local:%A %Y-%m-%d %H:%M} in the user's time zone ({name}, UTC{local:%z}), "
             f"which is {utc:%Y-%m-%d %H:%M} UTC.]")
 

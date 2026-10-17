@@ -27,6 +27,27 @@ if TYPE_CHECKING:
     from ..s3 import S3Analyzer
 
 
+_THREAD_ID_LENGTH = 12
+_WORKERS = 8
+
+
+def _new_thread() -> str:
+    """
+    A new conversation's ID.
+    """
+    return uuid.uuid4().hex[:_THREAD_ID_LENGTH]
+
+
+def _checked_zone(timezone: str | tzinfo | None) -> str | tzinfo | None:
+    """
+    timezone= as it's kept, after checking it names a zone, so a misspelled one is an error now rather than at the
+    first question. None is the zone reports show times in (set_timezone()).
+    """
+    if timezone is not None:
+        _zone_from(timezone)
+    return timezone
+
+
 class AgentAnalyzer(_BaseAnalyzer):
     """
     Answers questions about your AWS account with an agent: a model (an Azure OpenAI deployment) calling read-only
@@ -47,11 +68,14 @@ class AgentAnalyzer(_BaseAnalyzer):
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
     IST"). `budget` caps each question (Budget, or a dict of its fields).
+
+    It has no list prices: Azure OpenAI's depend on the deployment (see model_prices=). `thread` is the conversation
+    follow-up questions continue, and `history` every question asked, in order.
     """
 
-    _LIST_PRICES: dict[str, Any] = {}  # no list prices: Azure OpenAI's depend on the deployment; see model_prices=
+    _LIST_PRICES: dict[str, Any] = {}
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         session: Any = None,
         *,
@@ -77,19 +101,17 @@ class AgentAnalyzer(_BaseAnalyzer):
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.deployment, self.endpoint, self.api_version = azure_settings(deployment, endpoint, api_version)
-        self._api_key = api_key  # never shown; None reads AZURE_OPENAI_API_KEY when the model is made
+        self._api_key = api_key
         self._token_provider = azure_ad_token_provider
         self.chat_model = chat_model
         self.max_tokens = max_tokens
-        if timezone is not None:
-            _zone_from(timezone)  # a misspelled time zone is an error now, not at the first question
-        self.timezone = timezone  # None: the zone reports show times in (set_timezone())
+        self.timezone = _checked_zone(timezone)
         self.regions = regions
         self.notes = notes
         self.budget = Budget.of(budget)
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
-        self.max_workers = 8
+        self.max_workers = _WORKERS
         self._guard = _Guard()
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
             toolkits, {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
@@ -97,8 +119,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._graph: Any = None
         self._run: _Run | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
-        self.thread = uuid.uuid4().hex[:12]  # the conversation follow-up questions continue
-        self.history: list[AgentAnswer] = []  # every question asked, in order
+        self.thread = _new_thread()
+        self.history: list[AgentAnswer] = []
 
     def toolkit(self, name: str) -> Toolkit:
         """
@@ -144,8 +166,6 @@ class AgentAnalyzer(_BaseAnalyzer):
         """
         return {name: reads for toolkit in self.toolkits for name, reads in toolkit.reads.items()}
 
-    # ------------------------------------------------------------------ the model and the loop
-
     @property
     def model(self) -> str:
         """
@@ -172,10 +192,10 @@ class AgentAnalyzer(_BaseAnalyzer):
     def _harness(self) -> Any:
         """
         The deepagents agent: the model, the tools, the instructions and a memory of the conversation. Made once;
-        new_conversation() starts a new thread in it.
+        new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
         """
         if self._graph is None:
-            harness.check_ready()  # says what's missing before anything else is made
+            harness.check_ready()
             prompt = self.instructions()
             self._graph = harness.build_graph(self._chat(), self.tools(), prompt)
         return self._graph
@@ -184,10 +204,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         """
         Starts a new conversation: the next question won't see the earlier ones. Returns its ID.
         """
-        self.thread = uuid.uuid4().hex[:12]
+        self.thread = _new_thread()
         return self.thread
-
-    # ------------------------------------------------------------------ asking
 
     def ask(
         self,
@@ -233,8 +251,6 @@ class AgentAnalyzer(_BaseAnalyzer):
             answer.stopped = refused[0] if refused else None
         self.history.append(answer)
         return answer
-
-    # ------------------------------------------------------------------ the tools
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """

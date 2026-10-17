@@ -1,6 +1,7 @@
 """
 How far one question may go (Budget), and the state of the question being answered (_Run): its tool calls, what
-the model has cost so far, and the stop button. check_budget() is what every tool asks before it runs.
+the model has cost so far, and the stop button. check_budget() is what every tool asks before it runs, and
+_REFUSED is what the table of tool calls says about a call that wasn't run.
 """
 
 from __future__ import annotations
@@ -17,19 +18,29 @@ if TYPE_CHECKING:
     from .answers import ToolCall
 
 
+_METRICS_PER_PRICE = 1000
+
+
 @dataclass
 class Budget:
     """
     How far one question may go. A tool that would go past a limit isn't run: it tells the model to answer with
     what it has, and the answer says what stopped it.
+
+        tool_calls  tool calls per question
+        seconds     wall-clock time per question, model included
+        usd         estimated model cost per question (only when the model's prices are known)
+        steps       LangGraph's recursion limit: model calls, tool calls and the harness's own steps together
+        log_days    the longest window a log read (errors, logs, performance) may cover
+        s3_keys     the most keys one S3 listing may read (find_files, folder_summary, s3_triggers)
     """
 
-    tool_calls: int = 25  # tool calls per question
-    seconds: float = 300.0  # wall-clock time per question, model included
-    usd: float | None = 1.00  # estimated model cost per question (only when the model's prices are known)
-    steps: int = 80  # LangGraph's recursion limit: model calls, tool calls and the harness's own steps together
-    log_days: float = 3.0  # the longest window a log read (errors, logs, performance) may cover
-    s3_keys: int = 100_000  # the most keys one S3 listing may read (find_files, folder_summary, s3_triggers)
+    tool_calls: int = 25
+    seconds: float = 300.0
+    usd: float | None = 1.00
+    steps: int = 80
+    log_days: float = 3.0
+    s3_keys: int = 100_000
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
@@ -56,15 +67,19 @@ class _Run:
     """
     One question's state while it's being answered: what the tools did and what's left of the budget. The tools
     of one turn run side by side, so everything they change is changed under `lock`.
+
+        cost          the model's estimated cost so far (USD)
+        metrics_read  CloudWatch metrics the tools requested (GetMetricData bills per 1,000)
+        aws_cost      USD for those metrics; every other read the tools make is free
     """
 
     budget: Budget
     started: float = field(default_factory=time.monotonic)
     stop: threading.Event = field(default_factory=threading.Event)
     calls: list[ToolCall] = field(default_factory=list)
-    cost: float = 0.0  # the model's estimated cost so far (USD)
-    metrics_read: int = 0  # CloudWatch metrics the tools requested (GetMetricData bills per 1,000)
-    aws_cost: float = 0.0  # USD for those metrics; every other read the tools make is free
+    cost: float = 0.0
+    metrics_read: int = 0
+    aws_cost: float = 0.0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
@@ -77,7 +92,7 @@ class _Run:
         """
         with self.lock:
             self.metrics_read += count
-            self.aws_cost += count / 1000 * price
+            self.aws_cost += count / _METRICS_PER_PRICE * price
 
 
 class _Refused(Exception):
@@ -90,7 +105,7 @@ class _Refused(Exception):
         self.reason, self.message, self.extra = reason, message, extra
 
 
-_REFUSED = {  # what the table of tool calls says about a call that wasn't run
+_REFUSED = {
     "log_window": "not run: the window is longer than the log limit",
     "tool_calls": "not run: the budget of tool calls was used up",
     "time": "not run: the time budget was used up",
