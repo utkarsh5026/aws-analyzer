@@ -1,4 +1,5 @@
-"""The blocks a report is made of, and what draws each kind of block.
+"""
+The blocks a report is made of, and what draws each kind of block.
 
 A View command builds a list of blocks (a _Title, _Cards, a _Table, ...) and hands it to the renderer, which draws
 each block by what's registered for its type: its HTML, or its lines of text. These are the blocks every service
@@ -68,7 +69,9 @@ class _Next:
 
 @dataclass
 class _Tone:
-    """A table cell with a status colour: a pill in HTML, plain text elsewhere."""
+    """
+    A table cell with a status colour: a pill in HTML, plain text elsewhere.
+    """
 
     text: str
     tone: str = "warn"  # 'warn' | 'bad' | 'ok'
@@ -79,7 +82,9 @@ class _Tone:
 
 @dataclass(frozen=True)
 class _Report:
-    """One report being drawn: what each block's drawing function gets besides the block."""
+    """
+    One report being drawn: what each block's drawing function gets besides the block.
+    """
 
     max_rows: int  # the view's cap on table rows; 0 = no cap
     badge: str = ""  # the chip before each title (HTML), so reports from different services are easy to tell apart
@@ -90,8 +95,10 @@ class _Report:
     parts: dict[Any, Any] = field(default_factory=dict)  # what blocks share while the report is drawn (see shared)
 
     def shared(self, key: Any, make: Callable[[], Any]) -> Any:
-        """What the report's blocks share while it's drawn, made by make() the first time one asks for it: S3's PDF
-        pages share one full-size view, so its ‹ › step through every page in the report."""
+        """
+        What the report's blocks share while it's drawn, made by make() the first time one asks for it: S3's PDF
+        pages share one full-size view, so its ‹ › step through every page in the report.
+        """
         if key not in self.parts:
             self.parts[key] = make()
         return self.parts[key]
@@ -103,9 +110,11 @@ _CELLS: dict[type, Callable[[Any, str], str]] = {}  # table cell type -> its HTM
 
 
 def _draws(kind: type, mode: str) -> Callable[[Callable], Callable]:
-    """@_draws(_Passage, "html") makes the function under it the way a _Passage block is drawn in HTML:
+    """
+    @_draws(_Passage, "html") makes the function under it the way a _Passage block is drawn in HTML:
     f(block, report) -> str. "text" registers its lines in text mode, f(block, report) -> list[str], and "cell" how
-    a table cell of that type shows in HTML, f(cell, text) -> str (text mode shows str(cell))."""
+    a table cell of that type shows in HTML, f(cell, text) -> str (text mode shows str(cell)).
+    """
     registry: dict[type, Callable] = {"html": _HTML, "text": _TEXT, "cell": _CELLS}[mode]
 
     def register(draw: Callable) -> Callable:
@@ -116,5 +125,7 @@ def _draws(kind: type, mode: str) -> Callable[[Callable], Callable]:
 
 
 def _drawer(registry: dict[type, Callable], value: Any) -> Callable | None:
-    """What draws value: the function registered for its type, or for the closest type it's made from."""
+    """
+    What draws value: the function registered for its type, or for the closest type it's made from.
+    """
     return next((registry[cls] for cls in type(value).__mro__ if cls in registry), None)

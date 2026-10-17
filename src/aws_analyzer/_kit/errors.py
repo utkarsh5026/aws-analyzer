@@ -1,4 +1,6 @@
-"""AWS errors: their codes, the permission a denied call needs, and `_Hint` for a question back to the user."""
+"""
+AWS errors: their codes, the permission a denied call needs, and `_Hint` for a question back to the user.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +16,14 @@ def _error_name(exc: ClientError | BotoCoreError) -> str:
 
 
 def _why(code: str, permission: str) -> str:
-    """('AccessDeniedException', 's3:GetObject') -> 'AccessDeniedException; needs s3:GetObject'. Other codes stay
-    as they are."""
+    """
+    ('AccessDeniedException', 's3:GetObject') -> 'AccessDeniedException; needs s3:GetObject'. Other codes stay
+    as they are.
+    """
     return f"{code}; needs {permission}" if "denied" in code.lower() or code == "UnauthorizedOperation" else code
 
 
 class _Hint(ValueError):
-    """A question back to the user (e.g. which knowledge base), shown as a plain note rather than an error."""
+    """
+    A question back to the user (e.g. which knowledge base), shown as a plain note rather than an error.
+    """

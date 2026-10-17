@@ -1,6 +1,8 @@
-"""The model the agent answers with: an Azure OpenAI deployment made from settings or the environment (or any
+"""
+The model the agent answers with: an Azure OpenAI deployment made from settings or the environment (or any
 LangChain chat model passed in), its name, what its tokens cost, and what a failed call to it means. Another
-provider (a model on Amazon Bedrock, OpenAI itself) gets its own maker here, next to azure_chat_model()."""
+provider (a model on Amazon Bedrock, OpenAI itself) gets its own maker here, next to azure_chat_model().
+"""
 
 from __future__ import annotations
 
@@ -16,8 +18,10 @@ AZURE_API_VERSION = "2024-10-21"  # the Azure OpenAI API version used when neith
 
 def azure_settings(deployment: str | None = None, endpoint: str | None = None,
                    api_version: str | None = None) -> tuple[str | None, str | None, str]:
-    """(deployment, endpoint, api_version): the ones given, else AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_ENDPOINT and
-    OPENAI_API_VERSION (or AZURE_OPENAI_API_VERSION), else AZURE_API_VERSION for the version."""
+    """
+    (deployment, endpoint, api_version): the ones given, else AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_ENDPOINT and
+    OPENAI_API_VERSION (or AZURE_OPENAI_API_VERSION), else AZURE_API_VERSION for the version.
+    """
     return (deployment or os.environ.get("AZURE_OPENAI_DEPLOYMENT") or None,
             endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT") or None,
             api_version or os.environ.get("OPENAI_API_VERSION") or os.environ.get("AZURE_OPENAI_API_VERSION")
@@ -26,8 +30,10 @@ def azure_settings(deployment: str | None = None, endpoint: str | None = None,
 
 def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_version: str, api_key: str | None = None,
                      token_provider: Callable[[], str] | None = None, max_tokens: int | None = None) -> Any:
-    """LangChain's AzureChatOpenAI for a deployment. The key is api_key, else AZURE_OPENAI_API_KEY, or a Microsoft
-    Entra ID token_provider instead. _Hint (a note, not a traceback) says which settings are missing."""
+    """
+    LangChain's AzureChatOpenAI for a deployment. The key is api_key, else AZURE_OPENAI_API_KEY, or a Microsoft
+    Entra ID token_provider instead. _Hint (a note, not a traceback) says which settings are missing.
+    """
     missing = [env for env, value in (("AZURE_OPENAI_ENDPOINT", endpoint),
                                       ("AZURE_OPENAI_DEPLOYMENT", deployment)) if not value]
     if not (api_key or token_provider or os.environ.get("AZURE_OPENAI_API_KEY")):
@@ -52,8 +58,10 @@ def azure_chat_model(*, endpoint: str | None, deployment: str | None, api_versio
 
 
 def model_name(chat_model: Any, deployment: str | None = None) -> str:
-    """The deployment or model that answers: the chat model's own name when there is one, else the Azure
-    deployment's."""
+    """
+    The deployment or model that answers: the chat model's own name when there is one, else the Azure
+    deployment's.
+    """
     if chat_model is not None:
         for attribute in ("deployment_name", "model_name", "model_id", "model"):
             value = getattr(chat_model, attribute, None)
@@ -65,8 +73,10 @@ def model_name(chat_model: Any, deployment: str | None = None) -> str:
 
 def answer_cost(model: str, input_tokens: int, output_tokens: int,
                 model_prices: dict[str, tuple[float, float]] | None) -> float | None:
-    """Estimated USD for the tokens: model_prices maps a deployment or model name (the longest that appears in
-    `model` wins) to (USD per 1M input tokens, per 1M output tokens). None when no price matches."""
+    """
+    Estimated USD for the tokens: model_prices maps a deployment or model name (the longest that appears in
+    `model` wins) to (USD per 1M input tokens, per 1M output tokens). None when no price matches.
+    """
     if not model_prices or not model:
         return None
     wanted = model.lower()
@@ -78,8 +88,10 @@ def answer_cost(model: str, input_tokens: int, output_tokens: int,
 
 
 def explain_model_error(exc: BaseException) -> str:
-    """What a failed model call means and what to do, from the error the OpenAI client raised (by its class name,
-    so this needs no openai import)."""
+    """
+    What a failed model call means and what to do, from the error the OpenAI client raised (by its class name,
+    so this needs no openai import).
+    """
     name = type(exc).__name__
     text = " ".join(str(exc).split())
     if len(text) > 300:

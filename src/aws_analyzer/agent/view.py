@@ -1,6 +1,8 @@
-"""AgentView: the agent's notebook UI. ask() shows the answer first, then what it checked to get it (each tool call
+"""
+AgentView: the agent's notebook UI. ask() shows the answer first, then what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
-View commands to look closer; transcript() and tools() show the questions so far and what the agent can call."""
+View commands to look closer; transcript() and tools() show the questions so far and what the agent can call.
+"""
 
 from __future__ import annotations
 
@@ -45,14 +47,18 @@ _BADGE = "🤖 Agent"  # the chip before each report's title, so reports from di
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
 def _coverage_text(call: ToolCall) -> str:
-    """'2026-10-15 18:00 to 2026-10-16 08:00 IST · us-east-1 · cut short' for the table of what it checked: the window
+    """
+    '2026-10-15 18:00 to 2026-10-16 08:00 IST · us-east-1 · cut short' for the table of what it checked: the window
     in the zone reports show times in (set_timezone()), the regions, the S3 keys it read, and whether it was cut
-    short."""
+    short.
+    """
     cov = call.coverage
     parts = []
     window = cov.get("window")
@@ -70,27 +76,34 @@ def _coverage_text(call: ToolCall) -> str:
 
 
 def _zone_label(zone: tzinfo | None) -> str:
-    """'Asia/Kolkata (IST)', 'UTC', or 'UTC+05:30': a zone as the tools() report names it."""
+    """
+    'Asia/Kolkata (IST)', 'UTC', or 'UTC+05:30': a zone as the tools() report names it.
+    """
     moment = _utcnow().astimezone(zone)
     short, key = _zone_name(moment), getattr(zone, "key", None)
     return f"{key} ({short})" if key and key != short else short
 
 
 def _first_line(doc: str | None) -> str:
-    """A docstring's first sentence, on one line."""
+    """
+    A docstring's first sentence, on one line.
+    """
     flat = " ".join((doc or "").split())
     match = re.match(r"(.+?\.)(\s|$)", flat)
     return match.group(1) if match else flat
 
 
 def _look_closer(commands: list[tuple[str, str]]) -> str:
-    """The title over the commands to run next, naming the Views they're on: 'Look closer (aws_analyzer.LambdaView)'."""
+    """
+    The title over the commands to run next, naming the Views they're on: 'Look closer (aws_analyzer.LambdaView)'.
+    """
     views = dict.fromkeys(m.group(1) for command, _ in commands if (m := re.match(r"(\w+)\(\)\.", command)))
     return f"Look closer ({', '.join(f'aws_analyzer.{view}' for view in views)})" if views else "Look closer"
 
 
 class AgentView(_BaseView):
-    """Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
+    """
+    Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
     report and returns nothing; for the data, call the matching method on `view.core` (ask() -> AgentAnswer).
 
     AgentView(timezone='Asia/Kolkata', deployment='gpt-4o', ...) passes its settings to a new AgentAnalyzer (see
@@ -133,7 +146,9 @@ class AgentView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """The AWS error message plus what to do about it."""
+        """
+        The AWS error message plus what to do about it.
+        """
         text = message.rstrip() + ("" if message.rstrip().endswith((".", "!", "?")) else ".")
         if code in ("AccessDeniedException", "AccessDenied", "UnauthorizedOperation") or "not authorized" in message:
             return f"{text} README lists the read-only IAM permissions each tool needs."
@@ -143,11 +158,13 @@ class AgentView(_BaseView):
 
     @_friendly_errors
     def ask(self, question: str, *, new: bool = False) -> None:
-        """The agent's answer to a question about your AWS account (Lambda and S3, for now), then what it checked to
+        """
+        The agent's answer to a question about your AWS account (Lambda and S3, for now), then what it checked to
         get it: each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
         the tokens and what it cost, and the LambdaView and S3View commands to look closer. Follow-up questions continue the
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
-        found until then."""
+        found until then.
+        """
         with self._progress() as tick:
             answer = self.core.ask(question, new=new, progress=tick)
         self._show(self._answer_blocks(answer))
@@ -211,8 +228,10 @@ class AgentView(_BaseView):
 
     @_friendly_errors
     def new_conversation(self) -> None:
-        """Starts a new conversation: the next ask() won't see the questions before it (follow-ups like "why did
-        it fail?" need the conversation they follow)."""
+        """
+        Starts a new conversation: the next ask() won't see the questions before it (follow-ups like "why did
+        it fail?" need the conversation they follow).
+        """
         self.core.new_conversation()
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
@@ -220,8 +239,10 @@ class AgentView(_BaseView):
 
     @_friendly_errors
     def transcript(self) -> None:
-        """Every question asked so far and its answer, oldest first, with the tool calls, tokens and cost of each,
-        and the total. Questions of the same conversation are numbered together."""
+        """
+        Every question asked so far and its answer, oldest first, with the tool calls, tokens and cost of each,
+        and the total. Questions of the same conversation are numbered together.
+        """
         history = self.core.history
         if not history:
             self._show([_Title("Transcript"), _Note("Nothing asked yet: ask('Which Lambda failed last night?').")])
@@ -250,9 +271,11 @@ class AgentView(_BaseView):
 
     @_friendly_errors
     def tools(self) -> None:
-        """What the agent can call to answer: each tool, what it tells the model and the AWS reads it makes, then
+        """
+        What the agent can call to answer: each tool, what it tells the model and the AWS reads it makes, then
         the model it answers with, the regions and time zone it assumes, and its budget per question. Every AWS
-        call goes through a guard that refuses anything but a read."""
+        call goes through a guard that refuses anything but a read.
+        """
         core = self.core
         budget = core.budget
         model = core.model or "not set (AZURE_OPENAI_DEPLOYMENT)"

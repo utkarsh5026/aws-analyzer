@@ -1,6 +1,8 @@
-"""The read-only guard: every AWS client a toolkit's analyzer makes for the agent is hooked, and any operation that
+"""
+The read-only guard: every AWS client a toolkit's analyzer makes for the agent is hooked, and any operation that
 isn't a read is refused before its request is built, whatever asks for it (the model, a tool, a bug). It also counts
-the reads it lets through, for the report's "AWS reads it made"."""
+the reads it lets through, for the report's "AWS reads it made".
+"""
 
 from __future__ import annotations
 
@@ -14,18 +16,24 @@ READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")  # the AWS operati
 
 
 class ReadOnlyError(PermissionError):
-    """An AWS call the read-only guard refused: it isn't a Get, List, Describe, Head or Filter call."""
+    """
+    An AWS call the read-only guard refused: it isn't a Get, List, Describe, Head or Filter call.
+    """
 
 
 def _is_client(value: Any) -> bool:
-    """Whether `value` is a boto3 client (or a stand-in for one, as tests use): it has meta.events to hook."""
+    """
+    Whether `value` is a boto3 client (or a stand-in for one, as tests use): it has meta.events to hook.
+    """
     return getattr(getattr(value, "meta", None), "events", None) is not None
 
 
 class _GuardedSession:
-    """A boto3 session whose every client goes through the guard. An analyzer the guard attaches to reads AWS through
+    """
+    A boto3 session whose every client goes through the guard. An analyzer the guard attaches to reads AWS through
     one in place of its own session, so a client it makes later (in another region, for another service, in any
-    method) is hooked as it's made. Everything else is the session's own."""
+    method) is hooked as it's made. Everything else is the session's own.
+    """
 
     def __init__(self, session: Any, guard: _Guard):
         self._session, self._guard = session, guard
@@ -46,8 +54,10 @@ class _GuardedSession:
 
 
 class _Guard:
-    """Refuses every AWS call a tool's client would make that isn't a read, before its request is built, and counts
-    the ones it lets through. A toolkit hooks it onto its analyzer (attach) or onto a client it made (watch)."""
+    """
+    Refuses every AWS call a tool's client would make that isn't a read, before its request is built, and counts
+    the ones it lets through. A toolkit hooks it onto its analyzer (attach) or onto a client it made (watch).
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -72,8 +82,10 @@ class _Guard:
             self.counts[op] += 1
 
     def watch(self, client: Any) -> Any:
-        """Hooks one boto3 client (once: its event emitter keeps the hook's unique_id, so asking again does nothing)
-        and returns it."""
+        """
+        Hooks one boto3 client (once: its event emitter keeps the hook's unique_id, so asking again does nothing)
+        and returns it.
+        """
         events = getattr(getattr(client, "meta", None), "events", None)
         if events is None:
             return client
@@ -82,10 +94,12 @@ class _Guard:
         return client
 
     def attach(self, core: Any, factory: str | None = None) -> Any:
-        """Hooks an analyzer (`core`): its session becomes a _GuardedSession, so every client it makes from now on is
+        """
+        Hooks an analyzer (`core`): its session becomes a _GuardedSession, so every client it makes from now on is
         hooked; the clients it already has are hooked (its main `client` when it's set in __init__, and the ones it
         keeps in dicts, like `_clients`); and, when it makes clients through a method (`factory`, LambdaAnalyzer's
-        `_service`), every client that returns, which covers clients passed in (clients=) too. Returns `core`."""
+        `_service`), every client that returns, which covers clients passed in (clients=) too. Returns `core`.
+        """
         if factory and not getattr(core, "_agent_guard", None):
             make = getattr(core, factory)
 

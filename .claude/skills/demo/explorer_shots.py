@@ -1,4 +1,5 @@
-"""Remake the S3 explorer's screenshots: S3Explorer is a live widget, so this runs it in a real JupyterLab.
+"""
+Remake the S3 explorer's screenshots: S3Explorer is a live widget, so this runs it in a real JupyterLab.
 
     .venv/bin/python .claude/skills/demo/explorer_shots.py              # every explorer figure and the tour
     .venv/bin/python .claude/skills/demo/explorer_shots.py explorer     # just this one
@@ -156,7 +157,9 @@ def free_port() -> int:
 
 
 def open_explorer(page, base: str, figure: Figure, theme: str, settings: Path) -> None:
-    """Run the figure's notebook in the given JupyterLab theme and wait until the explorer has opened."""
+    """
+    Run the figure's notebook in the given JupyterLab theme and wait until the explorer has opened.
+    """
     (settings / "@jupyterlab" / "apputils-extension").mkdir(parents=True, exist_ok=True)
     (settings / "@jupyterlab" / "apputils-extension" / "themes.jupyterlab-settings").write_text(
         json.dumps({"theme": f"JupyterLab {theme.title()}"}))
@@ -176,7 +179,9 @@ def open_explorer(page, base: str, figure: Figure, theme: str, settings: Path) -
 
 
 def wait_ready(page, text: str) -> None:
-    """Wait for a right-hand pane, drawn since the last click, that shows `text` (each report gets a new pane)."""
+    """
+    Wait for a right-hand pane, drawn since the last click, that shows `text` (each report gets a new pane).
+    """
     page.wait_for_function("text => [...document.querySelectorAll('.s3x-right:not([data-old])')]"
                            ".some(pane => pane.textContent.includes(text))", arg=text, timeout=60_000)
 
@@ -196,7 +201,9 @@ def button(page, click: str):
 
 
 def click(page, step: Step, at: tuple[float, float] | None = None) -> None:
-    """Click the step's button (at a point, for the tour) and wait until its report is on the right."""
+    """
+    Click the step's button (at a point, for the tour) and wait until its report is on the right.
+    """
     time.sleep(0.5)  # the explorer drops clicks that come right after the list changed (_CLICK_GRACE)
     page.evaluate("() => document.querySelectorAll('.s3x-right').forEach(pane => pane.dataset.old = '1')")
     if at:
@@ -220,7 +227,9 @@ def still(page, figure: Figure, png: Path) -> None:
 
 
 def tour(page, figure: Figure) -> list:
-    """The frames of the tour, as (image, milliseconds) pairs."""
+    """
+    The frames of the tour, as (image, milliseconds) pairs.
+    """
     from PIL import Image
 
     box = page.locator(".s3x").first.bounding_box()
@@ -257,7 +266,7 @@ def tour(page, figure: Figure) -> list:
 
 
 def main() -> int:
-    intro, _, rest = (__doc__ or "").partition("\n\n")
+    intro, _, rest = (__doc__ or "").strip().partition("\n\n")
     parser = argparse.ArgumentParser(description=intro, epilog=rest, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("names", nargs="*", help="figures to make; default: all")
     parser.add_argument("--list", action="store_true", help="list the figures and exit")

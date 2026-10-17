@@ -1,4 +1,5 @@
-"""What every service's analyzer shares: its boto3 session, the retry settings its clients use, its prices, and
+"""
+What every service's analyzer shares: its boto3 session, the retry settings its clients use, its prices, and
 helpers for clients made once, lists read page by page and work spread over threads.
 
 A service's <Service>Analyzer subclasses _BaseAnalyzer: it sets _LIST_PRICES (its price table), passes session,
@@ -16,9 +17,11 @@ from botocore.config import Config
 
 
 class _BaseAnalyzer:
-    """What every <Service>Analyzer starts with: a boto3 session (session=, or one made from region= and profile=),
+    """
+    What every <Service>Analyzer starts with: a boto3 session (session=, or one made from region= and profile=),
     the retry settings its clients use (self._config), and its prices, the service's list prices with prices= over
-    them. Nothing here talks to AWS until the service asks."""
+    them. Nothing here talks to AWS until the service asks.
+    """
 
     _LIST_PRICES: dict[str, Any] = {}  # the service's price table (S3_PRICES, ...), which prices= overrides
     client: Any  # the service's main client, which the service makes
@@ -37,7 +40,9 @@ class _BaseAnalyzer:
         return self.client.meta.region_name
 
     def _cached_client(self, service: str, make: Callable[[], Any]) -> Any:
-        """The client for `service`, made by make() the first time it's needed (or the one passed in clients=)."""
+        """
+        The client for `service`, made by make() the first time it's needed (or the one passed in clients=).
+        """
         if service not in self._clients:
             with self._lock:  # sessions aren't thread-safe, and the windows read from threads
                 if service not in self._clients:
@@ -45,11 +50,15 @@ class _BaseAnalyzer:
         return self._clients[service]
 
     def _paginate(self, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
-        """Every item under `key`, from every page of one of the main client's list operations."""
+        """
+        Every item under `key`, from every page of one of the main client's list operations.
+        """
         return [item for page in self.client.get_paginator(operation).paginate(**params) for item in page.get(key, [])]
 
     def _map(self, fn: Callable[[Any], Any], items: list[Any]) -> list[Any]:
-        """fn over items, in parallel threads unless max_workers is 1 (a Stubber answers in order)."""
+        """
+        fn over items, in parallel threads unless max_workers is 1 (a Stubber answers in order).
+        """
         if self.max_workers <= 1 or len(items) <= 1:
             return [fn(item) for item in items]
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:

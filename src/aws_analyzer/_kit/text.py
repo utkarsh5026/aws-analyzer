@@ -1,4 +1,6 @@
-"""Escaping text for HTML, clipping and padding it for the text tables, and finding search words in it."""
+"""
+Escaping text for HTML, clipping and padding it for the text tables, and finding search words in it.
+"""
 
 from __future__ import annotations
 
@@ -17,8 +19,10 @@ def _clip(text: str, width: int = 90) -> str:
 
 
 def _width(text: str) -> int:
-    """How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
-    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners."""
+    """
+    How many columns a terminal gives `text`, so text tables line up when a cell holds an emoji (📁) or CJK:
+    2 for a wide character, 1 more for a symbol U+FE0F turns into an emoji (⚙️), 0 for combining marks and joiners.
+    """
     width, wide = 0, False
     for ch in text:
         if ch == "️":
@@ -30,7 +34,9 @@ def _width(text: str) -> int:
 
 
 def _pad(text: str, width: int, right: bool = False) -> str:
-    """ljust / rjust by the columns the text takes on screen (_width), not its length."""
+    """
+    ljust / rjust by the columns the text takes on screen (_width), not its length.
+    """
     fill = " " * max(0, width - _width(text))
     return fill + text if right else text + fill
 
@@ -42,10 +48,12 @@ def _text_bar(fraction: float, width: int = 20) -> str:
 
 
 def search_rank(text: str, fields: Iterable[Any]) -> int | None:
-    """Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
+    """
+    Where something goes in a search for `text` among its fields (a name, an ID, a description...), best first:
     0 when a field is the text (an ID pasted whole), 1 when one starts with it, 2 when one holds it, 3 when every
     word of it is in some field; None when a word is in none. Case is ignored, so 'k7qj' finds 'K7QJ2M4XNA'; an
-    empty search finds everything, at 3."""
+    empty search finds everything, at 3.
+    """
     wanted = " ".join(str(text or "").lower().split())
     if not wanted:
         return 3
@@ -62,8 +70,10 @@ def search_rank(text: str, fields: Iterable[Any]) -> int | None:
 
 
 def _marked(text: str, words: Iterable[str]) -> str:
-    """HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
-    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped."""
+    """
+    HTML for `text` with every place a search word is found, in any case and inside longer words ('k7qj' in
+    'K7QJ2M4XNA'), in <mark>. Each piece is escaped before it's wrapped.
+    """
     unique = sorted({w for w in words if w}, key=len, reverse=True)
     if not unique:
         return _esc(text)

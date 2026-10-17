@@ -1,5 +1,7 @@
-"""How far one question may go (Budget), and the state of the question being answered (_Run): its tool calls, what
-the model has cost so far, and the stop button. check_budget() is what every tool asks before it runs."""
+"""
+How far one question may go (Budget), and the state of the question being answered (_Run): its tool calls, what
+the model has cost so far, and the stop button. check_budget() is what every tool asks before it runs.
+"""
 
 from __future__ import annotations
 
@@ -17,8 +19,10 @@ if TYPE_CHECKING:
 
 @dataclass
 class Budget:
-    """How far one question may go. A tool that would go past a limit isn't run: it tells the model to answer with
-    what it has, and the answer says what stopped it."""
+    """
+    How far one question may go. A tool that would go past a limit isn't run: it tells the model to answer with
+    what it has, and the answer says what stopped it.
+    """
 
     tool_calls: int = 25  # tool calls per question
     seconds: float = 300.0  # wall-clock time per question, model included
@@ -29,7 +33,9 @@ class Budget:
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
-        """A Budget from a Budget, a dict of its fields ({'tool_calls': 50}) or None (the defaults)."""
+        """
+        A Budget from a Budget, a dict of its fields ({'tool_calls': 50}) or None (the defaults).
+        """
         if value is None:
             return cls()
         if isinstance(value, Budget):
@@ -47,8 +53,10 @@ class Budget:
 
 @dataclass
 class _Run:
-    """One question's state while it's being answered: what the tools did and what's left of the budget. The tools
-    of one turn run side by side, so everything they change is changed under `lock`."""
+    """
+    One question's state while it's being answered: what the tools did and what's left of the budget. The tools
+    of one turn run side by side, so everything they change is changed under `lock`.
+    """
 
     budget: Budget
     started: float = field(default_factory=time.monotonic)
@@ -64,14 +72,18 @@ class _Run:
         return time.monotonic() - self.started
 
     def read_metrics(self, count: int, price: float) -> None:
-        """Counts `count` CloudWatch metrics a tool requested, at `price` USD per 1,000."""
+        """
+        Counts `count` CloudWatch metrics a tool requested, at `price` USD per 1,000.
+        """
         with self.lock:
             self.metrics_read += count
             self.aws_cost += count / 1000 * price
 
 
 class _Refused(Exception):
-    """A tool that won't run: the budget is used up, or the window is too long. Carries what to tell the model."""
+    """
+    A tool that won't run: the budget is used up, or the window is too long. Carries what to tell the model.
+    """
 
     def __init__(self, reason: str, message: str, **extra: Any):
         super().__init__(message)
@@ -88,7 +100,9 @@ _REFUSED = {  # what the table of tool calls says about a call that wasn't run
 
 
 def check_budget(run: _Run, used: int) -> None:
-    """_Refused when the question has used up its budget (`used` tool calls so far) or was stopped."""
+    """
+    _Refused when the question has used up its budget (`used` tool calls so far) or was stopped.
+    """
     budget = run.budget
     if run.stop.is_set():
         raise _Refused("stopped", "Stopped by the user: answer now with what you found so far.")

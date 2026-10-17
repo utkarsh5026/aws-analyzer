@@ -1,4 +1,5 @@
-"""The S3 toolkit: tools over S3Analyzer for what a bucket holds and how it's set up, and the one that joins S3 and
+"""
+The S3 toolkit: tools over S3Analyzer for what a bucket holds and how it's set up, and the one that joins S3 and
 Lambda. Which buckets there are (find_buckets), a bucket's settings, size, cost and event notifications
 (bucket_details), a folder one level down (list_folder), the files under a location that match a filter
 (find_files), what a location holds by type, storage class and folder (folder_summary), one file's headers
@@ -6,7 +7,8 @@ Lambda. Which buckets there are (find_buckets), a bucket's settings, size, cost 
 and whether the files written in a window reached them. No tool reads what's inside a file.
 
 The summarize_* functions, count_arrivals() and trigger_findings() are pure: they run on any BucketConfig,
-BucketMetrics, Listing, PrefixSummary, list of ObjectInfo or TriggerLink."""
+BucketMetrics, Listing, PrefixSummary, list of ObjectInfo or TriggerLink.
+"""
 
 from __future__ import annotations
 
@@ -68,8 +70,10 @@ _CONFIG_PERMISSIONS = {  # BucketConfig.errors section (and this toolkit's own p
 
 
 def _s3_module() -> Any:
-    """aws_analyzer.s3, which the tools are built on. Loaded when a tool first needs it, so importing the agent loads
-    no analyzer."""
+    """
+    aws_analyzer.s3, which the tools are built on. Loaded when a tool first needs it, so importing the agent loads
+    no analyzer.
+    """
     from ... import s3
 
     return s3
@@ -80,8 +84,10 @@ def _code(exc: BaseException) -> str:
 
 
 def _between(since: str, until: str, now: datetime | None = None) -> tuple[datetime | None, datetime]:
-    """(start, end) of a tool's since= and until=: ISO UTC times ('2026-10-15T18:00Z') or relative ones ('24h'). The
-    start is None when since is empty, and the end is now when until is."""
+    """
+    (start, end) of a tool's since= and until=: ISO UTC times ('2026-10-15T18:00Z') or relative ones ('24h'). The
+    start is None when since is empty, and the end is now when until is.
+    """
     now = now or _utcnow()
     since, until = str(since or "").strip(), str(until or "").strip()
     try:
@@ -101,8 +107,10 @@ def _between(since: str, until: str, now: datetime | None = None) -> tuple[datet
 
 
 def _shown(values: dict[str, Any]) -> dict[str, str]:
-    """Tags or metadata as the model reads them: each value clipped, and hidden when it looks like a secret, by
-    itself or by its name ({'api_key': 'sk-...'} -> {'api_key': '[hidden]'})."""
+    """
+    Tags or metadata as the model reads them: each value clipped, and hidden when it looks like a secret, by
+    itself or by its name ({'api_key': 'sk-...'} -> {'api_key': '[hidden]'}).
+    """
     out = {}
     for key, value in values.items():
         text = hide_secrets(f"{key}={_clip(str(value), 200)}")
@@ -111,8 +119,10 @@ def _shown(values: dict[str, Any]) -> dict[str, str]:
 
 
 def file_row(obj: ObjectInfo) -> dict[str, Any]:
-    """One file as the agent sees it: its key, size, when it was last written, its storage class, and whether it
-    was uploaded in parts (which S3 events it sent depends on that)."""
+    """
+    One file as the agent sees it: its key, size, when it was last written, its storage class, and whether it
+    was uploaded in parts (which S3 events it sent depends on that).
+    """
     row: dict[str, Any] = {"key": obj.key, "size": human_size(obj.size), "modified": obj.last_modified,
                            "storage_class": obj.storage_class}
     if obj.is_multipart:
@@ -122,8 +132,10 @@ def file_row(obj: ObjectInfo) -> dict[str, Any]:
 
 def summarize_buckets(buckets: list[BucketInfo], metrics: dict[str, BucketMetrics] | None = None,
                       errors: dict[str, str] | None = None, *, limit: int = 100) -> dict[str, Any]:
-    """find_buckets()'s answer: every bucket (by name, or biggest first when `metrics` has their sizes), with its
-    region and when it was made, and its object count and size from CloudWatch when they were read."""
+    """
+    find_buckets()'s answer: every bucket (by name, or biggest first when `metrics` has their sizes), with its
+    region and when it was made, and its object count and size from CloudWatch when they were read.
+    """
     rows = []
     for b in buckets:
         row: dict[str, Any] = {"name": b.name, "region": b.region, "created": b.created}
@@ -151,9 +163,11 @@ def summarize_buckets(buckets: list[BucketInfo], metrics: dict[str, BucketMetric
 def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None, notifications: list[EventNotification] | None,
                      *, account_block: dict[str, bool] | None = None, prices: dict[str, float] | None = None,
                      errors: dict[str, str] | None = None) -> dict[str, Any]:
-    """bucket_details()'s answer: a bucket's settings in plain words (public access, encryption, versioning,
+    """
+    bucket_details()'s answer: a bucket's settings in plain words (public access, encryption, versioning,
     lifecycle rules, replication, logging, tags), its size and estimated monthly storage cost from CloudWatch, the
-    events it sends where (Lambda functions, queues, topics, EventBridge), and the findings about it."""
+    events it sends where (Lambda functions, queues, topics, EventBridge), and the findings about it.
+    """
     s3 = _s3_module()
     errors = {**cfg.errors, **(errors or {})}
     out: dict[str, Any] = {
@@ -194,7 +208,9 @@ def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None, notificat
 
 
 def summarize_listing(listing: Listing, *, folders: int = 100, files: int = 50) -> dict[str, Any]:
-    """list_folder()'s answer: the folders and files directly under a location (one level), the newest files first."""
+    """
+    list_folder()'s answer: the folders and files directly under a location (one level), the newest files first.
+    """
     newest = sorted(listing.objects, key=lambda o: o.last_modified, reverse=True)
     out: dict[str, Any] = {
         "location": listing.uri, "folders_found": len(listing.folders), "files_found": len(listing.objects),
@@ -214,8 +230,10 @@ def summarize_listing(listing: Listing, *, folders: int = 100, files: int = 50) 
 def summarize_found(location: str, found: list[ObjectInfo], *, scanned: int, cut_short: bool,
                     start: datetime | None = None, end: datetime | None = None,
                     filters: dict[str, Any] | None = None, limit: int = 30) -> dict[str, Any]:
-    """find_files()'s answer: how many files under a location match, their total size, when the oldest and newest
-    were written, and the newest of them; `scanned` keys were read, and `cut_short` when the listing stopped early."""
+    """
+    find_files()'s answer: how many files under a location match, their total size, when the oldest and newest
+    were written, and the newest of them; `scanned` keys were read, and `cut_short` when the listing stopped early.
+    """
     newest = heapq.nlargest(limit, found, key=lambda o: o.last_modified)
     out: dict[str, Any] = {"location": location, "filters": {k: v for k, v in (filters or {}).items() if v}}
     if start is not None:
@@ -236,8 +254,10 @@ def summarize_found(location: str, found: list[ObjectInfo], *, scanned: int, cut
 
 
 def summarize_prefix(summary: PrefixSummary, prices: dict[str, float] | None = None, *, top: int = 8) -> dict[str, Any]:
-    """folder_summary()'s answer: what a location holds (files, total size, by file type, storage class and
-    folder), the oldest and newest file, the largest ones, the estimated monthly storage cost and the findings."""
+    """
+    folder_summary()'s answer: what a location holds (files, total size, by file type, storage class and
+    folder), the oldest and newest file, the largest ones, the estimated monthly storage cost and the findings.
+    """
     s3 = _s3_module()
 
     def stats(by: dict[str, Any], n: int = top) -> list[dict[str, Any]]:
@@ -264,9 +284,11 @@ def summarize_prefix(summary: PrefixSummary, prices: dict[str, float] | None = N
 
 
 def summarize_file(info: dict[str, Any]) -> dict[str, Any]:
-    """file_info()'s answer: one file's headers (size, when it was written, type, storage class, encryption, version,
+    """
+    file_info()'s answer: one file's headers (size, when it was written, type, storage class, encryption, version,
     restore and lock status, its metadata and tags, with anything that looks like a secret hidden) and what they
-    mean for reading it. Never its content."""
+    mean for reading it. Never its content.
+    """
     s3 = _s3_module()
     out: dict[str, Any] = {k: v for k, v in info.items() if k not in ("metadata", "tags", "size", "etag")}
     out["size"] = human_size(info.get("size"))
@@ -292,7 +314,9 @@ def summarize_file(info: dict[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class Arrivals:
-    """What a listing of a notification's prefix says about the files written in a window (count_arrivals)."""
+    """
+    What a listing of a notification's prefix says about the files written in a window (count_arrivals).
+    """
 
     scanned: int = 0  # keys read
     matched: int = 0  # files written in the window that its prefix and suffix cover
@@ -308,7 +332,9 @@ class Arrivals:
 
 @dataclass
 class TriggerLink:
-    """One S3 event notification that invokes a Lambda function, checked from both ends (s3_triggers)."""
+    """
+    One S3 event notification that invokes a Lambda function, checked from both ends (s3_triggers).
+    """
 
     bucket: str
     notification: EventNotification
@@ -329,11 +355,13 @@ class TriggerLink:
 
 def count_arrivals(objects: Iterable[ObjectInfo], notification: EventNotification, start: datetime, end: datetime,
                    *, limit: int | None = None, show: int = 5) -> Arrivals:
-    """What a listing of the notification's prefix says about the files written from `start` to `end`: how many its
+    """
+    What a listing of the notification's prefix says about the files written from `start` to `end`: how many its
     prefix and suffix cover, and how many of those it fired on, by how each was uploaded (an ETag with a part count
     means multipart, which sends s3:ObjectCreated:CompleteMultipartUpload; anything else sent a Put, Post or Copy
     event), and the files its suffix misses only by case ('.CSV' for '.csv': S3 compares case-sensitively). `limit`
-    caps the keys read (cut_short when there were more)."""
+    caps the keys read (cut_short when there were more).
+    """
     out = Arrivals()
     suffix, prefix = notification.suffix, notification.prefix
     sent: list[ObjectInfo] = []
@@ -368,7 +396,9 @@ def count_arrivals(objects: Iterable[ObjectInfo], notification: EventNotificatio
 
 
 def _where(n: EventNotification) -> str:
-    """"under 'incoming/' ending in '.csv'", or "anywhere in the bucket"."""
+    """
+    "under 'incoming/' ending in '.csv'", or "anywhere in the bucket".
+    """
     parts = [f"under '{n.prefix}'" if n.prefix else "", f"ending in '{n.suffix}'" if n.suffix else ""]
     return " ".join(filter(None, parts)) or "anywhere in the bucket"
 
@@ -378,10 +408,12 @@ def _events(n: EventNotification) -> str:
 
 
 def trigger_findings(link: TriggerLink) -> list[tuple[str, str]]:
-    """What's wrong with one S3 -> Lambda link, or what explains it, each with what to do: a notification that
+    """
+    What's wrong with one S3 -> Lambda link, or what explains it, each with what to do: a notification that
     points at a function that isn't there, a function that doesn't let the bucket invoke it, files the filter or the
     event types miss, no file arriving at all, files that arrived without the function running, and runs that
-    failed. (level, message) pairs."""
+    failed. (level, message) pairs.
+    """
     n, fn, bucket = link.notification, link.function, link.bucket
     where = _where(n)
     found: list[tuple[str, str]] = []
@@ -455,9 +487,11 @@ def summarize_triggers(links: list[TriggerLink], start: datetime, end: datetime,
                        function: str = "", others: list[EventNotification] | None = None,
                        notes: list[tuple[str, str]] | None = None, errors: dict[str, str] | None = None,
                        searched: list[str] | None = None) -> dict[str, Any]:
-    """s3_triggers()'s answer: each S3 -> Lambda link (the events and keys it fires on, whether the function is there
+    """
+    s3_triggers()'s answer: each S3 -> Lambda link (the events and keys it fires on, whether the function is there
     and lets the bucket invoke it, the files written in the window that it covers and fired on, and the function's
-    runs and failures in that window), the bucket's other notification targets, and every finding."""
+    runs and failures in that window), the bucket's other notification targets, and every finding.
+    """
     found: list[tuple[str, str]] = list(notes or [])
     rows = []
     for link in links:
@@ -510,15 +544,19 @@ def summarize_triggers(links: list[TriggerLink], start: datetime, end: datetime,
 
 
 def _points_at(n: EventNotification, fn: Function) -> bool:
-    """Whether a notification invokes this function (any version or alias of it)."""
+    """
+    Whether a notification invokes this function (any version or alias of it).
+    """
     parts, own = (n.arn or "").split(":"), fn.arn.split(":")
     return (n.target == "Lambda function" and len(parts) > 6 and parts[6] == fn.name and parts[3] == fn.region
             and (len(own) < 5 or parts[4] == own[4]))
 
 
 def _s3_may_invoke(triggers: list[Any], bucket: str) -> bool:
-    """Whether a function's resource policy (as Lambda's parse_policy reads it) lets S3 invoke it for this bucket:
-    a statement for S3 limited to this bucket's ARN (or a pattern it matches), to an account, or not limited."""
+    """
+    Whether a function's resource policy (as Lambda's parse_policy reads it) lets S3 invoke it for this bucket:
+    a statement for S3 limited to this bucket's ARN (or a pattern it matches), to an account, or not limited.
+    """
     arn = f"arn:aws:s3:::{bucket}"
     for t in triggers:
         if t.kind == "S3 bucket" or t.principal == "s3.amazonaws.com":
@@ -533,9 +571,11 @@ def _s3_may_invoke(triggers: list[Any], bucket: str) -> bool:
 
 
 class S3Toolkit(Toolkit):
-    """The agent's tools for Amazon S3, reading through S3Analyzer: `analyzer` is one to use (else one is made on the
+    """
+    The agent's tools for Amazon S3, reading through S3Analyzer: `analyzer` is one to use (else one is made on the
     agent's session). With the Lambda toolkit beside it, it also has s3_triggers, which reads Lambda through that
-    toolkit's analyzer."""
+    toolkit's analyzer.
+    """
 
     name = "s3"
     title = "S3"
@@ -568,7 +608,9 @@ class S3Toolkit(Toolkit):
 
     @property
     def analyzer(self) -> S3Analyzer:
-        """The S3Analyzer the tools read through, made on first use and hooked to the read-only guard."""
+        """
+        The S3Analyzer the tools read through, made on first use and hooked to the read-only guard.
+        """
         return super().analyzer
 
     def instructions(self, budget: Budget) -> str:
@@ -594,7 +636,9 @@ S3 and Lambda together
         return text
 
     def request_cost(self, counts: dict[str, int]) -> float:
-        """USD for the S3 requests in `counts` (the guard's 's3:ListObjectsV2' -> n), at S3_REQUEST_PRICES."""
+        """
+        USD for the S3 requests in `counts` (the guard's 's3:ListObjectsV2' -> n), at S3_REQUEST_PRICES.
+        """
         lists = sum(n for op, n in counts.items() if op.startswith("s3:List"))
         others = sum(n for op, n in counts.items() if op.startswith("s3:") and not op.startswith("s3:List"))
         return (lists * S3_REQUEST_PRICES["list"] + others * S3_REQUEST_PRICES["get"]) / 1000
@@ -602,14 +646,18 @@ S3 and Lambda together
     # ------------------------------------------------------------------ the tools
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
-        """find_buckets, bucket_details, list_folder, find_files, folder_summary and file_info, and s3_triggers when
+        """
+        find_buckets, bucket_details, list_folder, find_files, folder_summary and file_info, and s3_triggers when
         the agent has the Lambda toolkit too: plain functions (their type hints and docstrings tell the model how to
-        call them), each reading through S3Analyzer and returning a compact, JSON-ready summary."""
+        call them), each reading through S3Analyzer and returning a compact, JSON-ready summary.
+        """
 
         def find_buckets(match: str = "", sizes: bool = False) -> dict[str, Any]:
-            """Lists the S3 buckets in the account: name, region and when each was made. match: a name glob like
+            """
+            Lists the S3 buckets in the account: name, region and when each was made. match: a name glob like
             'acme-*'. sizes=True also reads each bucket's object count and size from CloudWatch's daily storage
-            metrics and sorts the biggest first (two reads per bucket: slower when there are many)."""
+            metrics and sorts the biggest first (two reads per bucket: slower when there are many).
+            """
             core = self.analyzer
             buckets = [b for b in core.list_buckets() if not match or fnmatch.fnmatchcase(b.name, match)]
             metrics: dict[str, BucketMetrics] | None = None
@@ -626,10 +674,12 @@ S3 and Lambda together
             return out
 
         def bucket_details(bucket: str) -> dict[str, Any]:
-            """Everything about one bucket's setup: public access, encryption, versioning, object lock, lifecycle
+            """
+            Everything about one bucket's setup: public access, encryption, versioning, object lock, lifecycle
             rules in plain words, replication, access logging, tags, its event notifications (which Lambda
             functions, queues and topics it sends which events to, for which keys), its object count, size and
-            estimated monthly storage cost from CloudWatch, and the findings about it with what to do."""
+            estimated monthly storage cost from CloudWatch, and the findings about it with what to do.
+            """
             s3 = _s3_module()
             core = self.analyzer
             name, _ = s3.parse_s3_uri(bucket)
@@ -663,9 +713,11 @@ S3 and Lambda together
             return out
 
         def list_folder(location: str) -> dict[str, Any]:
-            """What's directly in a folder (one level, like `aws s3 ls`): its subfolders, and its files newest first
+            """
+            What's directly in a folder (one level, like `aws s3 ls`): its subfolders, and its files newest first
             with size, when each was written and storage class. Fast even on huge buckets. location:
-            's3://bucket/prefix/' or 'bucket/prefix/'; a bucket name alone lists its top level."""
+            's3://bucket/prefix/' or 'bucket/prefix/'; a bucket name alone lists its top level.
+            """
             listing = self.analyzer.ls(location, limit=1000)
             out = summarize_listing(listing)
             out["_summary"] = (f"{_plural(len(listing.folders), 'folder')}, {_plural(len(listing.objects), 'file')}"
@@ -675,11 +727,13 @@ S3 and Lambda together
 
         def find_files(location: str, match: str = "", since: str = "", until: str = "", min_size: str = "",
                        max_size: str = "", limit: int = 30) -> dict[str, Any]:
-            """The files under a location (every level below it) that match a filter: how many, their total size,
+            """
+            The files under a location (every level below it) that match a filter: how many, their total size,
             when the oldest and newest were written, and the newest `limit` of them. match: a glob on the file name,
             or on the whole key when it has a '/' ('*.csv', 'orders_2026-10-1*'). since/until: only files last
             written in that window, as ISO UTC times ('2026-10-15T18:00Z') or relative ('24h', '7d'). min_size /
-            max_size: '10MB', '1GB'. Reads the keys one listing page at a time, up to the budget's limit."""
+            max_size: '10MB', '1GB'. Reads the keys one listing page at a time, up to the budget's limit.
+            """
             s3 = _s3_module()
             core = self.analyzer
             start, end = _between(since, until)
@@ -708,10 +762,12 @@ S3 and Lambda together
             return out
 
         def folder_summary(location: str) -> dict[str, Any]:
-            """What a location holds, every level below it: how many files and how much, by file type, storage
+            """
+            What a location holds, every level below it: how many files and how much, by file type, storage
             class and folder, the oldest and newest file, the largest ones, the estimated monthly storage cost and
             findings (many small files, files in Glacier, files untouched for 90+ days...). Reads every key, up to
-            the budget's limit: use the narrowest location you can."""
+            the budget's limit: use the narrowest location you can.
+            """
             core = self.analyzer
             summary = core.summarize(location, top_n=5, folder_depth=1, limit=self.budget.s3_keys)
             out = summarize_prefix(summary, core.prices)
@@ -723,10 +779,12 @@ S3 and Lambda together
             return out
 
         def file_info(location: str) -> dict[str, Any]:
-            """One file's headers, never its content: size, when it was written, content type, storage class (a
+            """
+            One file's headers, never its content: size, when it was written, content type, storage class (a
             file in Glacier must be restored before anything can read it), encryption (a KMS key means readers need
             kms:Decrypt on it), version, restore and lock status, its metadata and tags. location:
-            's3://bucket/key'."""
+            's3://bucket/key'.
+            """
             core = self.analyzer
             info = core.head(location)
             out = summarize_file(info)
@@ -744,7 +802,8 @@ S3 and Lambda together
     def _triggers_tool(self) -> Callable[..., dict[str, Any]]:
         def s3_triggers(bucket: str = "", function: str = "", since: str = "24h", until: str = "",
                         region: str = "") -> dict[str, Any]:
-            """How S3 and Lambda are wired: the bucket event notifications that invoke Lambda functions. Give a
+            """
+            How S3 and Lambda are wired: the bucket event notifications that invoke Lambda functions. Give a
             bucket (the functions its events invoke), a function (the buckets whose events invoke it, from its
             resource policy and those buckets' notifications) or both. For each link: the events and the key
             prefix and suffix it fires on, whether the function exists and lets that bucket invoke it, how many files
@@ -752,7 +811,8 @@ S3 and Lambda together
             upload kind or by the case of their ending), and how often the function ran, failed and was throttled in
             that window (CloudWatch). Use it for "which Lambda processes files in X", "why didn't Y run after the
             upload" or "were last night's files processed". since/until: ISO UTC times or relative ('24h'). region:
-            the function's region when it isn't the default."""
+            the function's region when it isn't the default.
+            """
             return self._triggers(bucket, function, since, until, region)
 
         return s3_triggers
@@ -760,7 +820,9 @@ S3 and Lambda together
     # ------------------------------------------------------------------ what the tools share
 
     def _sizes(self, buckets: list[BucketInfo]) -> tuple[dict[str, BucketMetrics], dict[str, str]]:
-        """Each bucket's CloudWatch size and object count, read side by side; errors by 'bucket:metrics'."""
+        """
+        Each bucket's CloudWatch size and object count, read side by side; errors by 'bucket:metrics'.
+        """
         core = self.analyzer
         for region in {b.region for b in buckets if b.region}:
             core._cloudwatch_in(region)  # boto3 sessions aren't thread-safe: make the clients before the threads
@@ -783,7 +845,9 @@ S3 and Lambda together
         return metrics, errors
 
     def _triggers(self, bucket: str, function: str, since: str, until: str, region: str) -> dict[str, Any]:
-        """s3_triggers: the links for a bucket, a function or both, each checked from both ends (see its docstring)."""
+        """
+        s3_triggers: the links for a bucket, a function or both, each checked from both ends (see its docstring).
+        """
         s3, lf = _s3_module(), _lambda_module()
         lam_kit = self.peer("lambda")
         if lam_kit is None:
@@ -895,10 +959,12 @@ S3 and Lambda together
 
     def _buckets_for(self, fn: Function, errors: dict[str, str]) -> tuple[list[str], list[str],
                                                                           list[tuple[str, str]]]:
-        """(the buckets to look through, the buckets its policy names, notes) for a function: the buckets whose
+        """
+        (the buckets to look through, the buckets its policy names, notes) for a function: the buckets whose
         notifications may invoke it. Those its resource policy names for S3; or, when the policy lets S3 invoke it
         for any bucket (or for names matching a pattern, or doesn't let S3 at all), the buckets in its region, at
-        most _SEARCHED_BUCKETS."""
+        most _SEARCHED_BUCKETS.
+        """
         lf = _lambda_module()
         notes: list[tuple[str, str]] = []
         try:
@@ -933,7 +999,9 @@ S3 and Lambda together
         return candidates, named, notes
 
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:
-        """A tool's answer when a bucket, a file or a function isn't there: the closest names."""
+        """
+        A tool's answer when a bucket, a file or a function isn't there: the closest names.
+        """
         s3 = _s3_module()
         code = _error_code(exc)
         if code == "ResourceNotFoundException" and arguments.get("function"):
@@ -968,13 +1036,17 @@ S3 and Lambda together
 
 
 def _lambda_module() -> Any:
-    """aws_analyzer.lambda_functions, which s3_triggers reads Lambda's policies with (loaded when it first runs)."""
+    """
+    aws_analyzer.lambda_functions, which s3_triggers reads Lambda's policies with (loaded when it first runs).
+    """
     from ... import lambda_functions
 
     return lambda_functions
 
 
 def _metrics_read(metrics: BucketMetrics) -> int:
-    """How many CloudWatch metrics bucket_metrics() read: one per storage type it found, and the object count."""
+    """
+    How many CloudWatch metrics bucket_metrics() read: one per storage type it found, and the object count.
+    """
     return len(metrics.size_by_storage_type) + (metrics.object_count is not None)
 

@@ -102,7 +102,9 @@ KB, MB, GB, TB = 1024, 1024**2, 1024**3, 1024**4
 
 
 def parse_s3_uri(uri: str) -> tuple[str, str]:
-    """'s3://bucket/some/prefix' (or 'bucket/some/prefix') -> ('bucket', 'some/prefix')."""
+    """
+    's3://bucket/some/prefix' (or 'bucket/some/prefix') -> ('bucket', 'some/prefix').
+    """
     uri = uri.strip()
     for scheme in ("s3://", "s3a://", "s3n://"):
         if uri.lower().startswith(scheme):
@@ -119,7 +121,9 @@ def s3_uri(bucket: str, key: str = "") -> str:
 
 
 def base_prefix(prefix: str) -> str:
-    """The 'folder' part of a prefix: 'logs/2024-0' -> 'logs/', 'logs/' -> 'logs/'."""
+    """
+    The 'folder' part of a prefix: 'logs/2024-0' -> 'logs/', 'logs/' -> 'logs/'.
+    """
     return prefix[: prefix.rfind("/") + 1]
 
 
@@ -266,8 +270,10 @@ _CODEC_ALIASES = {
 
 
 def detect_format(key: str) -> tuple[str | None, str | None]:
-    """Guess (format, compression) from the key: 'x.csv.gz' -> ('csv', 'gz'), 'm.tgz' -> ('tar', 'gz'),
-    'x.bin' -> (None, None)."""
+    """
+    Guess (format, compression) from the key: 'x.csv.gz' -> ('csv', 'gz'), 'm.tgz' -> ('tar', 'gz'),
+    'x.bin' -> (None, None).
+    """
     parts = key.rsplit("/", 1)[-1].lower().split(".")
     if len(parts) > 1 and parts[-1] == "tgz":
         return "tar", "gz"
@@ -280,8 +286,10 @@ def detect_format(key: str) -> tuple[str | None, str | None]:
 
 
 def _browser_type(key: str) -> str | None:
-    """The Content-Type that makes a browser show the file in its tab rather than save it: 'a.pdf' ->
-    'application/pdf', 'a.csv' -> plain text (a browser saves text/csv), 'a.parquet' or 'a.csv.gz' -> None."""
+    """
+    The Content-Type that makes a browser show the file in its tab rather than save it: 'a.pdf' ->
+    'application/pdf', 'a.csv' -> plain text (a browser saves text/csv), 'a.parquet' or 'a.csv.gz' -> None.
+    """
     fmt, compression = detect_format(key)
     if compression or fmt is None:
         return None
@@ -323,8 +331,10 @@ _IMAGE_MIMES = [
 
 
 def sniff_format(head: bytes) -> tuple[str | None, str | None]:
-    """Guess (format, compression) from an object's first bytes (512 is enough), for files
-    whose name has no extension or the wrong one."""
+    """
+    Guess (format, compression) from an object's first bytes (512 is enough), for files
+    whose name has no extension or the wrong one.
+    """
     for magic, codec in _MAGIC_CODECS:
         if head.startswith(magic):
             return None, codec
@@ -342,7 +352,9 @@ def sniff_format(head: bytes) -> tuple[str | None, str | None]:
 
 
 def _avro_long(buf: bytes, pos: int) -> tuple[int, int]:
-    """Zig-zag varint at buf[pos:] -> (value, next position)."""
+    """
+    Zig-zag varint at buf[pos:] -> (value, next position).
+    """
     shift = result = 0
     while True:
         if pos >= len(buf):
@@ -356,7 +368,9 @@ def _avro_long(buf: bytes, pos: int) -> tuple[int, int]:
 
 
 def _avro_names(schema: Any, names: dict[str, Any]) -> dict[str, Any]:
-    """Collect every named type (record / enum / fixed) so references to it can be resolved."""
+    """
+    Collect every named type (record / enum / fixed) so references to it can be resolved.
+    """
     if isinstance(schema, list):
         for branch in schema:
             _avro_names(branch, names)
@@ -384,7 +398,9 @@ def _avro_names(schema: Any, names: dict[str, Any]) -> dict[str, Any]:
 def _avro_read(
     schema: Any, buf: bytes, pos: int, names: dict[str, Any]
 ) -> tuple[Any, int]:
-    """Decode one value of `schema` at buf[pos:] -> (value, next position)."""
+    """
+    Decode one value of `schema` at buf[pos:] -> (value, next position).
+    """
     if isinstance(schema, list):  # union: branch index, then the value
         index, pos = _avro_long(buf, pos)
         return _avro_read(schema[index], buf, pos, names)
@@ -485,7 +501,9 @@ def _avro_decompress(codec: str, block: bytes) -> bytes:
 
 
 def _avro_header(data: bytes) -> tuple[Any, str, bytes, int]:
-    """(schema, codec, sync marker, where the first block starts) from the start of an Avro container file."""
+    """
+    (schema, codec, sync marker, where the first block starts) from the start of an Avro container file.
+    """
     if not data.startswith(b"Obj\x01"):
         raise ValueError("Not an Avro container file")
     pos, meta = 4, {}
@@ -503,8 +521,10 @@ def _avro_header(data: bytes) -> tuple[Any, str, bytes, int]:
 
 
 def _avro_rows(data: bytes, pos: int) -> tuple[int, bool]:
-    """Records in an Avro file's blocks from `pos` on, counted from the block headers without decoding them
-    -> (records, whether every block was there)."""
+    """
+    Records in an Avro file's blocks from `pos` on, counted from the block headers without decoding them
+    -> (records, whether every block was there).
+    """
     rows = 0
     while pos < len(data):
         try:
@@ -519,8 +539,10 @@ def _avro_rows(data: bytes, pos: int) -> tuple[int, bool]:
 
 
 def parse_avro(data: bytes, n: int | None = None) -> tuple[Any, str, list[Any], bool]:
-    """Avro object container bytes -> (schema, codec, records, complete). Decodes up to `n` records;
-    `data` may be just the start of a file (complete=False when it stops at a cut-off block)."""
+    """
+    Avro object container bytes -> (schema, codec, records, complete). Decodes up to `n` records;
+    `data` may be just the start of a file (complete=False when it stops at a cut-off block).
+    """
     schema, codec, sync, pos = _avro_header(data)
     names = _avro_names(schema, {})
     records: list[Any] = []
@@ -588,7 +610,9 @@ _MAX_PICTURES = 20  # pages or pictures one document() report shows, so the note
 
 
 def _count_words(text: str) -> int:
-    """Words in text; list markers and table separators ('-', '|') don't count."""
+    """
+    Words in text; list markers and table separators ('-', '|') don't count.
+    """
     return sum(any(ch.isalnum() for ch in word) for word in text.split())
 
 
@@ -607,7 +631,9 @@ def _local(tag: str) -> str:
 
 
 def _zip_xml(archive: zipfile.ZipFile, name: str, *, required: bool = True) -> Any:
-    """Parse one XML part of an Office file (None if it's missing and not required)."""
+    """
+    Parse one XML part of an Office file (None if it's missing and not required).
+    """
     try:
         info = archive.getinfo(name)
     except KeyError:
@@ -630,7 +656,9 @@ def _zip_xml(archive: zipfile.ZipFile, name: str, *, required: bool = True) -> A
 
 
 def _zip_rels(archive: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]:
-    """Relationships of an Office part -> {id: (type, path inside the zip)}."""
+    """
+    Relationships of an Office part -> {id: (type, path inside the zip)}.
+    """
     folder, name = posixpath.split(part)
     root = _zip_xml(
         archive, posixpath.join(folder, "_rels", name + ".rels"), required=False
@@ -650,7 +678,9 @@ def _zip_rels(archive: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]
 
 
 def _office_properties(archive: zipfile.ZipFile) -> dict[str, Any]:
-    """Title, author and the page / slide count the app saved (docProps/core.xml and app.xml)."""
+    """
+    Title, author and the page / slide count the app saved (docProps/core.xml and app.xml).
+    """
     props: dict[str, Any] = {}
     for part in ("docProps/core.xml", "docProps/app.xml"):
         root = _zip_xml(archive, part, required=False)
@@ -670,7 +700,9 @@ def _office_properties(archive: zipfile.ZipFile) -> dict[str, Any]:
 
 
 def office_kind(source: Any) -> str | None:
-    """'docx', 'pptx' or 'excel' for an Office zip file (by the parts inside it), else None."""
+    """
+    'docx', 'pptx' or 'excel' for an Office zip file (by the parts inside it), else None.
+    """
     with zipfile.ZipFile(source) as archive:
         names = set(archive.namelist())
     return next((kind for part, kind in _OFFICE_PARTS.items() if part in names), None)
@@ -691,7 +723,9 @@ def _word_text(paragraph: Any) -> str:
 
 
 def _picture_mime(data: bytes) -> str:
-    """MIME type of a picture a browser can show, from its first bytes; '' for EMF, WMF, TIFF and the rest."""
+    """
+    MIME type of a picture a browser can show, from its first bytes; '' for EMF, WMF, TIFF and the rest.
+    """
     mime = next((m for magic, m in _IMAGE_MIMES if data.startswith(magic)), "")
     if mime == "image/webp" and data[8:12] != b"WEBP":  # RIFF also starts WAV and AVI files
         mime = ""
@@ -702,8 +736,10 @@ def _picture_mime(data: bytes) -> str:
 
 
 def _word_pictures(elem: Any) -> list[tuple[str, str]]:
-    """(relationship id, alt text) of each picture in a Word paragraph or table, in order. A picture saved
-    twice (the modern copy and its fallback for old Word versions) counts once."""
+    """
+    (relationship id, alt text) of each picture in a Word paragraph or table, in order. A picture saved
+    twice (the modern copy and its fallback for old Word versions) counts once.
+    """
     found: dict[str, str] = {}
     for drawing in elem.iter(f"{_W}drawing"):
         blip = next(drawing.iter(f"{_A}blip"), None)
@@ -719,9 +755,11 @@ def _word_pictures(elem: Any) -> list[tuple[str, str]]:
 
 
 def parse_docx(source: Any, uri: str = "", *, pictures: bool = False) -> Document:
-    """A Word .docx (path or binary file object) -> Document: paragraphs and tables in order, what each one
+    """
+    A Word .docx (path or binary file object) -> Document: paragraphs and tables in order, what each one
     is (doc.roles: title, heading, list item, table, paragraph), headings, list items prefixed with '- ',
-    title and author. pictures=True also loads the pictures, in reading order (doc.pictures). No packages needed."""
+    title and author. pictures=True also loads the pictures, in reading order (doc.pictures). No packages needed.
+    """
     with zipfile.ZipFile(source) as archive:
         root = _zip_xml(archive, "word/document.xml")
         styles = _zip_xml(archive, "word/styles.xml", required=False)
@@ -814,7 +852,9 @@ def _drawing_text(paragraph: Any) -> str:
 def _slide_text(
     root: Any, skip_placeholders: tuple[str, ...] = ()
 ) -> tuple[str | None, list[str], list[list[list[str]]]]:
-    """(title, paragraphs, tables) of a slide or notes page."""
+    """
+    (title, paragraphs, tables) of a slide or notes page.
+    """
     title, paragraphs, tables = None, [], []
     for shape in root.iter(f"{_P}sp"):
         placeholder = shape.find(f"{_P}nvSpPr/{_P}nvPr/{_P}ph")
@@ -844,8 +884,10 @@ def _slide_text(
 def parse_pptx(
     source: Any, uri: str = "", *, slides: Iterable[int] | None = None
 ) -> Document:
-    """A PowerPoint .pptx -> Document: one part per slide in presentation order, slide titles,
-    tables and speaker notes. slides: 1-based slide numbers to read. No packages needed."""
+    """
+    A PowerPoint .pptx -> Document: one part per slide in presentation order, slide titles,
+    tables and speaker notes. slides: 1-based slide numbers to read. No packages needed.
+    """
     with zipfile.ZipFile(source) as archive:
         presentation = _zip_xml(archive, "ppt/presentation.xml")
         rels = _zip_rels(archive, "ppt/presentation.xml")
@@ -898,10 +940,12 @@ def parse_pdf(
     layout: bool = False,
     progress: Callable[[int, int], None] | None = None,
 ) -> Document:
-    """A PDF (path or seekable binary file) -> Document with one part per page. Needs pypdf.
+    """
+    A PDF (path or seekable binary file) -> Document with one part per page. Needs pypdf.
     pages: 1-based page numbers to read. Scanned pages have no text layer and come back empty.
     layout=True also keeps each page's lines with where they start, their size and whether they're bold
-    (doc.layout), which pdf_flow turns into headings, paragraphs and lists. progress gets (pages read, pages to read)."""
+    (doc.layout), which pdf_flow turns into headings, paragraphs and lists. progress gets (pages read, pages to read).
+    """
     pypdf = _require("pypdf", "Reading PDF text")
     laid: list[PdfPage] = []
     try:
@@ -945,11 +989,13 @@ _LIST_MARK = re.compile(r"[•◦▪▫●○■□‣⁃∙·\x7f-]|[-–
 
 
 def _pdf_page_layout(page: Any, number: int) -> tuple[str, PdfPage]:
-    """A pypdf page -> (its text, as extract_text() reads it, and its lines with where each starts, its size and
+    """
+    A pypdf page -> (its text, as extract_text() reads it, and its lines with where each starts, its size and
     weight). The lines are pypdf's, read through its visitor_text hook, except that a bullet or number drawn
     apart from its item joins the item's line, and so does a piece pypdf put on a line of its own although it
     sits on the line before (the next cell of a table row). A line pypdf can't place (text turned sideways, or a
-    sideways page) gets no position, and pdf_flow lays it out by its text alone."""
+    sideways page) gets no position, and pdf_flow lays it out by its text alone.
+    """
     box = page.mediabox
     left, bottom, width, height = float(box.left), float(box.bottom), float(box.width), float(box.height)
     sideways = int(page.get("/Rotate", 0) or 0) % 180 != 0
@@ -1020,8 +1066,10 @@ def _pdf_page_layout(page: Any, number: int) -> tuple[str, PdfPage]:
 
 
 def _encode_picture(image: Any) -> tuple[bytes, str]:
-    """A pillow image -> (bytes, MIME type): PNG, which keeps text and lines sharp, unless JPEG is much
-    smaller (a scan or a photo)."""
+    """
+    A pillow image -> (bytes, MIME type): PNG, which keeps text and lines sharp, unless JPEG is much
+    smaller (a scan or a photo).
+    """
     if image.mode not in ("1", "L", "LA", "P", "RGB", "RGBA"):
         image = image.convert("RGB")
     png = io.BytesIO()
@@ -1036,10 +1084,12 @@ def _encode_picture(image: Any) -> tuple[bytes, str]:
 def render_pdf_pages(source: Any, pages: Iterable[int] | None = None, *, width: int = 1000,
                      password: str | None = None, max_pages: int | None = None,
                      progress: Callable[[int, int], None] | None = None) -> list[Picture]:
-    """Pictures of a PDF's pages as they print, scanned pages included (source: path, bytes or seekable
+    """
+    Pictures of a PDF's pages as they print, scanned pages included (source: path, bytes or seekable
     binary file). Needs pypdfium2 and pillow. pages: 1-based page numbers (default: all of them, or the
     first max_pages); width: pixels across a page (a very tall page is drawn narrower, at most 1.5 x width
-    high). progress gets (pages drawn, pages to draw)."""
+    high). progress gets (pages drawn, pages to draw).
+    """
     pdfium = _require("pypdfium2", "Seeing PDF pages as pictures")
     _require("PIL.Image", "Seeing PDF pages as pictures", "pillow")
     try:
@@ -1088,7 +1138,9 @@ _PDF_TEXT_PAGES = 3  # describe_file checks this many first pages of a PDF for t
 
 
 def _paper_size(width: float, height: float) -> str:
-    """A page size in words: 'A4', 'Letter landscape', or '13.3 × 7.5 in' (a 16:9 slide)."""
+    """
+    A page size in words: 'A4', 'Letter landscape', or '13.3 × 7.5 in' (a 16:9 slide).
+    """
     short, long = sorted((abs(width), abs(height)))
     for name, (w, h) in _PAPER_SIZES.items():
         if abs(short - w) <= 3 and abs(long - h) <= 3:
@@ -1102,10 +1154,12 @@ def _meta_text(value: Any) -> str | None:
 
 
 def _pdf_facts(source: Any, facts: dict[str, Any], password: str | None = None) -> None:
-    """Fill `facts` from a PDF (seekable binary file): 'pages', 'title', 'author', 'made_with' (the app that wrote
+    """
+    Fill `facts` from a PDF (seekable binary file): 'pages', 'title', 'author', 'made_with' (the app that wrote
     it), 'created', 'version', 'page_size', and 'text': whether its first pages have a text layer (False for
     scanned pages; None when it couldn't be checked). 'encrypted', and 'locked' when it needs a password. Needs
-    pypdf. Only the page tree and the first pages are read, and facts found before an error stay in `facts`."""
+    pypdf. Only the page tree and the first pages are read, and facts found before an error stay in `facts`.
+    """
     pypdf = _require("pypdf", "Counting PDF pages")
     try:
         reader = pypdf.PdfReader(source)
@@ -1143,8 +1197,10 @@ def _pdf_facts(source: Any, facts: dict[str, Any], password: str | None = None) 
 
 
 def _image_info(data: bytes) -> dict[str, Any] | None:
-    """{'kind': 'PNG', 'width': .., 'height': ..} from the first bytes of a PNG, JPEG, GIF, BMP, WebP or TIFF
-    (a JPEG with a big thumbnail can need more than 64 KB); None when they don't say."""
+    """
+    {'kind': 'PNG', 'width': .., 'height': ..} from the first bytes of a PNG, JPEG, GIF, BMP, WebP or TIFF
+    (a JPEG with a big thumbnail can need more than 64 KB); None when they don't say.
+    """
     kind, size = None, None
     if data.startswith(b"\x89PNG\r\n\x1a\n") and data[12:16] == b"IHDR" and len(data) >= 24:
         kind, size = "PNG", struct.unpack(">II", data[16:24])
@@ -1201,7 +1257,9 @@ def _image_info(data: bytes) -> dict[str, Any] | None:
 
 
 def _audio_info(data: bytes) -> dict[str, Any] | None:
-    """{'kind', 'duration' (seconds), 'sample_rate', 'channels'} from the first bytes of a WAV or FLAC file."""
+    """
+    {'kind', 'duration' (seconds), 'sample_rate', 'channels'} from the first bytes of a WAV or FLAC file.
+    """
     if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
         info: dict[str, Any] = {"kind": "WAV"}
         pos, byte_rate = 12, 0
@@ -1227,7 +1285,9 @@ def _audio_info(data: bytes) -> dict[str, Any] | None:
 
 
 def _boxes(data: bytes) -> Iterator[tuple[bytes, bytes]]:
-    """(type, contents) of each box in an MP4 / MOV box list."""
+    """
+    (type, contents) of each box in an MP4 / MOV box list.
+    """
     pos = 0
     while pos + 8 <= len(data):
         size, kind, start = int.from_bytes(data[pos : pos + 4], "big"), data[pos + 4 : pos + 8], pos + 8
@@ -1242,8 +1302,10 @@ def _boxes(data: bytes) -> Iterator[tuple[bytes, bytes]]:
 
 
 def _mp4_info(source: Any, size: int) -> dict[str, Any] | None:
-    """{'duration', 'width', 'height'} of an MP4 / MOV / M4A from its 'moov' box, found by hopping from box header
-    to box header (the media data in between isn't read). None when there's no moov box."""
+    """
+    {'duration', 'width', 'height'} of an MP4 / MOV / M4A from its 'moov' box, found by hopping from box header
+    to box header (the media data in between isn't read). None when there's no moov box.
+    """
     pos = 0
     while pos + 8 <= size:
         source.seek(pos)
@@ -1281,7 +1343,9 @@ def _mp4_info(source: Any, size: int) -> dict[str, Any] | None:
 
 
 def _safetensors_length(head: bytes) -> int:
-    """The header length a .safetensors file starts with (its first 8 bytes)."""
+    """
+    The header length a .safetensors file starts with (its first 8 bytes).
+    """
     length = int.from_bytes(head, "little") if len(head) == 8 else 0
     if not 2 <= length <= 100 * MB:
         raise ValueError("Not a safetensors file (bad header length)")
@@ -1289,7 +1353,9 @@ def _safetensors_length(head: bytes) -> int:
 
 
 def _parse_safetensors(header: bytes) -> dict[str, Any]:
-    """A .safetensors JSON header -> {'tensors': [{tensor, dtype, shape, parameters}], 'metadata': {...}}."""
+    """
+    A .safetensors JSON header -> {'tensors': [{tensor, dtype, shape, parameters}], 'metadata': {...}}.
+    """
     tensors = json.loads(header)
     metadata = tensors.pop("__metadata__", None) or {}
     return {
@@ -1310,7 +1376,9 @@ _SS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
 def _column_number(letters: str) -> int:
-    """'A' -> 1, 'Z' -> 26, 'AA' -> 27."""
+    """
+    'A' -> 1, 'Z' -> 26, 'AA' -> 27.
+    """
     number = 0
     for letter in letters:
         number = number * 26 + ord(letter) - 64
@@ -1318,9 +1386,11 @@ def _column_number(letters: str) -> int:
 
 
 def _xlsx_sheets(archive: zipfile.ZipFile) -> list[dict[str, Any]]:
-    """[{'sheet', 'rows', 'columns', 'hidden'}] for each sheet of an .xlsx, in order. The size is the used range
+    """
+    [{'sheet', 'rows', 'columns', 'hidden'}] for each sheet of an .xlsx, in order. The size is the used range
     Excel saves at the top of each sheet (header row included), so only that much of the sheet is unpacked;
-    None when the file doesn't say (some tools don't save it)."""
+    None when the file doesn't say (some tools don't save it).
+    """
     workbook = _zip_xml(archive, "xl/workbook.xml")
     rels = _zip_rels(archive, "xl/workbook.xml")
     sheets = []
@@ -1344,7 +1414,9 @@ def _xlsx_sheets(archive: zipfile.ZipFile) -> list[dict[str, Any]]:
 
 
 def _restore_note(bucket: str, key: str, storage_class: str, restore: str = "") -> str:
-    """Why an archived object can't be read, and the command that restores it (shown, never run)."""
+    """
+    Why an archived object can't be read, and the command that restores it (shown, never run).
+    """
     name, wait = key.rsplit("/", 1)[-1], "3-5 hours" if storage_class == "GLACIER" else "up to 12 hours"
     if 'ongoing-request="true"' in restore:
         return f"{name} is in {storage_class} and its restore is under way; it can be read when that finishes ({wait})."
@@ -1373,9 +1445,11 @@ _JSON_CUT_RE = re.compile(r'\s*(?:"|-?[\d.eE+-]*$|-?[tfnNI][a-z]*$)')  # what a 
 
 
 def _json_prefix(text: str) -> tuple[Any, int] | None:
-    """The start of a JSON document that was cut off (the first bytes of a file too big to read whole): the objects
+    """
+    The start of a JSON document that was cut off (the first bytes of a file too big to read whole): the objects
     and arrays read so far, closed where the text stops, and how many of them were still open there (0: the text
-    holds the whole document). None when the text isn't the start of a JSON object or array."""
+    holds the whole document). None when the text isn't the start of a JSON object or array.
+    """
     stack: list[Any] = []  # the open objects and arrays, outermost first
     keys: list[Any] = []  # each open object's key waiting for its value (None for arrays, or before the key)
     root: Any = None
@@ -1427,7 +1501,9 @@ def _json_prefix(text: str) -> tuple[Any, int] | None:
 
 
 def _json_lines_start(data: bytes) -> bool:
-    """Whether data starts like JSON lines (one record per line): a whole JSON value on its first line, then more."""
+    """
+    Whether data starts like JSON lines (one record per line): a whole JSON value on its first line, then more.
+    """
     first, newline, _ = data.lstrip().partition(b"\n")
     if not newline:
         return False
@@ -1439,8 +1515,10 @@ def _json_lines_start(data: bytes) -> bool:
 
 
 def _json_shape(value: Any, cut: int = 0) -> dict[str, Any]:
-    """Preview.info for a JSON value: its keys (an object) or items (an array), and how deep it nests. A document
-    that was cut off (cut > 0) has at least that many, and its depth isn't known."""
+    """
+    Preview.info for a JSON value: its keys (an object) or items (an array), and how deep it nests. A document
+    that was cut off (cut > 0) has at least that many, and its depth isn't known.
+    """
     if not isinstance(value, (dict, list)):
         return {}
     count = f"{len(value):,}+" if cut else len(value)
@@ -1462,7 +1540,9 @@ def _json_shape(value: Any, cut: int = 0) -> dict[str, Any]:
 
 @dataclass
 class ObjectInfo:
-    """One object from a listing."""
+    """
+    One object from a listing.
+    """
 
     bucket: str
     key: str
@@ -1503,7 +1583,9 @@ class BucketInfo:
 
 @dataclass
 class Listing:
-    """One level of a prefix, like `aws s3 ls`."""
+    """
+    One level of a prefix, like `aws s3 ls`.
+    """
 
     uri: str
     folders: list[str] = field(default_factory=list)  # full prefixes, ending in '/'
@@ -1513,7 +1595,9 @@ class Listing:
 
 @dataclass
 class BucketConfig:
-    """Bucket settings. Sections that couldn't be read are listed in `errors` (section -> error code)."""
+    """
+    Bucket settings. Sections that couldn't be read are listed in `errors` (section -> error code).
+    """
 
     name: str
     region: str | None = None
@@ -1540,7 +1624,9 @@ class BucketConfig:
 
 @dataclass
 class BucketMetrics:
-    """Daily CloudWatch storage metrics: bucket totals without listing a single key."""
+    """
+    Daily CloudWatch storage metrics: bucket totals without listing a single key.
+    """
 
     bucket: str
     object_count: int | None = None
@@ -1554,7 +1640,9 @@ class BucketMetrics:
 
 @dataclass
 class PrefixSummary:
-    """Everything `summarize` learns from one pass over a prefix. Folder markers are excluded."""
+    """
+    Everything `summarize` learns from one pass over a prefix. Folder markers are excluded.
+    """
 
     uri: str
     object_count: int = 0
@@ -1595,7 +1683,9 @@ class PrefixSummary:
 
 @dataclass
 class FolderTree:
-    """Size per folder, every level down to `depth`. Keys are folder paths relative to the prefix."""
+    """
+    Size per folder, every level down to `depth`. Keys are folder paths relative to the prefix.
+    """
 
     uri: str
     depth: int
@@ -1612,7 +1702,9 @@ class FolderTree:
 
 @dataclass
 class CompareResult:
-    """Two prefixes compared by relative key, size and ETag."""
+    """
+    Two prefixes compared by relative key, size and ETag.
+    """
 
     uri_a: str
     uri_b: str
@@ -1629,7 +1721,9 @@ class CompareResult:
 
 @dataclass
 class DuplicateGroup:
-    """Files with identical content. The first is the one to keep (see group_duplicates); the rest are copies."""
+    """
+    Files with identical content. The first is the one to keep (see group_duplicates); the rest are copies.
+    """
 
     size: int
     objects: list[ObjectInfo]
@@ -1654,7 +1748,9 @@ class DuplicateGroup:
 
 @dataclass
 class DuplicateReport:
-    """Identical files under a prefix (see S3Analyzer.find_duplicates and group_duplicates)."""
+    """
+    Identical files under a prefix (see S3Analyzer.find_duplicates and group_duplicates).
+    """
 
     uri: str
     method: str = "etag"  # 'etag' (listing only), 'hash' or 'strict' (see S3Analyzer.find_duplicates)
@@ -1698,7 +1794,9 @@ class DuplicateReport:
         return sum(g.monthly_cost for g in self.groups)
 
     def to_df(self):
-        """One row per file in a duplicate group: group number, 'keep' or 'copy', key, size, sha256, ..."""
+        """
+        One row per file in a duplicate group: group number, 'keep' or 'copy', key, size, sha256, ...
+        """
         pd = _require("pandas", "DuplicateReport.to_df")
         columns = [
             "group",
@@ -1735,7 +1833,9 @@ class DuplicateReport:
 
 @dataclass
 class DuplicateFolder:
-    """A folder holding files that have an identical file somewhere (see duplicate_folders)."""
+    """
+    A folder holding files that have an identical file somewhere (see duplicate_folders).
+    """
 
     folder: str  # full prefix of the folder, '' = the bucket's top level
     files: int  # files of at least min_size in the folder
@@ -1749,7 +1849,9 @@ class DuplicateFolder:
 
     @property
     def all_copies(self) -> bool:
-        """Every file here also exists in another folder, so the folder could go without losing data."""
+        """
+        Every file here also exists in another folder, so the folder could go without losing data.
+        """
         return 0 < self.files == self.outside
 
 
@@ -1791,7 +1893,9 @@ class MultipartUpload:
 
 @dataclass
 class DeletedObject:
-    """A key whose latest version is a delete marker. Deleting that marker brings `last_version` back."""
+    """
+    A key whose latest version is a delete marker. Deleting that marker brings `last_version` back.
+    """
 
     key: str
     deleted: datetime
@@ -1820,7 +1924,9 @@ class DeletedFiles:
 
 @dataclass
 class LifecycleImpact:
-    """What a lifecycle rule would do to a prefix if it ran today (see simulate_lifecycle_objects)."""
+    """
+    What a lifecycle rule would do to a prefix if it ran today (see simulate_lifecycle_objects).
+    """
 
     uri: str
     transitions: list[tuple[int, str]] = field(
@@ -1854,7 +1960,9 @@ class LifecycleImpact:
         return ", then ".join(steps)
 
     def rule(self, rule_id: str | None = None) -> dict:
-        """The rule in the format put_bucket_lifecycle_configuration takes."""
+        """
+        The rule in the format put_bucket_lifecycle_configuration takes.
+        """
         prefix = parse_s3_uri(self.uri)[1] if self.uri else ""
         rule: dict[str, Any] = {
             "ID": rule_id or f"{prefix.strip('/') or 'whole-bucket'}-lifecycle"[:255],
@@ -1872,7 +1980,9 @@ class LifecycleImpact:
 
 @dataclass
 class PolicyStatement:
-    """One bucket-policy statement in plain English (see explain_policy)."""
+    """
+    One bucket-policy statement in plain English (see explain_policy).
+    """
 
     sid: str
     effect: str  # 'Allow' | 'Deny'
@@ -1894,7 +2004,9 @@ class PolicyStatement:
 
 @dataclass
 class EventNotification:
-    """One of a bucket's event notifications (see parse_notifications): which events, for which keys, go where."""
+    """
+    One of a bucket's event notifications (see parse_notifications): which events, for which keys, go where.
+    """
 
     target: str  # 'Lambda function' | 'SQS queue' | 'SNS topic' | 'EventBridge'
     arn: str | None = None  # the function, queue or topic; None for EventBridge (every event goes to its default bus)
@@ -1905,7 +2017,9 @@ class EventNotification:
 
     @property
     def name(self) -> str:
-        """The function, queue or topic's name from its ARN: 'orders-etl'; 'EventBridge' for EventBridge."""
+        """
+        The function, queue or topic's name from its ARN: 'orders-etl'; 'EventBridge' for EventBridge.
+        """
         parts = (self.arn or "").split(":")
         if self.target == "Lambda function" and len(parts) > 6:
             return parts[6]
@@ -1913,18 +2027,24 @@ class EventNotification:
 
     @property
     def region(self) -> str | None:
-        """The region in its ARN (a Lambda function or queue has to be in the bucket's own region)."""
+        """
+        The region in its ARN (a Lambda function or queue has to be in the bucket's own region).
+        """
         parts = (self.arn or "").split(":")
         return parts[3] or None if len(parts) > 3 else None
 
     def matches(self, key: str) -> bool:
-        """Whether an object with this key is covered by its prefix and suffix filter."""
+        """
+        Whether an object with this key is covered by its prefix and suffix filter.
+        """
         return key.startswith(self.prefix) and key.endswith(self.suffix)
 
     def on_created(self, multipart: bool | None = None) -> bool:
-        """Whether a new object sends it. multipart=True: an object uploaded in parts, which sends
+        """
+        Whether a new object sends it. multipart=True: an object uploaded in parts, which sends
         s3:ObjectCreated:CompleteMultipartUpload; False: one uploaded whole (a PUT, a POST form or a copy); None:
-        any new object."""
+        any new object.
+        """
         events = set(self.events)
         if self.target == "EventBridge" or "s3:ObjectCreated:*" in events:
             return True
@@ -1935,7 +2055,9 @@ class EventNotification:
         return bool(events & {"s3:ObjectCreated:Put", "s3:ObjectCreated:Post", "s3:ObjectCreated:Copy"})
 
     def describe(self) -> str:
-        """In plain English: "new objects under 'incoming/' ending in '.csv' -> Lambda function orders-etl"."""
+        """
+        In plain English: "new objects under 'incoming/' ending in '.csv' -> Lambda function orders-etl".
+        """
         what = _event_words(self.events) if self.target != "EventBridge" else "every event"
         keys = " ".join(filter(None, [f"under '{self.prefix}'" if self.prefix else "",
                                       f"ending in '{self.suffix}'" if self.suffix else ""]))
@@ -1945,7 +2067,9 @@ class EventNotification:
 
 @dataclass
 class BucketReport:
-    """One bucket in the all-buckets overview."""
+    """
+    One bucket in the all-buckets overview.
+    """
 
     bucket: BucketInfo
     config: BucketConfig
@@ -1955,7 +2079,9 @@ class BucketReport:
 
 @dataclass
 class FolderDownload:
-    """What S3Analyzer.download_folder fetched."""
+    """
+    What S3Analyzer.download_folder fetched.
+    """
 
     uri: str
     path: str  # the local folder
@@ -1972,7 +2098,9 @@ class FolderDownload:
 
 @dataclass
 class ZipPlan:
-    """What download_zip would put in a .zip, and whether this notebook can make it (see S3Analyzer.plan_zip)."""
+    """
+    What download_zip would put in a .zip, and whether this notebook can make it (see S3Analyzer.plan_zip).
+    """
 
     uri: str  # the file or folder zipped; for a list of them, the folder they share
     path: str  # the .zip file it would write
@@ -2004,7 +2132,9 @@ class ZipPlan:
 
     @property
     def space_needed(self) -> int:
-        """Most the zip can take on disk: the files as they are, plus the zip's own headers."""
+        """
+        Most the zip can take on disk: the files as they are, plus the zip's own headers.
+        """
         return (
             self.size
             + self.size // 1000
@@ -2019,7 +2149,9 @@ class ZipPlan:
 
 @dataclass
 class ZipDownload:
-    """What S3Analyzer.download_zip did: the checks it ran (plan) and the zip it wrote."""
+    """
+    What S3Analyzer.download_zip did: the checks it ran (plan) and the zip it wrote.
+    """
 
     plan: ZipPlan
     written: bool = False  # False: a check failed, or dry_run=True
@@ -2033,7 +2165,9 @@ class ZipDownload:
 
 @dataclass
 class LocalDownload:
-    """A file, folder or zip in the downloads folder (see S3Analyzer.list_downloads)."""
+    """
+    A file, folder or zip in the downloads folder (see S3Analyzer.list_downloads).
+    """
 
     name: str  # its name in the downloads folder
     path: str  # where it is (absolute)
@@ -2049,7 +2183,9 @@ class LocalDownload:
 
 @dataclass
 class DownloadsFolder:
-    """What download() and download_zip() saved: the downloads folder and what's in it (S3Analyzer.list_downloads)."""
+    """
+    What download() and download_zip() saved: the downloads folder and what's in it (S3Analyzer.list_downloads).
+    """
 
     path: str  # the folder (absolute)
     exists: bool = False
@@ -2068,7 +2204,9 @@ class DownloadsFolder:
         return sum(entry.files for entry in self.entries)
 
     def to_df(self):
-        """One row per download: name, kind, size, files, downloaded, path."""
+        """
+        One row per download: name, kind, size, files, downloaded, path.
+        """
         pd = _require("pandas", "DownloadsFolder.to_df")
         return pd.DataFrame(
             [vars(entry) for entry in self.entries],
@@ -2078,7 +2216,9 @@ class DownloadsFolder:
 
 @dataclass
 class DownloadsCleanup:
-    """What S3Analyzer.clean_downloads deleted, or would delete with dry_run=True."""
+    """
+    What S3Analyzer.clean_downloads deleted, or would delete with dry_run=True.
+    """
 
     path: str  # the downloads folder
     removed: list[LocalDownload] = field(default_factory=list)  # deleted (or to delete), newest first
@@ -2089,7 +2229,9 @@ class DownloadsCleanup:
 
     @property
     def freed(self) -> int:
-        """Bytes deleted (with dry_run, that would be)."""
+        """
+        Bytes deleted (with dry_run, that would be).
+        """
         return sum(entry.size for entry in self.removed if entry.name not in self.failed)
 
 
@@ -2103,7 +2245,9 @@ class ArchiveEntry:
 
 @dataclass
 class ArchiveListing:
-    """Files inside a zip / tar archive (see S3Analyzer.list_archive)."""
+    """
+    Files inside a zip / tar archive (see S3Analyzer.list_archive).
+    """
 
     uri: str
     kind: str  # 'zip' | 'tar'
@@ -2117,8 +2261,10 @@ class ArchiveListing:
 
 @dataclass
 class Picture:
-    """A picture from a document: a PDF page as it prints, or an image inside a Word file. It shows itself
-    when it's the last thing in a notebook cell; .data holds the image file's bytes."""
+    """
+    A picture from a document: a PDF page as it prints, or an image inside a Word file. It shows itself
+    when it's the last thing in a notebook cell; .data holds the image file's bytes.
+    """
 
     data: bytes = field(repr=False)
     mime: str  # 'image/png', 'image/jpeg', ...; '' when browsers can't show the format (EMF, WMF, TIFF)
@@ -2134,8 +2280,10 @@ class Picture:
 
 @dataclass
 class PdfLine:
-    """One line of a PDF page as it prints: its text, where it starts (points from the page's left and top
-    edges; None when pypdf couldn't place it), its font size in points and whether its font is bold."""
+    """
+    One line of a PDF page as it prints: its text, where it starts (points from the page's left and top
+    edges; None when pypdf couldn't place it), its font size in points and whether its font is bold.
+    """
 
     text: str
     x: float | None = None
@@ -2146,8 +2294,10 @@ class PdfLine:
 
 @dataclass
 class PdfPage:
-    """A PDF page's lines in the order pypdf reads them, and the page's size in points (read_pdf(..., layout=True));
-    pdf_flow lays them out to read."""
+    """
+    A PDF page's lines in the order pypdf reads them, and the page's size in points (read_pdf(..., layout=True));
+    pdf_flow lays them out to read.
+    """
 
     number: int
     width: float = 0.0
@@ -2157,7 +2307,9 @@ class PdfPage:
 
 @dataclass
 class Document:
-    """Text of a PDF, Word (.docx) or PowerPoint (.pptx) file (see S3Analyzer.read_document)."""
+    """
+    Text of a PDF, Word (.docx) or PowerPoint (.pptx) file (see S3Analyzer.read_document).
+    """
 
     uri: str
     kind: str  # 'pdf' | 'docx' | 'pptx'
@@ -2196,11 +2348,13 @@ class Document:
 
 @dataclass
 class Preview:
-    """First look at an object. kind: 'table' (DataFrame), 'json' (the parsed value; info['cut'] when it's
+    """
+    First look at an object. kind: 'table' (DataFrame), 'json' (the parsed value; info['cut'] when it's
     only the start of a bigger file: how many objects and arrays were cut off), 'text' (list of lines),
     'listing' (list of dicts: archive members, notebook cells, tensors, arrays), 'image' (bytes),
     'document' (text; the parsed Document in .document, with a PDF's first pages drawn and a Word file's
-    pictures), 'media' (presigned URL for audio / video / PDF), 'binary' (bytes) or 'unavailable'."""
+    pictures), 'media' (presigned URL for audio / video / PDF), 'binary' (bytes) or 'unavailable'.
+    """
 
     uri: str
     kind: str
@@ -2217,14 +2371,16 @@ class Preview:
 
 @dataclass
 class FileDetails:
-    """What's inside one file (see describe_file and S3Analyzer.file_details). `facts` holds what its format says:
+    """
+    What's inside one file (see describe_file and S3Analyzer.file_details). `facts` holds what its format says:
     'pages', 'title', 'author', 'made_with', 'page_size', 'text' (does a PDF's first pages have text; False =
     scanned), 'locked' (needs a password); 'words', 'headings', 'tables', 'pictures' (Word); 'slides', 'notes'
     (PowerPoint); 'sheets' (Excel: name, rows, columns); 'rows', 'columns' (column names), 'row_groups', 'codec'
     (tables, CSV, JSON lines); 'width', 'height' (pictures, video); 'duration' in seconds, 'sample_rate',
     'channels' (audio, video); 'files', 'unpacked' (archives); 'tensors', 'arrays', 'parameters', 'dtypes',
     'shape' (model and array files); 'cells', 'code_cells', 'kernel' (notebooks); 'lines' (text). A count read
-    from the start of the file only has '<name>_estimate' set: 'estimate' (≈) or 'at least' (+)."""
+    from the start of the file only has '<name>_estimate' set: 'estimate' (≈) or 'at least' (+).
+    """
 
     key: str  # the object key, or the name given to describe_file
     size: int
@@ -2246,13 +2402,17 @@ class FileDetails:
 
     @property
     def summary(self) -> str:
-        """One line: '12 pages · A4 · "Q3 report"', '1,200 rows × 14 columns', 'PNG 1920 × 1080'."""
+        """
+        One line: '12 pages · A4 · "Q3 report"', '1,200 rows × 14 columns', 'PNG 1920 × 1080'.
+        """
         return _details_summary(self)
 
 
 @dataclass
 class FileDetailsReport:
-    """What's inside each file under a prefix (see S3Analyzer.file_details), and what reading it took."""
+    """
+    What's inside each file under a prefix (see S3Analyzer.file_details), and what reading it took.
+    """
 
     uri: str
     files: list[FileDetails] = field(default_factory=list)  # in key order
@@ -2266,7 +2426,9 @@ class FileDetailsReport:
     seconds: float = 0.0
 
     def to_df(self):
-        """One row per file: key, format, size, summary, status, then a column per fact (pages, rows, ...)."""
+        """
+        One row per file: key, format, size, summary, status, then a column per fact (pages, rows, ...).
+        """
         pd = _require("pandas", "FileDetailsReport.to_df")
         keys: dict[str, None] = {}
         for d in self.files:
@@ -2288,7 +2450,9 @@ class FileDetailsReport:
 
 
 def objects_to_df(objects: Iterable[ObjectInfo]):
-    """List of ObjectInfo -> pandas DataFrame (key, size, last_modified, storage_class, ...)."""
+    """
+    List of ObjectInfo -> pandas DataFrame (key, size, last_modified, storage_class, ...).
+    """
     pd = _require("pandas", "objects_to_df")
     columns = [
         "key",
@@ -2409,10 +2573,12 @@ TRANSITION_ORDER = {
 def object_monthly_cost(
     size: int, storage_class: str, prices: dict[str, float] | None = None
 ) -> float | None:
-    """Estimated USD per month to store one object, with S3's billing minimums: STANDARD_IA,
+    """
+    Estimated USD per month to store one object, with S3's billing minimums: STANDARD_IA,
     ONEZONE_IA and GLACIER_IR bill at least 128 KB per object; GLACIER and DEEP_ARCHIVE add 40 KB
     of index data per object (32 KB at the archive rate, 8 KB at the STANDARD rate).
-    None when `prices` has no price for the class. Storage only: no requests or data transfer."""
+    None when `prices` has no price for the class. Storage only: no requests or data transfer.
+    """
     prices = S3_PRICES if prices is None else prices
     price = prices.get(storage_class)
     if price is None:
@@ -2447,8 +2613,10 @@ _STORAGE_TYPE_PREFIXES = [  # CloudWatch StorageType prefix -> class whose price
 
 
 def storage_type_class(storage_type: str) -> str | None:
-    """CloudWatch StorageType ('StandardIAStorage', 'GlacierObjectOverhead', ...) -> the storage
-    class whose price applies to it ('STAGING' for archive uploads in progress), or None if unknown."""
+    """
+    CloudWatch StorageType ('StandardIAStorage', 'GlacierObjectOverhead', ...) -> the storage
+    class whose price applies to it ('STAGING' for archive uploads in progress), or None if unknown.
+    """
     if "S3ObjectOverhead" in storage_type:
         return "STANDARD"  # the 8 KB of archive index data per object is billed as STANDARD
     if "Staging" in storage_type:
@@ -2466,8 +2634,10 @@ def storage_type_class(storage_type: str) -> str | None:
 def cloudwatch_cost(
     size_by_storage_type: dict[str, int], prices: dict[str, float] | None = None
 ) -> dict[str, float | None]:
-    """BucketMetrics.size_by_storage_type -> estimated USD per month per storage type (None = no price).
-    CloudWatch already reports minimum-size and archive overheads as their own storage types."""
+    """
+    BucketMetrics.size_by_storage_type -> estimated USD per month per storage type (None = no price).
+    CloudWatch already reports minimum-size and archive overheads as their own storage types.
+    """
     prices = S3_PRICES if prices is None else prices
     costs: dict[str, float | None] = {}
     for storage_type, size in size_by_storage_type.items():
@@ -2481,8 +2651,10 @@ def _by_size(stats: dict[str, Stat]) -> dict[str, Stat]:
 
 
 def folder_of(key: str, base: str, depth: int = 1) -> str:
-    """Folder of `key` relative to `base`, at most `depth` levels: ('a/b/c/f.csv', 'a/', 1) -> 'b/'.
-    Returns '' for files directly under `base`."""
+    """
+    Folder of `key` relative to `base`, at most `depth` levels: ('a/b/c/f.csv', 'a/', 1) -> 'b/'.
+    Returns '' for files directly under `base`.
+    """
     parts = relative_key(key, base).split("/")[:-1][:depth]
     return "/".join(parts) + "/" if parts else ""
 
@@ -2497,7 +2669,9 @@ def summarize_objects(
     now: datetime | None = None,
     prices: dict[str, float] | None = None,
 ) -> PrefixSummary:
-    """One streaming pass over `objects` -> PrefixSummary (counts, sizes, histograms, top-N, cost)."""
+    """
+    One streaming pass over `objects` -> PrefixSummary (counts, sizes, histograms, top-N, cost).
+    """
     now = now or _utcnow()
     bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
     base = base_prefix(prefix)
@@ -2573,10 +2747,12 @@ def build_folder_tree(
     limit: int | None = None,
     files: int = 0,
 ) -> FolderTree:
-    """Aggregate objects into every folder level down to `depth` (each object counts toward all its ancestors).
+    """
+    Aggregate objects into every folder level down to `depth` (each object counts toward all its ancestors).
 
     With `files=N`, also keep the first N files (in key order) directly in each folder shown, and count
-    every file there in `direct`."""
+    every file there in `direct`.
+    """
     bucket, prefix = parse_s3_uri(uri) if uri else ("", "")
     base = base_prefix(prefix)
     tree = FolderTree(
@@ -2620,7 +2796,8 @@ def make_filter(
     modified_before: Any = None,
     storage_classes: str | Iterable[str] | None = None,
 ) -> Callable[[ObjectInfo], bool]:
-    """Predicate for find(); every given condition must match.
+    """
+    Predicate for find(); every given condition must match.
 
     pattern     glob, matched against the file name - or the full key if it contains '/'
     regex       re.search against the full key
@@ -2675,7 +2852,8 @@ def make_filter(
 def find_duplicate_groups(
     objects: Iterable[ObjectInfo], *, min_size: int | str = 1
 ) -> list[list[ObjectInfo]]:
-    """Group objects with the same (size, ETag); biggest reclaimable bytes first.
+    """
+    Group objects with the same (size, ETag); biggest reclaimable bytes first.
 
     Same size + ETag means same content. It can miss copies: an identical file uploaded
     with different multipart part sizes, or encrypted with SSE-KMS, gets a different ETag.
@@ -2731,7 +2909,9 @@ HASH_HEAD_BYTES = (
 
 
 def _etag_clusters(same_size: list[ObjectInfo]) -> list[list[ObjectInfo]]:
-    """Files of one size -> lists of files sharing an ETag (a file without one is on its own)."""
+    """
+    Files of one size -> lists of files sharing an ETag (a file without one is on its own).
+    """
     clusters: dict[str, list[ObjectInfo]] = {}
     for obj in same_size:
         clusters.setdefault(obj.etag or obj.uri, []).append(obj)
@@ -2741,7 +2921,8 @@ def _etag_clusters(same_size: list[ObjectInfo]) -> list[list[ObjectInfo]]:
 def files_to_hash(
     objects: Iterable[ObjectInfo], *, min_size: int | str = 1, method: str = "hash"
 ) -> list[list[ObjectInfo]]:
-    """The files find_duplicates reads, one list per size, biggest possible saving first.
+    """
+    The files find_duplicates reads, one list per size, biggest possible saving first.
 
     A file whose size no other file has can't be a copy, and files with the same size and ETag already match,
     so method='hash' reads one file per ETag, only for sizes where the ETags differ, picking one outside GLACIER /
@@ -2791,12 +2972,14 @@ def group_duplicates(
     min_size: int | str = 1,
     prices: dict[str, float] | None = None,
 ) -> DuplicateReport:
-    """Group identical files -> DuplicateReport. Files match when they have the same size and either the same
+    """
+    Group identical files -> DuplicateReport. Files match when they have the same size and either the same
     ETag or the same SHA-256 in `hashes` (uri -> hex digest). `distinct` lists uris already known to differ from
     every other file of their size (their first bytes differ). Works on any list of ObjectInfo, e.g. S3 Inventory
     rows. The groups are sorted by the space their copies take. In each, the file to keep comes first: one that can
     be read without a restore (not GLACIER / DEEP_ARCHIVE), in the folder with the smallest share of duplicated
-    files so that a folder of copies empties out, then the oldest."""
+    files so that a folder of copies empties out, then the oldest.
+    """
     hashes = hashes or {}
     distinct = set(distinct)
     threshold = parse_size(min_size) or 0
@@ -2889,8 +3072,10 @@ def group_duplicates(
 
 
 def duplicate_folders(report: DuplicateReport) -> list[DuplicateFolder]:
-    """Folders holding duplicated files, most duplicated bytes first. A folder whose files all exist in other
-    folders too (all_copies) can go without losing data, as long as those other copies stay."""
+    """
+    Folders holding duplicated files, most duplicated bytes first. A folder whose files all exist in other
+    folders too (all_copies) can go without losing data, as long as those other copies stay.
+    """
     folders: dict[str, DuplicateFolder] = {}
     for group in report.groups:
         where = Counter(base_prefix(o.key) for o in group.objects)
@@ -2915,7 +3100,9 @@ def duplicate_folders(report: DuplicateReport) -> list[DuplicateFolder]:
 
 
 def _folders_text(folders: list[str], base: str = "", most: int = 2) -> str:
-    """['logs/a/', 'logs/b/', 'logs/c/'] -> '3 folders under logs/'; ['a/', 'b/'] -> 'a/ and b/'."""
+    """
+    ['logs/a/', 'logs/b/', 'logs/c/'] -> '3 folders under logs/'; ['a/', 'b/'] -> 'a/ and b/'.
+    """
     names = [relative_key(f, base) or "(top level)" for f in folders]
     if len(names) <= most:
         return " and ".join(names)
@@ -2937,7 +3124,9 @@ _UNREADABLE_REASONS = {
 
 
 def duplicate_findings(report: DuplicateReport) -> list[tuple[str, str]]:
-    """Plain-language observations about duplicate files -> [(level, message)], level 'warn' or 'info'."""
+    """
+    Plain-language observations about duplicate files -> [(level, message)], level 'warn' or 'info'.
+    """
     found: list[tuple[str, str]] = []
     base = base_prefix(parse_s3_uri(report.uri)[1]) if report.uri else ""
 
@@ -3058,8 +3247,10 @@ def duplicate_findings(report: DuplicateReport) -> list[tuple[str, str]]:
 
 
 def zip_checks(plan: ZipPlan) -> list[tuple[str, bool | None, str]]:
-    """Whether a zip can be made -> [(check, passed, details)]; passed is None for a note that doesn't block it.
-    Checks: something to zip and not too many files, the size limit, disk space, memory and read access."""
+    """
+    Whether a zip can be made -> [(check, passed, details)]; passed is None for a note that doesn't block it.
+    Checks: something to zip and not too many files, the size limit, disk space, memory and read access.
+    """
     files, size = len(plan.files), plan.size
     rows: list[tuple[str, bool | None, str]] = []
     if not files:
@@ -3126,7 +3317,9 @@ def zip_checks(plan: ZipPlan) -> list[tuple[str, bool | None, str]]:
 
 
 def _nice_size(size: int) -> str:
-    """A max_size= value just above `size`: 3.3 MB -> '4MB', 340 MB -> '400MB', 3.2 GB -> '4GB'."""
+    """
+    A max_size= value just above `size`: 3.3 MB -> '4MB', 340 MB -> '400MB', 3.2 GB -> '4GB'.
+    """
     if size < 100 * MB:
         return f"{max(1, math.ceil(size / MB))}MB"
     if size < GB:
@@ -3135,7 +3328,9 @@ def _nice_size(size: int) -> str:
 
 
 def zip_findings(plan: ZipPlan) -> list[tuple[str, str]]:
-    """What stops a zip, or what's left out of it, and what to do -> [(level, message)]."""
+    """
+    What stops a zip, or what's left out of it, and what to do -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     size = plan.size
     if not plan.files and not plan.archived.count:
@@ -3207,8 +3402,10 @@ def zip_findings(plan: ZipPlan) -> list[tuple[str, str]]:
 
 
 def downloads_findings(folder: DownloadsFolder, now: datetime | None = None) -> list[tuple[str, str]]:
-    """What to tidy up in the downloads folder, and the call that does it -> [(level, message)]: downloads in a
-    folder that isn't theirs, unfinished zips, a disk running out of room, downloads over a month old."""
+    """
+    What to tidy up in the downloads folder, and the call that does it -> [(level, message)]: downloads in a
+    folder that isn't theirs, unfinished zips, a disk running out of room, downloads over a month old.
+    """
     found: list[tuple[str, str]] = []
     own = f"S3View(downloads={DOWNLOADS!r})"
     if folder.protected:
@@ -3252,8 +3449,10 @@ def compare_objects(
     uri_a: str = "",
     uri_b: str = "",
 ) -> CompareResult:
-    """Match objects by key relative to their prefix; compare size, then ETag.
-    SSE-KMS objects have random ETags, so identical KMS-encrypted files show up as 'different'."""
+    """
+    Match objects by key relative to their prefix; compare size, then ETag.
+    SSE-KMS objects have random ETags, so identical KMS-encrypted files show up as 'different'.
+    """
     index_a = {relative_key(o.key, prefix_a): o for o in a if not o.is_folder_marker}
     index_b = {relative_key(o.key, prefix_b): o for o in b if not o.is_folder_marker}
     result = CompareResult(uri_a=uri_a, uri_b=uri_b)
@@ -3276,7 +3475,9 @@ def compare_objects(
 def summary_findings(
     summary: PrefixSummary, prices: dict[str, float] | None = None
 ) -> list[tuple[str, str]]:
-    """Plain-language observations about a prefix -> [(level, message)], level 'warn' or 'info'."""
+    """
+    Plain-language observations about a prefix -> [(level, message)], level 'warn' or 'info'.
+    """
     prices = S3_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     n = summary.object_count
@@ -3367,8 +3568,10 @@ def summary_findings(
 def bucket_findings(
     cfg: BucketConfig, account_block: dict[str, bool] | None = None
 ) -> list[tuple[str, str]]:
-    """Plain-language risks / cost notes for a bucket config -> [(level, message)].
-    account_block: the account-level Block Public Access settings ({} = not set, None = unknown)."""
+    """
+    Plain-language risks / cost notes for a bucket config -> [(level, message)].
+    account_block: the account-level Block Public Access settings ({} = not set, None = unknown).
+    """
     found: list[tuple[str, str]] = []
     pab = cfg.public_access_block
     account_on = bool(account_block) and all(account_block.values())
@@ -3423,7 +3626,9 @@ def bucket_findings(
 def _lifecycle_steps(
     move_after: int | dict[int, str] | None, to: str | None
 ) -> list[tuple[int, str]]:
-    """Normalize move_after / to into [(days, class)] and apply the checks S3 does on a rule."""
+    """
+    Normalize move_after / to into [(days, class)] and apply the checks S3 does on a rule.
+    """
     if move_after is None:
         if to is not None:
             raise ValueError("to= needs move_after= (days)")
@@ -3478,7 +3683,8 @@ def simulate_lifecycle_objects(
     now: datetime | None = None,
     limit: int | None = None,
 ) -> LifecycleImpact:
-    """What a lifecycle rule would do to `objects` if it ran today, and what it would save.
+    """
+    What a lifecycle rule would do to `objects` if it ran today, and what it would save.
 
     move_after    days since last modified, with to='STANDARD_IA' / 'GLACIER_IR' / 'GLACIER' / ...,
                   or several moves at once: {30: 'STANDARD_IA', 180: 'GLACIER'}
@@ -3661,7 +3867,9 @@ def _as_list(value: Any) -> list:
 
 
 def _describe_principal(kind: str, value: str) -> tuple[str, str | None]:
-    """One principal -> (plain text, its account id or None)."""
+    """
+    One principal -> (plain text, its account id or None).
+    """
     if kind == "AWS":
         if value == "*":
             return "anyone (public)", None
@@ -3709,7 +3917,9 @@ def _describe_resource(arn: str) -> str:
 
 
 def _describe_condition(operator: str, key: str, values: Any) -> tuple[str, bool]:
-    """One condition -> (plain text, whether it narrows down who can use the statement)."""
+    """
+    One condition -> (plain text, whether it narrows down who can use the statement).
+    """
     base = operator.split(":")[-1]
     if_exists = base.lower().endswith("ifexists")
     base = base[:-8] if if_exists else base
@@ -3734,8 +3944,10 @@ def _describe_condition(operator: str, key: str, values: Any) -> tuple[str, bool
 def explain_policy(
     policy: dict | str | None, own_account: str | None = None
 ) -> list[PolicyStatement]:
-    """Bucket policy (dict or JSON text) -> one PolicyStatement per statement, in plain English.
-    With own_account, principals from any other account are listed in `other_accounts`."""
+    """
+    Bucket policy (dict or JSON text) -> one PolicyStatement per statement, in plain English.
+    With own_account, principals from any other account are listed in `other_accounts`.
+    """
     if not policy:
         return []
     doc = json.loads(policy) if isinstance(policy, str) else policy
@@ -3803,7 +4015,9 @@ def explain_policy(
 
 
 def policy_findings(statements: list[PolicyStatement]) -> list[tuple[str, str]]:
-    """Plain-language risks in an explained bucket policy -> [(level, message)]."""
+    """
+    Plain-language risks in an explained bucket policy -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     for st in statements:
         if st.effect != "Allow":
@@ -3879,16 +4093,20 @@ _EVENT_WORDS = {  # S3 event types in plain English (EventNotification.describe)
 
 
 def _event_words(events: Iterable[str]) -> str:
-    """['s3:ObjectCreated:Put', 's3:ObjectRemoved:*'] -> 'PUT uploads and deletions'."""
+    """
+    ['s3:ObjectCreated:Put', 's3:ObjectRemoved:*'] -> 'PUT uploads and deletions'.
+    """
     words = list(dict.fromkeys(_EVENT_WORDS.get(e, e.removeprefix("s3:")) for e in events)) or ["no events"]
     return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
 
 def parse_notifications(config: dict[str, Any] | None) -> list[EventNotification]:
-    """A bucket's notification configuration (GetBucketNotificationConfiguration) as a list: each Lambda function,
+    """
+    A bucket's notification configuration (GetBucketNotificationConfiguration) as a list: each Lambda function,
     SQS queue and SNS topic it sends events to, with the events and the key prefix and suffix they're limited to,
     and EventBridge when it's turned on (every event then goes to the account's default event bus, where its rules
-    pick them)."""
+    pick them).
+    """
     config = config or {}
     found: list[EventNotification] = []
     for section, target, arn_key in _NOTIFICATION_TARGETS:
@@ -3915,8 +4133,10 @@ _PDF_LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "f
 
 
 def _pdf_pages(doc: Document | Iterable[PdfPage]) -> list[PdfPage]:
-    """The pages to lay out: a Document's layout (read with layout=True), else its pages' text as lines with no
-    place or size; or the PdfPages given."""
+    """
+    The pages to lay out: a Document's layout (read with layout=True), else its pages' text as lines with no
+    place or size; or the PdfPages given.
+    """
     if not isinstance(doc, Document):
         return list(doc)
     return doc.layout or [PdfPage(number, lines=[PdfLine(text.strip()) for text in part.splitlines() if text.strip()])
@@ -3924,9 +4144,11 @@ def _pdf_pages(doc: Document | Iterable[PdfPage]) -> list[PdfPage]:
 
 
 def _pdf_furniture(pages: list[PdfPage]) -> set[tuple[int, int]]:
-    """(index in pages, line index) of the running headers and footers: lines in the top or bottom tenth of a page
+    """
+    (index in pages, line index) of the running headers and footers: lines in the top or bottom tenth of a page
     that come back on at least two pages and 40% of the pages with text (digits aside, so 'Page 3 of 9' does),
-    and page numbers there."""
+    and page numbers there.
+    """
     edges: dict[tuple[int, int], str] = {}
     on_pages: dict[str, set[int]] = defaultdict(set)
     numbers = set()
@@ -3945,8 +4167,10 @@ def _pdf_furniture(pages: list[PdfPage]) -> set[tuple[int, int]]:
 
 
 def pdf_furniture(doc: Document | Iterable[PdfPage]) -> list[str]:
-    """The running headers and footers pdf_flow leaves out of a PDF's text, each once ('ACME - Confidential'),
-    then 'page numbers' if there were any."""
+    """
+    The running headers and footers pdf_flow leaves out of a PDF's text, each once ('ACME - Confidential'),
+    then 'page numbers' if there were any.
+    """
     pages = _pdf_pages(doc)
     said, numbers = {}, False
     for at, i in sorted(_pdf_furniture(pages)):
@@ -3959,13 +4183,15 @@ def pdf_furniture(doc: Document | Iterable[PdfPage]) -> list[str]:
 
 
 def pdf_flow(doc: Document | Iterable[PdfPage]) -> list[tuple[str, Any]]:
-    """A PDF's text laid out to read, from read_pdf(uri, layout=True) (or its doc.layout): ('page', number) where
+    """
+    A PDF's text laid out to read, from read_pdf(uri, layout=True) (or its doc.layout): ('page', number) where
     each page starts, then its headings ('title', 'h1' to 'h3' by font size; a short bold line is a heading too),
     paragraphs ('p': lines that run on are joined, a word split at the end of a line is made whole, and a line
     that ends short keeps its line break, '\\n', so table rows and addresses stay apart) and list items ('li',
     without the bullet; a numbered item keeps its number). Running headers and footers (pdf_furniture) are left
     out, and a page with no text is ('missing', a line saying so). A Document read without layout=True is laid
-    out from its text alone: paragraphs, no headings."""
+    out from its text alone: paragraphs, no headings.
+    """
     pages = _pdf_pages(doc)
     skip = _pdf_furniture(pages)
     kept = [(page, [line for i, line in enumerate(page.lines) if (at, i) not in skip and line.text.strip()])
@@ -4104,7 +4330,8 @@ _KIND_NAMES = {  # a format in a sentence: "it's a PDF", "it holds text"
 def describe_file(
     source: Any, name: str = "", *, size: int | None = None, password: str | None = None
 ) -> FileDetails:
-    """What's inside a file, from as little of it as its format needs: a PDF's pages, title, author, page size and
+    """
+    What's inside a file, from as little of it as its format needs: a PDF's pages, title, author, page size and
     whether its first pages have text (scanned pages don't); a Word file's words, headings, tables and pictures; a
     deck's slides; each Excel sheet's rows and columns; a table's rows and column names (parquet, ORC, Feather,
     Avro, CSV, JSON lines); a picture's width and height; an audio or video file's length; an archive's files; a
@@ -4114,7 +4341,8 @@ def describe_file(
     source: a path or a seekable binary file (open(path, 'rb'), io.BytesIO(data)); name: the file name, whose
     extension says the format (the first bytes are checked too, and win when they disagree: d.named then keeps
     what the name said). PDFs need pypdf, and parquet / ORC / Feather need pyarrow. What can't be read goes in
-    d.error instead of raising. S3Analyzer.file_details does this for S3 objects, with ranged GETs."""
+    d.error instead of raising. S3Analyzer.file_details does this for S3 objects, with ranged GETs.
+    """
     if isinstance(source, (str, os.PathLike)):
         path = os.fspath(source)
         with open(path, "rb") as handle:
@@ -4150,8 +4378,10 @@ def _error_text(exc: BaseException) -> str:
 
 
 def _identify(d: FileDetails, f: Any) -> None:
-    """Settle d.format and d.compression from the name and the first bytes. When they disagree the bytes win,
-    d.named keeps what the name said, and d.facts['starts_with'] the first line of a file that turned out to be text."""
+    """
+    Settle d.format and d.compression from the name and the first bytes. When they disagree the bytes win,
+    d.named keeps what the name said, and d.facts['starts_with'] the first line of a file that turned out to be text.
+    """
     named = d.format
     head = f.read(512)
     sniffed, codec = sniff_format(head)
@@ -4185,7 +4415,9 @@ def _identify(d: FileDetails, f: Any) -> None:
 
 
 def _unpacked(d: FileDetails, f: Any) -> Any:
-    """The file itself, or when the whole of it is compressed, its unpacked bytes in memory (up to 64 MB)."""
+    """
+    The file itself, or when the whole of it is compressed, its unpacked bytes in memory (up to 64 MB).
+    """
     if not d.compression:
         return f
     data = _DECOMPRESSORS[d.compression](f).read(_UNPACK_LIMIT + 1)
@@ -4199,7 +4431,9 @@ def _stream(d: FileDetails, f: Any) -> Any:
 
 
 def _sample(d: FileDetails, f: Any) -> tuple[bytes, bool]:
-    """The first 256 KB of the (unpacked) file, and whether that's all of it."""
+    """
+    The first 256 KB of the (unpacked) file, and whether that's all of it.
+    """
     if not d.compression:  # the size says whether there's more, so no byte past the sample is fetched
         return f.read(_SAMPLE_BYTES), d.size <= _SAMPLE_BYTES
     data = _stream(d, f).read(_SAMPLE_BYTES + 1)
@@ -4207,9 +4441,11 @@ def _sample(d: FileDetails, f: Any) -> tuple[bytes, bool]:
 
 
 def _line_count(d: FileDetails, data: bytes, complete: bool) -> tuple[int, str | None]:
-    """Lines in the file -> (count, how): exact (how=None) when `data` is all of it; else estimated from the bytes
+    """
+    Lines in the file -> (count, how): exact (how=None) when `data` is all of it; else estimated from the bytes
     per line of its first lines ('estimate'), or for a compressed file, whose unpacked size isn't known, the lines
-    seen so far ('at least')."""
+    seen so far ('at least').
+    """
     if complete:
         return (data.count(b"\n") + (not data.endswith(b"\n"))) if data else 0, None
     whole = data[: data.rfind(b"\n") + 1]
@@ -4512,7 +4748,9 @@ _DETAIL_READERS: dict[str, Callable[[FileDetails, Any, str | None], None]] = {
 
 
 def _count_text(facts: dict[str, Any], key: str) -> str:
-    """A count with its accuracy: '1,234', '≈ 12,000' (estimated), '1,234+' (at least)."""
+    """
+    A count with its accuracy: '1,234', '≈ 12,000' (estimated), '1,234+' (at least).
+    """
     value, how = facts.get(key), facts.get(f"{key}_estimate")
     if value is None:
         return ""
@@ -4522,7 +4760,9 @@ def _count_text(facts: dict[str, Any], key: str) -> str:
 
 
 def _short_count(value: int) -> str:
-    """7_241_732_096 -> '7.2B', 124_000 -> '124K'."""
+    """
+    7_241_732_096 -> '7.2B', 124_000 -> '124K'.
+    """
     for size, unit in ((10**12, "T"), (10**9, "B"), (10**6, "M"), (10**3, "K")):
         if value >= size:
             return f"{value / size:.1f}".rstrip("0").rstrip(".") + unit
@@ -4530,14 +4770,18 @@ def _short_count(value: int) -> str:
 
 
 def _clock(seconds: float) -> str:
-    """192.4 -> '3:12', 3723 -> '1:02:03'."""
+    """
+    192.4 -> '3:12', 3723 -> '1:02:03'.
+    """
     whole = round(seconds)
     hours, rest = divmod(whole, 3600)
     return f"{hours}:{rest // 60:02d}:{rest % 60:02d}" if hours else f"{rest // 60}:{rest % 60:02d}"
 
 
 def _sheets_text(sheets: list[dict[str, Any]], most: int = 3) -> str:
-    """'Sales 1,200 × 11, Notes 40 × 2 and 3 more sheets' (rows × columns, header row included)."""
+    """
+    'Sales 1,200 × 11, Notes 40 × 2 and 3 more sheets' (rows × columns, header row included).
+    """
     parts = [
         f"{s['sheet']} {s['rows']:,} × {s['columns']:,}" if s.get("rows") else f"{s['sheet']} (size not saved)"
         for s in sheets[:most]
@@ -4630,7 +4874,9 @@ def _details_summary(d: FileDetails) -> str:
 
 
 def _changed_columns(columns: list[str], usual: tuple[str, ...]) -> str:
-    """How a file's columns differ from the usual ones: 'adds discount; lacks region'."""
+    """
+    How a file's columns differ from the usual ones: 'adds discount; lacks region'.
+    """
     added = [c for c in columns if c not in usual]
     lacking = [c for c in usual if c not in columns]
     parts = [f"{verb} {', '.join(names[:3])}{' and more' if len(names) > 3 else ''}"
@@ -4639,10 +4885,12 @@ def _changed_columns(columns: list[str], usual: tuple[str, ...]) -> str:
 
 
 def file_details_findings(report: FileDetailsReport) -> list[tuple[str, str]]:
-    """What stands out in what's inside the files -> [(level, message)], level 'warn' or 'info': scanned PDFs
+    """
+    What stands out in what's inside the files -> [(level, message)], level 'warn' or 'info': scanned PDFs
     without text, files that need a password, files that aren't what their name says, table files in one folder
     with different columns, pictures of mixed sizes, and what wasn't read or couldn't be (archived, over max_read,
-    a package to install, a damaged file)."""
+    a package to install, a damaged file).
+    """
     found: list[tuple[str, str]] = []
     files = report.files
     base = base_prefix(parse_s3_uri(report.uri)[1]) if report.uri else ""
@@ -4769,7 +5017,9 @@ def file_details_findings(report: FileDetailsReport) -> list[tuple[str, str]]:
 
 
 class _BodyReader(io.RawIOBase):
-    """Raw stream over a botocore StreamingBody, so io/gzip/pandas can wrap it."""
+    """
+    Raw stream over a botocore StreamingBody, so io/gzip/pandas can wrap it.
+    """
 
     def __init__(self, body: Any):
         self._body = body
@@ -4791,8 +5041,10 @@ class _BodyReader(io.RawIOBase):
 
 
 class _RangeReader(io.RawIOBase):
-    """Seekable reader over one object using ranged GETs, so pyarrow can fetch
-    just the parquet footer / needed row groups instead of the whole file."""
+    """
+    Seekable reader over one object using ranged GETs, so pyarrow can fetch
+    just the parquet footer / needed row groups instead of the whole file.
+    """
 
     def __init__(self, client: Any, bucket: str, key: str, size: int):
         self._client, self._bucket, self._key, self._size, self._pos = (
@@ -4838,9 +5090,11 @@ def _run_in_threads(
     tick: Callable[[], None],
     stop: threading.Event,
 ) -> list[tuple[Any, Any, Exception | None]]:
-    """Run work(item) for every item on `workers` threads -> [(item, result, error)], in the order they finish.
+    """
+    Run work(item) for every item on `workers` threads -> [(item, result, error)], in the order they finish.
     tick() runs about four times a second on the calling thread, so progress bars are only touched from it.
-    An interrupt (the notebook's stop button) sets `stop` for the workers to see and cancels what hasn't started."""
+    An interrupt (the notebook's stop button) sets `stop` for the workers to see and cancels what hasn't started.
+    """
     results: list[tuple[Any, Any, Exception | None]] = []
     if not items:
         return results
@@ -4867,7 +5121,9 @@ def _run_in_threads(
 
 
 def _pool_size(client: Any) -> int:
-    """How many connections the client keeps open: more threads than that just wait for one."""
+    """
+    How many connections the client keeps open: more threads than that just wait for one.
+    """
     return (
         getattr(
             getattr(getattr(client, "meta", None), "config", None),
@@ -4879,7 +5135,9 @@ def _pool_size(client: Any) -> int:
 
 
 def _free_space(path: str) -> int:
-    """Bytes free on the disk that holds `path` (or the nearest folder above it that exists)."""
+    """
+    Bytes free on the disk that holds `path` (or the nearest folder above it that exists).
+    """
     folder = os.path.abspath(path)
     while not os.path.isdir(folder):
         folder = os.path.dirname(folder)
@@ -4887,8 +5145,10 @@ def _free_space(path: str) -> int:
 
 
 def _protected_folder(folder: str) -> str:
-    """Why clean_downloads must never empty `folder` (absolute), or '': the notebook's folder or one above it, the
-    home folder, or a disk's root."""
+    """
+    Why clean_downloads must never empty `folder` (absolute), or '': the notebook's folder or one above it, the
+    home folder, or a disk's root.
+    """
     here = os.path.abspath(os.getcwd())
     if folder == here:
         return "the notebook's own folder"
@@ -4902,7 +5162,9 @@ def _protected_folder(folder: str) -> str:
 
 
 def _made_for_downloads(folder: str) -> bool:
-    """Whether `folder` has the .gitignore download() puts in a downloads folder it makes (_DOWNLOADS_MARK)."""
+    """
+    Whether `folder` has the .gitignore download() puts in a downloads folder it makes (_DOWNLOADS_MARK).
+    """
     try:
         with open(os.path.join(folder, ".gitignore"), encoding="utf-8") as mark:
             return mark.readline() == _DOWNLOADS_MARK.split("\n")[0] + "\n"
@@ -4911,8 +5173,10 @@ def _made_for_downloads(folder: str) -> bool:
 
 
 def _local_download(path: str, name: str) -> LocalDownload:
-    """One entry of the downloads folder: its size, files and when it was last written (a folder's newest file).
-    Downloads keep S3's time as their modified time, so the change time says when they were downloaded."""
+    """
+    One entry of the downloads folder: its size, files and when it was last written (a folder's newest file).
+    Downloads keep S3's time as their modified time, so the change time says when they were downloaded.
+    """
     info = os.lstat(path)
     newest, size, files = max(info.st_mtime, info.st_ctime), info.st_size, 1
     is_folder = os.path.isdir(path) and not os.path.islink(path)
@@ -4933,7 +5197,9 @@ def _local_download(path: str, name: str) -> LocalDownload:
 
 
 def _memory_available() -> int | None:
-    """RAM the notebook can still use (MemAvailable on Linux), or None when it can't be read."""
+    """
+    RAM the notebook can still use (MemAvailable on Linux), or None when it can't be read.
+    """
     try:
         with open("/proc/meminfo") as meminfo:
             for line in meminfo:
@@ -4948,8 +5214,10 @@ def _memory_available() -> int | None:
 
 
 def _zip_layout(bucket: str, keys: list[str]) -> tuple[str, str]:
-    """For zipping several keys together -> (the folder they share, the zip's name without .zip): 'churn-12-files'
-    from the folder and how many there are ('-items' when some are folders), or the one key's own name."""
+    """
+    For zipping several keys together -> (the folder they share, the zip's name without .zip): 'churn-12-files'
+    from the folder and how many there are ('-items' when some are folders), or the one key's own name.
+    """
     base = base_prefix(
         os.path.commonprefix([key if key.endswith("/") else base_prefix(key) for key in keys])
     )
@@ -4960,7 +5228,9 @@ def _zip_layout(bucket: str, keys: list[str]) -> tuple[str, str]:
 
 
 def _zip_name(key: str, base: str, used: set[str]) -> str | None:
-    """The name a file gets in the zip, relative to `base`; None if it would unzip outside the folder or clash."""
+    """
+    The name a file gets in the zip, relative to `base`; None if it would unzip outside the folder or clash.
+    """
     name = relative_key(key, base)
     if name.startswith("/"):
         return None
@@ -4984,9 +5254,11 @@ def _check_disk_space(path: str, needed: int) -> None:
 
 
 class _ContentHasher:
-    """Reads files for find_duplicates, in parallel: the SHA-256 of each file's first HASH_HEAD_BYTES, then of
+    """
+    Reads files for find_duplicates, in parallel: the SHA-256 of each file's first HASH_HEAD_BYTES, then of
     the rest where those match another file's. Stops planning reads at `budget` bytes. Progress is reported
-    from the calling thread only, so a notebook progress bar is never touched from a worker thread."""
+    from the calling thread only, so a notebook progress bar is never touched from a worker thread.
+    """
 
     def __init__(
         self,
@@ -5064,8 +5336,10 @@ class _ContentHasher:
     def _read_all(
         self, todo: list[tuple[ObjectInfo, int, Any]], size: int
     ) -> dict[str, Any]:
-        """Read every (object, from byte, hasher) in parallel -> {uri: hasher}; failures go to `unreadable`.
-        Progress counts this phase's `size` bytes from 0."""
+        """
+        Read every (object, from byte, hasher) in parallel -> {uri: hasher}; failures go to `unreadable`.
+        Progress counts this phase's `size` bytes from 0.
+        """
         done_hashers: dict[str, Any] = {}
         if not todo:
             return done_hashers
@@ -5138,18 +5412,24 @@ DETAILS_FILE_MAX = 128 * MB  # and stops reading any one file after this much
 
 
 def _stopped(why: str) -> str:
-    """Why _BlockReader stopped ('max_read' or 'file'), as words."""
+    """
+    Why _BlockReader stopped ('max_read' or 'file'), as words.
+    """
     if why == "max_read":
         return "stopped when max_read was reached"
     return f"stopped after reading {human_size(DETAILS_FILE_MAX)} of it, the most read from one file"
 
 
 class _ReadLimit(OSError):
-    """A read that would go over max_read, or over DETAILS_FILE_MAX of one file."""
+    """
+    A read that would go over max_read, or over DETAILS_FILE_MAX of one file.
+    """
 
 
 class _ReadBudget:
-    """Bytes and requests one file_details call has read, against its max_read (None = no cap)."""
+    """
+    Bytes and requests one file_details call has read, against its max_read (None = no cap).
+    """
 
     def __init__(self, limit: int | None):
         self.limit, self.used, self.requests = limit, 0, 0
@@ -5165,9 +5445,11 @@ class _ReadBudget:
 
 
 class _BlockReader(io.RawIOBase):
-    """Seekable reader over one object for file_details: ranged GETs of 256 KB blocks, fetched only when a parser
+    """
+    Seekable reader over one object for file_details: ranged GETs of 256 KB blocks, fetched only when a parser
     reads into them and kept (up to 64), so a PDF's page tree or a parquet footer costs a few requests. Stops with
-    _ReadLimit at the shared budget or after DETAILS_FILE_MAX of this file, and says why in `stopped`."""
+    _ReadLimit at the shared budget or after DETAILS_FILE_MAX of this file, and says why in `stopped`.
+    """
 
     def __init__(self, client: Any, obj: ObjectInfo, budget: _ReadBudget, stop: threading.Event):
         self._client, self._obj, self._budget, self._stop = client, obj, budget, stop
@@ -5235,8 +5517,10 @@ class _BlockReader(io.RawIOBase):
 def _read_arrow_table(
     fmt: str, handle: Any, nrows: int | None, columns: list[str] | None
 ) -> Any:
-    """Parquet / ORC / Feather (Arrow IPC) from a seekable file -> pyarrow Table (first nrows only
-    reads the row groups / stripes / batches it needs)."""
+    """
+    Parquet / ORC / Feather (Arrow IPC) from a seekable file -> pyarrow Table (first nrows only
+    reads the row groups / stripes / batches it needs).
+    """
     pa = _require("pyarrow", f"Reading {fmt}")
     if fmt == "parquet":
         parquet = _require("pyarrow.parquet", "Reading parquet").ParquetFile(handle)
@@ -5281,7 +5565,9 @@ def _read_arrow_table(
 
 
 def _columnar_info(fmt: str, handle: Any) -> dict[str, Any]:
-    """Rows, columns and layout of an ORC / Feather file from its metadata."""
+    """
+    Rows, columns and layout of an ORC / Feather file from its metadata.
+    """
     if fmt == "orc":
         orc = _require("pyarrow.orc", "Reading ORC").ORCFile(handle)
         return {
@@ -5305,7 +5591,9 @@ def _columnar_info(fmt: str, handle: Any) -> dict[str, Any]:
 
 
 def _zip_time_of(moment: datetime) -> tuple[int, int, int, int, int, int]:
-    """A file's time as a zip stores it (zip can't hold times before 1980)."""
+    """
+    A file's time as a zip stores it (zip can't hold times before 1980).
+    """
     moment = moment.astimezone(timezone.utc) if moment.tzinfo else moment
     return max(
         (
@@ -5328,7 +5616,9 @@ def _zip_time(stamp: tuple[int, ...]) -> datetime | None:
 
 
 def _npy_header(fp: Any) -> tuple[tuple[int, ...], bool, Any]:
-    """Read a .npy header from `fp` -> (shape, fortran_order, dtype); fp is left at the first data byte."""
+    """
+    Read a .npy header from `fp` -> (shape, fortran_order, dtype); fp is left at the first data byte.
+    """
     npformat = _require("numpy.lib.format", "Reading .npy")
     version = npformat.read_magic(fp)
     read_header = (
@@ -5340,7 +5630,8 @@ def _npy_header(fp: Any) -> tuple[tuple[int, ...], bool, Any]:
 
 
 class S3Analyzer(_BaseAnalyzer):
-    """Pure-logic S3 analysis: every method returns data, nothing is printed.
+    """
+    Pure-logic S3 analysis: every method returns data, nothing is printed.
 
     Anywhere a `uri` is taken you can pass 's3://bucket/prefix' or 'bucket/prefix'.
     Scans accept `limit` (stop after N keys) and `progress` (called with the running count).
@@ -5377,7 +5668,9 @@ class S3Analyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ buckets
 
     def list_buckets(self, *, with_region: bool = True) -> list[BucketInfo]:
-        """All buckets you can see. Regions are looked up in parallel when S3 doesn't return them."""
+        """
+        All buckets you can see. Regions are looked up in parallel when S3 doesn't return them.
+        """
         if self.client.can_paginate("list_buckets"):
             raw = [
                 b
@@ -5401,7 +5694,9 @@ class S3Analyzer(_BaseAnalyzer):
         return buckets
 
     def bucket_region(self, bucket: str) -> str:
-        """Region of a bucket (cached). Falls back to HeadBucket if GetBucketLocation is denied."""
+        """
+        Region of a bucket (cached). Falls back to HeadBucket if GetBucketLocation is denied.
+        """
         bucket, _ = parse_s3_uri(bucket)
         if bucket in self._regions:
             return self._regions[bucket]
@@ -5438,7 +5733,9 @@ class S3Analyzer(_BaseAnalyzer):
             return None
 
     def _client_for(self, bucket: str) -> Any:
-        """S3 client in the bucket's own region (bucket-config APIs and presigned URLs need it)."""
+        """
+        S3 client in the bucket's own region (bucket-config APIs and presigned URLs need it).
+        """
         return self._s3_in(self._safe_region(bucket))
 
     def _s3_in(self, region: str | None) -> Any:
@@ -5458,7 +5755,9 @@ class S3Analyzer(_BaseAnalyzer):
         return self._cloudwatch_clients[region]
 
     def account_id(self) -> str | None:
-        """Your AWS account id (cached), or None if STS can't be reached."""
+        """
+        Your AWS account id (cached), or None if STS can't be reached.
+        """
         if not self._account_id_checked:
             self._account_id_checked = True
             try:
@@ -5470,7 +5769,9 @@ class S3Analyzer(_BaseAnalyzer):
         return self._account_id
 
     def account_public_access_block(self) -> dict[str, bool]:
-        """Account-level Block Public Access settings ({} if never set). Needs s3:GetAccountPublicAccessBlock."""
+        """
+        Account-level Block Public Access settings ({} if never set). Needs s3:GetAccountPublicAccessBlock.
+        """
         account = self.account_id()
         if account is None:
             raise ValueError("Couldn't look up the account id (sts:GetCallerIdentity)")
@@ -5489,7 +5790,9 @@ class S3Analyzer(_BaseAnalyzer):
             raise
 
     def bucket_policy(self, bucket: str) -> dict | None:
-        """The bucket policy document, or None if the bucket has none. See explain_policy."""
+        """
+        The bucket policy document, or None if the bucket has none. See explain_policy.
+        """
         bucket, _ = parse_s3_uri(bucket)
         try:
             return json.loads(
@@ -5501,16 +5804,20 @@ class S3Analyzer(_BaseAnalyzer):
             raise
 
     def notifications(self, bucket: str) -> list[EventNotification]:
-        """The bucket's event notifications: the Lambda functions, SQS queues and SNS topics it sends which events
+        """
+        The bucket's event notifications: the Lambda functions, SQS queues and SNS topics it sends which events
         to, for which keys, and whether EventBridge gets every event (see parse_notifications). Needs
-        s3:GetBucketNotification."""
+        s3:GetBucketNotification.
+        """
         bucket, _ = parse_s3_uri(bucket)
         return parse_notifications(
             self._client_for(bucket).get_bucket_notification_configuration(Bucket=bucket)
         )
 
     def versioning_status(self, bucket: str) -> str:
-        """'Enabled', 'Suspended' or 'Disabled'."""
+        """
+        'Enabled', 'Suspended' or 'Disabled'.
+        """
         bucket, _ = parse_s3_uri(bucket)
         return (
             self._client_for(bucket)
@@ -5519,7 +5826,9 @@ class S3Analyzer(_BaseAnalyzer):
         )
 
     def bucket_config(self, bucket: str) -> BucketConfig:
-        """Versioning, encryption, public access, ownership, lock, lifecycle, replication, logging, tags."""
+        """
+        Versioning, encryption, public access, ownership, lock, lifecycle, replication, logging, tags.
+        """
         bucket, _ = parse_s3_uri(bucket)
         cfg = BucketConfig(name=bucket, region=self._safe_region(bucket))
         client = self._client_for(bucket)
@@ -5615,8 +5924,10 @@ class S3Analyzer(_BaseAnalyzer):
         return cfg
 
     def bucket_metrics(self, bucket: str, *, days: int = 3) -> BucketMetrics:
-        """Object count and size per storage type from CloudWatch (published daily, free, instant -
-        the fastest way to size a bucket with millions of objects). Needs cloudwatch:ListMetrics/GetMetricData."""
+        """
+        Object count and size per storage type from CloudWatch (published daily, free, instant -
+        the fastest way to size a bucket with millions of objects). Needs cloudwatch:ListMetrics/GetMetricData.
+        """
         bucket, _ = parse_s3_uri(bucket)
         cloudwatch = self._cloudwatch_in(self.bucket_region(bucket))
         result = BucketMetrics(bucket=bucket)
@@ -5678,7 +5989,9 @@ class S3Analyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> Iterator[ObjectInfo]:
-        """Stream every object under `uri` (recursive), 1000 per request, in key order."""
+        """
+        Stream every object under `uri` (recursive), 1000 per request, in key order.
+        """
         bucket, prefix = parse_s3_uri(uri)
         seen = 0
         for page in self.client.get_paginator("list_objects_v2").paginate(
@@ -5703,7 +6016,9 @@ class S3Analyzer(_BaseAnalyzer):
         return list(self.iter_objects(uri, limit=limit))
 
     def ls(self, uri: str, *, limit: int = 1000) -> Listing:
-        """Sub-folders and files directly under `uri` (one level). Fast even on huge buckets."""
+        """
+        Sub-folders and files directly under `uri` (one level). Fast even on huge buckets.
+        """
         bucket, prefix = parse_s3_uri(uri)
         listing = self._ls(bucket, prefix, limit)
         # 's3://b/data' almost always means the folder 'data/' - follow it when that's the only match
@@ -5754,8 +6069,10 @@ class S3Analyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> PrefixSummary:
-        """One pass over the prefix: totals, file types, storage classes, folders, size/age histograms,
-        largest, and estimated monthly storage cost."""
+        """
+        One pass over the prefix: totals, file types, storage classes, folders, size/age histograms,
+        largest, and estimated monthly storage cost.
+        """
         scan = self.iter_objects(
             uri, limit=None if limit is None else limit + 1, progress=progress
         )
@@ -5777,7 +6094,9 @@ class S3Analyzer(_BaseAnalyzer):
         files: int = 0,
         progress: Callable[[int], None] | None = None,
     ) -> FolderTree:
-        """Object count and size for every folder down to `depth` levels, plus up to `files` files per folder."""
+        """
+        Object count and size for every folder down to `depth` levels, plus up to `files` files per folder.
+        """
         scan = self.iter_objects(
             uri, limit=None if limit is None else limit + 1, progress=progress
         )
@@ -5799,8 +6118,10 @@ class S3Analyzer(_BaseAnalyzer):
         scan_limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> list[ObjectInfo]:
-        """Objects matching every given filter (see make_filter). Stops after `limit` matches
-        or after scanning `scan_limit` keys."""
+        """
+        Objects matching every given filter (see make_filter). Stops after `limit` matches
+        or after scanning `scan_limit` keys.
+        """
         keep = make_filter(
             pattern=pattern,
             regex=regex,
@@ -5859,7 +6180,8 @@ class S3Analyzer(_BaseAnalyzer):
         progress: Callable[[int], None] | None = None,
         read_progress: Callable[[int, int], None] | None = None,
     ) -> DuplicateReport:
-        """Identical files under `uri`, with what their copies take and cost.
+        """
+        Identical files under `uri`, with what their copies take and cost.
 
         Files are grouped by size (a file no other file matches in size can't be a copy), then by ETag.
         method='hash' (the default) also reads files that share a size but not an ETag, because copies uploaded
@@ -5922,11 +6244,13 @@ class S3Analyzer(_BaseAnalyzer):
         progress: Callable[[int], None] | None = None,
         read_progress: Callable[[int, int], None] | None = None,
     ) -> FileDetailsReport:
-        """What's inside each file under `uri` (see describe_file): a PDF's pages, a table's rows and columns, a
+        """
+        What's inside each file under `uri` (see describe_file): a PDF's pages, a table's rows and columns, a
         picture's size, ... Files can be picked with `pattern` (a glob on the name, or on the key when it has a
         '/') and `extensions` ('pdf' also matches 'pdf.gz'); the first `limit` of them in key order are read
         (None = all). A uri that names one file describes just that file. See describe_objects for what is read
-        and max_read. progress gets the running count of keys listed; read_progress (files done, files)."""
+        and max_read. progress gets the running count of keys listed; read_progress (files done, files).
+        """
         bucket, prefix = parse_s3_uri(uri)
         started = time.monotonic()
         keep = make_filter(pattern=pattern, extensions=extensions)
@@ -5959,12 +6283,14 @@ class S3Analyzer(_BaseAnalyzer):
         max_workers: int = 8,
         progress: Callable[[int, int], None] | None = None,
     ) -> FileDetailsReport:
-        """What's inside each of these objects (see describe_file), read in parallel with ranged GETs of 256 KB
+        """
+        What's inside each of these objects (see describe_file), read in parallel with ranged GETs of 256 KB
         blocks, fetching only the parts each format needs: a PDF's page tree and first pages, a parquet footer, a
         picture's header, the first 256 KB of a CSV. Reading stops at `max_read` bytes in all (None = no cap; the
         files not reached get skipped='max_read') and after 128 MB of any one file. Objects in GLACIER /
         DEEP_ARCHIVE aren't read (skipped='archived'). password opens password-protected PDFs. progress gets
-        (files done, files)."""
+        (files done, files).
+        """
         started = time.monotonic()
         todo = list(enumerate(o for o in objects if not o.is_folder_marker))
         budget = _ReadBudget(parse_size(max_read))
@@ -6037,7 +6363,9 @@ class S3Analyzer(_BaseAnalyzer):
     def compare(
         self, uri_a: str, uri_b: str, *, progress: Callable[[int], None] | None = None
     ) -> CompareResult:
-        """Diff two prefixes (e.g. a copy/sync source and target) by relative key, size and ETag."""
+        """
+        Diff two prefixes (e.g. a copy/sync source and target) by relative key, size and ETag.
+        """
         bucket_a, prefix_a = parse_s3_uri(uri_a)
         bucket_b, prefix_b = parse_s3_uri(uri_b)
         seen = [
@@ -6070,7 +6398,9 @@ class S3Analyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> VersionStats:
-        """Current vs noncurrent versions and delete markers - the hidden cost of versioned buckets."""
+        """
+        Current vs noncurrent versions and delete markers - the hidden cost of versioned buckets.
+        """
         bucket, prefix = parse_s3_uri(uri)
         stats = VersionStats(uri=s3_uri(bucket, prefix))
         noncurrent_by_key: dict[str, Stat] = defaultdict(Stat)
@@ -6114,8 +6444,10 @@ class S3Analyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> DeletedFiles:
-        """Keys under `uri` whose latest version is a delete marker (versioned buckets). Deleting the
-        marker (s3:DeleteObjectVersion) brings back `last_version`. deleted_after: datetime, '2024-05-01' or '7d'."""
+        """
+        Keys under `uri` whose latest version is a delete marker (versioned buckets). Deleting the
+        marker (s3:DeleteObjectVersion) brings back `last_version`. deleted_after: datetime, '2024-05-01' or '7d'.
+        """
         bucket, prefix = parse_s3_uri(uri)
         since = parse_time(deleted_after)
         result = DeletedFiles(uri=s3_uri(bucket, prefix))
@@ -6181,8 +6513,10 @@ class S3Analyzer(_BaseAnalyzer):
         limit: int | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> LifecycleImpact:
-        """What a lifecycle rule on `uri` would move or delete if it ran today, and the cost before and after.
-        See simulate_lifecycle_objects for the arguments."""
+        """
+        What a lifecycle rule on `uri` would move or delete if it ran today, and the cost before and after.
+        See simulate_lifecycle_objects for the arguments.
+        """
         scan = self.iter_objects(
             uri, limit=None if limit is None else limit + 1, progress=progress
         )
@@ -6204,8 +6538,10 @@ class S3Analyzer(_BaseAnalyzer):
         max_workers: int = 8,
         progress: Callable[[int], None] | None = None,
     ) -> list[BucketReport]:
-        """Settings (and CloudWatch size unless metrics=False) for every bucket, checked in parallel.
-        match: only buckets whose name matches this glob, e.g. 'sagemaker-*'."""
+        """
+        Settings (and CloudWatch size unless metrics=False) for every bucket, checked in parallel.
+        match: only buckets whose name matches this glob, e.g. 'sagemaker-*'.
+        """
         buckets = [
             b
             for b in self.list_buckets()
@@ -6240,7 +6576,9 @@ class S3Analyzer(_BaseAnalyzer):
         return reports
 
     def object_versions(self, uri: str) -> list[ObjectVersion]:
-        """Full version history of one key, newest first (includes delete markers)."""
+        """
+        Full version history of one key, newest first (includes delete markers).
+        """
         bucket, key = parse_s3_uri(uri)
         history: list[ObjectVersion] = []
         for page in self.client.get_paginator("list_object_versions").paginate(
@@ -6280,8 +6618,10 @@ class S3Analyzer(_BaseAnalyzer):
         with_sizes: bool = False,
         progress: Callable[[int], None] | None = None,
     ) -> list[MultipartUpload]:
-        """Multipart uploads that were started but never completed/aborted - their parts are billed
-        but invisible in normal listings. with_sizes=True adds one ListParts call per upload."""
+        """
+        Multipart uploads that were started but never completed/aborted - their parts are billed
+        but invisible in normal listings. with_sizes=True adds one ListParts call per upload.
+        """
         bucket, prefix = parse_s3_uri(uri)
         uploads: list[MultipartUpload] = []
         for page in self.client.get_paginator("list_multipart_uploads").paginate(
@@ -6315,7 +6655,9 @@ class S3Analyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ objects
 
     def head(self, uri: str) -> dict[str, Any]:
-        """Object metadata: size, type, storage class, encryption, version, restore/lock status, user metadata, tags."""
+        """
+        Object metadata: size, type, storage class, encryption, version, restore/lock status, user metadata, tags.
+        """
         bucket, key = parse_s3_uri(uri)
         resp = self.client.head_object(Bucket=bucket, Key=key)
         etag = resp.get("ETag", "").strip('"')
@@ -6372,8 +6714,10 @@ class S3Analyzer(_BaseAnalyzer):
     def open(
         self, uri: str, *, decompress: bool = True, compression: str | None = None
     ) -> BinaryIO:
-        """Streaming binary reader (use as a context manager). .gz / .bz2 / .xz / .zst are decompressed
-        on the fly. compression overrides the codec guessed from the name ('gz', 'bz2', 'xz', 'zst'; '' = none)."""
+        """
+        Streaming binary reader (use as a context manager). .gz / .bz2 / .xz / .zst are decompressed
+        on the fly. compression overrides the codec guessed from the name ('gz', 'bz2', 'xz', 'zst'; '' = none).
+        """
         bucket, key = parse_s3_uri(uri)
         codec = (
             (
@@ -6416,7 +6760,9 @@ class S3Analyzer(_BaseAnalyzer):
     def read_bytes(
         self, uri: str, start: int | None = None, end: int | None = None
     ) -> bytes:
-        """Raw bytes (not decompressed). start/end are inclusive byte offsets for a ranged GET."""
+        """
+        Raw bytes (not decompressed). start/end are inclusive byte offsets for a ranged GET.
+        """
         bucket, key = parse_s3_uri(uri)
         extra = (
             {"Range": f"bytes={start or 0}-{'' if end is None else end}"}
@@ -6428,7 +6774,9 @@ class S3Analyzer(_BaseAnalyzer):
     def _read_head(
         self, uri: str, max_bytes: int, compression: str | None = None
     ) -> tuple[bytes, bool]:
-        """First max_bytes of the (decompressed) object, and whether there was more."""
+        """
+        First max_bytes of the (decompressed) object, and whether there was more.
+        """
         with self.open(uri, compression=compression) as stream:
             data = stream.read(max_bytes + 1)
         return data[:max_bytes], len(data) > max_bytes
@@ -6441,7 +6789,9 @@ class S3Analyzer(_BaseAnalyzer):
         encoding: str = "utf-8",
         compression: str | None = None,
     ) -> str:
-        """Decoded text of the first `max_bytes` (decompressed) bytes."""
+        """
+        Decoded text of the first `max_bytes` (decompressed) bytes.
+        """
         return self._read_head(uri, max_bytes, compression)[0].decode(
             encoding, errors="replace"
         )
@@ -6455,7 +6805,9 @@ class S3Analyzer(_BaseAnalyzer):
         max_line_chars: int = 100_000,
         compression: str | None = None,
     ) -> list[str]:
-        """First n lines; downloads only as much as needed."""
+        """
+        First n lines; downloads only as much as needed.
+        """
         lines: list[str] = []
         with io.TextIOWrapper(
             self.open(uri, compression=compression), encoding=encoding, errors="replace"
@@ -6468,7 +6820,9 @@ class S3Analyzer(_BaseAnalyzer):
         return lines
 
     def read_json(self, uri: str, *, compression: str | None = None) -> Any:
-        """Parse a whole JSON document (reads the full object)."""
+        """
+        Parse a whole JSON document (reads the full object).
+        """
         with self.open(uri, compression=compression) as stream:
             return json.load(stream)
 
@@ -6480,7 +6834,9 @@ class S3Analyzer(_BaseAnalyzer):
         encoding: str = "utf-8",
         compression: str | None = None,
     ) -> list[Any]:
-        """Parse JSON-lines records; n limits how many (only that much is downloaded)."""
+        """
+        Parse JSON-lines records; n limits how many (only that much is downloaded).
+        """
         records: list[Any] = []
         with io.TextIOWrapper(
             self.open(uri, compression=compression), encoding=encoding
@@ -6495,8 +6851,10 @@ class S3Analyzer(_BaseAnalyzer):
     def read_avro(
         self, uri: str, n: int | None = None, *, compression: str | None = None
     ) -> list[Any]:
-        """Records from an Avro container file (codecs null, deflate, bzip2, xz, zstandard; snappy needs
-        python-snappy). n limits how many; then only the start of the file is downloaded."""
+        """
+        Records from an Avro container file (codecs null, deflate, bzip2, xz, zstandard; snappy needs
+        python-snappy). n limits how many; then only the start of the file is downloaded.
+        """
         return self._avro(uri, n, compression)[2]
 
     def _avro(
@@ -6518,8 +6876,10 @@ class S3Analyzer(_BaseAnalyzer):
     def read_npy(
         self, uri: str, *, nrows: int | None = None, compression: str | None = None
     ) -> Any:
-        """NumPy .npy array (never unpickles). With nrows on an uncompressed file only those rows
-        are downloaded."""
+        """
+        NumPy .npy array (never unpickles). With nrows on an uncompressed file only those rows
+        are downloaded.
+        """
         np = _require("numpy", "Reading .npy")
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
@@ -6549,10 +6909,12 @@ class S3Analyzer(_BaseAnalyzer):
         compression: str | None = None,
         **kwargs: Any,
     ):
-        """Load a table into a pandas DataFrame: csv / tsv / psv / json / jsonl / parquet / orc /
+        """
+        Load a table into a pandas DataFrame: csv / tsv / psv / json / jsonl / parquet / orc /
         feather (arrow) / avro / excel (xlsx, xls) / npy, optionally .gz / .bz2 / .xz / .zst compressed.
         nrows reads just the first rows (parquet, orc and feather fetch only what they need).
-        Extra kwargs go to pandas.read_csv (csv / tsv / psv) or pandas.read_excel (e.g. sheet_name=)."""
+        Extra kwargs go to pandas.read_csv (csv / tsv / psv) or pandas.read_excel (e.g. sheet_name=).
+        """
         pd = _require("pandas", "Reading a table")
         bucket, key = parse_s3_uri(uri)
         guessed_fmt, guessed_codec = detect_format(key)
@@ -6606,14 +6968,18 @@ class S3Analyzer(_BaseAnalyzer):
     def _random_access(
         self, bucket: str, key: str, codec: str | None = None, *, buffer_size: int = MB
     ) -> io.BufferedIOBase:
-        """Seekable reader: ranged GETs, or (for a compressed object) the whole thing decompressed in memory."""
+        """
+        Seekable reader: ranged GETs, or (for a compressed object) the whole thing decompressed in memory.
+        """
         if not codec:
             return self._seekable(bucket, key, buffer_size=buffer_size)
         with self.open(s3_uri(bucket, key), compression=codec) as stream:
             return io.BytesIO(stream.read())
 
     def parquet_info(self, uri: str) -> dict[str, Any]:
-        """Row count, row groups, schema and compression from the parquet footer (a few KB downloaded)."""
+        """
+        Row count, row groups, schema and compression from the parquet footer (a few KB downloaded).
+        """
         pq = _require("pyarrow.parquet", "Reading parquet")
         bucket, key = parse_s3_uri(uri)
         with self._seekable(bucket, key) as handle:
@@ -6637,9 +7003,11 @@ class S3Analyzer(_BaseAnalyzer):
         max_bytes: int = 256 * MB,
         compression: str | None = None,
     ) -> ArchiveListing:
-        """Files inside a .zip / .tar / .tar.gz / .tgz (e.g. a SageMaker model.tar.gz) without extracting it.
+        """
+        Files inside a .zip / .tar / .tar.gz / .tgz (e.g. a SageMaker model.tar.gz) without extracting it.
         A zip's index sits at its end, so only that is downloaded. A compressed tar has no index: it's
-        streamed from the start and the listing stops after `max_bytes` of it (complete=False)."""
+        streamed from the start and the listing stops after `max_bytes` of it (complete=False).
+        """
         bucket, key = parse_s3_uri(uri)
         fmt, codec = detect_format(key)
         codec = codec if compression is None else compression
@@ -6694,15 +7062,19 @@ class S3Analyzer(_BaseAnalyzer):
         return listing
 
     def safetensors_info(self, uri: str) -> dict[str, Any]:
-        """Tensor names, dtypes and shapes plus metadata from a .safetensors header (only the header is read)."""
+        """
+        Tensor names, dtypes and shapes plus metadata from a .safetensors header (only the header is read).
+        """
         length = _safetensors_length(self.read_bytes(uri, 0, 7))
         return _parse_safetensors(self.read_bytes(uri, 8, 8 + length - 1))
 
     def _open_document(
         self, bucket: str, key: str, codec: str | None, *, whole_under: int = 64 * MB
     ) -> io.BufferedIOBase:
-        """Seekable handle for a document: the whole object in memory when it's small (or compressed),
-        ranged GETs for bigger ones."""
+        """
+        Seekable handle for a document: the whole object in memory when it's small (or compressed),
+        ranged GETs for bigger ones.
+        """
         if codec:
             return self._random_access(bucket, key, codec)
         size = self.client.head_object(Bucket=bucket, Key=key)["ContentLength"]
@@ -6724,13 +7096,15 @@ class S3Analyzer(_BaseAnalyzer):
         layout: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> Document:
-        """Text of a PDF, one part per page (needs pypdf). pages: 1-based page numbers, e.g. [1, 2] or
+        """
+        Text of a PDF, one part per page (needs pypdf). pages: 1-based page numbers, e.g. [1, 2] or
         range(1, 11); only those are read. Scanned pages have no text layer and come back empty.
         pictures=True also draws each page read into doc.pictures, None only the pages with no text (scans);
         drawing needs pypdfium2 and pillow, and what stops it goes in doc.errors['pictures'] instead of
         raising. max_pictures: draw at most this many. layout=True also keeps where each line sits, its size
         and weight (doc.layout), for pdf_flow(doc): the text as headings, paragraphs and lists. progress gets
-        (pages drawn, pages to draw), or with pictures=False (pages read, pages to read)."""
+        (pages drawn, pages to draw), or with pictures=False (pages read, pages to read).
+        """
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
         with self._open_document(
@@ -6759,9 +7133,11 @@ class S3Analyzer(_BaseAnalyzer):
         compression: str | None = None,
         progress: Callable[[int, int], None] | None = None,
     ) -> list[Picture]:
-        """Pictures of a PDF's pages as they print, scanned pages included (needs pypdfium2 and pillow).
+        """
+        Pictures of a PDF's pages as they print, scanned pages included (needs pypdfium2 and pillow).
         pages: 1-based page numbers, e.g. [1, 2] (default: every page). Each Picture shows itself in a
-        notebook; .data holds its PNG / JPEG bytes. progress gets (pages drawn, pages to draw)."""
+        notebook; .data holds its PNG / JPEG bytes. progress gets (pages drawn, pages to draw).
+        """
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
         with self._open_document(
@@ -6772,8 +7148,10 @@ class S3Analyzer(_BaseAnalyzer):
     def read_docx(
         self, uri: str, *, pictures: bool = False, compression: str | None = None
     ) -> Document:
-        """Text of a Word .docx: paragraphs and tables in order, headings, title and author. pictures=True
-        also loads its pictures, in reading order (doc.pictures). No packages needed."""
+        """
+        Text of a Word .docx: paragraphs and tables in order, headings, title and author. pictures=True
+        also loads its pictures, in reading order (doc.pictures). No packages needed.
+        """
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
         with self._open_document(bucket, key, codec) as handle:
@@ -6786,8 +7164,10 @@ class S3Analyzer(_BaseAnalyzer):
         slides: Iterable[int] | None = None,
         compression: str | None = None,
     ) -> Document:
-        """Text of a PowerPoint .pptx, one part per slide, with slide titles, tables and speaker notes.
-        slides: 1-based slide numbers to read. No packages needed."""
+        """
+        Text of a PowerPoint .pptx, one part per slide, with slide titles, tables and speaker notes.
+        slides: 1-based slide numbers to read. No packages needed.
+        """
         bucket, key = parse_s3_uri(uri)
         codec = detect_format(key)[1] if compression is None else compression
         with self._open_document(bucket, key, codec) as handle:
@@ -6805,11 +7185,13 @@ class S3Analyzer(_BaseAnalyzer):
         layout: bool = False,
         progress: Callable[[int, int], None] | None = None,
     ) -> Document:
-        """Text of a PDF, Word .docx or PowerPoint .pptx, told apart by name or content. pages: page numbers
+        """
+        Text of a PDF, Word .docx or PowerPoint .pptx, told apart by name or content. pages: page numbers
         (PDF) or slide numbers (PPTX). doc.text is everything; doc.parts has one entry per page / slide.
         pictures: for a PDF, True draws every page read and None the pages without text (see read_pdf);
         for a Word file, True or None loads its pictures. False (the default) reads text only. layout=True
-        keeps a PDF's lines with where they sit (see read_pdf and pdf_flow)."""
+        keeps a PDF's lines with where they sit (see read_pdf and pdf_flow).
+        """
         bucket, key = parse_s3_uri(uri)
         fmt, codec = detect_format(key)
         codec = codec if compression is None else compression
@@ -6843,11 +7225,13 @@ class S3Analyzer(_BaseAnalyzer):
         raise ValueError(f"{key!r} isn't a PDF, Word .docx or PowerPoint .pptx file")
 
     def preview(self, uri: str, n: int = 20, *, max_bytes: int = 512 * KB) -> Preview:
-        """Best-effort look at an object: a DataFrame for tables (csv, tsv, psv, json, jsonl, parquet, orc,
+        """
+        Best-effort look at an object: a DataFrame for tables (csv, tsv, psv, json, jsonl, parquet, orc,
         feather, avro, excel, npy), the files in an archive (zip, tar, tar.gz, model.tar.gz, npz, PyTorch
         checkpoints), tensors in a .safetensors file, notebook cells, parsed JSON, text lines, an image,
         an audio / video player or PDF link, or a binary sample. Files without an extension are recognised
-        by their first bytes. Downloads only what it needs."""
+        by their first bytes. Downloads only what it needs.
+        """
         bucket, key = parse_s3_uri(uri)
         meta = self.client.head_object(Bucket=bucket, Key=key)
         fmt, compression = detect_format(key)
@@ -6909,7 +7293,9 @@ class S3Analyzer(_BaseAnalyzer):
     def _confirm_format(
         self, bucket: str, key: str, fmt: str | None, codec: str | None
     ) -> tuple[str | None, str | None, bool, str]:
-        """Check the name's guess against the first bytes -> (format, compression, sniffed, note)."""
+        """
+        Check the name's guess against the first bytes -> (format, compression, sniffed, note).
+        """
         uri = s3_uri(bucket, key)
         sniffed_fmt, sniffed_codec = sniff_format(self.read_bytes(uri, 0, 511))
         note = ""
@@ -7264,7 +7650,9 @@ class S3Analyzer(_BaseAnalyzer):
     def _preview_as_text(
         self, p: Preview, uri: str, n: int, codec: str, max_bytes: int, sniffed: bool
     ) -> None:
-        """JSON, text lines or a binary sample (also the fallback for everything else)."""
+        """
+        JSON, text lines or a binary sample (also the fallback for everything else).
+        """
         data, p.truncated = self._read_head(uri, max_bytes, codec)
         if p.format == "json":
             if not p.truncated:
@@ -7308,8 +7696,10 @@ class S3Analyzer(_BaseAnalyzer):
         p.data = lines[:n]
 
     def _show_json(self, p: Preview, value: Any, cut: int = 0, *, n: int = 20) -> None:
-        """A list of records as a table, anything else as JSON. `cut`: the objects and arrays along the end of a
-        document that was cut off (_json_prefix), so a record cut in half isn't a row."""
+        """
+        A list of records as a table, anything else as JSON. `cut`: the objects and arrays along the end of a
+        document that was cut off (_json_prefix), so a record cut in half isn't a row.
+        """
         records = value[:-1] if isinstance(value, list) and cut > 1 else value
         if isinstance(records, list) and records and all(isinstance(r, dict) for r in records):
             pd = _require("pandas", "Table preview")
@@ -7322,9 +7712,11 @@ class S3Analyzer(_BaseAnalyzer):
             p.info["cut"] = cut
 
     def presigned_url(self, uri: str, *, expires: int = 3600, inline: bool = False) -> str:
-        """Temporary HTTPS link to download the object without AWS credentials. inline=True makes it open in a
+        """
+        Temporary HTTPS link to download the object without AWS credentials. inline=True makes it open in a
         browser tab instead: S3 sends a PDF, picture, sound, video or text file as a type the browser shows,
-        whatever type it was stored with (other files still download)."""
+        whatever type it was stored with (other files still download).
+        """
         bucket, key = parse_s3_uri(uri)
         params = {"Bucket": bucket, "Key": key}
         if inline:
@@ -7343,8 +7735,10 @@ class S3Analyzer(_BaseAnalyzer):
         *,
         progress: Callable[[int, int], None] | None = None,
     ) -> str:
-        """Download one file to `path` (a file or directory; default: the downloads folder, see downloads_folder()).
-        Returns the local path. Refuses when the disk hasn't room. progress gets (bytes downloaded, file size)."""
+        """
+        Download one file to `path` (a file or directory; default: the downloads folder, see downloads_folder()).
+        Returns the local path. Refuses when the disk hasn't room. progress gets (bytes downloaded, file size).
+        """
         bucket, key = parse_s3_uri(uri)
         path = path or os.path.join(self.downloads_folder(), os.path.basename(key))
         if os.path.isdir(path):
@@ -7369,10 +7763,12 @@ class S3Analyzer(_BaseAnalyzer):
         progress: Callable[[int, int], None] | None = None,
         list_progress: Callable[[int], None] | None = None,
     ) -> FolderDownload:
-        """Download every file under a folder into `path` (default: a folder of the same name in the downloads
+        """
+        Download every file under a folder into `path` (default: a folder of the same name in the downloads
         folder, see downloads_folder()), keeping the sub-folders. A file already there with the same size and time
         is skipped, so running it again resumes. GLACIER / DEEP_ARCHIVE files are skipped (they need a restore
-        first). Refuses when the disk hasn't room. progress gets (bytes downloaded, bytes to download)."""
+        first). Refuses when the disk hasn't room. progress gets (bytes downloaded, bytes to download).
+        """
         bucket, prefix = parse_s3_uri(uri)
         if prefix and not prefix.endswith("/"):
             prefix += "/"  # 's3://b/data' means the folder data/, not also data-old/
@@ -7425,8 +7821,10 @@ class S3Analyzer(_BaseAnalyzer):
         progress: Callable[[int, int], None] | None,
         max_workers: int = 1,
     ) -> dict[str, Exception]:
-        """Download (bucket, key, local path, size, last modified) jobs in parallel, stamping each file with
-        the object's time. Returns {key: error} for the ones that failed (AWS errors, a full disk)."""
+        """
+        Download (bucket, key, local path, size, last modified) jobs in parallel, stamping each file with
+        the object's time. Returns {key: error} for the ones that failed (AWS errors, a full disk).
+        """
         total, done, lock, stop = (
             sum(job[3] for job in jobs),
             [0],
@@ -7474,12 +7872,14 @@ class S3Analyzer(_BaseAnalyzer):
         max_files: int = 10_000,
         progress: Callable[[int], None] | None = None,
     ) -> ZipPlan:
-        """Check whether a file or folder can be zipped here, without downloading it: what would go in, the size
+        """
+        Check whether a file or folder can be zipped here, without downloading it: what would go in, the size
         and file-count limits, free disk space and memory, and whether the files can be read (one 1-byte read).
         `path` is the .zip to write (default: named after the folder, in the downloads folder, see
         downloads_folder()). `uri` can also be a list of files and folders from one bucket (s3:// paths, or
         ObjectInfo from a listing): they go in one zip, laid out as they are under the folder they share, which
-        names it ('churn-12-files.zip')."""
+        names it ('churn-12-files.zip').
+        """
         limit = parse_size(max_size)
         if limit is None:
             raise ValueError("max_size can't be None; pass a size such as '2GB'")
@@ -7573,8 +7973,10 @@ class S3Analyzer(_BaseAnalyzer):
     def _zip_picks(
         self, items: list[str | ObjectInfo], progress: Callable[[int], None] | None
     ) -> tuple[str, str, str, list[str], Iterator[ObjectInfo]]:
-        """plan_zip for a list -> (bucket, the folder they share, the zip's name, the s3:// paths, every file in
-        them). A path without a '/' at the end is a file when there is one with that key, else a folder."""
+        """
+        plan_zip for a list -> (bucket, the folder they share, the zip's name, the s3:// paths, every file in
+        them). A path without a '/' at the end is a file when there is one with that key, else a folder.
+        """
         if not items:
             raise ValueError("Nothing to zip: pass at least one file or folder")
         found = [
@@ -7640,11 +8042,13 @@ class S3Analyzer(_BaseAnalyzer):
         progress: Callable[[int, int], None] | None = None,
         list_progress: Callable[[int], None] | None = None,
     ) -> ZipDownload:
-        """Zip a file or a folder (with its sub-folders) into one .zip on the notebook's disk, after plan_zip's
+        """
+        Zip a file or a folder (with its sub-folders) into one .zip on the notebook's disk, after plan_zip's
         checks pass: at most max_size of files (100 MB by default) and max_files files, room on the disk, and read
         access. Nothing is written when a check fails, or with dry_run=True. Already-compressed files (parquet,
         gz, images, ...) are stored as they are, the rest compressed. progress gets (bytes zipped, bytes to zip).
-        `uri` can be a list of files and folders from one bucket too (see plan_zip)."""
+        `uri` can be a list of files and folders from one bucket too (see plan_zip).
+        """
         plan = self.plan_zip(
             uri, path, max_size=max_size, max_files=max_files, progress=list_progress
         )
@@ -7759,7 +8163,9 @@ class S3Analyzer(_BaseAnalyzer):
         done: list[int],
         report: Callable[[], None],
     ) -> None:
-        """Copy a big object into the zip 1 MB at a time, so it never sits in memory whole."""
+        """
+        Copy a big object into the zip 1 MB at a time, so it never sits in memory whole.
+        """
         match = {"IfMatch": f'"{obj.etag}"'} if obj.etag else {}
         body = self.client.get_object(Bucket=obj.bucket, Key=obj.key, **match)["Body"]
         try:
@@ -7774,13 +8180,17 @@ class S3Analyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ the downloads folder (local, no AWS calls)
 
     def downloads_folder(self) -> str:
-        """The folder downloads go into when they're given no path (absolute): `self.downloads`, 's3-downloads'
-        next to the notebook unless S3Analyzer(downloads=...) or S3View(downloads=...) says otherwise."""
+        """
+        The folder downloads go into when they're given no path (absolute): `self.downloads`, 's3-downloads'
+        next to the notebook unless S3Analyzer(downloads=...) or S3View(downloads=...) says otherwise.
+        """
         return os.path.abspath(os.path.expanduser(str(self.downloads).strip() or "."))
 
     def _make_downloads_folder(self, paths: Iterable[str]) -> None:
-        """Before writing `paths`: when one goes in the downloads folder and that folder is new (or empty), make it
-        with aws-analyzer's .gitignore, which keeps it out of git and lets clean_downloads empty it."""
+        """
+        Before writing `paths`: when one goes in the downloads folder and that folder is new (or empty), make it
+        with aws-analyzer's .gitignore, which keeps it out of git and lets clean_downloads empty it.
+        """
         folder = self.downloads_folder()
         if _protected_folder(folder) or not any(
             os.path.abspath(path).startswith(folder.rstrip(os.sep) + os.sep) for path in paths
@@ -7796,10 +8206,12 @@ class S3Analyzer(_BaseAnalyzer):
             pass  # the download itself says what's wrong with the folder
 
     def list_downloads(self) -> DownloadsFolder:
-        """What's in the downloads folder (see downloads_folder()): each file, folder and zip download() and
+        """
+        What's in the downloads folder (see downloads_folder()): each file, folder and zip download() and
         download_zip() saved, newest first, with its size, files and when it was downloaded; the disk's free space;
         and whether clean_downloads may empty it (`managed`: a folder made for downloads). The notebook's own
-        folder, the home folder and the ones above them (`protected`) aren't listed: what's there isn't downloads."""
+        folder, the home folder and the ones above them (`protected`) aren't listed: what's there isn't downloads.
+        """
         path = self.downloads_folder()
         folder = DownloadsFolder(path, exists=os.path.isdir(path), protected=_protected_folder(path))
         if not folder.exists:
@@ -7833,13 +8245,15 @@ class S3Analyzer(_BaseAnalyzer):
         older_than: datetime | date | timedelta | str | None = None,
         dry_run: bool = False,
     ) -> DownloadsCleanup:
-        """Delete downloads from the downloads folder to free the disk: all of them, the ones named (a name as
+        """
+        Delete downloads from the downloads folder to free the disk: all of them, the ones named (a name as
         list_downloads gives it, 'churn.zip', or a path to it), or those downloaded before older_than ('7d',
         '2024-05-01'). dry_run=True deletes nothing and says what would go. Nothing in S3 changes.
 
         Only a folder made for downloads is emptied (it has aws-analyzer's .gitignore, which stays): one that held
         other files first, the notebook's own folder or the home folder raise ValueError, as does a name that
-        isn't there."""
+        isn't there.
+        """
         folder = self.list_downloads()
         own = f"S3View(downloads={DOWNLOADS!r})"
         if folder.protected:
@@ -7881,8 +8295,10 @@ class S3Analyzer(_BaseAnalyzer):
 
     @staticmethod
     def _download_name(item: Any, folder: str) -> str:
-        """A name or path given to clean_downloads -> the name of the entry it is in the downloads folder ('churn/',
-        's3-downloads/churn.zip', a LocalDownload); '' for a path elsewhere, or inside one of them."""
+        """
+        A name or path given to clean_downloads -> the name of the entry it is in the downloads folder ('churn/',
+        's3-downloads/churn.zip', a LocalDownload); '' for a path elsewhere, or inside one of them.
+        """
         text = os.path.expanduser(str(getattr(item, "path", item)).strip())
         for base in (os.getcwd(), folder):  # a path from the notebook's folder, or a name in the downloads folder
             full = os.path.abspath(os.path.join(base, text))
@@ -7929,10 +8345,12 @@ class _Pages:
 
 @dataclass
 class _Flow:
-    """A document in reading order: ('title' | 'h1'.. | 'p' | 'li', text), ('table', rows), ('picture', Picture),
+    """
+    A document in reading order: ('title' | 'h1'.. | 'p' | 'li', text), ('table', rows), ('picture', Picture),
     ('missing', a line about something that isn't shown) and, in a PDF's text (pdf_flow), ('page', number) where
     each page starts. A 'p' keeps its line breaks, and an 'li' that starts with its own number ('2. ', 'b) ')
-    shows no bullet."""
+    shows no bullet.
+    """
 
     items: list[tuple[str, Any]]
     title: str = ""
@@ -7982,16 +8400,20 @@ _BADGE = "🪣 S3"  # the chip before each report's title, so reports from diffe
 
 
 def _data_img(data: bytes, mime: str, alt: str = "") -> str:
-    """An <img> that holds the picture itself (a data: URL), so it stays in the saved notebook."""
+    """
+    An <img> that holds the picture itself (a data: URL), so it stays in the saved notebook.
+    """
     return f'<img src="data:{_esc(mime)};base64,{base64.b64encode(data).decode()}" alt="{_esc(alt)}">'
 
 
 class _Zoom:
-    """The full-size view of a report's PDF pages, with CSS only (so it still works in a saved notebook). Each page
+    """
+    The full-size view of a report's PDF pages, with CSS only (so it still works in a saved notebook). Each page
     has a hidden radio button, and its picture is a <label> that checks it; a checked radio turns the page into a
     fixed overlay. In the overlay, ‹ and › are labels for the radios of the pages before and after it (across all
     the report's _Pages blocks), and ✕ or a click on the page checks the group's "none" radio, which closes it.
-    A random group name keeps two reports in one notebook apart."""
+    A random group name keeps two reports in one notebook apart.
+    """
 
     def __init__(self, blocks: list[Any]):
         self.group = "z" + os.urandom(5).hex()
@@ -8000,15 +8422,19 @@ class _Zoom:
         self.started = False
 
     def start(self) -> str:
-        """The "none" radio (checked: no page open), once per report."""
+        """
+        The "none" radio (checked: no page open), once per report.
+        """
         if self.started:
             return ""
         self.started = True
         return f'<input type="radio" class="zr" name="{self.group}" id="{self.group}-0">'
 
     def page(self, picture: Picture) -> str:
-        """One page: its picture, which opens it full size, and the overlay's buttons. aspect-ratio keeps the page's
-        place in the report while it's open, so the pages behind the overlay don't move."""
+        """
+        One page: its picture, which opens it full size, and the overlay's buttons. aspect-ratio keeps the page's
+        place in the report while it's open, so the pages behind the overlay don't move.
+        """
         self.count += 1
         n, group = self.count, self.group
         info = _image_info(picture.data) or {}
@@ -8025,8 +8451,10 @@ class _Zoom:
 
 
 def _flow_html(items: list[tuple[str, Any]]) -> str:
-    """A document's _Flow items as HTML. Every piece of its text is escaped; headings are styled divs, not
-    <h1>.. tags, so they don't land in the notebook's table of contents."""
+    """
+    A document's _Flow items as HTML. Every piece of its text is escaped; headings are styled divs, not
+    <h1>.. tags, so they don't land in the notebook's table of contents.
+    """
     out: list[str] = []
     for i, (role, value) in enumerate(items):
         if role == "li":
@@ -8055,7 +8483,9 @@ def _flow_html(items: list[tuple[str, Any]]) -> str:
 
 
 def _flow_text(items: list[tuple[str, Any]]) -> str:
-    """A document's _Flow items as plain text: '#' headings, '- ' list items, ' | ' tables, '-- Page 2 --'."""
+    """
+    A document's _Flow items as plain text: '#' headings, '- ' list items, ' | ' tables, '-- Page 2 --'.
+    """
     out: list[str] = []
     for i, (role, value) in enumerate(items):
         if role == "li":
@@ -8104,8 +8534,10 @@ def _image_lines(block: _Image, report: _Report) -> list[str]:
 
 @_draws(_Pages, "html")
 def _pages_html(block: _Pages, report: _Report) -> str:
-    """PDF pages side by side; a click on one shows it full size, and ‹ › step through every page in the report
-    (the _Zoom its _Pages blocks share)."""
+    """
+    PDF pages side by side; a click on one shows it full size, and ‹ › step through every page in the report
+    (the _Zoom its _Pages blocks share).
+    """
     title = f"<h4>{_prose(block.title)}</h4>" if block.title else ""
     captioned = len(block.pictures) > 1
     zoom = report.shared(_Zoom, lambda: _Zoom(list(report.blocks)))
@@ -8159,7 +8591,9 @@ def _media_lines(block: _Media, report: _Report) -> list[str]:
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
@@ -8212,7 +8646,9 @@ def _policy_table(statements: list[PolicyStatement], title: str = "") -> _Table:
 
 
 def _exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
-    """One-word public access status for the overview table."""
+    """
+    One-word public access status for the overview table.
+    """
     if cfg.policy_is_public:
         return "PUBLIC (policy)"
     if any(
@@ -8226,7 +8662,9 @@ def _exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
 
 
 def _block_label(settings: dict[str, bool] | None) -> str:
-    """Block Public Access settings -> 'all on' / '2/4 on' / 'not set'."""
+    """
+    Block Public Access settings -> 'all on' / '2/4 on' / 'not set'.
+    """
     if not settings:
         return "not set"
     on = sum(bool(v) for v in settings.values())
@@ -8252,7 +8690,9 @@ def _objects_table(title: str, objects: list[ObjectInfo], base: str = "") -> _Ta
 
 
 def _file_steps(bucket: str, objects: list[ObjectInfo]) -> list[tuple[str, str]]:
-    """Next steps after a list of files: look at the first one."""
+    """
+    Next steps after a list of files: look at the first one.
+    """
     if not objects:
         return []
     uri = s3_uri(bucket, objects[0].key)
@@ -8351,7 +8791,9 @@ def _card_value(key: str, value: Any) -> str:
 
 
 def _document_table(rows: list[list[str]], title: str) -> _Table:
-    """A table from a Word / PowerPoint file: first row as the header, ragged rows padded."""
+    """
+    A table from a Word / PowerPoint file: first row as the header, ragged rows padded.
+    """
     width = max(len(row) for row in rows)
     rows = [row + [""] * (width - len(row)) for row in rows]
     headers = rows[0] if len(rows) > 1 else [""] * width
@@ -8359,8 +8801,10 @@ def _document_table(rows: list[list[str]], title: str) -> _Table:
 
 
 def _web_picture(picture: Picture) -> tuple[Picture | None, str]:
-    """A picture ready to show in a notebook -> (picture, '') or (None, why it can't be shown). With pillow
-    installed, a big picture shrinks to 1,600 pixels and TIFF becomes PNG, so the notebook stays small."""
+    """
+    A picture ready to show in a notebook -> (picture, '') or (None, why it can't be shown). With pillow
+    installed, a big picture shrinks to 1,600 pixels and TIFF becomes PNG, so the notebook stays small.
+    """
     if picture.mime and (len(picture.data) <= 512 * KB or picture.mime == "image/svg+xml"):
         return picture, ""
     pil, missing = None, ""
@@ -8389,9 +8833,11 @@ def _web_picture(picture: Picture) -> tuple[Picture | None, str]:
 
 def _flow_items(doc: Document, *, max_parts: int | None = None, max_chars: int | None = None,
                 max_pictures: int = _MAX_PICTURES) -> tuple[list[tuple[str, Any]], bool, int]:
-    """A Word document as _Flow items in reading order: its headings, paragraphs, list items and tables, with
+    """
+    A Word document as _Flow items in reading order: its headings, paragraphs, list items and tables, with
     its pictures in place (after max_pictures, a line naming each one instead). Stops after max_parts parts
-    or max_chars characters -> (items, whether it stopped early, pictures left out by max_pictures)."""
+    or max_chars characters -> (items, whether it stopped early, pictures left out by max_pictures).
+    """
     items: list[tuple[str, Any]] = []
     tables, waiting = iter(doc.tables), list(doc.pictures)
     counts = {"chars": 0, "shown": 0, "capped": 0}
@@ -8424,9 +8870,11 @@ def _flow_items(doc: Document, *, max_parts: int | None = None, max_chars: int |
 
 
 def _pdf_blocks(doc: Document, drawn: dict[int, Picture], max_chars: int) -> tuple[list[Any], bool]:
-    """A PDF's pages in order: the pages with text laid out by pdf_flow, in one _Flow with a line where each page
+    """
+    A PDF's pages in order: the pages with text laid out by pdf_flow, in one _Flow with a line where each page
     starts, and the drawn pages (`drawn`, by page number) as pictures with their text folded under them. Stops
-    after max_chars characters -> (blocks, whether it stopped early)."""
+    after max_chars characters -> (blocks, whether it stopped early).
+    """
     texts = dict(zip(doc.numbers, doc.parts))
     blocks: list[Any] = []
     items: list[tuple[str, Any]] = []
@@ -8460,20 +8908,26 @@ def _pdf_blocks(doc: Document, drawn: dict[int, Picture], max_chars: int) -> tup
 
 
 def _pages_title(pictures: list[Picture], count: int | None) -> str:
-    """'Pages 1-3 of 12' over PDF pages drawn from the start."""
+    """
+    'Pages 1-3 of 12' over PDF pages drawn from the start.
+    """
     first, last = pictures[0].page, pictures[-1].page
     span = f"Page {first}" if first == last else f"Pages {first}–{last}"
     return span + (f" of {count:,}" if count and count > len(pictures) else "")
 
 
 def _page_numbers(numbers: list[int]) -> list[int] | range:
-    """Page numbers to put in a call: a range when they run on without gaps."""
+    """
+    Page numbers to put in a call: a range when they run on without gaps.
+    """
     run = len(numbers) > 2 and numbers == list(range(numbers[0], numbers[-1] + 1))
     return range(numbers[0], numbers[-1] + 1) if run else numbers
 
 
 def _listing_table(rows: list[dict[str, Any]], title: str) -> _Table:
-    """list of dicts -> table; sizes, dates and big numbers formatted for reading."""
+    """
+    list of dicts -> table; sizes, dates and big numbers formatted for reading.
+    """
     if not rows:
         return _Table(["(empty)"], [], title=title)
 
@@ -8606,7 +9060,9 @@ _DETAIL_TABLES: list[tuple[str, tuple[str, ...], list[tuple[str, str]]]] = [  # 
 
 
 def _details_table_of(d: FileDetails) -> str:
-    """The title of the file_details() table a file goes in; 'Not read' when there's nothing to show."""
+    """
+    The title of the file_details() table a file goes in; 'Not read' when there's nothing to show.
+    """
     if d.skipped or (d.error and not d.facts):
         return "Not read"
     if d.format == "json" and "rows" not in d.facts:
@@ -8615,7 +9071,9 @@ def _details_table_of(d: FileDetails) -> str:
 
 
 def _fact_cell(d: FileDetails, key: str) -> Any:
-    """One fact of a file as a table cell ('' when the file doesn't have it)."""
+    """
+    One fact of a file as a table cell ('' when the file doesn't have it).
+    """
     facts = d.facts
     if key == "format":
         label = _FORMAT_LABELS.get(d.format or "", d.format) or "unknown"
@@ -8667,7 +9125,9 @@ def _fact_cell(d: FileDetails, key: str) -> Any:
 
 
 def _details_note(d: FileDetails) -> str:
-    """What's worth knowing about a file beyond its facts: why it couldn't be read, or what it really is."""
+    """
+    What's worth knowing about a file beyond its facts: why it couldn't be read, or what it really is.
+    """
     if d.error:
         return f"Couldn't read: {d.error}"
     if d.named:
@@ -8678,7 +9138,9 @@ def _details_note(d: FileDetails) -> str:
 
 
 def _details_tables(files: list[FileDetails], base: str) -> list[_Table]:
-    """file_details(): a table per kind of file, only the columns some file has, and a Note column when needed."""
+    """
+    file_details(): a table per kind of file, only the columns some file has, and a Note column when needed.
+    """
     groups: dict[str, list[FileDetails]] = defaultdict(list)
     for d in files:
         groups[_details_table_of(d)].append(d)
@@ -8711,11 +9173,15 @@ def _details_tables(files: list[FileDetails], base: str) -> list[_Table]:
 
 
 def _details_cards(report: FileDetailsReport) -> list[tuple[str, ...]]:
-    """file_details(): file count, the totals of the most common kinds, what wasn't read, and what was read."""
+    """
+    file_details(): file count, the totals of the most common kinds, what wasn't read, and what was read.
+    """
     files = report.files
 
     def total(key: str, kinds: tuple[str, ...]) -> tuple[int, int, str]:
-        """(files with the fact, sum, accuracy mark) of a fact over the files of these kinds."""
+        """
+        (files with the fact, sum, accuracy mark) of a fact over the files of these kinds.
+        """
         having = [d for d in files if d.format in kinds and isinstance(d.facts.get(key), int)]
         hows = {d.facts.get(f"{key}_estimate") for d in having}
         mark = "estimate" if "estimate" in hows else "at least" if "at least" in hows else ""
@@ -8751,7 +9217,8 @@ def _details_cards(report: FileDetailsReport) -> list[tuple[str, ...]]:
 
 
 class S3View(_BaseView):
-    """Notebook UI over S3Analyzer. Each method renders a report and returns nothing;
+    """
+    Notebook UI over S3Analyzer. Each method renders a report and returns nothing;
     for the underlying data call the same-named method on `view.core` (an S3Analyzer).
 
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
@@ -8806,14 +9273,18 @@ class S3View(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """A missing object reads as "object not found"."""
+        """
+        A missing object reads as "object not found".
+        """
         return "object not found" if code in ("404", "NoSuchKey", "NotFound") else message
 
     def _price_basis(self) -> str:
         return f"estimated at {super()._price_basis()}, storage only"
 
     def _account_block(self) -> dict[str, bool] | None:
-        """Account-level Block Public Access, or None when it can't be read."""
+        """
+        Account-level Block Public Access, or None when it can't be read.
+        """
         try:
             return self.core.account_public_access_block()
         except (ClientError, BotoCoreError, ValueError):
@@ -8823,7 +9294,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def buckets(self, *, with_region: bool = True) -> None:
-        """All buckets in the account with region, creation date and age."""
+        """
+        All buckets in the account with region, creation date and age.
+        """
         buckets = sorted(
             self.core.list_buckets(with_region=with_region), key=lambda b: b.name
         )
@@ -8865,8 +9338,10 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def bucket_info(self, bucket: str, *, metrics: bool = True) -> None:
-        """Bucket settings, policy in plain English, risks, and CloudWatch size, object count and
-        estimated monthly cost (instant, even for huge buckets)."""
+        """
+        Bucket settings, policy in plain English, risks, and CloudWatch size, object count and
+        estimated monthly cost (instant, even for huge buckets).
+        """
         cfg = self.core.bucket_config(bucket)
         account_block = self._account_block()
         blocked = any(
@@ -9063,8 +9538,10 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def overview(self, match: str | None = None, *, metrics: bool = True) -> None:
-        """Every bucket in one table: size, estimated cost, versioning, encryption, public access,
-        lifecycle and warnings. match='sagemaker-*' checks only matching bucket names."""
+        """
+        Every bucket in one table: size, estimated cost, versioning, encryption, public access,
+        lifecycle and warnings. match='sagemaker-*' checks only matching bucket names.
+        """
         with self._progress("Checking buckets", unit="buckets") as tick:
             reports = self.core.bucket_reports(
                 match=match, metrics=metrics, progress=tick
@@ -9221,7 +9698,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def policy(self, bucket: str) -> None:
-        """Bucket policy in plain English: who can do what, on which files, when; risks; the raw JSON."""
+        """
+        Bucket policy in plain English: who can do what, on which files, when; risks; the raw JSON.
+        """
         name = parse_s3_uri(bucket)[0]
         document = self.core.bucket_policy(name)
         blocks: list[Any] = [_Title(f"Bucket policy of s3://{name}")]
@@ -9265,11 +9744,13 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def ls(self, uri: str, *, limit: int = 500, details: bool = False) -> None:
-        """Folders and files directly under a prefix (one level, fast). details=True also says what's inside each
+        """
+        Folders and files directly under a prefix (one level, fast). details=True also says what's inside each
         file: a PDF's pages, a table's rows and columns, a picture's size (reading a little of each file).
 
         details=True reads up to 1 GB in all, only the parts each format needs; file_details(uri) shows the same
-        for every file below, with a table per kind of file (titles, authors, column names)."""
+        for every file below, with a table per kind of file (titles, authors, column names).
+        """
         listing = self.core.ls(uri, limit=limit)
         report = None
         if details and listing.objects:
@@ -9377,8 +9858,10 @@ class S3View(_BaseView):
         folder_depth: int = 1,
         limit: int | None = None,
     ) -> None:
-        """Full dashboard for a prefix: totals, estimated monthly cost, findings, folders, file types,
-        storage classes, size and age distribution, largest objects. Lists every key once (use limit= on huge prefixes)."""
+        """
+        Full dashboard for a prefix: totals, estimated monthly cost, findings, folders, file types,
+        storage classes, size and age distribution, largest objects. Lists every key once (use limit= on huge prefixes).
+        """
         with self._progress() as tick:
             s = self.core.summarize(
                 uri, top_n=top_n, folder_depth=folder_depth, limit=limit, progress=tick
@@ -9478,11 +9961,13 @@ class S3View(_BaseView):
         limit: int | None = None,
         max_rows: int = 300,
     ) -> None:
-        """Folder tree with object count and size at every level down to `depth`, and the files in each folder.
+        """
+        Folder tree with object count and size at every level down to `depth`, and the files in each folder.
 
         Each folder shown lists its first `files` files (by name) under its sub-folders, then one
         "… N more files" row with their size; `files=0` shows folders only. Files deeper than `depth`
-        count toward their folder's size but aren't listed: raise `depth` or run `ls` on that folder."""
+        count toward their folder's size but aren't listed: raise `depth` or run `ls` on that folder.
+        """
         with self._progress() as tick:
             tree = self.core.folder_tree(
                 uri, depth=depth, limit=limit, files=max(files, 0), progress=tick
@@ -9600,8 +10085,10 @@ class S3View(_BaseView):
         storage_classes: str | Iterable[str] | None = None,
         limit: int | None = 1000,
     ) -> None:
-        """Search by glob / regex / extension / size / date / storage class, e.g.
-        find(uri, pattern='*.csv', min_size='10MB', modified_after='7d')."""
+        """
+        Search by glob / regex / extension / size / date / storage class, e.g.
+        find(uri, pattern='*.csv', min_size='10MB', modified_after='7d').
+        """
         filters = {
             "pattern": pattern,
             "regex": regex,
@@ -9647,7 +10134,8 @@ class S3View(_BaseView):
         limit: int | None = 200,
         max_read: int | str | None = "1GB",
     ) -> None:
-        """What's inside each file under a prefix: a PDF's pages, title, author and whether it has text, a Word
+        """
+        What's inside each file under a prefix: a PDF's pages, title, author and whether it has text, a Word
         file's words, a deck's slides, each Excel sheet's size, a table's rows and columns, a picture's size, a
         video's length, an archive's files. One table per kind of file.
 
@@ -9656,7 +10144,8 @@ class S3View(_BaseView):
         scanned PDFs that need OCR, files that need a password, files whose content isn't what their name says,
         and table files in one folder with different columns. pattern='*.pdf' or extensions=['pdf', 'docx'] picks
         files; limit= is how many, in key order. A uri that names one file shows just that file. PDFs need pypdf,
-        and parquet / ORC / Feather need pyarrow. The data: ui.core.file_details(uri).to_df()."""
+        and parquet / ORC / Feather need pyarrow. The data: ui.core.file_details(uri).to_df().
+        """
         with (
             self._progress("Listing", unit="files") as tick,
             self._progress("Looking inside", unit="files") as read_tick,
@@ -9732,7 +10221,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def largest(self, uri: str, n: int = 20) -> None:
-        """The n biggest objects under a prefix."""
+        """
+        The n biggest objects under a prefix.
+        """
         with self._progress() as tick:
             self._top(
                 f"Largest {n} objects", uri, self.core.largest(uri, n, progress=tick)
@@ -9740,7 +10231,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def newest(self, uri: str, n: int = 20) -> None:
-        """The n most recently modified objects."""
+        """
+        The n most recently modified objects.
+        """
         with self._progress() as tick:
             self._top(
                 f"{n} most recently modified",
@@ -9750,7 +10243,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def oldest(self, uri: str, n: int = 20) -> None:
-        """The n least recently modified objects."""
+        """
+        The n least recently modified objects.
+        """
         with self._progress() as tick:
             self._top(
                 f"{n} least recently modified",
@@ -9778,9 +10273,11 @@ class S3View(_BaseView):
         max_read: int | str | None = "10GB",
         limit: int | None = None,
     ) -> None:
-        """Identical files under a prefix: what the copies take and cost, and folders that hold only copies.
+        """
+        Identical files under a prefix: what the copies take and cost, and folders that hold only copies.
         Matched by size + ETag, and by SHA-256 of the content where the ETags differ, reading at most max_read.
-        method='strict' reads every file that shares its size; method='etag' reads none."""
+        method='strict' reads every file that shares its size; method='etag' reads none.
+        """
         with (
             self._progress("Listing", unit="files") as tick,
             self._progress("Reading to compare", unit="B") as read_tick,
@@ -9969,7 +10466,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def compare(self, uri_a: str, uri_b: str, *, show: int = 20) -> None:
-        """Diff two prefixes (e.g. verify a copy / sync / migration)."""
+        """
+        Diff two prefixes (e.g. verify a copy / sync / migration).
+        """
         with self._progress() as tick:
             r = self.core.compare(uri_a, uri_b, progress=tick)
         _, prefix_a = parse_s3_uri(r.uri_a)
@@ -10027,7 +10526,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def versions(self, uri: str, *, limit: int | None = None) -> None:
-        """Current vs noncurrent versions and delete markers (hidden storage in versioned buckets)."""
+        """
+        Current vs noncurrent versions and delete markers (hidden storage in versioned buckets).
+        """
         with self._progress("Listing versions") as tick:
             v = self.core.version_stats(uri, limit=limit, progress=tick)
         blocks: list[Any] = [
@@ -10099,7 +10600,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def history(self, uri: str) -> None:
-        """Version history of a single object."""
+        """
+        Version history of a single object.
+        """
         history = self.core.object_versions(uri)
         rows = [
             [
@@ -10125,8 +10628,10 @@ class S3View(_BaseView):
     def deleted(
         self, uri: str, *, deleted_after: Any = None, limit: int | None = None
     ) -> None:
-        """Deleted files you can still bring back (versioned buckets), most recent first,
-        e.g. deleted(uri, deleted_after='7d'). Shows the call that restores one; never changes anything."""
+        """
+        Deleted files you can still bring back (versioned buckets), most recent first,
+        e.g. deleted(uri, deleted_after='7d'). Shows the call that restores one; never changes anything.
+        """
         with self._progress("Listing versions") as tick:
             d = self.core.deleted_files(
                 uri, deleted_after=deleted_after, limit=limit, progress=tick
@@ -10245,7 +10750,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def uploads(self, uri: str, *, with_sizes: bool = True) -> None:
-        """Incomplete multipart uploads (billed, but invisible in normal listings)."""
+        """
+        Incomplete multipart uploads (billed, but invisible in normal listings).
+        """
         with self._progress("Measuring uploads", unit="uploads") as tick:
             uploads = self.core.incomplete_uploads(
                 uri, with_sizes=with_sizes, progress=tick
@@ -10307,8 +10814,10 @@ class S3View(_BaseView):
         delete_after: int | None = None,
         limit: int | None = None,
     ) -> None:
-        """Preview a lifecycle rule before adding it: what it would move or delete today and the money
-        saved, e.g. what_if(uri, move_after=30, to='STANDARD_IA') or what_if(uri, delete_after=365)."""
+        """
+        Preview a lifecycle rule before adding it: what it would move or delete today and the money
+        saved, e.g. what_if(uri, move_after=30, to='STANDARD_IA') or what_if(uri, delete_after=365).
+        """
         with self._progress() as tick:
             impact = self.core.simulate_lifecycle(
                 uri,
@@ -10445,7 +10954,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def head(self, uri: str) -> None:
-        """All metadata of one object."""
+        """
+        All metadata of one object.
+        """
         info = self.core.head(uri)
         skip = {"uri", "metadata", "tags"}
         blocks: list[Any] = [
@@ -10503,14 +11014,16 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def preview(self, uri: str, n: int = 20) -> None:
-        """Peek inside a file: tables (csv, tsv, psv, json, jsonl, parquet, orc, feather, avro, excel, npy)
+        """
+        Peek inside a file: tables (csv, tsv, psv, json, jsonl, parquet, orc, feather, avro, excel, npy)
         with their schema, archive contents (zip, tar, tar.gz, model.tar.gz, npz, .pt), safetensors tensors,
         notebook cells, JSON as a tree you fold with a click, text, images, audio / video players, a PDF's first
         pages as they look (scans too), a Word file with its pictures in place, or a hex dump.
         Downloads only what it needs; files without an extension are recognised by their content.
 
         n is the number of rows, lines or paragraphs shown, and the items shown of each JSON array. In the JSON
-        tree, hover over a line for the Python that reaches it in data = ui.core.read_json(uri)."""
+        tree, hover over a line for the Python that reaches it in data = ui.core.read_json(uri).
+        """
         p = self.core.preview(uri, n=n)
         doc, items, capped = p.document, [], 0
         detail = " · ".join(
@@ -10643,7 +11156,8 @@ class S3View(_BaseView):
         pictures: bool | None = None,
         max_chars: int = 200_000,
     ) -> None:
-        """A document as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF's
+        """
+        A document as it reads: a Word file with its headings, lists, tables and pictures in place, a PDF's
         text laid out to read (headings, paragraphs and lists, a line where each page starts, and no running
         headers, footers or page numbers), or a PowerPoint deck slide by slide, e.g. document(uri, pages=[1, 2]).
         PDF pages with no text, such as scans, are drawn as pictures; pictures=True draws every page as it looks
@@ -10652,7 +11166,8 @@ class S3View(_BaseView):
         A PDF's text needs pypdf, and drawing its pages needs pypdfium2 and pillow. One report shows at most
         20 pages or pictures, so the notebook stays small; pass pages= for other pages. Click a drawn page to see
         it as big as the notebook, with ‹ › to step through the pages and ✕ to go back. The PDF's text as
-        pypdf reads it, line by line, is in ui.core.read_document(uri).text."""
+        pypdf reads it, line by line, is in ui.core.read_document(uri).text.
+        """
         with self._progress("Reading pages" if pictures is False else "Drawing pages", unit="pages") as tick:
             doc = self.core.read_document(uri, pages=pages, password=password, pictures=pictures,
                                           max_pictures=_MAX_PICTURES, layout=True, progress=tick)
@@ -10737,12 +11252,14 @@ class S3View(_BaseView):
     def download(
         self, uri: str, path: str | None = None, *, limit: int | None = None
     ) -> None:
-        """Download a file, or a whole folder with its sub-folders, with a progress bar, and say where it went.
+        """
+        Download a file, or a whole folder with its sub-folders, with a progress bar, and say where it went.
         Files already downloaded are skipped, so running it again resumes.
 
         Without a path it saves into the downloads folder (s3-downloads next to the notebook; S3View(downloads=...)
         picks another), so downloads don't mix with your notebooks and code: downloads() lists them and
-        clean_downloads() deletes them. A path saves there instead, e.g. download('s3://b/data/', '/tmp/data')."""
+        clean_downloads() deletes them. A path saves there instead, e.g. download('s3://b/data/', '/tmp/data').
+        """
         bucket, key = parse_s3_uri(uri)
         if key and not key.endswith("/") and self.core.exists(uri):
             started = time.monotonic()
@@ -10861,7 +11378,9 @@ class S3View(_BaseView):
         self._show(blocks)
 
     def _downloads_next(self, path: str) -> _Next:
-        """The Next block of a download: what's downloaded so far, and deleting this one when it's done with."""
+        """
+        The Next block of a download: what's downloaded so far, and deleting this one when it's done with.
+        """
         steps = [(_call("downloads"), "everything downloaded so far, how much disk it takes, and cleaning up")]
         folder = self.core.downloads_folder()
         if os.path.dirname(path) == folder and _made_for_downloads(folder) and not _protected_folder(folder):
@@ -10878,13 +11397,15 @@ class S3View(_BaseView):
         max_files: int = 10_000,
         dry_run: bool = False,
     ) -> None:
-        """Download a file or folder as one .zip, after checking this notebook can: size limit (100 MB by default),
+        """
+        Download a file or folder as one .zip, after checking this notebook can: size limit (100 MB by default),
         file count, disk space, memory and read access. dry_run=True only runs the checks.
 
         Pass a list to zip several files and folders from one bucket together, laid out as they are under the
         folder they share: download_zip(['s3://b/raw/a.csv', 's3://b/raw/b.csv', 's3://b/raw/2024/']) makes
         raw-3-items.zip. Without a path the zip goes in the downloads folder (s3-downloads next to the notebook;
-        see download())."""
+        see download()).
+        """
         with (
             self._progress("Listing", unit="files") as list_tick,
             self._progress("Zipping", unit="B") as tick,
@@ -11022,12 +11543,14 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def downloads(self) -> None:
-        """What you've downloaded: each file, folder and zip in the downloads folder with its size and when it was
+        """
+        What you've downloaded: each file, folder and zip in the downloads folder with its size and when it was
         downloaded, how much of the disk they take, and the clean_downloads() calls that delete them.
 
         The downloads folder is where download() and download_zip() save without a path: s3-downloads, next to the
         notebook. S3View(downloads='~/scratch/s3') or ui.core.downloads = '...' picks another. It's made with the
-        first download, with a .gitignore that keeps it out of git and marks it as one clean_downloads() may empty."""
+        first download, with a .gitignore that keeps it out of git and marks it as one clean_downloads() may empty.
+        """
         d = self.core.list_downloads()
         blocks: list[Any] = [_Title("Downloads", f"in {d.path}")]
         if d.protected:  # not listed: it holds your notebooks too
@@ -11082,13 +11605,15 @@ class S3View(_BaseView):
         older_than: datetime | date | timedelta | str | None = None,
         dry_run: bool = False,
     ) -> None:
-        """Delete downloads to free the disk: everything download() and download_zip() saved in the downloads
+        """
+        Delete downloads to free the disk: everything download() and download_zip() saved in the downloads
         folder, or the ones named (clean_downloads('churn.zip'), as downloads() lists them), or those downloaded
         before older_than ('7d', '2024-05-01'). dry_run=True only shows what would go. Nothing in S3 changes.
 
         It only empties a folder made for downloads (s3-downloads, or the one S3View(downloads=...) names, when
         download() made it): never the notebook's own folder, your home folder, or a folder that held other files
-        first. The folder itself stays, so the next download goes in the same place."""
+        first. The folder itself stays, so the next download goes in the same place.
+        """
         c = self.core.clean_downloads(names, older_than=older_than, dry_run=dry_run)
         removed = [entry for entry in c.removed if entry.name not in c.failed]
         verb = "Would delete" if dry_run else "Deleted"
@@ -11140,7 +11665,9 @@ class S3View(_BaseView):
 
     @_friendly_errors
     def link(self, uri: str, *, expires: int = 3600) -> None:
-        """Clickable presigned download link (no AWS login needed until it expires)."""
+        """
+        Clickable presigned download link (no AWS login needed until it expires).
+        """
         url = self.core.presigned_url(uri, expires=expires)
         self._show(
             [

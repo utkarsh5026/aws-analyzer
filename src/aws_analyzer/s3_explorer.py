@@ -70,9 +70,11 @@ from ._kit.window import _cell_number, _css_height, _icon_url, _running_loop, _w
 
 
 def _s3_module(core: Any = None) -> Any:
-    """The s3.py this explorer builds on: the module `core` came from, else the s3 next to this file when both
+    """
+    The s3.py this explorer builds on: the module `core` came from, else the s3 next to this file when both
     were installed with pip (aws_analyzer.s3), else `import s3`, else the notebook itself when s3.py was pasted
-    into a cell. Raises ImportError that says how to get it."""
+    into a cell. Raises ImportError that says how to get it.
+    """
     if core is not None:
         module = sys.modules.get(type(core).__module__)
         if module is not None and hasattr(module, "S3View"):
@@ -110,12 +112,16 @@ _CACHED_ENTRIES = 100_000  # S3Navigator forgets the folders it opened longest a
 
 
 def _natural(name: str) -> list[Any]:
-    """Sort key that orders 'part-2' before 'part-10'."""
+    """
+    Sort key that orders 'part-2' before 'part-10'.
+    """
     return [int(piece) if piece.isdigit() else piece.lower() for piece in _DIGITS.split(name)]
 
 
 def _extension(name: str) -> str:
-    """'data.csv.gz' -> 'csv.gz', 'part-0.snappy.parquet' -> 'parquet', 'README' -> '' (like s3.file_extension)."""
+    """
+    'data.csv.gz' -> 'csv.gz', 'part-0.snappy.parquet' -> 'parquet', 'README' -> '' (like s3.file_extension).
+    """
     parts = name.lower().split(".")
     if len(parts) < 2 or not parts[-1] or (len(parts) == 2 and not parts[0]):
         return ""
@@ -125,27 +131,35 @@ def _extension(name: str) -> str:
 
 
 def _file_type(name: str) -> str:
-    """The type a file is counted under: 'a.csv.gz' -> 'csv', 'x.JPEG' -> 'jpg', 'logs.tar.gz' -> 'tar', 'README' -> ''."""
+    """
+    The type a file is counted under: 'a.csv.gz' -> 'csv', 'x.JPEG' -> 'jpg', 'logs.tar.gz' -> 'tar', 'README' -> ''.
+    """
     found = _extension(name).split(".")[0]
     return _SAME_TYPE.get(found, found)
 
 
 def _types_of(name: str) -> set[str]:
-    """Every type a file name answers to in a search: 'a.csv.gz' -> {'csv', 'gz', 'csv.gz'}, 'x.jpeg' -> {'jpg'}."""
+    """
+    Every type a file name answers to in a search: 'a.csv.gz' -> {'csv', 'gz', 'csv.gz'}, 'x.jpeg' -> {'jpg'}.
+    """
     parts = name.lower().split(".")
     found = {_SAME_TYPE.get(t, t) for t in (".".join(parts[i:]) for i in range(1, len(parts)) if all(parts[i:]))}
     return found | {_file_type(name)} - {""}
 
 
 def _type_word(word: str) -> str:
-    """The file type a word of a filter asks for: '.csv', '*.csv' or 'ext:csv' -> 'csv', '.jpeg' -> 'jpg'; '' when the
-    word isn't one."""
+    """
+    The file type a word of a filter asks for: '.csv', '*.csv' or 'ext:csv' -> 'csv', '.jpeg' -> 'jpg'; '' when the
+    word isn't one.
+    """
     match = _TYPE_WORD.match(word.lower())
     return _SAME_TYPE.get(match.group(1), match.group(1)) if match else ""
 
 
 def _parent_prefix(key: str) -> str:
-    """The folder part of a key: 'a/b/c.csv' -> 'a/b/', 'c.csv' -> '', '/c.csv' -> '/'."""
+    """
+    The folder part of a key: 'a/b/c.csv' -> 'a/b/', 'c.csv' -> '', '/c.csv' -> '/'.
+    """
     head, sep, _ = key.rpartition("/")
     return head + sep
 
@@ -161,7 +175,9 @@ def _tip_time(moment: datetime | None) -> str:
 
 @dataclass
 class Entry:
-    """One row of the explorer: a bucket, a folder or a file."""
+    """
+    One row of the explorer: a bucket, a folder or a file.
+    """
 
     kind: str  # 'bucket' | 'folder' | 'file'
     bucket: str
@@ -177,12 +193,16 @@ class Entry:
 
     @property
     def is_folder(self) -> bool:
-        """Buckets and folders open; files show what's inside them."""
+        """
+        Buckets and folders open; files show what's inside them.
+        """
         return self.kind != "file"
 
     @property
     def name(self) -> str:
-        """What the explorer shows: 'events' for s3://b/raw/events/, 'a.json' for a file, the bucket's name."""
+        """
+        What the explorer shows: 'events' for s3://b/raw/events/, 'a.json' for a file, the bucket's name.
+        """
         if self.kind == "bucket":
             return self.bucket
         key = self.key[:-1] if self.kind == "folder" else self.key
@@ -195,8 +215,10 @@ class Entry:
 
 @dataclass
 class Folder:
-    """One level of a bucket, or every bucket when `uri` is ''. Entries come in S3's order, a page at a time.
-    A deep folder (S3Navigator.below) holds everything below `uri` instead: every file, and the folders between."""
+    """
+    One level of a bucket, or every bucket when `uri` is ''. Entries come in S3's order, a page at a time.
+    A deep folder (S3Navigator.below) holds everything below `uri` instead: every file, and the folders between.
+    """
 
     uri: str
     entries: list[Entry] = field(default_factory=list)
@@ -211,8 +233,10 @@ class Folder:
 
 @dataclass
 class Filter:
-    """What a filter box's text asks for (see parse_filter): words a name must contain, patterns it must match, and
-    file types it must have one of."""
+    """
+    What a filter box's text asks for (see parse_filter): words a name must contain, patterns it must match, and
+    file types it must have one of.
+    """
 
     words: list[str] = field(default_factory=list)
     patterns: list[str] = field(default_factory=list)  # with * ? or [, matched against the whole name
@@ -222,12 +246,16 @@ class Filter:
         return bool(self.words or self.patterns or self.types)
 
     def named(self, entry: Entry) -> bool:
-        """The name has every word in it and matches every pattern (any case)."""
+        """
+        The name has every word in it and matches every pattern (any case).
+        """
         name = entry.name.lower()
         return all(word in name for word in self.words) and all(fnmatch.fnmatchcase(name, p) for p in self.patterns)
 
     def typed(self, entry: Entry) -> bool:
-        """It's a file of one of the types (anything is, when no type was asked for; a folder never is)."""
+        """
+        It's a file of one of the types (anything is, when no type was asked for; a folder never is).
+        """
         return not self.types or (not entry.is_folder and not _types_of(entry.name).isdisjoint(self.types))
 
     def matches(self, entry: Entry) -> bool:
@@ -236,7 +264,9 @@ class Filter:
 
 @dataclass
 class FolderStats:
-    """What the loaded entries of a folder add up to. Sizes cover the files at this level, not sub-folders."""
+    """
+    What the loaded entries of a folder add up to. Sizes cover the files at this level, not sub-folders.
+    """
 
     folders: int = 0
     files: int = 0
@@ -253,11 +283,13 @@ class FolderStats:
 
 
 def parse_location(text: str | None) -> tuple[str, str]:
-    """Where a pasted path points -> (bucket, key); ('', '') means every bucket.
+    """
+    Where a pasted path points -> (bucket, key); ('', '') means every bucket.
 
     Takes 's3://bucket/key', 'bucket/key', S3 console links (…/s3/buckets/bucket?prefix=key,
     …/s3/object/bucket?prefix=key) and object URLs (https://bucket.s3.region.amazonaws.com/key,
-    https://s3.region.amazonaws.com/bucket/key)."""
+    https://s3.region.amazonaws.com/bucket/key).
+    """
     text = (text or "").strip()
     lower = text.lower()
     if lower.startswith(("http://", "https://")):
@@ -281,14 +313,18 @@ def parse_location(text: str | None) -> tuple[str, str]:
 
 
 def folder_uri(bucket: str, prefix: str = "") -> str:
-    """'' for no bucket (every bucket), else 's3://bucket/prefix' with prefix ending in '/'."""
+    """
+    '' for no bucket (every bucket), else 's3://bucket/prefix' with prefix ending in '/'.
+    """
     if not bucket:
         return ""
     return f"s3://{bucket}/{prefix if not prefix or prefix.endswith('/') else prefix + '/'}"
 
 
 def parent_uri(uri: str) -> str:
-    """The folder above: 's3://b/x/y/' -> 's3://b/x/', 's3://b/' -> '' (every bucket), '' -> ''."""
+    """
+    The folder above: 's3://b/x/y/' -> 's3://b/x/', 's3://b/' -> '' (every bucket), '' -> ''.
+    """
     bucket, key = parse_location(uri)
     if not bucket or not key:
         return ""
@@ -296,7 +332,9 @@ def parent_uri(uri: str) -> str:
 
 
 def breadcrumbs(uri: str) -> list[tuple[str, str]]:
-    """[(label, uri)] from every bucket down to `uri`: [('All buckets', ''), ('b', 's3://b/'), ('x', 's3://b/x/')]."""
+    """
+    [(label, uri)] from every bucket down to `uri`: [('All buckets', ''), ('b', 's3://b/'), ('x', 's3://b/x/')].
+    """
     crumbs = [("All buckets", "")]
     bucket, key = parse_location(uri)
     if bucket:
@@ -309,9 +347,11 @@ def breadcrumbs(uri: str) -> list[tuple[str, str]]:
 
 
 def entry_icon(entry: Entry, s3: Any = None) -> str:
-    """🪣 bucket, 📁 folder, or a file's icon by its type (📊 tables, 📕 PDF, 🖼️ images, 🧠 models, ...), the same
+    """
+    🪣 bucket, 📁 folder, or a file's icon by its type (📊 tables, 📕 PDF, 🖼️ images, 🧠 models, ...), the same
     icons the reports put in front of keys (_kit's _file_icon). `s3` isn't needed any more; it's kept so older calls
-    still work."""
+    still work.
+    """
     if entry.kind == "bucket":
         return "🪣"
     if entry.kind == "folder":
@@ -320,10 +360,12 @@ def entry_icon(entry: Entry, s3: Any = None) -> str:
 
 
 def sort_entries(entries: list[Entry], by: str = "name", descending: bool = False) -> list[Entry]:
-    """Folders (or buckets) first, then files, each sorted `by` 'name' (natural order: part-2 before part-10),
+    """
+    Folders (or buckets) first, then files, each sorted `by` 'name' (natural order: part-2 before part-10),
     'size' or 'modified'. Folders have no size, so a size sort keeps them by name. 'path' sorts by the whole key
     instead, folders and files together, so everything below a folder reads like a tree: each folder, then what's
-    in it."""
+    in it.
+    """
     if by not in ("name", "size", "modified", "path"):
         raise ValueError("by must be 'name', 'size', 'modified' or 'path'")
     if by == "path":  # folder by folder, so 'a/' and what's in it come before 'a-2.csv'
@@ -346,10 +388,12 @@ def sort_entries(entries: list[Entry], by: str = "name", descending: bool = Fals
 
 
 def parse_filter(text: str | None) -> Filter:
-    """What a filter box's text asks for. Spaces (or commas) separate words, and a name must contain every word, in
+    """
+    What a filter box's text asks for. Spaces (or commas) separate words, and a name must contain every word, in
     any case. A word that starts with '.' or '*.' is a file type ('.csv', '*.parquet', or 'ext:csv'), and a file
     must be one of the types asked for: '.csv .json' finds both, '.csv' also finds .csv.gz files and '.jpg' .jpeg
-    ones. Any other word with * ? or [ is a pattern for the whole name ('part-0*')."""
+    ones. Any other word with * ? or [ is a pattern for the whole name ('part-0*').
+    """
     found = Filter()
     for word in re.split(r"[\s,]+", (text or "").strip().lower()):
         kind = _type_word(word)
@@ -364,9 +408,11 @@ def parse_filter(text: str | None) -> Filter:
 
 
 def filter_entries(entries: list[Entry], text: str | None = None, kind: str = "all") -> list[Entry]:
-    """The entries that match a filter: names with the words of `text` in them, file types such as '.csv' or
+    """
+    The entries that match a filter: names with the words of `text` in them, file types such as '.csv' or
     '.csv .json', patterns such as 'part-0*' (see parse_filter), and only folders or files: kind is 'all',
-    'folders' (buckets count as folders) or 'files'."""
+    'folders' (buckets count as folders) or 'files'.
+    """
     if kind not in _KINDS:
         raise ValueError("kind must be 'all', 'folders' or 'files'")
     kind, wanted = _KINDS[kind], parse_filter(text)
@@ -374,8 +420,10 @@ def filter_entries(entries: list[Entry], text: str | None = None, kind: str = "a
 
 
 def count_types(entries: list[Entry]) -> list[tuple[str, int, int]]:
-    """(type, files, bytes) for the files among `entries`, most files first: a filter's choices. Types are what
-    '.csv' in a filter finds: .csv.gz files count as csv and .jpeg as jpg. Files without an extension aren't counted."""
+    """
+    (type, files, bytes) for the files among `entries`, most files first: a filter's choices. Types are what
+    '.csv' in a filter finds: .csv.gz files count as csv and .jpeg as jpg. Files without an extension aren't counted.
+    """
     found: dict[str, list[int]] = {}
     for entry in entries:
         kind = "" if entry.is_folder else _file_type(entry.name)
@@ -387,7 +435,9 @@ def count_types(entries: list[Entry]) -> list[tuple[str, int, int]]:
 
 
 def folder_stats(entries: list[Entry], top: int = 8) -> FolderStats:
-    """Counts, total size, newest / oldest file and the `top` file types by size, for one folder's entries."""
+    """
+    Counts, total size, newest / oldest file and the `top` file types by size, for one folder's entries.
+    """
     stats = FolderStats()
     types: dict[str, list[int]] = {}
     for entry in entries:
@@ -409,7 +459,9 @@ def folder_stats(entries: list[Entry], top: int = 8) -> FolderStats:
 
 
 def explain_list_error(code: str, bucket: str, prefix: str = "") -> str:
-    """What a listing error means and what to do about it, in a sentence."""
+    """
+    What a listing error means and what to do about it, in a sentence.
+    """
     if code in ("AccessDenied", "AllAccessDisabled"):
         where = f"arn:aws:s3:::{bucket}" if bucket else "this account"
         need = "s3:ListBucket" if bucket else "s3:ListAllMyBuckets"
@@ -432,14 +484,16 @@ def explain_list_error(code: str, bucket: str, prefix: str = "") -> str:
 
 
 class S3Navigator:
-    """The explorer's logic, without the UI: lists one level at a time (a page of `page_size` entries per S3
+    """
+    The explorer's logic, without the UI: lists one level at a time (a page of `page_size` entries per S3
     request), remembers where you've been for back / forward / up, and caches each folder so going back is
     instant. Every method returns the Folder you're now in. Listing errors land in Folder.error instead of
     raising, so a folder you can't read is a note, not a crash. Never prints.
 
     core: an S3Analyzer (or an S3View, whose analyzer is used); without one, an S3Analyzer is made from
     session / region / profile / client. list_limit: how many entries of one folder list_rest() lists (the
-    explorer lists that many, so its search covers them). deep_limit: how many files below() lists at a time."""
+    explorer lists that many, so its search covers them). deep_limit: how many files below() lists at a time.
+    """
 
     def __init__(
         self,
@@ -481,14 +535,18 @@ class S3Navigator:
         return bool(self._forward)
 
     def open(self, uri: str | None = "") -> Folder:
-        """Go to a folder. A file's path opens its folder with `focus` set to the file. A path that doesn't
-        end in '/' is checked first: 's3://b/data' opens the folder data/ when there is one."""
+        """
+        Go to a folder. A file's path opens its folder with `focus` set to the file. A path that doesn't
+        end in '/' is checked first: 's3://b/data' opens the folder data/ when there is one.
+        """
         target, self.focus, self.notice = self._resolve(uri)
         self._go(target)
         return self.folder()
 
     def back(self) -> Folder:
-        """The folder you were in before."""
+        """
+        The folder you were in before.
+        """
         if self._back:
             self._forward.append(self.location)
             self.location = self._back.pop()
@@ -496,7 +554,9 @@ class S3Navigator:
         return self.folder()
 
     def forward(self) -> Folder:
-        """Undo the last back()."""
+        """
+        Undo the last back().
+        """
         if self._forward:
             self._back.append(self.location)
             self.location = self._forward.pop()
@@ -504,14 +564,18 @@ class S3Navigator:
         return self.folder()
 
     def up(self) -> Folder:
-        """The folder above (from a bucket's top level: every bucket)."""
+        """
+        The folder above (from a bucket's top level: every bucket).
+        """
         self.focus = self.notice = ""
         if self.location:
             self._go(parent_uri(self.location))
         return self.folder()
 
     def refresh(self) -> Folder:
-        """List the current folder again (other folders stay cached)."""
+        """
+        List the current folder again (other folders stay cached).
+        """
         self._cache.pop(self.location, None)
         self._below.pop(self.location, None)
         self.notice = ""
@@ -527,7 +591,9 @@ class S3Navigator:
     # ------------------------------------------------------------------ listing
 
     def folder(self, uri: str | None = None) -> Folder:
-        """The current folder (or `uri`), listed once (its first page) and then cached."""
+        """
+        The current folder (or `uri`), listed once (its first page) and then cached.
+        """
         uri = self.location if uri is None else uri
         if uri not in self._cache:
             folder = Folder(uri)
@@ -539,8 +605,10 @@ class S3Navigator:
         return self._cache[uri]
 
     def more(self, below: bool = False, progress: Callable[[int], None] | None = None) -> Folder:
-        """The next page of a folder with more entries than one listing returns; below=True: the next deep_limit
-        files of below()'s listing."""
+        """
+        The next page of a folder with more entries than one listing returns; below=True: the next deep_limit
+        files of below()'s listing.
+        """
         if below and parse_location(self.location)[0]:
             fresh = self.location not in self._below
             folder = self.below(progress=progress)
@@ -554,25 +622,31 @@ class S3Navigator:
 
     def list_rest(self, uri: str | None = None, limit: int | None = None,
                   progress: Callable[[int], None] | None = None) -> Folder:
-        """The current folder (or `uri`) with the rest of its entries listed, one S3 request per 1,000, until S3 has
+        """
+        The current folder (or `uri`) with the rest of its entries listed, one S3 request per 1,000, until S3 has
         no more or it has listed `limit` of them (list_limit, 10,000, unless given); more() goes on from there. This
         is what the explorer does, so its search, counts and sort cover the whole folder.
-        progress(entries) is called after each request."""
+        progress(entries) is called after each request.
+        """
         folder = self.folder(uri)
         if folder.more:
             self._list(folder, (self.list_limit if limit is None else limit) - folder.listed, progress)
         return folder
 
     def below(self, uri: str | None = None, progress: Callable[[int], None] | None = None) -> Folder:
-        """Everything below the current folder (or `uri`), not only its first level: every file, and each folder
+        """
+        Everything below the current folder (or `uri`), not only its first level: every file, and each folder
         between it and them, the first deep_limit (10,000) files; more(below=True) lists the next ones. It's one S3
         request per 1,000 files. Cached like folder(); on the list of buckets it's the buckets.
-        progress(files) is called after each request."""
+        progress(files) is called after each request.
+        """
         return self._deep(uri, self.deep_limit, progress)
 
     def lookup(self, text: str) -> int:
-        """Find entries whose names start with `text` in S3, for a folder too big to load: they're added to
-        the current folder. Returns how many weren't loaded yet."""
+        """
+        Find entries whose names start with `text` in S3, for a folder too big to load: they're added to
+        the current folder. Returns how many weren't loaded yet.
+        """
         folder = self.folder()
         bucket, prefix = parse_location(folder.uri)
         if not bucket or not text or "/" in text:  # a '/' would find what's in a sub-folder, not here
@@ -588,8 +662,10 @@ class S3Navigator:
         return len(new)
 
     def _deep(self, uri: str | None, keys: int, progress: Callable[[int], None] | None = None) -> Folder:
-        """below(), listing only the first `keys` keys when it isn't cached yet (the explorer lists one page, then
-        the rest in the background)."""
+        """
+        below(), listing only the first `keys` keys when it isn't cached yet (the explorer lists one page, then
+        the rest in the background).
+        """
         uri = self.location if uri is None else uri
         if not parse_location(uri)[0]:
             return self.folder(uri)
@@ -602,7 +678,9 @@ class S3Navigator:
         return self._below[uri]
 
     def _load(self, folder: Folder) -> None:
-        """A folder's first page, or every bucket."""
+        """
+        A folder's first page, or every bucket.
+        """
         if parse_location(folder.uri)[0]:
             self._list(folder, self.page_size)
             return
@@ -616,7 +694,9 @@ class S3Navigator:
 
     @staticmethod
     def _failed(folder: Folder, exc: ClientError | BotoCoreError) -> None:
-        """Note why a folder couldn't be listed, in place of raising."""
+        """
+        Note why a folder couldn't be listed, in place of raising.
+        """
         if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             folder.error_code = str(error.get("Code", "Error"))
@@ -625,8 +705,10 @@ class S3Navigator:
             folder.error_code, folder.error = type(exc).__name__, f"{type(exc).__name__}: {exc}"
 
     def _list(self, folder: Folder, keys: int, progress: Callable[[int], None] | None = None) -> None:
-        """List up to `keys` more of a folder (from its first page when it has none yet), a page per request; an
-        error lands in folder.error. progress(entries, or files for a deep folder) after each request."""
+        """
+        List up to `keys` more of a folder (from its first page when it has none yet), a page per request; an
+        error lands in folder.error. progress(entries, or files for a deep folder) after each request.
+        """
         try:
             while keys > 0 and (folder.more or not folder.requests):
                 keys -= self._add(folder, self._request(folder, folder.token, min(self.page_size, keys)))
@@ -636,8 +718,10 @@ class S3Navigator:
             self._failed(folder, exc)
 
     def _request(self, folder: Folder, token: str | None, keys: int) -> dict[str, Any]:
-        """One ListObjectsV2 page of a folder, from `token` on: its first level (S3's '/' delimiter), or every key
-        below it for a deep folder. It changes nothing, so it can run on a worker thread; _add adds the page."""
+        """
+        One ListObjectsV2 page of a folder, from `token` on: its first level (S3's '/' delimiter), or every key
+        below it for a deep folder. It changes nothing, so it can run on a worker thread; _add adds the page.
+        """
         bucket, prefix = parse_location(folder.uri)
         request: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix, "MaxKeys": max(1, min(keys, 1000))}
         if not folder.deep:
@@ -647,8 +731,10 @@ class S3Navigator:
         return self.core.client.list_objects_v2(**request)
 
     def _add(self, folder: Folder, page: dict[str, Any]) -> int:
-        """Add a page from _request to its folder (nothing twice) and move on its token; returns how many keys and
-        folders the page had."""
+        """
+        Add a page from _request to its folder (nothing twice) and move on its token; returns how many keys and
+        folders the page had.
+        """
         folder.entries += self._entries(folder, page, {entry.key for entry in folder.entries})
         folder.token = page.get("NextContinuationToken") if page.get("IsTruncated") else None
         folder.more = folder.token is not None
@@ -659,9 +745,11 @@ class S3Navigator:
 
     @staticmethod
     def _entries(folder: Folder, page: dict[str, Any], known: set[str]) -> list[Entry]:
-        """The entries a ListObjectsV2 page adds to a folder, leaving out the keys in `known` (and adding the new
+        """
+        The entries a ListObjectsV2 page adds to a folder, leaving out the keys in `known` (and adding the new
         ones to it). A deep folder gets each file and each folder on the way to it (S3 has no folders of its own; a
-        folder's marker object becomes the folder); a folder's own marker object isn't one of its files."""
+        folder's marker object becomes the folder); a folder's own marker object isn't one of its files.
+        """
         bucket, prefix = parse_location(folder.uri)
         new: list[Entry] = []
 
@@ -692,7 +780,9 @@ class S3Navigator:
         return new
 
     def _resolve(self, uri: str | None) -> tuple[str, str, str]:
-        """(folder to open, file to focus, notice) for a path someone typed or pasted."""
+        """
+        (folder to open, file to focus, notice) for a path someone typed or pasted.
+        """
         bucket, key = parse_location(uri)
         if not bucket:
             return "", "", ""
@@ -740,7 +830,9 @@ _ICON_PATHS = {
 
 
 def _icon_rules() -> str:
-    """A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw."""
+    """
+    A CSS rule per icon: .s3x-i-<name> sets --s3x-icon, which .s3x-ic::before (and the search box) draw.
+    """
     return "\n".join(f".s3x .s3x-i-{name}{{--s3x-icon:{_icon_url(paths)}}}" for name, paths in _ICON_PATHS.items())
 
 
@@ -942,8 +1034,10 @@ _CHECK = ("s3x-check", "s3x-ic", "s3x-i-check")  # a row's checkbox; it gets s3x
 
 
 class _Row:
-    """One reusable row of the list: a full-width button (the name) under a checkbox and two labels (size, modified),
-    and under the name, when the list holds everything below a folder, the folder the entry is in."""
+    """
+    One reusable row of the list: a full-width button (the name) under a checkbox and two labels (size, modified),
+    and under the name, when the list holds everything below a folder, the folder the entry is in.
+    """
 
     def __init__(self, widgets: Any, on_click: Callable[[_Row], None], on_check: Callable[[_Row], None]):
         self.entry: Entry | None = None
@@ -965,7 +1059,8 @@ class _Row:
 
 
 class S3Explorer:
-    """Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
+    """
+    Browse S3 like a file explorer in a notebook: folders and files on the left, what's inside the file you
     click on the right. Click a folder to open it; ← → ↑ go back, forward and up; click the path to jump
     anywhere (paste an s3:// path or an S3 console link); click a column header to sort.
 
@@ -990,7 +1085,8 @@ class S3Explorer:
     mode: 'auto' (the clickable explorer in Jupyter, a text listing elsewhere), 'widgets' or 'text'.
 
     The previews and reports on the right come from s3.py's S3View; `x.ui` is one you can use in any cell
-    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list."""
+    (x.ui.summary(x.location)), and `x.nav` is the S3Navigator behind the list.
+    """
 
     def __init__(
         self,
@@ -1079,13 +1175,17 @@ class S3Explorer:
 
     @property
     def location(self) -> str:
-        """The folder you're in ('s3://bucket/prefix/'), or '' for the list of buckets."""
+        """
+        The folder you're in ('s3://bucket/prefix/'), or '' for the list of buckets.
+        """
         return self.nav.location if self.s3 is not None else ""
 
     @property
     def downloads(self) -> str:
-        """Where "Download" and the zips save: s3.py's downloads folder (core.downloads, 's3-downloads' next to the
-        notebook unless set), which ⚙ Settings changes."""
+        """
+        Where "Download" and the zips save: s3.py's downloads folder (core.downloads, 's3-downloads' next to the
+        notebook unless set), which ⚙ Settings changes.
+        """
         return self.core.downloads
 
     @downloads.setter
@@ -1095,54 +1195,70 @@ class S3Explorer:
     zip_folder = downloads  # its name before downloads went in one folder
 
     def _where(self) -> str:
-        """The downloads folder in words: 's3-downloads', or "the notebook's folder" for '.'."""
+        """
+        The downloads folder in words: 's3-downloads', or "the notebook's folder" for '.'.
+        """
         folder = str(self.downloads).strip() or "."
         return "the notebook's folder" if os.path.abspath(os.path.expanduser(folder)) == os.getcwd() else folder
 
     @property
     def picked(self) -> list[str]:
-        """The files and folders ticked in the list (s3:// paths), in the order they were ticked: x.ui.download_zip(
-        x.picked) zips them from code."""
+        """
+        The files and folders ticked in the list (s3:// paths), in the order they were ticked: x.ui.download_zip(
+        x.picked) zips them from code.
+        """
         return list(self._picked)
 
     @_window_errors
     def open(self, uri: str = "") -> None:
-        """Go to a folder, or show a file (its folder opens with the file on the right). Takes s3:// paths,
-        bucket/prefix and S3 console links; open() with nothing goes to your list of buckets."""
+        """
+        Go to a folder, or show a file (its folder opens with the file on the right). Takes s3:// paths,
+        bucket/prefix and S3 console links; open() with nothing goes to your list of buckets.
+        """
         self._navigate(lambda: self.nav.open(uri))
 
     @_window_errors
     def back(self) -> None:
-        """Go back to the folder you were in before (the ← button)."""
+        """
+        Go back to the folder you were in before (the ← button).
+        """
         self._navigate(self.nav.back)
 
     @_window_errors
     def forward(self) -> None:
-        """Go forward again after back() (the → button)."""
+        """
+        Go forward again after back() (the → button).
+        """
         self._navigate(self.nav.forward)
 
     @_window_errors
     def up(self) -> None:
-        """Go to the folder above this one (the ↑ button)."""
+        """
+        Go to the folder above this one (the ↑ button).
+        """
         self._navigate(self.nav.up)
 
     @_window_errors
     def refresh(self) -> None:
-        """List this folder again, to pick up files added or removed since it was opened (the ↻ button)."""
+        """
+        List this folder again, to pick up files added or removed since it was opened (the ↻ button).
+        """
         keep = self.selected
         self._cache.clear()
         self._navigate(self.nav.refresh, keep=keep, same=True)
 
     @_window_errors
     def filter(self, text: str = "", kind: str = "all", subfolders: bool = False) -> None:
-        """Show only part of the list, as the search box and the buttons above it do: names with `text` in them,
+        """
+        Show only part of the list, as the search box and the buttons above it do: names with `text` in them,
         file types such as '.csv' or '.csv .json' (.csv also finds .csv.gz), patterns such as 'part-0*'; only
         kind='folders' or 'files'; and with subfolders=True everything below this folder, not only its first
         level (the first 10,000 files). It searches the whole folder, up to its first 10,000 entries, and in a bigger
         one it also asks S3 for the names that start with `text`. filter() shows everything again.
 
         x.filter(".parquet", subfolders=True)    # every Parquet file below this folder
-        x.filter(kind="folders")                 # only the folders here"""
+        x.filter(kind="folders")                 # only the folders here
+        """
         if kind not in _KINDS:
             raise ValueError(f"kind={kind!r}: use 'all', 'folders' or 'files'")
         self._kind, self._all_types = _KINDS[kind], False
@@ -1178,7 +1294,9 @@ class S3Explorer:
         display(self._app)
 
     def _say(self, text: str) -> None:
-        """A warning note; works even when s3.py couldn't be loaded and nothing else can render."""
+        """
+        A warning note; works even when s3.py couldn't be loaded and nothing else can render.
+        """
         if self.s3 is not None:
             self._set_pane([[self.s3._Note(text, "warn")]])
             return
@@ -1194,14 +1312,18 @@ class S3Explorer:
         self._set_pane([[self.s3._Note(text, "warn")]])
 
     def _ready(self) -> bool:
-        """Whether a command can run (see _window_errors): not without s3.py, which says so instead."""
+        """
+        Whether a command can run (see _window_errors): not without s3.py, which says so instead.
+        """
         if self.s3 is None:
             self._say(self._broken)
             return False
         return True
 
     def _command_failed(self, exc: Exception, command: str) -> bool:
-        """A command's AWS or input error as a note in the explorer (see _window_errors); False for any other."""
+        """
+        A command's AWS or input error as a note in the explorer (see _window_errors); False for any other.
+        """
         if isinstance(exc, ClientError):
             error = exc.response.get("Error", {})
             self._fail(f"{error.get('Code', 'Error')}: {error.get('Message', exc)}  [{command}]")
@@ -1214,12 +1336,16 @@ class S3Explorer:
         return True
 
     def _capture(self, blocks: list[Any]) -> None:
-        """The pane's S3View renders here (see _trim)."""
+        """
+        The pane's S3View renders here (see _trim).
+        """
         self._captured.append(self._trim(blocks, self.selected))
 
     def _trim(self, blocks: list[Any], selected: str) -> list[Any]:
-        """A report for the right pane: without its Next block (its calls name commands of a view you don't have
-        here), and with the file's name instead of its whole path (the status bar shows that)."""
+        """
+        A report for the right pane: without its Next block (its calls name commands of a view you don't have
+        here), and with the file's name instead of its whole path (the status bar shows that).
+        """
         kept = []
         for block in blocks:
             if isinstance(block, self.s3._Next):
@@ -1231,13 +1357,17 @@ class S3Explorer:
         return kept
 
     def _entry(self) -> Entry | None:
-        """The file shown on the right, as listed."""
+        """
+        The file shown on the right, as listed.
+        """
         return next((e for e in self._source().entries if e.uri == self.selected), None) if self.selected else None
 
     def _source(self) -> Folder:
-        """What the list is drawn from: this folder's first level, or with "Include subfolders" everything below it.
+        """
+        What the list is drawn from: this folder's first level, or with "Include subfolders" everything below it.
         The first time, a notebook lists its first page (_follow lists the rest in the background) and anywhere else
-        its first 10,000 files, with the count so far in the status bar."""
+        its first 10,000 files, with the count so far in the status bar.
+        """
         if self._deep and parse_location(self.nav.location)[0]:
             first = self.nav.page_size if self._background() else self.nav.deep_limit
             return self.nav._deep(None, first, self._listing)
@@ -1250,17 +1380,23 @@ class S3Explorer:
     # ------------------------------------------------------------------ listing the rest of a big folder
 
     def _background(self) -> bool:
-        """Whether listings go on in the background: in a notebook, where the kernel's event loop runs the clicks."""
+        """
+        Whether listings go on in the background: in a notebook, where the kernel's event loop runs the clicks.
+        """
         return self._widgets is not None and _running_loop() is not None
 
     def _goal(self, folder: Folder) -> int:
-        """How much of a folder the explorer lists before it stops and offers "Load more from S3"."""
+        """
+        How much of a folder the explorer lists before it stops and offers "Load more from S3".
+        """
         return self.nav.deep_limit if folder.deep else self.nav.list_limit
 
     def _follow(self, folder: Folder) -> None:
-        """The list now shows `folder`: list the rest of it, up to its first list_limit entries (deep_limit files
+        """
+        The list now shows `folder`: list the rest of it, up to its first list_limit entries (deep_limit files
         with Include subfolders), so the search, the counts and the sort cover the whole folder and not only the
-        first page S3 returned. A listing of another folder stops."""
+        first page S3 returned. A listing of another folder stops.
+        """
         if self._lister is not None and self._lister is not folder:
             self._stop_listing()
         keys = self._goal(folder) - folder.listed
@@ -1268,8 +1404,10 @@ class S3Explorer:
             self._list_more(folder, keys)
 
     def _list_more(self, folder: Folder, keys: int) -> None:
-        """List up to `keys` more of a folder. In a notebook it's a page at a time on a worker thread, so the list can
-        be searched and clicked meanwhile and each page updates it (_list_later); elsewhere it's right away."""
+        """
+        List up to `keys` more of a folder. In a notebook it's a page at a time on a worker thread, so the list can
+        be searched and clicked meanwhile and each page updates it (_list_later); elsewhere it's right away.
+        """
         if self._lister is folder:
             return
         if not self._background():
@@ -1286,9 +1424,11 @@ class S3Explorer:
             self._list_task.cancel()
 
     async def _list_later(self, folder: Folder, keys: int) -> None:
-        """List a folder a page at a time: each request on a worker thread, and each page added on the kernel's event
+        """
+        List a folder a page at a time: each request on a worker thread, and each page added on the kernel's event
         loop, where the clicks run, so nothing changes under them. It stops after `keys` entries, when S3 has no
-        more, or when the list moves to another folder."""
+        more, or when the list moves to another folder.
+        """
         try:
             while keys > 0 and folder.more and self._lister is folder:
                 token = folder.token
@@ -1312,9 +1452,11 @@ class S3Explorer:
                 self._guard(lambda: self._listed(folder))
 
     def _listed(self, folder: Folder) -> None:
-        """After a page of a background listing (and once it's done): the counts, the chips, the list, the status bar
+        """
+        After a page of a background listing (and once it's done): the counts, the chips, the list, the status bar
         and the folder's overview on the right again, if they still show that folder. The overview changes in place,
-        where the reader has scrolled it to."""
+        where the reader has scrolled it to.
+        """
         if folder is not self._folder or self._widgets is None:
             return
         self._draw_filters(folder)
@@ -1326,13 +1468,15 @@ class S3Explorer:
 
     def _report(self, action: str, method: Callable | str, *args: Any, cache: bool = True, variant: Any = None,
                 **kwargs: Any) -> None:
-        """Run one of the pane's S3View commands (by name), or a method of the explorer, and show its report on the
+        """
+        Run one of the pane's S3View commands (by name), or a method of the explorer, and show its report on the
         right, with its progress bar above it while it runs. Reports are cached per file version (and `variant`,
         such as the first page shown).
 
         In a notebook, the quick reports (_BACKGROUND) load on worker threads instead: the click returns at once,
         so the next click is handled straight away instead of waiting for this file to finish loading, and a report
-        that a newer click made out of date is cached but not shown."""
+        that a newer click made out of date is cached but not shown.
+        """
         entry = self._entry()
         key = (action, self.selected or self.location, entry.etag if entry else "", variant)
         self._action = action
@@ -1368,7 +1512,9 @@ class S3Explorer:
         self._set_pane(self._captured)
 
     def _keep(self, key: tuple, reports: list[list[Any]], cache: bool) -> None:
-        """Cache a report, but not an error note: trying again then asks AWS again."""
+        """
+        Cache a report, but not an error note: trying again then asks AWS again.
+        """
         if cache and reports and reports[0] and isinstance(reports[0][0], self.s3._Title):
             while len(self._cache) >= 24:
                 self._cache.pop(next(iter(self._cache)))
@@ -1376,8 +1522,10 @@ class S3Explorer:
 
     async def _later(self, job: int, key: tuple, cache: bool, method: str, selected: str, args: tuple,
                      kwargs: dict) -> None:
-        """Wait, on the kernel's event loop, for a report loading on a worker thread, then show it unless the
-        right pane has changed since (another file was clicked); it's cached either way."""
+        """
+        Wait, on the kernel's event loop, for a report loading on a worker thread, then show it unless the
+        right pane has changed since (another file was clicked); it's cached either way.
+        """
         try:
             reports = await asyncio.wrap_future(self._threads().submit(self._load, job, method, selected, args, kwargs))
             if reports is None:
@@ -1390,14 +1538,18 @@ class S3Explorer:
                 self._fail(f"Something went wrong ({type(exc).__name__}: {exc}). Click the file again to try again.")
 
     def _threads(self) -> ThreadPoolExecutor:
-        """The worker threads that background reports and listings run on."""
+        """
+        The worker threads that background reports and listings run on.
+        """
         if self._workers is None:
             self._workers = ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="s3-explorer")
         return self._workers
 
     def _load(self, job: int, method: str, selected: str, args: tuple, kwargs: dict) -> list[list[Any]] | None:
-        """On a worker thread: a report from an S3View of its own, which touches no widgets (no progress bar, and
-        its reports are kept here). None when another click came before it started: it would only be thrown away."""
+        """
+        On a worker thread: a report from an S3View of its own, which touches no widgets (no progress bar, and
+        its reports are kept here). None when another click came before it started: it would only be thrown away.
+        """
         if job != self._job:
             return None
         reports: list[list[Any]] = []
@@ -1408,7 +1560,9 @@ class S3Explorer:
         return reports
 
     def _wait(self, text: str) -> None:
-        """The right pane while a report loads: a spinner, what it's doing, and the outline of a report."""
+        """
+        The right pane while a report loads: a spinner, what it's doing, and the outline of a report.
+        """
         self._job += 1
         self._overview = None
         lines = "".join(f'<div class="s3x-sk" style="width:{width}%"></div>' for width in (92, 84, 88, 64, 76))
@@ -1421,13 +1575,17 @@ class S3Explorer:
         self._renew("right")
 
     def _busy(self, text: str) -> None:
-        """The status bar while S3 is listing: a spinner and what it's doing."""
+        """
+        The status bar while S3 is listing: a spinner and what it's doing.
+        """
         if self._widgets is not None:
             self._status.value = f'<span class="s3x-at s3x-busy">{html.escape(text)}</span>'
 
     def _set_pane(self, reports: list[list[Any]], keep: bool = True) -> None:
-        """Show reports on the right; the text explorer (no ipywidgets) shows them as the S3View would. keep=False
-        is a note shown while a report loads."""
+        """
+        Show reports on the right; the text explorer (no ipywidgets) shows them as the S3View would. keep=False
+        is a note shown while a report loads.
+        """
         self._job += 1
         self._overview = None
         if keep:
@@ -1448,9 +1606,11 @@ class S3Explorer:
     # ------------------------------------------------------------------ navigation
 
     def _navigate(self, move: Callable[[], Folder], keep: str = "", same: bool = False) -> None:
-        """Move (open / back / up / ...), then redraw the list, the path and the right pane. Another folder starts
+        """
+        Move (open / back / up / ...), then redraw the list, the path and the right pane. Another folder starts
         with an empty search box and only its first level listed (same=True, for ↻, keeps them); All / Folders /
-        Files stays, like the sort."""
+        Files stays, like the sort.
+        """
         self._busy("Listing…")
         move()
         self.selected, self._offset, self._action = "", 0, ""
@@ -1484,7 +1644,9 @@ class S3Explorer:
         self._draw_picks()
 
     def _select(self, uri: str) -> None:
-        """Show a file on the right, and the page of the list it's on."""
+        """
+        Show a file on the right, and the page of the list it's on.
+        """
         self.selected = uri
         if self._widgets is not None:
             index = next((i for i, e in enumerate(self._visible) if e.uri == uri), -1)
@@ -1505,13 +1667,17 @@ class S3Explorer:
         self._draw_status(folder)
 
     def _show_overview(self, folder: Folder) -> None:
-        """What the folder holds, on the right (a background listing redraws it as more comes in)."""
+        """
+        What the folder holds, on the right (a background listing redraws it as more comes in).
+        """
         self._set_pane([self._folder_blocks(folder)])
         self._overview = folder
 
     def _folder_blocks(self, folder: Folder, listing: bool = False) -> list[Any]:
-        """The right pane when no file is chosen: what this folder holds, from the entries already listed (no
-        extra AWS calls). listing=True adds the entries themselves, for the text explorer."""
+        """
+        The right pane when no file is chosen: what this folder holds, from the entries already listed (no
+        extra AWS calls). listing=True adds the entries themselves, for the text explorer.
+        """
         s3 = self.s3
         bucket, prefix = parse_location(folder.uri)
         title = breadcrumbs(folder.uri)[-1][0]
@@ -1598,18 +1764,22 @@ class S3Explorer:
         return blocks
 
     def _shown_entries(self, folder: Folder) -> list[Entry]:
-        """The list's entries: the folder's, narrowed by the search box and All / Folders / Files, in the order of the
-        column clicked."""
+        """
+        The list's entries: the folder's, narrowed by the search box and All / Folders / Files, in the order of the
+        column clicked.
+        """
         kind = _KINDS[self._kind] if parse_location(folder.uri)[0] else "all"
         wanted = parse_filter(self._query)
         return [e for e in self._ordered(folder)
                 if wanted.matches(e) and (kind == "all" or e.is_folder == (kind == "folders"))]
 
     def _ordered(self, folder: Folder) -> list[Entry]:
-        """The folder's entries in the order of the column clicked, kept until the folder, the sort or what's listed
+        """
+        The folder's entries in the order of the column clicked, kept until the folder, the sort or what's listed
         changes, so a key typed in the search box only filters them. With "Include subfolders", Name sorts by path, so
         each folder comes before what's in it, and Size and Modified put the files first: the biggest or newest
-        anywhere below."""
+        anywhere below.
+        """
         key = (len(folder.entries), self._sort, self._descending)
         if not self._order or self._order[0] is not folder or self._order[1] != key:
             if folder.deep and self._sort == "name":
@@ -1622,7 +1792,9 @@ class S3Explorer:
         return self._order[2]
 
     def _stats(self, folder: Folder) -> FolderStats:
-        """folder_stats of what's listed, kept until more is listed (the status bar shows them after each key)."""
+        """
+        folder_stats of what's listed, kept until more is listed (the status bar shows them after each key).
+        """
         if not self._counted or self._counted[0] is not folder or self._counted[1] != len(folder.entries):
             self._counted = (folder, len(folder.entries), folder_stats(folder.entries))
         return self._counted[2]
@@ -1747,8 +1919,10 @@ class S3Explorer:
         self._act_buttons: dict[str, Any] = {}
 
     def _build_picks(self, button: Callable[..., Any]) -> Any:
-        """The panel ⬇ Download .zip in the selection bar opens on the right, under what's selected: the zip's name
-        (Enter downloads too), Download and Cancel, and the list of what goes in."""
+        """
+        The panel ⬇ Download .zip in the selection bar opens on the right, under what's selected: the zip's name
+        (Enter downloads too), Download and Cancel, and the list of what goes in.
+        """
         w = self._widgets
         self._picks_name = w.Text(layout=w.Layout(width="280px"))
         self._picks_name.on_msg(lambda _, content, __: content.get("event") == "submit" and self._guard(self._save_picks))
@@ -1769,8 +1943,10 @@ class S3Explorer:
         return panel
 
     def _build_settings(self, button: Callable[..., Any]) -> Any:
-        """The ⚙ Settings panel, shown on the right under its title: a text box per setting, Save and Close.
-        Enter in a box saves too."""
+        """
+        The ⚙ Settings panel, shown on the right under its title: a text box per setting, Save and Close.
+        Enter in a box saves too.
+        """
         w = self._widgets
         self._set_size = w.Text(placeholder="100MB", layout=w.Layout(width="140px"))
         self._set_files = w.Text(placeholder="10,000", layout=w.Layout(width="140px"))
@@ -1796,8 +1972,10 @@ class S3Explorer:
         return panel
 
     def _renew(self, *sides: str) -> None:
-        """Put the list ('left') or the report ('right') in a new box. Widgets can't scroll without JavaScript, but a
-        new box starts at the top, so a folder you open shows its first rows and a new report shows its title."""
+        """
+        Put the list ('left') or the report ('right') in a new box. Widgets can't scroll without JavaScript, but a
+        new box starts at the top, so a folder you open shows its first rows and a new report shows its title.
+        """
         w, old = self._widgets, [self._left, self._right]
         if "left" in sides:  # under the search box and its buttons, which stay where they are
             self._left = w.VBox([self._head, self._rows_box, self._foot],
@@ -1815,8 +1993,10 @@ class S3Explorer:
                 box.close()  # closes the box only; the widgets in it live on in the new one
 
     def _guard(self, handler: Callable[[], None]) -> None:
-        """Run a widget callback; anything that goes wrong becomes a note on the right. (A callback's
-        exception would otherwise go to Jupyter's log, where nobody sees it, and the click would do nothing.)"""
+        """
+        Run a widget callback; anything that goes wrong becomes a note on the right. (A callback's
+        exception would otherwise go to Jupyter's log, where nobody sees it, and the click would do nothing.)
+        """
         try:
             handler()
         except (ClientError, BotoCoreError, *self.s3._DATA_ERRORS) as exc:
@@ -1877,15 +2057,19 @@ class S3Explorer:
                 ("s3x-on",) if on else ())
 
     def _draw_side(self) -> None:
-        """The list's state, for the style: on the list of buckets (no sizes, nothing to select), and while
-        something is selected (every row shows its checkbox)."""
+        """
+        The list's state, for the style: on the list of buckets (no sizes, nothing to select), and while
+        something is selected (every row shows its checkbox).
+        """
         bucket = parse_location(self.nav.location)[0]
         self._side._dom_classes = ("s3x-side",) + (() if bucket else ("s3x-buckets",)) + (
             ("s3x-picking",) if self._picked else ())
 
     def _draw_filters(self, folder: Folder) -> None:
-        """Above the list: the search box, All / Folders / Files with how many of each match it, Include subfolders,
-        and a chip for each file type here (the most common first), lit when the search asks for that type."""
+        """
+        Above the list: the search box, All / Folders / Files with how many of each match it, Include subfolders,
+        and a chip for each file type here (the most common first), lit when the search asks for that type.
+        """
         w, s3 = self._widgets, self.s3
         bucket = parse_location(self.nav.location)[0]
         self._filter.placeholder = "Search: a name, .csv, *.parquet, part-0*" if bucket else "Search your buckets"
@@ -1938,8 +2122,10 @@ class S3Explorer:
             self._types.layout.display = "none"
 
     def _draw_rows(self, folder: Folder) -> None:
-        """Fill the list with a page of the folder's entries, filtered and sorted, reusing row widgets so redraws are
-        quick; and the bar under it, which says which rows these are and moves to the others."""
+        """
+        Fill the list with a page of the folder's entries, filtered and sorted, reusing row widgets so redraws are
+        quick; and the bar under it, which says which rows these are and moves to the others.
+        """
         w = self._widgets
         entries = self._shown_entries(folder)
         self._visible, self._folder = entries, folder
@@ -1961,8 +2147,10 @@ class S3Explorer:
         self._draw_check_all()
 
     def _draw_pages(self, folder: Folder, total: int) -> None:
-        """The bar under a list longer than a page: which rows these are, of how many, and « ‹ › » for the first,
-        previous, next and last page."""
+        """
+        The bar under a list longer than a page: which rows these are, of how many, and « ‹ › » for the first,
+        previous, next and last page.
+        """
         size = self.page_size
         self._pages.layout.display = None if total > size else "none"
         if total <= size:
@@ -1976,8 +2164,10 @@ class S3Explorer:
             b.disabled = first == 1 if name in ("first", "previous") else last >= total
 
     def _fill(self, row: _Row, entry: Entry, base: str | None = None) -> None:
-        """Show an entry in a row. In a list of everything below a folder (`base`, its prefix), the folder the entry
-        is in goes under its name."""
+        """
+        Show an entry in a row. In a list of everything below a folder (`base`, its prefix), the folder the entry
+        is in goes under its name.
+        """
         row.entry = entry
         s3 = self.s3
         if entry.kind == "file":
@@ -2004,7 +2194,9 @@ class S3Explorer:
         row.box._dom_classes = ("s3x-r", "s3x-r2") if base is not None else ("s3x-r",)
 
     def _row_classes(self, entry: Entry) -> tuple[str, ...]:
-        """A row's button: lit for the file shown on the right, tinted when it's selected."""
+        """
+        A row's button: lit for the file shown on the right, tinted when it's selected.
+        """
         return ("s3x-row",) + (("s3x-on",) if entry.uri == self.selected else ()) + (
             ("s3x-picked",) if entry.uri in self._picked else ())
 
@@ -2017,8 +2209,10 @@ class S3Explorer:
                 row.check._dom_classes = _CHECK + (("s3x-on",) if row.entry.uri in self._picked else ())
 
     def _draw_foot(self, folder: Folder, entries: list[Entry], shown: int) -> None:
-        """At the end of the list: Load more from S3 and Look up for a folder bigger than what's listed, or why the
-        list is empty and what to do."""
+        """
+        At the end of the list: Load more from S3 and Look up for a folder bigger than what's listed, or why the
+        list is empty and what to do.
+        """
         text, esc = self._query.strip(), html.escape
         bucket = parse_location(folder.uri)[0]
         busy = self._lister is folder  # listing the rest in the background: it'll be in the list in a moment
@@ -2065,7 +2259,9 @@ class S3Explorer:
         self._foot_note.layout.display = None if note else "none"
 
     def _draw_actions(self) -> None:
-        """The buttons above the right pane: what you can do with the chosen file, or with this folder."""
+        """
+        The buttons above the right pane: what you can do with the chosen file, or with this folder.
+        """
         w = self._widgets
         if w is None:
             return
@@ -2118,8 +2314,10 @@ class S3Explorer:
         self._mark_actions()
 
     def _open_link(self, label: str, tip: str) -> str:
-        """↗ Open in new tab: a link to the chosen file that looks like the buttons beside it, presigned (for an
-        hour) to show the file in the tab rather than save it. Empty when it can't be signed (no credentials)."""
+        """
+        ↗ Open in new tab: a link to the chosen file that looks like the buttons beside it, presigned (for an
+        hour) to show the file in the tab rather than save it. Empty when it can't be signed (no credentials).
+        """
         try:
             url = self.core.presigned_url(self.selected, inline=True)
         except (ClientError, BotoCoreError):
@@ -2129,8 +2327,10 @@ class S3Explorer:
                 f'title="{esc(tip)}">{esc(label)}</a>')
 
     def _draw_expand(self, show: bool = True) -> None:
-        """▾ Expand all, at the end of the buttons above the right pane (beside ✕), while the pane shows a JSON file
-        with something collapsed in it, or with every part expanded by it."""
+        """
+        ▾ Expand all, at the end of the buttons above the right pane (beside ✕), while the pane shows a JSON file
+        with something collapsed in it, or with every part expanded by it.
+        """
         acts = [b for action, b in self._act_buttons.items() if action != "close"]
         close = [b for action, b in self._act_buttons.items() if action == "close"]
         expand = show and any(tree.folded for tree in self._trees())
@@ -2142,7 +2342,9 @@ class S3Explorer:
             "one by one (long strings stay collapsed: click one to read it)")
 
     def _trees(self) -> list[Any]:
-        """The JSON trees in the report on the right (a .json file's preview)."""
+        """
+        The JSON trees in the report on the right (a .json file's preview).
+        """
         return [block for block in self.shown if isinstance(block, self.s3._JsonTree)]
 
     def _mark_actions(self) -> None:
@@ -2151,8 +2353,10 @@ class S3Explorer:
                 b._dom_classes = ("s3x-act", "s3x-on") if action == self._action else ("s3x-act",)
 
     def _draw_status(self, folder: Folder) -> None:
-        """The bar at the bottom: what's listed (and how much of it matches the search), and where you are. While the
-        rest of the folder is listed in the background, a spinner and "Listing…" in front."""
+        """
+        The bar at the bottom: what's listed (and how much of it matches the search), and where you are. While the
+        rest of the folder is listed in the background, a spinner and "Listing…" in front.
+        """
         if self._widgets is None:
             return
         s3, esc = self.s3, html.escape
@@ -2221,7 +2425,9 @@ class S3Explorer:
     # ------------------------------------------------------------------ a folder as a .zip, and ⚙ Settings
 
     def _zip_limit(self) -> str:
-        """The zip limits in words: '100.0 MB and 10,000 files'."""
+        """
+        The zip limits in words: '100.0 MB and 10,000 files'.
+        """
         try:
             size = self.s3.human_size(self.s3.parse_size(self.zip_max_size))
         except (TypeError, ValueError):
@@ -2229,9 +2435,11 @@ class S3Explorer:
         return f"{size} and {self.zip_max_files:,} files"
 
     def _zip(self, target: str | list[Any], path: str = "") -> None:
-        """⬇ Download .zip, for a folder (`target` is its uri) or what's selected (a list, and the path it goes to):
+        """
+        ⬇ Download .zip, for a folder (`target` is its uri) or what's selected (a list, and the path it goes to):
         s3's download_zip with the limits from ⚙ Settings. It checks the size, file count, disk space, memory and
-        read access first, and writes nothing when one fails."""
+        read access first, and writes nothing when one fails.
+        """
         self._pane.download_zip(target, os.path.normpath(path) if path else None,  # None: in the downloads folder
                                 max_size=self.zip_max_size, max_files=self.zip_max_files)
         report = self._captured[-1] if self._captured else []
@@ -2248,7 +2456,9 @@ class S3Explorer:
     # ------------------------------------------------------------------ selecting files to download as one .zip
 
     def _on_check(self, row: _Row) -> None:
-        """A row's checkbox: select it, or unselect it."""
+        """
+        A row's checkbox: select it, or unselect it.
+        """
         entry = row.entry
         if entry is None or entry.kind == "bucket":
             return
@@ -2259,8 +2469,10 @@ class S3Explorer:
         self._draw_picks()
 
     def _on_check_all(self) -> None:
-        """The header's checkbox: select everything the list shows (with a search, what matches it, past "Show
-        more" too), or unselect it when it's all selected already."""
+        """
+        The header's checkbox: select everything the list shows (with a search, what matches it, past "Show
+        more" too), or unselect it when it's all selected already.
+        """
         shown = [e for e in self._visible if e.kind != "bucket"]
         if shown and all(e.uri in self._picked for e in shown):
             for entry in shown:
@@ -2276,7 +2488,9 @@ class S3Explorer:
         self._draw_picks()
 
     def _draw_check_all(self) -> None:
-        """The header's checkbox: empty, ticked when everything listed is selected, or a dash for some of it."""
+        """
+        The header's checkbox: empty, ticked when everything listed is selected, or a dash for some of it.
+        """
         if self._widgets is None:
             return
         shown = [e for e in self._visible if e.kind != "bucket"]
@@ -2293,13 +2507,17 @@ class S3Explorer:
         self._draw_side()
 
     def _picks_summary(self) -> tuple[list[Entry], int, int]:
-        """(the selected files, how many folders are selected, the files' bytes)."""
+        """
+        (the selected files, how many folders are selected, the files' bytes).
+        """
         files = [e for e in self._picked.values() if not e.is_folder]
         return files, len(self._picked) - len(files), sum(e.size or 0 for e in files)
 
     def _draw_picks(self) -> None:
-        """After the selection changed: the bar under the list (how many, how big, Clear and ⬇ Download .zip), the
-        header's checkbox, and the panel on the right if it's open."""
+        """
+        After the selection changed: the bar under the list (how many, how big, Clear and ⬇ Download .zip), the
+        header's checkbox, and the panel on the right if it's open.
+        """
         if self._widgets is None:
             return
         files, folders, size = self._picks_summary()
@@ -2316,13 +2534,17 @@ class S3Explorer:
                 self._close_picks()
 
     def _picks_layout(self) -> tuple[str, str, str]:
-        """(bucket, the folder the selected entries share, the zip's name without .zip), as download_zip names it."""
+        """
+        (bucket, the folder the selected entries share, the zip's name without .zip), as download_zip names it.
+        """
         bucket = parse_location(self.nav.location)[0]
         base, name = self.s3._zip_layout(bucket, [e.key for e in self._picked.values()])
         return bucket, base, name
 
     def _picks_default(self) -> str:
-        """The zip's name: download_zip's ('churn-12-files.zip'), with -2, -3, ... when that file is already there."""
+        """
+        The zip's name: download_zip's ('churn-12-files.zip'), with -2, -3, ... when that file is already there.
+        """
         name = self._picks_layout()[2]
         folder = self.core.downloads_folder()
         number, candidate = 1, f"{name}.zip"
@@ -2332,8 +2554,10 @@ class S3Explorer:
         return candidate
 
     def _open_picks(self, keep_name: bool = False) -> None:
-        """⬇ Download .zip in the selection bar: on the right, what goes in the zip and how big it is, its name,
-        and the button that makes it. Nothing is downloaded until that's clicked."""
+        """
+        ⬇ Download .zip in the selection bar: on the right, what goes in the zip and how big it is, its name,
+        and the button that makes it. Nothing is downloaded until that's clicked.
+        """
         s3 = self.s3
         files, folders, size = self._picks_summary()
         bucket, base, _ = self._picks_layout()
@@ -2379,7 +2603,9 @@ class S3Explorer:
         self._picks_panel.layout.display = None
 
     def _close_picks(self) -> None:
-        """Back to the file or folder that was shown; the selection stays."""
+        """
+        Back to the file or folder that was shown; the selection stays.
+        """
         self._picks_panel.layout.display = "none"
         if self.selected:
             self._select(self.selected)
@@ -2387,7 +2613,9 @@ class S3Explorer:
             self._show_folder(self._source())
 
     def _save_picks(self) -> None:
-        """Download in the panel: zip what's selected under the name typed, unless a file of that name is there."""
+        """
+        Download in the panel: zip what's selected under the name typed, unless a file of that name is there.
+        """
         s3 = self.s3
         name = self._picks_name.value.strip()
         if not name:
@@ -2411,7 +2639,9 @@ class S3Explorer:
             self._close_settings()
 
     def _open_settings(self) -> None:
-        """⚙: the settings on the right, in place of the report."""
+        """
+        ⚙: the settings on the right, in place of the report.
+        """
         s3 = self.s3
         self._action = "settings"
         self._mark_actions()
@@ -2433,7 +2663,9 @@ class S3Explorer:
         self._settings.layout.display = None
 
     def _close_settings(self) -> None:
-        """Back to the file or folder that was shown."""
+        """
+        Back to the file or folder that was shown.
+        """
         self._settings.layout.display = "none"
         if self.selected:
             self._select(self.selected)
@@ -2470,14 +2702,18 @@ class S3Explorer:
     # ------------------------------------------------------------------ a PDF, page by page: as it looks, or its text
 
     def _show_pages(self, first: int, action: str = "document") -> None:
-        """Read all (action 'document': the pages as they look) or Text ('text': their words laid out to read), for
-        a PDF, from page `first` on; the pager under the report moves on."""
+        """
+        Read all (action 'document': the pages as they look) or Text ('text': their words laid out to read), for
+        a PDF, from page `first` on; the pager under the report moves on.
+        """
         self._first_page = first
         self._report(action, self._read_pdf if action == "document" else self._read_text, self.selected, variant=first)
 
     def _read_pdf(self, uri: str) -> None:
-        """The pages of a PDF drawn as they print, one report's worth (s3's _MAX_PICTURES, 20) from _first_page on,
-        each with its text folded underneath."""
+        """
+        The pages of a PDF drawn as they print, one report's worth (s3's _MAX_PICTURES, 20) from _first_page on,
+        each with its text folded underneath.
+        """
         count = self._page_count(uri)
         if not count:  # a broken or locked PDF, or no pypdf: document() says what's wrong
             self._pane.document(uri, pictures=True)
@@ -2491,9 +2727,11 @@ class S3Explorer:
             report.insert(at, self.s3._Note(f"{span}Click a page to see it full size; ‹ › there step through the pages."))
 
     def _read_text(self, uri: str) -> None:
-        """Text, for a PDF: the words of one report's worth of pages (_TEXT_PAGES, 50) from _first_page on, as
+        """
+        Text, for a PDF: the words of one report's worth of pages (_TEXT_PAGES, 50) from _first_page on, as
         s3's document(pictures=False) lays them out: headings, paragraphs and lists, a line where each page starts,
-        and no running headers or footers."""
+        and no running headers or footers.
+        """
         count = self._page_count(uri)
         if not count:  # a broken or locked PDF, or no pypdf: document() says what's wrong
             self._pane.document(uri, pictures=False)
@@ -2507,7 +2745,9 @@ class S3Explorer:
                                             "others, and 📖 Read all shows the pages as they look."))
 
     def _page_count(self, uri: str) -> int:
-        """How many pages a PDF has (0 when it can't be read), once per file version."""
+        """
+        How many pages a PDF has (0 when it can't be read), once per file version.
+        """
         entry = self._entry()
         key = (uri, entry.etag if entry else "")
         if key not in self._page_counts:
@@ -2518,16 +2758,22 @@ class S3Explorer:
         return self._page_counts[key]
 
     def _per_report(self) -> int:
-        """PDF pages one report shows: Read all draws s3's _MAX_PICTURES (20), Text shows _TEXT_PAGES (50)."""
+        """
+        PDF pages one report shows: Read all draws s3's _MAX_PICTURES (20), Text shows _TEXT_PAGES (50).
+        """
         return _TEXT_PAGES if self._action == "text" else self.s3._MAX_PICTURES
 
     def _page_span(self, count: int) -> tuple[int, int]:
-        """The first and last page "Read all" or "Text" shows now."""
+        """
+        The first and last page "Read all" or "Text" shows now.
+        """
         first = max(1, min(self._first_page, count))
         return first, min(first + self._per_report() - 1, count)
 
     def _draw_pager(self, show: bool = True) -> None:
-        """The buttons under a PDF's pages (or their text) that show the pages before and after them."""
+        """
+        The buttons under a PDF's pages (or their text) that show the pages before and after them.
+        """
         w, entry = self._widgets, self._entry()
         count = self._page_counts.get((self.selected, entry.etag if entry else ""), 0)
         per, action = self._per_report(), self._action
@@ -2549,8 +2795,10 @@ class S3Explorer:
             widget.close()
 
     def _on_expand(self) -> None:
-        """▾ Expand all: every object and array of the JSON on the right, and of the JSON files opened after it,
-        until it's clicked again. The report is drawn again in place, so the pane stays where it was scrolled to."""
+        """
+        ▾ Expand all: every object and array of the JSON on the right, and of the JSON files opened after it,
+        until it's clicked again. The report is drawn again in place, so the pane stays where it was scrolled to.
+        """
         self._expand_all = not self._expand_all
         for tree in self._trees():
             tree.unfold("all" if self._expand_all else "start")
@@ -2562,7 +2810,9 @@ class S3Explorer:
         self._refilter()
 
     def _set_query(self, text: str, renew: bool = False) -> None:
-        """Put text in the search box (without it calling _on_filter too) and redraw the list for it."""
+        """
+        Put text in the search box (without it calling _on_filter too) and redraw the list for it.
+        """
         self._query = text
         if self._widgets is not None:
             self._quiet = True
@@ -2571,8 +2821,10 @@ class S3Explorer:
         self._refilter(renew)
 
     def _refilter(self, renew: bool = False) -> None:
-        """Redraw the list after the search, All / Folders / Files or Include subfolders changed (the text explorer
-        prints it), from its first page. renew: start the list at the top."""
+        """
+        Redraw the list after the search, All / Folders / Files or Include subfolders changed (the text explorer
+        prints it), from its first page. renew: start the list at the top.
+        """
         self._offset = 0
         folder = self._source()
         if self._widgets is None:
@@ -2589,7 +2841,9 @@ class S3Explorer:
         self._refilter(renew=True)
 
     def _on_deep(self) -> None:
-        """Include subfolders: list everything below this folder (once; it's kept), or only its first level again."""
+        """
+        Include subfolders: list everything below this folder (once; it's kept), or only its first level again.
+        """
         self._deep, self._all_types = not self._deep, False
         if self._deep:
             self._busy("Listing everything below this folder…")
@@ -2599,8 +2853,10 @@ class S3Explorer:
             self._show_folder(self._source())
 
     def _toggle_type(self, kind: str) -> None:
-        """A file type's chip: add '.csv' to the search, or take it out again. The search box stays the one place a
-        filter is written down, so what a chip did can be read, changed or typed next time."""
+        """
+        A file type's chip: add '.csv' to the search, or take it out again. The search box stays the one place a
+        filter is written down, so what a chip did can be read, changed or typed next time.
+        """
         words = [word for word in re.split(r"[\s,]+", self._query.strip()) if word]
         kept = [word for word in words if _type_word(word) != kind]
         if len(kept) == len(words):
@@ -2622,7 +2878,9 @@ class S3Explorer:
         self._renew("left")
 
     def _on_page(self, to: str) -> None:
-        """« ‹ › » under the list: its first, previous, next or last page."""
+        """
+        « ‹ › » under the list: its first, previous, next or last page.
+        """
         size, total = self.page_size, len(self._visible)
         last = max(0, total - 1) // size * size
         self._offset = {"first": 0, "previous": max(0, self._offset - size), "next": min(last, self._offset + size),
@@ -2631,8 +2889,10 @@ class S3Explorer:
         self._renew("left")
 
     def _on_load(self) -> None:
-        """Load more from S3, at the end of a folder bigger than what's listed: the next list_limit entries (deep_limit
-        files with Include subfolders), in the background in a notebook."""
+        """
+        Load more from S3, at the end of a folder bigger than what's listed: the next list_limit entries (deep_limit
+        files with Include subfolders), in the background in a notebook.
+        """
         folder = self._source()
         self._list_more(folder, self._goal(folder))
         self._draw_filters(folder)

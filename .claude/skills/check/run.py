@@ -1,4 +1,5 @@
-"""Run what CI runs, locally, plus the project-rule checks CI doesn't have. Prints one line per step and the
+"""
+Run what CI runs, locally, plus the project-rule checks CI doesn't have. Prints one line per step and the
 output of any step that failed.
 
     python .claude/skills/check/run.py                  # lint, imports with only boto3, package, rules, tests
@@ -51,7 +52,9 @@ importlib.import_module(MODULE)
 
 
 def step(name: str, command: list[str], *, cwd: Path = ROOT, tail: int = 80) -> tuple[str, bool, str, str]:
-    """(status line, passed, the output to show if it failed, full output)"""
+    """
+    (status line, passed, the output to show if it failed, full output)
+    """
     started = time.monotonic()
     proc = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
     output = (proc.stdout + proc.stderr).strip()
@@ -63,8 +66,10 @@ def step(name: str, command: list[str], *, cwd: Path = ROOT, tail: int = 80) -> 
 
 
 def package_step(python: str) -> tuple[str, bool, str, str]:
-    """Like CI's Package job, without a fresh environment: build the wheel, twine check it, then import the
-    aws_analyzer package from the unpacked wheel with every package except boto3 blocked."""
+    """
+    Like CI's Package job, without a fresh environment: build the wheel, twine check it, then import the
+    aws_analyzer package from the unpacked wheel with every package except boto3 blocked.
+    """
     started = time.monotonic()
     with tempfile.TemporaryDirectory() as tmp:
         dist, site = Path(tmp) / "dist", Path(tmp) / "site"
@@ -93,7 +98,7 @@ def last_line(output: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").strip().split("\n\n")[0])
     parser.add_argument("--matrix", action="store_true", help="also run pytest on CI's other Python versions")
     parser.add_argument("pytest_args", nargs="*", help="arguments for pytest (after --)")
     args = parser.parse_args()

@@ -2696,7 +2696,9 @@ def formats(aws):
 
 
 def pdf_bytes(*pages, title=None):
-    """A PDF with one page per text (an empty string = a page with no text layer), xref offsets and all."""
+    """
+    A PDF with one page per text (an empty string = a page with no text layer), xref offsets and all.
+    """
     pages = pages or ("",)
     count = len(pages)
     objects = [
@@ -2733,8 +2735,10 @@ def pdf_bytes(*pages, title=None):
 
 
 def layout_pdf(*pages):
-    """A PDF whose pages (612 x 792 points) are lists of (x, y, size, bold, text) runs, y from the bottom of the
-    page, each drawn on its own in Helvetica or Helvetica-Bold."""
+    """
+    A PDF whose pages (612 x 792 points) are lists of (x, y, size, bold, text) runs, y from the bottom of the
+    page, each drawn on its own in Helvetica or Helvetica-Bold.
+    """
     count = len(pages)
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -2837,7 +2841,9 @@ DOCX_STYLES = (
 
 
 def docx_bytes(body=DOCX_BODY, styles=DOCX_STYLES, title="Churn study", pages=3, media=None):
-    """media: {relationship id: (path under word/, bytes)}, the pictures the body refers to."""
+    """
+    media: {relationship id: (path under word/, bytes)}, the pictures the body refers to.
+    """
     files = {
         "[Content_Types].xml": "<Types/>",
         "word/document.xml": f"<w:document {DOCX_NS}><w:body>{body}</w:body></w:document>",
@@ -2909,7 +2915,9 @@ def shape(text, placeholder=None):
 
 
 def pptx_bytes(slides, order=None, title="Q3 review"):
-    """slides: (title, body, notes, table rows) per slide file; order: slide file numbers as the deck shows them."""
+    """
+    slides: (title, body, notes, table rows) per slide file; order: slide file numbers as the deck shows them.
+    """
     files = {
         "[Content_Types].xml": "<Types/>",
         "docProps/core.xml": CORE.format(title=title),
@@ -3286,7 +3294,9 @@ def wav_bytes(seconds=2, rate=8000, channels=1):
 
 
 def flac_bytes(rate=44100, channels=2, samples=44100 * 3):
-    """Just the STREAMINFO block a FLAC file starts with."""
+    """
+    Just the STREAMINFO block a FLAC file starts with.
+    """
     bits = (rate << 44) | ((channels - 1) << 41) | (15 << 36) | samples
     return b"fLaC" + bytes([0x80, 0, 0, 34]) + bytes(10) + bits.to_bytes(8, "big") + bytes(16)
 
@@ -3296,7 +3306,9 @@ def box(kind, body):
 
 
 def mp4_bytes(seconds=12.5, width=1280, height=720, media=b"", brand=b"isom"):
-    """ftyp, then the media data, then moov with the length (mvhd) and one video track's size (tkhd)."""
+    """
+    ftyp, then the media data, then moov with the length (mvhd) and one video track's size (tkhd).
+    """
     mvhd = box(b"mvhd", bytes(12) + (1000).to_bytes(4, "big") + int(seconds * 1000).to_bytes(4, "big") + bytes(80))
     tkhd = box(b"tkhd", bytes(76) + (width << 16).to_bytes(4, "big") + (height << 16).to_bytes(4, "big"))
     return box(b"ftyp", brand + bytes(4) + b"isom") + box(b"mdat", media) + box(b"moov", mvhd + box(b"trak", tkhd))
@@ -3899,7 +3911,9 @@ def test_ui_downloads_and_clean_downloads(ui, capsys, tmp_path, monkeypatch):
 
 
 class FakeBar:
-    """Records what _progress does with a tqdm bar."""
+    """
+    Records what _progress does with a tqdm bar.
+    """
 
     made: list = []
 

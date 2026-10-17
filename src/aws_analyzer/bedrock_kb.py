@@ -101,7 +101,9 @@ from ._kit.window import (
 
 
 def human_duration(delta: timedelta | float | None) -> str:
-    """timedelta or seconds -> '45s', '3m 20s', '2h 05m'."""
+    """
+    timedelta or seconds -> '45s', '3m 20s', '2h 05m'.
+    """
     if delta is None:
         return "-"
     seconds = int(delta.total_seconds() if isinstance(delta, timedelta) else delta)
@@ -117,7 +119,9 @@ def _isnt(count: int) -> str:
 
 
 def _arn_region(arn: str) -> str:
-    """'arn:aws:bedrock:eu-west-1:123456789012:knowledge-base/X' -> 'eu-west-1' ('' for anything else)."""
+    """
+    'arn:aws:bedrock:eu-west-1:123456789012:knowledge-base/X' -> 'eu-west-1' ('' for anything else).
+    """
     parts = (arn or "").split(":")
     return parts[3] if len(parts) > 5 and parts[0] == "arn" else ""
 
@@ -135,19 +139,25 @@ FILE_TEXT_LIMIT = 1024**2  # bytes of a plain text file read to place its chunks
 
 
 def file_type(uri: str | None) -> str:
-    """The extension a file is read by, lower case: 's3://b/Refund-Policy.PDF' -> 'pdf', 'faq/README' -> ''."""
+    """
+    The extension a file is read by, lower case: 's3://b/Refund-Policy.PDF' -> 'pdf', 'faq/README' -> ''.
+    """
     name = source_name(uri)
     return name.rsplit(".", 1)[-1].lower() if "." in name.strip(".") else ""
 
 
 def sync_command(kb_id: str, data_source_id: str, region: str = "") -> str:
-    """The AWS CLI command that syncs one data source. This module never runs it: syncing changes the index."""
+    """
+    The AWS CLI command that syncs one data source. This module never runs it: syncing changes the index.
+    """
     where = f" --region {region}" if region else ""
     return f"aws bedrock-agent start-ingestion-job --knowledge-base-id {kb_id} --data-source-id {data_source_id}{where}"
 
 
 def sync_call(kb_id: str, data_source_id: str, region: str = "") -> str:
-    """The same sync as a boto3 call to copy into a cell."""
+    """
+    The same sync as a boto3 call to copy into a cell.
+    """
     where = f", region_name={region!r}" if region else ""
     return (
         f"boto3.client('bedrock-agent'{where}).start_ingestion_job(knowledgeBaseId={kb_id!r}, "
@@ -156,15 +166,19 @@ def sync_call(kb_id: str, data_source_id: str, region: str = "") -> str:
 
 
 def human_tokens(count: int | None, *, estimate: bool = False) -> str:
-    """1234 -> '1,234 tokens' ('~1,234 tokens' when it's an estimate)."""
+    """
+    1234 -> '1,234 tokens' ('~1,234 tokens' when it's an estimate).
+    """
     if count is None:
         return "-"
     return f"{'~' if estimate else ''}{count:,} token{'' if count == 1 else 's'}"
 
 
 def _code_terms(question: str) -> list[str]:
-    """IDs and codes in a question ('E1234', 'SKU-42', 'GDPR', '4412'): exact strings that semantic search, which
-    matches meaning, tends to miss."""
+    """
+    IDs and codes in a question ('E1234', 'SKU-42', 'GDPR', '4412'): exact strings that semantic search, which
+    matches meaning, tends to miss.
+    """
     codes = []
     for match in _TERM_RE.finditer(question or ""):
         word = match.group(0)
@@ -186,7 +200,9 @@ _RUNNING = ("STARTING", "IN_PROGRESS", "STOPPING")
 
 @dataclass
 class IngestionJob:
-    """One sync (ingestion job) of a data source. Counts are documents: files, web pages or records."""
+    """
+    One sync (ingestion job) of a data source. Counts are documents: files, web pages or records.
+    """
 
     id: str
     data_source_id: str = ""
@@ -211,7 +227,9 @@ class IngestionJob:
 
     @property
     def duration(self) -> timedelta | None:
-        """How long it ran (so far, while it's running)."""
+        """
+        How long it ran (so far, while it's running).
+        """
         if self.started is None:
             return None
         end = _utcnow() if self.running else self.updated
@@ -219,14 +237,18 @@ class IngestionJob:
 
     @property
     def ok(self) -> bool:
-        """Finished, and every document it read was indexed."""
+        """
+        Finished, and every document it read was indexed.
+        """
         return self.status == "COMPLETE" and not self.failed
 
 
 @dataclass
 class DataSourceInfo:
-    """Where a knowledge base's documents come from and how they're cut into chunks. Parts that couldn't be read
-    are listed in `errors` (section -> error code)."""
+    """
+    Where a knowledge base's documents come from and how they're cut into chunks. Parts that couldn't be read
+    are listed in `errors` (section -> error code).
+    """
 
     id: str
     name: str = ""
@@ -265,8 +287,10 @@ class DataSourceInfo:
 
 @dataclass
 class KnowledgeBaseInfo:
-    """A knowledge base's settings, data sources and their latest syncs. Parts that couldn't be read are listed in
-    `errors` (section -> error code)."""
+    """
+    A knowledge base's settings, data sources and their latest syncs. Parts that couldn't be read are listed in
+    `errors` (section -> error code).
+    """
 
     id: str
     name: str = ""
@@ -295,14 +319,18 @@ class KnowledgeBaseInfo:
 
     @property
     def last_sync(self) -> IngestionJob | None:
-        """The newest sync of any of its data sources."""
+        """
+        The newest sync of any of its data sources.
+        """
         jobs = [ds.last_sync for ds in self.data_sources if ds.last_sync]
         return max(jobs, key=lambda j: j.started or _EPOCH, default=None)
 
 
 @dataclass
 class DocumentSummary:
-    """Counts of documents by status, and the most common reasons documents failed."""
+    """
+    Counts of documents by status, and the most common reasons documents failed.
+    """
 
     total: int = 0
     counts: dict[str, int] = field(
@@ -319,7 +347,9 @@ class DocumentSummary:
 
 @dataclass
 class Retrieval:
-    """What one Retrieve call returned for a question, best passage first."""
+    """
+    What one Retrieve call returned for a question, best passage first.
+    """
 
     kb_id: str
     question: str
@@ -336,7 +366,9 @@ class Retrieval:
     )  # ID -> name of the data sources searched; {} = all of them
 
     def to_df(self):
-        """One row per passage: rank, score, source, page, text, IDs and metadata."""
+        """
+        One row per passage: rank, score, source, page, text, IDs and metadata.
+        """
         pd = _require("pandas", "Retrieval.to_df")
         return pd.DataFrame(
             [
@@ -359,7 +391,9 @@ class Retrieval:
 
 @dataclass
 class Answer:
-    """A generated answer, the sources it was given and how much of it they back up."""
+    """
+    A generated answer, the sources it was given and how much of it they back up.
+    """
 
     question: str
     text: str
@@ -392,12 +426,16 @@ class Answer:
 
     @property
     def cited(self) -> list[int]:
-        """The source numbers the answer cites."""
+        """
+        The source numbers the answer cites.
+        """
         return sorted({n for c in self.citations for n in c.sources})
 
     @property
     def grounded_share(self) -> float:
-        """The share of the answer's characters (spaces aside) inside a span that cites a source."""
+        """
+        The share of the answer's characters (spaces aside) inside a span that cites a source.
+        """
         covered = [False] * len(self.text)
         for c in self.citations:
             if c.sources:
@@ -407,7 +445,9 @@ class Answer:
         return sum(covered[i] for i in chars) / len(chars) if chars else 0.0
 
     def to_df(self):
-        """One row per source: its number, whether the answer cites it, where it's from, and its text."""
+        """
+        One row per source: its number, whether the answer cites it, where it's from, and its text.
+        """
         pd = _require("pandas", "Answer.to_df")
         cited = set(self.cited)
         return pd.DataFrame(
@@ -430,7 +470,9 @@ class Answer:
 
 @dataclass
 class FileChange:
-    """A file in a data source's bucket, added or changed after the last successful sync."""
+    """
+    A file in a data source's bucket, added or changed after the last successful sync.
+    """
 
     key: str
     modified: datetime | None = None
@@ -444,7 +486,9 @@ class FileChange:
 
 @dataclass
 class SyncFreshness:
-    """An S3 data source's files compared with its last successful sync."""
+    """
+    An S3 data source's files compared with its last successful sync.
+    """
 
     data_source: DataSourceInfo
     last_sync: IngestionJob | None = None  # the last COMPLETE sync (None = never)
@@ -459,7 +503,9 @@ class SyncFreshness:
     note: str = ""  # why it wasn't checked, when it wasn't (not S3, no access to the bucket, ...)
 
     def to_df(self):
-        """One row per changed file: key, when it changed, size."""
+        """
+        One row per changed file: key, when it changed, size.
+        """
         pd = _require("pandas", "SyncFreshness.to_df")
         return pd.DataFrame(
             [
@@ -472,7 +518,9 @@ class SyncFreshness:
 
 @dataclass
 class SearchComparison:
-    """The same question searched with different settings, and how much the results agree."""
+    """
+    The same question searched with different settings, and how much the results agree.
+    """
 
     question: str = ""
     kb_id: str = ""
@@ -494,7 +542,9 @@ class SearchComparison:
     )  # ID -> name of the data sources searched; {} = all of them
 
     def ranks(self) -> list[tuple[Passage, dict[str, int | None]]]:
-        """Every passage any setting found, with its rank under each setting (None = not found), best first."""
+        """
+        Every passage any setting found, with its rank under each setting (None = not found), best first.
+        """
         found: dict[str, tuple[Passage, dict[str, int | None]]] = {}
         for label, r in self.runs.items():
             for p in r.passages:
@@ -509,7 +559,9 @@ class SearchComparison:
         )
 
     def to_df(self):
-        """One row per passage, one column per setting holding its rank there."""
+        """
+        One row per passage, one column per setting holding its rank there.
+        """
         pd = _require("pandas", "SearchComparison.to_df")
         return pd.DataFrame(
             [{"source": p.source, "text": p.text, **ranks} for p, ranks in self.ranks()]
@@ -518,7 +570,9 @@ class SearchComparison:
 
 @dataclass
 class EvalCase:
-    """One test question, and where its expected source came up."""
+    """
+    One test question, and where its expected source came up.
+    """
 
     question: str
     expected: Any  # a piece of the source's URI, file name or text (or a list of them)
@@ -531,7 +585,9 @@ class EvalCase:
 
 @dataclass
 class EvalReport:
-    """How well retrieval finds the expected sources for a set of test questions."""
+    """
+    How well retrieval finds the expected sources for a set of test questions.
+    """
 
     kb_id: str = ""
     kb_name: str = ""
@@ -551,7 +607,9 @@ class EvalReport:
         return [c for c in self.cases if c.rank is None]
 
     def to_df(self):
-        """One row per question: expected source, its rank (None = missed) and what came up first."""
+        """
+        One row per question: expected source, its rank (None = missed) and what came up first.
+        """
         pd = _require("pandas", "EvalReport.to_df")
         return pd.DataFrame(
             [
@@ -585,9 +643,11 @@ FILE_STATES: dict[str, tuple[str, str]] = {
 
 @dataclass
 class KBFile:
-    """One file of a knowledge base: the S3 object and Bedrock's record of it side by side, and what they add up to.
+    """
+    One file of a knowledge base: the S3 object and Bedrock's record of it side by side, and what they add up to.
     `state` is one of FILE_STATES (failed, changed, new, skipped, deleted, partial, ignored, indexing, unchecked,
-    indexed) and `note` says why, in a sentence."""
+    indexed) and `note` says why, in a sentence.
+    """
 
     uri: str  # s3://bucket/key, or a custom data source's document ID
     data_source_id: str = ""
@@ -608,12 +668,16 @@ class KBFile:
 
     @property
     def key(self) -> str:
-        """Its path in the bucket ('policies/refund-policy.pdf'); a custom document's ID as it is."""
+        """
+        Its path in the bucket ('policies/refund-policy.pdf'); a custom document's ID as it is.
+        """
         return self.uri[5:].partition("/")[2] if self.uri.startswith("s3://") else self.uri
 
     @property
     def folder(self) -> str:
-        """'policies/' for 'policies/refund-policy.pdf', '' at the top of the bucket."""
+        """
+        'policies/' for 'policies/refund-policy.pdf', '' at the top of the bucket.
+        """
         return self.key.rsplit("/", 1)[0] + "/" if "/" in self.key else ""
 
     @property
@@ -622,15 +686,19 @@ class KBFile:
 
     @property
     def searchable(self) -> bool:
-        """Whether searches find it: Bedrock indexed its text (maybe an older version of it)."""
+        """
+        Whether searches find it: Bedrock indexed its text (maybe an older version of it).
+        """
         return self.status in SEARCHABLE
 
 
 @dataclass
 class FileInventory:
-    """Every file of a knowledge base's S3 and custom data sources, and whether each is searchable (KBFile.state).
+    """
+    Every file of a knowledge base's S3 and custom data sources, and whether each is searchable (KBFile.state).
     An S3 data source is read from both sides, Bedrock's document list and the bucket, so files a sync skipped or
-    hasn't reached yet, and files deleted since, show up too. What couldn't be read is in `errors`."""
+    hasn't reached yet, and files deleted since, show up too. What couldn't be read is in `errors`.
+    """
 
     kb_id: str
     kb_name: str = ""
@@ -644,13 +712,17 @@ class FileInventory:
     seconds: float = 0.0
 
     def counts(self) -> dict[str, int]:
-        """Files per state, worst first (FILE_STATES' order), without the states no file is in."""
+        """
+        Files per state, worst first (FILE_STATES' order), without the states no file is in.
+        """
         found = Counter(f.state for f in self.files)
         return {state: found[state] for state in FILE_STATES if found[state]}
 
     def to_df(self):
-        """One row per file: where it is, its state and why, Bedrock's status, size and when it changed and was
-        indexed."""
+        """
+        One row per file: where it is, its state and why, Bedrock's status, size and when it changed and was
+        indexed.
+        """
         pd = _require("pandas", "FileInventory.to_df")
         columns = ["uri", "name", "data_source", "state", "note", "status", "reason", "size", "modified", "indexed",
                    "metadata"]
@@ -677,8 +749,10 @@ class FileInventory:
 
 @dataclass
 class MetadataFile:
-    """A file's <file>.metadata.json: the attributes in it (what where= filters match) and what's wrong with it, in
-    plain English. found=False when the file has none."""
+    """
+    A file's <file>.metadata.json: the attributes in it (what where= filters match) and what's wrong with it, in
+    plain English. found=False when the file has none.
+    """
 
     uri: str  # s3://bucket/key.metadata.json
     found: bool = False
@@ -694,7 +768,9 @@ class MetadataFile:
 
 @dataclass
 class ChunkStats:
-    """What a file's chunks look like: how many, how big, the pages they come from, and how they fit together."""
+    """
+    What a file's chunks look like: how many, how big, the pages they come from, and how they fit together.
+    """
 
     count: int = 0
     tokens: list[int] = field(default_factory=list)  # each chunk's estimated tokens, in document order
@@ -713,7 +789,9 @@ class ChunkStats:
 
 @dataclass
 class DocumentChunks:
-    """A file's chunks as the vector store holds them (a Retrieve limited to the file), in document order."""
+    """
+    A file's chunks as the vector store holds them (a Retrieve limited to the file), in document order.
+    """
 
     kb_id: str
     uri: str
@@ -732,8 +810,10 @@ class DocumentChunks:
 
 @dataclass
 class FileProbe:
-    """One question asked of a file and of the whole knowledge base: whether the file holds an answer, and whether it
-    ranks high enough among every file's passages for an answer to see it."""
+    """
+    One question asked of a file and of the whole knowledge base: whether the file holds an answer, and whether it
+    ranks high enough among every file's passages for an answer to see it.
+    """
 
     uri: str
     question: str
@@ -751,8 +831,10 @@ class FileProbe:
 
 
 def parse_knowledge_base(desc: dict[str, Any]) -> KnowledgeBaseInfo:
-    """A GetKnowledgeBase 'knowledgeBase' dict (or a ListKnowledgeBases summary) -> KnowledgeBaseInfo.
-    Data sources, syncs and tags need their own calls: see BedrockKBAnalyzer.describe."""
+    """
+    A GetKnowledgeBase 'knowledgeBase' dict (or a ListKnowledgeBases summary) -> KnowledgeBaseInfo.
+    Data sources, syncs and tags need their own calls: see BedrockKBAnalyzer.describe.
+    """
     cfg = desc.get("knowledgeBaseConfiguration") or {}
     kind = cfg.get("type", "")
     info = KnowledgeBaseInfo(
@@ -809,7 +891,9 @@ def _web_urls(cfg: dict[str, Any]) -> list[str]:
 
 
 def parse_data_source(desc: dict[str, Any]) -> DataSourceInfo:
-    """A GetDataSource 'dataSource' dict -> DataSourceInfo (its syncs need their own call)."""
+    """
+    A GetDataSource 'dataSource' dict -> DataSourceInfo (its syncs need their own call).
+    """
     cfg = desc.get("dataSourceConfiguration") or {}
     kind = cfg.get("type", "")
     ds = DataSourceInfo(
@@ -887,8 +971,10 @@ _JOB_STATISTICS = {
 
 
 def parse_ingestion_job(desc: dict[str, Any]) -> IngestionJob:
-    """A GetIngestionJob 'ingestionJob' dict or a ListIngestionJobs summary -> IngestionJob. Only GetIngestionJob
-    returns failure_reasons."""
+    """
+    A GetIngestionJob 'ingestionJob' dict or a ListIngestionJobs summary -> IngestionJob. Only GetIngestionJob
+    returns failure_reasons.
+    """
     job = IngestionJob(
         id=desc.get("ingestionJobId", ""),
         data_source_id=desc.get("dataSourceId", ""),
@@ -904,8 +990,10 @@ def parse_ingestion_job(desc: dict[str, Any]) -> IngestionJob:
 
 
 def parse_rag(resp: dict[str, Any]) -> Answer:
-    """A RetrieveAndGenerate response -> Answer: the text, each cited span, and the passages behind them numbered
-    from 1 in the order the answer first cites them (a passage cited twice keeps one number)."""
+    """
+    A RetrieveAndGenerate response -> Answer: the text, each cited span, and the passages behind them numbered
+    from 1 in the order the answer first cites them (a passage cited twice keeps one number).
+    """
     text = (resp.get("output") or {}).get("text") or ""
     sources: list[Passage] = []
     numbers: dict[str, int] = {}
@@ -935,8 +1023,10 @@ def parse_rag(resp: dict[str, Any]) -> Answer:
 
 
 def parse_converse(resp: dict[str, Any], sources: Iterable[Passage | str]) -> Answer:
-    """A Converse response -> Answer with exact token counts. Only text blocks count as the answer (reasoning and
-    other blocks are skipped); its [n] markers become citations of `sources`."""
+    """
+    A Converse response -> Answer with exact token counts. Only text blocks count as the answer (reasoning and
+    other blocks are skipped); its [n] markers become citations of `sources`.
+    """
     sources = _as_passages(sources)
     blocks = ((resp.get("output") or {}).get("message") or {}).get("content") or []
     text = "".join(
@@ -962,7 +1052,9 @@ def parse_converse(resp: dict[str, Any], sources: Iterable[Passage | str]) -> An
 
 
 def describe_chunking(cfg: dict[str, Any] | None) -> str:
-    """chunkingConfiguration -> plain English: 'Fixed size: 300 tokens per chunk, 20% overlap'."""
+    """
+    chunkingConfiguration -> plain English: 'Fixed size: 300 tokens per chunk, 20% overlap'.
+    """
     cfg = cfg or {}
     strategy = cfg.get("chunkingStrategy")
     if not strategy:
@@ -1004,7 +1096,9 @@ _PARSERS = {
 
 
 def describe_parsing(cfg: dict[str, Any] | None) -> str:
-    """parsingConfiguration -> plain English: 'Default: the text only (...)'."""
+    """
+    parsingConfiguration -> plain English: 'Default: the text only (...)'.
+    """
     cfg = cfg or {}
     strategy: str | None = cfg.get("parsingStrategy")
     if not strategy:
@@ -1051,12 +1145,16 @@ _STORE_BILLED_BY = {
 
 
 def store_name(kind: str) -> str:
-    """'OPENSEARCH_SERVERLESS' -> 'OpenSearch Serverless'."""
+    """
+    'OPENSEARCH_SERVERLESS' -> 'OpenSearch Serverless'.
+    """
     return _STORE_NAMES.get(kind, kind.replace("_", " ").title() if kind else "-")
 
 
 def describe_vector_store(cfg: dict[str, Any] | None) -> str:
-    """storageConfiguration -> plain English: 'OpenSearch Serverless collection abc123, index kb-index'."""
+    """
+    storageConfiguration -> plain English: 'OpenSearch Serverless collection abc123, index kb-index'.
+    """
     cfg = cfg or {}
     kind = cfg.get("type", "")
     name = store_name(kind)
@@ -1106,7 +1204,9 @@ def describe_vector_store(cfg: dict[str, Any] | None) -> str:
 
 
 def describe_filter(where: Any) -> str:
-    """`where` as text: {'team': 'billing', 'year': ('>=', 2024)} -> "team = 'billing', year >= 2024"."""
+    """
+    `where` as text: {'team': 'billing', 'year': ('>=', 2024)} -> "team = 'billing', year >= 2024".
+    """
     if where is None:
         return ""
     if _is_bedrock_filter(where) or not isinstance(where, dict):
@@ -1128,13 +1228,17 @@ def describe_filter(where: Any) -> str:
 
 
 def _source_arg(sources: dict[str, str]) -> str | list[str]:
-    """The data_source= to pass for these data sources in a next step: a name, or a list of names."""
+    """
+    The data_source= to pass for these data sources in a next step: a name, or a list of names.
+    """
     names = [name or ds_id for ds_id, name in sources.items()]
     return names[0] if len(names) == 1 else names
 
 
 def _outside(passages: Iterable[Passage], sources: dict[str, str]) -> list[Passage]:
-    """The passages that came from other data sources than the ones asked for."""
+    """
+    The passages that came from other data sources than the ones asked for.
+    """
     if not sources:
         return []
     return [p for p in passages if p.data_source_id and p.data_source_id not in sources]
@@ -1159,7 +1263,9 @@ Answer from the sources above and cite them as [n]. If they don't answer the que
 
 
 def _as_passages(items: Iterable[Passage | str]) -> list[Passage]:
-    """Passages, or plain strings (your own chunks), numbered from 1."""
+    """
+    Passages, or plain strings (your own chunks), numbered from 1.
+    """
     passages = []
     for i, item in enumerate(items, 1):
         if isinstance(item, Passage):
@@ -1177,10 +1283,12 @@ def _as_passages(items: Iterable[Passage | str]) -> list[Passage]:
 def build_prompt(
     question: str, passages: Iterable[Passage | str], template: str | None = None
 ) -> tuple[str, str]:
-    """(system, user) messages that ask a model to answer from numbered sources. The sources go in
+    """
+    (system, user) messages that ask a model to answer from numbered sources. The sources go in
     <source id="n" file="..."> tags as data, never instructions (knowledge base content is untrusted), and the model is
     told to cite them as [n] and to say when they don't hold the answer. `template` (default DEFAULT_PROMPT) is the
-    user message, with {sources} and {question} filled in."""
+    user message, with {sources} and {question} filled in.
+    """
     template = DEFAULT_PROMPT if template is None else template
     missing = [name for name in ("{sources}", "{question}") if name not in template]
     if missing:
@@ -1212,7 +1320,9 @@ _SENTENCE_END_RE = re.compile(
 
 
 def _marker_numbers(body: str) -> list[int]:
-    """'1, 3-5' -> [1, 3, 4, 5]."""
+    """
+    '1, 3-5' -> [1, 3, 4, 5].
+    """
     numbers: list[int] = []
     for part in re.split(r"\s*,\s*", body):
         bounds = [int(x) for x in re.split(r"\s*[-–]\s*", part) if x.isdigit()]
@@ -1224,8 +1334,10 @@ def _marker_numbers(body: str) -> list[int]:
 
 
 def parse_citation_markers(text: str, n_sources: int) -> list[Citation]:
-    """The [n] markers in a generated answer -> one Citation per sentence that has any, covering that sentence.
-    '[1, 2]' and '[2-4]' work too; numbers outside 1..n_sources are ignored (the model made them up)."""
+    """
+    The [n] markers in a generated answer -> one Citation per sentence that has any, covering that sentence.
+    '[1, 2]' and '[2-4]' work too; numbers outside 1..n_sources are ignored (the model made them up).
+    """
     citations: list[Citation] = []
     pos = 0
     for end in [m.end() for m in _SENTENCE_END_RE.finditer(text)] + [len(text)]:
@@ -1256,7 +1368,9 @@ def parse_citation_markers(text: str, n_sources: int) -> list[Citation]:
 def summarize_documents(
     docs: Iterable[KBDocument], *, truncated: bool = False
 ) -> DocumentSummary:
-    """Counts by status and the most common failure reasons."""
+    """
+    Counts by status and the most common failure reasons.
+    """
     docs = list(docs)
     counts = Counter(d.status for d in docs)
     reasons = Counter(
@@ -1275,8 +1389,10 @@ def summarize_documents(
 def changed_since(
     objects: Iterable[dict[str, Any] | FileChange], when: datetime | str | None
 ) -> list[FileChange]:
-    """Files modified after `when` (all of them when None: never synced), newest first. Takes ListObjectsV2
-    'Contents' entries or FileChanges. Metadata files (<file>.metadata.json) and folder markers are left out."""
+    """
+    Files modified after `when` (all of them when None: never synced), newest first. Takes ListObjectsV2
+    'Contents' entries or FileChanges. Metadata files (<file>.metadata.json) and folder markers are left out.
+    """
     since = parse_time(when)
     changed = []
     for obj in objects:
@@ -1299,8 +1415,10 @@ def _pairs(labels: list[str]) -> list[tuple[str, str]]:
 
 
 def compare_retrievals(runs: dict[str, Retrieval]) -> SearchComparison:
-    """How much searches agree: for each pair of runs the share of their passages both found (shared / all, by chunk
-    ID, or by source and text), and for each run the passages no other run found."""
+    """
+    How much searches agree: for each pair of runs the share of their passages both found (shared / all, by chunk
+    ID, or by source and text), and for each run the passages no other run found.
+    """
     keys = {label: {p.key for p in r.passages} for label, r in runs.items()}
     overlap = {}
     for a, b in _pairs(list(runs)):
@@ -1330,14 +1448,18 @@ def _snippet_of(passage: Passage, width: int = 60) -> str:
 
 
 def _setting(label: str) -> tuple[str, str]:
-    """'HYBRID n=10' -> ('HYBRID', '10')."""
+    """
+    'HYBRID n=10' -> ('HYBRID', '10').
+    """
     kind, _, n = label.rpartition(" n=")
     return kind, n
 
 
 def retrieval_metrics(cases: Iterable[EvalCase], k: int) -> tuple[float, float]:
-    """(hit rate, mean reciprocal rank) at k: the share of questions whose expected source was in the top k, and the
-    average of 1/rank, counting a miss (or a rank past k) as 0."""
+    """
+    (hit rate, mean reciprocal rank) at k: the share of questions whose expected source was in the top k, and the
+    average of 1/rank, counting a miss (or a rank past k) as 0.
+    """
     ranks = [c.rank if c.rank is not None and c.rank <= k else None for c in cases]
     if not ranks:
         return 0.0, 0.0
@@ -1353,8 +1475,10 @@ def retrieval_metrics(cases: Iterable[EvalCase], k: int) -> tuple[float, float]:
 def vector_store_monthly_cost(
     kb: KnowledgeBaseInfo, prices: dict[str, float] | None = None
 ) -> float | None:
-    """Estimated USD per month the vector store costs even with no traffic. Only OpenSearch Serverless is estimated
-    (its minimum OCUs, around the clock); other stores are billed by their own service, and this returns None."""
+    """
+    Estimated USD per month the vector store costs even with no traffic. Only OpenSearch Serverless is estimated
+    (its minimum OCUs, around the clock); other stores are billed by their own service, and this returns None.
+    """
     prices = BEDROCK_PRICES if prices is None else prices
     if kb.vector_store != "OPENSEARCH_SERVERLESS":
         return None
@@ -1366,7 +1490,9 @@ def vector_store_monthly_cost(
 def idle_cost_label(
     kb: KnowledgeBaseInfo, prices: dict[str, float] | None = None
 ) -> str:
-    """'$350.40' for OpenSearch Serverless, 'billed by Pinecone, not estimated' for the others."""
+    """
+    '$350.40' for OpenSearch Serverless, 'billed by Pinecone, not estimated' for the others.
+    """
     cost = vector_store_monthly_cost(kb, prices)
     if cost is not None:
         return human_money(cost)
@@ -1417,9 +1543,11 @@ def kb_findings(
     prices: dict[str, float] | None = None,
     files: FileInventory | None = None,
 ) -> list[tuple[str, str]]:
-    """What's wrong with a knowledge base and what to do about it -> [(level, message)]. `docs` (from documents())
+    """
+    What's wrong with a knowledge base and what to do about it -> [(level, message)]. `docs` (from documents())
     and `freshness` (from unsynced()) add their findings when given. `files` (from file_inventory()) says the files
-    were listed, so a sync's failed documents aren't reported again here: inventory_findings names them."""
+    were listed, so a sync's failed documents aren't reported again here: inventory_findings names them.
+    """
     prices = BEDROCK_PRICES if prices is None else prices
     listed = {ds_id for ds_id, kind in (files.kinds if files else {}).items()
               if kind in ("S3", "CUSTOM") and "documents" not in files.errors.get(ds_id, {})}
@@ -1581,7 +1709,9 @@ def kb_findings(
 def freshness_findings(
     freshness: list[SyncFreshness], kb_id: str, region: str = ""
 ) -> list[tuple[str, str]]:
-    """What unsynced() found, with the command that syncs each stale data source -> [(level, message)]."""
+    """
+    What unsynced() found, with the command that syncs each stale data source -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     for fresh in freshness:
         ds = fresh.data_source
@@ -1622,8 +1752,10 @@ def freshness_findings(
 def sync_findings(
     jobs: list[IngestionJob], names: dict[str, str] | None = None
 ) -> list[tuple[str, str]]:
-    """Patterns in a sync history (newest first, one or more data sources) -> [(level, message)]: syncs that keep
-    failing (with their reasons grouped), documents that keep failing, and syncs that seem stuck."""
+    """
+    Patterns in a sync history (newest first, one or more data sources) -> [(level, message)]: syncs that keep
+    failing (with their reasons grouped), documents that keep failing, and syncs that seem stuck.
+    """
     names = names or {}
     found: list[tuple[str, str]] = []
     by_source: dict[str, list[IngestionJob]] = {}
@@ -1703,7 +1835,9 @@ def _search_label(search_type: str | None) -> str:
 
 
 def retrieval_findings(r: Retrieval) -> list[tuple[str, str]]:
-    """What a search result says about the knowledge base, with what to try next -> [(level, message)]."""
+    """
+    What a search result says about the knowledge base, with what to try next -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     passages = r.passages
     if r.guardrail_action == "INTERVENED":
@@ -1827,7 +1961,9 @@ def retrieval_findings(r: Retrieval) -> list[tuple[str, str]]:
 
 
 def answer_findings(a: Answer) -> list[tuple[str, str]]:
-    """How far to trust an answer, and what to check next -> [(level, message)]."""
+    """
+    How far to trust an answer, and what to check next -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     if a.guardrail_action == "INTERVENED":
         found.append(
@@ -1896,7 +2032,9 @@ def answer_findings(a: Answer) -> list[tuple[str, str]]:
 
 
 def comparison_findings(c: SearchComparison) -> list[tuple[str, str]]:
-    """What the differences between search settings mean for this question -> [(level, message)]."""
+    """
+    What the differences between search settings mean for this question -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     for label, error in c.errors.items():
         kind, _ = _setting(label)
@@ -1978,8 +2116,10 @@ def comparison_findings(c: SearchComparison) -> list[tuple[str, str]]:
 
 
 def eval_findings(report: EvalReport) -> list[tuple[str, str]]:
-    """What a retrieval check says to change -> [(level, message)]: the questions that missed, what came up instead,
-    and the usual fixes."""
+    """
+    What a retrieval check says to change -> [(level, message)]: the questions that missed, what came up instead,
+    and the usual fixes.
+    """
     found: list[tuple[str, str]] = []
     cases, missed = report.cases, report.missed
     if not cases:
@@ -2034,13 +2174,17 @@ _INDEXING = ("PENDING", "STARTING", "IN_PROGRESS", "DELETING", "DELETE_IN_PROGRE
 
 
 def _same_uri(a: str | None, b: str | None) -> bool:
-    """Whether two source locations name the same file, one of them URL-encoded or not."""
+    """
+    Whether two source locations name the same file, one of them URL-encoded or not.
+    """
     return bool(a) and bool(b) and (a == b or unquote(str(a)) == unquote(str(b)))
 
 
 def skip_reason(f: KBFile) -> str:
-    """Why a sync probably left a file out, in a few words: 'it's 61.2 MB, over the 50 MB Bedrock reads from one
-    file', '.mp4 isn't a type Bedrock reads', ... ('' when nothing about the file explains it)."""
+    """
+    Why a sync probably left a file out, in a few words: 'it's 61.2 MB, over the 50 MB Bedrock reads from one
+    file', '.mp4 isn't a type Bedrock reads', ... ('' when nothing about the file explains it).
+    """
     kind = file_type(f.uri)
     if f.storage_class in _ARCHIVED:
         return f"it's in the {f.storage_class} storage class, which Bedrock can't read"
@@ -2066,12 +2210,14 @@ def file_state(
     in_scope: bool = True,
     sync_known: bool = True,
 ) -> tuple[str, str]:
-    """(state, why) for a file, from Bedrock's record of it and the S3 object: one of FILE_STATES and a sentence.
+    """
+    (state, why) for a file, from Bedrock's record of it and the S3 object: one of FILE_STATES and a sentence.
 
     synced: when the data source's last successful sync started (None = it never finished one). listed: the bucket
     was listed in full, so a recorded file missing from it is deleted; recorded: Bedrock's document list was read in
     full, so a file without a record has none; in_scope: the file is in the data source's bucket and inclusion
-    prefixes; sync_known: the sync history could be read."""
+    prefixes; sync_known: the sync history could be read.
+    """
     status, reason = f.status, " ".join(f.reason.split()).rstrip(".")
     if status == "FAILED":
         return "failed", f"Bedrock couldn't index it: {reason or 'no reason given'}."
@@ -2126,12 +2272,14 @@ def inventory_files(
     recorded: bool = True,
     sync_known: bool = True,
 ) -> list[KBFile]:
-    """One data source's files from both sides -> [KBFile] sorted by path, each with its state (file_state).
+    """
+    One data source's files from both sides -> [KBFile] sorted by path, each with its state (file_state).
 
     documents: Bedrock's records of them (KBDocuments, from ListKnowledgeBaseDocuments); objects: the bucket's
     ListObjectsV2 'Contents' entries for an S3 data source (None when it wasn't listed). A <file>.metadata.json is
     attached to its file rather than listed. last_sync: the data source's last successful sync; complete: the bucket
-    was listed in full; recorded: the document list was read in full."""
+    was listed in full; recorded: the document list was read in full.
+    """
     prefixes = [p for p in prefixes if p]
     records = {d.uri: d for d in documents if d.uri}
     stored: dict[str, dict[str, Any]] = {}
@@ -2169,14 +2317,18 @@ _NEEDS_SYNC = ("failed", "changed", "new", "deleted")  # states the next sync of
 
 
 def sync_needed(inv: FileInventory) -> list[str]:
-    """The data sources (IDs) whose next sync would change what's searchable: a file failed, changed, was added
-    or was deleted since the last one. In the order they were listed."""
+    """
+    The data sources (IDs) whose next sync would change what's searchable: a file failed, changed, was added
+    or was deleted since the last one. In the order they were listed.
+    """
     wanted = {f.data_source_id for f in inv.files if f.state in _NEEDS_SYNC and f.data_source_id}
     return [ds_id for ds_id in inv.sources if ds_id in wanted]
 
 
 def _named(files: list[KBFile], shown: int = 3) -> str:
-    """'refund-policy.pdf, faq.md and 4 more'."""
+    """
+    'refund-policy.pdf, faq.md and 4 more'.
+    """
     names = [f.name for f in files[:shown]]
     more = len(files) - len(names)
     if more:
@@ -2193,8 +2345,10 @@ _SECTION_READS = {  # file_inventory() section -> (what it is, the permission th
 
 
 def inventory_findings(inv: FileInventory) -> list[tuple[str, str]]:
-    """What a knowledge base's files say to do -> [(level, message)]: failed, changed, not yet synced, skipped and
-    deleted files, and what couldn't be listed. sync_needed() says which data sources a sync would fix."""
+    """
+    What a knowledge base's files say to do -> [(level, message)]: failed, changed, not yet synced, skipped and
+    deleted files, and what couldn't be listed. sync_needed() says which data sources a sync would fix.
+    """
     found: list[tuple[str, str]] = []
     by_state: dict[str, list[KBFile]] = {}
     for f in inv.files:
@@ -2297,7 +2451,9 @@ _METADATA_TYPES = {"STRING": "stringValue", "NUMBER": "numberValue", "BOOLEAN": 
 
 
 def _metadata_kind(value: Any) -> str | None:
-    """The Bedrock type of a plain metadata value: STRING, NUMBER, BOOLEAN or STRING_LIST; None for anything else."""
+    """
+    The Bedrock type of a plain metadata value: STRING, NUMBER, BOOLEAN or STRING_LIST; None for anything else.
+    """
     if isinstance(value, bool):
         return "BOOLEAN"
     if isinstance(value, (int, float)):
@@ -2315,9 +2471,11 @@ def _json_kind(value: Any) -> str:
 
 
 def parse_metadata_file(text: str | bytes, uri: str = "", size: int | None = None) -> MetadataFile:
-    """A <file>.metadata.json's content -> MetadataFile: its attributes (plain values, or Bedrock's typed form with
+    """
+    A <file>.metadata.json's content -> MetadataFile: its attributes (plain values, or Bedrock's typed form with
     includeForEmbedding), and what's wrong with it in plain English. Bedrock skips a metadata file it can't read, and
-    then where= filters match nothing from the file."""
+    then where= filters match nothing from the file.
+    """
     raw = text.encode("utf-8") if isinstance(text, str) else bytes(text)
     meta = MetadataFile(uri, found=True, size=len(raw) if size is None else size)
     meta.text = raw[:65536].decode("utf-8", "replace")
@@ -2383,8 +2541,10 @@ def _single_spaced(text: str | None) -> str:
 
 
 def chunk_overlap(before: str, after: str, *, longest: int = 4000) -> int:
-    """How many characters the start of chunk `after` repeats from the end of chunk `before`, whitespace collapsed:
-    the overlap fixed-size and hierarchical chunking leave at each boundary. Overlaps under 20 characters count as 0."""
+    """
+    How many characters the start of chunk `after` repeats from the end of chunk `before`, whitespace collapsed:
+    the overlap fixed-size and hierarchical chunking leave at each boundary. Overlaps under 20 characters count as 0.
+    """
     a, b = _single_spaced(before)[-longest:], _single_spaced(after)[:longest]
     head = b[:20]
     if len(head) < 20:
@@ -2398,9 +2558,11 @@ def chunk_overlap(before: str, after: str, *, longest: int = 4000) -> int:
 
 
 def place_chunks(text: str, chunks: Iterable[Passage]) -> dict[str, tuple[int, int]]:
-    """Where each chunk sits in a file's text -> {chunk key: (start, end)}, in characters of the text with its
+    """
+    Where each chunk sits in a file's text -> {chunk key: (start, end)}, in characters of the text with its
     whitespace collapsed. A chunk is found by its first 80 characters, or failing that by 80 from its middle; one that
-    isn't found (a parser can change what it reads) is left out."""
+    isn't found (a parser can change what it reads) is left out.
+    """
     flat = _single_spaced(text)
     spans: dict[str, tuple[int, int]] = {}
     for p in chunks:
@@ -2418,8 +2580,10 @@ def place_chunks(text: str, chunks: Iterable[Passage]) -> dict[str, tuple[int, i
 
 
 def _chained(group: list[Passage]) -> list[Passage]:
-    """Chunks put in order by the text each repeats from the one before it (chunk_overlap); chains start in the
-    order the chunks came."""
+    """
+    Chunks put in order by the text each repeats from the one before it (chunk_overlap); chains start in the
+    order the chunks came.
+    """
     if len(group) < 2:
         return list(group)
     links = sorted(((chunk_overlap(a.text, b.text), i, j) for i, a in enumerate(group) for j, b in enumerate(group)
@@ -2451,9 +2615,11 @@ def _chained(group: list[Passage]) -> list[Passage]:
 
 
 def order_chunks(chunks: Iterable[Passage], spans: dict[str, tuple[int, int]] | None = None) -> list[Passage]:
-    """A file's chunks in document order, each once: by where it sits in the file's text when that's known
+    """
+    A file's chunks in document order, each once: by where it sits in the file's text when that's known
     (place_chunks), else by page and, within a page, by the text each repeats from the one before it. Chunks that
-    can't be placed keep the order they were retrieved in."""
+    can't be placed keep the order they were retrieved in.
+    """
     unique = list({p.key: p for p in reversed(list(chunks))}.values())[::-1]
     spans = spans or {}
     placed = sorted((p for p in unique if p.key in spans), key=lambda p: spans[p.key])
@@ -2467,9 +2633,11 @@ def order_chunks(chunks: Iterable[Passage], spans: dict[str, tuple[int, int]] | 
 
 def chunk_stats(chunks: list[Passage], spans: dict[str, tuple[int, int]] | None = None,
                 text_length: int = 0) -> ChunkStats:
-    """How a file's chunks (in document order) look: each one's estimated tokens and words, the pages they come
+    """
+    How a file's chunks (in document order) look: each one's estimated tokens and words, the pages they come
     from, how many are tiny or repeat another, the overlap at each boundary and, when the file's text was read
-    (spans, text_length), the share of it inside a chunk."""
+    (spans, text_length), the share of it inside a chunk.
+    """
     stats = ChunkStats(count=len(chunks))
     seen: set[str] = set()
     for i, p in enumerate(chunks):
@@ -2496,7 +2664,9 @@ def chunk_stats(chunks: list[Passage], spans: dict[str, tuple[int, int]] | None 
 
 
 def _failure_fix(reason: str) -> str:
-    """What usually fixes a failed file, from Bedrock's reason."""
+    """
+    What usually fixes a failed file, from Bedrock's reason.
+    """
     text = reason.lower()
     if any(word in text for word in ("scanned", "no text", "image", "ocr")):
         return ("A scanned page has no text for the default parser: a data source with a foundation model or Data "
@@ -2526,9 +2696,11 @@ def file_findings(
     region: str = "",
     others_have_metadata: bool = False,
 ) -> list[tuple[str, str]]:
-    """What's wrong with how one file was indexed and what to do -> [(level, message)]: its state, with the command
+    """
+    What's wrong with how one file was indexed and what to do -> [(level, message)]: its state, with the command
     that syncs it, what its chunks show (none, tiny, repeated, cut at Retrieve's limit) and what's wrong with its
-    metadata file. others_have_metadata: other files of its data source have a metadata file."""
+    metadata file. others_have_metadata: other files of its data source have a metadata file.
+    """
     found: list[tuple[str, str]] = []
     command = sync_command(kb_id, f.data_source_id, region) if kb_id and f.data_source_id else ""
     if f.state == "failed":
@@ -2611,9 +2783,11 @@ def file_steps(
     kb: KnowledgeBaseInfo | None = None,
     chunks: DocumentChunks | None = None,
 ) -> list[tuple[str, str, str, str]]:
-    """How a file went from S3 into the vector store, a step at a time -> [(step, what happened, detail, tone)]:
+    """
+    How a file went from S3 into the vector store, a step at a time -> [(step, what happened, detail, tone)]:
     stored, read by the parser, cut into chunks, transformed, embedded, stored as vectors, and where it stands now.
-    tone is 'ok', 'warn', 'bad' or '' (not known)."""
+    tone is 'ok', 'warn', 'bad' or '' (not known).
+    """
     steps: list[tuple[str, str, str, str]] = []
     failed = f.state == "failed"
     reason = f.reason.lower()
@@ -2661,8 +2835,10 @@ def file_steps(
 
 
 def find_files(files: Iterable[KBFile], ref: str) -> list[KBFile]:
-    """The files `ref` names: an s3:// path, a path in the bucket ('policies/refund-policy.pdf'), a file name in any
-    case ('Refund-Policy.pdf'), or else every file whose path holds it."""
+    """
+    The files `ref` names: an s3:// path, a path in the bucket ('policies/refund-policy.pdf'), a file name in any
+    case ('Refund-Policy.pdf'), or else every file whose path holds it.
+    """
     text = str(ref or "").strip()
     files = list(files)
     if not text:
@@ -2680,8 +2856,10 @@ def find_files(files: Iterable[KBFile], ref: str) -> list[KBFile]:
 
 
 def probe_findings(probe: FileProbe, n: int = 5) -> list[tuple[str, str]]:
-    """Whether a file can answer a question, and whether an answer will see it -> [(level, message)]: where its best
-    passage ranks across the whole knowledge base, against the n passages an answer gets (5 unless you change it)."""
+    """
+    Whether a file can answer a question, and whether an answer will see it -> [(level, message)]: where its best
+    passage ranks across the whole knowledge base, against the n passages an answer gets (5 unless you change it).
+    """
     name = source_name(probe.uri) or probe.uri
     inside, across = probe.inside.passages, probe.across.passages
     if not inside:
@@ -2726,8 +2904,10 @@ _STATE_WORDS = {  # what else status= takes: Bedrock's own statuses and a few pl
 
 
 def parse_file_state(text: str) -> str:
-    """A state for status=: a FILE_STATES key ('failed', 'changed', 'new'...), its label ('Not synced yet'), or
-    Bedrock's status ('PARTIALLY_INDEXED'), in any case -> the key."""
+    """
+    A state for status=: a FILE_STATES key ('failed', 'changed', 'new'...), its label ('Not synced yet'), or
+    Bedrock's status ('PARTIALLY_INDEXED'), in any case -> the key.
+    """
     words = " ".join(str(text or "").lower().replace("_", " ").replace("-", " ").split())
     if words in FILE_STATES:
         return words
@@ -2741,8 +2921,10 @@ def parse_file_state(text: str) -> str:
 
 
 def sort_files(files: Iterable[KBFile], by: str = "problems") -> list[KBFile]:
-    """Files in an order: 'problems' (worst state first, FILE_STATES' order, then by path), 'name', 'folder' (by
-    path), 'size' (largest first), 'modified' (changed in S3 last, first) or 'indexed' (indexed last, first)."""
+    """
+    Files in an order: 'problems' (worst state first, FILE_STATES' order, then by path), 'name', 'folder' (by
+    path), 'size' (largest first), 'modified' (changed in S3 last, first) or 'indexed' (indexed last, first).
+    """
     files = list(files)
     order = list(FILE_STATES)
 
@@ -2765,8 +2947,10 @@ def sort_files(files: Iterable[KBFile], by: str = "problems") -> list[KBFile]:
 
 
 def pick_files(files: Iterable[KBFile], *, state: str = "", match: str | None = None) -> list[KBFile]:
-    """The files in `state` (a FILE_STATES key; '' for any) whose path, name, Bedrock's reason or note hold `match`
-    (search_rank's words), in the order given: what files() lists and save_file_list() saves."""
+    """
+    The files in `state` (a FILE_STATES key; '' for any) whose path, name, Bedrock's reason or note hold `match`
+    (search_rank's words), in the order given: what files() lists and save_file_list() saves.
+    """
     picked = [f for f in files if not state or f.state == state]
     if match:
         picked = [f for f in picked if search_rank(match, (f.key, f.name, f.reason, f.note)) is not None]
@@ -2786,7 +2970,9 @@ def _question_text(question: Any) -> str:
 
 
 def _eval_pairs(cases: Any) -> list[tuple[str, Any]]:
-    """evaluate()'s cases -> [(question, expected)]."""
+    """
+    evaluate()'s cases -> [(question, expected)].
+    """
     rows = (
         cases.to_dict("records")
         if hasattr(cases, "to_dict") and hasattr(cases, "columns")
@@ -2826,7 +3012,8 @@ def _with_errors(ds: DataSourceInfo, errors: dict[str, str]) -> DataSourceInfo:
 
 
 class BedrockKBAnalyzer(_BaseAnalyzer):
-    """Pure-logic Bedrock Knowledge Bases analysis: every method returns data; nothing is printed or written.
+    """
+    Pure-logic Bedrock Knowledge Bases analysis: every method returns data; nothing is printed or written.
 
     Methods take the knowledge base first, as an ID, a name (any case) or an ARN. Nothing here starts a sync or
     changes a document; where one is needed, sync_command() gives the command to run.
@@ -2873,8 +3060,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The bedrock-agent client (settings, syncs, documents), made on first use so a missing region shows up as
-        a readable error."""
+        """
+        The bedrock-agent client (settings, syncs, documents), made on first use so a missing region shows up as
+        a readable error.
+        """
         if "bedrock-agent" not in self._clients:
             with self._lock:
                 if "bedrock-agent" not in self._clients:
@@ -2897,18 +3086,24 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         return summaries
 
     def knowledge_base_names(self, *, refresh: bool = False) -> dict[str, str]:
-        """{ID: name} of every knowledge base in the region (one ListKnowledgeBases, cached)."""
+        """
+        {ID: name} of every knowledge base in the region (one ListKnowledgeBases, cached).
+        """
         if refresh or self._names is None:
             self._kb_summaries()
         return dict(self._names or {})
 
     def kb_name(self, kb_id: str) -> str:
-        """The name of a knowledge base already seen (its ID otherwise). Makes no AWS call."""
+        """
+        The name of a knowledge base already seen (its ID otherwise). Makes no AWS call.
+        """
         return (self._names or {}).get(kb_id) or kb_id
 
     def resolve(self, kb: str) -> str:
-        """The ID of a knowledge base, given its ID, name (any case) or ARN. An unknown name raises a ValueError
-        that lists the knowledge bases in the region."""
+        """
+        The ID of a knowledge base, given its ID, name (any case) or ARN. An unknown name raises a ValueError
+        that lists the knowledge bases in the region.
+        """
         kind, value = parse_kb_ref(kb)
         if kind == "arn":
             return value
@@ -2944,8 +3139,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def list_knowledge_bases(
         self, *, details: bool = True, progress: Callable[[int], None] | None = None
     ) -> list[KnowledgeBaseInfo]:
-        """Every knowledge base in the region. details=True describes each one (in parallel): settings, data
-        sources and their latest syncs. One that can't be described keeps its error in `errors`."""
+        """
+        Every knowledge base in the region. details=True describes each one (in parallel): settings, data
+        sources and their latest syncs. One that can't be described keeps its error in `errors`.
+        """
         found = [parse_knowledge_base(summary) for summary in self._kb_summaries()]
         if not details:
             return found
@@ -2965,8 +3162,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
             return basic
 
     def describe(self, kb: str, *, jobs: int = 5) -> KnowledgeBaseInfo:
-        """Everything about a knowledge base: its settings, each data source's settings and last `jobs` syncs, and its
-        tags. A section that can't be read (e.g. a missing permission) is recorded in `errors` instead of raising."""
+        """
+        Everything about a knowledge base: its settings, each data source's settings and last `jobs` syncs, and its
+        tags. A section that can't be read (e.g. a missing permission) is recorded in `errors` instead of raising.
+        """
         kb_id = self.resolve(kb)
         info = parse_knowledge_base(
             self.client.get_knowledge_base(knowledgeBaseId=kb_id)["knowledgeBase"]
@@ -3035,7 +3234,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------- data sources
 
     def data_sources(self, kb: str) -> list[DataSourceInfo]:
-        """The data sources of a knowledge base: ID, name and status (describe() adds their settings and syncs)."""
+        """
+        The data sources of a knowledge base: ID, name and status (describe() adds their settings and syncs).
+        """
         kb_id = self.resolve(kb)
         sources = [
             DataSourceInfo(
@@ -3054,21 +3255,27 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         return sources
 
     def data_source_name(self, kb_id: str, ds_id: str) -> str:
-        """The name of a data source already listed (its ID otherwise). Makes no AWS call."""
+        """
+        The name of a data source already listed (its ID otherwise). Makes no AWS call.
+        """
         return self._source_names.get(kb_id, {}).get(ds_id) or ds_id
 
     def data_source_names(self, kb: str, *, refresh: bool = False) -> dict[str, str]:
-        """{ID: name} of a knowledge base's data sources (one ListDataSources, cached)."""
+        """
+        {ID: name} of a knowledge base's data sources (one ListDataSources, cached).
+        """
         kb_id = self.resolve(kb)
         if refresh or kb_id not in self._source_names:
             self.data_sources(kb_id)
         return dict(self._source_names[kb_id])
 
     def resolve_sources(self, kb: str, data_source: Any) -> dict[str, str]:
-        """{ID: name} of the data sources a search should cover, from data_source=: a data source's name (any case)
+        """
+        {ID: name} of the data sources a search should cover, from data_source=: a data source's name (any case)
         or ID, or a list of them. None, [] or 'all' -> {} (every data source). A dict is taken as already resolved
         (a Retrieval's data_sources). An unknown one raises a ValueError that lists the knowledge base's data
-        sources."""
+        sources.
+        """
         if isinstance(data_source, dict):
             return {str(k): str(v or "") for k, v in data_source.items()}
         if data_source is None or (
@@ -3121,7 +3328,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def _pick_sources(
         self, kb_id: str, data_source: str | None
     ) -> list[DataSourceInfo]:
-        """Every data source, or the one named by `data_source` (its ID or name, any case)."""
+        """
+        Every data source, or the one named by `data_source` (its ID or name, any case).
+        """
         sources = self.data_sources(kb_id)
         if data_source is None:
             return sources
@@ -3161,7 +3370,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         ds.last_success = next((job for job in jobs if job.status == "COMPLETE"), None)
 
     def _add_reasons(self, kb_id: str, job: IngestionJob) -> None:
-        """Fill in why a job failed (only GetIngestionJob returns the reasons). Leaves it alone if that call fails."""
+        """
+        Fill in why a job failed (only GetIngestionJob returns the reasons). Leaves it alone if that call fails.
+        """
         try:
             desc = self.client.get_ingestion_job(
                 knowledgeBaseId=kb_id,
@@ -3175,8 +3386,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def ingestion_jobs(
         self, kb: str, data_source: str | None = None, n: int = 10
     ) -> list[IngestionJob]:
-        """The last n syncs of every data source (or of one, by ID or name), newest first, with the reasons for
-        failed ones."""
+        """
+        The last n syncs of every data source (or of one, by ID or name), newest first, with the reasons for
+        failed ones.
+        """
         kb_id = self.resolve(kb)
         n = _as_int(n, "n")
         jobs: list[IngestionJob] = []
@@ -3195,9 +3408,11 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         limit: int | None = 10_000,
         progress: Callable[[int], None] | None = None,
     ) -> tuple[list[KBDocument], DocumentSummary]:
-        """Documents and whether each is searchable: (documents with `status`, or all of them; a summary of every
+        """
+        Documents and whether each is searchable: (documents with `status`, or all of them; a summary of every
         document read). Reads at most `limit` documents (None = all). Data sources whose type has no document list
-        (only S3 and custom ones do) are recorded in the summary's `errors`."""
+        (only S3 and custom ones do) are recorded in the summary's `errors`.
+        """
         kb_id = self.resolve(kb)
         limit = _as_count(limit, "limit")
         wanted = {
@@ -3231,7 +3446,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     # ---------------------------------------------------------------- retrieval
 
     def _runtime_client(self) -> Any:
-        """bedrock-agent-runtime: Retrieve and RetrieveAndGenerate."""
+        """
+        bedrock-agent-runtime: Retrieve and RetrieveAndGenerate.
+        """
         return self._cached_client(
             "bedrock-agent-runtime",
             lambda: self.session.client(
@@ -3240,7 +3457,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         )
 
     def _rerank_arn(self, model: str | bool) -> str:
-        """True, 'cohere', 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants."""
+        """
+        True, 'cohere', 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants.
+        """
         model_id = (
             DEFAULT_RERANK_MODEL
             if model is True
@@ -3260,8 +3479,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         rerank_model: str | bool | None = None,
         sources: Iterable[str] = (),
     ) -> dict[str, Any]:
-        """The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate. sources: the IDs of the only
-        data sources to search."""
+        """
+        The vectorSearchConfiguration shared by Retrieve and RetrieveAndGenerate. sources: the IDs of the only
+        data sources to search.
+        """
         n = _as_int(n, "n")
         if not 1 <= n <= 100:
             raise ValueError(
@@ -3303,10 +3524,12 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         rerank_model: str | bool | None = None,
         data_source: Any = None,
     ) -> Retrieval:
-        """The n passages (up to 100) that best match `question`, best first. where= filters on the documents'
+        """
+        The n passages (up to 100) that best match `question`, best first. where= filters on the documents'
         metadata (see build_filter); search_type='HYBRID' adds keyword matching, where the vector store supports it;
         rerank_model re-orders a wider set of results with a reranking model (True = Cohere Rerank 3.5);
-        data_source= searches only that data source (a name or ID, or a list of them; see resolve_sources)."""
+        data_source= searches only that data source (a name or ID, or a list of them; see resolve_sources).
+        """
         kb_id = self.resolve(kb)
         question = _question_text(question)
         sources = self.resolve_sources(kb_id, data_source)
@@ -3342,7 +3565,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     # --------------------------------------------------------------- generation
 
     def _llm_client(self) -> Any:
-        """bedrock-runtime: Converse."""
+        """
+        bedrock-runtime: Converse.
+        """
         return self._cached_client(
             "bedrock-runtime",
             lambda: self.session.client(
@@ -3351,7 +3576,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         )
 
     def _bedrock_client(self) -> Any:
-        """bedrock: the model and inference profile lists."""
+        """
+        bedrock: the model and inference profile lists.
+        """
         return self._cached_client(
             "bedrock",
             lambda: self.session.client(
@@ -3362,8 +3589,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def models(
         self, match: str | None = None, *, refresh: bool = False
     ) -> list[ModelInfo]:
-        """Text models ask() can use in this region, and how to call each: on demand, or through an inference profile.
-        Cached. match= keeps models whose ID, name or provider contains it."""
+        """
+        Text models ask() can use in this region, and how to call each: on demand, or through an inference profile.
+        Cached. match= keeps models whose ID, name or provider contains it.
+        """
         if self._models is None or refresh:
             bedrock = self._bedrock_client()
             summaries = bedrock.list_foundation_models(byOutputModality="TEXT").get(
@@ -3396,10 +3625,12 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         ]
 
     def resolve_model(self, name: str | None = None) -> tuple[str, str]:
-        """(ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
+        """
+        (ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
         'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Haiku 4.5).
         A model that can't be called on demand resolves to this region's inference profile. If the model list can't
-        be read, the name is used as given."""
+        be read, the name is used as given.
+        """
         wanted = str(name or self.default_model or DEFAULT_MODEL).strip()
         if wanted.startswith("arn:"):
             return wanted, wanted
@@ -3458,10 +3689,12 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         session_id: str | None = None,
         data_source: Any = None,
     ) -> Answer:
-        """An answer from Bedrock's managed RAG (RetrieveAndGenerate): it retrieves n passages and has `model` answer
+        """
+        An answer from Bedrock's managed RAG (RetrieveAndGenerate): it retrieves n passages and has `model` answer
         from them with citations. Only the settings you pass are sent (newer Claude models reject temperature). A
         custom prompt must contain $search_results$. Tokens are estimated from characters: this API doesn't report
-        them. session_id continues an earlier conversation; data_source= searches only that data source."""
+        them. session_id continues an earlier conversation; data_source= searches only that data source.
+        """
         kb_id = self.resolve(kb)
         question = _question_text(question)
         if prompt is not None and "$search_results$" not in prompt:
@@ -3536,9 +3769,11 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         temperature: float | None = None,
         max_tokens: int | None = 16_000,
     ) -> Answer:
-        """An answer from `model` (Bedrock Converse) that cites `passages` as numbered sources, with exact token
+        """
+        An answer from `model` (Bedrock Converse) that cites `passages` as numbered sources, with exact token
         counts. passages can be Passage objects (e.g. a Retrieval's) or plain strings. prompt= is a template with
-        {sources} and {question} (see DEFAULT_PROMPT); history= holds earlier Converse messages, for follow-ups."""
+        {sources} and {question} (see DEFAULT_PROMPT); history= holds earlier Converse messages, for follow-ups.
+        """
         question = _question_text(question)
         sources = _as_passages(passages)
         system, user = build_prompt(question, sources, prompt)
@@ -3597,10 +3832,12 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         history: list[dict[str, Any]] | None = None,
         data_source: Any = None,
     ) -> Answer:
-        """An answer with citations. engine='kb' uses Bedrock's RetrieveAndGenerate (session_id= continues a
+        """
+        An answer with citations. engine='kb' uses Bedrock's RetrieveAndGenerate (session_id= continues a
         conversation); engine='converse' retrieves, then calls the model itself: exact tokens and cost, any model, and
         your own prompt= template (history= continues a conversation). data_source= searches only that data source
-        (a name or ID, or a list of them)."""
+        (a name or ID, or a list of them).
+        """
         engine = str(engine).lower()
         if engine == "kb":
             return self.retrieve_and_generate(
@@ -3644,8 +3881,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ deciding
 
     def _s3_client(self) -> Any:
-        """s3: listing a data source's bucket for unsynced(), and signing links to its files (SigV4, which every
-        region accepts)."""
+        """
+        s3: listing a data source's bucket for unsynced(), and signing links to its files (SigV4, which every
+        region accepts).
+        """
         return self._cached_client(
             "s3",
             lambda: self.session.client(
@@ -3658,13 +3897,15 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def file_url(
         self, uri: str, *, page: int | None = None, expires: int = 3600
     ) -> str | None:
-        """A link that opens a source's file in a browser tab, or None when there's no file to open (a custom or
+        """
+        A link that opens a source's file in a browser tab, or None when there's no file to open (a custom or
         SQL data source).
 
         For an s3:// file it's a presigned GetObject link, signed here with your credentials (no AWS call): it works
         for `expires` seconds, only while those credentials are valid, and only if they may read the file
         (s3:GetObject). It makes the browser show a PDF (at `page`), picture, text or HTML file instead of saving it.
-        A web, Confluence, SharePoint or Salesforce source links to its own address."""
+        A web, Confluence, SharePoint or Salesforce source links to its own address.
+        """
         return presigned_url(self._s3_client, uri, page=page, expires=expires)
 
     def unsynced(
@@ -3674,9 +3915,11 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         limit: int | None = 100_000,
         progress: Callable[[int], None] | None = None,
     ) -> list[SyncFreshness]:
-        """For each S3 data source (or one, by ID or name): the files added or changed since its last successful sync
+        """
+        For each S3 data source (or one, by ID or name): the files added or changed since its last successful sync
         started. Lists the bucket (and inclusion prefixes) up to `limit` objects in all, marking results truncated;
-        metadata files are counted apart. Other data source types are returned with a note."""
+        metadata files are counted apart. Other data source types are returned with a note.
+        """
         kb_id = self.resolve(kb)
         limit = _as_count(limit, "limit")
         listed = 0
@@ -3758,8 +4001,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         data_source: Any = None,
         progress: Callable[[int], None] | None = None,
     ) -> SearchComparison:
-        """The same question searched with each search type and each n (one Retrieve per combination), and how much
-        the results overlap. A setting the vector store rejects (e.g. HYBRID) is recorded in `errors`."""
+        """
+        The same question searched with each search type and each n (one Retrieve per combination), and how much
+        the results overlap. A setting the vector store rejects (e.g. HYBRID) is recorded in `errors`.
+        """
         kb_id = self.resolve(kb)
         sources = self.resolve_sources(kb_id, data_source)
         sizes = [n] if isinstance(n, (int, str)) else list(n)
@@ -3813,10 +4058,12 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         data_source: Any = None,
         progress: Callable[[int], None] | None = None,
     ) -> EvalReport:
-        """Retrieval hit rate and MRR on test questions: where each question's expected source came up in the top n.
+        """
+        Retrieval hit rate and MRR on test questions: where each question's expected source came up in the top n.
         Retrieval only, no answers generated, so it stays cheap. cases: (question, expected) pairs, dicts with
         'question' and 'expected', or a DataFrame with those columns; expected is a piece of the source's URI, file
-        name or text."""
+        name or text.
+        """
         kb_id = self.resolve(kb)
         n = _as_int(n, "n")
         sources = self.resolve_sources(kb_id, data_source)
@@ -3867,11 +4114,13 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         info: KnowledgeBaseInfo | None = None,
         progress: Callable[[int], None] | None = None,
     ) -> FileInventory:
-        """Every file of a knowledge base's S3 and custom data sources (or one, by ID or name), and whether each is
+        """
+        Every file of a knowledge base's S3 and custom data sources (or one, by ID or name), and whether each is
         searchable. Bedrock's document list is read next to the bucket's files, so files a sync skipped or hasn't
         reached yet, and files deleted since, show up too (KBFile.state). Reads at most `limit` documents and `limit`
         S3 files per data source (None = all) and says what stopped early; a part that can't be read is recorded in
-        `errors` instead of raising. info: a describe() result to take the data sources' settings and syncs from."""
+        `errors` instead of raising. info: a describe() result to take the data sources' settings and syncs from.
+        """
         kb_id = self.resolve(kb)
         limit = _as_count(limit, "limit")
         started = time.monotonic()
@@ -3935,7 +4184,9 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
 
     def _documents_of(self, kb_id: str, ds_id: str, limit: int | None, tick: Callable[[int], None],
                       errors: dict[str, str]) -> tuple[list[KBDocument], bool]:
-        """(Bedrock's documents of one data source, whether it stopped at `limit`); an error goes in `errors`."""
+        """
+        (Bedrock's documents of one data source, whether it stopped at `limit`); an error goes in `errors`.
+        """
         docs: list[KBDocument] = []
         try:
             for page in self.client.get_paginator("list_knowledge_base_documents").paginate(
@@ -3952,8 +4203,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
 
     def _objects_of(self, ds: DataSourceInfo, limit: int | None, tick: Callable[[int], None],
                     errors: dict[str, str]) -> tuple[list[dict[str, Any]] | None, bool]:
-        """(The S3 objects under a data source's inclusion prefixes, whether every one was listed): at most `limit`
-        files, metadata files aside. None when the bucket can't be listed (the error goes in `errors`)."""
+        """
+        (The S3 objects under a data source's inclusion prefixes, whether every one was listed): at most `limit`
+        files, metadata files aside. None when the bucket can't be listed (the error goes in `errors`).
+        """
         objects: dict[str, dict[str, Any]] = {}
         files = 0
         try:
@@ -3983,11 +4236,13 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         link: str = "s3",
         expires: int = 3600,
     ) -> SavedFileList:
-        """Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
+        """
+        Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
         bucket ('key') or a link that opens it in a browser ('https': presigned here with your credentials, no AWS
         call, working for `expires` seconds). files: a file_inventory() or some of its files. path: the file to write
         (a folder puts it there), else <knowledge base>-files.txt beside the notebook; a file of that name is
-        replaced. Nothing in AWS changes."""
+        replaced. Nothing in AWS changes.
+        """
         link = parse_list_link(link)
         default = file_list_name(files.kb_name or files.kb_id) if isinstance(files, FileInventory) else "kb-files.txt"
         items = files.files if isinstance(files, FileInventory) else files
@@ -4001,8 +4256,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         return write_file_list(items, _list_target(path, default), link=link, sign=sign, expires=expires)
 
     def document_status(self, kb: str, uri: str, data_source: str) -> KBDocument | None:
-        """Bedrock's record of one file (GetKnowledgeBaseDocuments), for a file a truncated document list didn't
-        reach: its status and reason, or None when Bedrock has none. data_source: its data source's ID or name."""
+        """
+        Bedrock's record of one file (GetKnowledgeBaseDocuments), for a file a truncated document list didn't
+        reach: its status and reason, or None when Bedrock has none. data_source: its data source's ID or name.
+        """
         kb_id = self.resolve(kb)
         [ds] = self._pick_sources(kb_id, data_source)
         identifier = ({"dataSourceType": "S3", "s3": {"uri": uri}} if uri.startswith("s3://")
@@ -4013,9 +4270,11 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         return docs[0] if docs else None
 
     def metadata_file(self, uri: str) -> MetadataFile:
-        """The <file>.metadata.json next to an S3 file, read (its first 64 KB) and checked (parse_metadata_file): its
+        """
+        The <file>.metadata.json next to an S3 file, read (its first 64 KB) and checked (parse_metadata_file): its
         attributes, which of them are embedded with the text, and what's wrong with it. found=False when there is none;
-        one that can't be read keeps the error code in `error`."""
+        one that can't be read keeps the error code in `error`.
+        """
         target = str(uri or "").strip()
         target = target if target.endswith(METADATA_SUFFIX) else target + METADATA_SUFFIX
         bucket, _, key = target[5:].partition("/") if target.startswith("s3://") else ("", "", "")
@@ -4037,8 +4296,10 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         return meta
 
     def file_text(self, uri: str, limit: int = FILE_TEXT_LIMIT) -> str | None:
-        """The first `limit` bytes of a plain text file (.txt, .md, ...) in S3, as text; None for other types, whose
-        text only Bedrock's parser can read."""
+        """
+        The first `limit` bytes of a plain text file (.txt, .md, ...) in S3, as text; None for other types, whose
+        text only Bedrock's parser can read.
+        """
         if file_type(uri) not in _PLAIN_TYPES or not str(uri).startswith("s3://"):
             return None
         bucket, _, key = str(uri)[5:].partition("/")
@@ -4048,11 +4309,13 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
     def document_chunks(
         self, kb: str, uri: str, *, n: int = CHUNK_LIMIT, data_source: Any = None, text: bool = True
     ) -> DocumentChunks:
-        """One file's chunks as the vector store holds them, in document order: a Retrieve limited to the file (a
+        """
+        One file's chunks as the vector store holds them, in document order: a Retrieve limited to the file (a
         filter on x-amz-bedrock-kb-source-uri) for up to n of them (at most 100, Retrieve's limit). For a plain text
         file, text=True also reads the file to place each chunk in it, and to tell how much of the text is in a
         chunk. Passages of other files that come back anyway (a vector store that ignores the filter) are counted in
-        `outside` and left out."""
+        `outside` and left out.
+        """
         kb_id = self.resolve(kb)
         uri = str(uri or "").strip()
         if not uri.startswith("s3://"):
@@ -4103,9 +4366,11 @@ class BedrockKBAnalyzer(_BaseAnalyzer):
         across: int = 20,
         search_type: str | None = None,
     ) -> FileProbe:
-        """One question asked of a file and of the whole knowledge base (two Retrieves): the file's n best passages
+        """
+        One question asked of a file and of the whole knowledge base (two Retrieves): the file's n best passages
         for it, and where the file's best one ranks among the knowledge base's top `across`, so whether it holds an
-        answer and whether an answer will see it."""
+        answer and whether an answer will see it.
+        """
         kb_id = self.resolve(kb)
         inside = self.retrieve(kb_id, question, n, where={"equals": {"key": SOURCE_KEY, "value": str(uri)}},
                                search_type=search_type)
@@ -4137,8 +4402,10 @@ class _Passage:
 
 @dataclass
 class _Link:
-    """A link that opens in a new tab: a line of its own, or a table cell (the label as a link). Text mode shows
-    the label, then the address on its own line; in a table, the label only."""
+    """
+    A link that opens in a new tab: a line of its own, or a table cell (the label as a link). Text mode shows
+    the label, then the address on its own line; in a table, the label only.
+    """
 
     url: str
     label: str
@@ -4149,7 +4416,9 @@ class _Link:
 
 @dataclass
 class _Steps:
-    """How something happened, a step at a time: a dot per step on a line (HTML), a numbered list (text)."""
+    """
+    How something happened, a step at a time: a dot per step on a line (HTML), a numbered list (text).
+    """
 
     items: list[tuple[str, str, str, str]]  # (step, what happened, detail, tone 'ok' | 'warn' | 'bad' | '')
     title: str = ""
@@ -4157,7 +4426,9 @@ class _Steps:
 
 @dataclass
 class _Pipeline:
-    """How a knowledge base turns each data source into vectors: a row of stages per data source, left to right."""
+    """
+    How a knowledge base turns each data source into vectors: a row of stages per data source, left to right.
+    """
 
     rows: list[tuple[str, list[tuple[str, str, str, str]]]]  # (data source, [(stage, value, detail, tone)])
     title: str = ""
@@ -4165,9 +4436,11 @@ class _Pipeline:
 
 @dataclass
 class _Chunks:
-    """A file's chunks in document order: a bar of their sizes (and where they sit in the file, when its text was
+    """
+    A file's chunks in document order: a bar of their sizes (and where they sit in the file, when its text was
     read), then each one folded under a line with its number, page, size and first words, opening to its full text
-    (what it repeats from the chunk before it marked) and its metadata."""
+    (what it repeats from the chunk before it marked) and its metadata.
+    """
 
     items: list[tuple[int, Passage, int]]  # (number, chunk, characters it repeats from the chunk before it)
     title: str = ""
@@ -4178,7 +4451,9 @@ class _Chunks:
 
 @dataclass
 class _Shares:
-    """Parts of a whole as one bar with a colour for each part, and a legend: a knowledge base's files by state."""
+    """
+    Parts of a whole as one bar with a colour for each part, and a legend: a knowledge base's files by state.
+    """
 
     items: list[tuple[str, int, str]]  # (label, count, kind): kind picks the colour (a FILE_STATES key)
     title: str = ""
@@ -4310,7 +4585,9 @@ _BADGE = "📚 Bedrock KB"  # the chip before each report's title, so reports fr
 
 
 def _link_html(url: str, text: str) -> str:
-    """text as a link that opens url in a new tab; only http(s) links, so anything else stays text."""
+    """
+    text as a link that opens url in a new tab; only http(s) links, so anything else stays text.
+    """
     if not url.lower().startswith(("https://", "http://")):
         return _esc(text)
     return (
@@ -4320,7 +4597,9 @@ def _link_html(url: str, text: str) -> str:
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
@@ -4352,8 +4631,10 @@ def _pipeline_html(block: _Pipeline, report: _Report) -> str:
 
 
 def _raw_offset(text: str, flat_offset: int) -> int:
-    """Where in `text` the character `flat_offset` of its whitespace-collapsed form (_single_spaced) is: the overlap a chunk
-    repeats is measured on the collapsed text, but marked in the text as written."""
+    """
+    Where in `text` the character `flat_offset` of its whitespace-collapsed form (_single_spaced) is: the overlap a chunk
+    repeats is measured on the collapsed text, but marked in the text as written.
+    """
     count, pending = 0, False
     for i, ch in enumerate(text):
         if ch.isspace():
@@ -4548,7 +4829,9 @@ _DELETION = {"DELETE": "chunks deleted too", "RETAIN": "chunks kept (RETAIN)"}
 
 
 def _sync_label(job: IngestionJob | None) -> str:
-    """'done 3d ago', 'FAILED 2h ago', 'done 1d ago, 2 docs failed', 'never'."""
+    """
+    'done 3d ago', 'FAILED 2h ago', 'done 1d ago, 2 docs failed', 'never'.
+    """
     if job is None:
         return "never"
     text = f"{_JOB_STATES.get(job.status, job.status.lower())} {human_age(job.started)}"
@@ -4556,8 +4839,10 @@ def _sync_label(job: IngestionJob | None) -> str:
 
 
 def _status_tone(status: str | None) -> str:
-    """A knowledge base's or data source's status at a glance: FAILED is bad, anything but ACTIVE / AVAILABLE a
-    warning (it's being created, updated or deleted)."""
+    """
+    A knowledge base's or data source's status at a glance: FAILED is bad, anything but ACTIVE / AVAILABLE a
+    warning (it's being created, updated or deleted).
+    """
     return (
         "bad"
         if status == "FAILED"
@@ -4568,7 +4853,9 @@ def _status_tone(status: str | None) -> str:
 
 
 def _sync_tone(job: IngestionJob | None) -> str:
-    """How a sync reads at a glance: a failed one is bad; never synced, stopped or with failed documents, a warning."""
+    """
+    How a sync reads at a glance: a failed one is bad; never synced, stopped or with failed documents, a warning.
+    """
     if job is not None and job.status == "FAILED":
         return "bad"
     return "warn" if job is None or job.failed or job.status == "STOPPED" else ""
@@ -4603,8 +4890,10 @@ def _passage_blocks(
     sources: dict[str, str] | None = None,
     link: Callable[[Passage], str] | None = None,
 ) -> list[_Passage]:
-    """sources: {data source ID: name}, to say which data source each passage came from ({}: don't). link: the
-    passage -> the link that opens its file ('' for none)."""
+    """
+    sources: {data source ID: name}, to say which data source each passage came from ({}: don't). link: the
+    passage -> the link that opens its file ('' for none).
+    """
     top = max((p.score for p in passages if p.score is not None), default=None)
     sources = sources or {}
     return [
@@ -4634,8 +4923,10 @@ def _passage_blocks(
 
 
 def _open_label(p: Passage, url: str, expires: int = 3600) -> str:
-    """'Open refund-policy.pdf at page 3 (link valid for 1 hour)', or 'Download ...' for a file a browser saves
-    rather than shows."""
+    """
+    'Open refund-policy.pdf at page 3 (link valid for 1 hour)', or 'Download ...' for a file a browser saves
+    rather than shows.
+    """
     name = source_name(p.uri) or p.uri
     if not p.uri.startswith("s3://"):
         return f"Open {name}"
@@ -4649,8 +4940,10 @@ def _strip_markers(text: str) -> str:
 
 
 def _turns(question: str, answer: Answer) -> list[dict[str, Any]]:
-    """The Converse messages one question and its answer add to a conversation (the sources and markers left out:
-    the next question gets its own numbered sources)."""
+    """
+    The Converse messages one question and its answer add to a conversation (the sources and markers left out:
+    the next question gets its own numbered sources).
+    """
     return [
         {"role": "user", "content": [{"text": question}]},
         {
@@ -4661,7 +4954,9 @@ def _turns(question: str, answer: Answer) -> list[dict[str, Any]]:
 
 
 def _model_label(model: str) -> str:
-    """'amazon.titan-embed-text-v2:0' stays as is; '' -> '-'."""
+    """
+    'amazon.titan-embed-text-v2:0' stays as is; '' -> '-'.
+    """
     return model or "-"
 
 
@@ -4670,7 +4965,8 @@ def _section(info: KnowledgeBaseInfo | DataSourceInfo, section: str, text: str) 
 
 
 class BedrockKBView(_BaseView):
-    """Notebook UI over BedrockKBAnalyzer. Each method renders a report and returns nothing; for the underlying
+    """
+    Notebook UI over BedrockKBAnalyzer. Each method renders a report and returns nothing; for the underlying
     data call the matching method on `view.core` (a BedrockKBAnalyzer).
 
     kb: the knowledge base to use when a command isn't given one (a name, ID or ARN); use() changes it. Without
@@ -4717,7 +5013,9 @@ class BedrockKBView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """The AWS error message plus what to do about it."""
+        """
+        The AWS error message plus what to do about it.
+        """
         lowered = message.lower()
         text = message.rstrip() + (
             "" if message.rstrip().endswith((".", "!", "?")) else "."
@@ -4747,7 +5045,9 @@ class BedrockKBView(_BaseView):
         return message
 
     def _profile_for(self, message: str) -> str:
-        """The inference profile to use for the model an error message names ('<profile id>' if unknown)."""
+        """
+        The inference profile to use for the model an error message names ('<profile id>' if unknown).
+        """
         match = re.search(r"model ID ([\w.:-]+)", message)
         try:
             found = [
@@ -4762,12 +5062,16 @@ class BedrockKBView(_BaseView):
         return found[0] if found else "<profile id>"
 
     def _on(self, kb_id: str, name: str) -> dict[str, str]:
-        """kb= for a next step's call, unless it's the knowledge base commands already use without one."""
+        """
+        kb= for a next step's call, unless it's the knowledge base commands already use without one.
+        """
         return {} if self.kb in (kb_id, name) else {"kb": name}
 
     def _source_names(self, kb_id: str, passages: Iterable[Passage]) -> dict[str, str]:
-        """{ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
-        one cached ListDataSources, or the IDs when it can't be read."""
+        """
+        {ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
+        one cached ListDataSources, or the IDs when it can't be read.
+        """
         ids = sorted({p.data_source_id for p in passages if p.data_source_id})
         if len(ids) < 2:
             return {}
@@ -4781,7 +5085,9 @@ class BedrockKBView(_BaseView):
     def _top_source(
         passages: list[Passage], names: dict[str, str]
     ) -> tuple[str, int] | None:
-        """(name, count) of the data source most of these passages came from, when they came from several."""
+        """
+        (name, count) of the data source most of these passages came from, when they came from several.
+        """
         if not names:
             return None
         counts = Counter(p.data_source_id for p in passages if p.data_source_id in names)
@@ -4791,8 +5097,10 @@ class BedrockKBView(_BaseView):
         return names[ds_id], count
 
     def _url(self, uri: str, page: int | None = None) -> str:
-        """The link that opens a source's file in a new tab, or '' (no file to open, or no credentials to sign the
-        link with: the name then stays text, and the report still renders)."""
+        """
+        The link that opens a source's file in a new tab, or '' (no file to open, or no credentials to sign the
+        link with: the name then stays text, and the report still renders).
+        """
         try:
             return self.core.file_url(uri, page=page) or ""
         except (BotoCoreError, ClientError, ValueError):
@@ -4802,11 +5110,15 @@ class BedrockKBView(_BaseView):
         return self._url(p.uri, p.page)
 
     def _price_basis(self, models: bool = False) -> str:
-        """The prices a cost was worked out with; models=True: the models' prices (model_prices=)."""
+        """
+        The prices a cost was worked out with; models=True: the models' prices (model_prices=).
+        """
         return _which_prices(self.core.model_prices, MODEL_PRICES) if models else super()._price_basis()
 
     def _kb(self, kb: str | None) -> str:
-        """The knowledge base a command works on: `kb`, else the view's default, else the only one in the region."""
+        """
+        The knowledge base a command works on: `kb`, else the view's default, else the only one in the region.
+        """
         if kb is not None:
             return self.core.resolve(kb)
         if self.kb is not None:
@@ -4830,7 +5142,9 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def use(self, kb: str) -> None:
-        """Sets the knowledge base that later commands use when you don't pass kb=."""
+        """
+        Sets the knowledge base that later commands use when you don't pass kb=.
+        """
         kb_id = self.core.resolve(kb)
         self.kb, self._conversation = kb_id, None
         name = self.core.kb_name(kb_id)
@@ -4854,8 +5168,10 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def kbs(self) -> None:
-        """Every knowledge base in the region: status, type, vector store, embedding model, sources, documents,
-        last sync, estimated idle cost and warnings."""
+        """
+        Every knowledge base in the region: status, type, vector store, embedding model, sources, documents,
+        last sync, estimated idle cost and warnings.
+        """
         with self._progress("Checking knowledge bases", unit="knowledge bases") as tick:
             infos = sorted(
                 self.core.list_knowledge_bases(progress=tick),
@@ -5020,8 +5336,10 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def kb_info(self, kb: str | None = None) -> None:
-        """Settings in plain English, data sources (chunking, parsing, last sync), recent syncs, findings and cost.
-        Also tags, and how to try the knowledge base."""
+        """
+        Settings in plain English, data sources (chunking, parsing, last sync), recent syncs, findings and cost.
+        Also tags, and how to try the knowledge base.
+        """
         info = self.core.describe(self._kb(kb))
         cost = vector_store_monthly_cost(info, self.core.prices)
         embedding = _model_label(info.embedding_model) + (
@@ -5172,8 +5490,10 @@ class BedrockKBView(_BaseView):
     def syncs(
         self, kb: str | None = None, *, data_source: str | None = None, n: int = 10
     ) -> None:
-        """Sync history: when, how long, status, and scanned / new / modified / deleted / failed counts, with
-        why syncs failed."""
+        """
+        Sync history: when, how long, status, and scanned / new / modified / deleted / failed counts, with
+        why syncs failed.
+        """
         kb_id = self._kb(kb)
         jobs = self.core.ingestion_jobs(kb_id, data_source, n=n)
         sources = self.core.data_sources(kb_id)
@@ -5289,8 +5609,10 @@ class BedrockKBView(_BaseView):
         status: str | None = None,
         n: int = 50,
     ) -> None:
-        """Documents by status (indexed / failed / pending ...), the ones that aren't indexed with Bedrock's reason,
-        and the command to sync again."""
+        """
+        Documents by status (indexed / failed / pending ...), the ones that aren't indexed with Bedrock's reason,
+        and the command to sync again.
+        """
         kb_id = self._kb(kb)
         n = _as_int(n, "n")
         with self._progress("Listing documents", unit="documents") as tick:
@@ -5440,7 +5762,9 @@ class BedrockKBView(_BaseView):
     def unsynced(
         self, kb: str | None = None, *, data_source: str | None = None
     ) -> None:
-        """Files added or changed in S3 since the last successful sync, and the command to sync them."""
+        """
+        Files added or changed in S3 since the last successful sync, and the command to sync them.
+        """
         kb_id = self._kb(kb)
         with self._progress("Listing files", unit="files") as tick:
             results = self.core.unsynced(kb_id, data_source, progress=tick)
@@ -5536,9 +5860,11 @@ class BedrockKBView(_BaseView):
         search_type: str | None = None,
         rerank: str | bool | None = None,
     ) -> None:
-        """Ranked passages for a question, with score bars, source and page, highlighted words and metadata.
+        """
+        Ranked passages for a question, with score bars, source and page, highlighted words and metadata.
         Also findings, time and cost. data_source= searches only one data source (its name or ID, or a list of them);
-        where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}."""
+        where= filters on metadata: where={'team': 'billing', 'year': ('>=', 2024)}.
+        """
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="passages"):
             r = self.core.retrieve(
@@ -5636,8 +5962,10 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def chunk(self, rank: int = 1) -> None:
-        """The full text and metadata of result #rank from the last search or ask, and a link that opens its file in
-        a new tab."""
+        """
+        The full text and metadata of result #rank from the last search or ask, and a link that opens its file in
+        a new tab.
+        """
         last = self._last
         if last is None:
             raise _Hint(
@@ -5718,7 +6046,8 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def link(self, source: Any = 1, *, expires: int = 3600) -> None:
-        """A link that opens a file in a new browser tab: source #n of the last search or ask (a PDF opens at the
+        """
+        A link that opens a file in a new browser tab: source #n of the last search or ask (a PDF opens at the
         passage's page), a file name from it, or any s3:// path.
 
         An S3 file gets a presigned link, signed here with your credentials (no AWS call). It works for `expires`
@@ -5726,7 +6055,8 @@ class BedrockKBView(_BaseView):
         (s3:GetObject); anyone you send it to can open the file until then. The browser shows PDFs, pictures, text
         and HTML in the tab; Word and Excel files download. A web, Confluence, SharePoint or Salesforce source links
         to its page. search() and ask() already link each source's name; this is the link on its own, for text mode
-        or for longer than an hour: link(2, expires=86400)."""
+        or for longer than an hour: link(2, expires=86400).
+        """
         if isinstance(source, str) and "://" in source:
             p, number, what = Passage(rank=0, text="", uri=source.strip()), 0, repr(source.strip())
         else:
@@ -5750,8 +6080,10 @@ class BedrockKBView(_BaseView):
         self._show(blocks)
 
     def _pick_source(self, source: Any) -> tuple[Passage, int, str]:
-        """link()'s source: a number, or a file name, from the last search or answer -> (passage, its number as
-        chunk() takes it, how to name it)."""
+        """
+        link()'s source: a number, or a file name, from the last search or answer -> (passage, its number as
+        chunk() takes it, how to name it).
+        """
         last = self._last
         if last is None:
             raise _Hint(
@@ -5796,7 +6128,9 @@ class BedrockKBView(_BaseView):
     def _answer_blocks(
         self, a: Answer, title: str, notes: list[Any] | None = None
     ) -> list[Any]:
-        """Title, cards, the answer, warnings, the sources table, then the notes."""
+        """
+        Title, cards, the answer, warnings, the sources table, then the notes.
+        """
         engine = "KB engine" if a.engine == "kb" else "Converse"
         tokens = (
             f"~{a.input_tokens + a.output_tokens:,} (estimate)"
@@ -5918,9 +6252,11 @@ class BedrockKBView(_BaseView):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> None:
-        """The answer with [1][2] citations, grounded %, sources used, model, tokens, cost and time.
+        """
+        The answer with [1][2] citations, grounded %, sources used, model, tokens, cost and time.
         Also a sources table and findings. data_source= answers from one data source only (its name or ID, or a list
-        of them), and follow-ups keep it. engine='converse' gives exact tokens and cost, and takes your prompt=."""
+        of them), and follow-ups keep it. engine='converse' gives exact tokens and cost, and takes your prompt=.
+        """
         kb_id = self._kb(kb)
         with self._progress("Asking", unit="answers"):
             a = self.core.ask(
@@ -5959,9 +6295,11 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def follow_up(self, question: str, *, data_source: Any = None) -> None:
-        """The answer to a follow-up question, in the same session (engine='kb') or conversation as the last ask().
+        """
+        The answer to a follow-up question, in the same session (engine='kb') or conversation as the last ask().
         It searches the data source the conversation does; data_source= moves this and later follow-ups to another
-        one, and data_source='all' back to every data source."""
+        one, and data_source='all' back to every data source.
+        """
         conv = self._conversation
         if conv is None:
             raise _Hint(
@@ -6024,8 +6362,10 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def models(self, match: str | None = None) -> None:
-        """Models you can use for ask() here: the ID to pass as model=, provider, on demand or through an inference
-        profile, and $ per 1M tokens in and out."""
+        """
+        Models you can use for ask() here: the ID to pass as model=, provider, on demand or through an inference
+        profile, and $ per 1M tokens in and out.
+        """
         with self._progress("Listing models", unit="models"):
             models = self.core.models(match)
         try:
@@ -6105,8 +6445,10 @@ class BedrockKBView(_BaseView):
         where: Any = None,
         data_source: Any = None,
     ) -> None:
-        """One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings.
-        data_source= compares searches of one data source only."""
+        """
+        One row per passage and one column per search setting (its rank there, or "-"), overlap cards and findings.
+        data_source= compares searches of one data source only.
+        """
         kb_id = self._kb(kb)
         with self._progress("Searching", unit="searches") as tick:
             c = self.core.compare(
@@ -6196,8 +6538,10 @@ class BedrockKBView(_BaseView):
         where: Any = None,
         data_source: Any = None,
     ) -> None:
-        """Retrieval hit rate @n and MRR on test questions: where each expected source ranked (or missed), and what
-        came up first instead. cases: [(question, expected file or text), ...]. data_source= checks one data source."""
+        """
+        Retrieval hit rate @n and MRR on test questions: where each expected source ranked (or missed), and what
+        came up first instead. cases: [(question, expected file or text), ...]. data_source= checks one data source.
+        """
         kb_id = self._kb(kb)
         with self._progress("Checking questions", unit="questions") as tick:
             report = self.core.evaluate(
@@ -6292,15 +6636,19 @@ class BedrockKBView(_BaseView):
     # ------------------------------------------------------------- files, one by one
 
     def _inventory(self, kb_id: str, *, refresh: bool = False, info: KnowledgeBaseInfo | None = None) -> FileInventory:
-        """The knowledge base's files (file_inventory), listed once and kept, so naming a file is quick."""
+        """
+        The knowledge base's files (file_inventory), listed once and kept, so naming a file is quick.
+        """
         if refresh or kb_id not in self._inventories:
             with self._progress("Listing files", unit="files") as tick:
                 self._inventories[kb_id] = self.core.file_inventory(kb_id, info=info, progress=tick)
         return self._inventories[kb_id]
 
     def _find_file(self, kb_id: str, path: Any, info: KnowledgeBaseInfo | None = None) -> KBFile:
-        """The file `path` names (find_files): a name, a path in the bucket or an s3:// path. A name several files
-        share, or one no file has, raises a _Hint that says which there are."""
+        """
+        The file `path` names (find_files): a name, a path in the bucket or an s3:// path. A name several files
+        share, or one no file has, raises a _Hint that says which there are.
+        """
         text = str(path.uri if isinstance(path, KBFile) else path or "").strip()
         if not text:
             raise ValueError("Pass a file: its name, its path in the bucket or its s3:// path (files() lists them)")
@@ -6323,9 +6671,11 @@ class BedrockKBView(_BaseView):
                     "sources: files() shows them.")
 
     def _file_view(self, kb_id: str, f: KBFile) -> tuple[DocumentChunks | None, MetadataFile | None, list[_Note]]:
-        """What file() shows of a file beyond its record: its chunks (when it's searchable) and its metadata file,
+        """
+        What file() shows of a file beyond its record: its chunks (when it's searchable) and its metadata file,
         with notes for what couldn't be read. A file the document list stopped before (unchecked) is looked up on its
-        own first, and its state set from what Bedrock says."""
+        own first, and its state set from what Bedrock says.
+        """
         notes: list[_Note] = []
         chunks = meta = None
         if f.state == "unchecked" and f.data_source_id:
@@ -6350,7 +6700,9 @@ class BedrockKBView(_BaseView):
         return chunks, meta, notes
 
     def _recheck(self, kb_id: str, f: KBFile, record: KBDocument | None) -> None:
-        """A file's state again, now that Bedrock's record of it (or that it has none) is known."""
+        """
+        A file's state again, now that Bedrock's record of it (or that it has none) is known.
+        """
         inv = self._inventories.get(kb_id)
         last = inv.last_sync.get(f.data_source_id) if inv else None
         if record is not None:
@@ -6370,10 +6722,12 @@ class BedrockKBView(_BaseView):
         match: str | None = None,
         n: int = 50,
     ) -> None:
-        """Every file of the knowledge base next to Bedrock's record of it: indexed, failed (and why), changed in S3
+        """
+        Every file of the knowledge base next to Bedrock's record of it: indexed, failed (and why), changed in S3
         since it was indexed, added after the last sync, skipped by the sync, deleted from S3, with the command that
         syncs them. Problems first; status= ('failed', 'changed', 'new', ...) or match= (part of a name or path)
-        narrows the list."""
+        narrows the list.
+        """
         kb_id = self._kb(kb)
         n = _as_int(n, "n")
         wanted = parse_file_state(status) if status else ""
@@ -6381,7 +6735,9 @@ class BedrockKBView(_BaseView):
         self._show(self._files_blocks(inv, state=wanted, match=match, n=n, data_source=data_source))
 
     def _list_files(self, kb_id: str, data_source: str | None) -> FileInventory:
-        """The knowledge base's files read now (one data source's, or every one's, kept for file())."""
+        """
+        The knowledge base's files read now (one data source's, or every one's, kept for file()).
+        """
         if data_source is None:
             return self._inventory(kb_id, refresh=True)
         with self._progress("Listing files", unit="files") as tick:
@@ -6389,9 +6745,11 @@ class BedrockKBView(_BaseView):
 
     def _files_blocks(self, inv: FileInventory, *, state: str = "", match: str | None = None, n: int = 50,
                       window: bool = False, data_source: str | None = None) -> list[Any]:
-        """files()'s report: cards per state, findings, and the files that need a look first (window=True: the
+        """
+        files()'s report: cards per state, findings, and the files that need a look first (window=True: the
         explorer's summary, without the list, which the window has beside it). data_source: as files() was given it,
-        for the next steps' calls."""
+        for the next steps' calls.
+        """
         counts = inv.counts()
         several = len({f.data_source_id for f in inv.files}) > 1  # a column for it only when the files tell apart
         sub = [f"{_plural(len(inv.files), 'file')} from {_plural(len(inv.sources), 'data source')}",
@@ -6454,7 +6812,8 @@ class BedrockKBView(_BaseView):
         link: str = "s3",
         expires: int = 3600,
     ) -> None:
-        """Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
+        """
+        Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
         computer: each file's s3:// path, sorted by path, ready for a script, aws s3 cp or a spreadsheet.
 
         status= ('failed', 'changed', 'new', ...), match= (part of a name or path) and data_source= keep only the
@@ -6462,7 +6821,8 @@ class BedrockKBView(_BaseView):
         here with your credentials, no AWS call; each works for `expires` seconds, an hour unless you say, and anyone
         holding one can open its file until then), and link='key' each one's path in the bucket. path: default
         <knowledge base>-files.txt beside the notebook ('failed-files' etc. with status=); a folder puts it there, and
-        a file of that name is replaced. Only that file is written: nothing in AWS changes."""
+        a file of that name is replaced. Only that file is written: nothing in AWS changes.
+        """
         if path is None and _looks_like_path(kb):
             kb, path = None, kb
         kb_id = self._kb(kb)
@@ -6486,8 +6846,10 @@ class BedrockKBView(_BaseView):
 
     def _saved_list_blocks(self, saved: SavedFileList, inv: FileInventory, *, href: str = "",
                            narrowed: dict[str, Any] | None = None) -> list[Any]:
-        """save_file_list()'s report: what was written where, the link that downloads it, its first lines and what's
-        not in it. narrowed: the filters it was given, for the next steps' calls."""
+        """
+        save_file_list()'s report: what was written where, the link that downloads it, its first lines and what's
+        not in it. narrowed: the filters it was given, for the next steps' calls.
+        """
         notes = []
         for ds_id, parts in inv.truncated.items():
             what = " and ".join("Bedrock's document list" if p == "documents" else "the bucket's files" for p in parts)
@@ -6513,7 +6875,9 @@ class BedrockKBView(_BaseView):
         return blocks
 
     def _sync_block(self, kb_id: str, ds_ids: list[str], names: dict[str, str]) -> _Text | None:
-        """The commands that sync these data sources, to copy (this tool never syncs: a sync changes the index)."""
+        """
+        The commands that sync these data sources, to copy (this tool never syncs: a sync changes the index).
+        """
         if not ds_ids:
             return None
         region = self.core.region
@@ -6523,10 +6887,12 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def file(self, path: str, kb: str | None = None) -> None:
-        """How one file was indexed, step by step: stored in S3, read by the parser, cut into chunks (each in document
+        """
+        How one file was indexed, step by step: stored in S3, read by the parser, cut into chunks (each in document
         order with its size, page and the text it shares with the one before), embedded and stored, and where it
         stands now. Also its metadata file, checked against what its chunks carry, and what to fix. path: the file's
-        name, its path in the bucket or its s3:// path."""
+        name, its path in the bucket or its s3:// path.
+        """
         kb_id = self._kb(kb)
         info = self.core.describe(kb_id)
         f = self._find_file(kb_id, path, info)
@@ -6545,8 +6911,10 @@ class BedrockKBView(_BaseView):
         loading: bool = False,
         window: bool = False,
     ) -> list[Any]:
-        """file()'s report (and the explorer's file page): cards, findings, how it was indexed, its chunks, its
-        metadata next to its chunks', and Bedrock's record. loading: the chunks and metadata are still being read."""
+        """
+        file()'s report (and the explorer's file page): cards, findings, how it was indexed, its chunks, its
+        metadata next to its chunks', and Bedrock's record. loading: the chunks and metadata are still being read.
+        """
         kb_id = info.id if info else ""
         ds = next((d for d in info.data_sources if d.id == f.data_source_id), None) if info else None
         inv = self._inventories.get(kb_id)
@@ -6619,7 +6987,9 @@ class BedrockKBView(_BaseView):
         return blocks
 
     def _metadata_blocks(self, f: KBFile, meta: MetadataFile | None, chunks: DocumentChunks | None) -> list[Any]:
-        """The file's metadata file next to the metadata its chunks carry, and the problems with it."""
+        """
+        The file's metadata file next to the metadata its chunks carry, and the problems with it.
+        """
         if meta is None or meta.error:
             return []
         on_chunks: dict[str, Any] = {}
@@ -6657,8 +7027,10 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def search_file(self, path: str, question: str, kb: str | None = None, *, n: int = 10) -> None:
-        """Whether a question finds a file: the file's own best passages for it, and where the file ranks among the
-        whole knowledge base's (an answer only sees the top few), with what to change when it ranks too low."""
+        """
+        Whether a question finds a file: the file's own best passages for it, and where the file ranks among the
+        whole knowledge base's (an answer only sees the top few), with what to change when it ranks too low.
+        """
         kb_id = self._kb(kb)
         f = self._find_file(kb_id, path)
         with self._progress("Searching", unit="searches"):
@@ -6701,10 +7073,12 @@ class BedrockKBView(_BaseView):
 
     @_friendly_errors
     def explore(self, kb: str | None = None, *, file: str | None = None, height: int | str | None = None) -> None:
-        """The explorer window: every file next to Bedrock's record of it (failed and why, changed since the last
+        """
+        The explorer window: every file next to Bedrock's record of it (failed and why, changed since the last
         sync, not synced yet...), and for the one you click, how it was indexed: the parser, its chunks in document
         order, its metadata, and whether a question finds it. Also the indexing pipeline, the sync history, a search
-        box and every setting, by clicking. Needs Jupyter and ipywidgets; view.explorer is the window."""
+        box and every setting, by clicking. Needs Jupyter and ipywidgets; view.explorer is the window.
+        """
         if not self.use_html:
             raise _Hint(
                 "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, files() lists every file "
@@ -6759,8 +7133,10 @@ _STATE_INKS = {"failed": ("#dc2626", "#f87171"), "changed": ("#b45309", "#fbbf24
 
 
 def _explorer_rules() -> str:
-    """The explorer's tab icons (.kbx-i-<key> sets --kx-icon, which a tab's ::before draws), and each file state's
-    colour on the list's dots and chips."""
+    """
+    The explorer's tab icons (.kbx-i-<key> sets --kx-icon, which a tab's ::before draws), and each file state's
+    colour on the list's dots and chips.
+    """
     icons = [f".kbx-app .kbx-i-{key}{{--kx-icon:{_icon_url(paths)}}}" for key, _, _, paths in _EXPLORER_TABS]
     states = [f".kbx-app .dot.s-{state},.kbx-app.kbx-app button.kbx-chip.kbx-s-{state}::before{{background:{colour}}}"
               for state, colour in _STATE_COLOURS.items()]
@@ -6996,9 +7372,11 @@ _WINDOW_WORDS = [(re.compile(pattern), plain) for pattern, plain in (  # a comma
 
 
 def _window_text(text: str) -> str:
-    """A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab
+    """
+    A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab
     (documents(status='FAILED') -> "the Files tab's Failed filter"), and the arguments it names become what they do
-    (where= filters -> metadata filters); other calls and AWS CLI commands stay."""
+    (where= filters -> metadata filters); other calls and AWS CLI commands stay.
+    """
 
     def swap(match: re.Match[str]) -> str:
         call = match.group(0)
@@ -7014,11 +7392,13 @@ def _window_text(text: str) -> str:
 
 
 class _Chooser(_Picker):
-    """The explorer's knowledge base field: a button under its face (the name, ID and a status dot) that opens a list
+    """
+    The explorer's knowledge base field: a button under its face (the name, ID and a status dot) that opens a list
     over the window, with a search box that finds a knowledge base by any part of its name, ID or description. Enter
     picks the first line, or hands what's typed to on_text when no line has it (an ID or ARN). Plain widgets and CSS:
     each line is a button under its text, so the whole line is the click target. While the list is open, the window's
-    backdrop takes a click anywhere else and closes it."""
+    backdrop takes a click anywhere else and closes it.
+    """
 
     def __init__(self, app: KBExplorer, *, on_pick: Callable[[str], None], on_text: Callable[[str], None]):
         super().__init__(app, app._w, "kbx", on_pick=on_pick, on_text=on_text, tooltip="Pick another knowledge base",
@@ -7102,7 +7482,9 @@ _PARSER_NAMES = {"BEDROCK_FOUNDATION_MODEL": "Foundation model", "BEDROCK_DATA_A
 
 
 def _parser_name(cfg: dict[str, Any] | None) -> str:
-    """parsingConfiguration in two words: 'Default (text only)', 'Foundation model', 'Data Automation'..."""
+    """
+    parsingConfiguration in two words: 'Default (text only)', 'Foundation model', 'Data Automation'...
+    """
     strategy = (cfg or {}).get("parsingStrategy")
     return _PARSER_NAMES.get(strategy, strategy) if strategy else "Default (text only)"
 
@@ -7112,8 +7494,10 @@ def _kb_tone(status: str) -> str:
 
 
 class _FileRow:
-    """One reusable line of the file list: a full-width button under its face (the file type, with the state's dot on
-    it, the name, its folder and state, its size and age), so the whole line is the click target."""
+    """
+    One reusable line of the file list: a full-width button under its face (the file type, with the state's dot on
+    it, the name, its folder and state, its size and age), so the whole line is the click target.
+    """
 
     def __init__(self, app: KBExplorer):
         self.file: KBFile | None = None
@@ -7122,8 +7506,10 @@ class _FileRow:
 
 
 def _sync_step(job: IngestionJob, names: dict[str, str]) -> tuple[str, str, str, str]:
-    """A sync as a step of the Syncs tab's timeline: (its data source, what happened and when, what it read and
-    changed and why it failed, its tone)."""
+    """
+    A sync as a step of the Syncs tab's timeline: (its data source, what happened and when, what it read and
+    changed and why it failed, its tone).
+    """
     state = _JOB_STATES.get(job.status, job.status).lower()
     took = f" · took {human_duration(job.duration)}" if job.duration else ""
     counts = (f"read {job.scanned:,}: {job.new:,} new, {job.modified:,} changed, {job.deleted:,} deleted, "
@@ -7136,8 +7522,10 @@ def _sync_step(job: IngestionJob, names: dict[str, str]) -> tuple[str, str, str,
 
 
 def _file_face(f: KBFile, words: list[str], source: str = "") -> str:
-    """A file's line in the list: its type with the state's dot on it, its name (search words marked), its folder and
-    state, and its size and when it changed."""
+    """
+    A file's line in the list: its type with the state's dot on it, its name (search words marked), its folder and
+    state, and its size and when it changed.
+    """
     label, tone = FILE_STATES.get(f.state, (f.state or "?", ""))
     kind = file_type(f.uri)
     badge = (kind or "?")[:4].upper()
@@ -7152,15 +7540,18 @@ def _file_face(f: KBFile, words: list[str], source: str = "") -> str:
 
 
 def _short_value(value: Any, width: int = 48) -> str:
-    """A metadata value on one short line, typed: "billing" (text), 2024 (a number), ["a", "b"]; '-' and '?' (not
-    there, not known) as they are."""
+    """
+    A metadata value on one short line, typed: "billing" (text), 2024 (a number), ["a", "b"]; '-' and '?' (not
+    there, not known) as they are.
+    """
     if value in ("-", "?"):
         return str(value)
     return _clip(json.dumps(_plain_json(value), ensure_ascii=False), width)
 
 
 class KBExplorer(_Explorer):
-    """The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
+    """
+    The knowledge base explorer: a window to look through a knowledge base by clicking, with nothing to type but
     a question. The knowledge base field at the top switches to another one; the cards beside it say how it's doing.
 
         Overview   what's wrong and what to do, how each data source becomes vectors (source, parser, chunking,
@@ -7184,7 +7575,8 @@ class KBExplorer(_Explorer):
 
     Nothing here changes the knowledge base: the window only reads (where a sync is needed it shows the command), and
     the one file it writes is the list ⬇ List saves. x.ui is a BedrockKBView for reports in other cells
-    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown."""
+    (x.ui.search(...)); x.inventory, x.info, x.chunks and x.saved hold the data behind what's shown.
+    """
 
     _PREFIX, _THREADS = "kbx", "kb-explorer"
     _reword = staticmethod(_window_text)
@@ -7243,13 +7635,17 @@ class KBExplorer(_Explorer):
 
     @_window_errors
     def open(self, kb: str) -> None:
-        """Shows another knowledge base (a name, ID or ARN), as picking it in the knowledge base field does."""
+        """
+        Shows another knowledge base (a name, ID or ARN), as picking it in the knowledge base field does.
+        """
         self._open_kb(self.core.resolve(kb))
 
     @_window_errors
     def file(self, path: str) -> None:
-        """Opens a file in the Files tab (its name, path in the bucket or s3:// path), as clicking it in the list
-        does: how it was indexed, its chunks and its metadata."""
+        """
+        Opens a file in the Files tab (its name, path in the bucket or s3:// path), as clicking it in the list
+        does: how it was indexed, its chunks and its metadata.
+        """
         if self._w is None:
             self.ui.file(path, kb=self.kb)
             return
@@ -7266,7 +7662,9 @@ class KBExplorer(_Explorer):
 
     @_window_errors
     def search(self, question: str) -> None:
-        """Searches the knowledge base in the Search tab, as typing the question there does."""
+        """
+        Searches the knowledge base in the Search tab, as typing the question there does.
+        """
         if self._w is None:
             self.ui.search(question, kb=self.kb)
             return
@@ -7276,7 +7674,9 @@ class KBExplorer(_Explorer):
 
     @_window_errors
     def refresh(self) -> None:
-        """Reads the knowledge base again: settings, files, syncs (the ↻ button)."""
+        """
+        Reads the knowledge base again: settings, files, syncs (the ↻ button).
+        """
         if self.kb:
             keep = self.selected.uri if self.selected else None
             self._open_kb(self.kb, file=keep)
@@ -7284,7 +7684,9 @@ class KBExplorer(_Explorer):
     # ------------------------------------------------------------------ plumbing
 
     def _reports(self, kb: str | None, note: str, mode: str) -> None:
-        """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
+        """
+        Without the window (no ipywidgets, or not in Jupyter): the same as reports.
+        """
         if note:
             self.ui._show([_Note(note, "warn")])
         elif mode != "text":
@@ -7295,8 +7697,10 @@ class KBExplorer(_Explorer):
         self.kb = next(reversed(self.ui._inventories), None)  # the ID files() listed (None when it couldn't)
 
     def _html(self, blocks: list[Any]) -> str:
-        """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it)."""
+        """
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
+        report CSS each one carries (the window's style holds it).
+        """
         return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     # ------------------------------------------------------------------ layout
@@ -7444,7 +7848,9 @@ class KBExplorer(_Explorer):
             self._status(self._tab_line(key))
 
     def _tab_line(self, key: str) -> str:
-        """The status line for a tab: what's in it, or how to use it."""
+        """
+        The status line for a tab: what's in it, or how to use it.
+        """
         inv, info = self.inventory, self.info
         if key == "files" and self.selected is not None:
             return f"{self.selected.name}: {FILE_STATES.get(self.selected.state, (self.selected.state,))[0].lower()}"
@@ -7468,8 +7874,10 @@ class KBExplorer(_Explorer):
     # ------------------------------------------------------------------ the knowledge base
 
     def _begin(self, kb: str | None) -> None:
-        """Lists the knowledge bases for the field and opens the one asked for (else the only one, else the first
-        active one)."""
+        """
+        Lists the knowledge bases for the field and opens the one asked for (else the only one, else the first
+        active one).
+        """
         try:
             self.kbs = self.core.list_knowledge_bases(details=False)
         except (ClientError, BotoCoreError, ValueError) as exc:
@@ -7503,7 +7911,9 @@ class KBExplorer(_Explorer):
         self._open_kb(self.core.resolve(text))
 
     def _open_kb(self, kb_id: str, file: str | None = None) -> None:
-        """Shows a knowledge base: everything reads again, settings first, then its files, in the background."""
+        """
+        Shows a knowledge base: everything reads again, settings first, then its files, in the background.
+        """
         for key in self._jobs:  # what's still being read for the one shown before is dropped when it comes back
             self._jobs[key] += 1
         self.search_button.disabled, self.search_button.description = False, "Search"
@@ -7607,7 +8017,9 @@ class KBExplorer(_Explorer):
                               f'</div><div class="kbx-sub">{_esc(" · ".join(p for p in sub if p))}</div></div></div>')
 
     def _draw_stats(self) -> None:
-        """The cards beside the knowledge base field: how it's doing at a glance."""
+        """
+        The cards beside the knowledge base field: how it's doing at a glance.
+        """
         info, inv = self.info, self.inventory
         cards: list[tuple[str, str, str]] = []
         if info is not None and info.status != "ACTIVE":  # the field's green dot says ACTIVE
@@ -7837,7 +8249,9 @@ class KBExplorer(_Explorer):
         return [f for f in files if not self._source or f.data_source_id == self._source]
 
     def _draw_chips(self) -> None:
-        """A chip per state the files are in, with how many: a click shows only those (again shows all)."""
+        """
+        A chip per state the files are in, with how many: a click shows only those (again shows all).
+        """
         w, layout = self._w, self._w.Layout
         counts = Counter(f.state for f in self._in_source())
         chips = []
@@ -7916,8 +8330,10 @@ class KBExplorer(_Explorer):
             self._open_file(row.file)
 
     def _save_list(self) -> None:
-        """⬇ List: the s3:// paths of the files the list shows, in its order, one per line, in
-        <knowledge base>-files.txt beside the notebook, and a link under the list that downloads it."""
+        """
+        ⬇ List: the s3:// paths of the files the list shows, in its order, one per line, in
+        <knowledge base>-files.txt beside the notebook, and a link under the list that downloads it.
+        """
         inv = self.inventory
         if inv is None:
             self._status("The list is saved once the files are listed.")
@@ -7940,7 +8356,9 @@ class KBExplorer(_Explorer):
     # ------------------------------------------------------------------ one file
 
     def _draw_summary(self) -> None:
-        """The right side of the Files tab with no file open: the files' findings and counts."""
+        """
+        The right side of the Files tab with no file open: the files' findings and counts.
+        """
         inv = self.inventory
         if inv is None:
             return
@@ -7967,7 +8385,9 @@ class KBExplorer(_Explorer):
                       and row.file.uri == self.selected.uri)
 
     def _open_file(self, f: KBFile) -> None:
-        """A file's page on the right: what's known at once, then its chunks and metadata file as they're read."""
+        """
+        A file's page on the right: what's known at once, then its chunks and metadata file as they're read.
+        """
         self.selected, self.chunks, self.metadata, self.probe = f, None, None, None
         self._mark_rows()
         self.pane_bar.layout.display = ""
@@ -7985,8 +8405,10 @@ class KBExplorer(_Explorer):
                     lambda exc: self._file_failed(f, exc))
 
     def _renew_pane(self, keep: bool = True) -> None:
-        """A new box for the right side of the Files tab, which starts at the top (widgets can't be scrolled from
-        Python). keep: with what the old one showed."""
+        """
+        A new box for the right side of the Files tab, which starts at the top (widgets can't be scrolled from
+        Python). keep: with what the old one showed.
+        """
         w = self._w
         probe = w.HTML(self.probe_view.value if keep else "", layout=w.Layout(width="100%"))
         page = w.HTML(self.file_view.value if keep else "", layout=w.Layout(width="100%"))
@@ -8128,7 +8550,8 @@ def explore(
     profile: str | None = None,
     height: int | str | None = None,
 ) -> KBExplorer:
-    """Opens the knowledge base explorer window and returns it: every file next to Bedrock's record of it, how each
+    """
+    Opens the knowledge base explorer window and returns it: every file next to Bedrock's record of it, how each
     was indexed (its chunks in document order, its metadata), the indexing pipeline, the sync history, search and
     every setting, all by clicking.
 
@@ -8138,5 +8561,6 @@ def explore(
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 
     The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only
-    reads: where a sync is needed it shows the command to run."""
+    reads: where a sync is needed it shows the command to run.
+    """
     return KBExplorer(kb, file=file, region=region, profile=profile, height=height)

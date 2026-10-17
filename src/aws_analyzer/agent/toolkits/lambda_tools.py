@@ -1,8 +1,10 @@
-"""The Lambda toolkit: seven tools over LambdaAnalyzer, building blocks rather than one per question. Which functions
+"""
+The Lambda toolkit: seven tools over LambdaAnalyzer, building blocks rather than one per question. Which functions
 there are (find_functions), how every function did in a window, from CloudWatch (function_health), and one function's
 errors, runs, run times, settings and code (function_errors, function_logs, function_performance, function_details,
 function_code). The summarize_* functions turn what LambdaAnalyzer returns into the compact dicts the model reads;
-they're pure, so they run on any Function, ErrorReport, LogPage, Performance, FunctionDetail or CodeMap."""
+they're pure, so they run on any Function, ErrorReport, LogPage, Performance, FunctionDetail or CodeMap.
+"""
 
 from __future__ import annotations
 
@@ -46,8 +48,10 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
 
 
 def _lambda_module() -> Any:
-    """aws_analyzer.lambda_functions, which the tools are built on. Loaded when a tool first needs it, so importing
-    the agent loads no analyzer."""
+    """
+    aws_analyzer.lambda_functions, which the tools are built on. Loaded when a tool first needs it, so importing
+    the agent loads no analyzer.
+    """
     from ... import lambda_functions
 
     return lambda_functions
@@ -68,8 +72,10 @@ def _metrics_dict(m: FunctionMetrics | None) -> dict[str, Any] | None:
 
 
 def function_row(fn: Function, *, today: date | None = None) -> dict[str, Any]:
-    """One function's settings as the agent sees them: runtime and where it stands in AWS's support schedule,
-    memory, timeout, package and description. Environment variable values are never read; their names are."""
+    """
+    One function's settings as the agent sees them: runtime and where it stands in AWS's support schedule,
+    memory, timeout, package and description. Environment variable values are never read; their names are.
+    """
     lf = _lambda_module()
     status = lf.runtime_status(fn.runtime, package_type=fn.package_type, today=today)
     return {
@@ -84,7 +90,9 @@ def function_row(fn: Function, *, today: date | None = None) -> dict[str, Any]:
 
 def summarize_functions(functions: list[Function], regions: list[str], errors: dict[str, str] | None = None,
                         *, limit: int = 60) -> dict[str, Any]:
-    """find_functions()'s answer: every function found, the newest-changed first (up to `limit`), by region."""
+    """
+    find_functions()'s answer: every function found, the newest-changed first (up to `limit`), by region.
+    """
     rows = sorted(functions, key=lambda f: f.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     out = {
         "regions": regions, "count": len(functions),
@@ -102,8 +110,10 @@ def summarize_functions(functions: list[Function], regions: list[str], errors: d
 def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetrics], start: datetime,
                      end: datetime, regions: list[str], errors: dict[str, str] | None = None,
                      *, limit: int = 25) -> dict[str, Any]:
-    """function_health()'s answer: CloudWatch's counts for every function in a window, grouped into the ones that
-    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called."""
+    """
+    function_health()'s answer: CloudWatch's counts for every function in a window, grouped into the ones that
+    failed (most failed calls first), were throttled, ran within 10% of their timeout, and weren't called.
+    """
     failed, throttled, near, idle = [], [], [], []
     for fn in functions:
         m = metrics.get(fn.arn)
@@ -140,8 +150,10 @@ def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetri
 
 
 def summarize_errors(report: ErrorReport, *, causes: int = 8) -> dict[str, Any]:
-    """function_errors()'s answer: a function's errors in a window, grouped by cause, most frequent first, with an
-    example line (secrets hidden) and a few request IDs each, CloudWatch's counts and the analyzer's findings."""
+    """
+    function_errors()'s answer: a function's errors in a window, grouped by cause, most frequent first, with an
+    example line (secrets hidden) and a few request IDs each, CloudWatch's counts and the analyzer's findings.
+    """
     lf = _lambda_module()
     out: dict[str, Any] = {
         "function": report.function.name, "region": report.function.region,
@@ -163,8 +175,10 @@ def summarize_errors(report: ErrorReport, *, causes: int = 8) -> dict[str, Any]:
 
 
 def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str, Any]:
-    """function_logs()'s answer: the newest runs in a window (those matching the search, when there is one), each
-    with its status, run time, memory and its last lines (secrets hidden)."""
+    """
+    function_logs()'s answer: the newest runs in a window (those matching the search, when there is one), each
+    with its status, run time, memory and its last lines (secrets hidden).
+    """
     found = page.runs
     out: dict[str, Any] = {
         "function": page.function.name, "region": page.function.region, "window": _window(page.since, page.until),
@@ -197,8 +211,10 @@ def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str
 
 
 def summarize_performance(perf: Performance, prices: dict[str, float] | None = None) -> dict[str, Any]:
-    """function_performance()'s answer: run times (median, p95, p99, longest) against the timeout, timeouts, cold
-    starts, memory used against what it has (and the size it needs), and the analyzer's findings."""
+    """
+    function_performance()'s answer: run times (median, p95, p99, longest) against the timeout, timeouts, cold
+    starts, memory used against what it has (and the size it needs), and the analyzer's findings.
+    """
     lf = _lambda_module()
     fn, runs = perf.function, perf.invocations
     times = [r.duration for r in runs]
@@ -224,8 +240,10 @@ def summarize_performance(perf: Performance, prices: dict[str, float] | None = N
 
 
 def summarize_detail(detail: FunctionDetail, prices: dict[str, float] | None = None) -> dict[str, Any]:
-    """function_details()'s answer: settings, what triggers it, its last 30 days from CloudWatch, the estimated
-    monthly cost by part, and every finding about it, each with its next step."""
+    """
+    function_details()'s answer: settings, what triggers it, its last 30 days from CloudWatch, the estimated
+    monthly cost by part, and every finding about it, each with its next step.
+    """
     lf = _lambda_module()
     fn = detail.function
     cost = lf.function_monthly_cost(fn, detail.metrics, detail.provisioned, detail.log_group, prices=prices)
@@ -255,9 +273,11 @@ def summarize_detail(detail: FunctionDetail, prices: dict[str, float] | None = N
 
 
 def summarize_code(cmap: CodeMap) -> dict[str, Any]:
-    """function_code()'s answer: what a Python function's code does, read with Python's ast module (nothing is
+    """
+    function_code()'s answer: what a Python function's code does, read with Python's ast module (nothing is
     run): the AWS calls it makes, the environment variables it reads (names only), the event fields it uses, the
-    libraries it imports and the findings about it."""
+    libraries it imports and the findings about it.
+    """
     lf = _lambda_module()
     fn = cmap.function
     if cmap.note:
@@ -288,8 +308,10 @@ _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:Lis
 
 
 class LambdaToolkit(Toolkit):
-    """The agent's tools for AWS Lambda, reading through LambdaAnalyzer: `analyzer` is one to use (else one is made
-    on the agent's session), `clients` its clients (for tests) and `prices` its prices."""
+    """
+    The agent's tools for AWS Lambda, reading through LambdaAnalyzer: `analyzer` is one to use (else one is made
+    on the agent's session), `clients` its clients (for tests) and `prices` its prices.
+    """
 
     name = "lambda"
     title = "Lambda"
@@ -315,7 +337,9 @@ class LambdaToolkit(Toolkit):
 
     @property
     def analyzer(self) -> LambdaAnalyzer:
-        """The LambdaAnalyzer the tools read through, made on first use and hooked to the read-only guard."""
+        """
+        The LambdaAnalyzer the tools read through, made on first use and hooked to the read-only guard.
+        """
         return super().analyzer
 
     def instructions(self, budget: Budget) -> str:
@@ -331,14 +355,18 @@ AWS Lambda
     # ------------------------------------------------------------------ the tools
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
-        """find_functions, function_health, function_errors, function_logs, function_performance, function_details
+        """
+        find_functions, function_health, function_errors, function_logs, function_performance, function_details
         and function_code: plain functions (their type hints and docstrings tell the model how to call them), each
-        reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered."""
+        reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
+        """
 
         def find_functions(match: str = "", regions: str = "") -> dict[str, Any]:
-            """Lists the Lambda functions in the account: name, region, runtime (and whether AWS still supports
+            """
+            Lists the Lambda functions in the account: name, region, runtime (and whether AWS still supports
             it), memory, timeout, when each was last changed and its description. match: a name glob like 'etl-*'.
-            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions."""
+            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
+            """
             core = self.analyzer
             ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
             out = summarize_functions(ov.functions, ov.regions, ov.errors)
@@ -348,11 +376,13 @@ AWS Lambda
             return out
 
         def function_health(since: str = "24h", until: str = "", match: str = "", regions: str = "") -> dict[str, Any]:
-            """How every Lambda function did in a time window, from CloudWatch: calls, failed calls, throttles and
+            """
+            How every Lambda function did in a time window, from CloudWatch: calls, failed calls, throttles and
             the longest run against its timeout, sorted into failed, throttled, near_timeout and not_called. Fast and
             cheap: start here for "what failed", "what's slow" or "what's unused". since/until: ISO UTC times
             ('2026-10-15T18:00Z') or relative ('24h', '7d'); until defaults to now. match: a name glob like 'etl-*'.
-            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions."""
+            regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
+            """
             core = self.analyzer
             start, end = core._window(since or "24h", until or None)
             ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
@@ -368,11 +398,13 @@ AWS Lambda
             return out
 
         def function_errors(function: str, since: str = "24h", until: str = "", region: str = "") -> dict[str, Any]:
-            """One function's errors in a time window, read from its logs and grouped by cause (Timeout, KeyError,
+            """
+            One function's errors in a time window, read from its logs and grouped by cause (Timeout, KeyError,
             AccessDenied, ...), with CloudWatch's count of failed and throttled calls over the same window. Each
             cause has a count, when it first and last happened, an example line and request IDs to look up with
             function_logs. since/until: ISO UTC times or relative ('24h'); the window can't be longer than the log
-            limit. region: empty for the default region."""
+            limit. region: empty for the default region.
+            """
             core = self.analyzer
             start, end = self._log_window(function, since, until, region or None)
             report = core.errors(function, since=start, until=end, region=region or None)
@@ -398,11 +430,13 @@ AWS Lambda
 
         def function_logs(function: str, since: str = "1h", until: str = "", search: str = "",
                           region: str = "") -> dict[str, Any]:
-            """One function's runs in a time window, newest first, from its logs: each run's status (ok, failed,
+            """
+            One function's runs in a time window, newest first, from its logs: each run's status (ok, failed,
             timeout, logged an error), run time, memory, whether it was a cold start, and its last lines. search:
             text the runs' lines must contain, such as a request ID, an order ID or 'KeyError' (case-sensitive).
             since/until: ISO UTC times or relative ('1h'); the window can't be longer than the log limit. region:
-            empty for the default region."""
+            empty for the default region.
+            """
             core = self.analyzer
             start, end = self._log_window(function, since, until, region or None)
             page = core.log_runs(function, since=start, until=end, search=search or None, region=region or None)
@@ -416,10 +450,12 @@ AWS Lambda
 
         def function_performance(function: str, since: str = "24h", until: str = "",
                                  region: str = "") -> dict[str, Any]:
-            """One function's run times and memory in a time window, from the REPORT line Lambda logs after every
+            """
+            One function's run times and memory in a time window, from the REPORT line Lambda logs after every
             run: median, p95, p99 and longest run against its timeout, timeouts, cold starts, the most memory a run
             used and the memory size it needs. since/until: ISO UTC times or relative ('24h'); the window can't be
-            longer than the log limit. region: empty for the default region."""
+            longer than the log limit. region: empty for the default region.
+            """
             core = self.analyzer
             start, end = self._log_window(function, since, until, region or None)
             perf = core.performance(function, since=start, until=end, region=region or None)
@@ -432,10 +468,12 @@ AWS Lambda
             return out
 
         def function_details(function: str, region: str = "") -> dict[str, Any]:
-            """Everything about one function: its settings (runtime and its support dates, memory, timeout,
+            """
+            Everything about one function: its settings (runtime and its support dates, memory, timeout,
             reserved concurrency), what triggers it, its aliases and versions, its last 30 days from CloudWatch, its
             log group's retention and size, the estimated monthly cost by part, and every finding about it with the
-            next step. region: empty for the default region."""
+            next step. region: empty for the default region.
+            """
             core = self.analyzer
             detail = core.describe(function, region=region or None, days=30)
             out = summarize_detail(detail, core.prices)
@@ -447,10 +485,12 @@ AWS Lambda
             return out
 
         def function_code(function: str, region: str = "") -> dict[str, Any]:
-            """What a Python function's code does, read from its deployment package with Python's ast module
+            """
+            What a Python function's code does, read from its deployment package with Python's ast module
             (nothing is run): the AWS calls it makes, the environment variables it reads (names only), the event
             fields it uses, the libraries it imports and findings such as HTTP calls without a timeout. Other
-            runtimes and container images give a note. region: empty for the default region."""
+            runtimes and container images give a note. region: empty for the default region.
+            """
             core = self.analyzer
             cmap = core.code_map(function, region=region or None)
             out = summarize_code(cmap)
@@ -470,7 +510,9 @@ AWS Lambda
     # ------------------------------------------------------------------ what the tools share
 
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:
-        """A tool's answer when a function isn't there: the closest names in that region."""
+        """
+        A tool's answer when a function isn't there: the closest names in that region.
+        """
         function = arguments.get("function")
         if _error_code(exc) != "ResourceNotFoundException" or not function:
             return None
@@ -487,7 +529,9 @@ AWS Lambda
                         "region."}
 
     def _log_window(self, function: str, since: str, until: str, region: str | None) -> tuple[datetime, datetime]:
-        """(start, end) for a log read, or _Refused when it's longer than the budget's log_days."""
+        """
+        (start, end) for a log read, or _Refused when it's longer than the budget's log_days.
+        """
         core = self.analyzer
         log_days = self.budget.log_days
         start, end = core._window(since or "24h", until or None)
@@ -512,10 +556,14 @@ AWS Lambda
         return start, end
 
     def _next_for(self, fn: Function, command: str, *args: Any, **kwargs: Any) -> str:
-        """A LambdaView call about a function, as it runs in a new cell (region= added when it's elsewhere)."""
+        """
+        A LambdaView call about a function, as it runs in a new cell (region= added when it's elsewhere).
+        """
         return self._view_call(command, fn.name, *args, region=fn.region, **kwargs)
 
 
 def _since(start: datetime) -> str:
-    """A window's start as a View's since= takes it."""
+    """
+    A window's start as a View's since= takes it.
+    """
     return _iso(start) or "24h"

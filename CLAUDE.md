@@ -62,7 +62,7 @@ python -m pytest                               # all tests (moto, no AWS account
 python -m pytest tests/test_dynamodb.py        # one file
 python -m pytest tests/test_s3.py::test_ls     # one test
 python -m pytest -k "policy"                   # by name
-ruff check .                                   # lint (errors only, see ruff.toml)
+ruff check .                                   # lint: real errors and the style rules ruff can check (ruff.toml)
 python -m build                                # the PyPI sdist and wheel, in dist/ (twine check --strict dist/*)
 pip install -r requirements-docs.txt           # the guide site: mkdocs, mkdocs-material
 mkdocs serve                                   # preview docs/ at http://127.0.0.1:8000
@@ -197,6 +197,88 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   packages need 3.11 (`harness._MIN_PYTHON`): `agent/` still imports on 3.10, `ask()` says what it needs, the `[agent]`
   extra and the dev pins carry `python_version >= '3.11'`, and its tests that need them skip there.
   Files use `from __future__ import annotations`.
+
+## Code style
+
+These apply to every line you write or change. Every docstring already follows them; the comments and the
+structural rules are being brought in one module at a time, so bring a function in line when you're editing it
+anyway, but don't reformat files you aren't otherwise touching.
+
+- **No `#` comments to explain code.** Make the code say it: a well-named function, variable or constant instead of
+  a comment above it, and the reasoning in the docstring of the function it belongs to. Only these stay:
+  - the `# ====` section banners in an analyzer file,
+  - the `# read-only:` markers `rules.py` reads on `Converse`, `InvokeModel` and `filter_log_events` call lines,
+  - tool directives: `# noqa: ...`, `# type: ignore[...]`, `# pragma: no cover`.
+- **Docstrings open and close on their own lines**, the text between them, even when it's one sentence:
+
+  ```python
+  def human_size(n: int) -> str:
+      """
+      1536 -> '1.5 KB' (binary units, like the AWS console).
+      """
+  ```
+
+  Never `"""1536 -> '1.5 KB'."""` on one line, and never text on the line with the opening or closing quotes. The
+  first paragraph is still what `help()` and the agent's tool list show (they read docstrings through
+  `inspect.getdoc` and whitespace-collapsing, so the blank lines don't change what users see), so keep it a plain
+  description of what the user gets. Module docstrings follow the same shape.
+- **What checks them.** `tests/test_style.py` fails on a docstring with text beside its quotes anywhere in `src/`,
+  `tests/` or `.claude/skills/`, and on a file with more `#` comments than its number in `COMMENTS_LEFT`; when you
+  remove comments it fails until you lower that number, so they can't come back. `ruff.toml` checks the rest it can
+  (mutable defaults, broad excepts, commented-out code, complexity, too many arguments, long functions); files
+  written before these rules are listed in its `per-file-ignores` for what they already broke. Take a rule off a
+  file once the file passes it, and never add a file or a rule to that list.
+
+### Writing code that reads easily
+
+The reader should understand a function from top to bottom in one pass, without jumping around or decoding anything.
+
+#### Names
+
+- Name things by what they hold or do, in full words: `failed_runs`, not `fr`, `res` or `tmp`; `bucket_name`, not
+  `bn`. Short names are fine only for a loop index (`i`) or a tiny lambda.
+- Functions are verbs (`read_policy`, `count_arrivals`), values are nouns (`policy`, `arrivals`), booleans read as
+  a yes/no question (`is_empty`, `has_versions`, `should_retry`).
+- No magic numbers or strings in logic: give them a module-level constant with a name that says what they mean
+  (`_MAX_PICTURES = 20`, `_LIVE_SECONDS = 5`), not `if len(pages) > 20`.
+- Keep the shared names `_kit` already has (`_esc`, `_clip`, `_fmt_dt`, ...); this is about new names.
+
+#### Functions
+
+- One function, one job. If you need "and" to describe it, or it's longer than about 40 lines, split it into
+  well-named helpers that read like the steps of the job.
+- Return early. Handle the edge cases and errors first and `return`, so the main path isn't indented. Never nest
+  more than three levels deep (`for` inside `if` inside `with` is already three).
+- Few parameters. More than four or five is a sign they belong together in a dataclass; past the first one or two,
+  make them keyword-only (`*,`) so a call reads `ls(bucket, limit=100, deep=True)`, not `ls(bucket, 100, True)`.
+- No boolean flag that makes a function do two different things; write two functions instead.
+- Prefer pure functions (inputs in, a value out, nothing changed) for logic, and keep AWS calls, file writes and
+  widget updates at the edges, as the five-section layout already does.
+
+#### Expressions
+
+- Give a long condition a name: `is_stale = last_sync < cutoff and not job.running` then `if is_stale:`, not one
+  `if` that wraps over three lines.
+- A comprehension does one thing: one `for`, at most one `if`. Nested comprehensions, a ternary inside a
+  comprehension, or a chain of `and`/`or` used for its value become a plain loop or a helper function.
+- No clever one-liners. Two clear lines beat one dense one; don't chain more than about three calls on one line.
+- No ternaries inside ternaries.
+- Use f-strings for building text, never `%` or `+` across many pieces.
+
+#### Structure
+
+- Use a `@dataclass` (or `NamedTuple`) for data with named parts, not a dict with string keys or a tuple read by
+  position (`run.cost`, not `run[3]` or `run["cost"]`). The `("warn" | "info", message)` findings pairs stay as
+  they are.
+- Separate the steps of a function with a blank line, like paragraphs: gather, then decide, then build the result.
+- Put helpers above the code that uses them in the same section, so a file reads top-down.
+- No dead code: no commented-out code, no unused functions, variables or imports, no `if False:` blocks. Git
+  remembers what was there.
+- Catch the specific exception you expect (`except ClientError`, `except KeyError`), never a bare `except:` or a
+  wide `except Exception:` that silently swallows errors (the `@_friendly_errors` and `_safely` guards are the
+  places that catch broadly, on purpose).
+- No mutable default arguments (`def f(items=[])`); use `None` and make the list inside.
+- Type-hint every function's parameters and return value.
 
 ## Architecture of an analyzer file
 
@@ -885,5 +967,6 @@ does both, a page at a time). How the UI works:
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the
   `python_version < "3.11"` lines are intentionally held back, and so is mkdocs at 1.x (2.0 drops the plugins and
-  themes Material needs). `ruff.toml` selects only `E4`, `E7`, `E9`, `F` (real errors, not style), listed
-  explicitly so ruff upgrades don't change them; there is no formatter, and lines run to about 120 characters.
+  themes Material needs). `ruff.toml` selects `E4`, `E7`, `E9`, `F` (real errors) and the "Code style" rules ruff
+  can check (`B006`, `BLE001`, `ERA001`, `C901`, `PLR0912`, `PLR0913`, `PLR0915`), listed explicitly so ruff upgrades
+  don't change them; there is no formatter, and lines run to about 120 characters.

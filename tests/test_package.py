@@ -1,5 +1,7 @@
-"""The PyPI package (pyproject.toml, src/aws_analyzer/): the wheel ships every analyzer, and the package's names
-resolve to their classes. CI's Package job also builds the real wheel and imports it with only boto3."""
+"""
+The PyPI package (pyproject.toml, src/aws_analyzer/): the wheel ships every analyzer, and the package's names
+resolve to their classes. CI's Package job also builds the real wheel and imports it with only boto3.
+"""
 
 import importlib
 import re
@@ -15,7 +17,9 @@ PACKAGE = ROOT / "src" / "aws_analyzer"
 
 
 def _modules() -> set[str]:
-    """The package's modules users import, aws_analyzer.<name>: a file (s3.py) or a package of its own (agent/)."""
+    """
+    The package's modules users import, aws_analyzer.<name>: a file (s3.py) or a package of its own (agent/).
+    """
     files = {p.stem for p in PACKAGE.glob("*.py")} | {p.parent.name for p in PACKAGE.glob("*/__init__.py")}
     return {name for name in files if not name.startswith("_")}
 
@@ -37,8 +41,10 @@ def _loaded() -> list[str]:
 
 @pytest.fixture
 def package(tmp_path, monkeypatch):
-    """aws_analyzer laid out the way the wheel installs it, imported afresh from a temporary folder. The copy the
-    other tests imported from src/ is put back afterwards, so their modules and classes stay the ones in use."""
+    """
+    aws_analyzer laid out the way the wheel installs it, imported afresh from a temporary folder. The copy the
+    other tests imported from src/ is put back afterwards, so their modules and classes stay the ones in use.
+    """
     shutil.copytree(PACKAGE, tmp_path / "aws_analyzer", ignore=shutil.ignore_patterns("__pycache__"))
     saved = {name: sys.modules.pop(name) for name in _loaded()}
     monkeypatch.syspath_prepend(str(tmp_path))

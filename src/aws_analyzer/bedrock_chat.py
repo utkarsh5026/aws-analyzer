@@ -173,36 +173,48 @@ $output_format_instructions$"""
 
 
 def _plain_doc(doc: str | None) -> str:
-    """botocore's HTML documentation -> plain text on one line."""
+    """
+    botocore's HTML documentation -> plain text on one line.
+    """
     text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", doc or "")).split())
     return re.sub(r"\s+([.,;:!?)])", r"\1", text).replace("( ", "(")
 
 
 def _sentences(text: str, count: int = 2) -> str:
-    """The first `count` sentences of `text`."""
+    """
+    The first `count` sentences of `text`.
+    """
     return " ".join(re.split(r"(?<=[.!?])\s+(?=[A-Z(])", text.strip())[:count])
 
 
 def _words_of(name: str) -> str:
-    """'numberOfRerankedResults' -> 'Number of reranked results'; 'kmsKeyArn' -> 'Kms key arn'."""
+    """
+    'numberOfRerankedResults' -> 'Number of reranked results'; 'kmsKeyArn' -> 'Kms key arn'.
+    """
     words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).split() or [name]
     text = " ".join([words[0]] + [w.lower() for w in words[1:]])
     return text[:1].upper() + text[1:]
 
 
 def _norm(name: Any) -> str:
-    """How setting names are compared: 'max_tokens', 'maxTokens' and 'MAX-TOKENS' are the same."""
+    """
+    How setting names are compared: 'max_tokens', 'maxTokens' and 'MAX-TOKENS' are the same.
+    """
     return re.sub(r"[\s_\-]", "", str(name)).lower()
 
 
 def _number(value: float) -> str:
-    """1.0 -> '1', 0.25 -> '0.25', 65536 -> '65,536'."""
+    """
+    1.0 -> '1', 0.25 -> '0.25', 65536 -> '65,536'.
+    """
     return f"{int(value):,}" if float(value).is_integer() else f"{value:g}"
 
 
 def _loads(text: str, what: str) -> Any:
-    """JSON text -> Python. Python literals work too (single quotes, True, None), since that's what people paste
-    from a notebook. A ValueError says where the JSON broke."""
+    """
+    JSON text -> Python. Python literals work too (single quotes, True, None), since that's what people paste
+    from a notebook. A ValueError says where the JSON broke.
+    """
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
@@ -218,7 +230,9 @@ def _loads(text: str, what: str) -> Any:
 
 
 def _short(value: Any, width: int = 60) -> str:
-    """A setting's value on one short line: 0.2, 'HYBRID', {"team": "billing"}."""
+    """
+    A setting's value on one short line: 0.2, 'HYBRID', {"team": "billing"}.
+    """
     text = repr(value) if isinstance(value, str) else json.dumps(_plain_json(value), ensure_ascii=False)
     return _clip(" ".join(text.split()), width)
 
@@ -230,7 +244,9 @@ def _short(value: Any, width: int = 60) -> str:
 
 @dataclass
 class KnowledgeBase:
-    """A knowledge base you can chat with."""
+    """
+    A knowledge base you can chat with.
+    """
 
     id: str
     name: str = ""
@@ -241,7 +257,9 @@ class KnowledgeBase:
 
 @dataclass
 class DataSource:
-    """One of a knowledge base's data sources (an S3 bucket, a website, ...): questions can be asked of it alone."""
+    """
+    One of a knowledge base's data sources (an S3 bucket, a website, ...): questions can be asked of it alone.
+    """
 
     id: str
     name: str = ""
@@ -252,7 +270,9 @@ class DataSource:
 
 @dataclass
 class FileList:
-    """The files of a knowledge base, as ListKnowledgeBaseDocuments lists them, to pick from."""
+    """
+    The files of a knowledge base, as ListKnowledgeBaseDocuments lists them, to pick from.
+    """
 
     kb_id: str
     documents: list[KBDocument] = field(default_factory=list)
@@ -261,14 +281,18 @@ class FileList:
 
     @property
     def searchable(self) -> list[KBDocument]:
-        """The files a question can find something in: indexed, at least in part."""
+        """
+        The files a question can find something in: indexed, at least in part.
+        """
         return [d for d in self.documents if d.status in SEARCHABLE]
 
 
 @dataclass
 class Field:
-    """A setting the chat can send with every question: where it goes in the RetrieveAndGenerate request, what it
-    takes, and what it does."""
+    """
+    A setting the chat can send with every question: where it goes in the RetrieveAndGenerate request, what it
+    takes, and what it does.
+    """
 
     key: str  # what set() takes: a short name ('temperature') or, for fields without one, the dotted path
     path: tuple[str, ...]  # from the request's root
@@ -287,15 +311,19 @@ class Field:
 
     @property
     def where(self) -> str:
-        """The dotted path as the JSON shows it, from knowledgeBaseConfiguration (or from the request's root)."""
+        """
+        The dotted path as the JSON shows it, from knowledgeBaseConfiguration (or from the request's root).
+        """
         inside = self.path[: len(_KB_CONFIG)] == _KB_CONFIG
         return ".".join(self.path[len(_KB_CONFIG) :] if inside else self.path)
 
 
 @dataclass
 class Schema:
-    """Every setting the installed boto3 can send with RetrieveAndGenerate, read from its service model, plus the
-    short names, plain-English descriptions and defaults this chat adds. request_schema() builds it."""
+    """
+    Every setting the installed boto3 can send with RetrieveAndGenerate, read from its service model, plus the
+    short names, plain-English descriptions and defaults this chat adds. request_schema() builds it.
+    """
 
     fields: dict[str, Field]  # key -> Field, in the order the chat shows them
     auto: list[tuple[tuple[str, ...], str]] = field(default_factory=list)  # required, one possible value: filled in
@@ -304,9 +332,11 @@ class Schema:
     retrieve_shape: Any = None  # Retrieve's input shape, for validate_request() on a retrieve-only request
 
     def find(self, name: Any) -> Field:
-        """The field a name means: its short name or another name ('topP'), its path (full, from
+        """
+        The field a name means: its short name or another name ('topP'), its path (full, from
         knowledgeBaseConfiguration, or just its last parts if they're unique), in any case, with or without
-        underscores. A ValueError suggests close names."""
+        underscores. A ValueError suggests close names.
+        """
         text = str(name if name is not None else "").strip()
         if not text:
             raise ValueError(
@@ -334,9 +364,11 @@ class Schema:
         )
 
     def search(self, text: Any, limit: int | None = None) -> list[Field]:
-        """The fields some words could mean, best first: every word must be in a field's name, label, other names,
+        """
+        The fields some words could mean, best first: every word must be in a field's name, label, other names,
         path or description, and names count most. A misspelt name ('temprature') finds the closest ones; blank
-        text gives every field, in order."""
+        text gives every field, in order.
+        """
         words = str(text or "").lower().split()
         if not words:
             return list(self.fields.values())[:limit]
@@ -366,9 +398,11 @@ class Schema:
 
 @dataclass
 class Answer:
-    """One question of the conversation and Bedrock's answer: the text, the passages it cites, and the exact
+    """
+    One question of the conversation and Bedrock's answer: the text, the passages it cites, and the exact
     request and response. Asked retrieve-only (Retrieve), there's no answer: text is empty and sources holds every
-    passage the search found, best first, each with its score."""
+    passage the search found, best first, each with its score.
+    """
 
     question: str
     text: str
@@ -394,12 +428,16 @@ class Answer:
 
     @property
     def cited(self) -> list[int]:
-        """The source numbers the answer cites."""
+        """
+        The source numbers the answer cites.
+        """
         return sorted({n for c in self.citations for n in c.sources})
 
     @property
     def grounded_share(self) -> float:
-        """The share of the answer's characters (spaces aside) inside a span that cites a source."""
+        """
+        The share of the answer's characters (spaces aside) inside a span that cites a source.
+        """
         covered = [False] * len(self.text)
         for c in self.citations:
             if c.sources:
@@ -409,8 +447,10 @@ class Answer:
         return sum(covered[i] for i in chars) / len(chars) if chars else 0.0
 
     def to_df(self):
-        """One row per source: its number, where it's from, its page, its score (retrieve-only searches) and its
-        text."""
+        """
+        One row per source: its number, where it's from, its page, its score (retrieve-only searches) and its
+        text.
+        """
         pd = _require("pandas", "Answer.to_df")
         return pd.DataFrame(
             [
@@ -423,8 +463,10 @@ class Answer:
 
 @dataclass
 class BatchItem:
-    """One question of a test run: what was asked, what came back (or why nothing did), and where the source it was
-    expected to come from turned up."""
+    """
+    One question of a test run: what was asked, what came back (or why nothing did), and where the source it was
+    expected to come from turned up.
+    """
 
     question: str
     expected: Any = None  # a piece of the file name, s3:// path or text the answer should come from (a list: any)
@@ -436,15 +478,19 @@ class BatchItem:
 
     @property
     def found(self) -> int | None:
-        """Where the expected source came up: the [n] the answer cites it as, or its rank in a retrieve-only search.
-        None when it didn't come up, or nothing was expected."""
+        """
+        Where the expected source came up: the [n] the answer cites it as, or its rank in a retrieve-only search.
+        None when it didn't come up, or nothing was expected.
+        """
         return expected_at(self.answer, self.expected) if self.answer is not None else None
 
 
 @dataclass
 class Batch:
-    """A list of test questions asked with one setup, each on its own (never as a follow-up), and what came back.
-    ask_all() returns one, and the view keeps every run in view.batches."""
+    """
+    A list of test questions asked with one setup, each on its own (never as a follow-up), and what came back.
+    ask_all() returns one, and the view keeps every run in view.batches.
+    """
 
     items: list[BatchItem] = field(default_factory=list)  # in the order the questions were given
     kb_id: str = ""
@@ -465,23 +511,31 @@ class Batch:
 
     @property
     def asked(self) -> list[BatchItem]:
-        """The questions that came back: with an answer, or with the search's passages."""
+        """
+        The questions that came back: with an answer, or with the search's passages.
+        """
         return [i for i in self.items if i.answer is not None]
 
     @property
     def failed(self) -> list[BatchItem]:
-        """The questions Bedrock refused, and the ones that couldn't be sent."""
+        """
+        The questions Bedrock refused, and the ones that couldn't be sent.
+        """
         return [i for i in self.items if i.error]
 
     @property
     def cost(self) -> float:
-        """Estimated USD for the questions asked, as far as their model's price is known."""
+        """
+        Estimated USD for the questions asked, as far as their model's price is known.
+        """
         return sum(i.cost for i in self.items if i.cost is not None)
 
     def to_df(self):
-        """One row per question: the question, the source expected, how it did, the answer, its grounded share, the
+        """
+        One row per question: the question, the source expected, how it did, the answer, its grounded share, the
         sources it cites (every passage found, for a retrieve-only run), where the expected one came up, the best
-        score, time, estimated cost and any error."""
+        score, time, estimated cost and any error.
+        """
         pd = _require("pandas", "Batch.to_df")
         rows = []
         for n, item in enumerate(self.items, 1):
@@ -504,8 +558,10 @@ class Batch:
 
 @dataclass
 class RunScore:
-    """How a test run did, in numbers, on the questions it's compared on: what ranks the setups of a sweep and the runs
-    of the same questions. rank_runs() makes them."""
+    """
+    How a test run did, in numbers, on the questions it's compared on: what ranks the setups of a sweep and the runs
+    of the same questions. rank_runs() makes them.
+    """
 
     questions: int = 0  # questions counted: they came back, or Bedrock refused them
     answered: int = 0  # answers that say something (not "unable to assist"); for a search, searches that found passages
@@ -518,15 +574,19 @@ class RunScore:
     seconds: float | None = None  # the average time a question took
 
     def per_question(self) -> float | None:
-        """The estimated cost of one question."""
+        """
+        The estimated cost of one question.
+        """
         return None if self.cost is None or not self.questions else self.cost / self.questions
 
 
 @dataclass
 class Sweep:
-    """The same test questions asked with several setups (every combination of the settings, models, data sources or
+    """
+    The same test questions asked with several setups (every combination of the settings, models, data sources or
     files given), each setup a Batch of its own. sweep() returns one, and the view keeps each setup's run in
-    view.batches like any other test run."""
+    view.batches like any other test run.
+    """
 
     batches: list[Batch] = field(default_factory=list)  # one per setup, in the order the combinations were made
     varied: dict[str, list[Any]] = field(default_factory=dict)  # what differs between the setups -> its values
@@ -538,7 +598,9 @@ class Sweep:
 
     @property
     def ranked(self) -> list[tuple[Batch, RunScore]]:
-        """The setups best first, each with its score (rank_runs())."""
+        """
+        The setups best first, each with its score (rank_runs()).
+        """
         return rank_runs(self.batches)
 
     @property
@@ -548,12 +610,16 @@ class Sweep:
 
     @property
     def cost(self) -> float:
-        """Estimated USD for every question asked, as far as each model's price is known."""
+        """
+        Estimated USD for every question asked, as far as each model's price is known.
+        """
         return sum(b.cost for b in self.batches)
 
     def to_df(self):
-        """One row per setup, best first: its rank, what it varies, and how it did: answered (or found), grounded,
-        expected sources, MRR (searches), failures, average time and estimated cost."""
+        """
+        One row per setup, best first: its rank, what it varies, and how it did: answered (or found), grounded,
+        expected sources, MRR (searches), failures, average time and estimated cost.
+        """
         pd = _require("pandas", "Sweep.to_df")
         rows = []
         for rank, (b, s) in enumerate(self.ranked, 1):
@@ -571,8 +637,10 @@ class Sweep:
 
 
 def parse_rag(resp: dict[str, Any]) -> Answer:
-    """A RetrieveAndGenerate response -> Answer: the text, each cited span, and the passages behind them numbered
-    from 1 in the order the answer first cites them (a passage cited twice keeps one number)."""
+    """
+    A RetrieveAndGenerate response -> Answer: the text, each cited span, and the passages behind them numbered
+    from 1 in the order the answer first cites them (a passage cited twice keeps one number).
+    """
     text = (resp.get("output") or {}).get("text") or ""
     sources: list[Passage] = []
     numbers: dict[str, int] = {}
@@ -599,8 +667,10 @@ def parse_rag(resp: dict[str, Any]) -> Answer:
 
 
 def collect_stream(events: Iterable[dict[str, Any]], on_text: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """RetrieveAndGenerateStream's events -> a response shaped like RetrieveAndGenerate's (output.text, citations,
-    guardrailAction), so parse_rag() reads both. on_text gets the answer so far each time more of it arrives."""
+    """
+    RetrieveAndGenerateStream's events -> a response shaped like RetrieveAndGenerate's (output.text, citations,
+    guardrailAction), so parse_rag() reads both. on_text gets the answer so far each time more of it arrives.
+    """
     text: list[str] = []
     citations: list[dict[str, Any]] = []
     guardrail = None
@@ -720,7 +790,9 @@ def _children(shape: Any) -> list[Any]:
 
 
 def _recursive(shape: Any) -> bool:
-    """Whether a botocore shape contains itself (RetrievalFilter holds lists of RetrievalFilters)."""
+    """
+    Whether a botocore shape contains itself (RetrievalFilter holds lists of RetrievalFilters).
+    """
     seen: set[str] = set()
     todo = _children(shape)
     while todo:
@@ -734,8 +806,10 @@ def _recursive(shape: Any) -> bool:
 
 
 def _kind(shape: Any) -> str:
-    """A botocore shape -> how the chat edits it: 'structure' (open it up), a scalar kind, 'list' (of text) or
-    'json' (anything nested: filters, maps, lists of objects)."""
+    """
+    A botocore shape -> how the chat edits it: 'structure' (open it up), a scalar kind, 'list' (of text) or
+    'json' (anything nested: filters, maps, lists of objects).
+    """
     kind = shape.type_name
     if kind == "structure":
         return "json" if getattr(shape, "is_document_type", False) or _recursive(shape) else "structure"
@@ -753,7 +827,9 @@ def _kind(shape: Any) -> str:
 
 
 def _default_for(name: str, kind: str, low: float | None, high: float | None, choices: tuple[str, ...]) -> Any:
-    """What a new row of a field without a curated default starts with; None leaves it empty until filled in."""
+    """
+    What a new row of a field without a curated default starts with; None leaves it empty until filled in.
+    """
     if kind == "integer":
         guess = 2048 if name == "maxTokens" else 5 if name.startswith("numberOf") else 1
         return int(min(max(guess, low if low is not None else guess), high if high is not None else guess))
@@ -768,10 +844,12 @@ def _default_for(name: str, kind: str, low: float | None, high: float | None, ch
 
 
 def request_schema(service_model: Any = None) -> Schema:
-    """Every setting RetrieveAndGenerate takes, read from botocore's service model: its path in the request, type,
+    """
+    Every setting RetrieveAndGenerate takes, read from botocore's service model: its path in the request, type,
     range and documentation, plus this chat's short names ('temperature', 'n', 'reranker'), plain-English help and
     starting values. service_model is a botocore ServiceModel for bedrock-agent-runtime (default: the installed
-    boto3's). Reads local files only; no AWS call."""
+    boto3's). Reads local files only; no AWS call.
+    """
     if service_model is None:
         service_model = botocore.session.Session().get_service_model("bedrock-agent-runtime")
     try:
@@ -852,9 +930,11 @@ _SYMBOLIC = {">", ">=", "<", "<=", "=", "==", "!=", "<>", "between", "begins_wit
 
 
 def _where_from_json(where: dict[str, Any]) -> dict[str, Any]:
-    """JSON has no tuples, so in JSON a condition is a list that starts with its operator: {"year": [">=", 2024]}
+    """
+    JSON has no tuples, so in JSON a condition is a list that starts with its operator: {"year": [">=", 2024]}
     -> {"year": (">=", 2024)}. Any other list is the values allowed ({"team": ["billing", "support"]}), except
-    ["in", [...]] and ["not_in", [...]]."""
+    ["in", [...]] and ["not_in", [...]].
+    """
     out: dict[str, Any] = {}
     for key, spec in where.items():
         op = spec[0].lower() if isinstance(spec, list) and spec and isinstance(spec[0], str) else None
@@ -866,9 +946,11 @@ def _where_from_json(where: dict[str, Any]) -> dict[str, Any]:
 
 
 def as_filter(where: Any) -> dict[str, Any]:
-    """The `filter` setting -> a Bedrock RetrievalFilter. Takes a RetrievalFilter as it is ({"equals": {"key": "team",
+    """
+    The `filter` setting -> a Bedrock RetrievalFilter. Takes a RetrievalFilter as it is ({"equals": {"key": "team",
     "value": "billing"}}), or the short form build_filter() reads ({"team": "billing", "year": (">=", 2024)}), as
-    a dict or JSON text. In JSON a condition is a list that starts with its operator: {"year": [">=", 2024]}."""
+    a dict or JSON text. In JSON a condition is a list that starts with its operator: {"year": [">=", 2024]}.
+    """
     if isinstance(where, str):
         where = _loads(where, "filter")
     if isinstance(where, dict) and not _is_bedrock_filter(where):
@@ -887,8 +969,10 @@ _FILTER_WORDS = {
 
 
 def describe_filter(condition: Any) -> str:
-    """A Bedrock RetrievalFilter in words: {"andAll": [{"equals": {"key": "team", "value": "billing"}}, ...]} ->
-    'team = "billing" and year ≥ 2024'."""
+    """
+    A Bedrock RetrievalFilter in words: {"andAll": [{"equals": {"key": "team", "value": "billing"}}, ...]} ->
+    'team = "billing" and year ≥ 2024'.
+    """
     if not isinstance(condition, dict) or len(condition) != 1:
         return "a filter"
     op, body = next(iter(condition.items()))
@@ -906,8 +990,10 @@ SOURCE_URI_KEY = "x-amz-bedrock-kb-source-uri"  # Bedrock tags every chunk with 
 
 
 def files_filter(uris: Iterable[str]) -> dict[str, Any] | None:
-    """A RetrievalFilter that keeps only passages from these files (their s3:// paths, as Bedrock stores them):
-    {'equals': ...} for one, {'in': ...} for several, None for none."""
+    """
+    A RetrievalFilter that keeps only passages from these files (their s3:// paths, as Bedrock stores them):
+    {'equals': ...} for one, {'in': ...} for several, None for none.
+    """
     unique = list(dict.fromkeys(str(u) for u in uris if u))
     if not unique:
         return None
@@ -917,7 +1003,9 @@ def files_filter(uris: Iterable[str]) -> dict[str, Any] | None:
 
 
 def with_files(condition: dict[str, Any] | None, uris: Iterable[str]) -> dict[str, Any] | None:
-    """A RetrievalFilter narrowed to these files: both must match."""
+    """
+    A RetrievalFilter narrowed to these files: both must match.
+    """
     only = files_filter(uris)
     if only is None:
         return condition
@@ -928,8 +1016,10 @@ def with_files(condition: dict[str, Any] | None, uris: Iterable[str]) -> dict[st
 
 
 def split_condition(condition: Any, key: str) -> tuple[list[str], Any]:
-    """Takes the condition on one of Bedrock's own keys (DATA_SOURCE_KEY, SOURCE_URI_KEY) out of a RetrievalFilter:
-    -> ([the values it allows], the rest of the filter, or None). A filter without one comes back as it is, with []."""
+    """
+    Takes the condition on one of Bedrock's own keys (DATA_SOURCE_KEY, SOURCE_URI_KEY) out of a RetrievalFilter:
+    -> ([the values it allows], the rest of the filter, or None). A filter without one comes back as it is, with [].
+    """
 
     def values_of(part: Any) -> list[str] | None:
         if not isinstance(part, dict) or len(part) != 1:
@@ -958,28 +1048,36 @@ def split_condition(condition: Any, key: str) -> tuple[list[str], Any]:
 
 
 def split_data_sources(condition: Any) -> tuple[list[str], Any]:
-    """The opposite of with_data_sources(): a RetrievalFilter -> ([IDs of the data sources it keeps], the rest of the
-    filter, or None). A filter without a data source condition comes back as it is, with []."""
+    """
+    The opposite of with_data_sources(): a RetrievalFilter -> ([IDs of the data sources it keeps], the rest of the
+    filter, or None). A filter without a data source condition comes back as it is, with [].
+    """
     return split_condition(condition, DATA_SOURCE_KEY)
 
 
 def file_path(uri: str) -> str:
-    """'s3://support-docs-bucket/policies/refund-policy.pdf' -> 'policies/refund-policy.pdf' (the path in its bucket)."""
+    """
+    's3://support-docs-bucket/policies/refund-policy.pdf' -> 'policies/refund-policy.pdf' (the path in its bucket).
+    """
     rest = uri.split("://", 1)[1] if "://" in uri else uri
     return rest.split("/", 1)[1] if "/" in rest else rest
 
 
 def file_labels(uris: Iterable[str]) -> dict[str, str]:
-    """{s3:// path: how to show it}: its path in the bucket, or bucket and path when two buckets hold the same one."""
+    """
+    {s3:// path: how to show it}: its path in the bucket, or bucket and path when two buckets hold the same one.
+    """
     uris = list(dict.fromkeys(uris))
     counts = Counter(file_path(u) for u in uris)
     return {u: file_path(u) if counts[file_path(u)] == 1 else u.split("://", 1)[-1] for u in uris}
 
 
 def match_files(documents: Iterable[KBDocument], wanted: Iterable[str]) -> tuple[list[str], list[str]]:
-    """Files named by s3:// path, path in the bucket ('policies/refund-policy.pdf') or name ('refund-policy.pdf', any
+    """
+    Files named by s3:// path, path in the bucket ('policies/refund-policy.pdf') or name ('refund-policy.pdf', any
     case) -> ([their s3:// paths], [what's wrong with the ones that name no file, or several]). An s3:// path is
-    taken as it is, listed or not."""
+    taken as it is, listed or not.
+    """
     docs = [d for d in documents if d.uri]
     labels = file_labels(d.uri for d in docs)
     found: list[str] = []
@@ -1009,7 +1107,9 @@ def match_files(documents: Iterable[KBDocument], wanted: Iterable[str]) -> tuple
 
 
 def describe_files(uris: list[str]) -> str:
-    """The files searched, in words: 'every file', "file 'refund-policy.pdf'", '3 files'."""
+    """
+    The files searched, in words: 'every file', "file 'refund-policy.pdf'", '3 files'.
+    """
     if not uris:
         return "every file"
     if len(uris) == 1:
@@ -1019,7 +1119,9 @@ def describe_files(uris: list[str]) -> str:
 
 
 def kb_search_text(text: str) -> str:
-    """What to search knowledge bases for: a knowledge base ARN becomes the ID inside it, anything else stays."""
+    """
+    What to search knowledge bases for: a knowledge base ARN becomes the ID inside it, anything else stays.
+    """
     try:
         kind, value = parse_kb_ref(text)
     except ValueError:
@@ -1028,8 +1130,10 @@ def kb_search_text(text: str) -> str:
 
 
 def match_kbs(kbs: Iterable[KnowledgeBase], text: str) -> list[KnowledgeBase]:
-    """The knowledge bases a search finds by name, ID (or part of either), ARN, description or status, best first:
-    an exact name or ID, then one that starts with the text, then the rest in the order given."""
+    """
+    The knowledge bases a search finds by name, ID (or part of either), ARN, description or status, best first:
+    an exact name or ID, then one that starts with the text, then the rest in the order given.
+    """
     wanted = kb_search_text(text)
     ranked = []
     for i, kb in enumerate(kbs):
@@ -1040,14 +1144,18 @@ def match_kbs(kbs: Iterable[KnowledgeBase], text: str) -> list[KnowledgeBase]:
 
 
 def rerank_arn(model: Any, region: str) -> str:
-    """'cohere' (or True), 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants."""
+    """
+    'cohere' (or True), 'amazon', a reranking model ID or its ARN -> the ARN Bedrock wants.
+    """
     model_id = DEFAULT_RERANK_MODEL if model is True else _RERANK_ALIASES.get(str(model).lower(), str(model))
     return model_id if model_id.startswith("arn:") else f"arn:aws:bedrock:{region}::foundation-model/{model_id}"
 
 
 def coerce_setting(f: Field, value: Any) -> Any:
-    """The value to send for field `f`, from what someone typed or passed: '0.2' -> 0.2, '5' -> 5, 'hybrid' ->
-    'HYBRID', JSON text -> a dict, lines -> a list. A ValueError says what the field takes."""
+    """
+    The value to send for field `f`, from what someone typed or passed: '0.2' -> 0.2, '5' -> 5, 'hybrid' ->
+    'HYBRID', JSON text -> a dict, lines -> a list. A ValueError says what the field takes.
+    """
     if f.key == "reranker":
         if value is True:
             return "cohere"
@@ -1127,8 +1235,10 @@ def coerce_setting(f: Field, value: Any) -> Any:
 
 
 def normalize_settings(settings: dict[str, Any] | None, schema: Schema) -> dict[str, Any]:
-    """{name or path: value} -> {key: value}, each value checked and converted by coerce_setting(), in the order the
-    chat shows them. A value of None leaves the setting out. A ValueError lists every problem at once."""
+    """
+    {name or path: value} -> {key: value}, each value checked and converted by coerce_setting(), in the order the
+    chat shows them. A value of None leaves the setting out. A ValueError lists every problem at once.
+    """
     out: dict[str, Any] = {}
     problems: list[str] = []
     for name, value in (settings or {}).items():
@@ -1169,10 +1279,12 @@ def build_request(
     data_sources: Iterable[str] = (),
     files: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """The RetrieveAndGenerate request for a question: the knowledge base, the model, and each setting at its place
+    """
+    The RetrieveAndGenerate request for a question: the knowledge base, the model, and each setting at its place
     in the JSON. settings is {key: value} as normalize_settings() returns it. data_sources (IDs) and files (s3://
     paths) are the only ones to search, added to the filter. Required fields that can only have one value
-    (rerankingConfiguration.type) are filled in. No AWS call."""
+    (rerankingConfiguration.type) are filled in. No AWS call.
+    """
     params: dict[str, Any] = {"input": {"text": question}}
     if session_id:
         params["sessionId"] = session_id
@@ -1201,19 +1313,25 @@ _RETRIEVAL = (*_KB_CONFIG, "retrievalConfiguration")  # the part of the request 
 
 
 def _is_retrieve(params: Any) -> bool:
-    """Whether a request is Retrieve's (retrievalQuery and knowledgeBaseId at its root), not RetrieveAndGenerate's."""
+    """
+    Whether a request is Retrieve's (retrievalQuery and knowledgeBaseId at its root), not RetrieveAndGenerate's.
+    """
     return isinstance(params, dict) and "retrieveAndGenerateConfiguration" not in params and (
         "retrievalQuery" in params or "knowledgeBaseId" in params)
 
 
 def _retrieve_path(path: tuple[str, ...]) -> tuple[str, ...] | None:
-    """Where a RetrieveAndGenerate path goes in a Retrieve request; None when Retrieve has no place for it."""
+    """
+    Where a RetrieveAndGenerate path goes in a Retrieve request; None when Retrieve has no place for it.
+    """
     return path[len(_KB_CONFIG):] if path[: len(_RETRIEVAL)] == _RETRIEVAL else None
 
 
 def retrieve_settings(settings: dict[str, Any], schema: Schema) -> dict[str, Any]:
-    """The settings a retrieve-only search sends: the Retrieval ones (passages, search type, filter, reranker...).
-    The rest are for the model's answer, which a search doesn't ask for."""
+    """
+    The settings a retrieve-only search sends: the Retrieval ones (passages, search type, filter, reranker...).
+    The rest are for the model's answer, which a search doesn't ask for.
+    """
     return {key: value for key, value in settings.items()
             if key in schema.fields and _retrieve_path(schema.fields[key].path) is not None}
 
@@ -1228,9 +1346,11 @@ def build_retrieve_request(
     data_sources: Iterable[str] = (),
     files: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """The Retrieve request for a question: the same search build_request()'s RetrieveAndGenerate request makes
+    """
+    The Retrieve request for a question: the same search build_request()'s RetrieveAndGenerate request makes
     (passages, search type, filter, reranker, data sources and files) without the model, so what comes back is every
-    passage found instead of an answer. Settings for the answer (temperature, prompt...) are left out. No AWS call."""
+    passage found instead of an answer. Settings for the answer (temperature, prompt...) are left out. No AWS call.
+    """
     full = build_request(question, kb_id, "", retrieve_settings(settings, schema), schema, region=region,
                          data_sources=data_sources, files=files)
     params: dict[str, Any] = {"knowledgeBaseId": kb_id, "retrievalQuery": {"text": question}}
@@ -1241,8 +1361,10 @@ def build_retrieve_request(
 
 
 def _retrieve_as_rag(params: dict[str, Any]) -> dict[str, Any]:
-    """A Retrieve request laid out like RetrieveAndGenerate's, so settings_from_request() reads both. A field
-    RetrieveAndGenerate has no place for stays at the root, where it's named as one the chat can't send."""
+    """
+    A Retrieve request laid out like RetrieveAndGenerate's, so settings_from_request() reads both. A field
+    RetrieveAndGenerate has no place for stays at the root, where it's named as one the chat can't send.
+    """
     out: dict[str, Any] = {}
     kb: dict[str, Any] = {}
     for name, value in params.items():
@@ -1257,10 +1379,12 @@ def _retrieve_as_rag(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[str, Any], dict[str, Any]]:
-    """A RetrieveAndGenerate or Retrieve request (one you edited, say) -> (picked, settings): picked holds the
+    """
+    A RetrieveAndGenerate or Retrieve request (one you edited, say) -> (picked, settings): picked holds the
     'question', 'knowledgeBaseId', 'modelArn', 'sessionId', 'dataSources' (IDs) and 'files' (s3:// paths) it names,
     and 'retrieve_only': True for a Retrieve request; settings is {key: value} like normalize_settings()'s. The
-    opposite of build_request() and build_retrieve_request(). A ValueError names anything the chat can't send."""
+    opposite of build_request() and build_retrieve_request(). A ValueError names anything the chat can't send.
+    """
     if not isinstance(params, dict):
         raise ValueError("The request is a JSON object: {\"input\": ..., \"retrieveAndGenerateConfiguration\": ...}")
     retrieve_only = _is_retrieve(params)
@@ -1315,9 +1439,11 @@ def settings_from_request(params: dict[str, Any], schema: Schema) -> tuple[dict[
 
 
 def validate_request(params: dict[str, Any], schema: Schema) -> list[str]:
-    """What's wrong with a request (RetrieveAndGenerate's, or Retrieve's) according to the service model (botocore's
+    """
+    What's wrong with a request (RetrieveAndGenerate's, or Retrieve's) according to the service model (botocore's
     own checks, the ones it runs before sending): unknown fields, wrong types, numbers out of range, missing required
-    fields. [] when it's fine."""
+    fields. [] when it's fine.
+    """
     shape = schema.retrieve_shape if _is_retrieve(params) else schema.input_shape
     if shape is None:
         return []
@@ -1330,7 +1456,9 @@ def validate_request(params: dict[str, Any], schema: Schema) -> list[str]:
 
 
 def describe_setting(f: Field, value: Any) -> str:
-    """What a setting's value means, in a sentence: n=8 -> 'Retrieves the 8 passages that match best.'"""
+    """
+    What a setting's value means, in a sentence: n=8 -> 'Retrieves the 8 passages that match best.'
+    """
     if value is None:
         return "Not sent until you fill it in."
     key = f.key
@@ -1371,7 +1499,9 @@ def describe_setting(f: Field, value: Any) -> str:
 
 
 def settings_findings(settings: dict[str, Any], model: str = "") -> list[tuple[str, str]]:
-    """Settings that will fail, or won't do what they seem to -> [(level, message)]."""
+    """
+    Settings that will fail, or won't do what they seem to -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     if settings.get("temperature") is not None and settings.get("top_p") is not None:
         claude = "claude" in (model or "").lower()
@@ -1400,7 +1530,9 @@ def settings_findings(settings: dict[str, Any], model: str = "") -> list[tuple[s
 
 
 def _outside_picks(a: Answer) -> list[int]:
-    """The numbers of the passages that came from outside the data sources and files the question was asked of."""
+    """
+    The numbers of the passages that came from outside the data sources and files the question was asked of.
+    """
     return [i for i, p in enumerate(a.sources, 1)
             if (a.data_sources and p.data_source_id and p.data_source_id not in a.data_sources)
             or (a.files and p.uri and p.uri not in a.files)]
@@ -1417,7 +1549,9 @@ def _outside_finding(a: Answer, outside: list[int]) -> tuple[str, str]:
 
 
 def _search_findings(a: Answer) -> list[tuple[str, str]]:
-    """What a retrieve-only search found, and what to try when it isn't what an answer needs."""
+    """
+    What a retrieve-only search found, and what to try when it isn't what an answer needs.
+    """
     found: list[tuple[str, str]] = []
     if not a.sources:
         tries = []
@@ -1446,8 +1580,10 @@ def _search_findings(a: Answer) -> list[tuple[str, str]]:
 
 
 def answer_findings(a: Answer) -> list[tuple[str, str]]:
-    """How far to trust an answer, and which setting to try next -> [(level, message)]. For a retrieve-only search,
-    what it found and what to try when it isn't what an answer needs."""
+    """
+    How far to trust an answer, and which setting to try next -> [(level, message)]. For a retrieve-only search,
+    what it found and what to try when it isn't what an answer needs.
+    """
     if a.retrieve_only:
         return _search_findings(a)
     found: list[tuple[str, str]] = []
@@ -1499,8 +1635,10 @@ def _same_passage(a: Passage, b: Passage) -> bool:
 
 
 def cited_ranks(search: Answer, answer: Answer) -> dict[int, int]:
-    """{rank in a retrieve-only search: [n] in an answer} for each passage the search found that the answer cites,
-    in rank order: how a search and an answer to the same question line up."""
+    """
+    {rank in a retrieve-only search: [n] in an answer} for each passage the search found that the answer cites,
+    in rank order: how a search and an answer to the same question line up.
+    """
     ranks: dict[int, int] = {}
     for n, cited in enumerate(answer.sources, 1):
         for p in search.sources:
@@ -1511,8 +1649,10 @@ def cited_ranks(search: Answer, answer: Answer) -> dict[int, int]:
 
 
 def compare_findings(search: Answer, answer: Answer) -> list[tuple[str, str]]:
-    """What asking a question both ways shows (a retrieve-only search, and an answer): which of the passages found
-    the answer cites, and whether a poor answer comes from the search or from the answer step -> [(level, message)]."""
+    """
+    What asking a question both ways shows (a retrieve-only search, and an answer): which of the passages found
+    the answer cites, and whether a poor answer comes from the search or from the answer step -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     ranks = cited_ranks(search, answer)
     count = len(search.sources)
@@ -1544,9 +1684,11 @@ def answer_cost(
     model_prices: dict[str, tuple[float, float]] | None = None,
     prices: dict[str, float] | None = None,
 ) -> float | None:
-    """Estimated USD for one answer: the model's tokens (estimated from characters), embedding the question and, with
+    """
+    Estimated USD for one answer: the model's tokens (estimated from characters), embedding the question and, with
     a reranker, the reranking. None when the model isn't in the price table (pass model_prices=...). A retrieve-only
-    search costs the embedding and the reranking only."""
+    search costs the embedding and the reranking only.
+    """
     if a.retrieve_only:
         return query_cost(1, a.settings.get("reranker") or False, prices, question_tokens=estimate_tokens(a.question))
     generation = generation_cost(a.input_tokens, a.output_tokens, a.model, model_prices)
@@ -1564,7 +1706,9 @@ _GRADES = {"ok": 2, "warn": 1, "bad": 0}  # how a question did, to tell whether 
 
 
 def _filled(value: Any) -> bool:
-    """Whether a value says something: not None, NaN or pandas' NA (an empty cell), blank text or an empty list."""
+    """
+    Whether a value says something: not None, NaN or pandas' NA (an empty cell), blank text or an empty list.
+    """
     if value is None or (isinstance(value, float) and math.isnan(value)) or type(value).__name__ in ("NAType",
                                                                                                      "NaTType"):
         return False
@@ -1576,13 +1720,15 @@ def _filled(value: Any) -> bool:
 
 
 def parse_questions(text: str) -> list[tuple[str, Any]]:
-    """Test questions pasted as text, one per line -> [(question, expected or None)]. Blank lines and lines starting
+    """
+    Test questions pasted as text, one per line -> [(question, expected or None)]. Blank lines and lines starting
     with # are left out, and a list mark in front ('1.', '-', 'Q:') is dropped. After a | (or a tab, as two columns
     pasted from a spreadsheet) comes the source the answer should come from: a piece of its file name, s3:// path or
     text. Several, each after its own |, mean any of them.
 
         How long do refunds take? | refund-policy.pdf
-        2. Can I return a digital product?"""
+        2. Can I return a digital product?
+    """
     cases: list[tuple[str, Any]] = []
     for line in str(text or "").splitlines():
         line = line.strip()
@@ -1595,14 +1741,18 @@ def parse_questions(text: str) -> list[tuple[str, Any]]:
 
 
 def _split_case(line: str) -> tuple[str, Any]:
-    """'How long? | refund-policy.pdf' -> ('How long?', 'refund-policy.pdf'); several after their own | -> a list."""
+    """
+    'How long? | refund-policy.pdf' -> ('How long?', 'refund-policy.pdf'); several after their own | -> a list.
+    """
     question, *rest = re.split(r"\s*[|\t]\s*", line.strip())
     expected = [e.strip() for e in rest if e.strip()]
     return question.strip(), expected[0] if len(expected) == 1 else expected or None
 
 
 def format_questions(cases: Iterable[tuple[str, Any]]) -> str:
-    """The opposite of parse_questions(): one question per line, each expected source after a ' | '."""
+    """
+    The opposite of parse_questions(): one question per line, each expected source after a ' | '.
+    """
     lines = []
     for question, expected in cases:
         wanted = ([] if not _filled(expected) else [str(expected)] if isinstance(expected, str)
@@ -1612,10 +1762,12 @@ def format_questions(cases: Iterable[tuple[str, Any]]) -> str:
 
 
 def question_list(questions: Any) -> list[tuple[str, Any]]:
-    """What ask_all() takes -> [(question, expected or None)]: text with one question per line (parse_questions()),
+    """
+    What ask_all() takes -> [(question, expected or None)]: text with one question per line (parse_questions()),
     a list of questions, of (question, expected) pairs or of dicts with 'question' and 'expected', a DataFrame with
     those columns, or an earlier run (a Batch) to ask its questions again. Blank questions are left out; a ValueError
-    says what to pass when nothing is left."""
+    says what to pass when nothing is left.
+    """
     if isinstance(questions, str):
         cases = parse_questions(questions)
     else:
@@ -1649,8 +1801,10 @@ def question_list(questions: Any) -> list[tuple[str, Any]]:
 
 
 def expected_at(a: Answer, expected: Any) -> int | None:
-    """Where a test question's expected source came up (see match_expected()): the [n] an answer cites it as, or its
-    rank in a retrieve-only search. None when it didn't come up, or nothing was expected."""
+    """
+    Where a test question's expected source came up (see match_expected()): the [n] an answer cites it as, or its
+    rank in a retrieve-only search. None when it didn't come up, or nothing was expected.
+    """
     if not _filled(expected):
         return None
     for n, p in enumerate(a.sources, 1):
@@ -1660,14 +1814,18 @@ def expected_at(a: Answer, expected: Any) -> int | None:
 
 
 def _unhelpful(a: Answer) -> bool:
-    """An empty answer, or Bedrock's "unable to assist" reply."""
+    """
+    An empty answer, or Bedrock's "unable to assist" reply.
+    """
     text = a.text.strip()
     return not text or _REFUSAL in text.lower()
 
 
 def item_verdict(item: BatchItem) -> tuple[str, str]:
-    """How a test question did, in a few words, and its tone: ('answered', 'ok'), ('unable to assist', 'warn'),
-    ('expected not cited', 'warn'), ('failed', 'bad'), ('found #2', 'ok') for a search..."""
+    """
+    How a test question did, in a few words, and its tone: ('answered', 'ok'), ('unable to assist', 'warn'),
+    ('expected not cited', 'warn'), ('failed', 'bad'), ('found #2', 'ok') for a search...
+    """
     a = item.answer
     if a is None:
         if item.error_code:
@@ -1694,18 +1852,24 @@ def item_verdict(item: BatchItem) -> tuple[str, str]:
 
 
 def _examples(items: list[BatchItem], count: int = 2, width: int = 48) -> str:
-    """"'How long do refunds take?', 'Can I return…'" (and ', …' when there are more)."""
+    """
+    "'How long do refunds take?', 'Can I return…'" (and ', …' when there are more).
+    """
     shown = ", ".join(repr(_clip(i.question, width)) for i in items[:count])
     return shown + (", …" if len(items) > count else "")
 
 
 def _out_of(part: int, whole: int, noun: str = "answer") -> str:
-    """'1 of 6 answers'."""
+    """
+    '1 of 6 answers'.
+    """
     return f"{part:,} of {_plural(whole, noun)}"
 
 
 def _tries(settings: dict[str, Any], data_sources: dict[str, str], files: list[str]) -> str:
-    """What to try when a search finds nothing useful: 'retrieve more passages (set(n=10)), or ...'."""
+    """
+    What to try when a search finds nothing useful: 'retrieve more passages (set(n=10)), or ...'.
+    """
     tries = []
     if (settings.get("n") or 5) < 10:
         tries.append("retrieve more passages (set(n=10))")
@@ -1721,16 +1885,20 @@ def _tries(settings: dict[str, Any], data_sources: dict[str, str], files: list[s
 
 
 def _avg_grounded(batch: Batch) -> float | None:
-    """The average grounded share of a run's answers that say something (not "unable to assist")."""
+    """
+    The average grounded share of a run's answers that say something (not "unable to assist").
+    """
     shares = [i.answer.grounded_share for i in batch.asked if not i.answer.retrieve_only and not _unhelpful(i.answer)
               and i.answer.guardrail_action != "INTERVENED"]
     return sum(shares) / len(shares) if shares else None
 
 
 def batch_findings(batch: Batch, explain: Callable[[str, str], str] | None = None) -> list[tuple[str, str]]:
-    """What a test run says to change -> [(level, message)]: questions that failed or weren't sent, answers that
+    """
+    What a test run says to change -> [(level, message)]: questions that failed or weren't sent, answers that
     couldn't help or cite nothing, expected sources that didn't come up, answers cut off, and which setting to try.
-    explain(code, message) can add what to do about an AWS error (the view passes its own)."""
+    explain(code, message) can add what to do about an AWS error (the view passes its own).
+    """
     found: list[tuple[str, str]] = []
     items, asked = batch.items, batch.asked
     failed = [i for i in items if i.error_code]
@@ -1854,7 +2022,9 @@ def _key(question: str) -> str:
 
 
 def _settings_text(settings: dict[str, Any]) -> str:
-    """The settings on one line: 'n=8, where team = "billing", temperature=0.2, prompt (412 characters)'."""
+    """
+    The settings on one line: 'n=8, where team = "billing", temperature=0.2, prompt (412 characters)'.
+    """
     parts = []
     for key, value in settings.items():
         if key == "filter":
@@ -1867,9 +2037,11 @@ def _settings_text(settings: dict[str, Any]) -> str:
 
 
 def batch_changes(before: Batch, after: Batch, label: Callable[[str], str] | None = None) -> list[tuple[str, str]]:
-    """What changed since an earlier run of the same questions -> [(level, message)]: what differs in the setup (the
+    """
+    What changed since an earlier run of the same questions -> [(level, message)]: what differs in the setup (the
     settings, model, knowledge base, data sources and files), which questions did better or worse, and the averages.
-    [] when the two runs share no question. label(model) names a model (its short ID by default)."""
+    [] when the two runs share no question. label(model) names a model (its short ID by default).
+    """
     name = label or short_model
     old = {_key(i.question): i for i in before.items if i.answer is not None or i.error_code}
     pairs = [(old[_key(i.question)], i) for i in after.items
@@ -1916,9 +2088,11 @@ def batch_changes(before: Batch, after: Batch, label: Callable[[str], str] | Non
 def batch_estimate(questions: Iterable[str], settings: dict[str, Any], model: str, *, retrieve_only: bool = False,
                    model_prices: dict[str, tuple[float, float]] | None = None,
                    prices: dict[str, float] | None = None) -> float | None:
-    """Roughly what asking these questions costs in USD, before they're asked: each question's embedding (and its
+    """
+    Roughly what asking these questions costs in USD, before they're asked: each question's embedding (and its
     reranking), and for answers the model's tokens, guessing about 300 tokens a passage and 300 for each answer. None
-    when the model isn't in the price table. An estimate: label it as one."""
+    when the model isn't in the price table. An estimate: label it as one.
+    """
     texts = [str(q) for q in questions]
     search = sum(query_cost(1, settings.get("reranker") or False, prices, question_tokens=estimate_tokens(q))
                  for q in texts)
@@ -1942,7 +2116,9 @@ _NONE_WORDS = {"none", "off", "-", "default", "null", "unset"}  # in Try variati
 
 
 def _sweep_name(name: Any) -> str:
-    """'Model', 'data source', 'dataSources' -> 'model', 'data_source'; a setting's name stays as it is."""
+    """
+    'Model', 'data source', 'dataSources' -> 'model', 'data_source'; a setting's name stays as it is.
+    """
     text = str(name).strip()
     wanted = _norm(text)
     for key, names in (("model", ("model", "models")), ("data_source", ("datasource", "datasources")),
@@ -1953,7 +2129,9 @@ def _sweep_name(name: Any) -> str:
 
 
 def _alternatives(value: Any) -> list[Any]:
-    """A sweep's values for one name: a list, tuple, set or range is the values to try; anything else is one value."""
+    """
+    A sweep's values for one name: a list, tuple, set or range is the values to try; anything else is one value.
+    """
     if isinstance(value, (list, tuple, range)):
         return list(value)
     if isinstance(value, (set, frozenset)):
@@ -1965,20 +2143,24 @@ def _alternatives(value: Any) -> list[Any]:
 
 
 def _setup_key(setup: Any) -> str:
-    """What tells two setups (or two values) apart: the same JSON, keys in any order."""
+    """
+    What tells two setups (or two values) apart: the same JSON, keys in any order.
+    """
     return json.dumps(_plain_json(setup), sort_keys=True, ensure_ascii=False)
 
 
 def sweep_setups(grid: dict[str, Any] | None = None, setups: Iterable[dict[str, Any]] | None = None, *,
                  limit: int | None = SWEEP_LIMIT) -> list[dict[str, Any]]:
-    """Every combination to try -> [{name: value}], each one setup's changes to the settings it starts from.
+    """
+    Every combination to try -> [{name: value}], each one setup's changes to the settings it starts from.
 
     grid: {name: values}. A list means each of its values (n=[5, 10]); anything else is one value every setup uses.
     None (or 'none' in the window) leaves a setting out, so Bedrock's default applies. Names are settings (fields()
     lists them), 'model', 'data_source' and 'files'; a setting that takes a list goes in a list of its own
     (stop=[['END'], ['###']]). setups: whole setups to start from, each combined with the grid: [{'n': 5}, {'n': 10,
     'reranker': 'cohere'}]. Duplicates are dropped. A ValueError says when that's one setup (nothing to compare) or
-    more than `limit`."""
+    more than `limit`.
+    """
     bases = [{} if s is None else s for s in (setups if setups is not None else [{}])]
     if not bases or not all(isinstance(s, dict) for s in bases):
         raise ValueError("setups takes a list of dicts, each one setup's settings, like [{'n': 5}, {'n': 10, "
@@ -2008,9 +2190,11 @@ def sweep_setups(grid: dict[str, Any] | None = None, setups: Iterable[dict[str, 
 
 
 def apply_setup(settings: dict[str, Any], changes: dict[str, Any], schema: Schema) -> dict[str, Any]:
-    """Settings with one setup's changes made: each change checked and converted (coerce_setting()), None leaving the
+    """
+    Settings with one setup's changes made: each change checked and converted (coerce_setting()), None leaving the
     setting out; 'model', 'data_source' and 'files' aren't settings, so they're skipped. A ValueError says what a
-    change can't be."""
+    change can't be.
+    """
     values = dict(settings)
     for name, value in changes.items():
         if _sweep_name(name) in _PICKED:
@@ -2024,7 +2208,9 @@ def apply_setup(settings: dict[str, Any], changes: dict[str, Any], schema: Schem
 
 
 def _split_values(text: str) -> list[str]:
-    """'5, 10' -> ['5', '10']. A comma inside brackets, braces or a quoted value stays ('{"a": 1, "b": 2}, none')."""
+    """
+    '5, 10' -> ['5', '10']. A comma inside brackets, braces or a quoted value stays ('{"a": 1, "b": 2}, none').
+    """
     parts, depth, quote, start = [], 0, "", 0
     for i, ch in enumerate(text):
         if quote:
@@ -2043,21 +2229,25 @@ def _split_values(text: str) -> list[str]:
 
 
 def _variation_value(text: str) -> Any:
-    """One value typed in Try variations: quotes taken off, 'none' -> None (leave the setting out)."""
+    """
+    One value typed in Try variations: quotes taken off, 'none' -> None (leave the setting out).
+    """
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
         return text[1:-1]
     return None if text.lower() in _NONE_WORDS else text
 
 
 def parse_variations(text: str) -> dict[str, list[Any]]:
-    """What to try, as typed in the window's Try variations box -> {name: [values]} for sweep_setups(). One setting
+    """
+    What to try, as typed in the window's Try variations box -> {name: [values]} for sweep_setups(). One setting
     (or model, data_source, files) per line, then = (or :) and the values to try, separated by commas; 'none' leaves
     the setting out. Blank lines and lines starting with # are skipped. A ValueError names the line it can't read.
 
         n = 5, 10, 20
         search_type = SEMANTIC, HYBRID
         reranker = none, cohere
-        model = haiku, sonnet"""
+        model = haiku, sonnet
+    """
     grid: dict[str, list[Any]] = {}
     lines: dict[str, int] = {}
     for number, line in enumerate(str(text or "").splitlines(), 1):
@@ -2081,7 +2271,9 @@ def parse_variations(text: str) -> dict[str, list[Any]]:
 
 
 def format_variations(grid: dict[str, Any]) -> str:
-    """The opposite of parse_variations(): 'n = 5, 10' lines, None as 'none'."""
+    """
+    The opposite of parse_variations(): 'n = 5, 10' lines, None as 'none'.
+    """
     def text(v: Any) -> str:
         if v is None:
             return "none"
@@ -2092,8 +2284,10 @@ def format_variations(grid: dict[str, Any]) -> str:
 
 
 def run_setup(batch: Batch) -> dict[str, Any]:
-    """What a test run was asked with, flat, to compare runs by: 'kb' (the knowledge base's name), 'model' (unless it
-    only searched), 'data_source' and 'files' (when it asked only some), and its settings."""
+    """
+    What a test run was asked with, flat, to compare runs by: 'kb' (the knowledge base's name), 'model' (unless it
+    only searched), 'data_source' and 'files' (when it asked only some), and its settings.
+    """
     setup: dict[str, Any] = {"kb": batch.kb_name or batch.kb_id}
     if not batch.retrieve_only:
         setup["model"] = batch.model
@@ -2106,8 +2300,10 @@ def run_setup(batch: Batch) -> dict[str, Any]:
 
 
 def varied_setups(batches: Iterable[Batch]) -> dict[str, list[Any]]:
-    """What differs between test runs' setups (run_setup()) -> {name: [each value, in the order first seen]}: None
-    where a run didn't send that setting, or asked every data source or file."""
+    """
+    What differs between test runs' setups (run_setup()) -> {name: [each value, in the order first seen]}: None
+    where a run didn't send that setting, or asked every data source or file.
+    """
     setups = [run_setup(b) for b in batches]
     out: dict[str, list[Any]] = {}
     for key in dict.fromkeys(k for s in setups for k in s):
@@ -2120,8 +2316,10 @@ def varied_setups(batches: Iterable[Batch]) -> dict[str, list[Any]]:
 
 
 def _setup_value(key: str, value: Any, values: list[Any], label: Callable[[str], str] | None = None) -> str:
-    """One value of what differs between setups, short: 10, HYBRID, Claude Sonnet 5, all (data sources), #2 (a
-    prompt)."""
+    """
+    One value of what differs between setups, short: 10, HYBRID, Claude Sonnet 5, all (data sources), #2 (a
+    prompt).
+    """
     if key in ("data_source", "files"):
         names = [source_name(v) or v for v in value or []] if key == "files" else list(value or [])
         return _clip(", ".join(map(str, names)), 40) if names else "all"
@@ -2138,9 +2336,11 @@ def _setup_value(key: str, value: Any, values: list[Any], label: Callable[[str],
 
 
 def setup_label(batch: Batch, varied: dict[str, list[Any]], label: Callable[[str], str] | None = None) -> str:
-    """What sets a run apart from those it's compared with: 'n=10 · search_type=HYBRID', from the names `varied`
+    """
+    What sets a run apart from those it's compared with: 'n=10 · search_type=HYBRID', from the names `varied`
     holds (varied_setups()); 'the same setup' when nothing differs. label(model) names a model (its short ID by
-    default)."""
+    default).
+    """
     setup = run_setup(batch)
     parts = []
     for key, values in varied.items():
@@ -2154,20 +2354,26 @@ def setup_label(batch: Batch, varied: dict[str, list[Any]], label: Callable[[str
 
 
 def _came_back(item: BatchItem) -> bool:
-    """A question that was answered (or searched), or that Bedrock refused: one that counts in a comparison."""
+    """
+    A question that was answered (or searched), or that Bedrock refused: one that counts in a comparison.
+    """
     return item.answer is not None or bool(item.error_code)
 
 
 def shared_questions(batches: Iterable[Batch]) -> set[str]:
-    """The questions every one of these runs came back with (an answer, or Bedrock's refusal), as compared: in any
-    case and spacing."""
+    """
+    The questions every one of these runs came back with (an answer, or Bedrock's refusal), as compared: in any
+    case and spacing.
+    """
     sets = [{_key(i.question) for i in b.items if _came_back(i)} for b in batches]
     return set.intersection(*sets) if sets else set()
 
 
 def run_score(batch: Batch, questions: Iterable[str] | None = None) -> RunScore:
-    """How a test run did, in numbers -> RunScore, counting `questions` only (their text, in any case; default every
-    question that came back)."""
+    """
+    How a test run did, in numbers -> RunScore, counting `questions` only (their text, in any case; default every
+    question that came back).
+    """
     keep = None if questions is None else {_key(q) for q in questions}
     items = [i for i in batch.items if _came_back(i) and (keep is None or _key(i.question) in keep)]
     asked = [i for i in items if i.answer is not None]
@@ -2189,19 +2395,23 @@ def run_score(batch: Batch, questions: Iterable[str] | None = None) -> RunScore:
 
 
 def _quality(s: RunScore, retrieve_only: bool) -> tuple[int, ...]:
-    """What ranks a run, best highest: expected sources cited (or found), then answers that say something, then the
+    """
+    What ranks a run, best highest: expected sources cited (or found), then answers that say something, then the
     grounded share in steps of 5 points; for searches, expected sources found, then MRR, then searches that found
-    passages."""
+    passages.
+    """
     if retrieve_only:
         return s.hits, round((s.mrr or 0) * 20), s.answered
     return s.hits, s.answered, round((s.grounded or 0) * 20)
 
 
 def rank_runs(batches: Iterable[Batch]) -> list[tuple[Batch, RunScore]]:
-    """Test runs of the same questions, best first, each with its score (run_score()) on the questions every one of
+    """
+    Test runs of the same questions, best first, each with its score (run_score()) on the questions every one of
     them came back with: by how many answers cite the expected source (searches: find it), then how many say
     something (searches: their MRR, then how many found passages), then the grounded share; when two are as good,
-    the cheaper first, then the order given."""
+    the cheaper first, then the order given.
+    """
     runs = list(batches)
     common = shared_questions(runs)
     scored = [(b, run_score(b, common)) for b in runs]
@@ -2218,8 +2428,10 @@ def _index_of(runs: list[Batch], batch: Batch) -> int:
 
 
 def _score_text(s: RunScore, retrieve_only: bool) -> str:
-    """The number a run is ranked by, in words: 'cites the expected source in 5 of 6 questions', 'answers 6 of 6
-    questions (81% grounded)', 'finds the expected source for 5 of 6 questions (MRR 0.83)'."""
+    """
+    The number a run is ranked by, in words: 'cites the expected source in 5 of 6 questions', 'answers 6 of 6
+    questions (81% grounded)', 'finds the expected source for 5 of 6 questions (MRR 0.83)'.
+    """
     if retrieve_only:
         if s.checked:
             return f"finds the expected source for {_out_of(s.hits, s.checked, 'question')} (MRR {s.mrr or 0:.2f})"
@@ -2231,8 +2443,10 @@ def _score_text(s: RunScore, retrieve_only: bool) -> str:
 
 
 def _versus(best: RunScore, other: RunScore, retrieve_only: bool) -> str:
-    """Where `best` does better than `other`, the first thing they're ranked by that differs: 'cites the expected
-    source in 5 of 6 questions, against 3 of 6'."""
+    """
+    Where `best` does better than `other`, the first thing they're ranked by that differs: 'cites the expected
+    source in 5 of 6 questions, against 3 of 6'.
+    """
     if best.hits != other.hits:
         verb = "finds the expected source for" if retrieve_only else "cites the expected source in"
         return f"{verb} {_out_of(best.hits, best.checked, 'question')}, against {other.hits} of {other.checked}"
@@ -2246,7 +2460,9 @@ def _versus(best: RunScore, other: RunScore, retrieve_only: bool) -> str:
 
 
 def _cost_gap(a: RunScore, b: RunScore) -> str:
-    """How much more or less a's setup costs than b's: 'about $0.21 more per 100 questions' ('' if unknown)."""
+    """
+    How much more or less a's setup costs than b's: 'about $0.21 more per 100 questions' ('' if unknown).
+    """
     pa, pb = a.per_question(), b.per_question()
     if pa is None or pb is None:
         return ""
@@ -2259,13 +2475,15 @@ def _cost_gap(a: RunScore, b: RunScore) -> str:
 def ranking_findings(batches: Iterable[Batch], *, now: Batch | None = None,
                      number: Callable[[Batch], int] | None = None, label: Callable[[str], str] | None = None,
                      explain: Callable[[str, str], str] | None = None, brief: bool = False) -> list[tuple[str, str]]:
-    """What a comparison of test runs of the same questions (a sweep's setups, or compare_runs()) says to do ->
+    """
+    What a comparison of test runs of the same questions (a sweep's setups, or compare_runs()) says to do ->
     [(level, message)]: which setup did best and how it beats yours (`now`: the run whose setup is in use, one of
     them or an earlier run of the same questions), whether its lead could be chance, setups Bedrock refused, questions
     no setup handled, and with two or more things varied, what each one changed. brief=True keeps the setups Bedrock
     refused and which setup to use, as a list of runs wants. number(run) gives a run's number for use_run() (default:
     its place in the list, from 1); label(model) names a model; explain(code, message) adds what to do about an AWS
-    error."""
+    error.
+    """
     runs = list(batches)
     if len(runs) < 2:
         return []
@@ -2416,8 +2634,10 @@ def ranking_findings(batches: Iterable[Batch], *, now: Batch | None = None,
 
 def sweep_estimate(sweep: Sweep, *, model_prices: dict[str, tuple[float, float]] | None = None,
                    prices: dict[str, float] | None = None) -> float | None:
-    """Roughly what asking a prepared sweep costs in USD, before it's asked (batch_estimate() for each setup's
-    questions): None when a model's price isn't known. An estimate: label it as one."""
+    """
+    Roughly what asking a prepared sweep costs in USD, before it's asked (batch_estimate() for each setup's
+    questions): None when a model's price isn't known. An estimate: label it as one.
+    """
     total = 0.0
     for b in sweep.batches:
         cost = batch_estimate([i.question for i in b.items if i.request and i.answer is None and not i.error],
@@ -2430,9 +2650,11 @@ def sweep_estimate(sweep: Sweep, *, model_prices: dict[str, tuple[float, float]]
 
 
 def run_record(batch: Batch) -> dict[str, Any]:
-    """A test run as plain JSON data, one line of save_runs()'s file: when it ran, its setup, and each question with
+    """
+    A test run as plain JSON data, one line of save_runs()'s file: when it ran, its setup, and each question with
     its answer (text, citations and sources) or why it failed, its cost and the request sent. Bedrock's raw responses
-    are left out, to keep the file small."""
+    are left out, to keep the file small.
+    """
     def answer(a: Answer | None) -> dict[str, Any] | None:
         if a is None:
             return None
@@ -2453,14 +2675,18 @@ def run_record(batch: Batch) -> dict[str, Any]:
 
 
 def _known(cls: Any, data: dict[str, Any]) -> dict[str, Any]:
-    """The keys of `data` that are fields of the dataclass `cls`: what a newer file adds is left out."""
+    """
+    The keys of `data` that are fields of the dataclass `cls`: what a newer file adds is left out.
+    """
     names = {f.name for f in dataclasses.fields(cls)}
     return {k: v for k, v in data.items() if k in names}
 
 
 def run_from_record(record: Any) -> Batch:
-    """The opposite of run_record(): a test run read back from save_runs()'s file. A ValueError says what's wrong
-    with a record it can't read."""
+    """
+    The opposite of run_record(): a test run read back from save_runs()'s file. A ValueError says what's wrong
+    with a record it can't read.
+    """
     if not isinstance(record, dict) or record.get("format") != RUNS_FORMAT:
         what = record.get("format") if isinstance(record, dict) else type(record).__name__
         raise ValueError(f"not a test run saved by save_runs() (format {what!r}, not {RUNS_FORMAT!r})")
@@ -2487,8 +2713,10 @@ def run_from_record(record: Any) -> Batch:
 
 
 def read_runs(lines: Iterable[str]) -> tuple[list[Batch], list[str]]:
-    """The test runs in save_runs()'s file, JSON Lines with one run per line -> (runs, [why a line couldn't be
-    read, with its number]). Blank lines are skipped."""
+    """
+    The test runs in save_runs()'s file, JSON Lines with one run per line -> (runs, [why a line couldn't be
+    read, with its number]). Blank lines are skipped.
+    """
     runs: list[Batch] = []
     problems: list[str] = []
     for number, line in enumerate(lines, 1):
@@ -2504,8 +2732,10 @@ def read_runs(lines: Iterable[str]) -> tuple[list[Batch], list[str]]:
 
 
 def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | None = None) -> str:
-    """A JSON value as Python source, one key per line once it's too long for one line. column is where the value
-    starts on its line (after its key), when that's further than indent."""
+    """
+    A JSON value as Python source, one key per line once it's too long for one line. column is where the value
+    starts on its line (after its key), when that's further than indent.
+    """
     flat = repr(value)
     start = indent if column is None else column
     if not isinstance(value, (dict, list)) or not value or start + len(flat) + 1 <= width:
@@ -2520,8 +2750,10 @@ def _py_literal(value: Any, indent: int = 0, width: int = 100, column: int | Non
 
 
 def python_call(params: dict[str, Any], region: str = "", width: int = 100) -> str:
-    """The same RetrieveAndGenerate (or Retrieve) call as Python, to paste into a cell or a script. width is where
-    long lines break."""
+    """
+    The same RetrieveAndGenerate (or Retrieve) call as Python, to paste into a cell or a script. width is where
+    long lines break.
+    """
     where = f", region_name={region!r}" if region else ""
     if _is_retrieve(params):
         return (
@@ -2545,14 +2777,18 @@ _QUESTION_KEYS = ("input", "retrievalQuery", "sessionId")  # what a request hold
 
 
 def config_of(params: dict[str, Any]) -> dict[str, Any]:
-    """A request without its question and session: the setup (knowledge base, model, settings, filter) to keep and send
+    """
+    A request without its question and session: the setup (knowledge base, model, settings, filter) to keep and send
     with any question: client.retrieve_and_generate(input={'text': question}, **config), or for a Retrieve request
-    client.retrieve(retrievalQuery={'text': question}, **config)."""
+    client.retrieve(retrievalQuery={'text': question}, **config).
+    """
     return {key: copy.deepcopy(value) for key, value in params.items() if key not in _QUESTION_KEYS}
 
 
 def config_json(params: dict[str, Any]) -> str:
-    """config_of(params) as indented JSON: the file to keep the setup in, which the AWS CLI's --cli-input-json reads."""
+    """
+    config_of(params) as indented JSON: the file to keep the setup in, which the AWS CLI's --cli-input-json reads.
+    """
     return json.dumps(_plain_json(config_of(params)), indent=2, ensure_ascii=False)
 
 
@@ -2562,10 +2798,12 @@ def _request_question(params: dict[str, Any]) -> str:
 
 def python_script(params: dict[str, Any], region: str = "", questions: Iterable[str] = (), *, about: str = "",
                   width: int = 100) -> str:
-    """A script that asks a list of questions with the same setup as `params` (a RetrieveAndGenerate or Retrieve
+    """
+    A script that asks a list of questions with the same setup as `params` (a RetrieveAndGenerate or Retrieve
     request) and prints each answer with the files it cites (for Retrieve, each passage found, with its score). It
     needs only boto3: paste it into a cell, or save it as a .py file and run it. Without questions it asks the
-    request's own. about: a comment saying where the setup came from. width is where long lines break."""
+    request's own. about: a comment saying where the setup came from. width is where long lines break.
+    """
     asked = [str(q) for q in questions] or [_request_question(params) or "<your question>"]
     where = f", region_name={region!r}" if region else ""
     lines = ["import boto3", "", f"client = boto3.client('bedrock-agent-runtime'{where})", ""]
@@ -2621,8 +2859,10 @@ def python_script(params: dict[str, Any], region: str = "", questions: Iterable[
 
 
 def cli_command(params: dict[str, Any], region: str = "", question: str | None = None) -> str:
-    """The AWS CLI (v2) command that sends the same request from a terminal (bash or zsh) with `question` (the
-    request's own when None), and prints the answer: for a Retrieve request, each passage's score and file."""
+    """
+    The AWS CLI (v2) command that sends the same request from a terminal (bash or zsh) with `question` (the
+    request's own when None), and prints the answer: for a Retrieve request, each passage's score and file.
+    """
     text = question if question is not None else (_request_question(params) or "<your question>")
     if _is_retrieve(params):
         request = {"retrievalQuery": {"text": text}, **config_of(params)}
@@ -2639,7 +2879,9 @@ def cli_command(params: dict[str, Any], region: str = "", question: str | None =
 
 
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
-    """What changed between two settings dicts: 'temperature 0.2 → 0.5', 'top_p = 0.9 (added)', 'filter removed'."""
+    """
+    What changed between two settings dicts: 'temperature 0.2 → 0.5', 'top_p = 0.9 (added)', 'filter removed'.
+    """
     out = []
     for key, value in after.items():
         if key not in before:
@@ -2655,7 +2897,9 @@ def _diff(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 
 
 def _question_cap(limit: Any) -> int | None:
-    """How many test questions limit= lets a run ask (None: every one, as 0 does too); a ValueError for anything else."""
+    """
+    How many test questions limit= lets a run ask (None: every one, as 0 does too); a ValueError for anything else.
+    """
     cap = None if limit is None else _as_int(limit, "limit", hint=", or None for every question")
     if cap is not None and cap < 0:
         raise ValueError(f"limit takes a number of questions, like 50, or None for every question; got {limit!r}")
@@ -2675,7 +2919,8 @@ def _question_text(question: Any) -> str:
 
 
 class BedrockChatAnalyzer(_BaseAnalyzer):
-    """Pure logic for chatting with a Bedrock knowledge base: builds RetrieveAndGenerate requests from settings,
+    """
+    Pure logic for chatting with a Bedrock knowledge base: builds RetrieveAndGenerate requests from settings,
     sends them and returns an Answer, or only the search behind one (Retrieve, retrieve()). Nothing is printed, and
     nothing in AWS is changed.
 
@@ -2719,8 +2964,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The bedrock-agent client (the knowledge base list), made on first use so a missing region shows up as a
-        readable error."""
+        """
+        The bedrock-agent client (the knowledge base list), made on first use so a missing region shows up as a
+        readable error.
+        """
         if "bedrock-agent" not in self._clients:
             try:
                 self._clients["bedrock-agent"] = self.session.client("bedrock-agent", config=self._config)
@@ -2737,18 +2984,24 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return summaries
 
     def knowledge_base_names(self, *, refresh: bool = False) -> dict[str, str]:
-        """{ID: name} of every knowledge base in the region (one ListKnowledgeBases, cached)."""
+        """
+        {ID: name} of every knowledge base in the region (one ListKnowledgeBases, cached).
+        """
         if refresh or self._names is None:
             self._kb_summaries()
         return dict(self._names or {})
 
     def kb_name(self, kb_id: str) -> str:
-        """The name of a knowledge base already seen (its ID otherwise). Makes no AWS call."""
+        """
+        The name of a knowledge base already seen (its ID otherwise). Makes no AWS call.
+        """
         return (self._names or {}).get(kb_id) or kb_id
 
     def resolve(self, kb: str) -> str:
-        """The ID of a knowledge base, given its ID, name (any case) or ARN. An unknown name raises a ValueError
-        that lists the knowledge bases in the region."""
+        """
+        The ID of a knowledge base, given its ID, name (any case) or ARN. An unknown name raises a ValueError
+        that lists the knowledge bases in the region.
+        """
         kind, value = parse_kb_ref(kb)
         if kind == "arn":
             return value
@@ -2782,8 +3035,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         raise ValueError(text + " kbs() lists them.")
 
     def knowledge_bases(self, *, refresh: bool = False) -> list[KnowledgeBase]:
-        """Every knowledge base in the region: ID, name, status, description and when it last changed. One
-        ListKnowledgeBases, cached."""
+        """
+        Every knowledge base in the region: ID, name, status, description and when it last changed. One
+        ListKnowledgeBases, cached.
+        """
         if refresh or self._kbs is None:
             self._kbs = [
                 KnowledgeBase(s["knowledgeBaseId"], s.get("name", ""), s.get("status", ""), s.get("description", ""),
@@ -2793,8 +3048,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return list(self._kbs)
 
     def data_sources(self, kb: str, *, refresh: bool = False) -> list[DataSource]:
-        """The data sources of a knowledge base (where its documents come from): ID, name, status and description.
-        One ListDataSources, cached. Questions can be asked of one of them alone (data_source=)."""
+        """
+        The data sources of a knowledge base (where its documents come from): ID, name, status and description.
+        One ListDataSources, cached. Questions can be asked of one of them alone (data_source=).
+        """
         kb_id = self.resolve(kb)
         if refresh or kb_id not in self._sources:
             self._sources[kb_id] = [
@@ -2805,23 +3062,31 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return list(self._sources[kb_id])
 
     def data_source_names(self, kb: str, *, refresh: bool = False) -> dict[str, str]:
-        """{ID: name} of a knowledge base's data sources (one ListDataSources, cached)."""
+        """
+        {ID: name} of a knowledge base's data sources (one ListDataSources, cached).
+        """
         return {ds.id: ds.name for ds in self.data_sources(kb, refresh=refresh)}
 
     def file_status(self, kb_id: str, uri: str) -> str:
-        """A file's status (INDEXED, FAILED ...) when its knowledge base's files have been listed ('' otherwise).
-        Makes no AWS call."""
+        """
+        A file's status (INDEXED, FAILED ...) when its knowledge base's files have been listed ('' otherwise).
+        Makes no AWS call.
+        """
         listing = self._files.get(kb_id)
         return next((d.status for d in listing.documents if d.uri == uri), "") if listing else ""
 
     def data_source_name(self, kb_id: str, ds_id: str) -> str:
-        """The name of a data source already listed (its ID otherwise). Makes no AWS call."""
+        """
+        The name of a data source already listed (its ID otherwise). Makes no AWS call.
+        """
         return next((ds.name for ds in self._sources.get(kb_id, []) if ds.id == ds_id and ds.name), ds_id)
 
     def resolve_sources(self, kb: str, data_source: Any) -> dict[str, str]:
-        """{ID: name} of the data sources questions should search, from data_source=: a data source's name (any
+        """
+        {ID: name} of the data sources questions should search, from data_source=: a data source's name (any
         case) or ID, or a list of them. None, [] or 'all' -> {} (every data source). A dict is taken as already
-        resolved. An unknown one raises a ValueError that lists the knowledge base's data sources."""
+        resolved. An unknown one raises a ValueError that lists the knowledge base's data sources.
+        """
         if isinstance(data_source, dict):
             return {str(k): str(v or "") for k, v in data_source.items()}
         if data_source is None or (isinstance(data_source, str) and data_source.strip().lower() in ("all", "*")):
@@ -2856,9 +3121,11 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return found
 
     def files(self, kb: str, *, limit: int = FILE_LIMIT, refresh: bool = False) -> FileList:
-        """The files a knowledge base has indexed (or tried to), from each data source that keeps a list of them (S3
+        """
+        The files a knowledge base has indexed (or tried to), from each data source that keeps a list of them (S3
         and custom ones): s3:// path, status, data source and when it changed. Up to `limit` of them, cached. A data
-        source whose files can't be listed is recorded in `errors`."""
+        source whose files can't be listed is recorded in `errors`.
+        """
         kb_id = self.resolve(kb)
         if refresh or kb_id not in self._files:
             listing = FileList(kb_id)
@@ -2881,7 +3148,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return self._files[kb_id]
 
     def _s3_client(self) -> Any:
-        """s3: signing links to a knowledge base's files (SigV4, which every region accepts; no AWS call)."""
+        """
+        s3: signing links to a knowledge base's files (SigV4, which every region accepts; no AWS call).
+        """
         return self._cached_client(
             "s3",
             lambda: self.session.client(
@@ -2890,10 +3159,12 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         )
 
     def file_url(self, uri: str, *, page: int | None = None, expires: int = 3600) -> str | None:
-        """A link that opens a file in a browser tab, or None when there's no file to open (a custom data source's
+        """
+        A link that opens a file in a browser tab, or None when there's no file to open (a custom data source's
         document). An s3:// file gets a presigned GetObject link, signed here with your credentials (no AWS call): it
         works for `expires` seconds, only while those credentials are valid, and only if they may read the file
-        (s3:GetObject)."""
+        (s3:GetObject).
+        """
         return presigned_url(self._s3_client, uri, page=page, expires=expires)
 
     def save_file_list(
@@ -2904,11 +3175,13 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         link: str = "s3",
         expires: int = 3600,
     ) -> SavedFileList:
-        """Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
+        """
+        Writes a text file with a line per S3 file, in the order given: its s3:// path (link='s3'), its path in the
         bucket ('key') or a link that opens it in a browser ('https': presigned here with your credentials, no AWS
         call, working for `expires` seconds). files: a files() list, or some of its documents or s3:// paths. path:
         the file to write (a folder puts it there), else <knowledge base>-files.txt beside the notebook; a file of
-        that name is replaced. Nothing in AWS changes."""
+        that name is replaced. Nothing in AWS changes.
+        """
         link = parse_list_link(link)
         default = file_list_name(self.kb_name(files.kb_id)) if isinstance(files, FileList) else "kb-files.txt"
         items = files.documents if isinstance(files, FileList) else files
@@ -2922,10 +3195,12 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return write_file_list(items, _list_target(path, default), link=link, sign=sign, expires=expires)
 
     def resolve_files(self, kb: str, files: Any) -> list[str]:
-        """The s3:// paths of the files questions should search, from files=: s3:// paths, paths in the bucket
+        """
+        The s3:// paths of the files questions should search, from files=: s3:// paths, paths in the bucket
         ('policies/refund-policy.pdf') or file names ('refund-policy.pdf', any case), or a list of them. None, [] or
         'all' -> [] (every file). Names are looked up in files(); a name that matches no file, or several, raises a
-        ValueError that says so."""
+        ValueError that says so.
+        """
         if files is None or (isinstance(files, str) and files.strip().lower() in ("all", "*")):
             return []
         items = list(files) if isinstance(files, (list, tuple, set, frozenset)) else [files]
@@ -2953,7 +3228,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return uris
 
     def _runtime_client(self) -> Any:
-        """bedrock-agent-runtime: Retrieve and RetrieveAndGenerate."""
+        """
+        bedrock-agent-runtime: Retrieve and RetrieveAndGenerate.
+        """
         return self._cached_client(
             "bedrock-agent-runtime",
             lambda: self.session.client(
@@ -2962,7 +3239,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         )
 
     def _bedrock_client(self) -> Any:
-        """bedrock: the model and inference profile lists."""
+        """
+        bedrock: the model and inference profile lists.
+        """
         return self._cached_client(
             "bedrock",
             lambda: self.session.client(
@@ -2973,8 +3252,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
     def models(
         self, match: str | None = None, *, refresh: bool = False
     ) -> list[ModelInfo]:
-        """Text models ask() can use in this region, and how to call each: on demand, or through an inference profile.
-        Cached. match= keeps models whose ID, name or provider contains it."""
+        """
+        Text models ask() can use in this region, and how to call each: on demand, or through an inference profile.
+        Cached. match= keeps models whose ID, name or provider contains it.
+        """
         if self._models is None or refresh:
             bedrock = self._bedrock_client()
             summaries = bedrock.list_foundation_models(byOutputModality="TEXT").get(
@@ -3007,10 +3288,12 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         ]
 
     def resolve_model(self, name: str | None = None) -> tuple[str, str]:
-        """(ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
+        """
+        (ID to call, ARN) for a model: a model ID or ARN, an inference profile ID, or a short name ('opus',
         'sonnet', 'haiku', 'claude-opus-5', 'nova-pro'). None means default_model, else DEFAULT_MODEL (Claude Haiku 4.5).
         A model that can't be called on demand resolves to this region's inference profile. If the model list can't
-        be read, the name is used as given."""
+        be read, the name is used as given.
+        """
         wanted = str(name or self.default_model or DEFAULT_MODEL).strip()
         if wanted.startswith("arn:"):
             return wanted, wanted
@@ -3055,7 +3338,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return best.invoke_id, best.arn
 
     def schema(self) -> Schema:
-        """Every setting this boto3 can send with RetrieveAndGenerate (see request_schema()). Cached; no AWS call."""
+        """
+        Every setting this boto3 can send with RetrieveAndGenerate (see request_schema()). Cached; no AWS call.
+        """
         if self._schema is None:
             runtime = self._clients.get("bedrock-agent-runtime")
             model = getattr(getattr(runtime, "meta", None), "service_model", None)
@@ -3074,10 +3359,12 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         files: Any = None,
         retrieve_only: bool = False,
     ) -> dict[str, Any]:
-        """The RetrieveAndGenerate request ask() would send, without sending it: the knowledge base and model
+        """
+        The RetrieveAndGenerate request ask() would send, without sending it: the knowledge base and model
         resolved, each setting at its place in the JSON, and data_source= (a name or ID, or a list) and files= (names
         or s3:// paths) in the filter. retrieve_only=True gives retrieve()'s Retrieve request instead: the same
-        search, without the model."""
+        search, without the model.
+        """
         schema = self.schema()
         values = normalize_settings(settings, schema)
         kb_id = self.resolve(kb)
@@ -3098,11 +3385,13 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stream: bool = False,
         on_text: Callable[[str], None] | None = None,
     ) -> Answer:
-        """Sends a RetrieveAndGenerate request as it is and returns the Answer. stream=True uses
+        """
+        Sends a RetrieveAndGenerate request as it is and returns the Answer. stream=True uses
         RetrieveAndGenerateStream and calls on_text with the answer so far as it's written; where streaming isn't
         allowed or this boto3 can't, the answer comes all at once and says why. settings (the ones the request was
         built from) are kept on the Answer, for its findings. A Retrieve request is sent with Retrieve, and comes back
-        as a retrieve-only Answer: every passage found, no text."""
+        as a retrieve-only Answer: every passage found, no text.
+        """
         if _is_retrieve(params):
             return self._send_retrieve(params, settings)
         runtime = self._runtime_client()
@@ -3187,9 +3476,11 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         data_source: Any = None,
         files: Any = None,
     ) -> Answer:
-        """Every passage a question retrieves, best first, with its score, and no answer (Retrieve): the search an
+        """
+        Every passage a question retrieves, best first, with its score, and no answer (Retrieve): the search an
         answer with these settings starts from, without the model. Only the Retrieval settings are sent (passages,
-        search type, filter, reranker), and kept on the Answer; data_source= and files= narrow it as in ask()."""
+        search type, filter, reranker), and kept on the Answer; data_source= and files= narrow it as in ask().
+        """
         schema = self.schema()
         values = normalize_settings(settings, schema)
         sources = self.resolve_sources(kb, data_source)
@@ -3212,10 +3503,12 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         data_source: Any = None,
         files: Any = None,
     ) -> Answer:
-        """An answer from the knowledge base (RetrieveAndGenerate), with its citations, sources, request and response.
+        """
+        An answer from the knowledge base (RetrieveAndGenerate), with its citations, sources, request and response.
         session_id continues an earlier conversation; if Bedrock has ended it, a new one starts and the Answer says
         so. stream=True calls on_text with the answer so far as it's written. data_source= searches only that data
-        source (a name or ID, or a list of them), and files= only those files (names or s3:// paths)."""
+        source (a name or ID, or a list of them), and files= only those files (names or s3:// paths).
+        """
         values = normalize_settings(settings, self.schema())
         sources = self.resolve_sources(kb, data_source)
         uris = self.resolve_files(kb, files)
@@ -3251,13 +3544,15 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stop: threading.Event | None = None,
         label: str = "",
     ) -> Batch:
-        """Asks a list of test questions with one setup (knowledge base, model, settings, data sources and files),
+        """
+        Asks a list of test questions with one setup (knowledge base, model, settings, data sources and files),
         each on its own, never as a follow-up, `workers` at a time, and returns a Batch: each question's Answer (or why
         Bedrock refused it), where its expected source came up, and its estimated cost. questions: text with one per
         line ('question | expected file'), a list of questions or of (question, expected) pairs, a DataFrame with
         'question' and 'expected' columns, or an earlier Batch. retrieve_only=True only searches (Retrieve). Up to
         `limit` questions are asked (None for all). A question Bedrock refuses is recorded, not raised, and the rest
-        are still asked; setting `stop` (a threading.Event) asks no more. label names the run."""
+        are still asked; setting `stop` (a threading.Event) asks no more. label names the run.
+        """
         batch = self._prepare_batch(kb, questions, settings, model=model, data_source=data_source, files=files,
                                     retrieve_only=retrieve_only, limit=limit, label=label)
         return self._run_batch(batch, workers=workers, progress=progress, stop=stop)
@@ -3279,13 +3574,15 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stop: threading.Event | None = None,
         label: str = "",
     ) -> Sweep:
-        """Asks the same test questions with several setups and returns a Sweep: a Batch per setup, each question
+        """
+        Asks the same test questions with several setups and returns a Sweep: a Batch per setup, each question
         asked on its own with each one, `workers` at a time across them all (the first question with every setup,
         then the second...). setups: each setup's changes to `settings`, {name: value}, where None leaves a setting
         out and 'model', 'data_source' or 'files' pick those instead of model=, data_source= and files=;
         sweep_setups() makes them from lists of values to try. Every setup is checked before anything is sent, and
         two that come out the same are asked once. A question Bedrock refuses is recorded, not raised; setting `stop`
-        asks no more."""
+        asks no more.
+        """
         sweep = self._prepare_sweep(kb, questions, setups, settings, model=model, data_source=data_source,
                                     files=files, retrieve_only=retrieve_only, limit=limit, label=label)
         return self._run_sweep(sweep, workers=workers, progress=progress, stop=stop)
@@ -3304,8 +3601,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         limit: int | None = BATCH_LIMIT,
         label: str = "",
     ) -> Sweep:
-        """A sweep ready to send: each setup's run prepared like _prepare_batch()'s, with setups that come out the same
-        dropped. Sends no question; a ValueError says which setup can't be sent."""
+        """
+        A sweep ready to send: each setup's run prepared like _prepare_batch()'s, with setups that come out the same
+        dropped. Sends no question; a ValueError says which setup can't be sent.
+        """
         schema = self.schema()
         base = normalize_settings(settings, schema)
         cases, kb_id = question_list(questions), self.resolve(kb)  # said once, not as one setup's problem
@@ -3345,7 +3644,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stop: threading.Event | None = None,
         on_item: Callable[[BatchItem], None] | None = None,
     ) -> Sweep:
-        """Sends a prepared sweep's questions through one pool (_run_batches())."""
+        """
+        Sends a prepared sweep's questions through one pool (_run_batches()).
+        """
         started = time.monotonic()
         try:
             self._run_batches(sweep.batches, workers=workers, progress=progress, stop=stop, on_item=on_item)
@@ -3367,8 +3668,10 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         limit: int | None = BATCH_LIMIT,
         label: str = "",
     ) -> Batch:
-        """A test run, ready to send: the knowledge base, model, data sources and files resolved once, and each
-        question's request built, every question on its own (no session). Sends no question."""
+        """
+        A test run, ready to send: the knowledge base, model, data sources and files resolved once, and each
+        question's request built, every question on its own (no session). Sends no question.
+        """
         schema = self.schema()
         values = normalize_settings(settings, schema)
         cases = question_list(questions)
@@ -3410,7 +3713,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stop: threading.Event | None = None,
         on_item: Callable[[BatchItem], None] | None = None,
     ) -> Batch:
-        """Sends a prepared test run's questions, `workers` at a time (_run_batches())."""
+        """
+        Sends a prepared test run's questions, `workers` at a time (_run_batches()).
+        """
         return self._run_batches([batch], workers=workers, progress=progress, stop=stop, on_item=on_item)[0]
 
     def _run_batches(
@@ -3422,11 +3727,13 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         stop: threading.Event | None = None,
         on_item: Callable[[BatchItem], None] | None = None,
     ) -> list[Batch]:
-        """Sends prepared test runs' questions through one pool, `workers` at a time: the first question of every run,
+        """
+        Sends prepared test runs' questions through one pool, `workers` at a time: the first question of every run,
         then the second, and so on, so runs stopped early have asked the same questions. Each answer (or error) and
         its cost are filled in on the calling thread, which also calls progress(done, total) and on_item(item) as each
         comes back: nothing else is touched from the worker threads. Once `stop` is set, or the run is interrupted, no
-        more questions are sent and what came back is kept; each batch's `stopped` says so."""
+        more questions are sent and what came back is kept; each batch's `stopped` says so.
+        """
         rows = max((len(b.items) for b in batches), default=0)
         todo = [(b, b.items[k]) for k in range(rows) for b in batches
                 if k < len(b.items) and b.items[k].request and b.items[k].answer is None and not b.items[k].error]
@@ -3473,7 +3780,9 @@ class BedrockChatAnalyzer(_BaseAnalyzer):
         return batches
 
     def _fill(self, item: BatchItem, future: Any, batch: Batch) -> None:
-        """A test question's answer and its cost, or why Bedrock refused it, from its finished future."""
+        """
+        A test question's answer and its cost, or why Bedrock refused it, from its finished future.
+        """
         try:
             a = future.result()
         except ClientError as exc:
@@ -3504,7 +3813,9 @@ class _Turn:
 
 @dataclass
 class _Code:
-    """Code to copy, highlighted in HTML (one click selects all of it), as it is in text."""
+    """
+    Code to copy, highlighted in HTML (one click selects all of it), as it is in text.
+    """
 
     text: str
     title: str = ""
@@ -3513,7 +3824,9 @@ class _Code:
 
 @dataclass
 class _ResultRow:
-    """One question of a test run, as a report or the window's Test tab shows it."""
+    """
+    One question of a test run, as a report or the window's Test tab shows it.
+    """
 
     number: int
     item: BatchItem
@@ -3528,7 +3841,9 @@ class _ResultRow:
 
 @dataclass
 class _Results:
-    """A test run's questions: a line each, opening to the answer (or the passages found) in full."""
+    """
+    A test run's questions: a line each, opening to the answer (or the passages found) in full.
+    """
 
     rows: list[_ResultRow]
 
@@ -3549,9 +3864,11 @@ _TAB_TITLES = [title for title, _ in _TABS]
 
 
 def _tab_rules() -> str:
-    """The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
+    """
+    The side tabs as one row that never wraps: equal-weight titles in a bar, the picked one raised, each with its
     icon while the bar is 480px wide or more (a container query), tighter under 360px. For both ipywidgets 8's (lm-)
-    and 7's (p-) class names."""
+    and 7's (p-) class names.
+    """
     rules, narrow, tight = [], [], []
     for x in ("lm", "p"):
         bar = f".kbc-app.kbc-app .kbc-side>.{x}-TabBar"
@@ -3913,7 +4230,9 @@ _BADGE = "💬 Bedrock chat"  # the chip before each report's title, so reports 
 
 
 def _json_text_html(value: Any) -> str:
-    """JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped)."""
+    """
+    JSON as indented text, keys, text, numbers and true / false / null in their own colours (escaped).
+    """
     return _json_source_html(json.dumps(_plain_json(value), indent=2, ensure_ascii=False))
 
 
@@ -3921,8 +4240,10 @@ _SHELL_RE = re.compile(r"(?<![\w-])(--[\w-]+)|'(\{.*?\})'(?=\s|$)", re.S)
 
 
 def _shell_html(command: str) -> str:
-    """A shell command (the AWS CLI's): its options in colour, and the JSON it passes in single quotes highlighted as
-    JSON. Every piece is escaped."""
+    """
+    A shell command (the AWS CLI's): its options in colour, and the JSON it passes in single quotes highlighted as
+    JSON. Every piece is escaped.
+    """
     out, last = [], 0
     for m in _SHELL_RE.finditer(command):
         out.append(_esc(command[last:m.start()]))
@@ -3933,7 +4254,9 @@ def _shell_html(command: str) -> str:
 
 
 def _code_html(text: str, lang: str) -> str:
-    """Code as highlighted HTML: Python, JSON or a shell command."""
+    """
+    Code as highlighted HTML: Python, JSON or a shell command.
+    """
     return {"python": _python_html, "json": _json_source_html, "shell": _shell_html}.get(lang, _esc)(text)
 
 
@@ -3947,7 +4270,9 @@ _draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any ot
 
 
 def _sources_html(a: Answer) -> str:
-    """The cited passages under an answer: one line each, opening to the full passage, its location and metadata."""
+    """
+    The cited passages under an answer: one line each, opening to the full passage, its location and metadata.
+    """
     terms = question_terms(a.question)
     items = []
     for i, p in enumerate(a.sources, 1):
@@ -3969,21 +4294,27 @@ _SEARCH = '<span class="av">🔎</span>'  # and the one on a retrieve-only searc
 
 
 def _meta_html(meta: str, avatar: str = _AVATAR) -> str:
-    """'Claude Sonnet 5 · 2.1s · ~$0.004' as the head of an answer: the model's name in bold over the rest."""
+    """
+    'Claude Sonnet 5 · 2.1s · ~$0.004' as the head of an answer: the model's name in bold over the rest.
+    """
     model, _, rest = meta.partition(" · ")
     return f'{avatar}<div><b>{_esc(model)}</b><div class="wm">{_esc(rest)}</div></div>'
 
 
 def _score(score: float | None) -> str:
-    """A passage's relevance score: 0.8213 -> '0.821', 0.61 -> '0.610'; None -> ''."""
+    """
+    A passage's relevance score: 0.8213 -> '0.821', 0.61 -> '0.610'; None -> ''.
+    """
     return "" if score is None else f"{score:.3f}"
 
 
 def _search_html(a: Answer, meta: str, findings: list[tuple[str, str]], ranks: dict[int, int], *,
                  raw: bool = True) -> str:
-    """A retrieve-only search as a chat message: every passage found, best first, each with its score (and a bar
+    """
+    A retrieve-only search as a chat message: every passage found, best first, each with its score (and a bar
     against the best one), the [n] the answer to the same question cites it as, and the start of its text, opening to
-    all of it; then the findings and (raw=True) the request and response JSON folded at the bottom."""
+    all of it; then the findings and (raw=True) the request and response JSON folded at the bottom.
+    """
     terms = question_terms(a.question)
     top = max((p.score for p in a.sources if p.score is not None and p.score > 0), default=None)
     items = []
@@ -4021,8 +4352,10 @@ def _search_html(a: Answer, meta: str, findings: list[tuple[str, str]], ranks: d
 
 
 def _turn_html(a: Answer, meta: str, findings: list[tuple[str, str]], *, raw: bool = True) -> str:
-    """One answer as a chat message: who answered and how fast, the text (its markdown laid out) with cited spans
-    shaded, the findings, the sources, and (raw=True) the request and response JSON folded at the bottom."""
+    """
+    One answer as a chat message: who answered and how fast, the text (its markdown laid out) with cited spans
+    shaded, the findings, the sources, and (raw=True) the request and response JSON folded at the bottom.
+    """
     notes = "".join(f'<div class="note {level}">{_prose(message)}</div>' for level, message in _ordered(findings))
     text = _answer_html(_Answer(a.text, a.citations)) if a.text.strip() else '<p class="none">(no answer)</p>'
     json_part = ""
@@ -4035,7 +4368,9 @@ def _turn_html(a: Answer, meta: str, findings: list[tuple[str, str]], *, raw: bo
 
 
 def _writing_html(model: str, text: str) -> str:
-    """An answer while it streams in: its markdown so far, with a caret where the next words go."""
+    """
+    An answer while it streams in: its markdown so far, with a caret where the next words go.
+    """
     body, caret = _markdown_html(text), '<span class="caret"></span>'
     closing = re.search(r"(?:</(?:p|li|h[1-6]|td|th|tr|tbody|table|div|blockquote|ul|ol|code|pre)>)+$", body)
     at = closing.start() if closing else len(body)
@@ -4049,7 +4384,9 @@ def _question_html(question: str) -> str:
 
 
 def _row_stats(item: BatchItem) -> str:
-    """The numbers on a test question's line: '92% grounded · 2 cited · 2.1s', 'best 0.812 · 0.3s'."""
+    """
+    The numbers on a test question's line: '92% grounded · 2 cited · 2.1s', 'best 0.812 · 0.3s'.
+    """
     a = item.answer
     if a is None:
         return item.error_code
@@ -4062,7 +4399,9 @@ def _row_stats(item: BatchItem) -> str:
 
 
 def _expected_text(item: BatchItem) -> str:
-    """'expected 'refund-policy.pdf': cited as [1]' ('' when nothing was expected)."""
+    """
+    'expected 'refund-policy.pdf': cited as [1]' ('' when nothing was expected).
+    """
     if not _filled(item.expected) or item.answer is None:
         return ""
     if item.answer.retrieve_only:
@@ -4073,8 +4412,10 @@ def _expected_text(item: BatchItem) -> str:
 
 
 def _result_html(row: _ResultRow) -> str:
-    """A test question as a line (number, question, how it did, its numbers, what changed since the last run) that
-    opens to the answer in full, as the chat shows answers: citations, sources, findings, request and response."""
+    """
+    A test question as a line (number, question, how it did, its numbers, what changed since the last run) that
+    opens to the answer in full, as the chat shows answers: citations, sources, findings, request and response.
+    """
     item, a = row.item, row.item.answer
     tone = row.tone if row.tone in _TONES else ""
     pill = f'<span class="pill{" " + tone if tone else ""}">{_esc(row.verdict)}</span>'
@@ -4095,7 +4436,9 @@ def _result_html(row: _ResultRow) -> str:
 
 
 def _waiting_html(number: int, question: str, sending: bool = True) -> str:
-    """A test question still waiting for its answer, in the window."""
+    """
+    A test question still waiting for its answer, in the window.
+    """
     state = "asking…" if sending else "not asked"
     spin = '<span class="spin"></span>' if sending else ""
     return (f'<div class="bq wait"><span class="bn">{number}</span><span class="bt">{_esc(question)}</span>'
@@ -4103,8 +4446,10 @@ def _waiting_html(number: int, question: str, sending: bool = True) -> str:
 
 
 def _result_lines(row: _ResultRow) -> list[str]:
-    """A test question as text: its number and question, how it did with who answered and how fast, the expected
-    source, and the answer with its [n] markers and sources (every passage found, for a search)."""
+    """
+    A test question as text: its number and question, how it did with who answered and how fast, the expected
+    source, and the answer with its [n] markers and sources (every passage found, for a search).
+    """
     item, a = row.item, row.item.answer
     change = f" ({'↑' if row.better else '↓'} {row.change})" if row.change else ""
     what = row.meta if a is not None else row.error or item.error or "the run stopped before this question"
@@ -4152,13 +4497,17 @@ def _turn_block_lines(block: _Turn, report: _Report) -> list[str]:
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
 def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
-    """A retrieve-only search's passages as text: rank, score, source and the [n] the answer cites it as, over the
-    start of its text."""
+    """
+    A retrieve-only search's passages as text: rank, score, source and the [n] the answer cites it as, over the
+    start of its text.
+    """
     terms = question_terms(a.question)
     out: list[str] = []
     for p in a.sources:
@@ -4171,7 +4520,9 @@ def _passage_lines(a: Answer, ranks: dict[int, int]) -> list[str]:
 
 
 def _kind_text(f: Field) -> str:
-    """What a field takes, in words: 'number 0–1', 'HYBRID | SEMANTIC', 'text up to 4,000 characters'."""
+    """
+    What a field takes, in words: 'number 0–1', 'HYBRID | SEMANTIC', 'text up to 4,000 characters'.
+    """
     span = ""
     if f.low is not None and f.high is not None:
         span = f" {_number(f.low)}–{_number(f.high)}"
@@ -4197,13 +4548,17 @@ def _wrap(inner: str) -> str:
 
 
 def _waiting(keys: list[str]) -> str:
-    """['temperature'] -> 'temperature waits', ['temperature', 'prompt'] -> 'temperature and prompt wait'."""
+    """
+    ['temperature'] -> 'temperature waits', ['temperature', 'prompt'] -> 'temperature and prompt wait'.
+    """
     names = ", ".join(keys[:-1]) + " and " + keys[-1] if len(keys) > 1 else "".join(keys)
     return f"{names} {'waits' if len(keys) == 1 else 'wait'}"
 
 
 def _setting_marks(keys: Iterable[str], schema: Schema, retrieve_only: bool = False) -> dict[tuple[str, ...], str]:
-    """{path in the request: 'set as <key>'} for the settings a request sends, to highlight them in its JSON."""
+    """
+    {path in the request: 'set as <key>'} for the settings a request sends, to highlight them in its JSON.
+    """
     marks = {}
     for key in keys:
         f = schema.fields.get(key)
@@ -4222,7 +4577,9 @@ _PICKER_ROWS = 40  # lines a picker's list shows at once; the search box finds t
 
 @dataclass
 class _Choice:
-    """One line of a picker's list."""
+    """
+    One line of a picker's list.
+    """
 
     value: str  # what picking it sets: a knowledge base ID, a model ID, data source IDs, a file's s3:// path
     title: str  # its name
@@ -4237,7 +4594,8 @@ class _Choice:
 
 
 class _ChoicePicker(_Picker):
-    """A field of the window's header that opens a list to pick from, with a search box over it: the knowledge base,
+    """
+    A field of the window's header that opens a list to pick from, with a search box over it: the knowledge base,
     data source, model and files pickers. Plain widgets and CSS, like the rest of the window: the field is a button
     under its label and value, the list opens under it over the chat (.kbc-pop), and each line is a button under its
     text, so the whole line is the click target.
@@ -4248,7 +4606,8 @@ class _ChoicePicker(_Picker):
     picked (the values, with multi); setting the value from code (set_value) doesn't call it.
 
     While a list is open, the window's backdrop (an invisible button over the rest of the window, under the open
-    field) takes a click anywhere else and closes it, as a dropdown would."""
+    field) takes a click anywhere else and closes it, as a dropdown would.
+    """
 
     def __init__(self, app: _ChatApp, label: str, noun: str, *, on_pick: Callable[[Any], None], placeholder: str,
                  empty: str, on_text: Callable[[str], None] | None = None, on_open: Callable[[], None] | None = None,
@@ -4269,7 +4628,9 @@ class _ChoicePicker(_Picker):
 
     @property
     def value(self) -> str:
-        """The value picked ('' when none); with multi, see `picked`."""
+        """
+        The value picked ('' when none); with multi, see `picked`.
+        """
         return self.picked[0] if self.picked else ""
 
     @property
@@ -4295,7 +4656,9 @@ class _ChoicePicker(_Picker):
         self._draw()
 
     def set_choices(self, choices: Iterable[_Choice], picked: Any = None) -> None:
-        """What the list holds, and (unless None) what's picked."""
+        """
+        What the list holds, and (unless None) what's picked.
+        """
         self.choices = list(choices)
         if picked is None:
             self._draw()
@@ -4303,7 +4666,9 @@ class _ChoicePicker(_Picker):
             self.set_value(picked)
 
     def set_value(self, picked: Any) -> None:
-        """Shows `picked` (a value, or a list of them with multi) as picked, without calling on_pick."""
+        """
+        Shows `picked` (a value, or a list of them with multi) as picked, without calling on_pick.
+        """
         values = [picked] if isinstance(picked, str) else [str(v) for v in picked or []]
         self.picked = [v for v in values if v] if self.multi else values[:1]
         self._draw()
@@ -4328,7 +4693,9 @@ class _ChoicePicker(_Picker):
         return next((c for c in self.choices if c.value == value), None)
 
     def _draw(self) -> None:
-        """The field: its label, what's picked and a chevron."""
+        """
+        The field: its label, what's picked and a chevron.
+        """
         tone, mono = "", False
         if self.describe is not None:
             title, badge = self.describe(list(self.picked))
@@ -4423,8 +4790,10 @@ class _ChoicePicker(_Picker):
             self.on_pick(value)
 
     def _entered(self) -> None:
-        """Enter in the search box: picks the first line found (with multi, the only one), or hands the text to
-        on_text when nothing is found."""
+        """
+        Enter in the search box: picks the first line found (with multi, the only one), or hands the text to
+        on_text when nothing is found.
+        """
         text = str(self.search.value or "").strip()
         if not text:
             if not self.multi:
@@ -4461,9 +4830,11 @@ class _ChoicePicker(_Picker):
 
 
 class _ChatApp(_Window):
-    """The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
+    """
+    The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
     handler shows its own errors in the window: an exception in a widget callback would only reach the browser's
-    log, where nobody looks."""
+    log, where nobody looks.
+    """
 
     TEST_TAB, RUNS_TAB = _TAB_TITLES.index("Test"), _TAB_TITLES.index("Runs")  # where they are among the side tabs
 
@@ -4683,8 +5054,10 @@ class _ChatApp(_Window):
         return tabs
 
     def _test_tab(self) -> Any:
-        """Test: a list of questions asked with the window's setup, each on its own, and how each did; with Try
-        variations open, with every combination of the values typed there, the setups ranked."""
+        """
+        Test: a list of questions asked with the window's setup, each on its own, and how each did; with Try
+        variations open, with every combination of the values typed there, the setups ranked.
+        """
         w, layout = self.w, self.w.Layout
         self.test_box = w.Textarea(value=format_questions(self.view.questions), rows=7, continuous_update=True,
                                    placeholder="How long do refunds take? | refund-policy.pdf\nCan I return a digital "
@@ -4749,7 +5122,9 @@ class _ChatApp(_Window):
                        self.sweep_bar, self.test_head, self.test_rows], layout=layout(width="100%"))
 
     def _code_tab(self) -> Any:
-        """Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change."""
+        """
+        Code: the setup as a Python script, its JSON, or an AWS CLI command, following every change.
+        """
         w, layout = self.w, self.w.Layout
         self.code_mode = w.ToggleButtons(options=["Python", "JSON", "AWS CLI"], value="Python",
                                          tooltips=["A script that asks your test questions with this setup (boto3 "
@@ -4814,8 +5189,10 @@ class _ChatApp(_Window):
         return picker
 
     def _fill_sources(self) -> str:
-        """Puts the knowledge base's data sources in the picker, and shows it when there's a choice to make (more
-        than one). Returns what went wrong, if anything."""
+        """
+        Puts the knowledge base's data sources in the picker, and shows it when there's a choice to make (more
+        than one). Returns what went wrong, if anything.
+        """
         view, picker = self.view, self.source_pick
         sources: list[DataSource] = []
         problem = ""
@@ -4851,7 +5228,9 @@ class _ChatApp(_Window):
         return problem
 
     def _files_picker(self) -> _ChoicePicker:
-        """The Files field, and the line under the header that shows the files ticked, as chips."""
+        """
+        The Files field, and the line under the header that shows the files ticked, as chips.
+        """
         w, layout = self.w, self.w.Layout
         self.files_kb: str | None = None  # the knowledge base whose files the list holds
         self.files_pick = _ChoicePicker(self, "Files", "indexed file", on_pick=self._set_files, on_text=self._file_typed,
@@ -4892,7 +5271,9 @@ class _ChatApp(_Window):
         return ("All files" if not uris else _plural(len(uris), "file")), ""
 
     def _draw_files(self) -> str:
-        """The picked files as chips (a click removes one), and the buttons that fit. Returns what went wrong."""
+        """
+        The picked files as chips (a click removes one), and the buttons that fit. Returns what went wrong.
+        """
         w, view = self.w, self.view
         problem = ""
         if self.files_kb is not None and self.files_kb != view.kb:  # another knowledge base: list its files anew
@@ -4923,7 +5304,9 @@ class _ChatApp(_Window):
         return problem
 
     def _list_files(self) -> None:
-        """Lists the knowledge base's indexed files into the Files list, once per knowledge base (when it opens)."""
+        """
+        Lists the knowledge base's indexed files into the Files list, once per knowledge base (when it opens).
+        """
         view, picker = self.view, self.files_pick
         if view.kb is None:
             raise _Hint("Pick a knowledge base first.")
@@ -4963,9 +5346,11 @@ class _ChatApp(_Window):
         picker.set_choices(choices)
 
     def _save_file_list(self) -> None:
-        """⬇ List in the Files list: the s3:// paths of the files it shows (what the search finds, in its order), one
+        """
+        ⬇ List in the Files list: the s3:// paths of the files it shows (what the search finds, in its order), one
         per line, in <knowledge base>-indexed-files.txt beside the notebook, and a link under the list that downloads
-        it."""
+        it.
+        """
         view, picker = self.view, self.files_pick
         found = picker.matches()
         if not found:
@@ -4982,7 +5367,9 @@ class _ChatApp(_Window):
                          f"beside the notebook{', replacing the one there' if saved.replaced else ''}: {where}.", "ok")
 
     def _file_typed(self, text: str) -> None:
-        """Enter on text no listed file holds: a full s3:// path is picked as it is."""
+        """
+        Enter on text no listed file holds: a full s3:// path is picked as it is.
+        """
         if "://" not in text:
             raise _Hint(f"No indexed file's path holds {text!r}. A file that isn't listed can be picked by its full "
                         "s3:// path.")
@@ -5034,8 +5421,10 @@ class _ChatApp(_Window):
                                                          else "price unknown") if part))
 
     def _hello(self) -> str:
-        """The first bubble: two lines to start from, with the tour of the window folded under them, so an empty
-        conversation isn't a page of instructions."""
+        """
+        The first bubble: two lines to start from, with the tour of the window folded under them, so an empty
+        conversation isn't a page of instructions.
+        """
         view = self.view
         name = view.core.kb_name(view.kb) if view.kb else "your knowledge base"
         tour = [
@@ -5080,7 +5469,9 @@ class _ChatApp(_Window):
         self.log.children = tuple(reversed(self.bubbles))  # the box runs bottom-up, so the newest goes first
 
     def sync(self) -> None:
-        """Follows changes made from another cell (set(), use(), new_chat(), ask())."""
+        """
+        Follows changes made from another cell (set(), use(), new_chat(), ask()).
+        """
         if self.view.kb is not None and self.kb_pick.value != self.view.kb:
             self.kb_pick.set_value(self.view.kb)
         if self.view.model is not None and self.model_pick.value != self.view.model:
@@ -5152,7 +5543,9 @@ class _ChatApp(_Window):
             self._show_mode()
 
     def _show_mode(self) -> None:
-        """The box, the button and the model picker as Answer or Retrieve only has them: a search needs no model."""
+        """
+        The box, the button and the model picker as Answer or Retrieve only has them: a search needs no model.
+        """
         retrieve = self.view.retrieve_only
         self.send_button.description = "Retrieve" if retrieve else "Send"
         self.send_button.tooltip = "Search only (Enter does too)" if retrieve else "Ask (Enter does too)"
@@ -5183,7 +5576,9 @@ class _ChatApp(_Window):
                              + again, "ok")
 
     def added(self, a: Answer) -> None:
-        """An answer asked from another cell (ask()) joins the conversation shown here."""
+        """
+        An answer asked from another cell (ask()) joins the conversation shown here.
+        """
         self._add(_question_html(a.question))
         self._add(self.view._turn_html(a))
         self._show_log()
@@ -5192,7 +5587,9 @@ class _ChatApp(_Window):
         self._set_status(self.view._conversation_line())
 
     def cleared(self, note: str) -> None:
-        """The conversation was reset (new_chat(), another knowledge base)."""
+        """
+        The conversation was reset (new_chat(), another knowledge base).
+        """
         self.bubbles = [self.w.HTML(_wrap(self._hello()), layout=self.w.Layout(width="auto"))]
         if note:
             self._add(f'<div class="msg sys">{_prose(note)}</div>')
@@ -5215,8 +5612,10 @@ class _ChatApp(_Window):
                                                                                                else ""))
 
     def _kb_typed(self, text: str) -> None:
-        """Enter on a knowledge base the list doesn't hold (it couldn't be listed, or was made since): its ID, name or
-        ARN. A ValueError says which knowledge bases there are."""
+        """
+        Enter on a knowledge base the list doesn't hold (it couldn't be listed, or was made since): its ID, name or
+        ARN. A ValueError says which knowledge bases there are.
+        """
         kb_id = self.view.core.resolve(text)
         self.kb_pick.set_value(kb_id)
         self._kb_picked(kb_id)
@@ -5236,7 +5635,9 @@ class _ChatApp(_Window):
         self._set_status(f"The next question goes to {self.view._model_label(self.view.model)}.", "ok")
 
     def _model_typed(self, text: str) -> None:
-        """Enter on a model the list doesn't hold: its ID, inference profile or ARN, or a short name ('sonnet')."""
+        """
+        Enter on a model the list doesn't hold: its ID, inference profile or ARN, or a short name ('sonnet').
+        """
         model_id = self.view.core.resolve_model(text)[0]
         self.model_pick.set_value(model_id)
         self._model_picked(model_id)
@@ -5290,9 +5691,11 @@ class _ChatApp(_Window):
         return str(value)
 
     def _row(self, key: str) -> Any:
-        """A setting's line: its name, the box holding its value (beside the name when it's short, under it
+        """
+        A setting's line: its name, the box holding its value (beside the name when it's short, under it
         otherwise), ✕, and what the value means. Hovering the name says what the setting does, what it takes and
-        where it goes in the request."""
+        where it goes in the request.
+        """
         w, layout = self.w, self.w.Layout
         f = self.schema.fields[key]
         tip = f"{f.doc}\n\nTakes: {_kind_text(f)}\nSent as: {'.'.join(f.path)}"
@@ -5318,7 +5721,9 @@ class _ChatApp(_Window):
         return row
 
     def _off(self, key: str) -> bool:
-        """Whether a setting is left out because the window is on Retrieve only (it's for the answer)."""
+        """
+        Whether a setting is left out because the window is on Retrieve only (it's for the answer).
+        """
         return self.view.retrieve_only and _retrieve_path(self.schema.fields[key].path) is None
 
     def _note_row(self, key: str) -> None:
@@ -5345,8 +5750,10 @@ class _ChatApp(_Window):
                     row.remove_class(css_class)
 
     def _sync_rows(self) -> None:
-        """Cards for the settings that are set or being filled in, grouped, in the schema's order. Existing cards are
-        kept (with whatever their boxes hold), so a half-typed value isn't lost."""
+        """
+        Cards for the settings that are set or being filled in, grouped, in the schema's order. Existing cards are
+        kept (with whatever their boxes hold), so a half-typed value isn't lost.
+        """
         keys = [k for k in self.schema.fields if k in self.view.values or k in self.pending or k in self.broken]
         for key in keys:
             if key not in self.rows:
@@ -5380,7 +5787,9 @@ class _ChatApp(_Window):
         self._show_matches()
 
     def _show_value(self, key: str, value: Any) -> None:
-        """Puts a setting's value in its box, unless the box already holds it (in the user's own formatting)."""
+        """
+        Puts a setting's value in its box, unless the box already holds it (in the user's own formatting).
+        """
         f, box = self.schema.fields[key], self.inputs[key]
         try:
             same = box.value not in ("", None) and coerce_setting(f, box.value) == value
@@ -5457,8 +5866,10 @@ class _ChatApp(_Window):
     # ------------------------------------------------- finding a setting to add
 
     def _show_adding(self, show: bool) -> None:
-        """Opens Add a setting in place of its button (with the cursor in the search box), or folds it away again,
-        forgetting the search."""
+        """
+        Opens Add a setting in place of its button (with the cursor in the search box), or folds it away again,
+        forgetting the search.
+        """
         self.adding.layout.display = "" if show else "none"
         self.add_button.layout.display = "none" if show else ""
         if show:
@@ -5471,12 +5882,16 @@ class _ChatApp(_Window):
 
     @staticmethod
     def _mentions(f: Field, text: str) -> bool:
-        """Whether every word of the search is in the field's names, path or description (not a near miss)."""
+        """
+        Whether every word of the search is in the field's names, path or description (not a near miss).
+        """
         names = _norm(" ".join([f.key, f.label, *f.names, ".".join(f.path)]))
         return all(_norm(word) in names or word in f.doc.lower() for word in text.lower().split())
 
     def _pick(self, key: str) -> Any:
-        """A setting's line in the list under the search box: what it is and does, and a button that adds it."""
+        """
+        A setting's line in the list under the search box: what it is and does, and a button that adds it.
+        """
         if key not in self.picks:
             w, layout, f = self.w, self.w.Layout, self.schema.fields[key]
             where = f.key if f.key == f.where else f"{f.key} · {f.where}"
@@ -5498,8 +5913,10 @@ class _ChatApp(_Window):
         return row
 
     def _show_matches(self) -> None:
-        """The list under the search box: the settings the search matches (the best few), or every setting by group
-        while Browse all is on. Nothing while the box is empty."""
+        """
+        The list under the search box: the settings the search matches (the best few), or every setting by group
+        while Browse all is on. Nothing while the box is empty.
+        """
         text = str(self.add_name.value or "").strip()
         self.browse_button.description = "Hide the list" if self.browsing else f"Browse all {len(self.schema.fields)}"
         if not text and not self.browsing:
@@ -5546,7 +5963,9 @@ class _ChatApp(_Window):
         self._show_matches()
 
     def _add_typed(self, *_: Any) -> None:
-        """Enter in the search box, or Add: adds the setting the text names, else the best match."""
+        """
+        Enter in the search box, or Add: adds the setting the text names, else the best match.
+        """
         text = str(self.add_name.value or "").strip()
         if not text:
             self._set_status("Type a setting's name, or what it does, in the box; Browse all lists every one.")
@@ -5564,7 +5983,9 @@ class _ChatApp(_Window):
     # --------------------------------------------------------- the JSON views
 
     def _refresh(self) -> None:
-        """Everything that depends on the settings: the title, findings, the next request, the setup line."""
+        """
+        Everything that depends on the settings: the title, findings, the next request, the setup line.
+        """
         view = self.view
         name = view.core.kb_name(view.kb) if view.kb else "no knowledge base yet"
         try:
@@ -5643,8 +6064,10 @@ class _ChatApp(_Window):
                                            "question here is only a placeholder.</div>"))
 
     def _edit(self, *_: Any) -> None:
-        """Opens the editor on the request as it is now. The view buttons wait until it's closed: the editor is
-        the view while it's open."""
+        """
+        Opens the editor on the request as it is now. The view buttons wait until it's closed: the editor is
+        the view while it's open.
+        """
         self.editing = True
         self._fill_editor()
         self.edit_box.layout.display = ""
@@ -5661,8 +6084,10 @@ class _ChatApp(_Window):
         self.edit_button.disabled = self.request_mode.disabled = False
 
     def _follow_edit(self) -> None:
-        """The request changed while the editor is open (a setting, the model, an answer that started a session).
-        An untouched editor takes the new request; an edited one keeps the edits and says what Apply would undo."""
+        """
+        The request changed while the editor is open (a setting, the model, an answer that started a session).
+        An untouched editor takes the new request; an edited one keeps the edits and says what Apply would undo.
+        """
         now = self._request_text()
         if now == self.edit_base:
             return
@@ -5714,8 +6139,10 @@ class _ChatApp(_Window):
     # ------------------------------------------------------------ Try variations
 
     def _show_varying(self, show: bool) -> None:
-        """Opens Try variations in place of its button (a starting pair of lines in an empty box), or folds it away:
-        Run then asks with one setup again. What's in the box stays for next time."""
+        """
+        Opens Try variations in place of its button (a starting pair of lines in an empty box), or folds it away:
+        Run then asks with one setup again. What's in the box stays for next time.
+        """
         self.varying_card.layout.display = "" if show else "none"
         self.vary_button.layout.display = "none" if show else ""
         if show:
@@ -5729,11 +6156,15 @@ class _ChatApp(_Window):
         self._draw_test_note()
 
     def _varying(self) -> bool:
-        """Run asks every combination: Try variations is open and has something in it."""
+        """
+        Run asks every combination: Try variations is open and has something in it.
+        """
         return self.varying_card.layout.display != "none" and bool(self.vary_box.value.strip())
 
     def _vary_key(self, name: str) -> str:
-        """The name a variation line's setting goes by: 'Passages' and 'numberOfResults' -> 'n'."""
+        """
+        The name a variation line's setting goes by: 'Passages' and 'numberOfResults' -> 'n'.
+        """
         key = _sweep_name(name)
         if key in _PICKED:
             return key
@@ -5743,7 +6174,9 @@ class _ChatApp(_Window):
             return key
 
     def _variation_line(self, key: str) -> str:
-        """A line to start from, for a chip: 'n = 5, 10', 'model = haiku, sonnet', 'data_source = all, faq, manuals'."""
+        """
+        A line to start from, for a chip: 'n = 5, 10', 'model = haiku, sonnet', 'data_source = all, faq, manuals'.
+        """
         view = self.view
         if key == "n":
             n = int(view.values.get("n") or 5)
@@ -5765,8 +6198,10 @@ class _ChatApp(_Window):
             return []
 
     def _draw_vary_chips(self) -> None:
-        """One click adds a line of values to try: passages, search type, reranker, model and temperature (answers
-        only), and the data source when the knowledge base has more than one."""
+        """
+        One click adds a line of values to try: passages, search type, reranker, model and temperature (answers
+        only), and the data source when the knowledge base has more than one.
+        """
         chips = [("n", "Passages", "How many passages to retrieve"), ("search_type", "Search type", "SEMANTIC "
                  "(meaning) or HYBRID (meaning and exact words)"), ("reranker", "Reranker", "Without and with "
                  "reranking the passages")]
@@ -5786,7 +6221,9 @@ class _ChatApp(_Window):
         self.vary_chip_box.children = shown
 
     def _add_variation(self, key: str) -> None:
-        """A chip's line: it takes the place of the line for the same setting, or goes at the end."""
+        """
+        A chip's line: it takes the place of the line for the same setting, or goes at the end.
+        """
         line = self._variation_line(key)
         lines = [text for text in self.vary_box.value.splitlines() if text.strip()]
         same = [k for k, text in enumerate(lines) if self._vary_key(re.split(r"[=:]", text, maxsplit=1)[0]) == key]
@@ -5797,8 +6234,10 @@ class _ChatApp(_Window):
         self.vary_box.value = "\n".join(lines)  # its observer redraws the note
 
     def _plan(self, cases: list[tuple[str, Any]]) -> tuple[int, float | None, bool]:
-        """What Try variations asks, without building a request: (how many different setups, roughly what asking the
-        questions with each costs, whether the model varies). A ValueError says what's wrong with a line."""
+        """
+        What Try variations asks, without building a request: (how many different setups, roughly what asking the
+        questions with each costs, whether the model varies). A ValueError says what's wrong with a line.
+        """
         view = self.view
         retrieve = view.retrieve_only
         grid = parse_variations(self.vary_box.value)
@@ -5832,8 +6271,10 @@ class _ChatApp(_Window):
         return len(seen), total, len(models) > 1
 
     def _draw_test_note(self) -> None:
-        """Beside Run: how many questions it asks (with how many setups), how (answers from which model, or searches
-        only), and roughly what that costs."""
+        """
+        Beside Run: how many questions it asks (with how many setups), how (answers from which model, or searches
+        only), and roughly what that costs.
+        """
         if self.running:
             return
         cases = parse_questions(self.test_box.value)
@@ -5878,9 +6319,11 @@ class _ChatApp(_Window):
     # ------------------------------------------------------------ running them
 
     def _run_tests(self, *_: Any) -> None:
-        """Run: every question in the box, asked with the window's setup (with Try variations open, with every
+        """
+        Run: every question in the box, asked with the window's setup (with Try variations open, with every
         combination), each on its own. In a notebook the questions are asked on worker threads while the window stays
-        usable, and each line fills in as its answer comes back; elsewhere (a script, the tests) right away."""
+        usable, and each line fills in as its answer comes back; elsewhere (a script, the tests) right away.
+        """
         if self.running:
             return
         cases = parse_questions(self.test_box.value)
@@ -5907,7 +6350,9 @@ class _ChatApp(_Window):
         self._start(work, self._tested, lambda: self._tests_done(batch, view._log_runs([batch])))
 
     def _run_sweep(self, cases: list[tuple[str, Any]]) -> None:
-        """Run with Try variations open: the sweep checked (a costly one asks for a second click), then asked."""
+        """
+        Run with Try variations open: the sweep checked (a costly one asks for a second click), then asked.
+        """
         view = self.view
         sweep = view._prepare_sweep(cases, parse_variations(self.vary_box.value), retrieve_only=view.retrieve_only,
                                     limit=BATCH_LIMIT)
@@ -5939,8 +6384,10 @@ class _ChatApp(_Window):
 
     def _start(self, work: Callable[[Callable[[BatchItem], None]], Any], tested: Callable[[BatchItem], None],
                done: Callable[[], None]) -> None:
-        """Runs `work` (which takes the on_item callback): in a notebook on a worker thread, drawing each question on
-        the kernel's event loop as it comes back; without a running loop, right away."""
+        """
+        Runs `work` (which takes the on_item callback): in a notebook on a worker thread, drawing each question on
+        the kernel's event loop as it comes back; without a running loop, right away.
+        """
         loop = _running_loop()
         if loop is None:
             try:
@@ -5952,8 +6399,10 @@ class _ChatApp(_Window):
 
     async def _run_later(self, work: Callable[[Callable[[BatchItem], None]], Any],
                          tested: Callable[[BatchItem], None], done: Callable[[], None]) -> None:
-        """A test run on a worker thread: each question's line is drawn on the kernel's event loop, where the clicks
-        run, as its answer comes back, so Stop and the rest of the window keep working meanwhile."""
+        """
+        A test run on a worker thread: each question's line is drawn on the kernel's event loop, where the clicks
+        run, as its answer comes back, so Stop and the rest of the window keep working meanwhile.
+        """
         finished: queue.SimpleQueue = queue.SimpleQueue()
         job = asyncio.get_running_loop().run_in_executor(None, functools.partial(work, finished.put))
         try:
@@ -5985,7 +6434,9 @@ class _ChatApp(_Window):
         self.run_button.description = f"{'Searching' if retrieve_only else 'Asking'}… {back} of {len(sent)}"
 
     def _tested(self, item: BatchItem) -> None:
-        """A test question came back: its line shows how it did, and Run how many are back."""
+        """
+        A test question came back: its line shows how it did, and Run how many are back.
+        """
         batch = self.batch
         index = next((k for k, i in enumerate(batch.items) if i is item), None) if batch is not None else None
         if index is None or index >= len(self.batch_rows):
@@ -5995,7 +6446,9 @@ class _ChatApp(_Window):
         self._show_progress(batch)
 
     def _swept_item(self, item: BatchItem) -> None:
-        """A question of the sweep came back: its setup's line counts it, and Run how many are back."""
+        """
+        A question of the sweep came back: its setup's line counts it, and Run how many are back.
+        """
         if self.sweep is not None and self.running:
             self._draw_sweep(self.sweep)
 
@@ -6006,7 +6459,9 @@ class _ChatApp(_Window):
             self._set_status("Stopping: no more questions are sent, and the ones already sent finish first.")
 
     def _tests_done(self, batch: Batch, notes: Iterable[_Note] = ()) -> None:
-        """The run is over, or stopped: every line, the summary and findings, and Run again."""
+        """
+        The run is over, or stopped: every line, the summary and findings, and Run again.
+        """
         if batch is not self.batch:  # another run took the tab meanwhile (ask_all() in another cell)
             return
         self.running, self.batch_stop, self.batch_task = False, None, None
@@ -6025,7 +6480,9 @@ class _ChatApp(_Window):
         self._draw_runs()
 
     def _sweep_done(self, sweep: Sweep, notes: Iterable[_Note] = ()) -> None:
-        """The sweep is over, or stopped: the setups ranked, the best one's answers under them, and Run again."""
+        """
+        The sweep is over, or stopped: the setups ranked, the best one's answers under them, and Run again.
+        """
         if sweep is not self.sweep:
             return
         self.running, self.batch_stop, self.batch_task = False, None, None
@@ -6046,7 +6503,9 @@ class _ChatApp(_Window):
         self._draw_runs()
 
     def ran(self, batch: Batch) -> None:
-        """A test run from another cell (ask_all()) shows in the Test tab."""
+        """
+        A test run from another cell (ask_all()) shows in the Test tab.
+        """
         self._quietly(self.test_box, value=format_questions(self.view.questions))
         self.sweep = None
         self._hide_sweep()
@@ -6055,14 +6514,18 @@ class _ChatApp(_Window):
         self._render_code()
 
     def swept(self, sweep: Sweep) -> None:
-        """A sweep from another cell (sweep()) shows in the Test tab."""
+        """
+        A sweep from another cell (sweep()) shows in the Test tab.
+        """
         self._quietly(self.test_box, value=format_questions(self.view.questions))
         self.sweep = sweep
         self._sweep_done(sweep)
         self._render_code()
 
     def loaded(self) -> None:
-        """Runs read back from a file (load_runs(), or the Runs tab's Load): the last one shows in the Test tab."""
+        """
+        Runs read back from a file (load_runs(), or the Runs tab's Load): the last one shows in the Test tab.
+        """
         self._quietly(self.test_box, value=format_questions(self.view.questions))
         if self.view.batches and not self.running:
             self._show_run(self.view.batches[-1])
@@ -6071,7 +6534,9 @@ class _ChatApp(_Window):
         self._draw_runs()
 
     def runs_changed(self) -> None:
-        """The runs were saved (save_runs()): the Runs tab says where."""
+        """
+        The runs were saved (save_runs()): the Runs tab says where.
+        """
         self._draw_runs()
 
     # ------------------------------------------------------------ drawing them
@@ -6080,7 +6545,9 @@ class _ChatApp(_Window):
         return next((k for k, sw in enumerate(self.view.sweeps, 1) if sw is sweep), len(self.view.sweeps))
 
     def _show_run(self, batch: Batch) -> None:
-        """A run in the Test tab: a sweep's run shows its sweep, with that setup's answers under the ranking."""
+        """
+        A run in the Test tab: a sweep's run shows its sweep, with that setup's answers under the ranking.
+        """
         sweep = next((sw for sw in self.view.sweeps if batch.sweep and sw.id == batch.sweep), None)
         if sweep is not None:
             self.sweep = sweep
@@ -6096,9 +6563,11 @@ class _ChatApp(_Window):
         self.sweep_bar.layout.display = "none"
 
     def _draw_sweep(self, sweep: Sweep, pick: Batch | None = None) -> None:
-        """The Test tab's sweep: while it's asked, a line per setup with how many questions are back; then the setups
+        """
+        The Test tab's sweep: while it's asked, a line per setup with how many questions are back; then the setups
         ranked, what to do, how each question did with each, and a picker for the setup whose answers show below
-        (`pick`, else the one shown, else the best)."""
+        (`pick`, else the one shown, else the best).
+        """
         view = self.view
         questions = len(sweep.batches[0].items)
         how = "searches only (Retrieve)" if sweep.retrieve_only else (
@@ -6140,7 +6609,9 @@ class _ChatApp(_Window):
         self._draw_batch(chosen)
 
     def _setup_picked(self, change: dict[str, Any]) -> None:
-        """Another setup of the sweep picked: its answers show under the ranking."""
+        """
+        Another setup of the sweep picked: its answers show under the ranking.
+        """
         if self.quiet or self.sweep is None or change.get("new") is None:
             return
         batch = self.view._run(change["new"])
@@ -6148,13 +6619,17 @@ class _ChatApp(_Window):
         self._draw_batch(batch)
 
     def _use_shown(self, *_: Any) -> None:
-        """Use this setup, under a sweep: the window switches to the setup picked."""
+        """
+        Use this setup, under a sweep: the window switches to the setup picked.
+        """
         if self.batch is not None:
             self._set_status(self.view._switch_to(self.batch), "ok")
 
     def _draw_batch(self, batch: Batch) -> None:
-        """The Test tab's results: the run's summary and findings, then a line per question, which opens to its
-        answer (a spinner while it's being asked)."""
+        """
+        The Test tab's results: the run's summary and findings, then a line per question, which opens to its
+        answer (a spinner while it's being asked).
+        """
         view = self.view
         while len(self.batch_rows) < len(batch.items):
             self.batch_rows.append(self.w.HTML(layout=self.w.Layout(width="100%")))
@@ -6184,8 +6659,10 @@ class _ChatApp(_Window):
     # ------------------------------------------------------------------- Runs
 
     def _runs_tab(self) -> Any:
-        """Runs: every test run, newest first, ranked against the others of the same questions; any one opened in
-        the Test tab, switched to or compared, and all of them saved to a file or read back from one."""
+        """
+        Runs: every test run, newest first, ranked against the others of the same questions; any one opened in
+        the Test tab, switched to or compared, and all of them saved to a file or read back from one.
+        """
         w, layout = self.w, self.w.Layout
         self.runs_view = w.HTML(layout=layout(width="100%"))
         self.run_pick = w.Dropdown(options=[], layout=layout(flex="1 1 100%", width="auto", min_width="0"))
@@ -6233,8 +6710,10 @@ class _ChatApp(_Window):
             self._draw_runs()
 
     def _draw_runs(self) -> None:
-        """Runs: the cards and findings of runs(), then a line per run (newest first) with its rank among the runs
-        of its questions, opening to its setup; the run picker; and where the runs are saved."""
+        """
+        Runs: the cards and findings of runs(), then a line per run (newest first) with its rank among the runs
+        of its questions, opening to its setup; the run picker; and where the runs are saved.
+        """
         view = self.view
         if not view.batches:
             self._set(self.runs_view, _wrap('<div class="more" style="margin:10px 0">No test runs yet: ask a list of '
@@ -6269,8 +6748,10 @@ class _ChatApp(_Window):
         self._set(self.runs_note, _wrap(f'<div class="pd" style="margin:6px 0 0">{_esc(text)}</div>') if text else "")
 
     def _run_line(self, batch: Batch, place: tuple[int, int] | None) -> str:
-        """One run in the Runs tab: number, name, rank among the runs of its questions, result, and opening to its
-        whole setup."""
+        """
+        One run in the Runs tab: number, name, rank among the runs of its questions, result, and opening to its
+        whole setup.
+        """
         view = self.view
         result, expected = view._result_text(batch)
         name = (f"sweep {view._sweep_number(batch)}: {batch.label}" if batch.sweep else batch.label) or \
@@ -6334,7 +6815,9 @@ class _ChatApp(_Window):
         self._set(self.runs_note, _wrap("".join(f'<div class="note {n.level}">{_prose(n.text)}</div>' for n in notes)))
 
     def _render_code(self) -> None:
-        """The Code tab: the setup as a Python script that asks the test questions, its JSON, or an AWS CLI command."""
+        """
+        The Code tab: the setup as a Python script that asks the test questions, its JSON, or an AWS CLI command.
+        """
         view = self.view
         asked = [q for q, _ in parse_questions(self.test_box.value)] or view._code_questions()
         retrieve = view.retrieve_only
@@ -6365,7 +6848,8 @@ class _ChatApp(_Window):
 
 
 class BedrockChatView(_BaseView):
-    """The chat window, and reports, over BedrockChatAnalyzer. Each command renders something and returns nothing:
+    """
+    The chat window, and reports, over BedrockChatAnalyzer. Each command renders something and returns nothing:
     the conversation's answers are in `view.answers`, the settings in `view.values`, and the analyzer is
     `view.core`.
 
@@ -6451,7 +6935,9 @@ class BedrockChatView(_BaseView):
                 f"{_plural(len(self.answers), 'question')}) · help() lists its commands")
 
     def _ipython_display_(self) -> None:
-        """A cell ending with the view shows the chat window, unless the same cell already did (chat() shows it)."""
+        """
+        A cell ending with the view shows the chat window, unless the same cell already did (chat() shows it).
+        """
         if self.use_html and self._shown_in is not None and self._shown_in == _cell_number():
             return
         if self.use_html:
@@ -6467,7 +6953,9 @@ class BedrockChatView(_BaseView):
         display(widget)
 
     def _explain(self, code: str, message: str) -> str:
-        """The AWS error message plus what to do about it."""
+        """
+        The AWS error message plus what to do about it.
+        """
         lowered = message.lower()
         text = message.rstrip() + ("" if message.rstrip().endswith((".", "!", "?")) else ".")
         if "managed knowledge base" in lowered:
@@ -6493,7 +6981,9 @@ class BedrockChatView(_BaseView):
         return message
 
     def _profile_for(self, message: str) -> str:
-        """The inference profile to use for the model an error message names ('<profile id>' if unknown)."""
+        """
+        The inference profile to use for the model an error message names ('<profile id>' if unknown).
+        """
         match = re.search(r"model ID ([\w.:-]+)", message)
         try:
             found = [
@@ -6508,8 +6998,10 @@ class BedrockChatView(_BaseView):
         return found[0] if found else "<profile id>"
 
     def _source_names(self, kb_id: str, passages: Iterable[Passage]) -> dict[str, str]:
-        """{ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
-        one cached ListDataSources, or the IDs when it can't be read."""
+        """
+        {ID: name} of the data sources these passages came from, when that's more than one (else {}): names from
+        one cached ListDataSources, or the IDs when it can't be read.
+        """
         ids = sorted({p.data_source_id for p in passages if p.data_source_id})
         if len(ids) < 2:
             return {}
@@ -6523,7 +7015,9 @@ class BedrockChatView(_BaseView):
     def _top_source(
         passages: list[Passage], names: dict[str, str]
     ) -> tuple[str, int] | None:
-        """(name, count) of the data source most of these passages came from, when they came from several."""
+        """
+        (name, count) of the data source most of these passages came from, when they came from several.
+        """
         if not names:
             return None
         counts = Counter(p.data_source_id for p in passages if p.data_source_id in names)
@@ -6533,7 +7027,9 @@ class BedrockChatView(_BaseView):
         return names[ds_id], count
 
     def _price_basis(self, models: bool = False) -> str:
-        """The prices a cost was worked out with; models=True: the models' prices (model_prices=)."""
+        """
+        The prices a cost was worked out with; models=True: the models' prices (model_prices=).
+        """
         return _which_prices(self.core.model_prices, MODEL_PRICES) if models else super()._price_basis()
 
     def _region(self) -> str:
@@ -6543,7 +7039,9 @@ class BedrockChatView(_BaseView):
             return ""
 
     def _kb_id(self) -> str:
-        """The knowledge base questions go to: kb=, else the only one in the region; a _Hint says how to pick."""
+        """
+        The knowledge base questions go to: kb=, else the only one in the region; a _Hint says how to pick.
+        """
         if self.kb is not None:
             self.kb = self.core.resolve(self.kb)
             return self.kb
@@ -6560,7 +7058,9 @@ class BedrockChatView(_BaseView):
                     f"or chat('{listed[0]}').")
 
     def _model_label(self, model: str) -> str:
-        """The model's name when the model list has been read ('Claude Sonnet 5'), else its short ID."""
+        """
+        The model's name when the model list has been read ('Claude Sonnet 5'), else its short ID.
+        """
         wanted = model or str(self.core.default_model or DEFAULT_MODEL)
         if self.core._models:  # read already, so no AWS call: a short name or the default finds the model it calls
             try:
@@ -6578,12 +7078,16 @@ class BedrockChatView(_BaseView):
         self._reset()
 
     def _sources(self, kb_id: str) -> dict[str, str]:
-        """{ID: name} of the data sources questions search ({} = all of them), resolved from data_source=."""
+        """
+        {ID: name} of the data sources questions search ({} = all of them), resolved from data_source=.
+        """
         self.data_source = self.core.resolve_sources(kb_id, self.data_source)
         return self.data_source
 
     def _sources_now(self) -> dict[str, str]:
-        """The data sources questions search, if they can be told yet ({} otherwise)."""
+        """
+        The data sources questions search, if they can be told yet ({} otherwise).
+        """
         if not self.data_source:
             return {}
         try:
@@ -6592,17 +7096,23 @@ class BedrockChatView(_BaseView):
             return {}
 
     def _sources_text(self) -> str:
-        """'all', or the names of the only data sources questions search."""
+        """
+        'all', or the names of the only data sources questions search.
+        """
         sources = self._sources_now()
         return ", ".join(name or ds_id for ds_id, name in sources.items()) if sources else "all"
 
     def _files_for(self, kb_id: str) -> list[str]:
-        """The s3:// paths of the only files questions search ([] = all of them), resolved from files=."""
+        """
+        The s3:// paths of the only files questions search ([] = all of them), resolved from files=.
+        """
         self.picked_files = self.core.resolve_files(kb_id, self.picked_files)
         return self.picked_files
 
     def _files_now(self) -> list[str]:
-        """The files questions search, if they can be told yet ([] otherwise)."""
+        """
+        The files questions search, if they can be told yet ([] otherwise).
+        """
         if not self.picked_files:
             return []
         try:
@@ -6611,7 +7121,9 @@ class BedrockChatView(_BaseView):
             return []
 
     def _files_text(self) -> str:
-        """'all', or the names of the only files questions search."""
+        """
+        'all', or the names of the only files questions search.
+        """
         uris = self._files_now()
         if not uris:
             return "all"
@@ -6622,14 +7134,18 @@ class BedrockChatView(_BaseView):
         self.answers, self.session_id = [], None
 
     def _changed(self, note: str = "") -> None:
-        """An open window follows what a command changed."""
+        """
+        An open window follows what a command changed.
+        """
         if self._app is not None:
             self._app.sync()
             if note:  # another knowledge base, or a new chat: the conversation starts over
                 self._app.cleared(note)
 
     def _update(self, values: dict[str, Any]) -> list[str]:
-        """Applies {name: value} (None removes) to the settings, all or nothing, and says what changed."""
+        """
+        Applies {name: value} (None removes) to the settings, all or nothing, and says what changed.
+        """
         schema = self.core.schema()
         new = dict(self.values)
         problems = []
@@ -6651,8 +7167,10 @@ class BedrockChatView(_BaseView):
 
     def _turn(self, question: str, on_text: Callable[[str], None] | None = None, retrieve_only: bool = False
               ) -> Answer:
-        """Asks one question of this conversation and keeps the answer. retrieve_only=True only searches (Retrieve):
-        the passages join the conversation, and the Bedrock session the answers share isn't touched."""
+        """
+        Asks one question of this conversation and keeps the answer. retrieve_only=True only searches (Retrieve):
+        the passages join the conversation, and the Bedrock session the answers share isn't touched.
+        """
         kb_id = self._kb_id()
         if retrieve_only:
             a = self.core.retrieve(kb_id, question, self.values, data_source=self._sources(kb_id),
@@ -6667,8 +7185,10 @@ class BedrockChatView(_BaseView):
         return a
 
     def _counterpart(self, a: Answer) -> Answer | None:
-        """The latest question before `a` that asked the same thing the other way (an answer for a search, a search
-        for an answer), to compare the two."""
+        """
+        The latest question before `a` that asked the same thing the other way (an answer for a search, a search
+        for an answer), to compare the two.
+        """
         wanted = " ".join(a.question.lower().split())
         before = next((i for i, t in enumerate(self.answers) if t is a), len(self.answers))
         for t in reversed(self.answers[:before]):
@@ -6678,8 +7198,10 @@ class BedrockChatView(_BaseView):
         return None
 
     def _findings(self, a: Answer) -> list[tuple[str, str]]:
-        """An answer's (or a search's) findings, and what comparing it with the same question asked the other way
-        shows."""
+        """
+        An answer's (or a search's) findings, and what comparing it with the same question asked the other way
+        shows.
+        """
         found = answer_findings(a)
         other = self._counterpart(a)
         if other is not None:
@@ -6687,7 +7209,9 @@ class BedrockChatView(_BaseView):
         return found
 
     def _ranks(self, a: Answer) -> dict[int, int]:
-        """For a search: {rank: [n]} of its passages the answer to the same question cites ({} without one)."""
+        """
+        For a search: {rank: [n]} of its passages the answer to the same question cites ({} without one).
+        """
         other = self._counterpart(a) if a.retrieve_only else None
         return cited_ranks(a, other) if other is not None else {}
 
@@ -6699,8 +7223,10 @@ class BedrockChatView(_BaseView):
         return text if text.startswith("<") else "~" + text
 
     def _meta(self, a: Answer) -> str:
-        """'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004', or for a search 'Retrieve only · 8
-        passages · best score 0.821 · 0.4s · <$0.01'."""
+        """
+        'Claude Sonnet 5 · 2.1s · 2 sources cited · 80% grounded · ~$0.004', or for a search 'Retrieve only · 8
+        passages · best score 0.821 · 0.4s · <$0.01'.
+        """
         only = [describe_sources(a.data_sources) if a.data_sources else "", describe_files(a.files) if a.files else ""]
         narrowed = [f"only {' and '.join(filter(None, only))}"] if any(only) else []
         if a.retrieve_only:
@@ -6736,7 +7262,9 @@ class BedrockChatView(_BaseView):
         return self.retrieve_only if retrieve_only is None else bool(retrieve_only)
 
     def _unsent(self, retrieve_only: bool | None = None) -> list[str]:
-        """The settings the next request leaves out: the answer's, when it only searches."""
+        """
+        The settings the next request leaves out: the answer's, when it only searches.
+        """
         if not self._retrieving(retrieve_only):
             return []
         sent = retrieve_settings(self.values, self.core.schema())
@@ -6744,9 +7272,11 @@ class BedrockChatView(_BaseView):
 
     def _preview(self, question: str | None = None, retrieve_only: bool | None = None
                  ) -> tuple[dict[str, Any], list[str]]:
-        """The request the next question would send (a Retrieve request when it only searches; the window's mode
+        """
+        The request the next question would send (a Retrieve request when it only searches; the window's mode
         when retrieve_only is None), and what Bedrock would refuse in it. Never raises: a knowledge base or model that
-        can't be resolved yet shows as a placeholder."""
+        can't be resolved yet shows as a placeholder.
+        """
         try:
             kb_id = self._kb_id()
         except (ValueError, ClientError, BotoCoreError):
@@ -6792,7 +7322,9 @@ class BedrockChatView(_BaseView):
         return notes
 
     def _setup_call(self) -> str:
-        """chat(...) with this knowledge base, model and settings, to open the same setup again."""
+        """
+        chat(...) with this knowledge base, model and settings, to open the same setup again.
+        """
         args = [self.core.kb_name(self.kb)] if self.kb else []
         kwargs: dict[str, Any] = {"model": self.model} if self.model else {}
         sources = self._sources_now()
@@ -6811,10 +7343,12 @@ class BedrockChatView(_BaseView):
         return _call("chat", *args, **kwargs)
 
     def _apply_request(self, text: str) -> list[str]:
-        """Takes a request edited by hand: its knowledge base, model, session and settings become the chat's. A
+        """
+        Takes a request edited by hand: its knowledge base, model, session and settings become the chat's. A
         Retrieve request turns Retrieve only on (a RetrieveAndGenerate one turns it off) and leaves the answer's
         settings, which it has no place for, as they are. Raises a ValueError, changing nothing, if Bedrock would
-        refuse it or the chat can't send it."""
+        refuse it or the chat can't send it.
+        """
         params = _loads(text, "The request")
         schema = self.core.schema()
         if not isinstance(params, dict):
@@ -6867,16 +7401,20 @@ class BedrockChatView(_BaseView):
         return changes or ["nothing changed"]
 
     def _model_from_arn(self, arn: str) -> str:
-        """A model's ARN -> the ID the model picker shows, when it's one of the listed models."""
+        """
+        A model's ARN -> the ID the model picker shows, when it's one of the listed models.
+        """
         for m in self.core._models or []:
             if arn in (m.arn, m.invoke_id, m.id):
                 return m.invoke_id
         return arn
 
     def _search_blocks(self, a: Answer, number: int, *, full: bool = False) -> list[Any]:
-        """A retrieve-only search: title, cards, findings and every passage found, best first, with its score and the
+        """
+        A retrieve-only search: title, cards, findings and every passage found, best first, with its score and the
         [n] the answer to the same question cites it as; full=True shows each passage whole, with the request, the
-        response and the call in Python."""
+        response and the call in Python.
+        """
         kb = a.kb_name or a.kb_id
         only = "".join([f" · only {describe_sources(a.data_sources)}" if a.data_sources else "",
                         f" · only {describe_files(a.files)}" if a.files else ""])
@@ -6939,8 +7477,10 @@ class BedrockChatView(_BaseView):
         return blocks
 
     def _answer_blocks(self, a: Answer, number: int, *, full: bool = False) -> list[Any]:
-        """Title, cards, the answer, findings and sources; full=True adds every passage in full, the request and the
-        response."""
+        """
+        Title, cards, the answer, findings and sources; full=True adds every passage in full, the request and the
+        response.
+        """
         if a.retrieve_only:
             return self._search_blocks(a, number, full=full)
         kb = a.kb_name or a.kb_id
@@ -6997,7 +7537,9 @@ class BedrockChatView(_BaseView):
         return blocks
 
     def _next_set(self) -> str:
-        """A set() call worth trying next: a common setting that isn't set yet, with its starting value."""
+        """
+        A set() call worth trying next: a common setting that isn't set yet, with its starting value.
+        """
         fields = self.core.schema().fields
         for key in _QUICK:
             if key in fields and key not in self.values and fields[key].default is not None and key != "prompt":
@@ -7012,8 +7554,10 @@ class BedrockChatView(_BaseView):
     # ------------------------------------------------------ test runs and code
 
     def _prepare(self, questions: Any, retrieve_only: bool, limit: Any = BATCH_LIMIT, label: Any = None) -> Batch:
-        """A test run of these questions with this setup (knowledge base, model, settings, data source and files), ready
-        to send and kept in self.batches. The questions become the Test tab's list."""
+        """
+        A test run of these questions with this setup (knowledge base, model, settings, data source and files), ready
+        to send and kept in self.batches. The questions become the Test tab's list.
+        """
         cases = question_list(questions)
         kb_id = self._kb_id()
         batch = self.core._prepare_batch(kb_id, cases, self.values, model=self.model, data_source=self._sources(kb_id),
@@ -7026,9 +7570,11 @@ class BedrockChatView(_BaseView):
     def _prepare_sweep(self, questions: Any, grid: dict[str, Any] | None, *, setups: Any = None,
                        retrieve_only: bool, limit: Any = BATCH_LIMIT, max_setups: Any = SWEEP_LIMIT,
                        label: Any = None) -> Sweep:
-        """A sweep of these questions over every combination in `grid` (and `setups`), each starting from this setup,
+        """
+        A sweep of these questions over every combination in `grid` (and `setups`), each starting from this setup,
         ready to send, and not kept yet (_keep() does that). A ValueError says what's wrong before anything is
-        sent."""
+        sent.
+        """
         cap = None if max_setups is None else _as_int(max_setups, "max_setups", hint=", or None for no limit")
         combos = sweep_setups(grid, setups, limit=cap or None)
         cases = question_list(questions)
@@ -7044,7 +7590,9 @@ class BedrockChatView(_BaseView):
         return sweep_estimate(sweep, model_prices=self.core.model_prices, prices=self.core.prices)
 
     def _too_costly(self, sweep: Sweep, cost: float | None, max_cost: Any) -> str:
-        """What a sweep estimated over max_cost USD asks, and costs ('' when it isn't over)."""
+        """
+        What a sweep estimated over max_cost USD asks, and costs ('' when it isn't over).
+        """
         if max_cost is None or cost is None or cost <= float(max_cost):
             return ""
         calls = sum(1 for b in sweep.batches for i in b.items if i.request)
@@ -7053,11 +7601,15 @@ class BedrockChatView(_BaseView):
                 f"{human_money(cost)} (estimate, {self._price_basis(models=not sweep.retrieve_only)})")
 
     def _run_number(self, batch: Batch) -> int:
-        """A run's number, as the reports show it and results(), use_run() and compare_runs() take it: from 1."""
+        """
+        A run's number, as the reports show it and results(), use_run() and compare_runs() take it: from 1.
+        """
         return next((k for k, b in enumerate(self.batches, 1) if b is batch), len(self.batches))
 
     def _run(self, run: Any) -> Batch:
-        """The test run `run` names: its number (1 the first, -1 the last) or the Batch; a _Hint says what there is."""
+        """
+        The test run `run` names: its number (1 the first, -1 the last) or the Batch; a _Hint says what there is.
+        """
         if isinstance(run, Batch):
             return run
         if not self.batches:
@@ -7074,27 +7626,35 @@ class BedrockChatView(_BaseView):
         return self.batches[number - 1 if number > 0 else number]
 
     def _sweep_number(self, batch: Batch) -> int:
-        """Which sweep a run was part of, counted from 1 in the order they ran (0: none)."""
+        """
+        Which sweep a run was part of, counted from 1 in the order they ran (0: none).
+        """
         ids = list(dict.fromkeys(b.sweep for b in self.batches if b.sweep))
         return ids.index(batch.sweep) + 1 if batch.sweep in ids else 0
 
     def _run_name(self, batch: Batch) -> str:
-        """'run 7', 'run 7 (baseline)', 'run 7 (sweep 2: n=10 · search_type=HYBRID)'."""
+        """
+        'run 7', 'run 7 (baseline)', 'run 7 (sweep 2: n=10 · search_type=HYBRID)'.
+        """
         name = f"run {self._run_number(batch)}"
         if batch.sweep:
             return f"{name} (sweep {self._sweep_number(batch)}: {batch.label})" if batch.label else name
         return f"{name} ({batch.label})" if batch.label else name
 
     def _family(self, batch: Batch) -> list[Batch]:
-        """The runs asked the same way (answers, or searches) with the same questions as this one, in order."""
+        """
+        The runs asked the same way (answers, or searches) with the same questions as this one, in order.
+        """
         keys = {_key(i.question) for i in batch.items}
         return [b for b in self.batches if b.retrieve_only == batch.retrieve_only
                 and {_key(i.question) for i in b.items} == keys]
 
     def _before(self, batch: Batch) -> Batch | None:
-        """The run to compare this one with: the last one before it that asked some of the same questions the same way
+        """
+        The run to compare this one with: the last one before it that asked some of the same questions the same way
         (answers, or searches), apart from the rest of its own sweep. When that was a sweep, its setup that's the same
-        as this run's, else its best."""
+        as this run's, else its best.
+        """
         keys = {_key(i.question) for i in batch.items}
         at = next((k for k, b in enumerate(self.batches) if b is batch), len(self.batches))
         for earlier in reversed(self.batches[:at]):
@@ -7110,8 +7670,10 @@ class BedrockChatView(_BaseView):
         return None
 
     def _setup_now(self, retrieve_only: bool) -> str | None:
-        """The setup questions are asked with now, as _setup_key(run_setup()) gives a run's, to tell which run that is;
-        None when it can't be told (no knowledge base picked, or a model that can't be resolved)."""
+        """
+        The setup questions are asked with now, as _setup_key(run_setup()) gives a run's, to tell which run that is;
+        None when it can't be told (no knowledge base picked, or a model that can't be resolved).
+        """
         try:
             kb_id = self._kb_id()
             model = "" if retrieve_only else _model_id(self.core.resolve_model(self.model)[1])
@@ -7123,14 +7685,18 @@ class BedrockChatView(_BaseView):
         return _setup_key(run_setup(now))
 
     def _now_in(self, batches: list[Batch]) -> Batch | None:
-        """The run among these whose setup is the one in use now (the newest, if several)."""
+        """
+        The run among these whose setup is the one in use now (the newest, if several).
+        """
         if not batches:
             return None
         now = self._setup_now(batches[0].retrieve_only)
         return next((b for b in reversed(batches) if _setup_key(run_setup(b)) == now), None) if now else None
 
     def _saved_ids(self, path: Path) -> set[str]:
-        """The IDs of the runs already in a file save_runs() writes, read once per file."""
+        """
+        The IDs of the runs already in a file save_runs() writes, read once per file.
+        """
         key = str(path.resolve())
         if key not in self._in_file:
             ids: set[str] = set()
@@ -7147,8 +7713,10 @@ class BedrockChatView(_BaseView):
         return self._in_file[key]
 
     def _append_runs(self, path: Path, batches: list[Batch]) -> int:
-        """Adds the runs that aren't in the file yet to its end, one JSON line each -> how many. Nothing in it is
-        changed. An OSError says why it couldn't be written."""
+        """
+        Adds the runs that aren't in the file yet to its end, one JSON line each -> how many. Nothing in it is
+        changed. An OSError says why it couldn't be written.
+        """
         saved = self._saved_ids(path)
         new = [b for b in batches if b.id and b.id not in saved]
         if new:
@@ -7159,12 +7727,16 @@ class BedrockChatView(_BaseView):
         return len(new)
 
     def _unsaved(self, batches: Iterable[Batch]) -> list[Batch]:
-        """The runs that aren't in a file yet (saved, logged as they finished, or loaded from one)."""
+        """
+        The runs that aren't in a file yet (saved, logged as they finished, or loaded from one).
+        """
         kept = set().union(*self._in_file.values()) if self._in_file else set()
         return [b for b in batches if b.id not in kept]
 
     def _memory_findings(self, batches: list[Batch]) -> list[tuple[str, str]]:
-        """A note when some of these runs would be lost with the kernel: what keeps them."""
+        """
+        A note when some of these runs would be lost with the kernel: what keeps them.
+        """
         unsaved = self._unsaved(batches)
         if not unsaved:
             return []
@@ -7176,7 +7748,9 @@ class BedrockChatView(_BaseView):
                          f"{self.log or RUNS_FILE} (and every later one), and load_runs() reads them back.")]
 
     def _saved_text(self) -> str:
-        """Where the runs are kept: the log file, else the file they were loaded from, and how many aren't."""
+        """
+        Where the runs are kept: the log file, else the file they were loaded from, and how many aren't.
+        """
         files = [Path(key).name for key, ids in self._in_file.items() if any(b.id in ids for b in self.batches)]
         where = self.log or ", ".join(files)
         unsaved = len(self._unsaved(self.batches))
@@ -7185,8 +7759,10 @@ class BedrockChatView(_BaseView):
         return f"{where} ({unsaved:,} not yet)" if unsaved else where
 
     def _log_runs(self, batches: list[Batch]) -> list[_Note]:
-        """Adds finished runs to the file log= names (save_runs() sets it): [] when it worked or there's no log, else
-        a note saying why it didn't."""
+        """
+        Adds finished runs to the file log= names (save_runs() sets it): [] when it worked or there's no log, else
+        a note saying why it didn't.
+        """
         if not self.log:
             return []
         try:
@@ -7197,16 +7773,22 @@ class BedrockChatView(_BaseView):
         return []
 
     def _item_error(self, item: BatchItem) -> str:
-        """Why a test question failed, with what to do about it."""
+        """
+        Why a test question failed, with what to do about it.
+        """
         return f"{item.error_code}: {self._explain(item.error_code, item.error)}" if item.error_code else item.error
 
     def _result_rows(self, batch: Batch) -> list[_ResultRow]:
-        """Each question of a run with how it did, and how that changed since the run before it."""
+        """
+        Each question of a run with how it did, and how that changed since the run before it.
+        """
         old = self._old_items(batch)
         return [self._result_row(n, item, old) for n, item in enumerate(batch.items, 1)]
 
     def _old_items(self, batch: Batch) -> dict[str, BatchItem]:
-        """The run before this one's questions that came back, by question."""
+        """
+        The run before this one's questions that came back, by question.
+        """
         before = self._before(batch)
         return {_key(i.question): i for i in before.items if i.answer is not None or i.error_code} if before else {}
 
@@ -7229,8 +7811,10 @@ class BedrockChatView(_BaseView):
         return text if text.startswith("<") else "~" + text
 
     def _batch_cards(self, batch: Batch) -> list[tuple[str, ...]]:
-        """The numbers that say how a run went: answered (or found), grounded, expected sources, failures, cost, time.
-        A card is coloured when a finding of the same report is about it."""
+        """
+        The numbers that say how a run went: answered (or found), grounded, expected sources, failures, cost, time.
+        A card is coloured when a finding of the same report is about it.
+        """
         items, asked = batch.items, batch.asked
         checked = [i for i in asked if _filled(i.expected)]
         hits = [i for i in checked if i.found is not None]
@@ -7261,8 +7845,10 @@ class BedrockChatView(_BaseView):
                                                        else [])
 
     def _batch_blocks(self, batch: Batch, notes: Iterable[_Note] = ()) -> list[Any]:
-        """A test run as a report: title, cards, findings across every question and since the run before, then each
-        question with how it did, opening to its answer."""
+        """
+        A test run as a report: title, cards, findings across every question and since the run before, then each
+        question with how it did, opening to its answer.
+        """
         kb = batch.kb_name or batch.kb_id
         narrowed = [f"only {describe_sources(batch.data_sources)}" if batch.data_sources else "",
                     f"only {describe_files(batch.files)}" if batch.files else ""]
@@ -7294,8 +7880,10 @@ class BedrockChatView(_BaseView):
         ]
 
     def _batch_steps(self, batch: Batch) -> list[tuple[str, str]]:
-        """What to run after a test run: the search behind the first question that didn't work, several settings at
-        once (or for a sweep's run, switching to it), and the same questions again."""
+        """
+        What to run after a test run: the search behind the first question that didn't work, several settings at
+        once (or for a sweep's run, switching to it), and the same questions again.
+        """
         steps: list[tuple[str, str]] = []
         weak = next((i for i in batch.asked if item_verdict(i)[1] == "warn"), None)
         if weak is not None and not batch.retrieve_only:
@@ -7314,7 +7902,9 @@ class BedrockChatView(_BaseView):
         return steps
 
     def _next_sweep(self, retrieve_only: bool = False) -> str:
-        """A sweep() call worth trying: the passages now and twice as many, with both search types."""
+        """
+        A sweep() call worth trying: the passages now and twice as many, with both search types.
+        """
         try:
             n = int(self.values.get("n") or 5)
         except (TypeError, ValueError):
@@ -7334,7 +7924,9 @@ class BedrockChatView(_BaseView):
         return text if text.startswith("<") else "~" + text
 
     def _ranked_by(self, batches: list[Batch]) -> str:
-        """How the runs are ranked, in words, for a report's subtitle."""
+        """
+        How the runs are ranked, in words, for a report's subtitle.
+        """
         checked = any(_filled(i.expected) for b in batches for i in b.items)
         if batches[0].retrieve_only:
             first = "expected sources found, then MRR, then searches that found passages" if checked else \
@@ -7346,9 +7938,11 @@ class BedrockChatView(_BaseView):
 
     def _compare_blocks(self, batches: list[Batch], *, sweep: Sweep | None = None, notes: Iterable[_Note] = (),
                         memory: bool = True) -> list[Any]:
-        """Test runs of the same questions side by side (a sweep's setups, or compare_runs()'s runs): cards, what to
+        """
+        Test runs of the same questions side by side (a sweep's setups, or compare_runs()'s runs): cards, what to
         do, the runs best first, then how each question did in each. memory=False leaves out the note on runs that
-        aren't saved (the window's Runs tab says it)."""
+        aren't saved (the window's Runs tab says it).
+        """
         ranked = rank_runs(batches)
         retrieve = batches[0].retrieve_only
         varied = varied_setups(batches)
@@ -7420,7 +8014,9 @@ class BedrockChatView(_BaseView):
 
     def _ranking_table(self, ranked: list[tuple[Batch, RunScore]], varied: dict[str, list[Any]],
                        now: Batch | None, sweep: bool = False) -> _Table:
-        """The runs best first: rank, run number, what differs between them, and how each did."""
+        """
+        The runs best first: rank, run number, what differs between them, and how each did.
+        """
         retrieve = ranked[0][0].retrieve_only
         checked = any(s.checked for _, s in ranked)
         headers = ["Rank", "Run", *varied]
@@ -7447,8 +8043,10 @@ class BedrockChatView(_BaseView):
         return _Table(headers, rows, title="Setups, best first" if sweep else "Runs, best first", max_rows=0)
 
     def _matrix_table(self, ranked: list[tuple[Batch, RunScore]]) -> _Table:
-        """How each question did with each setup: a column per run, in the ranking's order; the questions whose result
-        changes with the setup first."""
+        """
+        How each question did with each setup: a column per run, in the ranking's order; the questions whose result
+        changes with the setup first.
+        """
         items = [{_key(i.question): i for i in b.items} for b, _ in ranked]
         changes, same = [], []
         for question in dict.fromkeys(i.question for b, _ in ranked for i in b.items):
@@ -7467,7 +8065,9 @@ class BedrockChatView(_BaseView):
                       max_rows=0)
 
     def _families(self) -> list[list[Batch]]:
-        """The runs grouped by what they asked: the same questions, asked the same way (answers, or searches)."""
+        """
+        The runs grouped by what they asked: the same questions, asked the same way (answers, or searches).
+        """
         families: dict[str, list[Batch]] = {}
         for b in self.batches:
             key = _setup_key([b.retrieve_only, sorted({_key(i.question) for i in b.items})])
@@ -7475,7 +8075,9 @@ class BedrockChatView(_BaseView):
         return list(families.values())
 
     def _places(self) -> dict[int, tuple[int, int]]:
-        """id(run) -> (its rank, how many runs asked its questions), for the runs that have others to rank against."""
+        """
+        id(run) -> (its rank, how many runs asked its questions), for the runs that have others to rank against.
+        """
         place: dict[int, tuple[int, int]] = {}
         for family in self._families():
             if len(family) > 1:
@@ -7484,8 +8086,10 @@ class BedrockChatView(_BaseView):
         return place
 
     def _result_text(self, batch: Batch) -> tuple[str, str]:
-        """How a run did, short: ('5 of 6 answered · 81% grounded', '4 of 6 cited'), the second '-' when nothing was
-        expected."""
+        """
+        How a run did, short: ('5 of 6 answered · 81% grounded', '4 of 6 cited'), the second '-' when nothing was
+        expected.
+        """
         s = run_score(batch)
         if batch.retrieve_only:
             result = f"{s.answered} of {s.questions} found passages" + (f" · MRR {s.mrr:.2f}" if s.mrr is not None
@@ -7497,9 +8101,11 @@ class BedrockChatView(_BaseView):
         return result, expected
 
     def _runs_blocks(self, memory: bool = True) -> list[Any]:
-        """Every test run, newest first, each ranked against the others of the same questions, under which setup of
+        """
+        Every test run, newest first, each ranked against the others of the same questions, under which setup of
         the last list to use (compare_runs() says the rest). memory=False leaves out the note on runs that aren't
-        saved."""
+        saved.
+        """
         families = self._families()
         place = self._places()
         latest = self.batches[-1]
@@ -7549,7 +8155,9 @@ class BedrockChatView(_BaseView):
         return blocks
 
     def _setup_text(self, batch: Batch) -> str:
-        """A run's whole setup on one line: 'Claude Haiku 4.5 · only faq · n=10, search_type=HYBRID'."""
+        """
+        A run's whole setup on one line: 'Claude Haiku 4.5 · only faq · n=10, search_type=HYBRID'.
+        """
         parts = ["Retrieve only" if batch.retrieve_only else self._model_label(batch.model)]
         if batch.data_sources:
             parts.append(f"only {describe_sources(batch.data_sources)}")
@@ -7559,7 +8167,9 @@ class BedrockChatView(_BaseView):
         return " · ".join(parts)
 
     def _code_questions(self, questions: Any = None) -> list[str]:
-        """The questions the code asks: these, else the test questions, else this conversation's (each once)."""
+        """
+        The questions the code asks: these, else the test questions, else this conversation's (each once).
+        """
         if questions is not None:
             return [q for q, _ in question_list(questions)]
         if self.questions:
@@ -7567,7 +8177,9 @@ class BedrockChatView(_BaseView):
         return list(dict.fromkeys(a.question for a in self.answers))[-5:]
 
     def _about(self, retrieve_only: bool) -> str:
-        """The comment over the code's CONFIG: the setup, in words."""
+        """
+        The comment over the code's CONFIG: the setup, in words.
+        """
         kb_id = self.kb or ""
         name = self.core.kb_name(kb_id) if kb_id else ""
         parts = [f"Knowledge base {name} ({kb_id})" if name and name != kb_id else
@@ -7583,8 +8195,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def app(self) -> None:
-        """The chat window: pick the knowledge base and model, ask questions (follow-ups keep the conversation), and
-        change what's sent in the Settings tab, with the exact request and response as JSON."""
+        """
+        The chat window: pick the knowledge base and model, ask questions (follow-ups keep the conversation), and
+        change what's sent in the Settings tab, with the exact request and response as JSON.
+        """
         self._shown_in = _cell_number()
         if not self.use_html:
             raise _Hint(
@@ -7599,9 +8213,11 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def ask(self, question: str) -> None:
-        """The answer to a question, with [1][2] citations, grounded %, sources, model, estimated cost and time.
+        """
+        The answer to a question, with [1][2] citations, grounded %, sources, model, estimated cost and time.
         Each question follows up on the ones before it (new_chat() starts over); an open window shows it too.
-        retrieve('...') shows only the search behind it."""
+        retrieve('...') shows only the search behind it.
+        """
         with self._progress("Asking", unit="answers"):
             a = self._turn(question)
         if self._app is not None:
@@ -7610,10 +8226,12 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def retrieve(self, question: str) -> None:
-        """Only the search behind an answer: every passage a question retrieves, best first, with its score, and no
+        """
+        Only the search behind an answer: every passage a question retrieves, best first, with its score, and no
         answer (Retrieve, with the same settings, data source and files, without the model). Asked both ways, the
         same question shows which passages the answer cites, and whether a poor answer comes from the search or
-        from the model. It joins the conversation, and an open window shows it too."""
+        from the model. It joins the conversation, and an open window shows it too.
+        """
         with self._progress("Searching", unit="searches"):
             a = self._turn(question, retrieve_only=True)
         if self._app is not None:
@@ -7622,7 +8240,9 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def new_chat(self) -> None:
-        """Forgets the conversation: the next question starts a new Bedrock session. The settings stay."""
+        """
+        Forgets the conversation: the next question starts a new Bedrock session. The settings stay.
+        """
         count = len(self.answers)
         self._reset()
         self._changed("New conversation: the next question starts a new Bedrock session.")
@@ -7631,7 +8251,9 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def transcript(self) -> None:
-        """The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't)."""
+        """
+        The conversation so far, as a report that stays in the notebook when it's saved (the window doesn't).
+        """
         if not self.answers:
             raise _Hint("No questions yet: ask('...') or app() first.")
         a0 = self.answers[0]
@@ -7656,8 +8278,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def last(self) -> None:
-        """The last answer in full: every cited passage, the exact request sent and the response, and the same call in
-        Python. After a retrieve-only search, every passage it found, in full."""
+        """
+        The last answer in full: every cited passage, the exact request sent and the response, and the same call in
+        Python. After a retrieve-only search, every passage it found, in full.
+        """
         if not self.answers:
             raise _Hint("No questions yet: ask('...') or app() first.")
         self._show(self._answer_blocks(self.answers[-1], len(self.answers), full=True))
@@ -7667,7 +8291,8 @@ class BedrockChatView(_BaseView):
     @_friendly_errors
     def ask_all(self, questions: Any = None, *, retrieve_only: bool | None = None, workers: int = BATCH_WORKERS,
                 limit: int | None = BATCH_LIMIT, label: str | None = None) -> None:
-        """Asks a list of test questions with these settings and shows how each did: answered or "unable to assist",
+        """
+        Asks a list of test questions with these settings and shows how each did: answered or "unable to assist",
         grounded share, sources cited, time and estimated cost, with findings across them all and what changed since
         the last run. Each question is asked on its own, not as a follow-up.
 
@@ -7675,7 +8300,8 @@ class BedrockChatView(_BaseView):
         that file (a piece of its name, path or text). ask_all() with no questions asks the last list again: change a
         setting, run it, and the report says which questions did better or worse. retrieve_only=True only searches
         (default: the window's Answer / Retrieve only). workers questions are asked at a time, and up to limit of them
-        (None for all). label names the run in runs(). ui.batches[-1].to_df() has the answers as a table."""
+        (None for all). label names the run in runs(). ui.batches[-1].to_df() has the answers as a table.
+        """
         if questions is None:
             if not self.questions:
                 raise _Hint("Pass the questions to ask: ask_all(['How long do refunds take?', 'Can I return a digital "
@@ -7695,7 +8321,8 @@ class BedrockChatView(_BaseView):
     def sweep(self, questions: Any = None, *, setups: Any = None, retrieve_only: bool | None = None,
               workers: int = BATCH_WORKERS, limit: int | None = BATCH_LIMIT, max_setups: int | None = SWEEP_LIMIT,
               max_cost: float | None = SWEEP_MAX_COST, label: str | None = None, **grid: Any) -> None:
-        """Asks the test questions with every combination of the settings, models, data sources or files you list, and
+        """
+        Asks the test questions with every combination of the settings, models, data sources or files you list, and
         ranks the setups best first (expected sources cited, answers, grounded share, failures, time and estimated
         cost), with which setup to use, what each setting changed, and how each question did with each setup.
 
@@ -7706,7 +8333,8 @@ class BedrockChatView(_BaseView):
         retrieve_only=True only searches, for the embedding's cost alone: a cheap way to pick the search settings
         before trying models. Nothing is sent when it's more than max_setups setups or estimated over max_cost USD
         (raise them, or None for no limit). Each setup becomes a test run: use_run() switches to the best,
-        results(n) shows one's answers, and runs() lists them all."""
+        results(n) shows one's answers, and runs() lists them all.
+        """
         if questions is None:
             if not self.questions:
                 raise _Hint("Pass the questions to ask: sweep(['How long do refunds take? | refund-policy.pdf', 'Can I "
@@ -7737,22 +8365,28 @@ class BedrockChatView(_BaseView):
         self._show(self._compare_blocks(sweep.batches, sweep=sweep, notes=notes))
 
     def _keep(self, sweep: Sweep, questions: Any) -> None:
-        """A sweep about to be sent: its runs join self.batches, and its questions become the Test tab's list."""
+        """
+        A sweep about to be sent: its runs join self.batches, and its questions become the Test tab's list.
+        """
         self.questions = question_list(questions)
         self.batches += sweep.batches
         self.sweeps.append(sweep)
 
     @_friendly_errors
     def results(self, run: int = -1) -> None:
-        """A test run again, as a report that stays in the notebook when it's saved (the window doesn't): the last
-        run, or results(1) for the first, as runs() numbers them. Nothing is asked again."""
+        """
+        A test run again, as a report that stays in the notebook when it's saved (the window doesn't): the last
+        run, or results(1) for the first, as runs() numbers them. Nothing is asked again.
+        """
         self._show(self._batch_blocks(self._run(run)))
 
     @_friendly_errors
     def runs(self) -> None:
-        """Every test run so far, newest first: when it ran, its setup, and how it did (answered or found, grounded,
+        """
+        Every test run so far, newest first: when it ran, its setup, and how it did (answered or found, grounded,
         expected sources, failures, estimated cost), ranked against the other runs of the same questions, with the
-        best setup to switch to. load_runs() brings back runs saved before a restart."""
+        best setup to switch to. load_runs() brings back runs saved before a restart.
+        """
         if not self.batches:
             raise _Hint("No test runs yet: ask_all(['a question', 'another']), sweep(n=[5, 10]), or the window's "
                         "Test tab. load_runs() reads runs saved to a file before.")
@@ -7760,9 +8394,11 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def compare_runs(self, *runs: Any) -> None:
-        """Test runs of the same questions side by side, best first: how each did, how each question did in each, which
+        """
+        Test runs of the same questions side by side, best first: how each did, how each question did in each, which
         setup to use and what the differences between them changed. compare_runs(2, 5) compares runs 2 and 5 (as
-        runs() numbers them); compare_runs() every run of the last run's questions."""
+        runs() numbers them); compare_runs() every run of the last run's questions.
+        """
         if not self.batches:
             raise _Hint("No test runs yet: ask_all(['a question', 'another']), then change a setting and ask_all() "
                         "again, or sweep(n=[5, 10]).")
@@ -7791,9 +8427,11 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def use_run(self, run: Any = None) -> None:
-        """Switches to a test run's setup, so the chat, ask_all() and the window use it from now on: its settings,
+        """
+        Switches to a test run's setup, so the chat, ask_all() and the window use it from now on: its settings,
         model, data source and files (and knowledge base). use_run() picks the best run of the last run's questions,
-        use_run(7) run 7, as runs() numbers them. A search-only run sets the search settings and keeps the rest."""
+        use_run(7) run 7, as runs() numbers them. A search-only run sets the search settings and keeps the rest.
+        """
         if run is None:
             if not self.batches:
                 raise _Hint("No test runs yet: sweep(n=[5, 10]) or ask_all([...]) first, then use_run() switches to the "
@@ -7807,7 +8445,9 @@ class BedrockChatView(_BaseView):
                            ("code()", "this setup as Python, JSON or an AWS CLI command")])])
 
     def _switch_to(self, batch: Batch) -> str:
-        """Makes a run's setup the one in use (use_run() and the window's Use this setup) -> what changed, in words."""
+        """
+        Makes a run's setup the one in use (use_run() and the window's Use this setup) -> what changed, in words.
+        """
         schema = self.core.schema()
         if batch.retrieve_only:  # its search settings; the answer's stay as they are
             searched = retrieve_settings(self.values, schema)
@@ -7845,17 +8485,21 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def save_runs(self, path: str | None = None) -> None:
-        """Saves every test run to a file, so they outlast a kernel restart and can be shared: a line per run (JSON
+        """
+        Saves every test run to a file, so they outlast a kernel restart and can be shared: a line per run (JSON
         Lines) with its setup, and each question's answer, sources, cost and request. Runs already in the file aren't
         written again, and nothing in it is changed. Every later run is added as it finishes (ui.log holds the file;
         None stops that). load_runs() reads them back, and pandas.read_json(path, lines=True) reads the file too.
-        path: default kb-test-runs.jsonl, beside the notebook."""
+        path: default kb-test-runs.jsonl, beside the notebook.
+        """
         note = self._save(path)
         steps = [(_call("load_runs", self.log), "read them back after a restart")] if note.level == "ok" else []
         self._show([note, _Next(steps + [("runs()", "every test run, ranked")])])
 
     def _save(self, path: Any = None) -> _Note:
-        """save_runs() and the window's Save: the runs added to the file, and from then on every run -> what happened."""
+        """
+        save_runs() and the window's Save: the runs added to the file, and from then on every run -> what happened.
+        """
         target = Path(str(path or self.log or RUNS_FILE).strip())
         if target.is_dir():
             raise _Hint(f"{target} is a folder: pass a file in it, like save_runs('{target / RUNS_FILE}').")
@@ -7880,15 +8524,19 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def load_runs(self, path: str | None = None) -> None:
-        """Reads test runs saved with save_runs() (or log=) back in, after a kernel restart or from someone else's
+        """
+        Reads test runs saved with save_runs() (or log=) back in, after a kernel restart or from someone else's
         file, and lists them as runs() does: results(), compare_runs() and use_run() work on them like on new runs, and
-        the window's Test tab shows the last one. Runs already here are skipped. path: default kb-test-runs.jsonl."""
+        the window's Test tab shows the last one. Runs already here are skipped. path: default kb-test-runs.jsonl.
+        """
         notes = self._load(path)
         self._show(notes + (self._runs_blocks() if self.batches else []))
 
     def _load(self, path: Any = None) -> list[_Note]:
-        """load_runs() and the window's Load: the runs in the file that aren't here yet, added in the order they ran
-        -> what happened."""
+        """
+        load_runs() and the window's Load: the runs in the file that aren't here yet, added in the order they ran
+        -> what happened.
+        """
         target = Path(str(path or self.log or RUNS_FILE).strip())
         if not target.is_file():
             raise _Hint(f"There's no file {target} in {target.resolve().parent}: save_runs() writes one, or pass the "
@@ -7938,8 +8586,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def settings(self) -> None:
-        """What's sent with every question, each setting in plain English with where it goes in the request, and
-        what Bedrock would refuse."""
+        """
+        What's sent with every question, each setting in plain English with where it goes in the request, and
+        what Bedrock would refuse.
+        """
         _, problems = self._preview()
         kb = self.core.kb_name(self.kb) if self.kb else "(not picked yet)"
         model = self._model_label(self.model or "")
@@ -7974,8 +8624,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def set(self, name: str | None = None, value: Any = None, **values: Any) -> None:
-        """Changes what's sent with every question: set(temperature=0.2, n=8), or set('a.field.path', value) for any
-        field fields() lists. None removes a setting; an open window follows."""
+        """
+        Changes what's sent with every question: set(temperature=0.2, n=8), or set('a.field.path', value) for any
+        field fields() lists. None removes a setting; an open window follows.
+        """
         if name is not None:
             if value is None:
                 raise _Hint(f"Pass a value too: set({name!r}, ...). unset({name!r}) stops sending it.")
@@ -7997,7 +8649,9 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def unset(self, *names: str) -> None:
-        """Stops sending settings, so Bedrock uses its defaults for them: unset('temperature', 'top_p')."""
+        """
+        Stops sending settings, so Bedrock uses its defaults for them: unset('temperature', 'top_p').
+        """
         if not names:
             raise _Hint(f"Name the settings to stop sending: unset('temperature'). Set now: "
                         f"{', '.join(self.values) or 'nothing'}.")
@@ -8009,8 +8663,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def fields(self, match: str | None = None) -> None:
-        """Every setting RetrieveAndGenerate takes, read from this boto3: the name set() takes, what it takes, what
-        it does and where it goes in the request. match= keeps those whose name or description mentions it."""
+        """
+        Every setting RetrieveAndGenerate takes, read from this boto3: the name set() takes, what it takes, what
+        it does and where it goes in the request. match= keeps those whose name or description mentions it.
+        """
         schema = self.core.schema()
         wanted = str(match).lower() if match else ""
         items = [f for f in schema.fields.values()
@@ -8036,9 +8692,11 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def request(self, question: str | None = None, retrieve_only: bool | None = None) -> None:
-        """The exact RetrieveAndGenerate request your next question sends, as highlighted JSON, and the same call in
+        """
+        The exact RetrieveAndGenerate request your next question sends, as highlighted JSON, and the same call in
         Python. Nothing is sent. retrieve_only=True shows retrieve()'s Retrieve request (the search only), False the
-        answer's; by default, the one the window's Send makes."""
+        answer's; by default, the one the window's Send makes.
+        """
         retrieve = self._retrieving(retrieve_only)
         params, problems = self._preview(_question_text(question) if question is not None else None, retrieve)
         kb = self.core.kb_name(self.kb) if self.kb else "(not picked yet)"
@@ -8069,11 +8727,13 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def code(self, questions: Any = None, retrieve_only: bool | None = None) -> None:
-        """This setup as code to copy and run anywhere: a Python script (boto3 only) that asks your test questions and
+        """
+        This setup as code to copy and run anywhere: a Python script (boto3 only) that asks your test questions and
         prints each answer with the files it cites, the config as JSON (the request without the question), and the
         AWS CLI command for one question. It follows the knowledge base, model, data source, files and settings.
         Nothing is sent. questions: the ones the script asks (default: the test questions, else this conversation's);
-        retrieve_only=True gives the search-only (Retrieve) setup."""
+        retrieve_only=True gives the search-only (Retrieve) setup.
+        """
         retrieve = self._retrieving(retrieve_only)
         asked = self._code_questions(questions)
         params, problems = self._preview(asked[0] if asked else None, retrieve)
@@ -8117,9 +8777,11 @@ class BedrockChatView(_BaseView):
     @_friendly_errors
     def use(self, kb: str | None = None, model: str | None = None, data_source: Any = None,
             files: Any = None) -> None:
-        """Switches the knowledge base, the model, or what questions search: data_source= (one of the knowledge base's
+        """
+        Switches the knowledge base, the model, or what questions search: data_source= (one of the knowledge base's
         data sources, a name or ID, or a list) and files= (file names, paths or s3:// paths, which files() lists), or
-        'all' for every one. Another knowledge base starts a new conversation; the rest keep it."""
+        'all' for every one. Another knowledge base starts a new conversation; the rest keep it.
+        """
         if kb is None and model is None and data_source is None and files is None:
             raise _Hint("Pass kb=, model=, data_source= or files=: use('support-docs'), use(model='sonnet'), "
                         "use(data_source='faq'), use(files=['refund-policy.pdf']). kbs(), models() and files() list "
@@ -8170,8 +8832,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def files(self, match: str | None = None) -> None:
-        """The knowledge base's files, to point questions at: name, folder, data source, whether it's indexed and when
-        it changed, with the ones questions search marked. match= keeps those whose path contains it."""
+        """
+        The knowledge base's files, to point questions at: name, folder, data source, whether it's indexed and when
+        it changed, with the ones questions search marked. match= keeps those whose path contains it.
+        """
         kb_id = self._kb_id()
         with self._progress("Listing files", unit="files"):
             listing = self.core.files(kb_id)
@@ -8238,7 +8902,8 @@ class BedrockChatView(_BaseView):
     @_friendly_errors
     def save_file_list(self, match: str | None = None, path: str | None = None, *, link: str = "s3",
                        expires: int = 3600) -> None:
-        """Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
+        """
+        Saves the knowledge base's files as a text file, one per line, with a link that downloads it to your
         computer: each file's s3:// path, sorted by path, ready for a script, aws s3 cp or a spreadsheet.
 
         match= keeps the files whose path contains it, as files() does. link='https' writes a link that opens each
@@ -8246,7 +8911,8 @@ class BedrockChatView(_BaseView):
         seconds, an hour unless you say, and anyone holding one can open its file until then), and link='key' each
         one's path in the bucket. path: default <knowledge base>-files.txt beside the notebook (a folder puts it
         there); a file of that name is replaced. Only that file is written: nothing in AWS changes. The window's Files
-        list has the same as its ⬇ List button."""
+        list has the same as its ⬇ List button.
+        """
         kb_id = self._kb_id()
         link = parse_list_link(link)
         if link == "https":
@@ -8286,9 +8952,11 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def kbs(self, match: str | None = None) -> None:
-        """Every knowledge base in the region you can chat with: name, ID, status, description and when it last
+        """
+        Every knowledge base in the region you can chat with: name, ID, status, description and when it last
         changed. match= keeps those whose name, ID, ARN or description holds it, best match first: kbs('support'),
-        kbs('K7QJ')."""
+        kbs('K7QJ').
+        """
         every = sorted(self.core.knowledge_bases(refresh=True), key=lambda k: k.name.lower())
         kbs = match_kbs(every, match) if match else every
         tones = {"ACTIVE": "ok", "FAILED": "bad", "DELETE_UNSUCCESSFUL": "bad"}
@@ -8321,8 +8989,10 @@ class BedrockChatView(_BaseView):
 
     @_friendly_errors
     def models(self, match: str | None = None) -> None:
-        """Models you can chat with here: the ID to pass as model=, provider, on demand or through an inference
-        profile, and $ per 1M tokens in and out. match= keeps those whose ID, name or provider contains it."""
+        """
+        Models you can chat with here: the ID to pass as model=, provider, on demand or through an inference
+        profile, and $ per 1M tokens in and out. match= keeps those whose ID, name or provider contains it.
+        """
         with self._progress("Listing models", unit="models"):
             models = [m for m in self.core.models(match) if m.via != "provisioned only"]
         try:
@@ -8369,7 +9039,8 @@ def chat(
     log: str | None = None,
     **values: Any,
 ) -> BedrockChatView:
-    """Opens the chat window on a knowledge base and returns the view behind it.
+    """
+    Opens the chat window on a knowledge base and returns the view behind it.
 
         chat()                                        # pick the knowledge base and the model in the window
         chat("support-docs", model="sonnet")          # by name, ID or ARN; model by ID, profile or short name
@@ -8388,7 +9059,8 @@ def chat(
     with a list of test questions to ask with the window's settings (a list, or text with one per line). log= names a
     file every test run is added to as it finishes, so runs outlast a kernel restart (load_runs() reads them back).
     The window fills the browser's height; height= sets the conversation's instead (800 pixels, or CSS such as
-    '70vh')."""
+    '70vh').
+    """
     view = BedrockChatView(BedrockChatAnalyzer(region=region, profile=profile), kb=kb, model=model, settings={},
                            stream=stream, data_source=data_source, files=files, retrieve_only=retrieve_only,
                            height=height, log=log)

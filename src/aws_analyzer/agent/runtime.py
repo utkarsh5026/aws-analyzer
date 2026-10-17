@@ -1,6 +1,8 @@
-"""How a tool runs for the agent, whichever toolkit it comes from: the budget is checked first, the call is recorded
+"""
+How a tool runs for the agent, whichever toolkit it comes from: the budget is checked first, the call is recorded
 on the question, its errors become its result (a tool never raises into the agent loop), and the result is made
-JSON-ready, with the report's `_summary` and `_next` taken out before the model sees it."""
+JSON-ready, with the report's `_summary` and `_next` taken out before the model sees it.
+"""
 
 from __future__ import annotations
 
@@ -26,10 +28,12 @@ COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned
 
 def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
             current: Callable[[], _Run]) -> Callable[..., dict[str, Any]]:
-    """`fn` (one of `toolkit`'s tools) as the agent calls it: the budget of the question `current()` returns is
+    """
+    `fn` (one of `toolkit`'s tools) as the agent calls it: the budget of the question `current()` returns is
     checked first, the call recorded on it, its errors turned into its answer (a resource that isn't there into the
     toolkit's close names, a refused call into the permission it needed), and its result made JSON-ready. The
-    signature and docstring stay the tool's, which is how the model learns to call it."""
+    signature and docstring stay the tool's, which is how the model learns to call it.
+    """
 
     @functools.wraps(fn)
     def tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -87,7 +91,9 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
 
 
 def _defaults(fn: Callable[..., Any]) -> dict[str, Any]:
-    """A tool's parameters that have a default, and their defaults."""
+    """
+    A tool's parameters that have a default, and their defaults.
+    """
     try:
         params = inspect.signature(fn).parameters.values()
     except (TypeError, ValueError):
@@ -96,8 +102,10 @@ def _defaults(fn: Callable[..., Any]) -> dict[str, Any]:
 
 
 def _first_parameter(fn: Callable[..., Any]) -> str | None:
-    """The name of a tool's first parameter when it has no default ('function', 'location'): the report writes it
-    without its name, as the call reads in Python."""
+    """
+    The name of a tool's first parameter when it has no default ('function', 'location'): the report writes it
+    without its name, as the call reads in Python.
+    """
     try:
         params = list(inspect.signature(fn).parameters.values())
     except (TypeError, ValueError):

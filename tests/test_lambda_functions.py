@@ -808,7 +808,9 @@ APP_NAMES = list(APP) + ["requests/__init__.py", "requests-2.31.0.dist-info/RECO
 
 
 def outline(steps, depth=0):
-    """An outline as lines of text: each step's code and tags, a function it calls under it."""
+    """
+    An outline as lines of text: each step's code and tags, a function it calls under it.
+    """
     lines = []
     for step in steps:
         tags = ", ".join(text for _, text in step.notes)
@@ -1275,8 +1277,10 @@ def test_wiring_and_columns_render_as_html_and_text():
 
 
 def checked(client, handlers):
-    """Handlers for the Lambda reads moto doesn't have, with each request and answer checked against the service
-    model like a real client's."""
+    """
+    Handlers for the Lambda reads moto doesn't have, with each request and answer checked against the service
+    model like a real client's.
+    """
     model = client.meta.service_model
     operations = {xform_name(op): model.operation_model(op) for op in model.operation_names}
 
@@ -1294,7 +1298,9 @@ def checked(client, handlers):
 
 
 class Patched:
-    """A moto client, with some operations answered by functions instead."""
+    """
+    A moto client, with some operations answered by functions instead.
+    """
 
     def __init__(self, client, handlers):
         self._client, self._handlers = client, checked(client, handlers)
@@ -1304,9 +1310,11 @@ class Patched:
 
 
 def lambda_clients(provisioned=None, reserved=None, policies=None, runtime_updates="Auto", denied=(), **handlers):
-    """A function that makes a patched Lambda client per region: moto has no GetAccountSettings,
+    """
+    A function that makes a patched Lambda client per region: moto has no GetAccountSettings,
     ListProvisionedConcurrencyConfigs or GetRuntimeManagementConfig, leaves Concurrency out of GetFunction and
-    writes a function URL's auth type outside the policy's Condition."""
+    writes a function URL's auth type outside the policy's Condition.
+    """
     provisioned, reserved, policies = provisioned or {}, reserved or {}, policies or {}
 
     def make(region):
@@ -1382,9 +1390,11 @@ def put_logs(group, events, stream="2026/10/06/[$LATEST]abc", region=REGION):
 
 @pytest.fixture
 def seeded(role):
-    """etl-nightly: python3.9, 1 GB, 900 s timeout, environment variables with a password, an SQS queue and an S3
+    """
+    etl-nightly: python3.9, 1 GB, 900 s timeout, environment variables with a password, an SQS queue and an S3
     bucket that trigger it, CloudWatch numbers with errors and throttles, and a run in its logs. api-handler: anyone
-    may invoke it. eu-fn: nodejs18.x in eu-west-1."""
+    may invoke it. eu-fn: nodejs18.x in eu-west-1.
+    """
     lam = boto3.client("lambda", region_name=REGION)
     create("etl-nightly", role, Runtime="python3.9", MemorySize=1024, Timeout=900, Description="Nightly orders load",
            Environment={"Variables": {"DB_PASSWORD": "hunter2", "MODE": "prod"}}, Tags={"team": "ml"})
@@ -1692,7 +1702,9 @@ def test_code_map_reads_the_package(core):
 
 
 def seed_runs(now, group="/aws/lambda/etl-nightly", stream="2026/10/06/[$LATEST]def", count=4):
-    """count more runs of etl-nightly, a minute apart in a stream of their own; the second one logs an order ID."""
+    """
+    count more runs of etl-nightly, a minute apart in a stream of their own; the second one logs an order ID.
+    """
     events, ids = [], []
     for i in range(count):
         rid = f"{i:08x}-1111-4222-8333-444455556666"
@@ -2091,7 +2103,9 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
 
 
 def html_widgets(widget):
-    """Every widget in a window that shows HTML."""
+    """
+    Every widget in a window that shows HTML.
+    """
     found, todo = [], [widget]
     while todo:
         item = todo.pop()
@@ -2274,7 +2288,9 @@ NESTED = zipped({
 
 
 def tree_of(x):
-    """The lines the Code tab's tree shows, as text (search marks dropped)."""
+    """
+    The lines the Code tab's tree shows, as text (search marks dropped).
+    """
     return [plain(re.sub("</?mark>", "", row.face.value)) for row in x._code_rows[:len(x.files_box.children)]]
 
 

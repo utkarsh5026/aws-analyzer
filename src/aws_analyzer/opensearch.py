@@ -321,7 +321,9 @@ _EMBEDDING_ALIASES = {
 }
 
 def _int(value: Any) -> int | None:
-    """'1,024' / '1024' / 1024.0 -> 1024; None for missing or unreadable values (the _cat API answers in strings)."""
+    """
+    '1,024' / '1024' / 1024.0 -> 1024; None for missing or unreadable values (the _cat API answers in strings).
+    """
     try:
         return None if value in (None, "") else int(float(str(value).replace(",", "")))
     except ValueError:
@@ -332,7 +334,9 @@ _CAT_SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?b)?\s*$", re.IGNORECA
 
 
 def _bytes(value: Any) -> int | None:
-    """A size from the _cat API -> bytes: '123456' (bytes=b) or OpenSearch's own '1.2gb'. None when missing."""
+    """
+    A size from the _cat API -> bytes: '123456' (bytes=b) or OpenSearch's own '1.2gb'. None when missing.
+    """
     match = _CAT_SIZE_RE.match(str(value)) if value not in (None, "") else None
     if not match:
         return None
@@ -341,13 +345,17 @@ def _bytes(value: Any) -> int | None:
 
 
 def _epoch_ms(value: Any) -> datetime | None:
-    """Milliseconds since 1970 (Serverless dates, index.creation_date) -> an aware datetime."""
+    """
+    Milliseconds since 1970 (Serverless dates, index.creation_date) -> an aware datetime.
+    """
     number = _int(value)
     return None if number is None else datetime.fromtimestamp(number / 1000, timezone.utc)
 
 
 def parse_engine_version(text: str | None) -> tuple[str, str]:
-    """'OpenSearch_2.17' -> ('OpenSearch', '2.17'); 'Elasticsearch_7.10' -> ('Elasticsearch', '7.10')."""
+    """
+    'OpenSearch_2.17' -> ('OpenSearch', '2.17'); 'Elasticsearch_7.10' -> ('Elasticsearch', '7.10').
+    """
     engine, _, version = (text or "").partition("_")
     if not version:
         return ("OpenSearch", engine) if re.match(r"^\d", engine) else (engine or "OpenSearch", "")
@@ -355,7 +363,9 @@ def parse_engine_version(text: str | None) -> tuple[str, str]:
 
 
 def version_at_least(version: str | None, wanted: tuple[int, ...]) -> bool | None:
-    """'2.17' >= (2, 13) -> True. None when the version is unknown, so callers can stay quiet."""
+    """
+    '2.17' >= (2, 13) -> True. None when the version is unknown, so callers can stay quiet.
+    """
     numbers = [int(n) for n in re.findall(r"\d+", version or "")[: len(wanted)]]
     if not numbers:
         return None
@@ -370,11 +380,13 @@ _AWS_HOST_RE = re.compile(
 
 
 def parse_location(where: str) -> tuple[str, str | None]:
-    """Where an index lives -> (domain, collection or URL; index or None).
+    """
+    Where an index lives -> (domain, collection or URL; index or None).
 
     'vectors-prod/docs' -> ('vectors-prod', 'docs'), 'vectors-prod' -> ('vectors-prod', None). Also takes an
     endpoint URL with or without https:// ('https://search-x.us-east-1.es.amazonaws.com/docs' ->
-    ('https://search-x.us-east-1.es.amazonaws.com', 'docs')), a domain or collection ARN, and a collection ID."""
+    ('https://search-x.us-east-1.es.amazonaws.com', 'docs')), a domain or collection ARN, and a collection ID.
+    """
     text = str(where or "").strip()
     if not text:
         raise ValueError("Pass a domain or collection name, with the index after a slash: 'vectors-prod/docs'")
@@ -394,8 +406,10 @@ def parse_location(where: str) -> tuple[str, str | None]:
 
 
 def endpoint_service(url: str) -> tuple[str | None, str | None]:
-    """(SigV4 service, region) of an AWS OpenSearch endpoint: ('es', 'us-east-1') for a domain, ('aoss', ...) for a
-    Serverless collection, (None, None) for anything else (an OpenSearch you run yourself)."""
+    """
+    (SigV4 service, region) of an AWS OpenSearch endpoint: ('es', 'us-east-1') for a domain, ('aoss', ...) for a
+    Serverless collection, (None, None) for anything else (an OpenSearch you run yourself).
+    """
     host = (urlsplit(url).hostname or "").lower()
     match = _AWS_HOST_RE.search(host)
     if not match:
@@ -406,7 +420,9 @@ def endpoint_service(url: str) -> tuple[str | None, str | None]:
 
 
 def vector_norm(vector: Iterable[Any]) -> float | None:
-    """Euclidean length of a vector; None when it holds something that isn't a number."""
+    """
+    Euclidean length of a vector; None when it holds something that isn't a number.
+    """
     try:
         return math.sqrt(sum(float(x) * float(x) for x in vector))
     except (TypeError, ValueError):
@@ -414,7 +430,9 @@ def vector_norm(vector: Iterable[Any]) -> float | None:
 
 
 def vector_summary(vector: Any, shown: int = 3) -> str:
-    """[0.0123, -0.0441, 0.0087, …] -> '[0.0123, -0.0441, 0.0087, …] 1,024 dims · length 1.00'."""
+    """
+    [0.0123, -0.0441, 0.0087, …] -> '[0.0123, -0.0441, 0.0087, …] 1,024 dims · length 1.00'.
+    """
     if not isinstance(vector, (list, tuple)):
         return "-" if vector is None else _clip(str(vector), 40)
     head = ", ".join(f"{x:.4g}" if isinstance(x, (int, float)) else str(x) for x in vector[:shown])
@@ -424,8 +442,10 @@ def vector_summary(vector: Any, shown: int = 3) -> str:
 
 
 def values_at(source: Any, path: str) -> list[Any]:
-    """Every value at a dotted path in a document, through lists (nested documents): {'chunks': [{'v': 1}, {'v': 2}]}
-    and 'chunks.v' -> [1, 2]. A field literally named 'a.b' wins over the nested path."""
+    """
+    Every value at a dotted path in a document, through lists (nested documents): {'chunks': [{'v': 1}, {'v': 2}]}
+    and 'chunks.v' -> [1, 2]. A field literally named 'a.b' wins over the nested path.
+    """
     if isinstance(source, dict) and path in source:
         return [source[path]]
     head, _, rest = path.partition(".")
@@ -437,8 +457,10 @@ def values_at(source: Any, path: str) -> list[Any]:
 
 
 def _format_value(value: Any, width: int = 80) -> str:
-    """Short display text for a field value: strings as they are, numbers with commas, lists of numbers (vectors)
-    summarized, other lists and dicts as compact JSON."""
+    """
+    Short display text for a field value: strings as they are, numbers with commas, lists of numbers (vectors)
+    summarized, other lists and dicts as compact JSON.
+    """
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -461,8 +483,10 @@ def _format_value(value: Any, width: int = 80) -> str:
 
 @dataclass
 class Domain:
-    """An OpenSearch Service domain (a managed cluster), from DescribeDomains. Parts that couldn't be read are in
-    `errors` (section -> error code)."""
+    """
+    An OpenSearch Service domain (a managed cluster), from DescribeDomains. Parts that couldn't be read are in
+    `errors` (section -> error code).
+    """
 
     name: str
     arn: str = ""
@@ -504,7 +528,9 @@ class Domain:
 
 @dataclass
 class Collection:
-    """An OpenSearch Serverless collection, from BatchGetCollection, with its network policy when it could be read."""
+    """
+    An OpenSearch Serverless collection, from BatchGetCollection, with its network policy when it could be read.
+    """
 
     name: str
     id: str = ""
@@ -539,8 +565,10 @@ class Collection:
 
 @dataclass
 class Endpoint:
-    """Any other OpenSearch, given by its URL: one you run yourself, or a domain or collection by its endpoint.
-    Requests to an AWS endpoint are signed with `service` ('es' or 'aoss') in `region`; others aren't."""
+    """
+    Any other OpenSearch, given by its URL: one you run yourself, or a domain or collection by its endpoint.
+    Requests to an AWS endpoint are signed with `service` ('es' or 'aoss') in `region`; others aren't.
+    """
 
     url: str
     service: str | None = None
@@ -557,7 +585,9 @@ class Endpoint:
 
 @dataclass
 class VectorField:
-    """One knn_vector field in an index's mapping, with the defaults OpenSearch fills in left as None."""
+    """
+    One knn_vector field in an index's mapping, with the defaults OpenSearch fills in left as None.
+    """
 
     path: str  # 'embedding', or 'chunks.embedding' inside a nested field
     dimension: int | None = None
@@ -589,7 +619,9 @@ class VectorField:
 
     @property
     def compression_factor(self) -> float:
-        """How much smaller than 32-bit floats each stored vector is: 2 for fp16, 32 for binary or on_disk's default."""
+        """
+        How much smaller than 32-bit floats each stored vector is: 2 for fp16, 32 for binary or on_disk's default.
+        """
         if self.compression:
             return _int(self.compression.rstrip("xX")) or 1
         if self.data_type == "binary":
@@ -603,8 +635,10 @@ class VectorField:
 
 @dataclass
 class IndexInfo:
-    """One index: what _cat/indices, its mapping and settings, and the counts and stats say about it. Parts that
-    couldn't be read are in `errors` (section -> error)."""
+    """
+    One index: what _cat/indices, its mapping and settings, and the counts and stats say about it. Parts that
+    couldn't be read are in `errors` (section -> error).
+    """
 
     name: str
     health: str | None = None  # 'green' | 'yellow' | 'red' (None on Serverless)
@@ -635,7 +669,9 @@ class IndexInfo:
 
     @property
     def copies(self) -> int:
-        """Primaries plus replicas: each copy builds and loads its own graphs."""
+        """
+        Primaries plus replicas: each copy builds and loads its own graphs.
+        """
         return 1 + (self.replicas or 0)
 
     @property
@@ -643,7 +679,9 @@ class IndexInfo:
         return self.top_docs if self.top_docs is not None else self.docs
 
     def vector(self, name: str | None = None) -> VectorField:
-        """The vector field `name`, or the only one (the first when there are several)."""
+        """
+        The vector field `name`, or the only one (the first when there are several).
+        """
         if not self.vectors:
             raise ValueError(f"Index {self.name} has no vector (knn_vector) fields")
         if name is None:
@@ -657,7 +695,9 @@ class IndexInfo:
 
 @dataclass
 class ClusterHealth:
-    """_cluster/health of a domain or self-run cluster."""
+    """
+    _cluster/health of a domain or self-run cluster.
+    """
 
     status: str = ""  # 'green' | 'yellow' | 'red'
     nodes: int = 0
@@ -668,8 +708,10 @@ class ClusterHealth:
 
 @dataclass
 class KnnStats:
-    """What the k-NN plugin reports (_plugins/_knn/stats; not on Serverless): native memory the faiss and nmslib
-    graphs use, and whether it ran out."""
+    """
+    What the k-NN plugin reports (_plugins/_knn/stats; not on Serverless): native memory the faiss and nmslib
+    graphs use, and whether it ran out.
+    """
 
     nodes: int = 0
     memory_bytes: int = 0  # graph memory on all nodes
@@ -684,7 +726,9 @@ class KnnStats:
 
 @dataclass
 class StoreReport:
-    """indexes(): every index in a domain, collection or cluster, and the cluster's health and k-NN memory."""
+    """
+    indexes(): every index in a domain, collection or cluster, and the cluster's health and k-NN memory.
+    """
 
     store: Domain | Collection | Endpoint
     indexes: list[IndexInfo] = field(default_factory=list)
@@ -699,7 +743,9 @@ class StoreReport:
 
 @dataclass
 class VectorCheck:
-    """How a sample of one field's vectors looks: their dimensions, lengths, zeros and repeats."""
+    """
+    How a sample of one field's vectors looks: their dimensions, lengths, zeros and repeats.
+    """
 
     field: str
     docs: int = 0  # documents looked at
@@ -715,13 +761,17 @@ class VectorCheck:
 
     @property
     def unit_length(self) -> bool:
-        """Every vector has length 1 (to within 1%): normalized, as most embedding models return them."""
+        """
+        Every vector has length 1 (to within 1%): normalized, as most embedding models return them.
+        """
         return self.norm_min is not None and self.norm_max is not None and 0.99 <= self.norm_min <= self.norm_max <= 1.01
 
 
 @dataclass
 class Sample:
-    """Documents read from an index (random ones when the endpoint allows), with a check of each vector field."""
+    """
+    Documents read from an index (random ones when the endpoint allows), with a check of each vector field.
+    """
 
     target: str
     index: str
@@ -733,7 +783,9 @@ class Sample:
     info: IndexInfo | None = field(default=None, repr=False)  # the index's mapping and settings
 
     def to_df(self, *, vectors: bool = False):
-        """The documents as a pandas DataFrame (vector fields left out unless vectors=True)."""
+        """
+        The documents as a pandas DataFrame (vector fields left out unless vectors=True).
+        """
         pd = _require("pandas", "Sample.to_df")
         rows = [{k: v for k, v in doc.items() if vectors or k not in self.checks} for doc in self.docs]
         return pd.DataFrame(rows)
@@ -741,7 +793,9 @@ class Sample:
 
 @dataclass
 class Embedding:
-    """A text embedded by a Bedrock model, and what it cost."""
+    """
+    A text embedded by a Bedrock model, and what it cost.
+    """
 
     vector: list[float]
     model: str
@@ -751,7 +805,9 @@ class Embedding:
 
 @dataclass
 class Hit:
-    """One search result: its rank, OpenSearch's score, and the similarity or distance read back from the score."""
+    """
+    One search result: its rank, OpenSearch's score, and the similarity or distance read back from the score.
+    """
 
     rank: int
     id: str
@@ -762,7 +818,9 @@ class Hit:
 
 @dataclass
 class SearchResult:
-    """The k nearest neighbours of a query vector, from one k-NN search."""
+    """
+    The k nearest neighbours of a query vector, from one k-NN search.
+    """
 
     target: str
     index: str
@@ -784,7 +842,9 @@ class SearchResult:
     info: IndexInfo | None = field(default=None, repr=False)  # the index's mapping and settings
 
     def to_df(self):
-        """One row per hit: rank, id, score, similarity and the document's fields."""
+        """
+        One row per hit: rank, id, score, similarity and the document's fields.
+        """
         pd = _require("pandas", "SearchResult.to_df")
         return pd.DataFrame(
             [{"rank": h.rank, "id": h.id, "score": h.score, "similarity": h.similarity, **h.source} for h in self.hits]
@@ -793,7 +853,9 @@ class SearchResult:
 
 @dataclass
 class Overview:
-    """overview(): every domain and Serverless collection in the region, plus the account's Serverless capacity."""
+    """
+    overview(): every domain and Serverless collection in the region, plus the account's Serverless capacity.
+    """
 
     region: str
     domains: list[Domain] = field(default_factory=list)
@@ -847,14 +909,18 @@ _SCORE_MEANINGS = {
 
 
 def similarity_name(vf: VectorField) -> str:
-    """What search() reads back from a score in this field: 'Cosine', 'Squared L2 distance', ..."""
+    """
+    What search() reads back from a score in this field: 'Cosine', 'Squared L2 distance', ...
+    """
     if vf.space == "l2" and vf.engine == "nmslib":
         return "L2 distance"
     return _SIMILARITY_NAMES.get(vf.space, "Similarity")
 
 
 def score_meaning(vf: VectorField) -> str:
-    """How OpenSearch turns this field's distance into a score, in words."""
+    """
+    How OpenSearch turns this field's distance into a score, in words.
+    """
     distance = "L2 distance" if vf.engine == "nmslib" else "squared L2 distance"
     return _SCORE_MEANINGS.get(vf.space, "").format(distance=distance)
 
@@ -899,7 +965,9 @@ _SOURCE_FIELDS = (
 
 
 def parse_domain(status: dict[str, Any]) -> Domain:
-    """A DescribeDomain(s) DomainStatus -> Domain."""
+    """
+    A DescribeDomain(s) DomainStatus -> Domain.
+    """
     engine, version = parse_engine_version(status.get("EngineVersion"))
     cluster = status.get("ClusterConfig") or {}
     ebs = status.get("EBSOptions") or {}
@@ -957,7 +1025,9 @@ def parse_domain(status: dict[str, Any]) -> Domain:
 
 
 def parse_collection(detail: dict[str, Any]) -> Collection:
-    """A BatchGetCollection collectionDetail (or a ListCollections summary) -> Collection."""
+    """
+    A BatchGetCollection collectionDetail (or a ListCollections summary) -> Collection.
+    """
     key = detail.get("kmsKeyArn")
     return Collection(
         name=detail.get("name", ""),
@@ -977,10 +1047,12 @@ def parse_collection(detail: dict[str, Any]) -> Collection:
 
 
 def network_access(policies: Iterable[tuple[str, Any]], collection: str) -> tuple[str | None, str | None, list[str]]:
-    """Which network policy covers a collection, and what it allows -> (access, policy name, VPC endpoint IDs).
+    """
+    Which network policy covers a collection, and what it allows -> (access, policy name, VPC endpoint IDs).
     access is 'public' (the internet, still behind IAM and the data access policy), 'vpc' (only through the listed
     VPC endpoints), 'aws services' (only AWS services such as Bedrock) or None when no policy names it.
-    policies: (name, policy document) pairs, as GetSecurityPolicy returns them for type='network'."""
+    policies: (name, policy document) pairs, as GetSecurityPolicy returns them for type='network'.
+    """
     found: tuple[str | None, str | None, list[str]] = (None, None, [])
     for name, document in policies:
         rule_sets = document if isinstance(document, list) else [document]
@@ -1035,8 +1107,10 @@ def _vector_field(path: str, spec: dict[str, Any], nested: str | None) -> Vector
 
 
 def parse_mapping(mapping: dict[str, Any]) -> tuple[dict[str, str], list[VectorField], list[str]]:
-    """An index's mapping -> (field path -> type, its vector fields, the fields left out of _source).
-    Takes the 'mappings' object, or GET <index>/_mapping's whole answer for one index."""
+    """
+    An index's mapping -> (field path -> type, its vector fields, the fields left out of _source).
+    Takes the 'mappings' object, or GET <index>/_mapping's whole answer for one index.
+    """
     if len(mapping) == 1:
         (only,) = mapping.values()
         if isinstance(only, dict) and "mappings" in only:
@@ -1070,7 +1144,9 @@ def parse_mapping(mapping: dict[str, Any]) -> tuple[dict[str, str], list[VectorF
 
 
 def unindexed_fields(mapping: dict[str, Any]) -> list[str]:
-    """Fields a mapping keeps in _source but doesn't index ("index": false): they can't be searched or filtered on."""
+    """
+    Fields a mapping keeps in _source but doesn't index ("index": false): they can't be searched or filtered on.
+    """
     found: list[str] = []
 
     def walk(properties: dict[str, Any], prefix: str) -> None:
@@ -1086,7 +1162,9 @@ def unindexed_fields(mapping: dict[str, Any]) -> list[str]:
 
 
 def _flat_settings(settings: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    """{'index': {'knn': 'true'}} -> {'index.knn': 'true'}; flat settings pass through."""
+    """
+    {'index': {'knn': 'true'}} -> {'index.knn': 'true'}; flat settings pass through.
+    """
     flat: dict[str, Any] = {}
     for key, value in settings.items():
         if isinstance(value, dict):
@@ -1101,8 +1179,10 @@ def _true(value: Any) -> bool:
 
 
 def read_settings(info: IndexInfo, settings: dict[str, Any]) -> None:
-    """Fill in what an index's settings say: index.knn, ef_search, shards, replicas, refresh interval, creation date.
-    settings: the 'settings' object of GET <index>/_settings (flat or nested)."""
+    """
+    Fill in what an index's settings say: index.knn, ef_search, shards, replicas, refresh interval, creation date.
+    settings: the 'settings' object of GET <index>/_settings (flat or nested).
+    """
     flat = _flat_settings(settings)
     info.settings = flat
     s = {key.removeprefix("index."): value for key, value in flat.items()}
@@ -1124,8 +1204,10 @@ def read_settings(info: IndexInfo, settings: dict[str, Any]) -> None:
 
 
 def guess_text_field(fields: dict[str, str]) -> str | None:
-    """The field that most likely holds each document's text: a name tools give it (Bedrock's
-    AMAZON_BEDROCK_TEXT_CHUNK, LangChain's text, ...), else the first text field."""
+    """
+    The field that most likely holds each document's text: a name tools give it (Bedrock's
+    AMAZON_BEDROCK_TEXT_CHUNK, LangChain's text, ...), else the first text field.
+    """
     texts = [path for path, kind in fields.items() if kind in _TEXT_TYPES]
     by_name = {path.lower(): path for path in texts}
     for name in _TEXT_FIELDS:
@@ -1136,8 +1218,10 @@ def guess_text_field(fields: dict[str, str]) -> str | None:
 
 
 def source_field(doc: dict[str, Any]) -> tuple[str, str]:
-    """(field, value) saying where a document came from, by the fields tools use for it (Bedrock's
-    x-amz-bedrock-kb-source-uri, LangChain's metadata.source, url, file, title, ...); ('', '') when none."""
+    """
+    (field, value) saying where a document came from, by the fields tools use for it (Bedrock's
+    x-amz-bedrock-kb-source-uri, LangChain's metadata.source, url, file, title, ...); ('', '') when none.
+    """
     for name in _SOURCE_FIELDS:
         values = values_at(doc, name)
         if values and values[0] not in (None, "", [], {}):
@@ -1156,12 +1240,16 @@ def source_field(doc: dict[str, Any]) -> tuple[str, str]:
 
 
 def source_of(doc: dict[str, Any]) -> str:
-    """Where a document came from (see source_field); '' when it doesn't say."""
+    """
+    Where a document came from (see source_field); '' when it doesn't say.
+    """
     return source_field(doc)[1]
 
 
 def index_from_cat(row: dict[str, Any]) -> IndexInfo:
-    """A row of GET _cat/indices?format=json -> IndexInfo (its counts and sizes)."""
+    """
+    A row of GET _cat/indices?format=json -> IndexInfo (its counts and sizes).
+    """
     return IndexInfo(
         name=str(row.get("index", "")),
         health=row.get("health") or None,
@@ -1176,7 +1264,9 @@ def index_from_cat(row: dict[str, Any]) -> IndexInfo:
 
 
 def parse_knn_stats(resp: dict[str, Any]) -> KnnStats:
-    """GET _plugins/_knn/stats -> KnnStats. Graph memory is reported in KB per node."""
+    """
+    GET _plugins/_knn/stats -> KnnStats. Graph memory is reported in KB per node.
+    """
     nodes = resp.get("nodes") or {}
     stats = KnnStats(nodes=len(nodes), circuit_breaker=bool(resp.get("circuit_breaker_triggered")))
     for node in nodes.values():
@@ -1195,10 +1285,12 @@ def parse_knn_stats(resp: dict[str, Any]) -> KnnStats:
 
 
 def vector_memory(vf: VectorField, vectors: int) -> int | None:
-    """Estimated bytes the search structure of `vectors` vectors needs in memory, by OpenSearch's sizing rules:
+    """
+    Estimated bytes the search structure of `vectors` vectors needs in memory, by OpenSearch's sizing rules:
     HNSW 1.1 x (bytes per vector + 8 x m) per vector; IVF 1.1 x (bytes per vector x vectors + 4 x nlist x dimension).
     fp16, byte, binary and on-disk compression shrink the bytes per vector. None for a trained (PQ) model or an unknown
-    dimension. Multiply by IndexInfo.copies for the replicas, which hold their own graphs."""
+    dimension. Multiply by IndexInfo.copies for the replicas, which hold their own graphs.
+    """
     if not vf.dimension or vf.model_id or vf.encoder == "pq":
         return None
     per_vector = 4 * vf.dimension / vf.compression_factor
@@ -1208,8 +1300,10 @@ def vector_memory(vf: VectorField, vectors: int) -> int | None:
 
 
 def vector_count(info: IndexInfo, vf: VectorField) -> int | None:
-    """How many vectors a field holds: the documents that have one, or for a field inside a nested field, the nested
-    documents (Lucene's count, which _cat/indices reports, less the top-level documents)."""
+    """
+    How many vectors a field holds: the documents that have one, or for a field inside a nested field, the nested
+    documents (Lucene's count, which _cat/indices reports, less the top-level documents).
+    """
     if vf.nested and info.docs is not None and info.top_docs is not None and info.docs > info.top_docs:
         return info.docs - info.top_docs
     count = info.with_vector.get(vf.path)
@@ -1219,8 +1313,10 @@ def vector_count(info: IndexInfo, vf: VectorField) -> int | None:
 
 
 def index_vector_memory(info: IndexInfo, *, native: bool = False) -> int | None:
-    """Estimated memory of all of an index's vector fields, primaries and replicas; None when it can't be told.
-    native=True counts only the fields whose graphs live in the k-NN plugin's memory (faiss and nmslib, not lucene)."""
+    """
+    Estimated memory of all of an index's vector fields, primaries and replicas; None when it can't be told.
+    native=True counts only the fields whose graphs live in the k-NN plugin's memory (faiss and nmslib, not lucene).
+    """
     total, known = 0, False
     for vf in info.vectors:
         if native and vf.engine == "lucene":
@@ -1233,23 +1329,29 @@ def index_vector_memory(info: IndexInfo, *, native: bool = False) -> int | None:
 
 
 def knn_memory_limit(memory_gib: float) -> float:
-    """Bytes of native memory the k-NN plugin may use on a node with `memory_gib` of RAM, at its default limit: half
+    """
+    Bytes of native memory the k-NN plugin may use on a node with `memory_gib` of RAM, at its default limit: half
     of what the Java heap leaves (OpenSearch Service gives the heap half the RAM, up to 32 GiB). faiss and nmslib
-    graphs live there; lucene's live in the operating system's file cache instead."""
+    graphs live there; lucene's live in the operating system's file cache instead.
+    """
     heap = min(memory_gib / 2, 32)
     return 0.5 * (memory_gib - heap) * GB
 
 
 def domain_knn_memory(domain: Domain) -> float | None:
-    """k-NN memory of all the domain's data nodes together (knn_memory_limit per node); None for an unknown type."""
+    """
+    k-NN memory of all the domain's data nodes together (knn_memory_limit per node); None for an unknown type.
+    """
     spec = INSTANCE_TYPES.get(domain.instance_type)
     return knn_memory_limit(spec[2]) * domain.instance_count if spec and domain.instance_count else None
 
 
 def domain_monthly_cost(domain: Domain, prices: dict[str, float] | None = None) -> dict[str, float | None]:
-    """Estimated USD per month: 'data nodes', 'master nodes' and 'UltraWarm nodes' (instance-hours at list price) and
+    """
+    Estimated USD per month: 'data nodes', 'master nodes' and 'UltraWarm nodes' (instance-hours at list price) and
     'storage' (every data node's EBS volume). None where a price isn't known (pass it in prices). IOPS and throughput
-    above gp3's baseline, UltraWarm storage and data transfer aren't included."""
+    above gp3's baseline, UltraWarm storage and data transfer aren't included.
+    """
     prices = OPENSEARCH_PRICES if prices is None else prices
 
     def nodes(kind: str | None, count: int) -> float | None:
@@ -1272,9 +1374,11 @@ def _key_label(key: str | None) -> str:
 
 
 def serverless_minimum(collections: Iterable[Collection]) -> list[tuple[str, float, list[str]]]:
-    """The OCUs OpenSearch Serverless bills even when idle -> [(group, OCUs, collection names)], one entry for each
+    """
+    The OCUs OpenSearch Serverless bills even when idle -> [(group, OCUs, collection names)], one entry for each
     group of collections that share OCUs: same encryption key, same kind (vector search or not) and same standby
-    setting. Collections being deleted or that failed to create aren't counted."""
+    setting. Collections being deleted or that failed to create aren't counted.
+    """
     groups: dict[tuple[bool, str, bool], list[str]] = {}
     for c in collections:
         if c.status in ("DELETING", "FAILED"):
@@ -1292,16 +1396,20 @@ def serverless_minimum(collections: Iterable[Collection]) -> list[tuple[str, flo
 
 
 def ocu_monthly_cost(ocus: float, prices: dict[str, float] | None = None) -> float:
-    """USD per month for `ocus` OpenSearch Compute Units running all month."""
+    """
+    USD per month for `ocus` OpenSearch Compute Units running all month.
+    """
     prices = OPENSEARCH_PRICES if prices is None else prices
     return ocus * prices["ocu_hour"] * HOURS_PER_MONTH
 
 
 def score_to_similarity(score: float | None, space_type: str | None) -> float | None:
-    """OpenSearch's k-NN score -> the similarity or distance it was computed from (faiss, lucene and nmslib use the
+    """
+    OpenSearch's k-NN score -> the similarity or distance it was computed from (faiss, lucene and nmslib use the
     same formulas): cosinesimil: score = (1 + cosine) / 2; innerproduct: score = 1 + ip when ip > 0, else
     1 / (1 - ip); l2, l1, linf and hamming: score = 1 / (1 + d), where d for l2 is the squared distance on faiss and
-    lucene and the distance itself on nmslib."""
+    lucene and the distance itself on nmslib.
+    """
     if score is None or score <= 0:
         return None
     space = space_type or "l2"
@@ -1313,8 +1421,10 @@ def score_to_similarity(score: float | None, space_type: str | None) -> float | 
 
 
 def check_vectors(vectors: Iterable[Any], field: str = "") -> VectorCheck:
-    """Look over vectors (lists of numbers) -> their dimensions, range of lengths, zeros, exact repeats and vectors
-    that hold NaN, infinity or something that isn't a number."""
+    """
+    Look over vectors (lists of numbers) -> their dimensions, range of lengths, zeros, exact repeats and vectors
+    that hold NaN, infinity or something that isn't a number.
+    """
     check = VectorCheck(field)
     seen: set[int] = set()
     norms: list[float] = []
@@ -1358,7 +1468,9 @@ _DSL_KEYS = {
 
 
 def _exact(name: str, fields: dict[str, str]) -> tuple[str, bool]:
-    """(field to match exact values on, whether it's analyzed text without a keyword sub-field)."""
+    """
+    (field to match exact values on, whether it's analyzed text without a keyword sub-field).
+    """
     if fields.get(name) in ("text", "match_only_text"):
         keyword = f"{name}.keyword"
         return (keyword, False) if fields.get(keyword) == "keyword" else (name, True)
@@ -1366,7 +1478,9 @@ def _exact(name: str, fields: dict[str, str]) -> tuple[str, bool]:
 
 
 def _filter_clause(name: str, spec: Any, fields: dict[str, str]) -> tuple[dict[str, Any], bool]:
-    """One where= entry -> (query DSL clause, whether it excludes the documents it matches)."""
+    """
+    One where= entry -> (query DSL clause, whether it excludes the documents it matches).
+    """
     if isinstance(spec, tuple) and spec and isinstance(spec[0], str) and spec[0].lower() in _FILTER_OPS:
         op, args = spec[0].lower(), spec[1:]
     elif isinstance(spec, (list, set, frozenset)):
@@ -1397,7 +1511,9 @@ def _filter_clause(name: str, spec: Any, fields: dict[str, str]) -> tuple[dict[s
 
 
 def _check_where(where: Any, info: IndexInfo) -> None:
-    """Refuse a where= on a field the mapping doesn't index, which would silently match nothing."""
+    """
+    Refuse a where= on a field the mapping doesn't index, which would silently match nothing.
+    """
     if isinstance(where, dict) and not (len(where) == 1 and next(iter(where)) in _DSL_KEYS):
         for name in where:
             if name in info.unindexed:
@@ -1406,14 +1522,16 @@ def _check_where(where: Any, info: IndexInfo) -> None:
 
 
 def build_filter(where: Any, fields: dict[str, str] | None = None) -> dict[str, Any] | None:
-    """A friendly filter -> OpenSearch query DSL, for the filter of a k-NN search.
+    """
+    A friendly filter -> OpenSearch query DSL, for the filter of a k-NN search.
 
     where={'lang': 'en', 'year': ('>=', 2024), 'team': ['billing', 'support'], 'draft': ('!=', True)} matches
     documents in English from 2024 on, of the billing or support team, that aren't drafts. Operators: '=', '!=',
     '>', '>=', '<', '<=', ('between', low, high), ('in', [...]), ('prefix', 'abc'), ('contains', 'some words'),
     ('exists',) and ('missing',). With `fields` (the index's field types), a text field is matched exactly through
     its .keyword sub-field, and a field the index doesn't have is reported with the closest names. Query DSL
-    ({'term': {...}}, {'bool': {...}}) passes through unchanged."""
+    ({'term': {...}}, {'bool': {...}}) passes through unchanged.
+    """
     if where is None or where == {}:
         return None
     if not isinstance(where, dict):
@@ -1439,7 +1557,9 @@ def build_filter(where: Any, fields: dict[str, str] | None = None) -> dict[str, 
 
 
 def describe_filter(where: Any) -> str:
-    """where= in words: {'lang': 'en', 'year': ('>=', 2024)} -> "lang = 'en' and year >= 2024"."""
+    """
+    where= in words: {'lang': 'en', 'year': ('>=', 2024)} -> "lang = 'en' and year >= 2024".
+    """
     if not where:
         return "no filter"
     if not isinstance(where, dict) or (len(where) == 1 and next(iter(where)) in _DSL_KEYS):
@@ -1470,10 +1590,12 @@ def knn_query(
     ef_search: int | None = None,
     exclude: Iterable[str] = (),
 ) -> dict[str, Any]:
-    """The _search body for the k nearest neighbours of `vector` in field `vf`. The filter is applied during the
+    """
+    The _search body for the k nearest neighbours of `vector` in field `vf`. The filter is applied during the
     search (faiss and lucene), or after it for nmslib and nested fields, which can return fewer than k then.
     ef_search overrides the index's candidate list size for this query (OpenSearch 2.16+); `exclude` leaves those
-    fields out of the documents returned."""
+    fields out of the documents returned.
+    """
     inner: dict[str, Any] = {"vector": list(vector), "k": k}
     after = filter is not None and (vf.engine == "nmslib" or vf.nested is not None)
     if filter is not None and not after:
@@ -1497,7 +1619,9 @@ def knn_query(
 
 
 def query_python(body: dict[str, Any], index: str) -> str:
-    """A k-NN search body as opensearch-py code to copy, with the query vector as a variable."""
+    """
+    A k-NN search body as opensearch-py code to copy, with the query vector as a variable.
+    """
     import pprint
 
     shown = json.loads(json.dumps(body))
@@ -1519,7 +1643,9 @@ def query_python(body: dict[str, Any], index: str) -> str:
 
 
 def describe_vector_field(vf: VectorField) -> str:
-    """'1,024 dims · faiss HNSW · cosine' (· fp16, · on disk 32x when compressed)."""
+    """
+    '1,024 dims · faiss HNSW · cosine' (· fp16, · on disk 32x when compressed).
+    """
     parts = [f"{vf.dimension:,} dims" if vf.dimension else "? dims"]
     if vf.model_id:
         parts.append(f"trained model {vf.model_id}")
@@ -1536,7 +1662,9 @@ def describe_vector_field(vf: VectorField) -> str:
 
 
 def _ref(store: Any, index: str) -> str:
-    """'vectors-prod/docs': how commands name an index in a domain, collection or URL."""
+    """
+    'vectors-prod/docs': how commands name an index in a domain, collection or URL.
+    """
     if store is None:
         return index
     return f"{store.url if isinstance(store, Endpoint) else store.name}/{index}"
@@ -1547,7 +1675,9 @@ def _is_serverless(store: Any) -> bool:
 
 
 def _open_to_anyone(domain: Domain) -> bool:
-    """The domain's access policy allows every principal, with no condition, and the domain isn't in a VPC."""
+    """
+    The domain's access policy allows every principal, with no condition, and the domain isn't in a VPC.
+    """
     if domain.vpc or not domain.access_policy:
         return False
     statements = domain.access_policy.get("Statement") or []
@@ -1562,7 +1692,9 @@ def _open_to_anyone(domain: Domain) -> bool:
 
 
 def domain_findings(domain: Domain, prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
-    """Plain-language risks and cost notes for a domain, each with what to do about it -> [(level, message)]."""
+    """
+    Plain-language risks and cost notes for a domain, each with what to do about it -> [(level, message)].
+    """
     prices = OPENSEARCH_PRICES if prices is None else prices
     found: list[tuple[str, str]] = []
     name = domain.name
@@ -1643,7 +1775,9 @@ def domain_findings(domain: Domain, prices: dict[str, float] | None = None) -> l
 
 
 def collection_findings(collection: Collection) -> list[tuple[str, str]]:
-    """Plain-language notes about a Serverless collection, each with what to do about it -> [(level, message)]."""
+    """
+    Plain-language notes about a Serverless collection, each with what to do about it -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     c = collection
     if c.status == "FAILED":
@@ -1690,11 +1824,13 @@ def index_findings(
     version: str | None = None,
     data_nodes: int | None = None,
 ) -> list[tuple[str, str]]:
-    """Plain-language risks for one index, each with what to do about it -> [(level, message)].
+    """
+    Plain-language risks for one index, each with what to do about it -> [(level, message)].
 
     knn_memory: the k-NN memory of the whole cluster in bytes (domain_knn_memory), to check the graphs fit;
     stats: the k-NN plugin's own numbers; version: the OpenSearch version, for which fixes are available;
-    data_nodes: how many data nodes hold the shards."""
+    data_nodes: how many data nodes hold the shards.
+    """
     found: list[tuple[str, str]] = []
     name = info.name
     serverless = _is_serverless(store)
@@ -1837,8 +1973,10 @@ def _vector_index_findings(
 
 
 def store_findings(report: StoreReport, knn_memory: float | None = None) -> list[tuple[str, str]]:
-    """Cluster-wide notes for indexes(): health, the k-NN plugin's memory, and whether all the vector graphs fit in
-    `knn_memory` (bytes, all data nodes) -> [(level, message)]."""
+    """
+    Cluster-wide notes for indexes(): health, the k-NN plugin's memory, and whether all the vector graphs fit in
+    `knn_memory` (bytes, all data nodes) -> [(level, message)].
+    """
     found: list[tuple[str, str]] = []
     health = report.health
     if health and health.status == "red":
@@ -1876,7 +2014,9 @@ def store_findings(report: StoreReport, knn_memory: float | None = None) -> list
 
 
 def knn_findings(stats: KnnStats | None) -> list[tuple[str, str]]:
-    """What the k-NN plugin's numbers mean for the whole cluster: a tripped circuit breaker, a full graph cache."""
+    """
+    What the k-NN plugin's numbers mean for the whole cluster: a tripped circuit breaker, a full graph cache.
+    """
     found: list[tuple[str, str]] = []
     if stats is None:
         return found
@@ -1904,7 +2044,9 @@ def knn_findings(stats: KnnStats | None) -> list[tuple[str, str]]:
 
 
 def vector_findings(check: VectorCheck, vf: VectorField | None = None) -> list[tuple[str, str]]:
-    """Plain-language notes about a sample of vectors (check_vectors), given the field's settings -> [(level, msg)]."""
+    """
+    Plain-language notes about a sample of vectors (check_vectors), given the field's settings -> [(level, msg)].
+    """
     found: list[tuple[str, str]] = []
     path = check.field
     if not check.vectors:
@@ -1966,7 +2108,9 @@ def vector_findings(check: VectorCheck, vf: VectorField | None = None) -> list[t
 def search_findings(
     result: SearchResult, vf: VectorField, hit_norms: list[float] | None = None
 ) -> list[tuple[str, str]]:
-    """Notes on one k-NN search: too few results, repeated texts, a query that doesn't look like the stored vectors."""
+    """
+    Notes on one k-NN search: too few results, repeated texts, a query that doesn't look like the stored vectors.
+    """
     found: list[tuple[str, str]] = []
     if result.where and len(result.hits) < result.k:
         late = vf.engine == "nmslib" or vf.nested is not None
@@ -2009,9 +2153,11 @@ _READ_POSTS = re.compile(r"/_(?:search|count)$")  # the only paths a body is sen
 
 
 class OpenSearchError(Exception):
-    """A request to an OpenSearch endpoint that failed. `status` is the HTTP status (None when the endpoint couldn't
+    """
+    A request to an OpenSearch endpoint that failed. `status` is the HTTP status (None when the endpoint couldn't
     be reached), `kind` the error type OpenSearch gave (index_not_found_exception, security_exception, ...) and
-    `reason` its message."""
+    `reason` its message.
+    """
 
     def __init__(self, store: Any, path: str, status: int | None, kind: str, reason: str):
         self.store, self.path, self.status, self.kind, self.reason = store, path, status, kind, reason
@@ -2019,7 +2165,9 @@ class OpenSearchError(Exception):
 
 
 def _error_details(status: int, content: bytes) -> tuple[str, str]:
-    """(error type, reason) from an OpenSearch error answer, whichever shape it has."""
+    """
+    (error type, reason) from an OpenSearch error answer, whichever shape it has.
+    """
     text = (content or b"").decode("utf-8", "replace").strip()
     try:
         body = json.loads(text) if text else {}
@@ -2039,7 +2187,9 @@ def _error_details(status: int, content: bytes) -> tuple[str, str]:
 
 
 def _path(name: str) -> str:
-    """An index name for a URL path (commas and wildcards kept)."""
+    """
+    An index name for a URL path (commas and wildcards kept).
+    """
     return quote(name, safe=",*")
 
 
@@ -2048,7 +2198,9 @@ def _store_url(store: Any) -> str | None:
 
 
 def _as_vector(value: Any) -> list[float]:
-    """A query vector from a list, tuple or numpy array -> list of floats."""
+    """
+    A query vector from a list, tuple or numpy array -> list of floats.
+    """
     if hasattr(value, "tolist"):
         value = value.tolist()
     if isinstance(value, (list, tuple)) and len(value) == 1 and isinstance(value[0], (list, tuple)):
@@ -2063,13 +2215,17 @@ def _as_vector(value: Any) -> list[float]:
 
 
 def _exists(vf: VectorField) -> dict[str, Any]:
-    """Query matching documents that have a vector in `vf` (through its nested field when it's inside one)."""
+    """
+    Query matching documents that have a vector in `vf` (through its nested field when it's inside one).
+    """
     query = {"exists": {"field": vf.path}}
     return {"nested": {"path": vf.nested, "query": query}} if vf.nested else query
 
 
 def _drop(source: dict[str, Any], path: str) -> None:
-    """Remove a (possibly dotted) field from a document, so vectors don't fill the table of results."""
+    """
+    Remove a (possibly dotted) field from a document, so vectors don't fill the table of results.
+    """
     if path in source:
         source.pop(path)
         return
@@ -2079,12 +2235,16 @@ def _drop(source: dict[str, Any], path: str) -> None:
 
 
 def _base_model(model_id: str) -> str:
-    """An inference profile's model: 'us.cohere.embed-v4:0' -> 'cohere.embed-v4:0'."""
+    """
+    An inference profile's model: 'us.cohere.embed-v4:0' -> 'cohere.embed-v4:0'.
+    """
     return re.sub(r"^(?:us|eu|apac|global|us-gov|ca|jp|au)\.", "", model_id)
 
 
 def _embedding_style(model_id: str) -> str:
-    """How to call a Bedrock embedding model, from its ID (inference profiles such as 'us.cohere.embed-v4:0' too)."""
+    """
+    How to call a Bedrock embedding model, from its ID (inference profiles such as 'us.cohere.embed-v4:0' too).
+    """
     known = EMBEDDING_MODELS.get(_base_model(model_id))
     if known:
         return known[0]
@@ -2117,7 +2277,9 @@ def _embedding_request(style: str, text: str, dimension: int | None) -> dict[str
 
 
 def _embedding_from(payload: dict[str, Any]) -> list[float]:
-    """The vector in a Bedrock embedding answer (Titan's 'embedding', Cohere's 'embeddings', by type or not)."""
+    """
+    The vector in a Bedrock embedding answer (Titan's 'embedding', Cohere's 'embeddings', by type or not).
+    """
     if isinstance(payload.get("embedding"), list):
         return payload["embedding"]
     found = payload.get("embeddings")
@@ -2132,7 +2294,8 @@ def _embedding_from(payload: dict[str, Any]) -> list[float]:
 
 
 class OpenSearchAnalyzer(_BaseAnalyzer):
-    """Pure-logic OpenSearch analysis: every method returns data; nothing is printed or written.
+    """
+    Pure-logic OpenSearch analysis: every method returns data; nothing is printed or written.
 
     Domains and Serverless collections are found through the AWS APIs. Their indexes are read through each one's own
     REST endpoint, with requests signed with your AWS credentials (SigV4), or with a user name and password when you
@@ -2175,7 +2338,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ clients
 
     def _service(self, name: str) -> Any:
-        """A boto3 client, made on first use (or the one passed in client= / clients=)."""
+        """
+        A boto3 client, made on first use (or the one passed in client= / clients=).
+        """
         if name not in self._clients:
             makers = {  # named one by one so the project's read-only check can see which services are used
                 "opensearch": lambda: self.session.client("opensearch", config=self._config),
@@ -2197,20 +2362,26 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The OpenSearch Service client (domains)."""
+        """
+        The OpenSearch Service client (domains).
+        """
         return self._service("opensearch")
 
     # ---------------------------------------------------------- domains and collections
 
     def domain_names(self) -> list[str]:
-        """Every OpenSearch Service domain in the region (OpenSearch and Elasticsearch)."""
+        """
+        Every OpenSearch Service domain in the region (OpenSearch and Elasticsearch).
+        """
         return sorted(d["DomainName"] for d in self.client.list_domain_names().get("DomainNames", []))
 
     def list_domains(
         self, names: list[str] | None = None, *, progress: Callable[..., None] | None = None
     ) -> list[Domain]:
-        """Every domain's configuration (DescribeDomains, five domains a call). A domain that can't be described
-        comes back with errors['describe'] set."""
+        """
+        Every domain's configuration (DescribeDomains, five domains a call). A domain that can't be described
+        comes back with errors['describe'] set.
+        """
         names = self.domain_names() if names is None else names
         chunks = [names[i : i + 5] for i in range(0, len(names), 5)]
 
@@ -2235,7 +2406,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return domains
 
     def domain(self, name: str, *, refresh: bool = False) -> Domain:
-        """One domain's configuration (DescribeDomain, cached)."""
+        """
+        One domain's configuration (DescribeDomain, cached).
+        """
         if refresh or name not in self._domains:
             self._domains[name] = parse_domain(self.client.describe_domain(DomainName=name)["DomainStatus"])
         return self._domains[name]
@@ -2244,7 +2417,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return self._service("opensearchserverless")
 
     def collection_summaries(self) -> list[dict[str, Any]]:
-        """Every Serverless collection in the region: ListCollections' id, name, status and ARN."""
+        """
+        Every Serverless collection in the region: ListCollections' id, name, status and ARN.
+        """
         found: list[dict[str, Any]] = []
         token = None
         while True:
@@ -2255,8 +2430,10 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
                 return found
 
     def list_collections(self, *, network: bool = True) -> list[Collection]:
-        """Every Serverless collection with its endpoint and settings (BatchGetCollection, 100 a call), and with
-        network=True which network policy covers it. Parts that can't be read are in each collection's errors."""
+        """
+        Every Serverless collection with its endpoint and settings (BatchGetCollection, 100 a call), and with
+        network=True which network policy covers it. Parts that can't be read are in each collection's errors.
+        """
         summaries = self.collection_summaries()
         ids = [s["id"] for s in summaries if s.get("id")]
         details: dict[str, dict[str, Any]] = {}
@@ -2282,7 +2459,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return collections
 
     def collection(self, name: str, *, refresh: bool = False) -> Collection:
-        """One collection by name or ID (BatchGetCollection, cached), with its network policy."""
+        """
+        One collection by name or ID (BatchGetCollection, cached), with its network policy.
+        """
         if not refresh and name in self._collections:
             return self._collections[name]
         details = self._serverless_client().batch_get_collection(names=[name]).get("collectionDetails") or []
@@ -2296,7 +2475,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return found
 
     def network_policies(self) -> list[tuple[str, Any]]:
-        """Every Serverless network policy: (name, policy document)."""
+        """
+        Every Serverless network policy: (name, policy document).
+        """
         names: list[str] = []
         token = None
         while True:
@@ -2321,15 +2502,19 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
             c.network, c.network_policy, c.vpc_endpoints = network_access(policies, c.name)
 
     def serverless_capacity(self) -> tuple[float | None, float | None]:
-        """The account's Serverless capacity limits: (most indexing OCUs, most search OCUs) it may scale to."""
+        """
+        The account's Serverless capacity limits: (most indexing OCUs, most search OCUs) it may scale to.
+        """
         detail = self._serverless_client().get_account_settings().get("accountSettingsDetail") or {}
         limits = detail.get("capacityLimits") or {}
         return limits.get("maxIndexingCapacityInOCU"), limits.get("maxSearchCapacityInOCU")
 
     def serverless_ocus(self, hours: int = 24) -> dict[str, float] | None:
-        """Average indexing and search OCUs the account's Serverless collections used over the last `hours`
+        """
+        Average indexing and search OCUs the account's Serverless collections used over the last `hours`
         (CloudWatch AWS/AOSS IndexingOCU and SearchOCU) -> {'indexing': ..., 'search': ...}; None without data.
-        Collections in a collection group report their OCUs separately and aren't included."""
+        Collections in a collection group report their OCUs separately and aren't included.
+        """
         account = self._service("sts").get_caller_identity()["Account"]
         names = ("IndexingOCU", "SearchOCU")
         queries = [
@@ -2366,9 +2551,11 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     def overview(
         self, *, match: str | None = None, metrics: bool = True, progress: Callable[..., None] | None = None
     ) -> Overview:
-        """Every domain and Serverless collection in the region (match='prod-*' keeps matching names), the account's
+        """
+        Every domain and Serverless collection in the region (match='prod-*' keeps matching names), the account's
         Serverless capacity limits, and with metrics=True the OCUs it used in the last 24 hours (CloudWatch).
-        Lists that can't be read are recorded in `errors`."""
+        Lists that can't be read are recorded in `errors`.
+        """
         result = Overview(region=self.region)
 
         def wanted(name: str) -> bool:
@@ -2396,9 +2583,11 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return result
 
     def resolve(self, target: Any) -> Domain | Collection | Endpoint:
-        """A domain, Serverless collection or other OpenSearch from its name, collection ID, ARN or endpoint URL ('name/index'
+        """
+        A domain, Serverless collection or other OpenSearch from its name, collection ID, ARN or endpoint URL ('name/index'
         works too; the index is ignored). A Domain, Collection or Endpoint passes through. Raises ValueError, with the
-        closest names, when there's no such domain or collection."""
+        closest names, when there's no such domain or collection.
+        """
         if isinstance(target, (Domain, Collection, Endpoint)):
             return target
         head, _ = parse_location(target)
@@ -2446,7 +2635,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         )
 
     def _endpoint(self, url: str) -> Domain | Collection | Endpoint:
-        """A URL -> the domain or collection it belongs to when this analyzer knows it, else an Endpoint."""
+        """
+        A URL -> the domain or collection it belongs to when this analyzer knows it, else an Endpoint.
+        """
         host = (urlsplit(url).hostname or "").lower()
         for d in self._domains.values():
             if d.endpoint and d.endpoint.lower() == host:
@@ -2471,7 +2662,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------- REST requests
 
     def _send(self, method: str, url: str, body: bytes | None, headers: dict[str, str]) -> tuple[int, bytes]:
-        """Send one request with botocore's HTTP client, through the proxies and CA bundle boto3 would use."""
+        """
+        Send one request with botocore's HTTP client, through the proxies and CA bundle boto3 would use.
+        """
         if self._http_session is None:
             core = getattr(self.session, "_session", None)
             bundle = core.get_config_variable("ca_bundle") if hasattr(core, "get_config_variable") else None
@@ -2485,7 +2678,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return response.status_code, response.content
 
     def _headers(self, store: Any, method: str, url: str, body: bytes | None) -> dict[str, str]:
-        """Request headers: SigV4 for AWS endpoints (the 'es' or 'aoss' service), Basic auth with auth=."""
+        """
+        Request headers: SigV4 for AWS endpoints (the 'es' or 'aoss' service), Basic auth with auth=.
+        """
         headers = {"Accept": "application/json"}
         if body is not None:
             headers["Content-Type"] = "application/json"
@@ -2512,8 +2707,10 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return dict(request.headers.items())
 
     def request(self, target: Any, path: str, body: Any = None, *, params: dict[str, Any] | None = None) -> Any:
-        """GET `path` from a domain, collection or URL -> the parsed JSON answer. With `body`, POSTs it, which only
-        _search and _count accept: anything that could change data is refused before it's sent."""
+        """
+        GET `path` from a domain, collection or URL -> the parsed JSON answer. With `body`, POSTs it, which only
+        _search and _count accept: anything that could change data is refused before it's sent.
+        """
         store = self.resolve(target)
         base = _store_url(store)
         if not base:
@@ -2549,7 +2746,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------- indexes
 
     def cat_indices(self, target: Any) -> list[IndexInfo]:
-        """Every index with its health, documents, size, shards and replicas (GET _cat/indices)."""
+        """
+        Every index with its health, documents, size, shards and replicas (GET _cat/indices).
+        """
         rows = self.request(target, "_cat/indices", params={"format": "json", "bytes": "b"})
         return [index_from_cat(row) for row in rows or [] if isinstance(row, dict)]
 
@@ -2561,7 +2760,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return info
 
     def _counts(self, store: Any, info: IndexInfo) -> None:
-        """Top-level documents, and how many have each vector field (one _count each)."""
+        """
+        Top-level documents, and how many have each vector field (one _count each).
+        """
         try:
             info.top_docs = self._count(store, info.name, {"match_all": {}})
             for vf in info.vectors:
@@ -2570,10 +2771,12 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
             info.errors["counts"] = f"{exc.status or ''} {exc.kind}".strip()
 
     def index(self, target: Any, index: str, *, counts: bool = True) -> IndexInfo:
-        """Everything about one index: its counts and size (_cat/indices), mapping (fields and vector fields) and
+        """
+        Everything about one index: its counts and size (_cat/indices), mapping (fields and vector fields) and
         settings, and with counts=True how many documents have each vector field and (outside Serverless) its
         segments. Parts that can't be read are recorded in `errors`; an index that doesn't exist raises
-        OpenSearchError (404)."""
+        OpenSearchError (404).
+        """
         store = self.resolve(target)
         info = IndexInfo(index)
         try:
@@ -2612,10 +2815,12 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         details: bool = True,
         progress: Callable[..., None] | None = None,
     ) -> StoreReport:
-        """Every index in a domain, collection or cluster with its mapping and settings, and with details=True the
+        """
+        Every index in a domain, collection or cluster with its mapping and settings, and with details=True the
         documents that have each vector field, plus (outside Serverless) segment counts, cluster health and the k-NN
         plugin's memory use. hidden=True includes system indexes (names starting with a dot). Parts that can't be
-        read are recorded in `errors`."""
+        read are recorded in `errors`.
+        """
         store = self.resolve(target)
         report = StoreReport(store)
         infos: dict[str, IndexInfo] = {}
@@ -2662,8 +2867,10 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     def _bulk(
         self, store: Any, what: str, names: list[str], params: dict[str, str], report: StoreReport
     ) -> dict[str, Any]:
-        """GET /_mapping or /_settings for every index in one call; when that's refused (Serverless), one call per
-        index. -> index name -> its answer."""
+        """
+        GET /_mapping or /_settings for every index in one call; when that's refused (Serverless), one call per
+        index. -> index name -> its answer.
+        """
         try:
             found = self.request(store, what, params=params or None) or {}
             if isinstance(found, dict):
@@ -2685,7 +2892,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return out
 
     def _cluster_details(self, store: Any, report: StoreReport) -> None:
-        """Segment counts, cluster health and k-NN memory, each optional."""
+        """
+        Segment counts, cluster health and k-NN memory, each optional.
+        """
         try:
             stats = self.request(store, "_stats/segments") or {}
             for info in report.indexes:
@@ -2704,7 +2913,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
                 report.errors["k-NN stats"] = f"{exc.status or ''} {exc.kind}".strip()
 
     def cluster_health(self, target: Any) -> ClusterHealth:
-        """GET _cluster/health (not on Serverless)."""
+        """
+        GET _cluster/health (not on Serverless).
+        """
         resp = self.request(target, "_cluster/health") or {}
         return ClusterHealth(
             status=str(resp.get("status", "")),
@@ -2715,7 +2926,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         )
 
     def knn_stats(self, target: Any) -> KnnStats:
-        """The k-NN plugin's memory and cache numbers (GET _plugins/_knn/stats; _opendistro on Elasticsearch)."""
+        """
+        The k-NN plugin's memory and cache numbers (GET _plugins/_knn/stats; _opendistro on Elasticsearch).
+        """
         try:
             resp = self.request(target, "_plugins/_knn/stats")
         except OpenSearchError as exc:
@@ -2729,9 +2942,11 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     def sample(
         self, target: Any, index: str, n: int = 10, *, check: int = 200, where: Any = None
     ) -> Sample:
-        """Random documents from an index: max(n, check) of them (at most 1,000), with each vector field's vectors
+        """
+        Random documents from an index: max(n, check) of them (at most 1,000), with each vector field's vectors
         checked (dimensions, lengths, zeros, repeats). where= narrows the sample (see build_filter). Falls back to
-        the first documents when the endpoint can't sample at random."""
+        the first documents when the endpoint can't sample at random.
+        """
         store = self.resolve(target)
         info = self.index(store, index, counts=False)
         size = max(1, min(1000, max(_as_int(n, "n"), _as_int(check, "check"))))
@@ -2775,9 +2990,11 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ search
 
     def embed(self, text: str, *, model: str | None = None, dimension: int | None = None) -> Embedding:
-        """Embed a text with a Bedrock embedding model: an ID from EMBEDDING_MODELS (or an inference profile), or a short
+        """
+        Embed a text with a Bedrock embedding model: an ID from EMBEDDING_MODELS (or an inference profile), or a short
         name ('titan', 'titan-v1', 'cohere', 'cohere-multilingual', 'cohere-v4'). Without a model, Titan Text
-        Embeddings V2 is used for 256, 512 or 1,024 dimensions; other sizes need a model. Needs bedrock:InvokeModel."""
+        Embeddings V2 is used for 256, 512 or 1,024 dimensions; other sizes need a model. Needs bedrock:InvokeModel.
+        """
         if model:
             model_id = _EMBEDDING_ALIASES.get(model.lower(), model)
         elif dimension in (256, 512, 1024):
@@ -2806,7 +3023,9 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         return Embedding([float(x) for x in _embedding_from(payload)], model_id, tokens, cost)
 
     def doc_vector(self, target: Any, index: str, doc_id: str, field: str | None = None) -> list[float]:
-        """The vector a document holds in a vector field (the index's first one by default)."""
+        """
+        The vector a document holds in a vector field (the index's first one by default).
+        """
         store = self.resolve(target)
         info = self.index(store, index, counts=False)
         return self._doc_vector(store, info, str(doc_id), info.vector(field))
@@ -2839,10 +3058,12 @@ class OpenSearchAnalyzer(_BaseAnalyzer):
         embed: Callable[[str], Any] | None = None,
         ef_search: int | None = None,
     ) -> SearchResult:
-        """The k nearest neighbours of a query, by one k-NN search. The query is one of: `text`, embedded by
+        """
+        The k nearest neighbours of a query, by one k-NN search. The query is one of: `text`, embedded by
         embed=your_function or a Bedrock model (see embed()); vector=[...]; or like='<document id>', that document's
         own vector (the document itself is left out of the results). field: the vector field (the index's first by
-        default); where: a filter (see build_filter); ef_search: candidates to consider (more is slower, more exact)."""
+        default); where: a filter (see build_filter); ef_search: candidates to consider (more is slower, more exact).
+        """
         started = time.monotonic()
         store = self.resolve(target)
         info = self.index(store, index, counts=False)
@@ -2928,7 +3149,9 @@ _BADGE = "🔎 OpenSearch"  # the chip before each report's title, so reports fr
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
@@ -2956,7 +3179,9 @@ _FILTER_EXAMPLES = {  # mapping type -> a where= example for index_info's table 
 
 
 def _state_tone(status: str) -> str:
-    """'' for a healthy status, 'bad' for a failed one, 'warn' for anything in between."""
+    """
+    '' for a healthy status, 'bad' for a failed one, 'warn' for anything in between.
+    """
     lowered = (status or "").lower()
     if lowered in ("active", "green", "open", ""):
         return ""
@@ -2964,7 +3189,9 @@ def _state_tone(status: str) -> str:
 
 
 def _target_arg(store: Any) -> str:
-    """What to pass to a command to name this domain, collection or endpoint."""
+    """
+    What to pass to a command to name this domain, collection or endpoint.
+    """
     return store.url if isinstance(store, Endpoint) else store.name
 
 
@@ -2973,7 +3200,9 @@ def _same(a: Any, b: Any) -> bool:
 
 
 def _node_label(domain: Domain) -> str:
-    """'3 × r6g.large.search' (+ masters and UltraWarm)."""
+    """
+    '3 × r6g.large.search' (+ masters and UltraWarm).
+    """
     parts = [f"{domain.instance_count} × {domain.instance_type or '?'}"]
     if domain.master_type:
         parts.append(f"{domain.master_count} masters")
@@ -2989,7 +3218,9 @@ def _storage_label(domain: Domain) -> str:
 
 
 def _shards_label(info: IndexInfo) -> str:
-    """'3 primaries, 1 replica each' / '1 primary, no replicas'."""
+    """
+    '3 primaries, 1 replica each' / '1 primary, no replicas'.
+    """
     if not info.shards:
         return "-"
     primaries = f"{info.shards} primar{'y' if info.shards == 1 else 'ies'}"
@@ -2999,12 +3230,16 @@ def _shards_label(info: IndexInfo) -> str:
 
 
 def _vector_label(info: IndexInfo) -> str:
-    """'embedding: 1,024 dims · faiss HNSW · cosine', one line per vector field."""
+    """
+    'embedding: 1,024 dims · faiss HNSW · cosine', one line per vector field.
+    """
     return "\n".join(f"{vf.path}: {describe_vector_field(vf)}" for vf in info.vectors) or "-"
 
 
 def _with_vector_cell(info: IndexInfo) -> Any:
-    """'48,750 (97.5%)' for the first vector field, toned when some documents have none."""
+    """
+    '48,750 (97.5%)' for the first vector field, toned when some documents have none.
+    """
     if not info.vectors:
         return "-"
     have, total = info.with_vector.get(info.vectors[0].path), info.top_docs
@@ -3015,7 +3250,9 @@ def _with_vector_cell(info: IndexInfo) -> Any:
 
 
 def _method_settings(vf: VectorField) -> str:
-    """'m=16 · ef_construction=512 · ef_search=100', defaults marked."""
+    """
+    'm=16 · ef_construction=512 · ef_search=100', defaults marked.
+    """
     if vf.model_id:
         return f"trained model {vf.model_id}"
     if vf.algorithm == "ivf":
@@ -3047,7 +3284,9 @@ def _hit_text(source: dict[str, Any], text_field: str | None, width: int = 300) 
 
 
 def _flat(doc: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    """A document with its objects spread into dotted fields ('metadata.page'); lists stay values."""
+    """
+    A document with its objects spread into dotted fields ('metadata.page'); lists stay values.
+    """
     flat: dict[str, Any] = {}
     for key, value in doc.items():
         if isinstance(value, dict) and value:
@@ -3058,7 +3297,9 @@ def _flat(doc: dict[str, Any], prefix: str = "") -> dict[str, Any]:
 
 
 def _metadata_columns(docs: list[dict[str, Any]], skip: set[str], limit: int) -> list[str]:
-    """The fields most documents have (objects spread into dotted fields), besides the text, source and vectors."""
+    """
+    The fields most documents have (objects spread into dotted fields), besides the text, source and vectors.
+    """
     counts: Counter = Counter()
     for doc in docs:
         counts.update(k for k in _flat(doc) if k not in skip and not k.startswith("_"))
@@ -3066,7 +3307,9 @@ def _metadata_columns(docs: list[dict[str, Any]], skip: set[str], limit: int) ->
 
 
 def _filter_rows(info: IndexInfo) -> list[list[str]]:
-    """Fields a where= filter can use, with an example for each."""
+    """
+    Fields a where= filter can use, with an example for each.
+    """
     vectors = {vf.path for vf in info.vectors}
     rows = []
     for path, kind in info.fields.items():
@@ -3085,7 +3328,8 @@ def _filter_rows(info: IndexInfo) -> list[list[str]]:
 
 
 class OpenSearchView(_BaseView):
-    """Notebook UI over OpenSearchAnalyzer. Each method renders a report and returns nothing; for the underlying
+    """
+    Notebook UI over OpenSearchAnalyzer. Each method renders a report and returns nothing; for the underlying
     data call the matching method on `view.core` (an OpenSearchAnalyzer).
 
     index: the domain or collection, and optionally the index ('vectors-prod/docs'), that commands use when they
@@ -3132,7 +3376,9 @@ class OpenSearchView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """An AWS API error message plus what to do about it."""
+        """
+        An AWS API error message plus what to do about it.
+        """
         lowered = message.lower()
         text = message.rstrip() + ("" if message.rstrip().endswith((".", "!", "?")) else ".")
         if code in ("ResourceNotFoundException", "ResourceNotFound"):
@@ -3149,7 +3395,9 @@ class OpenSearchView(_BaseView):
         return message
 
     def _explain_http(self, exc: OpenSearchError) -> str:
-        """A failed REST request in words, with what to change."""
+        """
+        A failed REST request in words, with what to change.
+        """
         store, status = exc.store, exc.status
         where = store.label
         reason = exc.reason.rstrip(".")
@@ -3195,7 +3443,9 @@ class OpenSearchView(_BaseView):
         return f"{where} answered {status}{kind}: {reason} ({exc.path})."
 
     def _extra_note(self, exc: Exception, command: str) -> _Note | None:
-        """OpenSearch's own errors as notes: a failed request in words (_explain_http), and an answer it can't read."""
+        """
+        OpenSearch's own errors as notes: a failed request in words (_explain_http), and an answer it can't read.
+        """
         if isinstance(exc, OpenSearchError):
             return _Note(f"{self._explain_http(exc)}  [{command}]", "warn")
         if isinstance(exc, (KeyError, AttributeError, IndexError)):  # an answer shaped unlike any this file has seen
@@ -3205,7 +3455,9 @@ class OpenSearchView(_BaseView):
         return None
 
     def _store(self, target: str | None = None) -> Domain | Collection | Endpoint:
-        """The domain, collection or endpoint a command works on: `target`, else use()'s, else the only one."""
+        """
+        The domain, collection or endpoint a command works on: `target`, else use()'s, else the only one.
+        """
         if target is not None:
             return self.core.resolve(target)
         if self.target is not None:
@@ -3246,8 +3498,10 @@ class OpenSearchView(_BaseView):
             return None
 
     def _index_ref(self, index: str | None, command: str) -> tuple[Any, str]:
-        """(store, index name) for a command: 'name/index', a bare index name (in use()'s domain or collection, or
-        the only one), a domain or collection on its own (its only vector index), or use()'s index."""
+        """
+        (store, index name) for a command: 'name/index', a bare index name (in use()'s domain or collection, or
+        the only one), a domain or collection on its own (its only vector index), or use()'s index.
+        """
         if index is not None:
             head, tail = parse_location(index)
             if tail is not None:
@@ -3285,7 +3539,9 @@ class OpenSearchView(_BaseView):
         )
 
     def _is_default(self, store: Any, index: str | None = None) -> bool:
-        """Whether use() picked this store (and index), so next steps can leave the argument out."""
+        """
+        Whether use() picked this store (and index), so next steps can leave the argument out.
+        """
         if self.target is None or (index is not None and self.index != index):
             return False
         try:
@@ -3294,7 +3550,9 @@ class OpenSearchView(_BaseView):
             return False
 
     def _ref_args(self, store: Any, index: str) -> tuple[str, ...]:
-        """('vectors-prod/docs',) for a next step's call, or () when it's use()'s index."""
+        """
+        ('vectors-prod/docs',) for a next step's call, or () when it's use()'s index.
+        """
         return () if self._is_default(store, index) else (f"{_target_arg(store)}/{index}",)
 
     def _ref_kwargs(self, store: Any, index: str) -> dict[str, str]:
@@ -3304,8 +3562,10 @@ class OpenSearchView(_BaseView):
 
     @_friendly_errors
     def use(self, where: str) -> None:
-        """Sets the domain or collection, and with 'name/index' the index, that later commands use when you don't
-        pass one: use('vectors-prod/docs') and then index_info(), sample() or search('a question')."""
+        """
+        Sets the domain or collection, and with 'name/index' the index, that later commands use when you don't
+        pass one: use('vectors-prod/docs') and then index_info(), sample() or search('a question').
+        """
         head, tail = parse_location(where)
         store = self.core.resolve(head)
         if tail is not None:
@@ -3325,9 +3585,11 @@ class OpenSearchView(_BaseView):
 
     @_friendly_errors
     def overview(self, match: str | None = None, *, metrics: bool = True) -> None:
-        """Every OpenSearch Service domain and Serverless collection in the region: what it runs on, where it
+        """
+        Every OpenSearch Service domain and Serverless collection in the region: what it runs on, where it
         answers, estimated monthly cost, and warnings. match='prod-*' keeps matching names; metrics=False skips
-        CloudWatch (the OCUs Serverless used)."""
+        CloudWatch (the OCUs Serverless used).
+        """
         with self._progress("Checking domains", unit="domains") as tick:
             ov = self.core.overview(match=match, metrics=metrics, progress=tick)
         prices = self.core.prices
@@ -3502,9 +3764,11 @@ class OpenSearchView(_BaseView):
 
     @_friendly_errors
     def indexes(self, target: str | None = None, *, hidden: bool = False) -> None:
-        """Every index in a domain or collection: documents, size, shards, vector fields (dimensions, engine,
+        """
+        Every index in a domain or collection: documents, size, shards, vector fields (dimensions, engine,
         similarity), documents missing a vector, the memory the vectors need against what the nodes have, and
-        warnings. hidden=True adds system indexes (names starting with a dot)."""
+        warnings. hidden=True adds system indexes (names starting with a dot).
+        """
         store = self._store(target)
         with self._progress("Counting vectors", unit="indexes") as tick:
             report = self.core.indexes(store, hidden=hidden, progress=tick)
@@ -3602,10 +3866,12 @@ class OpenSearchView(_BaseView):
 
     @_friendly_errors
     def index_info(self, index: str | None = None) -> None:
-        """One index in plain English: its vector fields (dimensions, engine, algorithm and settings, similarity and
+        """
+        One index in plain English: its vector fields (dimensions, engine, algorithm and settings, similarity and
         what a score means), documents without a vector, the memory the vectors need against what the nodes have,
         the fields you can filter on, findings, and the k-NN query to copy. index='vectors-prod/docs', or 'docs'
-        after use('vectors-prod')."""
+        after use('vectors-prod').
+        """
         store, name = self._index_ref(index, "index_info")
         info = self.core.index(store, name)
         serverless = _is_serverless(store)
@@ -3726,9 +3992,11 @@ class OpenSearchView(_BaseView):
 
     @_friendly_errors
     def sample(self, index: str | None = None, n: int = 10, *, check: int = 200, where: Any = None) -> None:
-        """A few random documents (text, where each came from, its fields, and its vector as dimensions and length),
+        """
+        A few random documents (text, where each came from, its fields, and its vector as dimensions and length),
         and a check of `check` documents' vectors: lengths, all-zero vectors and exact repeats. where= picks the
-        documents, e.g. where={'embedding': ('missing',)} for those without a vector."""
+        documents, e.g. where={'embedding': ('missing',)} for those without a vector.
+        """
         store, name = self._index_ref(index, "sample")
         n = _as_int(n, "n")
         result = self.core.sample(store, name, n, check=check, where=where)
@@ -3837,11 +4105,13 @@ class OpenSearchView(_BaseView):
         model: str | None = None,
         embed: Callable[[str], Any] | None = None,
     ) -> None:
-        """The k documents nearest a question: rank, score and the similarity it stands for (cosine or distance),
+        """
+        The k documents nearest a question: rank, score and the similarity it stands for (cosine or distance),
         text, source and fields. The question is embedded with a Bedrock model (Titan Text Embeddings V2 for 256,
         512 or 1,024 dimensions; model= picks another) or with embed=your_function; vector=[...] searches with your
         own vector, and like='doc-id' finds the documents nearest an existing one. where= filters, e.g.
-        where={'lang': 'en', 'year': ('>=', 2024)}."""
+        where={'lang': 'en', 'year': ('>=', 2024)}.
+        """
         store, name = self._index_ref(index, "search")
         result = self.core.search(store, name, query, vector=vector, like=like, k=k, field=field, where=where,
                                   model=model, embed=embed)

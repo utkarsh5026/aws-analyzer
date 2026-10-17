@@ -1,6 +1,8 @@
-"""Source code as HTML, every piece escaped: JSON and Python with their tokens in colour (jk / js / jn / jl for JSON's
+"""
+Source code as HTML, every piece escaped: JSON and Python with their tokens in colour (jk / js / jn / jl for JSON's
 keys, text, numbers and literals; pk / pf / pa / pc for Python's keywords, calls, keyword arguments and comments).
-The chat's code to copy and the Lambda explorer's Code tab draw with them; each service's stylesheet colours them."""
+The chat's code to copy and the Lambda explorer's Code tab draw with them; each service's stylesheet colours them.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +17,9 @@ _JSON_TOKEN_RE = re.compile(r'("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE]
 
 
 def _json_source_html(text: str) -> str:
-    """JSON text with its keys, text, numbers and true / false / null in their own colours (escaped)."""
+    """
+    JSON text with its keys, text, numbers and true / false / null in their own colours (escaped).
+    """
     out, last = [], 0
     for m in _JSON_TOKEN_RE.finditer(text):
         out.append(_esc(text[last:m.start()]))
@@ -32,8 +36,10 @@ _PY_LITERALS = frozenset({"True", "False", "None"})
 
 
 def _python_html(code: str) -> str:
-    """Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
-    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain."""
+    """
+    Python as HTML: keywords, text, numbers, True / False / None, calls, keyword arguments, dict keys and
+    comments in their own colours. Every piece is escaped; code that doesn't tokenize is shown plain.
+    """
     try:
         tokens = [t for t in tokenize.generate_tokens(io.StringIO(code).readline)
                   if t.type not in (tokenize.ENDMARKER, tokenize.INDENT, tokenize.DEDENT)]

@@ -1,4 +1,5 @@
-"""The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py), each a Toolkit subclass (base.py)
+"""
+The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py), each a Toolkit subclass (base.py)
 with the tools the agent can call about that service. TOOLKITS names the built-in ones; AgentAnalyzer(toolkits=[...]) picks which
 the agent gets, by name or as Toolkit objects (yours too), and DEFAULT_TOOLKITS is what it gets without that.
 
@@ -6,7 +7,8 @@ Adding a service: a module here (`<service>_tools.py`) with a Toolkit subclass t
 analyzer, its name in TOOLKITS (and in DEFAULT_TOOLKITS when every agent should have it), the analyzer in
 COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in README's IAM permissions. A tool that
 joins two services (S3's s3_triggers, which reads Lambda too) goes in one of their toolkits, which offers it when the
-agent has the other (Toolkit.peer())."""
+agent has the other (Toolkit.peer()).
+"""
 
 from __future__ import annotations
 
@@ -22,8 +24,10 @@ DEFAULT_TOOLKITS = ("lambda", "s3")  # what an agent gets unless toolkits= says 
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
-    """A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
-    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=)."""
+    """
+    A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
+    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=).
+    """
     if isinstance(spec, Toolkit):
         return spec
     if isinstance(spec, type) and issubclass(spec, Toolkit):
@@ -39,14 +43,18 @@ def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolki
 
 
 def default_toolkits() -> list[Toolkit]:
-    """A new, unbound Toolkit for each of DEFAULT_TOOLKITS."""
+    """
+    A new, unbound Toolkit for each of DEFAULT_TOOLKITS.
+    """
     return [make_toolkit(name) for name in DEFAULT_TOOLKITS]
 
 
 def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
                   settings: dict[str, dict[str, Any]] | None = None) -> list[Toolkit]:
-    """The toolkits toolkits= names (DEFAULT_TOOLKITS for None), each once. settings: a built-in toolkit's own
-    settings by its name ({'lambda': {'clients': ...}}), for the ones made from a name."""
+    """
+    The toolkits toolkits= names (DEFAULT_TOOLKITS for None), each once. settings: a built-in toolkit's own
+    settings by its name ({'lambda': {'clients': ...}}), for the ones made from a name.
+    """
     settings = settings or {}
     made: list[Toolkit] = []
     for spec in DEFAULT_TOOLKITS if specs is None else ([specs] if isinstance(specs, (str, Toolkit, type))

@@ -212,7 +212,9 @@ def test_tool_call_reads_as_the_call_the_model_made():
 
 
 class Notes(Toolkit):
-    """A toy toolkit with no AWS behind it, built the way a new service's toolkit is."""
+    """
+    A toy toolkit with no AWS behind it, built the way a new service's toolkit is.
+    """
 
     name, title, service, view = "notes", "Notes", "notes", "NotesView"
     covers = "the user's notes: what they wrote down and when."
@@ -227,7 +229,9 @@ class Notes(Toolkit):
 
     def tools(self):
         def read_note(name: str) -> dict:
-            """Reads one of the user's notes by its name."""
+            """
+            Reads one of the user's notes by its name.
+            """
             notes = self.analyzer.notes
             if name not in notes:
                 raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "nope"}}, "GetNote")
@@ -235,7 +239,9 @@ class Notes(Toolkit):
                     "_next": [(self._view_call("note", name, region="eu-west-1"), "the note")]}
 
         def list_notes() -> dict:
-            """Lists the user's notes."""
+            """
+            Lists the user's notes.
+            """
             raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "ListNotes")
 
         return [read_note, list_notes]
@@ -326,8 +332,10 @@ def aws():
 
 @pytest.fixture
 def seeded(aws):
-    """etl-nightly (python3.9, 60 s timeout) failed 40 of 1,000 calls in the last hour and logged a KeyError run with
-    a password in it; api-handler did nothing; eu-fn is in eu-west-1."""
+    """
+    etl-nightly (python3.9, 60 s timeout) failed 40 of 1,000 calls in the last hour and logged a KeyError run with
+    a password in it; api-handler did nothing; eu-fn is in eu-west-1.
+    """
     role = boto3.client("iam").create_role(RoleName="etl-role", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
     create("etl-nightly", role, Runtime="python3.9", MemorySize=1024, Timeout=60,
            Environment={"Variables": {"DB_PASSWORD": "hunter2"}})
@@ -510,10 +518,12 @@ def notify(bucket, arn, events=("s3:ObjectCreated:Put",), prefix="incoming/", su
 
 @pytest.fixture
 def buckets(seeded):
-    """acme-raw: three files under incoming/ written just now (a .csv uploaded whole, a .csv uploaded in parts and a
+    """
+    acme-raw: three files under incoming/ written just now (a .csv uploaded whole, a .csv uploaded in parts and a
     .CSV) and a README, and a notification that sends PUT uploads of incoming/*.csv to etl-nightly, whose policy lets
     it (and acme-old, which sends it nothing); acme-ghost sends events to a function that isn't there; acme-drop to
-    api-handler, which doesn't let S3 invoke it; acme-reports is in eu-west-1."""
+    api-handler, which doesn't let S3 invoke it; acme-reports is in eu-west-1.
+    """
     s3 = boto3.client("s3", region_name=REGION)
     for name in ("acme-raw", "acme-ghost", "acme-old", "acme-drop"):
         s3.create_bucket(Bucket=name)
@@ -666,8 +676,10 @@ def test_without_lambda_the_s3_toolkit_leaves_out_s3_triggers(buckets):
 
 
 def scripted(*replies):
-    """A LangChain chat model that answers with these AIMessages in turn (an exception is raised instead), and
-    remembers the tools it was given and the messages it was sent."""
+    """
+    A LangChain chat model that answers with these AIMessages in turn (an exception is raised instead), and
+    remembers the tools it was given and the messages it was sent.
+    """
     pytest.importorskip("deepagents")
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.outputs import ChatGeneration, ChatResult
@@ -697,7 +709,9 @@ def scripted(*replies):
 
 
 def ai_message(**fields):
-    """An AIMessage, or a skip where the agent's packages aren't installed (Python 3.10)."""
+    """
+    An AIMessage, or a skip where the agent's packages aren't installed (Python 3.10).
+    """
     pytest.importorskip("deepagents")
     return pytest.importorskip("langchain_core.messages").AIMessage(**fields)
 
@@ -847,7 +861,9 @@ def test_the_azure_model_comes_from_the_environment(monkeypatch):
 
 
 def test_asking_through_azure_openai(seeded):
-    """The whole path to Azure: AzureChatOpenAI, over a mock HTTP endpoint that answers as Azure does."""
+    """
+    The whole path to Azure: AzureChatOpenAI, over a mock HTTP endpoint that answers as Azure does.
+    """
     httpx = pytest.importorskip("httpx")
     openai = pytest.importorskip("langchain_openai")
     replies = [

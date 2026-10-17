@@ -1,4 +1,5 @@
-"""How reports are drawn, for every service: the stylesheet each report starts with, and the HTML and text of the
+"""
+How reports are drawn, for every service: the stylesheet each report starts with, and the HTML and text of the
 blocks every service uses (blocks.py); a service's own blocks register how they're drawn when it's imported.
 
 Each service's reports sit in an HTML box of its own root class (.s3a, .ddb, .kba, ...): `_base_css(root, extra)`
@@ -169,13 +170,15 @@ _BASE_RULES = """\
 
 def _base_css(root: str, extra: str = "", *, theme: str = "", restyle: dict[str, str] | None = None,
               after: dict[str, str] | None = None) -> str:
-    """The <style> every report starts with: the shared rules for the root class `root`, then `extra`, the rules
+    """
+    The <style> every report starts with: the shared rules for the root class `root`, then `extra`, the rules
     for the service's own blocks.
 
     A service whose reports look different (the chat's match its window) changes some shared rules: `theme` goes
     first (the custom properties its rules use), `restyle` replaces a shared rule and `after` adds rules after one.
     Their keys are how the shared rule starts after `.<root> ` ("h3 .badge{", "code{background:"); one that matches
-    no rule, or more than one, raises ValueError, so a change to the shared rules can't silently undo a restyle."""
+    no rule, or more than one, raises ValueError, so a change to the shared rules can't silently undo a restyle.
+    """
     rules = _BASE_RULES.replace("{root}", root).split("\n")
     for edits, keep in ((restyle or {}, False), (after or {}, True)):
         for start, new in edits.items():
@@ -206,9 +209,11 @@ _MONEY_RE = re.compile(r"(-?<?\$[\d,]+(?:\.\d+)?(?:/month|/mo\b| a month| per mo
 
 
 def _prose(value: Any, money: bool = False) -> str:
-    """Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects
+    """
+    Escaped HTML for a sentence this tool wrote, with the calls in it as code that one click selects
     (and, with money=True, amounts like $12.40/month stressed). The text is split on the calls and every
-    piece escaped before it's wrapped, so nothing in it becomes markup."""
+    piece escaped before it's wrapped, so nothing in it becomes markup.
+    """
     pieces = _CALL_RE.split("" if value is None else str(value))
     return "".join(
         f"<code{_SELECT}>{_esc(piece)}</code>" if i % 2
@@ -220,8 +225,10 @@ def _prose(value: Any, money: bool = False) -> str:
 
 
 def _masked(text: str) -> str:
-    """The text with its commands and anything in brackets blanked out (same length), so a sentence is never
-    split inside them: 'Something went wrong (RuntimeError: boom)' has no lead."""
+    """
+    The text with its commands and anything in brackets blanked out (same length), so a sentence is never
+    split inside them: 'Something went wrong (RuntimeError: boom)' has no lead.
+    """
     masked, before = _CALL_RE.sub(lambda m: "x" * len(m.group(0)), text), None
     while masked != before:  # innermost brackets first
         before, masked = masked, re.sub(r"[(\[][^()\[\]]*[)\]]", lambda m: "x" * len(m.group(0)), masked)
@@ -229,9 +236,11 @@ def _masked(text: str) -> str:
 
 
 def _split_lead(text: str, shortest: int = 8, longest: int = 160) -> tuple[str, str, str]:
-    """'Versioning is on: every deleted file is kept.' -> ('Versioning is on', ':', 'every deleted file is
+    """
+    'Versioning is on: every deleted file is kept.' -> ('Versioning is on', ':', 'every deleted file is
     kept.'): what a sentence says first, the mark after it and the rest (why it matters, what to do).
-    ('', '', text) when it has no lead that short. Commands and brackets in it are never split."""
+    ('', '', text) when it has no lead that short. Commands and brackets in it are never split.
+    """
     masked = _masked(text)
     for match in _LEAD_END_RE.finditer(masked):
         if match.start() < shortest:
@@ -244,15 +253,19 @@ def _split_lead(text: str, shortest: int = 8, longest: int = 160) -> tuple[str, 
 
 
 def _prose_sentences(text: str) -> list[str]:
-    """Split this tool's prose into sentences, never inside a command or brackets."""
+    """
+    Split this tool's prose into sentences, never inside a command or brackets.
+    """
     masked = _masked(text)
     cuts = [m.end() for m in re.finditer(r"\.(?=\s+[A-Z0-9\"'(<$])", masked)]
     return [text[a:b].strip() for a, b in zip([0] + cuts, cuts + [len(text)]) if text[a:b].strip()]
 
 
 def _capitalized(text: str) -> str:
-    """'every file is kept' -> 'Every file is kept', but 'invoices/a.pdf', 'uploads(...)' or a command to copy
-    ('aws s3 ls ...') stay as they are."""
+    """
+    'every file is kept' -> 'Every file is kept', but 'invoices/a.pdf', 'uploads(...)' or a command to copy
+    ('aws s3 ls ...') stay as they are.
+    """
     first = text.split(" ", 1)[0]
     if _CALL_RE.match(text):
         return text
@@ -260,8 +273,10 @@ def _capitalized(text: str) -> str:
 
 
 def _lead(value: Any) -> str:
-    """_prose with the sentence's lead in bold and amounts of money stressed:
-    '<span class="ld">Versioning is on:</span> every deleted file is kept.' For notes and Warnings cells."""
+    """
+    _prose with the sentence's lead in bold and amounts of money stressed:
+    '<span class="ld">Versioning is on:</span> every deleted file is kept.' For notes and Warnings cells.
+    """
     text = "" if value is None else str(value)
     head, mark, rest = _split_lead(text)
     if not head:
@@ -270,8 +285,10 @@ def _lead(value: Any) -> str:
 
 
 def _finding_html(level: str, message: str) -> str:
-    """One finding as a headline (what's wrong) over its detail (why it matters, what it costs, what to do),
-    the detail's sentences as points when there are several."""
+    """
+    One finding as a headline (what's wrong) over its detail (why it matters, what it costs, what to do),
+    the detail's sentences as points when there are several.
+    """
     head, _, rest = _split_lead(message)
     if not head:
         head, rest = (message, "") if len(message) <= 200 else ("", message)
@@ -286,7 +303,9 @@ def _finding_html(level: str, message: str) -> str:
 
 
 def _call(name: str, *args: Any, **kwargs: Any) -> str:
-    """_call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy."""
+    """
+    _call('tree', 's3://b/', depth=2) -> "tree('s3://b/', depth=2)": a next step, ready to copy.
+    """
 
     def literal(value: Any) -> str:  # repr, but DynamoDB numbers read 42 rather than Decimal('42')
         if type(value).__name__ == "Decimal":
@@ -302,7 +321,9 @@ def _call(name: str, *args: Any, **kwargs: Any) -> str:
 
 
 def _signature(function: Callable) -> str:
-    """'(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints."""
+    """
+    '(uri, *, top_n=10, limit=None)': a command's parameters without self or type hints.
+    """
     sig = inspect.signature(function)
     params = [p.replace(annotation=inspect.Parameter.empty) for name, p in sig.parameters.items() if name != "self"]
     return str(sig.replace(parameters=params, return_annotation=inspect.Signature.empty))
@@ -332,9 +353,11 @@ _HIDE = ' hidden="hidden"'
 
 
 def _sort_key(text: str) -> tuple[int, Any] | None:
-    """What a table cell sorts by: (0, number) for sizes, money, counts, percentages and ages ('2.1 GB' is
+    """
+    What a table cell sorts by: (0, number) for sizes, money, counts, percentages and ages ('2.1 GB' is
     bytes, '<$0.01' half a cent, '3d ago' seconds), (1, text) for dates, (2, parts) for the rest in natural
-    order ('epoch-2' before 'epoch-10'). None for an empty cell, which sorts last both ways."""
+    order ('epoch-2' before 'epoch-10'). None for an empty cell, which sorts last both ways.
+    """
     text = text.split("\n", 1)[0].strip().removeprefix("📁 ")
     if text in ("", "-", "—"):
         return None
@@ -353,7 +376,9 @@ def _sort_key(text: str) -> tuple[int, Any] | None:
 
 
 def _sort_kind(values: list[str], keys: list[tuple[int, Any]]) -> str:
-    """'number', 'age', 'date' or 'text': what most of a column's cells hold, which decides its first sort."""
+    """
+    'number', 'age', 'date' or 'text': what most of a column's cells hold, which decides its first sort.
+    """
     cls = Counter(key[0] for key in keys).most_common(1)[0][0]
     if cls:
         return "date" if cls == 1 else "text"
@@ -362,8 +387,10 @@ def _sort_kind(values: list[str], keys: list[tuple[int, Any]]) -> str:
 
 
 def _ranks(keys: list[Any]) -> tuple[list[int], list[int]]:
-    """Each row's place when the column is sorted up and when it's sorted down. Rows that tie share a place,
-    so they keep their order; empty cells come last both ways."""
+    """
+    Each row's place when the column is sorted up and when it's sorted down. Rows that tie share a place,
+    so they keep their order; empty cells come last both ways.
+    """
     present = sorted(key for key in keys if key is not None)
     first: dict[Any, int] = {}
     for i, key in enumerate(present):
@@ -375,8 +402,10 @@ def _ranks(keys: list[Any]) -> tuple[list[int], list[int]]:
 
 
 def _filters(block: _Table, columns: list[list[str]], numeric: list[bool]) -> list[tuple[int, list[tuple[str, int]]]]:
-    """The columns that get a filter: a few different values, some repeated (a storage class, a status, a
-    region), never numbers, dates, keys or sentences -> [(column, [(value, rows), ...] most rows first)]."""
+    """
+    The columns that get a filter: a few different values, some repeated (a storage class, a status, a
+    region), never numbers, dates, keys or sentences -> [(column, [(value, rows), ...] most rows first)].
+    """
     found: list[tuple[int, list[tuple[str, int]]]] = []
     for j, column in enumerate(columns):
         skip = set(block.prose_cols) | set(block.code_cols) | set(block.path_cols) | ({0} if block.tree else set())
@@ -411,8 +440,10 @@ _ICONS = {  # extension -> the icon in front of a file's name, in key columns an
 
 
 def _file_icon(key: str) -> str:
-    """📁 for a folder, else the file's icon by its extension: 📊 tables, 📕 PDF, 🖼️ pictures, 🧠 models, ...,
-    📄 for anything else. 'data.csv.gz' is a table and 'logs.tar.gz' an archive."""
+    """
+    📁 for a folder, else the file's icon by its extension: 📊 tables, 📕 PDF, 🖼️ pictures, 🧠 models, ...,
+    📄 for anything else. 'data.csv.gz' is a table and 'logs.tar.gz' an archive.
+    """
     if key.endswith("/"):
         return "📁"
     ext = file_extension(key)
@@ -422,9 +453,11 @@ def _file_icon(key: str) -> str:
 
 
 def _path_html(text: str) -> str:
-    """A key in a table cell: its icon (📁 for a folder, 📊 for a table, ... by _file_icon), its folder dimmed and,
+    """
+    A key in a table cell: its icon (📁 for a folder, 📊 for a table, ... by _file_icon), its folder dimmed and,
     when long, shortened from the left (the nearest folders stay), then the file name in full. Each line of the
-    cell is one key. The icon is only drawn: the cell's text, which sorts and copies, is the key alone."""
+    cell is one key. The icon is only drawn: the cell's text, which sorts and copies, is the key alone.
+    """
     lines = []
     for line in text.split("\n"):
         if line.startswith("📁 "):
@@ -445,7 +478,9 @@ def _path_html(text: str) -> str:
 
 
 def _clip_path(text: str, width: int = 90) -> str:
-    """A key for a text table: when it's too long the start of its folder goes, never the file name."""
+    """
+    A key for a text table: when it's too long the start of its folder goes, never the file name.
+    """
     if len(text) <= width:
         return text
     tail = text[-(width - 1):]
@@ -457,17 +492,23 @@ def _clip_path(text: str, width: int = 90) -> str:
 
 
 def _tone(item: tuple[str, ...]) -> str:
-    """The tone of a card: its third element, when it's one this renderer colours."""
+    """
+    The tone of a card: its third element, when it's one this renderer colours.
+    """
     return item[2] if len(item) > 2 and item[2] in _TONES else ""
 
 
 def _ordered(findings: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Warnings first, then notes, each in the order they were found."""
+    """
+    Warnings first, then notes, each in the order they were found.
+    """
     return sorted(findings, key=lambda f: {"warn": 0, "info": 1}.get(f[0], 2))
 
 
 def _counts(findings: list[tuple[str, str]], sep: str) -> str:
-    """'2 warnings · 3 notes'."""
+    """
+    '2 warnings · 3 notes'.
+    """
     warns = sum(level == "warn" for level, _ in findings)
     return sep.join(filter(None, [_plural(warns, "warning") if warns else "",
                                   _plural(len(findings) - warns, "note") if len(findings) > warns else ""]))
@@ -480,13 +521,17 @@ def _visible_rows(table: _Table, default_max: int) -> tuple[list[list[Any]], int
 
 
 def _hidden(count: int, table: _Table, default_max: int) -> str:
-    """The line under a table that was cut short, and how to see the rest when the view's max_rows cut it."""
+    """
+    The line under a table that was cut short, and how to see the rest when the view's max_rows cut it.
+    """
     text = f"... {count:,} more rows not shown"
     return text + (f" (the view shows {default_max:,}; ui.max_rows = 0 shows all)" if table.max_rows is None else "")
 
 
 def _undrawn(block: Any) -> _Note:
-    """The note shown in place of a block that nothing draws, rather than a traceback."""
+    """
+    The note shown in place of a block that nothing draws, rather than a traceback.
+    """
     return _Note(f"Part of this report isn't shown: there's no way to draw a {type(block).__name__} here "
                  "(a bug in aws-analyzer).", "warn")
 
@@ -514,8 +559,10 @@ def _note_html(block: _Note, report: _Report) -> str:
 
 @_draws(_Findings, "html")
 def _findings_html(block: _Findings, report: _Report) -> str:
-    """The findings panel: warnings first, with a chip counting each kind, every finding a headline over its detail
-    (_finding_html); block.empty (an ok note) when there's none."""
+    """
+    The findings panel: warnings first, with a chip counting each kind, every finding a headline over its detail
+    (_finding_html); block.empty (an ok note) when there's none.
+    """
     items = _ordered(block.items)
     if not items:
         return f'<div class="note ok">{_lead(block.empty)}</div>' if block.empty else ""
@@ -545,19 +592,23 @@ def _tone_cell_html(cell: _Tone, text: str) -> str:
 
 
 def _cell_html(cell: Any, text: str) -> str:
-    """A table cell's HTML: its text, escaped, or what's registered for its type (a _Tone's coloured pill)."""
+    """
+    A table cell's HTML: its text, escaped, or what's registered for its type (a _Tone's coloured pill).
+    """
     draw = _drawer(_CELLS, cell)
     return draw(cell, text) if draw else _esc(text)
 
 
 @_draws(_Table, "html")
 def _table_html(block: _Table, report: _Report) -> str:
-    """A _Table as HTML. Over 30 rows it scrolls under a sticky header. With 3 rows or more, a click on a
+    """
+    A _Table as HTML. Over 30 rows it scrolls under a sticky header. With 3 rows or more, a click on a
     header sorts by that column (largest, newest or A to Z first; again for the other way; a third click
     for the original order); a column of a few repeated values gets a filter; with 3 columns or more, a
     Columns menu ticks columns off. All plain HTML and CSS: radio buttons, selects and checkboxes in a form,
     read by :has() rules (the per-table ones go into report.rules), so they keep working in a reopened notebook,
-    where scripts don't run. Without the stylesheet the controls stay hidden and the table is plain."""
+    where scripts don't run. Without the stylesheet the controls stay hidden and the table is plain.
+    """
     if not block.rows:
         return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + '<div class="more">(none)</div>'
     rows, hidden = _visible_rows(block, report.max_rows)
@@ -753,39 +804,51 @@ def _text_lines(block: _Text, report: _Report) -> list[str]:
 
 
 def _block_html(block: Any, report: _Report) -> str:
-    """One block as HTML, drawn by what's registered for its type."""
+    """
+    One block as HTML, drawn by what's registered for its type.
+    """
     draw = _drawer(_HTML, block)
     return draw(block, report) if draw else _note_html(_undrawn(block), report)
 
 
 def _rules_html(report: _Report) -> str:
-    """The <style> holding the CSS rules the report's blocks added (its tables' filters and columns), if any."""
+    """
+    The <style> holding the CSS rules the report's blocks added (its tables' filters and columns), if any.
+    """
     return "<style>" + "\n".join(sorted(report.rules)) + "</style>" if report.rules else ""
 
 
 def _blocks_html(blocks: list[Any], max_rows: int = 0, root: str = "") -> str:
-    """Blocks as HTML without a report's stylesheet and box, for a window that has both inside a box of the root
-    class `root` (a title gets no badge)."""
+    """
+    Blocks as HTML without a report's stylesheet and box, for a window that has both inside a box of the root
+    class `root` (a title gets no badge).
+    """
     report = _Report(max_rows, root=root, blocks=tuple(blocks))
     body = "".join(_block_html(block, report) for block in blocks)
     return _rules_html(report) + body
 
 
 def _report_html(blocks: list[Any], max_rows: int, css: str, root: str, badge: str) -> str:
-    """A report as HTML: the service's stylesheet, the rules its blocks added, then its blocks in a box of the
-    service's root class."""
+    """
+    A report as HTML: the service's stylesheet, the rules its blocks added, then its blocks in a box of the
+    service's root class.
+    """
     report = _Report(max_rows, badge, root, tuple(blocks))
     body = [_block_html(block, report) for block in blocks]
     return "".join([css, _rules_html(report), f'<div class="{root}">', *body, "</div>"])
 
 
 def _block_lines(block: Any, report: _Report) -> list[str]:
-    """One block as lines of text, drawn by what's registered for its type."""
+    """
+    One block as lines of text, drawn by what's registered for its type.
+    """
     draw = _drawer(_TEXT, block)
     return draw(block, report) if draw else _note_lines(_undrawn(block), report)
 
 
 def _render_text(blocks: list[Any], max_rows: int) -> str:
-    """A report as text: each block's lines, one after the other."""
+    """
+    A report as text: each block's lines, one after the other.
+    """
     report = _Report(max_rows)
     return "\n".join(line for block in blocks for line in _block_lines(block, report))

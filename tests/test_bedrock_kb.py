@@ -327,8 +327,10 @@ def search_params(question, n=5, kb_id=KB_ID, **config):
 
 
 def rag_resp(text, citations, session="session-1", guardrail=None):
-    """A RetrieveAndGenerate response; each citation is (the answer text it covers, [passage(...), ...]). Spans use
-    an inclusive end, which parse_rag has to detect."""
+    """
+    A RetrieveAndGenerate response; each citation is (the answer text it covers, [passage(...), ...]). Spans use
+    an inclusive end, which parse_rag has to detect.
+    """
     cites = []
     for piece, refs in citations:
         start = text.index(piece)
@@ -1470,8 +1472,10 @@ def test_eval_findings():
 
 
 class Stubs:
-    """Real boto3 clients with a botocore Stubber on each: every call must be queued, and its parameters are
-    checked against the service model."""
+    """
+    Real boto3 clients with a botocore Stubber on each: every call must be queued, and its parameters are
+    checked against the service model.
+    """
 
     def __init__(self):
         names = ("bedrock-agent", "bedrock-agent-runtime", "bedrock-runtime", "bedrock")
@@ -1521,8 +1525,10 @@ class Stubs:
         )
 
     def describe(self, desc=None, sources=None, *, tags=None, reasons=None):
-        """Queue what describe() reads: the knowledge base, its data sources, each one's settings and recent syncs
-        (and why the newest failed, when it did), then the tags."""
+        """
+        Queue what describe() reads: the knowledge base, its data sources, each one's settings and recent syncs
+        (and why the newest failed, when it did), then the tags.
+        """
         desc = desc or kb_desc()
         kb_id = desc["knowledgeBaseId"]
         self.agent.add_response(
@@ -2066,7 +2072,9 @@ def test_generate_works_with_models_that_take_no_system_prompt(aws, core):
 
 
 def backdate(bucket, key, when):
-    """moto stamps objects with the current time; unsynced() needs some from before the last sync."""
+    """
+    moto stamps objects with the current time; unsynced() needs some from before the last sync.
+    """
     from moto.core.models import DEFAULT_ACCOUNT_ID
     from moto.s3.models import s3_backends
 
@@ -2078,7 +2086,9 @@ def backdate(bucket, key, when):
 
 @pytest.fixture
 def bucket(aws):
-    """A moto bucket behind the S3 data source: an old file, new ones, and metadata files."""
+    """
+    A moto bucket behind the S3 data source: an old file, new ones, and metadata files.
+    """
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="support-docs-bucket")
@@ -2680,7 +2690,9 @@ def two_sources(aws):
 
 
 def with_source(params, *ids):
-    """rag_params(...) narrowed to these data sources, the way data_source= sends it."""
+    """
+    rag_params(...) narrowed to these data sources, the way data_source= sends it.
+    """
     only = (
         {"equals": {"key": DS_KEY, "value": ids[0]}}
         if len(ids) == 1
@@ -3258,7 +3270,9 @@ FOLDER = "s3://support-docs-bucket/policies/"
 
 
 def kbfile(name, status="INDEXED", *, size=2048, modified=None, indexed=None, ds_id=DS_ID, **kwargs):
-    """A file of the S3 data source: in S3 since 10 days ago, indexed a day ago (when it has a status)."""
+    """
+    A file of the S3 data source: in S3 since 10 days ago, indexed a day ago (when it has a status).
+    """
     return KBFile(FOLDER + name, ds_id, status=status, size=size, modified=modified or ago(days=10),
                   indexed=indexed or (ago(days=1) if status else None), **kwargs)
 
@@ -3306,7 +3320,9 @@ def test_skip_reason_says_why_a_sync_left_a_file_out():
 
 
 def objects(*entries):
-    """ListObjectsV2 'Contents' entries: (key, size, modified)."""
+    """
+    ListObjectsV2 'Contents' entries: (key, size, modified).
+    """
     return [{"Key": key, "Size": size, "LastModified": when, "StorageClass": "STANDARD"} for key, size, when in entries]
 
 
@@ -3661,8 +3677,10 @@ FILE_DOCS = [doc("old.pdf"), doc("gone.pdf"), doc("broken.pdf", "FAILED", "The f
 
 
 def stub_inventory(aws, docs=None, *, web=False, kb="support-docs", last=None):
-    """Queue what file_inventory() reads without describe(): the knowledge base list (for the name), its data
-    sources, each one's settings and last successful sync, and Bedrock's documents. The bucket is moto's."""
+    """
+    Queue what file_inventory() reads without describe(): the knowledge base list (for the name), its data
+    sources, each one's settings and last successful sync, and Bedrock's documents. The bucket is moto's.
+    """
     if kb != KB_ARN:
         aws.list_kbs()
     aws.data_sources(ds_desc(), *([ds_desc(DS2_ID, "help-site", kind="WEB")] if web else []))
@@ -3913,7 +3931,9 @@ def test_save_file_list_report_links_the_file_in_html(tmp_path, monkeypatch):
 
 
 def stub_file_page(aws, chunks=None):
-    """What file() reads after the files are listed: the file's chunks (the metadata file is moto's)."""
+    """
+    What file() reads after the files are listed: the file's chunks (the metadata file is moto's).
+    """
     old = FOLDER + "old.pdf"
     aws.runtime.add_response("retrieve", retrieve_resp(*(chunks if chunks is not None else [
         chunk_result("The old policy, page one. " * 4, old, page=1, chunk_id="o1"),
@@ -3971,9 +3991,11 @@ def test_ui_explore_needs_jupyter(ui, capsys):
 
 
 class Fake:
-    """A boto3 client stand-in answering from functions in any order (the window reads in its own order, some of it
+    """
+    A boto3 client stand-in answering from functions in any order (the window reads in its own order, some of it
     on other threads). Every request and response is checked against the service model, and calls are recorded.
-    Operations without a handler don't exist on it."""
+    Operations without a handler don't exist on it.
+    """
 
     def __init__(self, service, handlers):
         model = boto3.client(service, region_name="us-east-1").meta.service_model
@@ -4012,9 +4034,11 @@ FAQ = FOLDER + "faq.md"
 
 
 class World:
-    """support-docs (an S3 data source over moto's bucket, and a web one) and sales (no data sources), as fake
+    """
+    support-docs (an S3 data source over moto's bucket, and a web one) and sales (no data sources), as fake
     bedrock-agent and bedrock-agent-runtime clients. Put a threading.Event in `holds` under an operation's name to
-    hold its calls back until it's set, or an exception in `errors` to make them fail."""
+    hold its calls back until it's set, or an exception in `errors` to make them fail.
+    """
 
     def __init__(self, s3, *, bulk=0):
         self.s3, self.holds, self.errors = s3, {}, {}
@@ -4184,7 +4208,9 @@ def test_explorer_shows_how_a_file_was_indexed(world):
 
 
 def html_widgets(widget):
-    """Every widget in a window that shows HTML."""
+    """
+    Every widget in a window that shows HTML.
+    """
     found, todo = [], [widget]
     while todo:
         item = todo.pop()

@@ -1,4 +1,5 @@
-"""What bedrock_kb.py and bedrock_chat.py share, written once: Bedrock's list prices and model helpers, the
+"""
+What bedrock_kb.py and bedrock_chat.py share, written once: Bedrock's list prices and model helpers, the
 passages, documents and models Bedrock returns, metadata filters, token and cost estimates, the answer's markdown
 with its citations, the _Answer and _Json blocks with their drawings, and files: the links that open them
 (presigned_url) and their list saved as a text file (write_file_list, SavedFileList, the _Download block).
@@ -119,9 +120,11 @@ _KB_ARN_RE = re.compile(
 
 
 def parse_kb_ref(ref: str) -> tuple[str, str]:
-    """How a knowledge base was named: 'ABCDE12345' -> ('id', 'ABCDE12345'), 'support-docs' -> ('name',
+    """
+    How a knowledge base was named: 'ABCDE12345' -> ('id', 'ABCDE12345'), 'support-docs' -> ('name',
     'support-docs'), and an ARN (arn:aws:bedrock:<region>:<account>:knowledge-base/ABCDE12345) -> ('arn', 'ABCDE12345'),
-    the ID inside it."""
+    the ID inside it.
+    """
     text = str(ref or "").strip()
     if not text:
         raise ValueError(
@@ -139,13 +142,17 @@ def parse_kb_ref(ref: str) -> tuple[str, str]:
 
 
 def _model_id(arn: str | None) -> str:
-    """'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0' -> 'amazon.titan-embed-text-v2:0'."""
+    """
+    'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v2:0' -> 'amazon.titan-embed-text-v2:0'.
+    """
     return (arn or "").rsplit("/", 1)[-1]
 
 
 def source_name(uri: str | None) -> str:
-    """The file name in a source location: 's3://docs/policies/refund-policy.pdf' -> 'refund-policy.pdf',
-    'https://example.com/help/refunds?x=1' -> 'refunds', 'https://example.com/' -> 'example.com'."""
+    """
+    The file name in a source location: 's3://docs/policies/refund-policy.pdf' -> 'refund-policy.pdf',
+    'https://example.com/help/refunds?x=1' -> 'refunds', 'https://example.com/' -> 'example.com'.
+    """
     if not uri:
         return ""
     text = str(uri).split("?", 1)[0].split("#", 1)[0]
@@ -164,7 +171,9 @@ SEARCHABLE = {"INDEXED", "PARTIALLY_INDEXED", "METADATA_PARTIALLY_INDEXED", "MET
 
 
 def estimate_tokens(text: str | None) -> int:
-    """Roughly how many tokens `text` is: one per 4 characters. An estimate: label it as one wherever it's shown."""
+    """
+    Roughly how many tokens `text` is: one per 4 characters. An estimate: label it as one wherever it's shown.
+    """
     return math.ceil(len(text or "") / 4)
 
 
@@ -172,9 +181,11 @@ _BEDROCK_META_PREFIX = "x-amz-bedrock-kb-"
 
 
 def split_metadata(md: dict[str, Any] | None) -> tuple[dict[str, Any], dict[str, Any]]:
-    """A retrieved passage's metadata -> (system, user). System keys lose their prefix: 'source-uri', 'chunk-id',
+    """
+    A retrieved passage's metadata -> (system, user). System keys lose their prefix: 'source-uri', 'chunk-id',
     'data-source-id', 'document-page-number'. User keys are the knowledge base author's own metadata (from
-    <file>.metadata.json), which is what where= filters on."""
+    <file>.metadata.json), which is what where= filters on.
+    """
     system: dict[str, Any] = {}
     user: dict[str, Any] = {}
     for key, value in (md or {}).items():
@@ -198,8 +209,10 @@ _TERM_RE = re.compile(r"[^\W_](?:[\w'’.\-/#]*[^\W_])?")
 
 
 def question_terms(question: str) -> list[str]:
-    """The words of a question worth highlighting, lower case, each once: no stopwords, 3+ characters or holding a
-    digit. 'How long do refunds take for order E1234?' -> ['long', 'refunds', 'take', 'order', 'e1234']."""
+    """
+    The words of a question worth highlighting, lower case, each once: no stopwords, 3+ characters or holding a
+    digit. 'How long do refunds take for order E1234?' -> ['long', 'refunds', 'take', 'order', 'e1234'].
+    """
     terms: list[str] = []
     for match in _TERM_RE.finditer(question or ""):
         word = match.group(0).lower()
@@ -214,8 +227,10 @@ def question_terms(question: str) -> list[str]:
 
 
 def _terms_regex(terms: Iterable[str]) -> re.Pattern[str] | None:
-    """One regex (with a single group) matching any of `terms` as whole words, plus simple plural / verb endings:
-    'refunds' also matches 'refund' and 'refunded'."""
+    """
+    One regex (with a single group) matching any of `terms` as whole words, plus simple plural / verb endings:
+    'refunds' also matches 'refund' and 'refunded'.
+    """
     stems = set()
     for term in terms:
         term = term.lower()
@@ -230,8 +245,10 @@ def _terms_regex(terms: Iterable[str]) -> re.Pattern[str] | None:
 
 
 def best_snippet(text: str, terms: Iterable[str], width: int = 320) -> str:
-    """The `width`-character window of `text` holding the most question words, cut at spaces, with … where the text
-    was cut. Whitespace is collapsed. Text without any of the words gives its start."""
+    """
+    The `width`-character window of `text` holding the most question words, cut at spaces, with … where the text
+    was cut. Whitespace is collapsed. Text without any of the words gives its start.
+    """
     flat = " ".join((text or "").split())
     if len(flat) <= width:
         return flat
@@ -256,9 +273,11 @@ def best_snippet(text: str, terms: Iterable[str], width: int = 320) -> str:
 
 
 def _family_match(family: str, model_id: str) -> bool:
-    """Whether `model_id` belongs to a model family: 'claude-opus-5' matches 'anthropic.claude-opus-5-v1:0' and
+    """
+    Whether `model_id` belongs to a model family: 'claude-opus-5' matches 'anthropic.claude-opus-5-v1:0' and
     'us.anthropic.claude-opus-5-20260301-v1:0', but not 'anthropic.claude-opus-5-5' (a newer version, another model);
-    'llama4-maverick' matches 'meta.llama4-maverick-17b-instruct-v1:0' (17b is its size, not a version)."""
+    'llama4-maverick' matches 'meta.llama4-maverick-17b-instruct-v1:0' (17b is its size, not a version).
+    """
     version = r"(?!\d)(?!-\d{1,2}(?:[-:.]|$))"  # right after the family, '-5' then '-', ':', '.' or the end
     return (
         re.search(re.escape(family.lower()) + version, (model_id or "").lower())
@@ -269,10 +288,12 @@ def _family_match(family: str, model_id: str) -> bool:
 def model_price(
     model: str, model_prices: dict[str, tuple[float, float]] | None = None
 ) -> tuple[float, float] | None:
-    """(USD per 1M input tokens, per 1M output tokens) for a model ID, profile ID or ARN; None when it isn't in the
+    """
+    (USD per 1M input tokens, per 1M output tokens) for a model ID, profile ID or ARN; None when it isn't in the
     table. The longest matching key wins, so 'claude-opus-5-5' isn't priced as 'claude-opus-5'. A global profile
     ('global.anthropic.claude-opus-5-v1:0') gets its GLOBAL_MODEL_PRICES price unless `model_prices` changed the
-    model's list price."""
+    model's list price.
+    """
     prices = MODEL_PRICES if model_prices is None else model_prices
     is_global = (model or "").rsplit("/", 1)[-1].lower().startswith("global.")
     for key in sorted(prices, key=len, reverse=True):
@@ -288,7 +309,9 @@ def model_price(
 
 
 def short_model(model: str) -> str:
-    """'us.anthropic.claude-opus-5-v1:0' -> 'claude-opus-5', 'amazon.nova-pro-v1:0' -> 'nova-pro'."""
+    """
+    'us.anthropic.claude-opus-5-v1:0' -> 'claude-opus-5', 'amazon.nova-pro-v1:0' -> 'nova-pro'.
+    """
     name = (model or "").rsplit("/", 1)[-1]
     name = re.sub(r"^(us|eu|apac|ap|ca|us-gov|jp|au|global)\.", "", name)
     name = (
@@ -309,7 +332,9 @@ _RERANK_ALIASES = {"cohere": DEFAULT_RERANK_MODEL, "amazon": "amazon.rerank-v1:0
 
 @dataclass
 class KBDocument:
-    """One document (file or record) of a data source, and whether it's searchable."""
+    """
+    One document (file or record) of a data source, and whether it's searchable.
+    """
 
     data_source_id: str
     uri: str  # s3://... for S3 data sources, the document ID for custom ones
@@ -324,7 +349,9 @@ class KBDocument:
 
 @dataclass
 class Passage:
-    """One retrieved chunk of a document, with where it came from."""
+    """
+    One retrieved chunk of a document, with where it came from.
+    """
 
     rank: int  # 1 = best match
     text: str
@@ -346,19 +373,25 @@ class Passage:
 
     @property
     def source(self) -> str:
-        """'refund-policy.pdf p.3'."""
+        """
+        'refund-policy.pdf p.3'.
+        """
         name = source_name(self.uri) or self.uri or "(unknown source)"
         return f"{name} p.{self.page}" if self.page is not None else name
 
     @property
     def key(self) -> str:
-        """What identifies this chunk when comparing searches: its chunk ID, or its source and text."""
+        """
+        What identifies this chunk when comparing searches: its chunk ID, or its source and text.
+        """
         return self.chunk_id or f"{self.uri}|{self.page}|{self.text[:500]}"
 
 
 @dataclass
 class Citation:
-    """A span of an answer and the sources behind it."""
+    """
+    A span of an answer and the sources behind it.
+    """
 
     start: int  # character offsets into Answer.text; end is exclusive
     end: int
@@ -370,7 +403,9 @@ class Citation:
 
 @dataclass
 class ModelInfo:
-    """A model ask() can use, and how to call it."""
+    """
+    A model ask() can use, and how to call it.
+    """
 
     id: str  # the foundation model ID, e.g. 'anthropic.claude-opus-5'
     name: str = ""
@@ -388,7 +423,9 @@ class ModelInfo:
 # ----------------------------------------------------------------------------- reading responses, filters and costs
 
 def parse_document(desc: dict[str, Any]) -> KBDocument:
-    """One ListKnowledgeBaseDocuments 'documentDetails' entry -> KBDocument."""
+    """
+    One ListKnowledgeBaseDocuments 'documentDetails' entry -> KBDocument.
+    """
     ident = desc.get("identifier") or {}
     uri = (
         (ident.get("s3") or {}).get("uri")
@@ -426,7 +463,9 @@ def _page_number(value: Any) -> int | None:
 
 
 def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
-    """One Retrieve result (or one RetrieveAndGenerate retrievedReference) -> Passage."""
+    """
+    One Retrieve result (or one RetrieveAndGenerate retrievedReference) -> Passage.
+    """
     content = ref.get("content") or {}
     location = ref.get("location") or {}
     kind = location.get("type", "")
@@ -464,7 +503,9 @@ def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
 
 
 def parse_retrieve(resp: dict[str, Any]) -> list[Passage]:
-    """A Retrieve response -> Passages, best first."""
+    """
+    A Retrieve response -> Passages, best first.
+    """
     return [
         parse_passage(ref, i)
         for i, ref in enumerate(resp.get("retrievalResults") or [], 1)
@@ -472,8 +513,10 @@ def parse_retrieve(resp: dict[str, Any]) -> list[Passage]:
 
 
 def _span(text: str, part: dict[str, Any]) -> tuple[int, int]:
-    """Where a RetrieveAndGenerate citation's text sits in the answer. The API doesn't say whether span.end is
-    inclusive, so the offsets are checked against the text itself."""
+    """
+    Where a RetrieveAndGenerate citation's text sits in the answer. The API doesn't say whether span.end is
+    inclusive, so the offsets are checked against the text itself.
+    """
     piece = part.get("text") or ""
     span = part.get("span") or {}
     start, end = span.get("start"), span.get("end")
@@ -497,9 +540,11 @@ def parse_models(
     region: str = "",
     model_prices: dict[str, tuple[float, float]] | None = None,
 ) -> list[ModelInfo]:
-    """ListFoundationModels summaries + ListInferenceProfiles summaries -> the text models ask() can use. A model
+    """
+    ListFoundationModels summaries + ListInferenceProfiles summaries -> the text models ask() can use. A model
     that can't be called on demand gets the inference profile for this region's geography (e.g. 'us.' in us-east-1),
-    else a global one. profiles=None means they couldn't be listed, so such a model's profile is unknown."""
+    else a global one. profiles=None means they couldn't be listed, so such a model's profile is unknown.
+    """
     known = profiles is not None
     profiles = profiles or []
     served: dict[str, list[dict[str, Any]]] = {}
@@ -605,7 +650,9 @@ _FILTER_KEYS = {
 
 
 def _filter_value(value: Any) -> Any:
-    """A metadata value Bedrock accepts: tuples and sets become lists, dates ISO text."""
+    """
+    A metadata value Bedrock accepts: tuples and sets become lists, dates ISO text.
+    """
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_filter_value(v) for v in value]
     if isinstance(value, (datetime, date)):
@@ -622,7 +669,9 @@ def _is_bedrock_filter(where: Any) -> bool:
 
 
 def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
-    """One where= entry -> Bedrock filter conditions (two for 'between')."""
+    """
+    One where= entry -> Bedrock filter conditions (two for 'between').
+    """
     if not isinstance(key, str) or not key:
         raise ValueError(f"where= keys are metadata attribute names, got {key!r}")
     if not isinstance(spec, tuple):
@@ -661,7 +710,8 @@ def _conditions(key: str, spec: Any) -> list[dict[str, Any]]:
 
 
 def build_filter(where: Any) -> dict[str, Any] | None:
-    """`where` -> a Bedrock RetrievalFilter on the documents' metadata. Takes None, a filter Bedrock already
+    """
+    `where` -> a Bedrock RetrievalFilter on the documents' metadata. Takes None, a filter Bedrock already
     understands ({'andAll': [...]}, {'equals': {...}}, ...), or a dict of attribute -> value or (operator, *values),
     which must all match:
 
@@ -673,7 +723,8 @@ def build_filter(where: Any) -> dict[str, Any] | None:
         {'title': ('contains', 'refund')}       text containing this, or a list with an element containing it
         {'tags': ('list_contains', 'gdpr')}     a list attribute holding exactly this element
 
-    Metadata comes from a <file>.metadata.json next to each file; values are typed, so 2024 and '2024' differ."""
+    Metadata comes from a <file>.metadata.json next to each file; values are typed, so 2024 and '2024' differ.
+    """
     if where is None:
         return None
     if _is_bedrock_filter(where):
@@ -695,9 +746,11 @@ DATA_SOURCE_KEY = "x-amz-bedrock-kb-data-source-id"  # Bedrock tags every chunk 
 
 
 def data_source_filter(ids: Iterable[str]) -> dict[str, Any] | None:
-    """A RetrievalFilter that keeps only passages from these data sources (by ID): {'equals': ...} for one, {'in':
+    """
+    A RetrievalFilter that keeps only passages from these data sources (by ID): {'equals': ...} for one, {'in':
     ...} for several, None for none. Bedrock tags every chunk with its data source's ID, so this needs no
-    .metadata.json files."""
+    .metadata.json files.
+    """
     unique = list(dict.fromkeys(str(i) for i in ids if i))
     if not unique:
         return None
@@ -709,7 +762,9 @@ def data_source_filter(ids: Iterable[str]) -> dict[str, Any] | None:
 def with_data_sources(
     condition: dict[str, Any] | None, ids: Iterable[str]
 ) -> dict[str, Any] | None:
-    """A RetrievalFilter (build_filter's) narrowed to the data sources with these IDs: both must match."""
+    """
+    A RetrievalFilter (build_filter's) narrowed to the data sources with these IDs: both must match.
+    """
     only = data_source_filter(ids)
     if only is None:
         return condition
@@ -720,7 +775,9 @@ def with_data_sources(
 
 
 def describe_sources(sources: dict[str, str]) -> str:
-    """{ID: name} of the data sources searched -> "data source 'faq'" / "data sources 'faq' and 'policies'"."""
+    """
+    {ID: name} of the data sources searched -> "data source 'faq'" / "data sources 'faq' and 'policies'".
+    """
     names = [repr(name or ds_id) for ds_id, name in sources.items()]
     if not names:
         return "every data source"
@@ -732,8 +789,10 @@ _MARKER_RE = re.compile(r"\[(\d+(?:\s*[,\-–]\s*\d+)*)\]")
 
 
 def match_expected(passage: Passage, expected: Any) -> bool:
-    """Whether a passage is the one a test question expects: `expected` is a case-insensitive piece of its URI, its file
-    name or its text (a list means any of them)."""
+    """
+    Whether a passage is the one a test question expects: `expected` is a case-insensitive piece of its URI, its file
+    name or its text (a list means any of them).
+    """
     wanted = [expected] if isinstance(expected, str) else list(expected or [])
     haystack = f"{passage.uri}\n{source_name(passage.uri)}\n{passage.text}".lower()
     return any(str(w).strip().lower() in haystack for w in wanted if str(w).strip())
@@ -746,9 +805,11 @@ def query_cost(
     *,
     question_tokens: int = 20,
 ) -> float:
-    """Estimated USD for n searches: embedding each question (about question_tokens tokens) and, with `rerank`, the
+    """
+    Estimated USD for n searches: embedding each question (about question_tokens tokens) and, with `rerank`, the
     reranking model: True or 'cohere' for Cohere Rerank 3.5, 'amazon' or 'amazon.rerank-v1:0' (or its ARN) for
-    Amazon Rerank. The vector store's own charges aren't included."""
+    Amazon Rerank. The vector store's own charges aren't included.
+    """
     prices = BEDROCK_PRICES if prices is None else prices
     per_query = question_tokens * prices["embedding_per_million_tokens"] / 1e6
     if rerank:
@@ -768,7 +829,9 @@ def generation_cost(
     model: str,
     model_prices: dict[str, tuple[float, float]] | None = None,
 ) -> float | None:
-    """Estimated USD for one answer; None when the model isn't in the price table (pass model_prices=...)."""
+    """
+    Estimated USD for one answer; None when the model isn't in the price table (pass model_prices=...).
+    """
     price = model_price(model, model_prices)
     if price is None:
         return None
@@ -781,7 +844,9 @@ _REFUSAL = "unable to assist you with this request"
 # ----------------------------------------------------------------------------- knowledge bases by name
 
 def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
-    """The ID in {ID: name} that `value` names (an ID, or a name in any case); None if nothing matches."""
+    """
+    The ID in {ID: name} that `value` names (an ID, or a name in any case); None if nothing matches.
+    """
     if kind == "id" and value in names:
         return value
     hits = [kb_id for kb_id, name in names.items() if name.lower() == value.lower()]
@@ -795,7 +860,9 @@ def _match_kb(names: dict[str, str], kind: str, value: str) -> str | None:
 def _match_sources(
     names: dict[str, str], wanted: list[str]
 ) -> tuple[dict[str, str], list[str]]:
-    """({ID: name} of the data sources `wanted` names, by ID or by name in any case, [what matched none])."""
+    """
+    ({ID: name} of the data sources `wanted` names, by ID or by name in any case, [what matched none]).
+    """
     found: dict[str, str] = {}
     missing: list[str] = []
     for w in wanted:
@@ -827,7 +894,9 @@ class _Json:
 
 
 def _plain_json(value: Any) -> Any:
-    """A deep copy holding only JSON types: tuples become lists, dates ISO text, anything else its str()."""
+    """
+    A deep copy holding only JSON types: tuples become lists, dates ISO text, anything else its str().
+    """
     return json.loads(json.dumps(value, default=lambda v: v.isoformat() if hasattr(v, "isoformat") else str(v)))
 
 
@@ -838,9 +907,11 @@ def _json_html(
     marks: dict[tuple[str, ...], str] | None = None,
     notes: dict[tuple[str, ...], str] | None = None,
 ) -> str:
-    """JSON as highlighted HTML: keys, text, numbers and true / false / null in their own colours, each object and list
+    """
+    JSON as highlighted HTML: keys, text, numbers and true / false / null in their own colours, each object and list
     folding under a click (plain <details>, no script), paths in `marks` highlighted with a tooltip, and `notes`
-    after their values. Every piece of text is escaped: responses quote untrusted knowledge base content."""
+    after their values. Every piece of text is escaped: responses quote untrusted knowledge base content.
+    """
     marks, notes = marks or {}, notes or {}
 
     def scalar(v: Any) -> str:
@@ -889,8 +960,10 @@ def _json_block_lines(block: _Json, report: _Report) -> list[str]:
 
 
 def _highlight(text: str, terms: Iterable[str]) -> str:
-    """HTML for `text` with the question's words in <mark>. The text is split on the words and each piece escaped
-    before it's wrapped, so markup inside a passage (knowledge base content is untrusted) stays text."""
+    """
+    HTML for `text` with the question's words in <mark>. The text is split on the words and each piece escaped
+    before it's wrapped, so markup inside a passage (knowledge base content is untrusted) stays text.
+    """
     regex = _terms_regex(terms)
     if regex is None:
         return _esc(text)
@@ -901,14 +974,18 @@ def _highlight(text: str, terms: Iterable[str]) -> str:
 
 
 def _split_marks(span: str) -> tuple[str, str]:
-    """'returned within 14 days. ' -> ('returned within 14 days', '. '): where a citation marker goes."""
+    """
+    'returned within 14 days. ' -> ('returned within 14 days', '. '): where a citation marker goes.
+    """
     stripped = span.rstrip()
     body = stripped.rstrip(".!?:;,")
     return body, span[len(body) :]
 
 
 def _with_markers(text: str, citations: list[Citation]) -> str:
-    """The answer with [n] markers after each cited span, before its closing punctuation: 'days [1].'"""
+    """
+    The answer with [n] markers after each cited span, before its closing punctuation: 'days [1].'
+    """
     out, pos = [], 0
     for c in sorted((c for c in citations if c.sources), key=lambda c: c.end):
         end = min(len(text), c.end)
@@ -941,7 +1018,9 @@ _Line = tuple[int, str]  # (where the text starts in the answer, the text): offs
 
 
 def _md_indent(line: str) -> int:
-    """Columns of leading whitespace, a tab counting to the next multiple of 4."""
+    """
+    Columns of leading whitespace, a tab counting to the next multiple of 4.
+    """
     n = 0
     for ch in line:
         if ch == " ":
@@ -969,7 +1048,9 @@ def _md_lstrip(item: _Line) -> _Line:
 
 
 def _md_cells(item: _Line) -> list[_Line]:
-    """A table row's cells, on its unescaped pipes outside `code`, with a leading and trailing pipe dropped."""
+    """
+    A table row's cells, on its unescaped pipes outside `code`, with a leading and trailing pipe dropped.
+    """
     offset, line = item
     cells, start, k, tick = [], 0, 0, False
     while k < len(line):
@@ -1000,15 +1081,19 @@ def _md_table_start(lines: list[_Line], i: int) -> bool:
 
 
 def _md_starts_block(lines: list[_Line], i: int) -> bool:
-    """Whether line i starts a block that ends a paragraph above it."""
+    """
+    Whether line i starts a block that ends a paragraph above it.
+    """
     line = lines[i][1]
     return bool(_MD_FENCE_RE.match(line) or _MD_HEADING_RE.match(line) or _MD_RULE_RE.match(line)
                 or _MD_QUOTE_RE.match(line) or _MD_ITEM_RE.match(line) or _md_table_start(lines, i))
 
 
 def _md_blocks(lines: list[_Line], depth: int = 0) -> list[tuple[Any, ...]]:
-    """Markdown lines -> blocks: ('p', lines), ('h', level, lines), ('hr',), ('code', language, lines),
-    ('quote', blocks), ('list', ordered, start, items, loose) and ('table', aligns, header, rows)."""
+    """
+    Markdown lines -> blocks: ('p', lines), ('h', level, lines), ('hr',), ('code', language, lines),
+    ('quote', blocks), ('list', ordered, start, items, loose) and ('table', aligns, header, rows).
+    """
     blocks: list[tuple[Any, ...]] = []
     i = 0
     while i < len(lines):
@@ -1083,8 +1168,10 @@ def _md_blocks(lines: list[_Line], depth: int = 0) -> list[tuple[Any, ...]]:
 
 
 def _md_list(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], int]:
-    """The list starting at line i (its items' lines, nested ones dedented) and the line after it. Lenient where
-    models are: any bullet character continues a bullet list, and nested lists can be indented by 2, 3 or 4."""
+    """
+    The list starting at line i (its items' lines, nested ones dedented) and the line after it. Lenient where
+    models are: any bullet character continues a bullet list, and nested lists can be indented by 2, 3 or 4.
+    """
     first = _MD_ITEM_RE.match(lines[i][1])
     assert first is not None
     indent, ordered = _md_indent(first.group(1)), first.group(2)[0].isdigit()
@@ -1132,7 +1219,9 @@ def _md_list(lines: list[_Line], i: int, depth: int) -> tuple[tuple[Any, ...], i
 
 
 def _md_source(lines: list[_Line]) -> tuple[str, list[int]]:
-    """Lines joined with newlines, and where each character of that is in the answer."""
+    """
+    Lines joined with newlines, and where each character of that is in the answer.
+    """
     parts: list[str] = []
     where: list[int] = []
     for k, (offset, line) in enumerate(lines):
@@ -1145,14 +1234,18 @@ def _md_source(lines: list[_Line]) -> tuple[str, list[int]]:
 
 
 def _md_link_target(url: str) -> str:
-    """The URL a link may open: http(s) and mailto only, else '' (shown as text)."""
+    """
+    The URL a link may open: http(s) and mailto only, else '' (shown as text).
+    """
     url = url.strip().strip("<>")
     return url if url.lower().startswith(("http://", "https://", "mailto:")) else ""
 
 
 class _Markdown:
-    """Markdown -> HTML, with the cited spans of the answer shaded and the [n] markers placed after them.
-    Citations hold offsets into the raw text, so every character keeps where it came from (`where`)."""
+    """
+    Markdown -> HTML, with the cited spans of the answer shaded and the [n] markers placed after them.
+    Citations hold offsets into the raw text, so every character keeps where it came from (`where`).
+    """
 
     def __init__(self, text: str, citations: Iterable[Citation] = (), inline: bool = False):
         self.text, self.inline = text, inline
@@ -1184,7 +1277,9 @@ class _Markdown:
     # -------------------------------------------------------------- text and markers
 
     def marks_before(self, offset: int) -> str:
-        """Markers placed before this offset not shown yet (their character was markup): shown now."""
+        """
+        Markers placed before this offset not shown yet (their character was markup): shown now.
+        """
         out = []
         while self.next_mark < len(self.marks) and self.marks[self.next_mark][0] < offset:
             out.append(f"<sup>{self.marks[self.next_mark][1]}</sup>")
@@ -1198,7 +1293,9 @@ class _Markdown:
                        for i, piece in enumerate(_MARKER_RE.split(text)))
 
     def chars(self, s: str, where: list[int], i: int, j: int, code: bool = False) -> str:
-        """s[i:j] escaped, cited runs in <span class="cite">, each marker after the character it follows."""
+        """
+        s[i:j] escaped, cited runs in <span class="cite">, each marker after the character it follows.
+        """
         out: list[str] = []
         run: list[str] = []  # the HTML of the run so far: shaded throughout, or not at all
         text: list[str] = []  # its characters not escaped yet
@@ -1279,8 +1376,10 @@ class _Markdown:
     # ---------------------------------------------------------------------- inline
 
     def parse(self, s: str, i: int, j: int, depth: int = 0) -> list[tuple[Any, ...]]:
-        """Inline markdown in s[i:j] -> nodes: ('t', i, j) text, ('code', i, j), ('br',), (tag, children) for em /
-        strong / del, and ('a', href, children). Anything that doesn't close is text."""
+        """
+        Inline markdown in s[i:j] -> nodes: ('t', i, j) text, ('code', i, j), ('br',), (tag, children) for em /
+        strong / del, and ('a', href, children). Anything that doesn't close is text.
+        """
         nodes: list[tuple[Any, ...]] = []
         text_from, k = i, i
 
@@ -1347,7 +1446,9 @@ class _Markdown:
         return n - k
 
     def code_close(self, s: str, k: int, j: int, run: int) -> int:
-        """Where a code span of `run` backticks closes, or -1."""
+        """
+        Where a code span of `run` backticks closes, or -1.
+        """
         while True:
             k = s.find("`" * run, k, j)
             if k < 0:
@@ -1358,9 +1459,11 @@ class _Markdown:
             k += length
 
     def emphasis(self, s: str, k: int, j: int) -> tuple[str, int, int, int] | None:
-        """*em*, **strong**, ***both***, _em_, __strong__ or ~~del~~ opening at k: (tag, inner start, inner end,
+        """
+        *em*, **strong**, ***both***, _em_, __strong__ or ~~del~~ opening at k: (tag, inner start, inner end,
         after it), or None. An opener needs a non-space after it, a closer a non-space before it, and _ doesn't work
-        inside a word (snake_case_names stay as they are)."""
+        inside a word (snake_case_names stay as they are).
+        """
         ch = s[k]
         run = self.run(s, k, j, ch)
         if run > 3 or (ch == "~" and run != 2):
@@ -1397,7 +1500,9 @@ class _Markdown:
 
     @staticmethod
     def link(s: str, k: int, j: int) -> tuple[int, int, str, int] | None:
-        """[text](url) opening at k: (text start, text end, url, after it), or None."""
+        """
+        [text](url) opening at k: (text start, text end, url, after it), or None.
+        """
         if s.find("](", k, j) < 0:
             return None
         depth, n = 0, k
@@ -1447,15 +1552,19 @@ class _Markdown:
 
 
 def _markdown_html(text: str, citations: Iterable[Citation] = (), inline: bool = False) -> str:
-    """Markdown as HTML: paragraphs, headings, lists, quotes, code, tables, **bold**, *italic*, `code` and links.
+    """
+    Markdown as HTML: paragraphs, headings, lists, quotes, code, tables, **bold**, *italic*, `code` and links.
     With citations, the cited spans are shaded and [n] follows each one; inline=True when the text already holds the
-    [n] markers. A single line break stays a line break, so plain-text answers look as they were written."""
+    [n] markers. A single line break stays a line break, so plain-text answers look as they were written.
+    """
     return _Markdown(text, citations, inline).html()
 
 
 def _answer_html(block: _Answer) -> str:
-    """The answer, laid out from its markdown, with cited spans shaded and [n] superscripts. Every piece of text is
-    escaped: answers can quote untrusted knowledge base content."""
+    """
+    The answer, laid out from its markdown, with cited spans shaded and [n] superscripts. Every piece of text is
+    escaped: answers can quote untrusted knowledge base content.
+    """
     return _markdown_html(block.text, block.citations, block.inline)
 
 
@@ -1470,8 +1579,10 @@ def _answer_block_lines(block: _Answer, report: _Report) -> list[str]:
 
 
 def _answer_lines(text: str, width: int, indent: str = "") -> list[str]:
-    """An answer as text lines: its markdown kept as written (it reads well as text), long lines wrapped, a list
-    item's continuation lined up under its text, and code blocks and table rows never wrapped."""
+    """
+    An answer as text lines: its markdown kept as written (it reads well as text), long lines wrapped, a list
+    item's continuation lined up under its text, and code blocks and table rows never wrapped.
+    """
     out: list[str] = []
     fence = ""
     for line in text.split("\n"):
@@ -1501,7 +1612,9 @@ def _session_expired(exc: ClientError) -> bool:
 
 
 def _per_million(price: float | None) -> str:
-    """0.8 -> '$0.80', 0.035 -> '$0.035' (a price per million tokens); None -> '-'."""
+    """
+    0.8 -> '$0.80', 0.035 -> '$0.035' (a price per million tokens); None -> '-'.
+    """
     if price is None:
         return "-"
     return f"${price:,.2f}" if price >= 0.1 or price == 0 else f"${price:.3f}"
@@ -1513,8 +1626,10 @@ _TEXT_EXTENSIONS = {"txt", "md", "markdown", "csv", "tsv", "log", "rst", "yaml",
 
 
 def _browser_type(name: str) -> str | None:
-    """The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
-    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download)."""
+    """
+    The Content-Type that makes a browser show a file in its tab rather than save it: 'a.pdf' ->
+    'application/pdf', 'a.md' or 'a.csv' -> plain text, 'a.docx' -> None (Word and Excel files download).
+    """
     name = name.rsplit("/", 1)[-1]
     if "." in name and name.rsplit(".", 1)[-1].lower() in _TEXT_EXTENSIONS:
         return "text/plain; charset=utf-8"
@@ -1536,8 +1651,10 @@ _LINK_WORDS = {"s3://": "s3", "uri": "s3", "url": "https", "http": "https", "lin
 
 
 def parse_list_link(text: str) -> str:
-    """link= for save_file_list(): 's3', 'https' or 'key' (FILE_LIST_LINKS), or a word for one ('url', 'path'),
-    in any case -> the key."""
+    """
+    link= for save_file_list(): 's3', 'https' or 'key' (FILE_LIST_LINKS), or a word for one ('url', 'path'),
+    in any case -> the key.
+    """
     word = str(text or "").strip().lower()
     if word in FILE_LIST_LINKS:
         return word
@@ -1549,11 +1666,13 @@ def parse_list_link(text: str) -> str:
 
 def file_list_lines(files: Iterable[Any], link: str = "s3",
                     sign: Callable[[str], str | None] | None = None) -> tuple[list[str], int]:
-    """save_file_list()'s lines, one per S3 file in the order given (each file once): its s3:// path (link='s3'), its
+    """
+    save_file_list()'s lines, one per S3 file in the order given (each file once): its s3:// path (link='s3'), its
     path in the bucket ('key') or sign(uri), a link that opens it ('https'). files: anything with a .uri (KBFile,
     KBDocument) or s3:// paths. -> (the lines, how many files have no line of that kind: a custom data source's
     documents have no s3:// path, a file deleted from S3 (state 'deleted') has no link to open, and sign may give
-    none)."""
+    none).
+    """
     link = parse_list_link(link)
     lines: list[str] = []
     seen: set[str] = set()
@@ -1579,13 +1698,17 @@ def file_list_lines(files: Iterable[Any], link: str = "s3",
 
 
 def file_list_name(kb_name: str, state: str = "") -> str:
-    """The name save_file_list() gives its file: 'support-docs-files.txt', 'support-docs-failed-files.txt'."""
+    """
+    The name save_file_list() gives its file: 'support-docs-files.txt', 'support-docs-failed-files.txt'.
+    """
     stem = re.sub(r"[^\w.-]+", "-", str(kb_name or "").strip()).strip("-.") or "knowledge-base"
     return f"{stem}{'-' + state if state else ''}-files.txt"
 
 
 def _link_seconds(expires: Any) -> int:
-    """expires= for a presigned link, checked: whole seconds, from 1 to 604,800 (7 days, the longest S3 allows)."""
+    """
+    expires= for a presigned link, checked: whole seconds, from 1 to 604,800 (7 days, the longest S3 allows).
+    """
     seconds = _as_int(expires, "expires")
     if not 1 <= seconds <= 604_800:
         raise ValueError(f"expires is in seconds, from 1 to 604,800 (7 days, the longest S3 allows); got {seconds:,}")
@@ -1593,7 +1716,9 @@ def _link_seconds(expires: Any) -> int:
 
 
 def _link_life(expires: int) -> str:
-    """How long a presigned link works, in the largest whole unit: '1 hour', '7 days', '90 minutes'."""
+    """
+    How long a presigned link works, in the largest whole unit: '1 hour', '7 days', '90 minutes'.
+    """
     for size, unit in ((86_400, "day"), (3600, "hour"), (60, "minute"), (1, "second")):
         if expires % size == 0:
             break
@@ -1601,15 +1726,19 @@ def _link_life(expires: int) -> str:
 
 
 def _looks_like_path(text: Any) -> bool:
-    """Whether a knowledge base argument is a file or folder instead: names, IDs and ARNs have no dot, slash or ~
-    (an ARN's slash aside)."""
+    """
+    Whether a knowledge base argument is a file or folder instead: names, IDs and ARNs have no dot, slash or ~
+    (an ARN's slash aside).
+    """
     text = str(text or "").strip()
     return bool(text) and not text.lower().startswith("arn:") and any(c in text for c in "./\\~")
 
 
 def _list_target(path: str | None, default: str) -> str:
-    """Where save_file_list() writes (absolute): `path`, from the notebook's folder, or `default` inside it when it's a
-    folder; `default` beside the notebook without one."""
+    """
+    Where save_file_list() writes (absolute): `path`, from the notebook's folder, or `default` inside it when it's a
+    folder; `default` beside the notebook without one.
+    """
     if path is None or not str(path).strip():
         return os.path.abspath(default)
     text = str(path).strip()
@@ -1620,10 +1749,12 @@ def _list_target(path: str | None, default: str) -> str:
 
 
 def presigned_url(s3: Callable[[], Any], uri: str, *, page: int | None = None, expires: int = 3600) -> str | None:
-    """A link that opens a file in a browser tab: for an s3:// file a presigned GetObject link, signed by the client
+    """
+    A link that opens a file in a browser tab: for an s3:// file a presigned GetObject link, signed by the client
     s3() returns (SigV4, with its credentials: no AWS call), that works for `expires` seconds and makes the browser
     show a PDF (at `page`), picture, text or HTML file instead of saving it; an http(s) address as it is; None for
-    anything else (a custom document's ID)."""
+    anything else (a custom document's ID).
+    """
     expires = _link_seconds(expires)
     uri = str(uri or "").strip()
     if uri.lower().startswith(("https://", "http://")):
@@ -1641,8 +1772,10 @@ def presigned_url(s3: Callable[[], Any], uri: str, *, page: int | None = None, e
 
 @dataclass
 class SavedFileList:
-    """A text file of files that save_file_list() wrote: one line per file, each one's s3:// path, its path in the
-    bucket or a link that opens it (`link`, a FILE_LIST_LINKS key)."""
+    """
+    A text file of files that save_file_list() wrote: one line per file, each one's s3:// path, its path in the
+    bucket or a link that opens it (`link`, a FILE_LIST_LINKS key).
+    """
 
     path: str  # where it was written (absolute)
     count: int  # its lines: one per file
@@ -1664,9 +1797,11 @@ class SavedFileList:
 
 @dataclass
 class _Download:
-    """A file saved on the notebook's disk, with a link that downloads it to your computer: `href` is its path from
+    """
+    A file saved on the notebook's disk, with a link that downloads it to your computer: `href` is its path from
     the notebook's folder (Jupyter serves it from there) or a data: URL holding it; '' when there's no link to give.
-    Text mode says where it is."""
+    Text mode says where it is.
+    """
 
     path: str  # where it is (absolute)
     href: str = ""
@@ -1688,8 +1823,10 @@ def _download_lines(block: _Download, report: _Report) -> list[str]:
 
 
 def _notebook_href(path: str) -> str:
-    """A saved file's path from the notebook's folder, as a link Jupyter downloads it from ('' outside that folder,
-    which Jupyter may not serve)."""
+    """
+    A saved file's path from the notebook's folder, as a link Jupyter downloads it from ('' outside that folder,
+    which Jupyter may not serve).
+    """
     try:
         relative = os.path.relpath(path, os.getcwd())
     except ValueError:  # another drive (Windows)
@@ -1700,8 +1837,10 @@ def _notebook_href(path: str) -> str:
 
 
 def _data_href(text: str, limit: int = 1_000_000) -> str:
-    """Text as a data: URL that a link can download (the explorer's widgets can't link to the notebook's files); ''
-    when it's over `limit` bytes, which browsers may refuse in a link."""
+    """
+    Text as a data: URL that a link can download (the explorer's widgets can't link to the notebook's files); ''
+    when it's over `limit` bytes, which browsers may refuse in a link.
+    """
     data = text.encode("utf-8")
     if len(data) > limit:
         return ""
@@ -1710,8 +1849,10 @@ def _data_href(text: str, limit: int = 1_000_000) -> str:
 
 def write_file_list(files: Iterable[Any], target: str, *, link: str = "s3",
                     sign: Callable[[str], str | None] | None = None, expires: int | None = None) -> SavedFileList:
-    """Writes file_list_lines(files, link, sign) to `target` (absolute; its folder is made when it isn't there), a line
-    each: to <target>.part, then renamed over a file of that name. An OSError becomes a ValueError that says why."""
+    """
+    Writes file_list_lines(files, link, sign) to `target` (absolute; its folder is made when it isn't there), a line
+    each: to <target>.part, then renamed over a file of that name. An OSError becomes a ValueError that says why.
+    """
     link = parse_list_link(link)
     lines, left_out = file_list_lines(files, link, sign)
     text = "".join(line + "\n" for line in lines)
@@ -1735,7 +1876,9 @@ _LIST_LINK_BYTES = 1_000_000  # the most a window puts in a download link (a dat
 
 
 def _download_css(root: str) -> str:
-    """The _Download block's rules, scoped to a service's root class."""
+    """
+    The _Download block's rules, scoped to a service's root class.
+    """
     return (f".{root} .dlw{{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:6px 0 8px}}\n"
             f".{root} a.dl{{display:inline-block;padding:3px 12px;border:1px solid rgba(59,130,246,.45);"
             f"border-radius:999px;color:#3b82f6;font-weight:600;text-decoration:none}}\n"
@@ -1745,8 +1888,10 @@ def _download_css(root: str) -> str:
 
 def _file_list_blocks(saved: SavedFileList, kb_name: str, *, href: str = "", sorted_by: str = "sorted by path",
                       notes: Iterable[Any] = ()) -> list[Any]:
-    """A saved list's report, without its next steps: what was written where, the link that downloads it, its first
-    lines, `notes` (what the listing missed), and what's not in it."""
+    """
+    A saved list's report, without its next steps: what was written where, the link that downloads it, its first
+    lines, `notes` (what the listing missed), and what's not in it.
+    """
     what = FILE_LIST_LINKS[saved.link]
     cards: list[tuple[str, ...]] = [("Files", f"{saved.count:,}"), ("Each line", what),
                                     ("Size", human_size(saved.size))]

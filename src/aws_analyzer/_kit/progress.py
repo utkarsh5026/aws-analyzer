@@ -1,4 +1,5 @@
-"""How progress shows while a long command runs: a tqdm bar, or a line with the count, rate and time left.
+"""
+How progress shows while a long command runs: a tqdm bar, or a line with the count, rate and time left.
 
 _BaseView._progress (view.py) shows them. tqdm, and ipywidgets for its notebook bar, load only when a bar is needed;
 without them (or with a tqdm too old to import cleanly) the plain line takes over without a word.
@@ -13,7 +14,9 @@ from .fmt import _duration, human_size
 
 
 def _progress_bar_class(notebook: bool) -> Any:
-    """tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm."""
+    """
+    tqdm's widget bar in a notebook (it needs ipywidgets) or its text bar elsewhere; None without tqdm.
+    """
     try:
         if notebook:
             importlib.import_module("ipywidgets")
@@ -24,7 +27,9 @@ def _progress_bar_class(notebook: bool) -> Any:
 
 
 def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> Any:
-    """A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes."""
+    """
+    A tqdm bar that shows up after half a second and disappears when closed. unit='B' counts bytes.
+    """
     options: dict[str, Any] = {"desc": label, "total": total, "leave": False, "delay": 0.5, "mininterval": 0.25,
                                "dynamic_ncols": True, "disable": False, "unit_scale": True}
     if unit == "B":
@@ -38,7 +43,9 @@ def _progress_bar(bar_class: Any, label: str, unit: str, total: int | None) -> A
 
 
 def _progress_text(label: str, unit: str, count: int, total: int | None, elapsed: float) -> str:
-    """The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'."""
+    """
+    The progress line shown without tqdm: 'Reading... 1.2 GB of 3.0 GB (40%) · 12s · 98.0 MB/s · about 18s left'.
+    """
     amount = human_size if unit == "B" else (lambda n: f"{n:,}")
     text = f"{label}... {amount(count)}"
     if total:

@@ -1,4 +1,6 @@
-"""Optional packages, loaded only by the code that needs them, and whether the code runs in a notebook."""
+"""
+Optional packages, loaded only by the code that needs them, and whether the code runs in a notebook.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,9 @@ from typing import Any
 
 
 def _require(module: str, purpose: str, package: str | None = None) -> Any:
-    """Import an optional package, or say what to pip install. package: its pip name when that differs (pillow)."""
+    """
+    Import an optional package, or say what to pip install. package: its pip name when that differs (pillow).
+    """
     try:
         return importlib.import_module(module)
     except ImportError as exc:

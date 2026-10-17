@@ -1,4 +1,5 @@
-"""What the notebook windows share: the S3 explorer, the chat, and the knowledge base and Lambda explorers.
+"""
+What the notebook windows share: the S3 explorer, the chat, and the knowledge base and Lambda explorers.
 
 The windows are ipywidgets laid out and styled by CSS, with no JavaScript. ipywidgets and IPython load only inside the
 functions that need them (the window itself loads ipywidgets with `_require`), so this module imports with boto3 alone.
@@ -32,14 +33,18 @@ from .text import _esc, search_rank
 
 
 def _css_height(height: int | str | None) -> str | None:
-    """height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None."""
+    """
+    height= as CSS: a number is pixels (720, '720'), other text is CSS as written ('80vh'); None is None.
+    """
     text = "" if height is None else str(height).strip()
     return f"{text}px" if re.fullmatch(r"\d+(\.\d+)?", text) else text or None
 
 
 def _running_loop() -> asyncio.AbstractEventLoop | None:
-    """The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
-    where the window's work runs right away while the click waits."""
+    """
+    The kernel's event loop, which runs the window's clicks in a notebook; None elsewhere (a script, the tests),
+    where the window's work runs right away while the click waits.
+    """
     try:
         return asyncio.get_running_loop()
     except RuntimeError:
@@ -47,8 +52,10 @@ def _running_loop() -> asyncio.AbstractEventLoop | None:
 
 
 def _cell_number() -> Any:
-    """The running cell's execution count in IPython (None elsewhere): a cell that ends with a window (chat(),
-    explore()) shows it once, not twice."""
+    """
+    The running cell's execution count in IPython (None elsewhere): a cell that ends with a window (chat(),
+    explore()) shows it once, not twice.
+    """
     try:
         from IPython.core.getipython import get_ipython
     except ImportError:
@@ -62,16 +69,20 @@ _ICON_SVG = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='
 
 
 def _icon_url(paths: str) -> str:
-    """A line drawing's paths (24 x 24) as a CSS url(): the windows draw their icons as masks of it, in the text's
-    colour, so they follow the theme."""
+    """
+    A line drawing's paths (24 x 24) as a CSS url(): the windows draw their icons as masks of it, in the text's
+    colour, so they follow the theme.
+    """
     return f'url("data:image/svg+xml,{quote(_ICON_SVG.format(paths))}")'
 
 
 def _row_button(w: Any, classes: tuple[str, str, str], on_click: Callable[[Any], None], *, tooltip: str | None = None,
                 after: Iterable[Any] = ()) -> tuple[Any, Any, Any]:
-    """A line the whole of which is the click target: a full-width button under its face, an HTML widget that shows
+    """
+    A line the whole of which is the click target: a full-width button under its face, an HTML widget that shows
     what the line says (the window's CSS lets clicks through it). classes: the CSS classes of the box, the button and
-    the face; after: widgets after them in the box (a line's own small button). Returns (box, button, face)."""
+    the face; after: widgets after them in the box (a line's own small button). Returns (box, button, face).
+    """
     button = w.Button(tooltip=tooltip, layout=w.Layout(width="100%", height="100%"))
     button.add_class(classes[1])
     button.on_click(on_click)
@@ -83,7 +94,9 @@ def _row_button(w: Any, classes: tuple[str, str, str], on_click: Callable[[Any],
 
 
 def _class_if(widget: Any, name: str, on: bool) -> None:
-    """Adds or removes a widget's CSS class, sending nothing when it's already as wanted."""
+    """
+    Adds or removes a widget's CSS class, sending nothing when it's already as wanted.
+    """
     if on and name not in widget._dom_classes:
         widget.add_class(name)
     elif not on and name in widget._dom_classes:
@@ -91,7 +104,9 @@ def _class_if(widget: Any, name: str, on: bool) -> None:
 
 
 def _skeleton(text: str) -> str:
-    """A page still loading: what's being read, with a spinner, over grey bars where the report will be."""
+    """
+    A page still loading: what's being read, with a spinner, over grey bars where the report will be.
+    """
     return (f'<div class="skw"><div class="skl"><span class="spin"></span>{_esc(text)}</div><div class="sk t"></div>'
             '<div class="skc"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>'
             '</div><div class="sk"></div><div class="sk" style="width:86%"></div><div class="sk" style="width:64%">'
@@ -99,8 +114,10 @@ def _skeleton(text: str) -> str:
 
 
 def _for_window(blocks: list[Any], words: Callable[[str], str]) -> list[Any]:
-    """A report's blocks for an explorer window: no Next block (its calls are for a cell), and the commands its
-    sentences name changed into the tabs that show the same (words: the window's _window_text)."""
+    """
+    A report's blocks for an explorer window: no Next block (its calls are for a cell), and the commands its
+    sentences name changed into the tabs that show the same (words: the window's _window_text).
+    """
     out = []
     for block in blocks:
         if isinstance(block, _Next):
@@ -121,9 +138,11 @@ def _for_window(blocks: list[Any], words: Callable[[str], str]) -> list[Any]:
 
 
 def _window_errors(method: Callable) -> Callable:
-    """For a window's own commands (x.open(...), x.refresh()): an error is said in the window (or, without the window,
+    """
+    For a window's own commands (x.open(...), x.refresh()): an error is said in the window (or, without the window,
     as a note) instead of a traceback. The window says when a command can't run at all (_ready) and how an error is
-    said (_command_failed, which returns False for one that should still raise)."""
+    said (_command_failed, which returns False for one that should still raise).
+    """
 
     @functools.wraps(method)
     def wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -140,36 +159,48 @@ def _window_errors(method: Callable) -> Callable:
 
 
 class _Window:
-    """What the windows' classes share: widget callbacks that say their errors in the window, Enter in a text box,
+    """
+    What the windows' classes share: widget callbacks that say their errors in the window, Enter in a text box,
     and widgets set quietly or only when their HTML changed.
 
     A window says where an error goes (_warn: its status line) and what an AWS error means (_explain: its View's),
     in its own words (_reword: an explorer turns a report's commands into its tabs). Its pickers (_Picker) go in
-    pickers, and its backdrop, the invisible button under an open list, calls _close_lists."""
+    pickers, and its backdrop, the invisible button under an open list, calls _close_lists.
+    """
 
     quiet = False  # set while the code (not a person) changes a widget, so its observer does nothing
     pickers: list[_Picker]
     backdrop: Any
 
     def _warn(self, text: str) -> None:
-        """Says what went wrong where the window says things."""
+        """
+        Says what went wrong where the window says things.
+        """
         raise NotImplementedError
 
     def _explain(self, code: str, message: str) -> str:
-        """An AWS error's message, plus what to do about it."""
+        """
+        An AWS error's message, plus what to do about it.
+        """
         return message
 
     @staticmethod
     def _reword(text: str) -> str:
-        """A sentence from a report, as the window says it."""
+        """
+        A sentence from a report, as the window says it.
+        """
         return text
 
     def _ready(self) -> bool:
-        """Whether a command can run (see _window_errors)."""
+        """
+        Whether a command can run (see _window_errors).
+        """
         return True
 
     def _command_failed(self, exc: Exception, command: str) -> bool:
-        """Says a command's error in the window (see _window_errors); False when it isn't one to say."""
+        """
+        Says a command's error in the window (see _window_errors); False when it isn't one to say.
+        """
         return False
 
     def _safely(self, handler: Callable[..., Any]) -> Callable[..., Any]:
@@ -184,8 +215,10 @@ class _Window:
         return run
 
     def _on_enter(self, handler: Callable[..., Any]) -> Callable[..., Any]:
-        """A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
-        doesn't trigger it."""
+        """
+        A text box's Enter: the 'submit' message the box sends (on_submit is deprecated), so leaving the box
+        doesn't trigger it.
+        """
         safe = self._safely(handler)
         return lambda _widget, content, _buffers: safe() if content.get("event") == "submit" else None
 
@@ -208,26 +241,32 @@ class _Window:
 
     @staticmethod
     def _set(widget: Any, value: str) -> None:
-        """An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
-        part the user opened (a chunk, a run, a JSON object, a table)."""
+        """
+        An HTML widget's new content, sent only when it changed: sending the same HTML again would fold up every
+        part the user opened (a chunk, a run, a JSON object, a table).
+        """
         if widget.value != value:
             widget.value = value
 
     def _close_lists(self) -> None:
-        """A click on the backdrop, anywhere in the window but the open list: closes it."""
+        """
+        A click on the backdrop, anywhere in the window but the open list: closes it.
+        """
         for picker in self.pickers:
             picker.close()
 
 
 class _Explorer(_Window):
-    """What the knowledge base and Lambda explorers share on top of _Window: the status line under the tabs, AWS read
+    """
+    What the knowledge base and Lambda explorers share on top of _Window: the status line under the tabs, AWS read
     off the notebook's event loop (_later), report blocks drawn into a page (_draw), their commands' errors said in
     the window, and the window shown once per cell.
 
     A subclass calls this __init__ first and sets ui (its View) and height; its _build makes the head, the tab bar
     (_tab_bar) and the pages, and _frame puts them in the window. _show_tab(key) opens a tab, and _html(blocks) draws
     a report the way the window shows them. _PREFIX starts its CSS class names (.kbx-app, .kbx-tab, ...), and
-    _THREADS names its worker threads."""
+    _THREADS names its worker threads.
+    """
 
     _PREFIX = "explorer"
     _THREADS = "explorer"
@@ -245,8 +284,10 @@ class _Explorer(_Window):
         self.pickers: list[_Picker] = []  # the fields that open a list: one open at a time
 
     def _load_widgets(self, mode: str) -> str:
-        """Loads ipywidgets into _w when the window can show (mode 'widgets', or 'auto' in a notebook). Returns what
-        to say instead when it isn't installed ('' otherwise)."""
+        """
+        Loads ipywidgets into _w when the window can show (mode 'widgets', or 'auto' in a notebook). Returns what
+        to say instead when it isn't installed ('' otherwise).
+        """
         if mode != "text" and (mode == "widgets" or _in_notebook()):
             try:
                 self._w = _require("ipywidgets", "The explorer window")
@@ -256,8 +297,10 @@ class _Explorer(_Window):
         return ""
 
     def _ipython_display_(self) -> None:
-        """A cell ending with the explorer shows its window, unless the same cell already did (without the window,
-        its reports were shown when it was made)."""
+        """
+        A cell ending with the explorer shows its window, unless the same cell already did (without the window,
+        its reports were shown when it was made).
+        """
         if self._w is not None and _cell_number() != self._shown_at:
             self._display()
 
@@ -270,8 +313,10 @@ class _Explorer(_Window):
         display(self.root)
 
     def _tab_bar(self, tabs: Iterable[tuple[str, str, str, str]]) -> Any:
-        """The tab buttons in a row, one per (key, title, what it holds, its icon's paths), in tab_buttons: a click
-        opens its tab. The CSS draws each one's icon from its <prefix>-i-<key> class."""
+        """
+        The tab buttons in a row, one per (key, title, what it holds, its icon's paths), in tab_buttons: a click
+        opens its tab. The CSS draws each one's icon from its <prefix>-i-<key> class.
+        """
         w, layout, prefix = self._w, self._w.Layout, self._PREFIX
         self.tab_buttons: dict[str, Any] = {}
         for key, title, tip, _ in tabs:
@@ -285,8 +330,10 @@ class _Explorer(_Window):
         return bar
 
     def _frame(self, css: str, head: Any, tabs: Any, pages: dict[str, Any]) -> None:
-        """The window, in root: its stylesheet (in a hidden HTML widget), the head and the tab bar over the tabs'
-        pages (only the open one shows; each is height= tall when that's set), the status line and the backdrop."""
+        """
+        The window, in root: its stylesheet (in a hidden HTML widget), the head and the tab bar over the tabs'
+        pages (only the open one shows; each is height= tall when that's set), the status line and the backdrop.
+        """
         w, layout, prefix = self._w, self._w.Layout, self._PREFIX
         style = w.HTML(css, layout=layout(display="none"))
         height = _css_height(self.height)
@@ -323,19 +370,25 @@ class _Explorer(_Window):
         return True
 
     def _status(self, text: str, level: str = "", busy: bool = False, owner: str = "") -> None:
-        """The line under the tabs. owner: the background job a busy line is about (it says the job's last word)."""
+        """
+        The line under the tabs. owner: the background job a busy line is about (it says the job's last word).
+        """
         self._said = (text, level, busy, owner)
         spin = '<span class="spin"></span>' if busy else ""
         self._set(self.status, f'<div class="st {level}">{spin}{_prose(text)}</div>' if text else "")
 
     def _finish(self, owner: str, text: str, level: str = "", *, tabs: Iterable[str] = (), busy: bool = False) -> None:
-        """A background job's word in the status line (its last, unless busy= says it goes on): said while the line is
-        still that job's (busy), or while one of its tabs is open; otherwise the line stays as it is."""
+        """
+        A background job's word in the status line (its last, unless busy= says it goes on): said while the line is
+        still that job's (busy), or while one of its tabs is open; otherwise the line stays as it is.
+        """
         if (self._said[2] and self._said[3] == owner) or self._tab in tabs:
             self._status(text, level, busy=busy, owner=owner if busy else "")
 
     def _html(self, blocks: list[Any]) -> str:
-        """Report blocks as the window shows them (each explorer draws them in its own service's look)."""
+        """
+        Report blocks as the window shows them (each explorer draws them in its own service's look).
+        """
         raise NotImplementedError
 
     def _draw(self, page: str, widget: Any, blocks: list[Any]) -> None:
@@ -349,10 +402,12 @@ class _Explorer(_Window):
 
     def _later(self, key: str, work: Callable[[], Any], done: Callable[[Any], None],
                failed: Callable[[BaseException], None] | None = None, counting: str = "", owner: str = "") -> None:
-        """Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
+        """
+        Runs work() off the notebook's event loop, then done(result) on it, so a click returns at once and the
         window keeps answering while AWS is read. Without a running loop (a script, the tests) it runs here and now.
         A newer job of the same key makes this one's result go unused. counting: the status line to show while it runs
-        and the line is still owner's, {n} standing for the count read so far."""
+        and the line is still owner's, {n} standing for the count read so far.
+        """
         self._jobs[key] = job = self._jobs.get(key, 0) + 1
         failed = failed or (lambda exc: self._status(self._error_text(exc), "warn"))
 
@@ -394,13 +449,16 @@ class _Explorer(_Window):
         self._tasks[key] = task
 
     def _drop(self, *keys: str) -> None:
-        """Makes what's still being read for these jobs go unused when it comes back."""
+        """
+        Makes what's still being read for these jobs go unused when it comes back.
+        """
         for key in keys:
             self._jobs[key] = self._jobs.get(key, 0) + 1
 
 
 class _Picker:
-    """A window's field that opens a list to pick from, with a search box over it. Plain widgets and CSS: the field is
+    """
+    A window's field that opens a list to pick from, with a search box over it. Plain widgets and CSS: the field is
     a button under its face (_row_button), the list opens under it over the window (its panel, <prefix>-pop), and
     each line of the list is a button under its text, made the first time it's shown and kept (rows, _line), so the
     whole line is the click target. One list is open at a time (the window's pickers), and while one is, the window's
@@ -410,7 +468,8 @@ class _Picker:
 
     A subclass says what the search box finds a choice by (_fields; _query rewrites what's typed first, an ARN into
     its name), a choice's value (_key), and draws the field's face, the list (_draw_list) and its lines, and what a
-    click on one does (_clicked). prefix starts the CSS classes (kbx: .kbx-field, .kbx-trig, .kbx-opt, ...)."""
+    click on one does (_clicked). prefix starts the CSS classes (kbx: .kbx-field, .kbx-trig, .kbx-opt, ...).
+    """
 
     def __init__(self, app: _Window, w: Any, prefix: str, *, on_pick: Callable[[Any], None],
                  on_text: Callable[[str], None] | None, placeholder: str, tooltip: str | None = None,
@@ -451,7 +510,9 @@ class _Picker:
         return True
 
     def _opening(self) -> None:
-        """What to do as the list opens, before it's drawn."""
+        """
+        What to do as the list opens, before it's drawn.
+        """
 
     def open(self) -> None:
         if not self._can_open() or self.is_open:
@@ -485,26 +546,36 @@ class _Picker:
             self.open()
 
     def _query(self, text: str) -> str:
-        """What's typed, as the search looks for it."""
+        """
+        What's typed, as the search looks for it.
+        """
         return text
 
     def _fields(self, choice: Any) -> Iterable[Any]:
-        """What the search box finds a choice by (its name, ID, description...)."""
+        """
+        What the search box finds a choice by (its name, ID, description...).
+        """
         raise NotImplementedError
 
     def _key(self, choice: Any) -> str:
-        """The value a choice's line stands for."""
+        """
+        The value a choice's line stands for.
+        """
         raise NotImplementedError
 
     def matches(self) -> list[Any]:
-        """The choices the search box finds, best first (search_rank); every one, in order, while it's empty."""
+        """
+        The choices the search box finds, best first (search_rank); every one, in order, while it's empty.
+        """
         text = self._query(str(self.search.value or ""))
         ranked = [(rank, i, c) for i, c in enumerate(self.choices)
                   if (rank := search_rank(text, self._fields(c))) is not None]
         return [c for _, _, c in sorted(ranked, key=lambda r: r[:2])]
 
     def _line(self, value: str) -> tuple[Any, Any, Any]:
-        """The widgets of value's line in the list (its line, the line's button, its text), made once."""
+        """
+        The widgets of value's line in the list (its line, the line's button, its text), made once.
+        """
         if value not in self.rows:
             prefix = self.prefix
             self.rows[value] = _row_button(self.w, (f"{prefix}-opt", f"{prefix}-opt-b", f"{prefix}-opt-t"),
@@ -521,9 +592,11 @@ class _Picker:
         self._draw_list()
 
     def _entered(self) -> None:
-        """Enter in the search box: picks the first line found, or hands the text to on_text when nothing is found
+        """
+        Enter in the search box: picks the first line found, or hands the text to on_text when nothing is found
         (a picker without on_text has an _entered of its own). What goes wrong is said under the list, where the eyes
-        are."""
+        are.
+        """
         text = str(self.search.value or "").strip()
         if not text:
             self.close()

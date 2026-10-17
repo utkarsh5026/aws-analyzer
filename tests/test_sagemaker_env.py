@@ -472,7 +472,9 @@ def test_running_findings_many_and_errors():
 
 
 def write_root(tmp_path, metadata=NOTEBOOK_META, *, home="home/ec2-user/SageMaker", memory=(16_000_000, 4_000_000)):
-    """A folder that looks like a SageMaker notebook's /: metadata, /proc and a home folder."""
+    """
+    A folder that looks like a SageMaker notebook's /: metadata, /proc and a home folder.
+    """
     if metadata is not None:
         meta = tmp_path / "opt/ml/metadata"
         meta.mkdir(parents=True)
@@ -646,8 +648,10 @@ def denied(stub, operation, action=None):
 
 
 class Stubs:
-    """Real boto3 clients with a botocore Stubber on each: every call must be queued, and its parameters are
-    checked against the service model. moto has no Studio apps, spaces or ListApps."""
+    """
+    Real boto3 clients with a botocore Stubber on each: every call must be queued, and its parameters are
+    checked against the service model. moto has no Studio apps, spaces or ListApps.
+    """
 
     def __init__(self):
         self.clients = {name: boto3.client(name, region_name=REGION) for name in ("sagemaker", "sts", "cloudwatch")}
@@ -672,7 +676,9 @@ class Stubs:
             "Arn": f"arn:aws:sts::{ACCOUNT}:assumed-role/AmazonSageMaker-ExecutionRole-2024/SageMaker"}, {})
 
     def studio(self, *, app=None, domain=None, space=None, profile=True):
-        """What instance() reads for the churn-analysis space: the app, the domain, the space, its owner."""
+        """
+        What instance() reads for the churn-analysis space: the app, the domain, the space, its owner.
+        """
         self.sm.add_response("describe_app", app or app_desc(), {
             "DomainId": DOMAIN, "AppType": "JupyterLab", "AppName": "default", "SpaceName": "churn-analysis"})
         self.sm.add_response("describe_domain", domain or domain_desc(), {"DomainId": DOMAIN})
@@ -1157,7 +1163,9 @@ def executable(path, text="#!/bin/sh\n"):
 
 
 def make_env(prefix, version, *, conda=True, ipykernel=True, made=None):
-    """A folder that looks like a Python environment: bin/python, and conda-meta or pyvenv.cfg."""
+    """
+    A folder that looks like a Python environment: bin/python, and conda-meta or pyvenv.cfg.
+    """
     executable(prefix / "bin/python")
     if conda:
         (prefix / "conda-meta").mkdir(parents=True)
@@ -1180,8 +1188,10 @@ def write_kernel(folder, name, program, display=None):
 
 
 def notebook_envs(tmp_path):
-    """A notebook instance with anaconda3 (the image's environments, and one made since it started), an
-    environment in ~/SageMaker/envs whose kernel went with the last stop, and a kernel whose environment is gone."""
+    """
+    A notebook instance with anaconda3 (the image's environments, and one made since it started), an
+    environment in ~/SageMaker/envs whose kernel went with the last stop, and a kernel whose environment is gone.
+    """
     root = write_root(tmp_path)  # booted 3d 4h ago
     anaconda = root / "home/ec2-user/anaconda3"
     make_env(anaconda, "3.10.14", ipykernel=False)
@@ -1256,7 +1266,9 @@ def test_env_plan(tmp_path):
 
 
 class Runner:
-    """Stands in for running commands: records each, and makes what a successful one would have made."""
+    """
+    Stands in for running commands: records each, and makes what a successful one would have made.
+    """
 
     def __init__(self, root, fail=None, code=1, output=""):
         self.root, self.fail, self.code, self.output, self.calls = root, fail, code, output, []

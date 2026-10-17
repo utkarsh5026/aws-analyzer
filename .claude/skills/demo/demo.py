@@ -1,4 +1,5 @@
-"""Run View commands against realistic demo data in moto (a fake AWS in memory) and show what a user would see.
+"""
+Run View commands against realistic demo data in moto (a fake AWS in memory) and show what a user would see.
 
     python .claude/skills/demo/demo.py s3 'ui.summary("s3://demo-lake/")'
     python .claude/skills/demo/demo.py dynamodb 'ui.table_info("orders"); ui.scan("orders"); ui.more()'
@@ -89,7 +90,9 @@ NOW = datetime.now(timezone.utc).replace(tzinfo=None)  # moto keeps naive UTC ti
 
 
 def _backdate(bucket: str, key: str, when: datetime) -> None:
-    """moto stamps objects with the current time; lifecycle and age reports need older data."""
+    """
+    moto stamps objects with the current time; lifecycle and age reports need older data.
+    """
     from moto.core.models import DEFAULT_ACCOUNT_ID
     from moto.s3.models import s3_backends
 
@@ -487,8 +490,10 @@ SALES_FILES = ["playbooks/discovery-calls.pdf", "playbooks/objection-handling.pd
 
 
 def _warranty_chunks(words: int = 210, overlap: int = 42) -> list[tuple[int, str]]:
-    """warranty.pdf cut like Bedrock's fixed-size chunking with 20% overlap: (page, text) for each chunk, the page
-    being where it starts."""
+    """
+    warranty.pdf cut like Bedrock's fixed-size chunking with 20% overlap: (page, text) for each chunk, the page
+    being where it starts.
+    """
     tokens = [(page, word) for page, text in enumerate(WARRANTY_PAGES, 1) for word in text.split()]
     found, start = [], 0
     while start < len(tokens):
@@ -507,12 +512,16 @@ def _words(text: str) -> list[str]:
 
 
 def _meaning(words: list[str]) -> set[str]:
-    """What 'semantic' search sees: words (mapped to a concept where one fits) without codes like E1234."""
+    """
+    What 'semantic' search sees: words (mapped to a concept where one fits) without codes like E1234.
+    """
     return {_SYNONYMS.get(w, w.rstrip("s")) for w in words if not any(c.isdigit() for c in w)}
 
 
 def _rank(question: str, search_type: str, chunks: list) -> list[tuple[float, tuple]]:
-    """A toy retriever: SEMANTIC matches concepts and misses exact codes; HYBRID also matches exact words."""
+    """
+    A toy retriever: SEMANTIC matches concepts and misses exact codes; HYBRID also matches exact words.
+    """
     import zlib
 
     asked = _words(question)
@@ -531,7 +540,9 @@ def _rank(question: str, search_type: str, chunks: list) -> list[tuple[float, tu
 
 
 def _matches(md: dict, condition: dict | None) -> bool:
-    """Evaluate a Bedrock RetrievalFilter against one chunk's metadata."""
+    """
+    Evaluate a Bedrock RetrievalFilter against one chunk's metadata.
+    """
     if not condition:
         return True
     (op, arg), = condition.items()
@@ -568,7 +579,9 @@ def _reference(score: float | None, chunk: tuple, i: int, *, uri: str = "", chun
 
 
 def _file_filter(condition: dict | None) -> str | None:
-    """The file a Retrieve filter limits a search to (an equals on x-amz-bedrock-kb-source-uri), if it does."""
+    """
+    The file a Retrieve filter limits a search to (an equals on x-amz-bedrock-kb-source-uri), if it does.
+    """
     if not condition:
         return None
     (op, arg), = condition.items()
@@ -580,8 +593,10 @@ def _file_filter(condition: dict | None) -> str | None:
 
 
 class _FakeAWS:
-    """Answers boto3 calls from Python functions, in any order, and checks each request and response against the
-    service model the way botocore's Stubber does. moto doesn't cover Bedrock Knowledge Bases."""
+    """
+    Answers boto3 calls from Python functions, in any order, and checks each request and response against the
+    service model the way botocore's Stubber does. moto doesn't cover Bedrock Knowledge Bases.
+    """
 
     def __init__(self, service: str, handlers: dict, latency: dict | None = None):
         import boto3
@@ -645,7 +660,9 @@ def _client_error(code: str, message: str, operation: str):
 
 
 def seed_bedrock_kb() -> dict:
-    """moto S3 for the files behind support-docs, and fake Bedrock clients for everything else."""
+    """
+    moto S3 for the files behind support-docs, and fake Bedrock clients for everything else.
+    """
     import boto3
 
     # The bucket behind docs-s3: most files are older than the last sync; two changed after it. Each file's metadata
@@ -898,8 +915,10 @@ def seed_bedrock_kb() -> dict:
         return {"output": {"text": text}, "citations": citations, "sessionId": sessionId or "demo-session-1"}
 
     def retrieve_and_generate_stream(**params):
-        """The same answer, as RetrieveAndGenerateStream's events: the text a few words at a time, then each
-        citation once the text it covers has been written."""
+        """
+        The same answer, as RetrieveAndGenerateStream's events: the text a few words at a time, then each
+        citation once the text it covers has been written.
+        """
         import time
 
         resp = retrieve_and_generate(**params)
@@ -996,11 +1015,13 @@ SM_ROLE = f"arn:aws:iam::{ACCOUNT}:role/service-role/AmazonSageMaker-ExecutionRo
 
 
 def _seed_python_envs(mod, root: Path, now: datetime) -> None:
-    """The Studio image's conda (base, with mamba), an environment made in /opt/conda/envs since the app started
+    """
+    The Studio image's conda (base, with mamba), an environment made in /opt/conda/envs since the app started
     (it goes when the app stops), one in ~/.conda/envs with its kernel, a kernel whose environment was removed, and
     a stand-in for running commands, so new_env() makes an environment without downloading anything. ~/.conda and
     ~/.local/share/jupyter are links to folders outside the home folder, so disk() (which doesn't follow links)
-    shows what the docs show."""
+    shows what the docs show.
+    """
     elsewhere = root / "var/demo"
 
     def executable(path: Path) -> None:
@@ -1056,8 +1077,10 @@ def _seed_python_envs(mod, root: Path, now: datetime) -> None:
 
 
 def seed_sagemaker_env() -> dict:
-    """A fake machine (metadata, /proc, a home folder of sparse files) and fake sagemaker / sts / cloudwatch clients.
-    moto has no Studio apps, spaces or ListApps."""
+    """
+    A fake machine (metadata, /proc, a home folder of sparse files) and fake sagemaker / sts / cloudwatch clients.
+    moto has no Studio apps, spaces or ListApps.
+    """
     import tempfile
 
     mod = importlib.import_module("aws_analyzer.sagemaker_env")
@@ -1281,8 +1304,10 @@ def _os_topic(text: str) -> int | None:
 
 
 def seed_opensearch() -> dict:
-    """moto for the domains; a fake opensearchserverless, CloudWatch, STS and Bedrock (a toy embedding model that
-    knows four topics), and fake OpenSearch clusters behind each endpoint (tests/fake_opensearch.py)."""
+    """
+    moto for the domains; a fake opensearchserverless, CloudWatch, STS and Bedrock (a toy embedding model that
+    knows four topics), and fake OpenSearch clusters behind each endpoint (tests/fake_opensearch.py).
+    """
     import boto3
 
     sys.path.insert(0, str(ROOT / "tests"))
@@ -1581,13 +1606,17 @@ def open_ticket(customer, summary):
 
 
 def _epoch_ms(moment: datetime) -> int:
-    """A naive UTC time (NOW's kind) as CloudWatch Logs' epoch milliseconds, whatever the machine's time zone."""
+    """
+    A naive UTC time (NOW's kind) as CloudWatch Logs' epoch milliseconds, whatever the machine's time zone.
+    """
     return int(moment.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
 def _report_api_logs(logs) -> None:
-    """report-api logs JSON (its LoggingConfig says so): Lambda's platform.* records and the app's own lines with a
-    level and a message, over the last three hours: a WARN now and then, and unhandled TypeErrors."""
+    """
+    report-api logs JSON (its LoggingConfig says so): Lambda's platform.* records and the app's own lines with a
+    level and a message, over the last three hours: a WARN now and then, and unhandled TypeErrors.
+    """
     rng = random.Random(23)
     streams = [f"2026/10/06/[$LATEST]{i:032x}" for i in (0xD4, 0xE5)]
     events: dict[str, list[dict]] = {stream: [] for stream in streams}
@@ -1643,10 +1672,12 @@ def _report_api_logs(logs) -> None:
 
 
 def seed_lambda_functions() -> dict:
-    """moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
+    """
+    moto for the functions, their triggers, CloudWatch numbers and logs. moto has no GetAccountSettings,
     ListProvisionedConcurrencyConfigs or GetRuntimeManagementConfig, leaves reserved concurrency out of GetFunction
     and keeps no real log sizes, so the seeder hands the analyzer Lambda and Logs clients per region that answer
-    those, and serves the deployment packages GetFunction links to."""
+    those, and serves the deployment packages GetFunction links to.
+    """
     import urllib.request
 
     import boto3
@@ -1826,7 +1857,9 @@ def seed_lambda_functions() -> dict:
               "/aws/lambda/churn-scoring": 40 * 1024**2, "/aws/lambda/support-agent-actions": 180 * 1024**2}
 
     class _Answer:
-        """What urlopen returns, for a deployment package served from memory."""
+        """
+        What urlopen returns, for a deployment package served from memory.
+        """
 
         def __init__(self, body: bytes):
             self.body, self.headers = body, {"Content-Length": str(len(body))}
@@ -1913,10 +1946,12 @@ def seed_lambda_functions() -> dict:
 
 
 def seed_agent() -> dict:
-    """The Lambda demo data, and a scripted stand-in for the model (no Azure OpenAI needed, but the agent's packages
+    """
+    The Lambda demo data, and a scripted stand-in for the model (no Azure OpenAI needed, but the agent's packages
     are): it calls function_health for the last 24 hours, then function_errors for the two functions that failed most,
     and writes its answer from what they returned, so the report shows the demo data's real numbers. It only knows
-    that one plan; with --live the agent asks your Azure OpenAI deployment instead (AZURE_OPENAI_* variables)."""
+    that one plan; with --live the agent asks your Azure OpenAI deployment instead (AZURE_OPENAI_* variables).
+    """
     seeded = seed_lambda_functions()
     return {"lambda_clients": seeded["clients"], "chat_model": _demo_model()}
 
@@ -1983,7 +2018,9 @@ def _demo_model():
 
 
 class _Patched:
-    """A moto client with a few operations answered by functions instead (each checked against the service model)."""
+    """
+    A moto client with a few operations answered by functions instead (each checked against the service model).
+    """
 
     def __init__(self, client, handlers: dict):
         from botocore import xform_name
@@ -2030,7 +2067,7 @@ def _page(fragments: list[str], theme: str, title: str) -> str:
 
 
 def main() -> int:
-    intro, _, rest = (__doc__ or "").partition("\n\n")
+    intro, _, rest = (__doc__ or "").strip().partition("\n\n")
     parser = argparse.ArgumentParser(description=intro, epilog=rest,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("service", help="analyzer module name: s3, dynamodb, ...")

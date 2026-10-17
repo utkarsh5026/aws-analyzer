@@ -1,4 +1,5 @@
-"""The code every analyzer shares, written once: each service module imports what it uses from these modules.
+"""
+The code every analyzer shares, written once: each service module imports what it uses from these modules.
 
     fmt      numbers, sizes, money, times and counts: what users type in, and what reports show
     text     escaping for HTML, clipping and padding for text tables, and search words (`search_rank`, `_marked`)

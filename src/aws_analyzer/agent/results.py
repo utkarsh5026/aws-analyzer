@@ -1,6 +1,8 @@
-"""What a tool hands the model: JSON-ready values, time windows in UTC, text with anything that looks like a secret
+"""
+What a tool hands the model: JSON-ready values, time windows in UTC, text with anything that looks like a secret
 hidden, and the parts it couldn't read with the permission each one needs. Every toolkit builds its results with
-these, so the model reads the same shapes whichever service a tool is about."""
+these, so the model reads the same shapes whichever service a tool is about.
+"""
 
 from __future__ import annotations
 
@@ -23,9 +25,11 @@ _SECRETS = (  # (pattern, replacement): what hide_secrets() takes out of a log l
 
 
 def hide_secrets(text: Any) -> str:
-    """The text with anything that looks like a secret replaced by [hidden]: AWS access key IDs, tokens (JWTs,
+    """
+    The text with anything that looks like a secret replaced by [hidden]: AWS access key IDs, tokens (JWTs,
     Bearer ...), private keys, the password in a URL, and the value after names like password=, api_key: or
-    "token": ... What the agent reads from logs and code goes through this before the model sees it."""
+    "token": ... What the agent reads from logs and code goes through this before the model sees it.
+    """
     out = "" if text is None else str(text)
     for pattern, replacement in _SECRETS:
         out = pattern.sub(replacement, out)
@@ -33,14 +37,18 @@ def hide_secrets(text: Any) -> str:
 
 
 def _iso(moment: datetime | None) -> str | None:
-    """A time as the tools hand it to the model: '2026-10-15T18:00Z', always UTC."""
+    """
+    A time as the tools hand it to the model: '2026-10-15T18:00Z', always UTC.
+    """
     if moment is None:
         return None
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
 def _plain(value: Any, depth: int = 0) -> Any:
-    """A JSON-ready copy of a tool's result: times as ISO UTC text, floats rounded, tuples and sets as lists."""
+    """
+    A JSON-ready copy of a tool's result: times as ISO UTC text, floats rounded, tuples and sets as lists.
+    """
     if depth > 12:
         return str(value)
     if isinstance(value, datetime):
@@ -59,14 +67,18 @@ def _plain(value: Any, depth: int = 0) -> Any:
 
 
 def _window(start: datetime, end: datetime) -> dict[str, Any]:
-    """The window a result covers, as the model reads it: {'from': ..., 'to': ..., 'hours': ...}, in UTC."""
+    """
+    The window a result covers, as the model reads it: {'from': ..., 'to': ..., 'hours': ...}, in UTC.
+    """
     return {"from": _iso(start), "to": _iso(end), "hours": round((end - start).total_seconds() / 3600, 1)}
 
 
 def _with_permissions(errors: dict[str, str], permissions: dict[str, str]) -> dict[str, str]:
-    """{'us-east-1:list': 'AccessDeniedException'} -> {'us-east-1:list': 'AccessDeniedException; needs
+    """
+    {'us-east-1:list': 'AccessDeniedException'} -> {'us-east-1:list': 'AccessDeniedException; needs
     lambda:ListFunctions'}: what couldn't be read, and the permission that would read it. `permissions` maps the
-    part after the last ':' of a section to its permission."""
+    part after the last ':' of a section to its permission.
+    """
     out = {}
     for section, code in errors.items():
         permission = permissions.get(section.rsplit(":", 1)[-1], "")

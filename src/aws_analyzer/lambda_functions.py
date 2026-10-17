@@ -201,9 +201,11 @@ _NAME_RE = re.compile(r"^([A-Za-z0-9_-]{1,64})(?::([\w$-]+))?$")
 
 
 def parse_function_ref(text: str) -> tuple[str, str | None, str | None]:
-    """A function the way you'd paste it -> (name, qualifier, region): 'etl', 'etl:prod' (an alias or a version),
+    """
+    A function the way you'd paste it -> (name, qualifier, region): 'etl', 'etl:prod' (an alias or a version),
     an ARN ('arn:aws:lambda:eu-west-1:123456789012:function:etl'), a partial ARN ('123456789012:function:etl') or a
-    link to it in the Lambda console. qualifier and region are None when the text doesn't say."""
+    link to it in the Lambda console. qualifier and region are None when the text doesn't say.
+    """
     value = str(text).strip()
     if match := _FUNCTION_ARN_RE.match(value):
         return match.group(3), match.group(4), match.group(1)
@@ -221,8 +223,10 @@ def parse_function_ref(text: str) -> tuple[str, str | None, str | None]:
 
 
 def runtime_family(runtime: str | None) -> str | None:
-    """'python3.12' -> 'python', 'nodejs20.x' -> 'nodejs', 'dotnetcore3.1' -> 'dotnet', 'provided.al2' ->
-    'provided', 'go1.x' -> 'go'; None for a container image (no runtime)."""
+    """
+    'python3.12' -> 'python', 'nodejs20.x' -> 'nodejs', 'dotnetcore3.1' -> 'dotnet', 'provided.al2' ->
+    'provided', 'go1.x' -> 'go'; None for a container image (no runtime).
+    """
     if not runtime:
         return None
     match = re.match(r"[a-z]+", runtime)
@@ -231,7 +235,9 @@ def runtime_family(runtime: str | None) -> str | None:
 
 
 def _lambda_time(value: Any) -> datetime | None:
-    """Lambda's '2024-05-01T10:00:00.000+0000' (or a datetime) -> an aware datetime; None when missing or unreadable."""
+    """
+    Lambda's '2024-05-01T10:00:00.000+0000' (or a datetime) -> an aware datetime; None when missing or unreadable.
+    """
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     match = re.match(
@@ -249,7 +255,9 @@ def _lambda_time(value: Any) -> datetime | None:
 
 
 def _midnight(moment: datetime) -> datetime:
-    """The start of the moment's UTC day."""
+    """
+    The start of the moment's UTC day.
+    """
     return moment.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
@@ -258,7 +266,9 @@ def _day(text: str | None) -> date | None:
 
 
 def human_ms(ms: float | None) -> str:
-    """A run time: 0.42 -> '0.42 ms', 102.4 -> '102 ms', 1530 -> '1.53 s', 75000 -> '75.0 s', 185000 -> '3m 05s'."""
+    """
+    A run time: 0.42 -> '0.42 ms', 102.4 -> '102 ms', 1530 -> '1.53 s', 75000 -> '75.0 s', 185000 -> '3m 05s'.
+    """
     if ms is None:
         return "-"
     if ms < 1:
@@ -274,8 +284,10 @@ def human_ms(ms: float | None) -> str:
 
 
 def _ms(ms: float | None) -> str:
-    """A run time in a table: always in ms, so a column of them lines up, with a second or more also said the way
-    people read it: '102 ms', '1,530 ms (1.5s)', '30,000 ms (30s)', '185,000 ms (3m 05s)'."""
+    """
+    A run time in a table: always in ms, so a column of them lines up, with a second or more also said the way
+    people read it: '102 ms', '1,530 ms (1.5s)', '30,000 ms (30s)', '185,000 ms (3m 05s)'.
+    """
     if ms is None:
         return "-"
     if 0 < ms < 1:
@@ -288,7 +300,9 @@ def _mb(value: float | None) -> str:
 
 
 def _pct(fraction: float | None) -> str:
-    """0.024 -> '2.4%', 0.0004 -> '<0.1%', 0 -> '0%'."""
+    """
+    0.024 -> '2.4%', 0.0004 -> '<0.1%', 0 -> '0%'.
+    """
     if fraction is None:
         return "-"
     if fraction == 0:
@@ -297,7 +311,9 @@ def _pct(fraction: float | None) -> str:
 
 
 def _in_days(days: int) -> str:
-    """26 -> 'in 26 days', 1 -> 'tomorrow', 0 -> 'today', -40 -> '40 days ago'."""
+    """
+    26 -> 'in 26 days', 1 -> 'tomorrow', 0 -> 'today', -40 -> '40 days ago'.
+    """
     if days == 0:
         return "today"
     if days == 1:
@@ -312,7 +328,9 @@ def _in_days(days: int) -> str:
 
 @dataclass
 class RuntimeStatus:
-    """Where a runtime stands in AWS's support schedule."""
+    """
+    Where a runtime stands in AWS's support schedule.
+    """
 
     runtime: str | None
     state: str  # 'supported' | 'ending' (within ENDING_SOON_DAYS) | 'deprecated' | 'blocked' | 'image' | 'unknown'
@@ -324,7 +342,9 @@ class RuntimeStatus:
 
     @property
     def label(self) -> str:
-        """'python3.9 (ended)', 'python3.10 (ends in 26 days)', 'python3.12', 'container image'."""
+        """
+        'python3.9 (ended)', 'python3.10 (ends in 26 days)', 'python3.12', 'container image'.
+        """
         if self.state == "image":
             return "container image"
         name = self.runtime or "-"
@@ -346,14 +366,18 @@ class Layer:
 
     @property
     def name(self) -> str:
-        """'arn:aws:lambda:us-east-1:123456789012:layer:pandas:7' -> 'pandas:7'."""
+        """
+        'arn:aws:lambda:us-east-1:123456789012:layer:pandas:7' -> 'pandas:7'.
+        """
         parts = self.arn.split(":")
         return ":".join(parts[-2:]) if len(parts) >= 8 else self.arn
 
 
 @dataclass
 class Function:
-    """One function's configuration (ListFunctions / GetFunction), in plain Python."""
+    """
+    One function's configuration (ListFunctions / GetFunction), in plain Python.
+    """
 
     name: str
     arn: str = ""
@@ -405,7 +429,9 @@ class Function:
 
     @property
     def vcpus(self) -> float:
-        """The share of CPU its memory buys (Lambda gives a full vCPU at 1,769 MB)."""
+        """
+        The share of CPU its memory buys (Lambda gives a full vCPU at 1,769 MB).
+        """
         return self.memory / MEMORY_PER_VCPU
 
     @property
@@ -415,8 +441,10 @@ class Function:
 
 @dataclass
 class Trigger:
-    """Something that invokes a function: an event source mapping (a queue or stream Lambda reads), a resource
-    policy statement (a service or account allowed to call it), or its function URL."""
+    """
+    Something that invokes a function: an event source mapping (a queue or stream Lambda reads), a resource
+    policy statement (a service or account allowed to call it), or its function URL.
+    """
 
     kind: str  # 'SQS queue', 'S3 bucket', 'EventBridge rule', 'API Gateway', 'Function URL', 'AWS account', ...
     source: str = ""  # its name: a queue, bucket, rule or account
@@ -433,19 +461,25 @@ class Trigger:
 
     @property
     def short(self) -> str:
-        """A few characters for a table cell: 'SQS', 'S3', 'URL (public)'."""
+        """
+        A few characters for a table cell: 'SQS', 'S3', 'URL (public)'.
+        """
         label = _SHORT_KINDS.get(self.kind, self.kind)
         return f"{label} (public)" if self.public else label
 
     @property
     def asynchronous(self) -> bool:
-        """Whether the source invokes the function asynchronously, so failed events go to its on-failure destination."""
+        """
+        Whether the source invokes the function asynchronously, so failed events go to its on-failure destination.
+        """
         return self.kind in _ASYNC_KINDS
 
 
 @dataclass
 class DailyUsage:
-    """One period of CloudWatch numbers for a function (a day, or an hour in short reports)."""
+    """
+    One period of CloudWatch numbers for a function (a day, or an hour in short reports).
+    """
 
     start: datetime
     invocations: float = 0.0
@@ -462,7 +496,9 @@ class DailyUsage:
 
 @dataclass
 class FunctionMetrics:
-    """What CloudWatch counted for a function over a window: runs, failures, throttles, run time, log volume."""
+    """
+    What CloudWatch counted for a function over a window: runs, failures, throttles, run time, log volume.
+    """
 
     name: str
     days: float  # the window, in days
@@ -489,7 +525,9 @@ class FunctionMetrics:
 
     @property
     def last_invoked(self) -> datetime | None:
-        """The start of the latest period with a run (a day, in daily numbers)."""
+        """
+        The start of the latest period with a run (a day, in daily numbers).
+        """
         return self._last("invocations")
 
     @property
@@ -512,7 +550,9 @@ class LogGroup:
 
 @dataclass
 class ProvisionedConcurrency:
-    """Copies of a version or alias kept started and ready, billed whether they're used or not."""
+    """
+    Copies of a version or alias kept started and ready, billed whether they're used or not.
+    """
 
     qualifier: str  # the alias or version
     requested: int
@@ -523,7 +563,9 @@ class ProvisionedConcurrency:
 
     @property
     def billed(self) -> int:
-        """The copies being paid for: what's allocated, or what was asked for while it's starting."""
+        """
+        The copies being paid for: what's allocated, or what was asked for while it's starting.
+        """
         return self.allocated or (self.requested if self.status == "IN_PROGRESS" else 0)
 
 
@@ -554,7 +596,9 @@ class FunctionUrl:
 
 @dataclass
 class AsyncConfig:
-    """What happens to an event an asynchronous caller (S3, SNS, EventBridge) sent when the function fails it."""
+    """
+    What happens to an event an asynchronous caller (S3, SNS, EventBridge) sent when the function fails it.
+    """
 
     retries: int = 2  # Lambda's default
     max_age: int = 6 * 3600  # seconds an event may wait; Lambda's default
@@ -564,7 +608,9 @@ class AsyncConfig:
 
 @dataclass
 class FunctionDetail:
-    """Everything function_info() shows about one function. Sections that couldn't be read are in errors."""
+    """
+    Everything function_info() shows about one function. Sections that couldn't be read are in errors.
+    """
 
     function: Function
     triggers: list[Trigger] = field(default_factory=list)
@@ -583,7 +629,9 @@ class FunctionDetail:
 
 @dataclass
 class AccountLimits:
-    """A region's Lambda limits and usage (GetAccountSettings), with the most functions CloudWatch saw running."""
+    """
+    A region's Lambda limits and usage (GetAccountSettings), with the most functions CloudWatch saw running.
+    """
 
     region: str
     concurrency: int | None = None  # how many runs may be in progress at once, across the region
@@ -596,7 +644,9 @@ class AccountLimits:
 
 @dataclass
 class Overview:
-    """Every function in one or more regions, with what CloudWatch counted for each and what invokes it."""
+    """
+    Every function in one or more regions, with what CloudWatch counted for each and what invokes it.
+    """
 
     regions: list[str]
     days: int
@@ -613,8 +663,10 @@ class Overview:
     prices: dict[str, float] = field(default_factory=lambda: dict(LAMBDA_PRICES), repr=False)
 
     def add_extras(self, found: dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]]) -> None:
-        """Adds the reads made per function (LambdaAnalyzer._extras: the callers its resource policy allows, its
-        provisioned concurrency, and what couldn't be read), by function ARN."""
+        """
+        Adds the reads made per function (LambdaAnalyzer._extras: the callers its resource policy allows, its
+        provisioned concurrency, and what couldn't be read), by function ARN.
+        """
         for fn in self.functions:
             if fn.arn in found:
                 triggers, provisioned, errors = found[fn.arn]
@@ -626,8 +678,10 @@ class Overview:
 
     def add_numbers(self, metrics: dict[str, FunctionMetrics], read: int, peaks: dict[str, float | None],
                     errors: dict[str, str]) -> None:
-        """Adds CloudWatch's numbers (LambdaAnalyzer._numbers): each function's by ARN, how many metrics that read,
-        each region's most runs at once, and 'region:metrics' -> the error code of a region that couldn't be read."""
+        """
+        Adds CloudWatch's numbers (LambdaAnalyzer._numbers): each function's by ARN, how many metrics that read,
+        each region's most runs at once, and 'region:metrics' -> the error code of a region that couldn't be read.
+        """
         self.metrics.update(metrics)
         self.metrics_read += read
         for region, peak in peaks.items():
@@ -636,8 +690,10 @@ class Overview:
         self.errors.update(errors)
 
     def detail(self, fn: Function) -> FunctionDetail:
-        """What the overview knows about one function, shaped like describe()'s answer (fewer sections). Its errors
-        name what wasn't read, so findings don't claim, say, that nothing triggers a function whose policy is unread."""
+        """
+        What the overview knows about one function, shaped like describe()'s answer (fewer sections). Its errors
+        name what wasn't read, so findings don't claim, say, that nothing triggers a function whose policy is unread.
+        """
         errors = {section: code for section, code in fn.errors.items() if section in ("policy", "provisioned")}
         if not self.details:
             errors.update(policy="not read", provisioned="not read")
@@ -653,7 +709,9 @@ class Overview:
         )
 
     def to_df(self):
-        """One row per function: its settings, what CloudWatch counted and the estimated monthly cost."""
+        """
+        One row per function: its settings, what CloudWatch counted and the estimated monthly cost.
+        """
         pd = _require("pandas", "Overview.to_df()")
         rows = []
         for fn in self.functions:
@@ -695,8 +753,10 @@ class LogEvent:
 
 @dataclass
 class LogRun:
-    """One run (a call) as its log stream recorded it: its lines from START to REPORT, oldest first, with the start-up
-    lines just before START on a cold start. request_id is None for lines that belong to no run in the window."""
+    """
+    One run (a call) as its log stream recorded it: its lines from START to REPORT, oldest first, with the start-up
+    lines just before START on a cold start. request_id is None for lines that belong to no run in the window.
+    """
 
     request_id: str | None
     stream: str = ""
@@ -713,12 +773,16 @@ class LogRun:
 
     @property
     def key(self) -> str:
-        """What tells it apart from the window's other runs, for the window to remember which ones are open."""
+        """
+        What tells it apart from the window's other runs, for the window to remember which ones are open.
+        """
         return f"{self.stream}|{self.request_id or self.start.isoformat()}"
 
     @functools.cached_property
     def failures(self) -> list[tuple[LogEvent, str, str]]:
-        """(line, kind, summary) for each line classify_error() says reports an error."""
+        """
+        (line, kind, summary) for each line classify_error() says reports an error.
+        """
         found = []
         for event in self.events:
             kind = classify_error(event.message)
@@ -728,9 +792,11 @@ class LogRun:
 
     @property
     def status(self) -> str:
-        """'timeout'; 'failed' (an error it didn't handle, running out of memory, the runtime exiting); 'logged' (it
+        """
+        'timeout'; 'failed' (an error it didn't handle, running out of memory, the runtime exiting); 'logged' (it
         logged an error, which it may have handled); 'running' (no REPORT line yet: still running, or it ends after
-        the window); 'ok'; or 'outside' (lines that belong to no run)."""
+        the window); 'ok'; or 'outside' (lines that belong to no run).
+        """
         if self.request_id is None:
             return "outside"
         report = self.report
@@ -746,7 +812,9 @@ class LogRun:
 
     @property
     def error(self) -> tuple[str, str] | None:
-        """(kind, summary) of what made it fail, else of the first error it logged; None when it logged none."""
+        """
+        (kind, summary) of what made it fail, else of the first error it logged; None when it logged none.
+        """
         if not self.failures and self.report is not None and self.report.error_type:
             return self.report.error_type, f"{self.report.error_type} ({self.report.status or 'error'})"
         serious = [(kind, summary) for _, kind, summary in self.failures if kind != "Logged error"]
@@ -754,15 +822,19 @@ class LogRun:
 
     @property
     def cold(self) -> bool:
-        """Whether it was a cold start: its REPORT line has a start-up (or SnapStart restore) time, or its stream logged
-        the runtime starting just before it."""
+        """
+        Whether it was a cold start: its REPORT line has a start-up (or SnapStart restore) time, or its stream logged
+        the runtime starting just before it.
+        """
         if self.report is not None and (self.report.init is not None or self.report.restore is not None):
             return True
         return any((_marker(e.message) or ("",))[0] == "init" for e in self.events)
 
     @property
     def duration(self) -> float | None:
-        """How long it ran, in ms, from its REPORT line."""
+        """
+        How long it ran, in ms, from its REPORT line.
+        """
         return self.report.duration if self.report is not None else None
 
     @property
@@ -772,7 +844,9 @@ class LogRun:
 
 @dataclass
 class LogPage:
-    """Log events read from a function's log group, oldest first."""
+    """
+    Log events read from a function's log group, oldest first.
+    """
 
     function: Function
     log_group: str
@@ -787,8 +861,10 @@ class LogPage:
 
     @property
     def runs(self) -> list[LogRun]:
-        """The events grouped into the runs they belong to, newest first (split_runs). After a search
-        (log_runs(search=...)), only the runs with a line that matched it."""
+        """
+        The events grouped into the runs they belong to, newest first (split_runs). After a search
+        (log_runs(search=...)), only the runs with a line that matched it.
+        """
         runs = split_runs(self.events)
         return [run for run in runs if run.matched] if any(e.matched for e in self.events) else runs
 
@@ -802,7 +878,9 @@ class LogPage:
 
 @dataclass
 class ErrorGroup:
-    """Errors that share a cause: the same kind and message, once numbers and IDs are blanked out."""
+    """
+    Errors that share a cause: the same kind and message, once numbers and IDs are blanked out.
+    """
 
     kind: str  # 'Timeout', 'Out of memory', 'KeyError', 'Runtime.ImportModuleError', 'Logged error', ...
     message: str  # the message with numbers and IDs blanked out
@@ -830,7 +908,9 @@ class ErrorReport:
 
 @dataclass
 class Invocation:
-    """One run, from the REPORT line Lambda logs at the end of it."""
+    """
+    One run, from the REPORT line Lambda logs at the end of it.
+    """
 
     request_id: str
     time: datetime | None = None
@@ -847,7 +927,9 @@ class Invocation:
 
 @dataclass
 class Performance:
-    """Run times and memory from the REPORT lines in a window."""
+    """
+    Run times and memory from the REPORT lines in a window.
+    """
 
     function: Function
     log_group: str
@@ -864,7 +946,9 @@ class Performance:
 
     @property
     def window_days(self) -> float:
-        """The days the invocations read cover (less than asked when the read stopped at the limit)."""
+        """
+        The days the invocations read cover (less than asked when the read stopped at the limit).
+        """
         start = self.covered_from if self.truncated and self.covered_from else self.since
         return max((self.until - start).total_seconds() / 86400, 1 / 24)
 
@@ -882,7 +966,9 @@ class CodeFile:
 
 @dataclass
 class CodePackage:
-    """A function's deployment package: the files in it, and the text of one of them."""
+    """
+    A function's deployment package: the files in it, and the text of one of them.
+    """
 
     function: Function
     size: int = 0  # bytes downloaded (zipped)
@@ -900,7 +986,9 @@ class CodePackage:
 
 @dataclass
 class PackageDownload:
-    """A deployment package download() saved on the notebook's disk, as Lambda stores it (nothing unzipped or run)."""
+    """
+    A deployment package download() saved on the notebook's disk, as Lambda stores it (nothing unzipped or run).
+    """
 
     function: Function
     path: str  # where it was saved (absolute)
@@ -913,9 +1001,11 @@ class PackageDownload:
 
 @dataclass
 class CodeStep:
-    """A line of how_it_works()'s outline: a statement of the function's own code that does something worth knowing
+    """
+    A line of how_it_works()'s outline: a statement of the function's own code that does something worth knowing
     (calls AWS, the network or one of its own functions, reads the event or an environment variable, logs, returns or
-    raises), or a loop, branch, `with` or `try` around such lines, with what it does in plain English."""
+    raises), or a loop, branch, `with` or `try` around such lines, with what it does in plain English.
+    """
 
     file: str
     line: int
@@ -928,7 +1018,9 @@ class CodeStep:
     seen: bool = False  # a 'def' step whose steps are shown where it was first called, not again here
 
     def walk(self) -> Iterable[CodeStep]:
-        """This step and every step under it, in the order they're shown."""
+        """
+        This step and every step under it, in the order they're shown.
+        """
         yield self
         for step in [*self.calls, *self.steps]:
             yield from step.walk()
@@ -936,7 +1028,9 @@ class CodeStep:
 
 @dataclass
 class AwsCall:
-    """An AWS API call the code makes, found by following its boto3 clients and resources."""
+    """
+    An AWS API call the code makes, found by following its boto3 clients and resources.
+    """
 
     service: str  # boto3's name: 's3', 'dynamodb'
     operation: str  # 'GetObject'
@@ -954,13 +1048,17 @@ class AwsCall:
 
     @property
     def label(self) -> str:
-        """'S3 GetObject'."""
+        """
+        'S3 GetObject'.
+        """
         return f"{_service_name(self.service)} {self.operation}"
 
 
 @dataclass
 class EnvRead:
-    """An environment variable the code reads. Its value is never read: only its name."""
+    """
+    An environment variable the code reads. Its value is never read: only its name.
+    """
 
     name: str
     file: str
@@ -973,7 +1071,9 @@ class EnvRead:
 
 @dataclass
 class EventField:
-    """A field the code reads from the event Lambda passes the handler."""
+    """
+    A field the code reads from the event Lambda passes the handler.
+    """
 
     path: tuple[str, ...]  # ('Records', '[]', 'body', '{json}', 'bucket')
     file: str
@@ -982,13 +1082,17 @@ class EventField:
 
     @property
     def label(self) -> str:
-        """'Records[].body (JSON) bucket'."""
+        """
+        'Records[].body (JSON) bucket'.
+        """
         return _event_label(self.path)
 
 
 @dataclass
 class CodeFunction:
-    """One of the package's own functions that runs when the handler does."""
+    """
+    One of the package's own functions that runs when the handler does.
+    """
 
     name: str  # 'db.connect', 'repo.Orders.save'
     file: str
@@ -1002,7 +1106,9 @@ class CodeFunction:
 
 @dataclass
 class ImportUse:
-    """A module the code imports, and where Lambda finds it."""
+    """
+    A module the code imports, and where Lambda finds it.
+    """
 
     module: str  # as written: 'requests', 'db', 'pkg.sub'
     source: str  # 'own' (its own files), 'stdlib', 'runtime' (boto3, botocore...), 'package' (a library packed in
@@ -1019,7 +1125,9 @@ class ImportUse:
 
 @dataclass
 class CodeSpot:
-    """A line how_it_works()'s findings are about."""
+    """
+    A line how_it_works()'s findings are about.
+    """
 
     kind: str  # 'http', 'sleep', 'write', 'secret', 'swallow', 'client', 'command', 'syntax'
     file: str
@@ -1034,9 +1142,11 @@ class CodeSpot:
 
 @dataclass
 class CodeMap:
-    """How a Python function's code works, read from its deployment package with Python's ast module (nothing in it is
+    """
+    How a Python function's code works, read from its deployment package with Python's ast module (nothing in it is
     run): what runs when Lambda starts it, the steps of each call from the handler on, following its own functions,
-    and what they reach outside: AWS calls, environment variables, the event's fields, libraries and HTTP."""
+    and what they reach outside: AWS calls, environment variables, the event's fields, libraries and HTTP.
+    """
 
     function: Function | None
     handler: str | None  # the handler setting: 'etl.handler'
@@ -1067,19 +1177,25 @@ class CodeMap:
 
     @property
     def services(self) -> list[str]:
-        """The AWS services it calls, as people name them ('S3', 'DynamoDB'), in the order it first calls them."""
+        """
+        The AWS services it calls, as people name them ('S3', 'DynamoDB'), in the order it first calls them.
+        """
         return list(dict.fromkeys(_service_name(call.service) for call in self.aws))
 
     def to_df(self):
-        """Its AWS calls, a row each."""
+        """
+        Its AWS calls, a row each.
+        """
         pd = _require("pandas", "CodeMap.to_df()")
         return pd.DataFrame([{**vars(call), "label": call.label} for call in self.aws])
 
 
 @dataclass
 class GraphNode:
-    """A box in how_it_works()'s graph: what calls the code (the event), what it's configured with (its environment),
-    one of its own functions, or what it reaches (an AWS service, the web)."""
+    """
+    A box in how_it_works()'s graph: what calls the code (the event), what it's configured with (its environment),
+    one of its own functions, or what it reaches (an AWS service, the web).
+    """
 
     id: str  # 'event', 'env', 'start', 'f0' (a function), 'aws-s3', 'http'
     kind: str  # 'event', 'env', 'start', 'handler', 'function', 'aws', 'http'
@@ -1095,7 +1211,9 @@ class GraphNode:
 
 @dataclass
 class GraphEdge:
-    """An arrow in how_it_works()'s graph: a call, an AWS call, an HTTP request, or the event and variables coming in."""
+    """
+    An arrow in how_it_works()'s graph: a call, an AWS call, an HTTP request, or the event and variables coming in.
+    """
 
     source: str  # a GraphNode id
     target: str
@@ -1110,8 +1228,10 @@ class GraphEdge:
 
 @dataclass
 class CodeGraph:
-    """How the code fits together, as boxes and arrows: what comes in, its own functions and who calls whom, and what
-    they reach outside. code_graph() makes it from a CodeMap; mermaid() writes it for a Markdown file."""
+    """
+    How the code fits together, as boxes and arrows: what comes in, its own functions and who calls whom, and what
+    they reach outside. code_graph() makes it from a CodeMap; mermaid() writes it for a Markdown file.
+    """
 
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
@@ -1121,7 +1241,9 @@ class CodeGraph:
         return next((n for n in self.nodes if n.id == node_id), None)
 
     def mermaid(self) -> str:
-        """The graph in Mermaid's language, for a Markdown file, a wiki or a pull request that renders it."""
+        """
+        The graph in Mermaid's language, for a Markdown file, a wiki or a pull request that renders it.
+        """
         shapes = {"event": ("([", "])"), "env": ("[/", "/]"), "aws": ("[(", ")]"), "http": ("{{", "}}"),
                   "start": ("[[", "]]")}
         out = ["flowchart LR"]
@@ -1206,8 +1328,10 @@ _INVOKE_ACTIONS = ("lambda:invokefunction", "lambda:invokefunctionurl", "lambda:
 
 
 def masked_config(config: dict[str, Any]) -> dict[str, Any]:
-    """A copy of a function's configuration with environment variable values replaced by '(hidden)', so it can be
-    shown or shared: the values often hold passwords and keys."""
+    """
+    A copy of a function's configuration with environment variable values replaced by '(hidden)', so it can be
+    shown or shared: the values often hold passwords and keys.
+    """
     shown = json.loads(json.dumps(config, default=str))
     shown.pop("ResponseMetadata", None)
     variables = (shown.get("Environment") or {}).get("Variables")
@@ -1217,13 +1341,17 @@ def masked_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _unqualified(arn: str) -> str:
-    """'arn:aws:lambda:r:a:function:etl:prod' -> 'arn:aws:lambda:r:a:function:etl'."""
+    """
+    'arn:aws:lambda:r:a:function:etl:prod' -> 'arn:aws:lambda:r:a:function:etl'.
+    """
     return ":".join(arn.split(":")[:7]) if arn.startswith("arn:") else arn
 
 
 def parse_function(config: dict[str, Any], region: str = "") -> Function:
-    """One function's configuration (an entry of ListFunctions, or GetFunction's Configuration) -> Function.
-    Environment variable values are left out (only their names are kept), and hidden in .raw."""
+    """
+    One function's configuration (an entry of ListFunctions, or GetFunction's Configuration) -> Function.
+    Environment variable values are left out (only their names are kept), and hidden in .raw.
+    """
     arn = config.get("FunctionArn") or ""
     name = config.get("FunctionName") or (arn.split(":")[6] if arn.count(":") >= 6 else "")
     environment = config.get("Environment") or {}
@@ -1272,8 +1400,10 @@ def parse_function(config: dict[str, Any], region: str = "") -> Function:
 
 
 def runtime_status(runtime: str | None, *, package_type: str = "Zip", today: date | None = None) -> RuntimeStatus:
-    """Where a runtime stands in AWS's support schedule (RUNTIMES) on `today`: supported, ending within
-    ENDING_SOON_DAYS, deprecated (no more patches), or blocked (functions on it can't be updated)."""
+    """
+    Where a runtime stands in AWS's support schedule (RUNTIMES) on `today`: supported, ending within
+    ENDING_SOON_DAYS, deprecated (no more patches), or blocked (functions on it can't be updated).
+    """
     if not runtime:
         return RuntimeStatus(None, "image" if package_type == "Image" else "unknown")
     upgrade = LATEST_RUNTIMES.get(runtime_family(runtime) or "")
@@ -1296,7 +1426,9 @@ def runtime_status(runtime: str | None, *, package_type: str = "Zip", today: dat
 
 
 def _policy_condition(conditions: Any, key: str) -> str | None:
-    """The first value a policy statement's Condition gives `key` (any operator, keys compared without case)."""
+    """
+    The first value a policy statement's Condition gives `key` (any operator, keys compared without case).
+    """
     if not isinstance(conditions, dict):
         return None
     for block in conditions.values():
@@ -1310,8 +1442,10 @@ def _policy_condition(conditions: Any, key: str) -> str | None:
 
 
 def _source_name(arn: str | None) -> tuple[str, str]:
-    """(name, detail) from a trigger's source ARN: a bucket, queue, topic, rule, stream, API (with its route) or
-    log group."""
+    """
+    (name, detail) from a trigger's source ARN: a bucket, queue, topic, rule, stream, API (with its route) or
+    log group.
+    """
     if not arn:
         return "", ""
     parts = arn.split(":", 5)
@@ -1341,8 +1475,10 @@ def _source_name(arn: str | None) -> tuple[str, str]:
 
 
 def parse_policy(policy: dict[str, Any] | str | None) -> list[Trigger]:
-    """A function's resource-based policy (GetPolicy) as the callers it allows: services (S3, EventBridge, API
-    Gateway...) with the bucket, rule or API they're limited to, other accounts, and anyone (public)."""
+    """
+    A function's resource-based policy (GetPolicy) as the callers it allows: services (S3, EventBridge, API
+    Gateway...) with the bucket, rule or API they're limited to, other accounts, and anyone (public).
+    """
     if not policy:
         return []
     document = json.loads(policy) if isinstance(policy, str) else policy
@@ -1413,7 +1549,9 @@ def parse_policy(policy: dict[str, Any] | str | None) -> list[Trigger]:
 
 
 def parse_event_source_mapping(mapping: dict[str, Any]) -> Trigger:
-    """One event source mapping (ListEventSourceMappings): the queue or stream Lambda polls for the function."""
+    """
+    One event source mapping (ListEventSourceMappings): the queue or stream Lambda polls for the function.
+    """
     arn = mapping.get("EventSourceArn")
     service = arn.split(":")[2] if arn and arn.count(":") >= 5 else ""
     kind = _STREAM_KINDS.get(service, service or "event source")
@@ -1444,8 +1582,10 @@ def parse_event_source_mapping(mapping: dict[str, Any]) -> Trigger:
 
 
 def _window(seconds: float) -> str:
-    """How long a window is, for 'in the last ...': 900 -> '15 minutes', 3600 -> 'hour', 86400 -> '24 hours',
-    2592000 -> '30 days'."""
+    """
+    How long a window is, for 'in the last ...': 900 -> '15 minutes', 3600 -> 'hour', 86400 -> '24 hours',
+    2592000 -> '30 days'.
+    """
     minutes = round(seconds / 60)
     if minutes < 60:
         return _plural(max(minutes, 1), "minute")
@@ -1458,7 +1598,9 @@ def _window(seconds: float) -> str:
 
 
 def _cli(fn: Function) -> str:
-    """The options that name a function in an AWS CLI command, region included so it works from any terminal."""
+    """
+    The options that name a function in an AWS CLI command, region included so it works from any terminal.
+    """
     return f"--function-name {fn.name}" + (f" --region {fn.region}" if fn.region else "")
 
 
@@ -1471,13 +1613,17 @@ def _reason(text: str | None) -> str:
 
 
 def provisioned_monthly_cost(fn: Function, copies: int, prices: dict[str, float] | None = None) -> float:
-    """What keeping `copies` copies of the function ready (provisioned concurrency) costs a month, used or not."""
+    """
+    What keeping `copies` copies of the function ready (provisioned concurrency) costs a month, used or not.
+    """
     prices = {**LAMBDA_PRICES, **(prices or {})}
     return copies * fn.gb * HOURS_PER_MONTH * 3600 * prices["provisioned_arm" if fn.arm else "provisioned"]
 
 
 def log_storage_monthly_cost(group: LogGroup | None, prices: dict[str, float] | None = None) -> float | None:
-    """What keeping a log group's logs costs a month (CloudWatch Logs storage), at its size now."""
+    """
+    What keeping a log group's logs costs a month (CloudWatch Logs storage), at its size now.
+    """
     if group is None or group.stored_bytes is None:
         return None
     prices = {**LAMBDA_PRICES, **(prices or {})}
@@ -1492,11 +1638,13 @@ def function_monthly_cost(
     *,
     prices: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """Estimated USD a month, by part: 'requests', 'compute' (memory x run time), 'storage' (/tmp above 512 MB),
+    """
+    Estimated USD a month, by part: 'requests', 'compute' (memory x run time), 'storage' (/tmp above 512 MB),
     'logs' (what it sends to CloudWatch Logs), 'log_storage' (what the log group keeps) and 'provisioned'
     (copies kept ready). Usage parts scale what CloudWatch counted over its window (metrics) to a month; a part
     without the numbers it needs is left out. Before the free tier; compute that runs on provisioned concurrency is
-    billed a little less than this."""
+    billed a little less than this.
+    """
     prices = {**LAMBDA_PRICES, **(prices or {})}
     cost: dict[str, float] = {}
     if metrics is not None and metrics.days:
@@ -1524,8 +1672,10 @@ _POINTER_NAME_RE = re.compile(
 
 
 def secret_like(names: Iterable[str]) -> list[str]:
-    """Environment variable names that look like they hold a secret (DB_PASSWORD, API_KEY), leaving out the ones
-    that point at a secret instead (DB_SECRET_ARN, TOKEN_PARAMETER_NAME)."""
+    """
+    Environment variable names that look like they hold a secret (DB_PASSWORD, API_KEY), leaving out the ones
+    that point at a secret instead (DB_SECRET_ARN, TOKEN_PARAMETER_NAME).
+    """
     return [n for n in names if _SECRET_NAME_RE.search(n) and not _POINTER_NAME_RE.search(n)]
 
 
@@ -1538,7 +1688,9 @@ def _next_timeout(timeout: int) -> int:
 
 
 def _nice_timeout(longest_ms: float) -> int:
-    """A timeout with room above the longest run seen: about 3x it, rounded to a round number of seconds."""
+    """
+    A timeout with room above the longest run seen: about 3x it, rounded to a round number of seconds.
+    """
     want = longest_ms / 1000 * 3
     return next((s for s in (3, 5, 10, 15, 30, 60, 120, 300, 600, MAX_TIMEOUT) if s >= want), MAX_TIMEOUT)
 
@@ -1571,7 +1723,9 @@ def _runtime_findings(fn: Function, status: RuntimeStatus) -> list[tuple[str, st
 
 
 def _day_age(moment: datetime | None, now: datetime) -> str:
-    """'today', 'yesterday' or '5d ago', by UTC calendar day."""
+    """
+    'today', 'yesterday' or '5d ago', by UTC calendar day.
+    """
     if moment is None:
         return "-"
     days = (now.astimezone(timezone.utc).date() - moment.astimezone(timezone.utc).date()).days
@@ -1579,7 +1733,9 @@ def _day_age(moment: datetime | None, now: datetime) -> str:
 
 
 def _last_seen(moment: datetime | None, metrics: FunctionMetrics, now: datetime) -> str:
-    """', the last today' / ', the last 3d ago' (daily numbers) or ', the last 2h ago' (hourly)."""
+    """
+    ', the last today' / ', the last 3d ago' (daily numbers) or ', the last 2h ago' (hourly).
+    """
     if moment is None:
         return ""
     return f", the last {_day_age(moment, now) if metrics.period >= 86400 else human_age(moment, now)}"
@@ -1589,7 +1745,9 @@ RECENT_DAYS = 3  # how far back "lately" reaches when daily numbers are checked 
 
 
 def _recent(metrics: FunctionMetrics, now: datetime) -> tuple[float, float] | None:
-    """(calls, errors) over the last RECENT_DAYS days of daily numbers; None for hourly numbers or short windows."""
+    """
+    (calls, errors) over the last RECENT_DAYS days of daily numbers; None for hourly numbers or short windows.
+    """
     if metrics.period < 86400 or metrics.days < 2 * RECENT_DAYS:
         return None
     start = _midnight(now) - timedelta(days=RECENT_DAYS - 1)
@@ -1598,9 +1756,11 @@ def _recent(metrics: FunctionMetrics, now: datetime) -> tuple[float, float] | No
 
 
 def _errors_level(metrics: FunctionMetrics | None, now: datetime) -> str | None:
-    """'warn' when a function's failed calls are worth acting on (at least 10, and 1% of its calls over the window
+    """
+    'warn' when a function's failed calls are worth acting on (at least 10, and 1% of its calls over the window
     or over the last few days, the last within a week), 'info' when they stopped earlier or are many (100) but a
-    small share, None when there are too few to mention."""
+    small share, None when there are too few to mention.
+    """
     if metrics is None or not metrics.invocations or metrics.errors < 1:
         return None
     recent = _recent(metrics, now)
@@ -1614,7 +1774,9 @@ def _errors_level(metrics: FunctionMetrics | None, now: datetime) -> str | None:
 
 
 def _metrics_window(metrics: FunctionMetrics) -> str:
-    """'30 days' for daily numbers (whole UTC days, today's part included), '24 hours' for hourly ones."""
+    """
+    '30 days' for daily numbers (whole UTC days, today's part included), '24 hours' for hourly ones.
+    """
     days = math.ceil(metrics.days - 1e-6) if metrics.period >= 86400 else metrics.days
     return _window(days * 86400)
 
@@ -1624,7 +1786,9 @@ def _times(count: int) -> str:
 
 
 def _longer(fn: Function) -> str:
-    """What to do about runs that need more time than the timeout gives them."""
+    """
+    What to do about runs that need more time than the timeout gives them.
+    """
     if fn.timeout >= MAX_TIMEOUT:
         return (f"it's already at the most Lambda allows ({MAX_TIMEOUT} s), so split the work into smaller pieces, "
                 "or run it somewhere without the limit (Step Functions, ECS or Batch)")
@@ -1722,9 +1886,11 @@ def function_findings(
     prices: dict[str, float] | None = None,
     now: datetime | None = None,
 ) -> list[tuple[str, str]]:
-    """What's wrong with a function, or worth knowing: (level, message) pairs, each with the next step. Works on
+    """
+    What's wrong with a function, or worth knowing: (level, message) pairs, each with the next step. Works on
     what you have: the configuration alone, plus CloudWatch's numbers (metrics), plus the rest of describe()'s
-    answer (detail: triggers, provisioned concurrency, the log group, versions...)."""
+    answer (detail: triggers, provisioned concurrency, the log group, versions...).
+    """
     prices = {**LAMBDA_PRICES, **(prices or {})}
     now = now or _utcnow()
     detail = detail or FunctionDetail(fn)
@@ -1864,7 +2030,9 @@ def function_findings(
 
 
 def account_findings(limits: AccountLimits, days: float = 30) -> list[tuple[str, str]]:
-    """A region's limits that are close to running out: code storage, and how many runs may happen at once."""
+    """
+    A region's limits that are close to running out: code storage, and how many runs may happen at once.
+    """
     found: list[tuple[str, str]] = []
     region = limits.region
     if limits.code_storage is not None and limits.code_storage_limit:
@@ -1918,7 +2086,9 @@ _LOAD_ERRORS = ("Runtime.ImportModuleError", "Runtime.HandlerNotFound", "Runtime
 
 
 def request_id_of(message: str) -> str | None:
-    """The request ID a log line belongs to (Lambda writes it in each line it adds), or None."""
+    """
+    The request ID a log line belongs to (Lambda writes it in each line it adds), or None.
+    """
     if message.lstrip().startswith("{"):
         try:
             doc = json.loads(message)
@@ -1934,7 +2104,9 @@ def request_id_of(message: str) -> str | None:
 
 
 def _typed(text: str) -> tuple[str, str] | None:
-    """'KeyError: 'x'' -> ('KeyError', "KeyError: 'x'"); None when the line doesn't start with an error type."""
+    """
+    'KeyError: 'x'' -> ('KeyError', "KeyError: 'x'"); None when the line doesn't start with an error type.
+    """
     match = _ERROR_TYPE_RE.match(text.strip())
     if not match:
         return None
@@ -1942,7 +2114,9 @@ def _typed(text: str) -> tuple[str, str] | None:
 
 
 def _json_error(text: str) -> tuple[str, str] | None:
-    """An error in a JSON log line: Lambda's own (errorType / errorMessage) or a record at level ERROR."""
+    """
+    An error in a JSON log line: Lambda's own (errorType / errorMessage) or a record at level ERROR.
+    """
     try:
         doc = json.loads(text)
     except ValueError:
@@ -1973,10 +2147,12 @@ def _json_error(text: str) -> tuple[str, str] | None:
 
 
 def classify_error(message: str) -> tuple[str, str] | None:
-    """(kind, summary) for a log line that reports an error, or None for any other line. Kinds: 'Timeout',
+    """
+    (kind, summary) for a log line that reports an error, or None for any other line. Kinds: 'Timeout',
     'Out of memory', 'Runtime exited', an exception type ('KeyError', 'Runtime.ImportModuleError', 'TypeError',
     ...) or 'Logged error' (an ERROR line the code wrote). REPORT lines are skipped: they repeat what the line
-    before them said."""
+    before them said.
+    """
     text = message.strip()
     if not text or text.startswith(("REPORT RequestId", "INIT_REPORT", "START RequestId", "END RequestId")):
         return None
@@ -2016,8 +2192,10 @@ def classify_error(message: str) -> tuple[str, str] | None:
 
 
 def _phrase(search: str | None) -> str | None:
-    """The exact text a plain search= looks for (None for a filter pattern with its own syntax), so lines can be
-    checked again here."""
+    """
+    The exact text a plain search= looks for (None for a filter pattern with its own syntax), so lines can be
+    checked again here.
+    """
     text = str(search or "").strip()
     if len(text) >= 2 and text[0] == text[-1] == '"' and '"' not in text[1:-1]:
         return text[1:-1]
@@ -2025,8 +2203,10 @@ def _phrase(search: str | None) -> str | None:
 
 
 def _filter_pattern(search: str | None) -> str | None:
-    """search= as a CloudWatch Logs filter pattern: plain text becomes an exact, case-sensitive phrase; a pattern
-    ('?ERROR ?WARN', '{ $.level = "ERROR" }') passes through as it is."""
+    """
+    search= as a CloudWatch Logs filter pattern: plain text becomes an exact, case-sensitive phrase; a pattern
+    ('?ERROR ?WARN', '{ $.level = "ERROR" }') passes through as it is.
+    """
     if not search:
         return None
     text = str(search).strip()
@@ -2036,15 +2216,19 @@ def _filter_pattern(search: str | None) -> str | None:
 
 
 def _error_key(text: str) -> str:
-    """A message with what changes between occurrences blanked out (IDs, numbers), so repeats group together."""
+    """
+    A message with what changes between occurrences blanked out (IDs, numbers), so repeats group together.
+    """
     text = _REQUEST_ID_RE.sub("<id>", text)
     text = re.sub(r"\b[0-9a-f]{12,}\b", "<id>", text)
     return re.sub(r"\d+(?:\.\d+)?", "N", text)[:300]
 
 
 def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
-    """Log events that report errors, grouped by cause (kind and message, numbers and IDs aside), most frequent
-    first. Lines that aren't errors are skipped."""
+    """
+    Log events that report errors, grouped by cause (kind and message, numbers and IDs aside), most frequent
+    first. Lines that aren't errors are skipped.
+    """
     groups: dict[tuple[str, str], ErrorGroup] = {}
     seen: dict[tuple[str, str], list[tuple[datetime, str]]] = defaultdict(list)
     for event in events:
@@ -2069,8 +2253,10 @@ def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
 
 
 def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
-    """What the errors in a window mean and what to do: timeouts, out of memory, code that can't load, missing
-    permissions, throttled or unreachable services, and the most common error otherwise."""
+    """
+    What the errors in a window mean and what to do: timeouts, out of memory, code that can't load, missing
+    permissions, throttled or unreachable services, and the most common error otherwise.
+    """
     fn = report.function
     name, cli = fn.name, _cli(fn)
     found: list[tuple[str, str]] = []
@@ -2148,8 +2334,10 @@ def error_findings(report: ErrorReport) -> list[tuple[str, str]]:
 
 
 def parse_report(message: str, time: datetime | None = None) -> Invocation | None:
-    """A REPORT line (or a JSON platform.report record), which Lambda logs at the end of every run, -> Invocation:
-    run time, billed time, memory used, and the start-up time of a cold start. None for any other line."""
+    """
+    A REPORT line (or a JSON platform.report record), which Lambda logs at the end of every run, -> Invocation:
+    run time, billed time, memory used, and the start-up time of a cold start. None for any other line.
+    """
     text = message.strip()
     if text.startswith("{"):
         try:
@@ -2203,8 +2391,10 @@ _STARTING = ("INIT_START", "INIT_REPORT", "INIT_RUNTIME_DONE", "RESTORE_START", 
 
 
 def _marker(message: str) -> tuple[str, str | None] | None:
-    """('start' | 'end' | 'report' | 'init', request ID) for the lines Lambda itself writes around a run (START, END,
-    REPORT and the start-up lines), in text or JSON format; None for any other line."""
+    """
+    ('start' | 'end' | 'report' | 'init', request ID) for the lines Lambda itself writes around a run (START, END,
+    REPORT and the start-up lines), in text or JSON format; None for any other line.
+    """
     text = message.lstrip()
     for kind, prefix in (("start", "START RequestId:"), ("end", "END RequestId:"), ("report", "REPORT RequestId:")):
         if text.startswith(prefix):
@@ -2225,11 +2415,13 @@ def _marker(message: str) -> tuple[str, str | None] | None:
 
 
 def split_runs(events: Iterable[LogEvent]) -> list[LogRun]:
-    """Log lines grouped into the runs they belong to, newest run first. An execution environment (a log stream) runs
+    """
+    Log lines grouped into the runs they belong to, newest run first. An execution environment (a log stream) runs
     one call at a time, so a run is what its stream recorded from its START line to its REPORT line, with the start-up
     lines just before START on a cold start; a line that names an open run's request ID goes to that run. A run the
     window cuts off keeps the lines the window has (no START, or no REPORT yet), and lines that belong to no run come
-    back as a LogRun with request_id None, one per stream."""
+    back as a LogRun with request_id None, one per stream.
+    """
     streams: dict[str, list[LogEvent]] = defaultdict(list)
     for event in events:
         streams[event.stream].append(event)
@@ -2285,9 +2477,11 @@ _LEVELS = {"ERROR": "error", "CRITICAL": "error", "FATAL": "error", "WARNING": "
 
 
 def line_level(message: str) -> str:
-    """What kind of line a log line is: 'report' (the REPORT line that ends a run), 'platform' (Lambda's START, END and
+    """
+    What kind of line a log line is: 'report' (the REPORT line that ends a run), 'platform' (Lambda's START, END and
     start-up lines), 'error', 'warn', 'info', 'debug', or '' when it doesn't say. Reads Lambda's text formats (Python's
-    '[ERROR]', Node's '<time>\\t<request>\\tWARN\\t...') and JSON logs (their "level")."""
+    '[ERROR]', Node's '<time>\\t<request>\\tWARN\\t...') and JSON logs (their "level").
+    """
     text = message.lstrip()
     mark = _marker(text)
     if mark is not None:
@@ -2312,7 +2506,9 @@ def line_level(message: str) -> str:
 
 
 def percentile(values: Iterable[float], q: float) -> float | None:
-    """The nearest-rank percentile (q from 0 to 100) of the values; None when there are none."""
+    """
+    The nearest-rank percentile (q from 0 to 100) of the values; None when there are none.
+    """
     ordered = sorted(values)
     if not ordered:
         return None
@@ -2320,16 +2516,20 @@ def percentile(values: Iterable[float], q: float) -> float | None:
 
 
 def suggest_memory(max_used: float, memory: int, headroom: float = 1.3) -> int | None:
-    """The smallest of MEMORY_STEPS that leaves 30% room above the most memory a run used, when that's less than
-    the function has; None when what it has is about right."""
+    """
+    The smallest of MEMORY_STEPS that leaves 30% room above the most memory a run used, when that's less than
+    the function has; None when what it has is about right.
+    """
     need = max_used * headroom
     step = next((s for s in MEMORY_STEPS if s >= need), None)
     return step if step is not None and step < memory else None
 
 
 def performance_findings(perf: Performance, prices: dict[str, float] | None = None) -> list[tuple[str, str]]:
-    """What the run times and memory say: timeouts, runs close to the timeout or out of memory, memory that's
-    much more than the runs use (and what less would save), and slow cold starts."""
+    """
+    What the run times and memory say: timeouts, runs close to the timeout or out of memory, memory that's
+    much more than the runs use (and what less would save), and slow cold starts.
+    """
     runs = perf.invocations
     if not runs:
         return []
@@ -2408,9 +2608,11 @@ _JUNK_RE = re.compile(r"(^|/)(__pycache__|\.git|\.pytest_cache|tests?|\.venv|\.i
 
 
 def handler_file(handler: str | None, runtime: str | None, names: Iterable[str]) -> str | None:
-    """The file in a package that Lambda loads the handler from: 'app.handler' -> 'app.py',
+    """
+    The file in a package that Lambda loads the handler from: 'app.handler' -> 'app.py',
     'pkg.module.handler' -> 'pkg/module.py', 'src/index.handler' -> 'src/index.mjs'. None when the runtime loads
-    compiled code (Java, .NET, Go) or no file matches."""
+    compiled code (Java, .NET, Go) or no file matches.
+    """
     family = runtime_family(runtime)
     if not handler or family not in _HANDLER_EXTENSIONS:
         return None
@@ -2428,14 +2630,18 @@ def handler_file(handler: str | None, runtime: str | None, names: Iterable[str])
 
 
 def package_file_name(fn: Function) -> str:
-    """The name download() saves a function's package as: 'etl.zip', or 'etl-v3.zip' for a published version (an
-    alias names the version it points to)."""
+    """
+    The name download() saves a function's package as: 'etl.zip', or 'etl-v3.zip' for a published version (an
+    alias names the version it points to).
+    """
     return f"{fn.name}.zip" if fn.version in ("", "$LATEST") else f"{fn.name}-v{fn.version}.zip"
 
 
 def _local_path(path: str) -> str:
-    """A path on the notebook's disk as a report shows it: relative to the notebook's folder when it's in it, else
-    as it is."""
+    """
+    A path on the notebook's disk as a report shows it: relative to the notebook's folder when it's in it, else
+    as it is.
+    """
     here = os.path.abspath(os.getcwd())
     path = os.path.abspath(path)
     return os.path.relpath(path, here) if path.startswith(here.rstrip(os.sep) + os.sep) else path
@@ -2447,7 +2653,9 @@ def _top_folder(path: str) -> str:
 
 
 def _pick_file(wanted: str, names: list[str]) -> str:
-    """A file in the package from what the user typed: its path, its name, the end of its path, or a glob."""
+    """
+    A file in the package from what the user typed: its path, its name, the end of its path, or a glob.
+    """
     wanted = wanted.strip().lstrip("/")
     if wanted in names:
         return wanted
@@ -2466,10 +2674,12 @@ def _pick_file(wanted: str, names: list[str]) -> str:
 
 
 def read_package(fn: Function, data: bytes | None, file: str | None = None) -> CodePackage:
-    """A deployment package (the .zip as code() downloads it) as the files in it, the file that holds the handler, and
+    """
+    A deployment package (the .zip as code() downloads it) as the files in it, the file that holds the handler, and
     the text of that file, or of file= (a path, a file name or a glob like '*.py'). No AWS calls, and nothing in it is
     run. A secrets file (.env, keys, credentials) is named but its text isn't read. data=None means there's nothing to
-    read: a container image, or no link to the code (the note says which)."""
+    read: a container image, or no link to the code (the note says which).
+    """
     package = CodePackage(fn)
     if fn.package_type == "Image":
         package.note = (
@@ -2512,8 +2722,10 @@ def read_package(fn: Function, data: bytes | None, file: str | None = None) -> C
 
 
 def package_findings(pkg: CodePackage) -> list[tuple[str, str]]:
-    """What's worth knowing about a deployment package: a handler no file matches, secrets packed in it, size near
-    Lambda's limit, and what it carries that never runs."""
+    """
+    What's worth knowing about a deployment package: a handler no file matches, secrets packed in it, size near
+    Lambda's limit, and what it carries that never runs.
+    """
     fn = pkg.function
     found: list[tuple[str, str]] = []
     if not pkg.files:
@@ -2699,7 +2911,9 @@ _LAMBDA_ENV = {  # environment variables Lambda sets itself: reading one needs n
 
 
 def _service_name(service: str) -> str:
-    """'s3' -> 'S3', 'dynamodb' -> 'DynamoDB', 'stepfunctions' -> 'Step Functions': the name people use."""
+    """
+    's3' -> 'S3', 'dynamodb' -> 'DynamoDB', 'stepfunctions' -> 'Step Functions': the name people use.
+    """
     if service in _SERVICE_NAMES:
         return _SERVICE_NAMES[service]
     model = _aws_model(service)
@@ -2714,16 +2928,20 @@ def _botocore_loader() -> Any:
 
 
 def _tokens(value: Any) -> tuple[str, ...]:
-    """A paginator's token setting as names: 'NextMarker || Contents[-1].Key' -> ('NextMarker',)."""
+    """
+    A paginator's token setting as names: 'NextMarker || Contents[-1].Key' -> ('NextMarker',).
+    """
     values = value if isinstance(value, list) else [value] if value else []
     return tuple(m.group(0) for v in values if (m := re.match(r"\w+", str(v))))
 
 
 @functools.lru_cache(maxsize=256)
 def _aws_model(service: str) -> dict[str, Any] | None:
-    """What botocore's own copy of a service's API says, read from the files boto3 installs (no AWS call): its
+    """
+    What botocore's own copy of a service's API says, read from the files boto3 installs (no AWS call): its
     operations by method name, which of them come in pages, its name and its IAM prefix. None for a service this
-    boto3 doesn't know."""
+    boto3 doesn't know.
+    """
     if not service or not re.fullmatch(r"[a-z0-9-]+", service):
         return None
     from botocore import xform_name
@@ -2751,8 +2969,10 @@ def _aws_model(service: str) -> dict[str, Any] | None:
 
 
 def _access(operation: str) -> str:
-    """What an AWS operation does to what it touches: 'reads', 'writes', 'sends' (a message or an event) or 'runs'
-    (invokes or starts something)."""
+    """
+    What an AWS operation does to what it touches: 'reads', 'writes', 'sends' (a message or an event) or 'runs'
+    (invokes or starts something).
+    """
     if operation.startswith(_SENDS_PREFIXES):
         return "sends"
     if operation.startswith(_RUNS_PREFIXES):
@@ -2761,7 +2981,9 @@ def _access(operation: str) -> str:
 
 
 def _iam_action(service: str, operation: str) -> str:
-    """The IAM action an operation needs: ('s3', 'ListObjectsV2') -> 's3:ListBucket'."""
+    """
+    The IAM action an operation needs: ('s3', 'ListObjectsV2') -> 's3:ListBucket'.
+    """
     if (service, operation) in _IAM_ACTIONS:
         return _IAM_ACTIONS[(service, operation)]
     model = _aws_model(service)
@@ -2770,7 +2992,9 @@ def _iam_action(service: str, operation: str) -> str:
 
 
 def _event_label(path: tuple[str, ...]) -> str:
-    """('Records', '[]', 'body', '{json}', 'bucket') -> 'Records[].body (JSON).bucket'."""
+    """
+    ('Records', '[]', 'body', '{json}', 'bucket') -> 'Records[].body (JSON).bucket'.
+    """
     out = ""
     for part in path:
         if part == "[]":
@@ -2783,8 +3007,10 @@ def _event_label(path: tuple[str, ...]) -> str:
 
 
 def _event_kind(fields: Iterable[EventField]) -> str | None:
-    """What sends the event, from the fields the code reads: 'an SQS batch', 'an HTTP request', ... None when it
-    can't tell."""
+    """
+    What sends the event, from the fields the code reads: 'an SQS batch', 'an HTTP request', ... None when it
+    can't tell.
+    """
     paths = [tuple(p.lower() for p in f.path) for f in fields]
 
     def has(*parts: str) -> bool:
@@ -2810,8 +3036,10 @@ def _event_kind(fields: Iterable[EventField]) -> str | None:
 
 
 def _sample_event(fields: Iterable[EventField]) -> Any:
-    """A test event with every field the code reads, its values '...': {'Records': [{'body': '{"bucket": "..."}'}]},
-    for the console's Test tab. JSON read from a text field is written as text, the way it arrives."""
+    """
+    A test event with every field the code reads, its values '...': {'Records': [{'body': '{"bucket": "..."}'}]},
+    for the console's Test tab. JSON read from a text field is written as text, the way it arrives.
+    """
     root: dict[str, Any] = {}
     for f in fields:
         if "*" in f.path:
@@ -2838,8 +3066,10 @@ def _sample_event(fields: Iterable[EventField]) -> Any:
 
 
 def _secret_spots(node: Any) -> list[tuple[str, Any]]:
-    """The secret-looking literals in a piece of code, with the name each is given to: a password=, token= or key given
-    as text (in an assignment, a call or a dict), and any AWS access key."""
+    """
+    The secret-looking literals in a piece of code, with the name each is given to: a password=, token= or key given
+    as text (in an assignment, a call or a dict), and any AWS access key.
+    """
     found: list[tuple[str, Any]] = []
     for n in ast.walk(node):
         pairs: list[tuple[Any, Any]] = []
@@ -2863,7 +3093,9 @@ def _secret_spots(node: Any) -> list[tuple[str, Any]]:
 
 
 class _Hide(ast.NodeTransformer):
-    """Puts '…' in place of the literals at these places (line, column)."""
+    """
+    Puts '…' in place of the literals at these places (line, column).
+    """
 
     def __init__(self, places: set[tuple[int, int]]):
         self.places = places
@@ -2875,8 +3107,10 @@ class _Hide(ast.NodeTransformer):
 
 
 def _unparse(node: Any, width: int = 140) -> str:
-    """A piece of code on one line, as Python writes it back from the tree: "s3.get_object(Bucket=b, Key=k)". A
-    secret-looking literal in it shows as '…'."""
+    """
+    A piece of code on one line, as Python writes it back from the tree: "s3.get_object(Bucket=b, Key=k)". A
+    secret-looking literal in it shows as '…'.
+    """
     try:
         if isinstance(node, ast.AST) and not isinstance(node, (ast.arguments, ast.pattern)):
             places = {(getattr(v, "lineno", 0), getattr(v, "col_offset", 0)) for _, v in _secret_spots(node)}
@@ -2889,14 +3123,18 @@ def _unparse(node: Any, width: int = 140) -> str:
 
 
 def _target(node: Any) -> str:
-    """A loop's target as written: 'i, record', not '(i, record)'."""
+    """
+    A loop's target as written: 'i, record', not '(i, record)'.
+    """
     if isinstance(node, ast.Tuple) and node.elts:
         return ", ".join(_unparse(elt, 30) for elt in node.elts)
     return _unparse(node, 40)
 
 
 def _a(name: str) -> str:
-    """'a' or 'an' before a service's name, as it's said: an S3, an SQS, a DynamoDB, an EventBridge, a KMS."""
+    """
+    'a' or 'an' before a service's name, as it's said: an S3, an SQS, a DynamoDB, an EventBridge, a KMS.
+    """
     if re.match(r"[A-Z][A-Z0-9]", name):  # said letter by letter
         return "an" if name[0] in "AEFHILMNORSX" else "a"
     return "an" if name[:1].lower() in "aeiou" else "a"
@@ -2907,7 +3145,9 @@ def _const(node: Any) -> Any:
 
 
 def _names_in(node: Any, names: Iterable[str]) -> bool:
-    """Whether an `except` catches one of these exceptions: except ImportError, except (KeyError, Exception)."""
+    """
+    Whether an `except` catches one of these exceptions: except ImportError, except (KeyError, Exception).
+    """
     if node is None:
         return False
     if isinstance(node, ast.Tuple):
@@ -2916,7 +3156,9 @@ def _names_in(node: Any, names: Iterable[str]) -> bool:
 
 
 def _swallows(handler: ast.ExceptHandler) -> bool:
-    """An `except` that catches every error and does nothing with it: no log line, no raise, nothing returned."""
+    """
+    An `except` that catches every error and does nothing with it: no log line, no raise, nothing returned.
+    """
     if not (handler.type is None or _names_in(handler.type, ("Exception", "BaseException"))):
         return False
     for stmt in handler.body:
@@ -2931,7 +3173,9 @@ def _swallows(handler: ast.ExceptHandler) -> bool:
 
 
 def _is_main_guard(test: Any) -> bool:
-    """`if __name__ == "__main__":`, which never runs in Lambda."""
+    """
+    `if __name__ == "__main__":`, which never runs in Lambda.
+    """
     return (isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) and test.left.id == "__name__"
             and any(_const(c) == "__main__" for c in test.comparators))
 
@@ -2942,13 +3186,17 @@ def _doc_line(node: Any) -> str:
 
 
 def _def_line(node: Any) -> str:
-    """'def connect(host, password):'."""
+    """
+    'def connect(host, password):'.
+    """
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
     return f"{prefix} {node.name}({_unparse(node.args, 100)}):"
 
 
 def _secret_value(value: str) -> bool:
-    """Whether a literal looks like a real secret rather than a name, a path or a placeholder."""
+    """
+    Whether a literal looks like a real secret rather than a name, a path or a placeholder.
+    """
     text = value.strip()
     return (len(text) >= 6 and not re.search(r"\s", text) and not re.fullmatch(r"[A-Z0-9_]+", text)
             and not text.startswith(("arn:", "/", "{", "$", "<", "%", "http", "s3://", "projects/"))
@@ -2958,7 +3206,9 @@ def _secret_value(value: str) -> bool:
 
 @dataclass(frozen=True)
 class _Sym:
-    """What a name holds, as far as how_it_works() can tell without running the code."""
+    """
+    What a name holds, as far as how_it_works() can tell without running the code.
+    """
 
     kind: str  # 'mod' (an outside module or name, dotted), 'own' (one of its own modules), 'func', 'class', 'obj' (an
     # instance of one of its classes), 'bound' (one's method), 'client', 'resource', 'res' (a resource object: a
@@ -2973,7 +3223,9 @@ class _Sym:
 
 @dataclass
 class _Frame:
-    """A function (or a module's top level) being read: what its names hold, and where it is."""
+    """
+    A function (or a module's top level) being read: what its names hold, and where it is.
+    """
 
     module: str
     file: str
@@ -3007,7 +3259,9 @@ class _Module:
 
 @dataclass
 class _Collect:
-    """What one statement does, gathered while its expressions are read."""
+    """
+    What one statement does, gathered while its expressions are read.
+    """
 
     notes: list[tuple[str, str]] = field(default_factory=list)
     calls: list[CodeStep] = field(default_factory=list)
@@ -3018,9 +3272,11 @@ class _Collect:
 
 
 class _CodeReader:
-    """Follows a Python function's code from its handler with the ast module, never running it. It keeps track of what
+    """
+    Follows a Python function's code from its handler with the ast module, never running it. It keeps track of what
     each name holds (a boto3 client, part of the event, one of its own functions, an environment variable...) as far
-    as it can tell, so it knows what each line calls, and fills a CodeMap. One per map_code()."""
+    as it can tell, so it knows what each line calls, and fills a CodeMap. One per map_code().
+    """
 
     def __init__(self, texts: dict[str, str], names: list[str], root: str, cmap: CodeMap,
                  version: tuple[int, int] | None, libraries: set[str], layers: bool):
@@ -3138,7 +3394,9 @@ class _CodeReader:
                 if ".".join(parts[:i]) in self.modules]
 
     def _load_chain(self, module: str) -> _Module:
-        """A module and the packages it's in, loaded the way Python imports them: each package's __init__ first."""
+        """
+        A module and the packages it's in, loaded the way Python imports them: each package's __init__ first.
+        """
         parts = module.split(".")
         for i in range(1, len(parts)):
             if ".".join(parts[:i]) in self.sources:
@@ -3397,7 +3655,9 @@ class _CodeReader:
         return [CodeStep(frame.file, node.lineno, f"class {node.name}:", "do", steps=steps)] if steps else []
 
     def _member(self, cls: str, name: str, seen: set[str] | None = None) -> tuple[str, Any] | None:
-        """A class's attribute or method, looked for in its own classes it's made from too."""
+        """
+        A class's attribute or method, looked for in its own classes it's made from too.
+        """
         seen = seen if seen is not None else set()
         info = self.classes.get(cls)
         if info is None or cls in seen:
@@ -3515,7 +3775,9 @@ class _CodeReader:
                 self._bind(elt.value if isinstance(elt, ast.Starred) else elt, None, frame)
 
     def _item(self, items: _Sym | None) -> _Sym | None:
-        """What a loop over `items` gets each time round."""
+        """
+        What a loop over `items` gets each time round.
+        """
         if items is None:
             return None
         if items.kind == "event":
@@ -3708,8 +3970,10 @@ class _CodeReader:
         return None
 
     def _unknown_call(self, node: ast.Call, frame: _Frame) -> _Sym | None:
-        """A call to something it couldn't follow: a method name only AWS has, a file written with pandas, a log
-        line, or a web framework's router."""
+        """
+        A call to something it couldn't follow: a method name only AWS has, a file written with pandas, a log
+        line, or a web framework's router.
+        """
         if not isinstance(node.func, ast.Attribute):
             return None
         attr = node.func.attr
@@ -3728,7 +3992,9 @@ class _CodeReader:
         return None
 
     def _outside(self, name: str, node: ast.Call, args: list[_Sym | None], frame: _Frame) -> _Sym | None:
-        """A call to something from outside the package: boto3, os, json, requests, logging, time..."""
+        """
+        A call to something from outside the package: boto3, os, json, requests, logging, time...
+        """
         first = args[0] if args else None
         last = name.rsplit(".", 1)[-1]
         if name.startswith("boto3") and last in ("client", "resource"):
@@ -3797,7 +4063,9 @@ class _CodeReader:
         return None
 
     def _write(self, path_node: Any, node: ast.Call, frame: _Frame) -> None:
-        """A file the code writes: on Lambda's disk only /tmp (and a file system mounted under /mnt) can be."""
+        """
+        A file the code writes: on Lambda's disk only /tmp (and a file system mounted under /mnt) can be.
+        """
         prefix = None
         if isinstance(_const(path_node), str):
             prefix = str(_const(path_node))
@@ -3892,7 +4160,9 @@ class _CodeReader:
 
     def _run(self, key: str, args: list[_Sym | None], kwargs: dict[str, _Sym | None], caller: _Frame | None,
              call: Any, bound: _Sym | None = None, label: str = "") -> _Sym | None:
-        """One of its own functions, called: its steps (shown the first time), and what it returns."""
+        """
+        One of its own functions, called: its steps (shown the first time), and what it returns.
+        """
         module, node, cls = self.defs[key]
         file = self.modules[module].file or ""
         depth = caller.depth + 1 if caller is not None and caller.function != caller.module else 0
@@ -3963,7 +4233,9 @@ class _CodeReader:
         return frame.loops[-1] if frame.loops else ""
 
     def _op(self, service: str, method: Any) -> str | None:
-        """A client method's operation: ('s3', 'get_object') -> 'GetObject'; None when it isn't one."""
+        """
+        A client method's operation: ('s3', 'get_object') -> 'GetObject'; None when it isn't one.
+        """
         if not isinstance(method, str):
             return None
         model = _aws_model(service)
@@ -3985,8 +4257,10 @@ class _CodeReader:
         self.cur.note(f"aws-{access}", f"{_service_name(service)} {op}")
 
     def _pages(self, service: str, op: str, node: ast.Call, frame: _Frame) -> str:
-        """'one' when a list call reads only its first page, 'all' when the code follows the next-page token, ''
-        when the call doesn't come in pages, or asks for a set number."""
+        """
+        'one' when a list call reads only its first page, 'all' when the code follows the next-page token, ''
+        when the call doesn't come in pages, or asks for a set number.
+        """
         model = _aws_model(service)
         if model is None or op not in model["pages"]:
             return ""
@@ -4049,15 +4323,19 @@ class _CodeReader:
             self.cmap.spots.append(CodeSpot(kind, file, line, function, code, detail, ok, loop, self.loading > 0))
 
     def _secrets(self, mod: _Module) -> None:
-        """Secret-looking values written in the code: a password, token or key given as a literal. Only their names
-        are kept, never the values (an AWS access key is found in every file, by read())."""
+        """
+        Secret-looking values written in the code: a password, token or key given as a literal. Only their names
+        are kept, never the values (an AWS access key is found in every file, by read()).
+        """
         for name, value in _secret_spots(mod.tree):
             if name != "an AWS access key":
                 self._spot("secret", mod.file or "", value.lineno, mod.name, "", name, ok=False)
 
 
 def _python_version(runtime: str | None) -> tuple[int, int] | None:
-    """'python3.12' -> (3, 12)."""
+    """
+    'python3.12' -> (3, 12).
+    """
     match = re.fullmatch(r"python(\d+)\.(\d+)", runtime or "")
     return (int(match.group(1)), int(match.group(2))) if match else None
 
@@ -4070,7 +4348,8 @@ def map_code(
     names: Iterable[str] | None = None,
     libraries: Iterable[str] = (),
 ) -> CodeMap:
-    """How Python code works, read with Python's ast module and never run: files is {path: source} (the package's
+    """
+    How Python code works, read with Python's ast module and never run: files is {path: source} (the package's
     own .py files), handler the handler setting ('app.handler'). Starting at the handler, it follows the code into
     its own functions and modules, keeping track of what each name holds (a boto3 client, part of the event, an
     environment variable...), and returns a CodeMap: what runs at start-up and on each call, step by step, its AWS
@@ -4079,7 +4358,8 @@ def map_code(
     only the Python ones; libraries names packages in it that aren't its own code. function (a Function) adds what
     the findings check against: the runtime, its environment variables' names and its layers.
 
-        map_code({"app.py": open("app.py").read()}, "app.handler")"""
+        map_code({"app.py": open("app.py").read()}, "app.handler")
+    """
     texts = {path: text.decode("utf-8", "replace") if isinstance(text, bytes) else str(text)
              for path, text in files.items()}
     names = list(names) if names is not None else list(texts)
@@ -4116,10 +4396,12 @@ def map_code(
 
 
 def map_package(fn: Function, data: bytes | None) -> CodeMap:
-    """How a Python function's code works, from its deployment package (the .zip as code() downloads it): its own
+    """
+    How a Python function's code works, from its deployment package (the .zip as code() downloads it): its own
     .py files are read with Python's ast module and never run, libraries packed in it (found by their .dist-info
     folders) aren't read as its code. See map_code(). A container image, a runtime that isn't Python or a package
-    without the handler's file gives a CodeMap with only a note saying so."""
+    without the handler's file gives a CodeMap with only a note saying so.
+    """
     if fn.package_type == "Image":
         return CodeMap(fn, fn.handler, note=(
             f"It's a container image ({fn.image_uri or 'image URI not shown'}): its code is in the image, which this "
@@ -4176,8 +4458,10 @@ _REPLACEMENTS = {"distutils": "setuptools, or shutil and sysconfig", "imp": "imp
 
 
 def _short_name(key: str) -> str:
-    """One of its functions as people say it: 'app.main.handler' -> 'handler', 'app.store.Orders.save' ->
-    'Orders.save', 'app.store.Orders.__init__' -> 'Orders' (what you call to run it)."""
+    """
+    One of its functions as people say it: 'app.main.handler' -> 'handler', 'app.store.Orders.save' ->
+    'Orders.save', 'app.store.Orders.__init__' -> 'Orders' (what you call to run it).
+    """
     parts = key.split(".")
     if len(parts) >= 2 and parts[-2][:1].isupper():
         return parts[-2] if parts[-1] == "__init__" else f"{parts[-2]}.{parts[-1]}"
@@ -4185,22 +4469,28 @@ def _short_name(key: str) -> str:
 
 
 def _where(file: str, line: int, function: str = "") -> str:
-    """'etl.py line 17', or 'etl.py line 17 in handler()'."""
+    """
+    'etl.py line 17', or 'etl.py line 17 in handler()'.
+    """
     return f"{file} line {line}" + (f" in {_short_name(function)}()" if function else "")
 
 
 def _listed(items: list[str], most: int = 3) -> str:
-    """'a', 'a and b', 'a, b and c', 'a, b, c and 2 more'."""
+    """
+    'a', 'a and b', 'a, b and c', 'a, b, c and 2 more'.
+    """
     if len(items) > most:
         return ", ".join(items[:most]) + f" and {len(items) - most} more"
     return " and ".join([", ".join(items[:-1]), items[-1]]) if len(items) > 1 else (items[0] if items else "")
 
 
 def code_map_findings(cmap: CodeMap) -> list[tuple[str, str]]:
-    """What's worth fixing in a function's code, from its CodeMap: a handler that isn't there or can't take (event,
+    """
+    What's worth fixing in a function's code, from its CodeMap: a handler that isn't there or can't take (event,
     context), environment variables it needs that aren't set, imports Lambda can't find, HTTP requests without a
     timeout, list calls that read only their first page, errors it drops, files written outside /tmp, secrets written
-    in the code, AWS calls in a loop that a batch call would do in fewer requests, and clients made on every call."""
+    in the code, AWS calls in a loop that a batch call would do in fewer requests, and clients made on every call.
+    """
     found: list[tuple[str, str]] = []
     if cmap.note:
         return found
@@ -4382,8 +4672,10 @@ def _snake(operation: str) -> str:
 
 
 def _code_summary(cmap: CodeMap) -> list[str]:
-    """How the code works in a few sentences: what it does when Lambda starts it, then what each call reads from the
-    event, which AWS services it reaches and how, its own functions it calls, and what it returns."""
+    """
+    How the code works in a few sentences: what it does when Lambda starts it, then what each call reads from the
+    event, which AWS services it reaches and how, its own functions it calls, and what it returns.
+    """
     out = []
     file = cmap.handler_file or ""
     early = []
@@ -4433,8 +4725,10 @@ def _code_summary(cmap: CodeMap) -> list[str]:
 
 
 def _returned(code: str) -> str:
-    """What a return statement gives back, said shortly: "{'statusCode': 200, 'body': ...}" -> 'a dict with
-    statusCode and body'; short code as it is."""
+    """
+    What a return statement gives back, said shortly: "{'statusCode': 200, 'body': ...}" -> 'a dict with
+    statusCode and body'; short code as it is.
+    """
     try:
         node = ast.parse(code, mode="eval").body
     except SyntaxError:
@@ -4450,15 +4744,19 @@ def _mermaid_id(node_id: str) -> str:
 
 
 def _mermaid_text(text: str) -> str:
-    """Text for a Mermaid label: its quotes and brackets as entities, so a label can hold any code."""
+    """
+    Text for a Mermaid label: its quotes and brackets as entities, so a label can hold any code.
+    """
     return (text.replace("#", "#35;").replace("&", "#amp;").replace('"', "#quot;").replace("<br/>", "\0").replace("<small>", "\1")
             .replace("</small>", "\2").replace("<", "#lt;").replace(">", "#gt;").replace("\0", "<br/>")
             .replace("\1", "<small>").replace("\2", "</small>"))
 
 
 def _aws_node(service: str) -> str:
-    """An AWS service's box id: 'aws-s3'. The service is a literal from the code, so only letters, digits and hyphens
-    stay: the id goes into class names and the CSS rules that light up what a box is joined to."""
+    """
+    An AWS service's box id: 'aws-s3'. The service is a literal from the code, so only letters, digits and hyphens
+    stay: the id goes into class names and the CSS rules that light up what a box is joined to.
+    """
     return "aws-" + (re.sub(r"[^a-z0-9]+", "-", service.lower()).strip("-") or "service")
 
 
@@ -4472,12 +4770,14 @@ def _listed_lines(items: list[str], most: int = _GRAPH_LINES) -> list[str]:
 
 
 def code_graph(cmap: CodeMap) -> CodeGraph:
-    """How the code fits together, as boxes and arrows, from a CodeMap: on the left what comes in (the event, with the
+    """
+    How the code fits together, as boxes and arrows, from a CodeMap: on the left what comes in (the event, with the
     fields it reads, and the environment variables), then the handler, what runs at start-up, and its own functions
     by how many calls they are from those (an arrow for each call), and on the right the AWS services and the web it
     reaches, each arrow by what it does (reads, writes, sends, runs). A box or an arrow a warning is about is marked,
     and says which on hover. At most 24 functions, 5 calls deep, the nearest first; `hidden` counts the rest, and what
-    they do is drawn from the nearest box above them that is."""
+    they do is drawn from the nearest box above them that is.
+    """
     graph = CodeGraph()
     if cmap.note or cmap.entry is None:
         return graph
@@ -4524,8 +4824,10 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
         ids[entry] = "f-entry"
 
     def owner(key: str) -> tuple[str | None, bool]:
-        """The box what a function (or a module's top level) does is drawn from, and whether that's a box above it
-        because the graph leaves the function out."""
+        """
+        The box what a function (or a module's top level) does is drawn from, and whether that's a box above it
+        because the graph leaves the function out.
+        """
         if key in ids:
             return ids[key], False
         if key not in by_name:
@@ -4704,7 +5006,9 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
 
 
 def _aws_phrase(calls: list[AwsCall]) -> list[str]:
-    """['reads from S3 (GetObject) and SQS (ListQueues)', 'writes to DynamoDB (PutItem)']."""
+    """
+    ['reads from S3 (GetObject) and SQS (ListQueues)', 'writes to DynamoDB (PutItem)'].
+    """
     grouped: dict[str, dict[str, list[AwsCall]]] = {}
     for call in calls:
         grouped.setdefault(call.access, {}).setdefault(call.service, []).append(call)
@@ -4756,7 +5060,9 @@ def _log_group(entry: dict[str, Any]) -> LogGroup:
 
 
 def _pages(client: Any, operation: str, key: str, **params: Any) -> list[dict[str, Any]]:
-    """Every item under `key` across the pages of a List / Describe call (Lambda's Marker, or nextToken)."""
+    """
+    Every item under `key` across the pages of a List / Describe call (Lambda's Marker, or nextToken).
+    """
     call = getattr(client, operation)
     items: list[dict[str, Any]] = []
     token: dict[str, str] = {}
@@ -4775,13 +5081,16 @@ def _pages(client: Any, operation: str, key: str, **params: Any) -> list[dict[st
 
 
 def _qualifier(arn: str | None) -> str:
-    """'arn:aws:lambda:r:a:function:etl:live' -> 'live'."""
+    """
+    'arn:aws:lambda:r:a:function:etl:live' -> 'live'.
+    """
     parts = (arn or "").split(":")
     return parts[7] if len(parts) > 7 else "$LATEST"
 
 
 class LambdaAnalyzer(_BaseAnalyzer):
-    """Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
+    """
+    Pure-logic Lambda analysis: every method returns data; nothing is printed, invoked or changed.
 
     Functions are read in the analyzer's region, or in several: overview(regions=['us-east-1', 'eu-west-1']) or
     regions='all'. Methods about one function take its name, 'name:alias', an ARN or a console link, and region=
@@ -4818,7 +5127,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ clients
 
     def _service(self, name: str, region: str | None = None) -> Any:
-        """A boto3 client for `region` (default: the analyzer's), made on first use, or the one passed in."""
+        """
+        A boto3 client for `region` (default: the analyzer's), made on first use, or the one passed in.
+        """
         if region is not None and region == self.session.region_name:
             region = None
         with self._lock:
@@ -4847,13 +5158,17 @@ class LambdaAnalyzer(_BaseAnalyzer):
 
     @property
     def client(self) -> Any:
-        """The Lambda client in the analyzer's region."""
+        """
+        The Lambda client in the analyzer's region.
+        """
         return self._service("lambda")
 
     def regions(self, which: str | Iterable[str] | None = None) -> list[str]:
-        """The regions a report covers: None -> the analyzer's; 'all' -> every region turned on for the account
+        """
+        The regions a report covers: None -> the analyzer's; 'all' -> every region turned on for the account
         (EC2 DescribeRegions; without that permission, every region Lambda is offered in); a name, 'us-east-1,
-        eu-west-1' or a list -> those."""
+        eu-west-1' or a list -> those.
+        """
         if which is None:
             return [self.region]
         if isinstance(which, str) and which.strip().lower() == "all":
@@ -4877,9 +5192,11 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return names
 
     def locate(self, ref: str, region: str | None = None) -> tuple[str, str | None, str]:
-        """(name, qualifier, region) for a function: its name, 'name:alias', an ARN or a console link. The region is
+        """
+        (name, qualifier, region) for a function: its name, 'name:alias', an ARN or a console link. The region is
         region= when given, else the one in the ARN or link, else the one other region overview() found the name
-        in, else the analyzer's."""
+        in, else the analyzer's.
+        """
         name, qualifier, found = parse_function_ref(ref)
         if region:
             return name, qualifier, region
@@ -4893,14 +5210,18 @@ class LambdaAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ functions
 
     def list_functions(self, region: str | None = None, *, match: str | None = None) -> list[Function]:
-        """Every function in the region (its $LATEST configuration), or those whose name matches the glob."""
+        """
+        Every function in the region (its $LATEST configuration), or those whose name matches the glob.
+        """
         where = region or self.region
         found = [parse_function(c, where) for c in _pages(self._service("lambda", region), "list_functions",
                                                           "Functions")]
         return [f for f in found if match is None or fnmatch.fnmatchcase(f.name, match)]
 
     def function(self, ref: str, *, region: str | None = None) -> Function:
-        """One function's configuration, tags, reserved concurrency and the link to its code (GetFunction)."""
+        """
+        One function's configuration, tags, reserved concurrency and the link to its code (GetFunction).
+        """
         name, qualifier, where = self.locate(ref, region)
         resp = self._service("lambda", where).get_function(
             FunctionName=name, **({"Qualifier": qualifier} if qualifier else {})
@@ -4914,7 +5235,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return fn
 
     def event_sources(self, region: str | None = None, *, function: str | None = None) -> dict[str, list[Trigger]]:
-        """Event source mappings (the queues and streams Lambda polls for functions), by function ARN."""
+        """
+        Event source mappings (the queues and streams Lambda polls for functions), by function ARN.
+        """
         params = {"FunctionName": function} if function else {}
         found: dict[str, list[Trigger]] = defaultdict(list)
         for mapping in _pages(self._service("lambda", region), "list_event_source_mappings", "EventSourceMappings",
@@ -4923,7 +5246,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return dict(found)
 
     def policy(self, name: str, region: str | None = None, *, qualifier: str | None = None) -> dict[str, Any] | None:
-        """The function's resource-based policy document (who may invoke it), or None when it has none."""
+        """
+        The function's resource-based policy document (who may invoke it), or None when it has none.
+        """
         try:
             resp = self._service("lambda", region).get_policy(
                 FunctionName=name, **({"Qualifier": qualifier} if qualifier else {})
@@ -4935,7 +5260,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return json.loads(resp.get("Policy") or "{}")
 
     def provisioned(self, name: str, region: str | None = None) -> list[ProvisionedConcurrency]:
-        """Provisioned concurrency on the function's aliases and versions: copies kept ready, billed used or not."""
+        """
+        Provisioned concurrency on the function's aliases and versions: copies kept ready, billed used or not.
+        """
         configs = _pages(self._service("lambda", region), "list_provisioned_concurrency_configs",
                          "ProvisionedConcurrencyConfigs", FunctionName=name)
         return [
@@ -4951,7 +5278,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         ]
 
     def account(self, region: str | None = None) -> AccountLimits:
-        """The region's limits and usage: concurrent runs allowed and unreserved, code storage used and allowed."""
+        """
+        The region's limits and usage: concurrent runs allowed and unreserved, code storage used and allowed.
+        """
         resp = self._service("lambda", region).get_account_settings()
         limit, usage = resp.get("AccountLimit") or {}, resp.get("AccountUsage") or {}
         return AccountLimits(
@@ -4964,12 +5293,16 @@ class LambdaAnalyzer(_BaseAnalyzer):
         )
 
     def log_groups(self, region: str | None = None, *, prefix: str = "/aws/lambda/") -> dict[str, LogGroup]:
-        """Log groups whose names start with prefix (by default the one each function gets), by name."""
+        """
+        Log groups whose names start with prefix (by default the one each function gets), by name.
+        """
         entries = _pages(self._service("logs", region), "describe_log_groups", "logGroups", logGroupNamePrefix=prefix)
         return {entry["logGroupName"]: _log_group(entry) for entry in entries if entry.get("logGroupName")}
 
     def log_group(self, name: str, region: str | None = None) -> LogGroup | None:
-        """One log group: how long it keeps logs and how much it holds; None when it doesn't exist yet."""
+        """
+        One log group: how long it keeps logs and how much it holds; None when it doesn't exist yet.
+        """
         return self.log_groups(region, prefix=name).get(name)
 
     # ------------------------------------------------------------------ CloudWatch
@@ -4984,10 +5317,12 @@ class LambdaAnalyzer(_BaseAnalyzer):
         logs: bool = True,
         concurrency: bool = False,
     ) -> tuple[dict[str, FunctionMetrics], int]:
-        """What CloudWatch counted for each function from `since` to `until`, by function ARN: calls, errors,
+        """
+        What CloudWatch counted for each function from `since` to `until`, by function ARN: calls, errors,
         throttles, total and longest run time, with logs=True the bytes it logged, and with concurrency=True the
         most running at once. One row per day (per hour for windows of two days or less). Also returns how many
-        metrics were read (GetMetricData bills $0.01 per 1,000). Functions may be in different regions."""
+        metrics were read (GetMetricData bills $0.01 per 1,000). Functions may be in different regions.
+        """
         until = until or _utcnow()
         period = period or (3600 if until - since <= timedelta(days=2) else 86400)
         specs = [
@@ -5044,7 +5379,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
     def _metric_data(
         self, region: str | None, queries: list[dict[str, Any]], since: datetime, until: datetime
     ) -> dict[str, dict[datetime, float]]:
-        """GetMetricData for any number of queries (500 a call): query ID -> {period start: value}."""
+        """
+        GetMetricData for any number of queries (500 a call): query ID -> {period start: value}.
+        """
         series: dict[str, dict[datetime, float]] = defaultdict(dict)
         client = self._service("cloudwatch", region)
         for start in range(0, len(queries), 500):
@@ -5061,7 +5398,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return series
 
     def peak_concurrency(self, region: str | None, *, since: datetime, until: datetime | None = None) -> float | None:
-        """The most runs in progress at once across the region (every function together) in the window."""
+        """
+        The most runs in progress at once across the region (every function together) in the window.
+        """
         until = until or _utcnow()
         query = {"Id": "peak", "MetricStat": {
             "Metric": {"Namespace": "AWS/Lambda", "MetricName": "ConcurrentExecutions"},
@@ -5081,11 +5420,13 @@ class LambdaAnalyzer(_BaseAnalyzer):
         details: bool = True,
         progress: Callable[..., None] | None = None,
     ) -> Overview:
-        """Every function in the region (or regions; 'all' for every region turned on for the account) with what
+        """
+        Every function in the region (or regions; 'all' for every region turned on for the account) with what
         invokes it, CloudWatch's numbers for the last `days` days, each region's limits and its functions' log
         groups. details=False skips the reads made per function (resource policy, provisioned concurrency);
         metrics=False skips CloudWatch. match='etl-*' keeps matching names. What can't be read is in .errors, as
-        'region:section'."""
+        'region:section'.
+        """
         days = _as_int(days, "days")
         if not 1 <= days <= 455:
             raise ValueError(f"days= must be between 1 and 455 (what CloudWatch keeps of hourly numbers); got {days}")
@@ -5148,8 +5489,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return ov
 
     def _extras(self, fn: Function) -> tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]:
-        """The reads overview() makes per function: the callers its resource policy allows, and its provisioned
-        concurrency, with section -> error code for what couldn't be read."""
+        """
+        The reads overview() makes per function: the callers its resource policy allows, and its provisioned
+        concurrency, with section -> error code for what couldn't be read.
+        """
         triggers: list[Trigger] = []
         provisioned: list[ProvisionedConcurrency] = []
         errors: dict[str, str] = {}
@@ -5170,7 +5513,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
     def _all_extras(
         self, functions: list[Function], *, progress: Callable[..., None] | None = None
     ) -> dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]]:
-        """_extras() for each function, in parallel, by function ARN (Overview.add_extras adds them)."""
+        """
+        _extras() for each function, in parallel, by function ARN (Overview.add_extras adds them).
+        """
         for region in dict.fromkeys(fn.region for fn in functions):  # each region's client before the threads use it
             self._service("lambda", region or None)
         found: dict[str, tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]] = {}
@@ -5184,10 +5529,12 @@ class LambdaAnalyzer(_BaseAnalyzer):
     def _numbers(
         self, functions: list[Function], *, since: datetime, until: datetime, limits: set[str] | None = None
     ) -> tuple[dict[str, FunctionMetrics], int, dict[str, float | None], dict[str, str]]:
-        """CloudWatch's numbers for overview() (Overview.add_numbers adds them): each function's from `since` to `until`
+        """
+        CloudWatch's numbers for overview() (Overview.add_numbers adds them): each function's from `since` to `until`
         by ARN, concurrency included (what provisioned concurrency is weighed against); how many metrics that read;
         the most runs at once in each region of `limits`; and 'region:metrics' -> the error code of a region that
-        couldn't be read."""
+        couldn't be read.
+        """
         found: dict[str, FunctionMetrics] = {}
         read = 0
         peaks: dict[str, float | None] = {}
@@ -5220,10 +5567,12 @@ class LambdaAnalyzer(_BaseAnalyzer):
         metrics: bool = True,
         progress: Callable[..., None] | None = None,
     ) -> FunctionDetail:
-        """Everything about one function: its configuration (GetFunction), what triggers it (event source mappings
+        """
+        Everything about one function: its configuration (GetFunction), what triggers it (event source mappings
         and its resource policy), its function URL, what happens to failed asynchronous events, versions, aliases,
         provisioned concurrency, runtime updates, its log group, and CloudWatch's numbers for the last `days` days.
-        Sections that can't be read are named in .errors."""
+        Sections that can't be read are named in .errors.
+        """
         days = _as_int(days, "days")
         if not 1 <= days <= 455:
             raise ValueError(f"days= must be between 1 and 455; got {days}")
@@ -5318,7 +5667,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
 
     @staticmethod
     def _window(since: Any, until: Any = None) -> tuple[datetime, datetime]:
-        """(start, end) from since= / until=: '1h', '24h', '7d', '2026-10-01' or a datetime."""
+        """
+        (start, end) from since= / until=: '1h', '24h', '7d', '2026-10-01' or a datetime.
+        """
         now = _utcnow()
         try:  # '24h' and '7d' are measured back from now, for since= and until= alike
             end = parse_time(until, now=now) if until is not None else now
@@ -5344,9 +5695,11 @@ class LambdaAnalyzer(_BaseAnalyzer):
         stream: str | None = None,
         progress: Callable[..., None] | None = None,
     ) -> tuple[list[LogEvent], bool, datetime | None]:
-        """The newest `limit` events from start to end that match the filter pattern, oldest first; whether reading
+        """
+        The newest `limit` events from start to end that match the filter pattern, oldest first; whether reading
         stopped at the limit, and then how far back it reached. Reads backwards in growing slices (a minute, then
-        4, 16, ...), so the newest events are the ones kept."""
+        4, 16, ...), so the newest events are the ones kept.
+        """
         client = self._service("logs", region)
         events: list[LogEvent] = []
         low, high = _to_ms(start), _to_ms(end)
@@ -5383,8 +5736,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return events, truncated, (events[0].time if truncated and events else None)
 
     def _run_of(self, fn: Function, event: LogEvent) -> str | None:
-        """The run a log line without a request ID belongs to: the next REPORT line in its stream (a stream runs one
-        call at a time, and every run ends with one). None when there's none within the timeout."""
+        """
+        The run a log line without a request ID belongs to: the next REPORT line in its stream (a stream runs one
+        call at a time, and every run ends with one). None when there's none within the timeout.
+        """
         if not event.stream:
             return None
         start = _to_ms(event.time)
@@ -5398,7 +5753,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return next((rid for rid in found if rid), None)
 
     def _latest(self, group: str, region: str | None) -> datetime | None:
-        """When the log group last got an event (its busiest stream's last one), or None."""
+        """
+        When the log group last got an event (its busiest stream's last one), or None.
+        """
         try:
             streams = self._service("logs", region).describe_log_streams(
                 logGroupName=group, orderBy="LastEventTime", descending=True, limit=1
@@ -5419,9 +5776,11 @@ class LambdaAnalyzer(_BaseAnalyzer):
         region: str | None = None,
         progress: Callable[..., None] | None = None,
     ) -> LogPage:
-        """What a function logged from `since` to `until` (the newest `limit` lines when there are more), matching a
+        """
+        What a function logged from `since` to `until` (the newest `limit` lines when there are more), matching a
         CloudWatch Logs filter pattern ('"KeyError"', '?ERROR ?WARN'). request_id= gives every line of that one
-        run, the lines it printed without the ID included."""
+        run, the lines it printed without the ID included.
+        """
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
         return self._log_page(fn, start, end, pattern=pattern, request_id=request_id, limit=limit, progress=progress)
@@ -5437,7 +5796,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         limit: int | None = 10_000,
         progress: Callable[..., None] | None = None,
     ) -> LogPage:
-        """log_events() for a function already read (no GetFunction)."""
+        """
+        log_events() for a function already read (no GetFunction).
+        """
         page = LogPage(fn, fn.log_group, start, end, pattern=pattern)
         try:
             if request_id:
@@ -5473,10 +5834,12 @@ class LambdaAnalyzer(_BaseAnalyzer):
         region: str | None = None,
         progress: Callable[..., None] | None = None,
     ) -> LogPage:
-        """What a function logged from `since` to `until`, as runs: .runs is a LogRun per call, newest first, each with
+        """
+        What a function logged from `since` to `until`, as runs: .runs is a LogRun per call, newest first, each with
         every line it logged, its status (ok, failed, timeout...), run time, memory and cold start. Reads the newest
         `limit` lines. search= ('KeyError', an order ID, a request ID, or a CloudWatch Logs filter pattern) keeps the
-        runs with a matching line, each with all of its lines (the matching ones are marked)."""
+        runs with a matching line, each with all of its lines (the matching ones are marked).
+        """
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
         return self._log_runs(fn, start, end, search=search, limit=limit, progress=progress)
@@ -5491,7 +5854,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         limit: int | None = 3_000,
         progress: Callable[..., None] | None = None,
     ) -> LogPage:
-        """log_runs() for a function already read (no GetFunction)."""
+        """
+        log_runs() for a function already read (no GetFunction).
+        """
         pattern = _filter_pattern(search)
         if not pattern:
             return self._log_page(fn, start, end, limit=limit, progress=progress)
@@ -5514,9 +5879,11 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return page
 
     def _around(self, fn: Function, hits: list[LogEvent], limit: int | None = 3_000) -> list[LogEvent]:
-        """Every line of the runs that `hits` (lines a search found) belong to, oldest first, the hits marked: each
+        """
+        Every line of the runs that `hits` (lines a search found) belong to, oldest first, the hits marked: each
         stream's lines from a timeout before a hit to a timeout after it (no run lasts longer), windows that overlap
-        read once, the newest _SEARCH_WINDOWS of them."""
+        read once, the newest _SEARCH_WINDOWS of them.
+        """
         pad = timedelta(seconds=fn.timeout + 10)
         spans: dict[str, list[list[datetime]]] = {}
         for hit in sorted(hits, key=lambda e: e.time):
@@ -5547,8 +5914,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
     def _run_around(
         self, fn: Function, moment: datetime, *, stream: str = "", request_id: str | None = None
     ) -> LogRun | None:
-        """The whole run that logged a line at `moment` in `stream` (the one with request_id, when given): its stream's
-        lines from a timeout before to a timeout after. Without a stream, a search for the request ID finds it."""
+        """
+        The whole run that logged a line at `moment` in `stream` (the one with request_id, when given): its stream's
+        lines from a timeout before to a timeout after. Without a stream, a search for the request ID finds it.
+        """
         pad = timedelta(seconds=fn.timeout + 10)
         if stream:
             events = self._filter(fn.log_group, fn.region, moment - pad, moment + pad, None, 10_000, stream=stream)[0]
@@ -5572,8 +5941,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         region: str | None = None,
         progress: Callable[..., None] | None = None,
     ) -> ErrorReport:
-        """A function's errors from `since` to `until`, from its logs and grouped by cause (group_errors), with
-        CloudWatch's count of failed and throttled calls over the same window."""
+        """
+        A function's errors from `since` to `until`, from its logs and grouped by cause (group_errors), with
+        CloudWatch's count of failed and throttled calls over the same window.
+        """
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
         return self._errors(fn, start, end, limit=limit, progress=progress)
@@ -5587,7 +5958,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         limit: int | None = 10_000,
         progress: Callable[..., None] | None = None,
     ) -> ErrorReport:
-        """errors() for a function already read (no GetFunction)."""
+        """
+        errors() for a function already read (no GetFunction).
+        """
         report = ErrorReport(fn, fn.log_group, start, end)
         events: list[LogEvent] = []
         try:
@@ -5622,8 +5995,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         region: str | None = None,
         progress: Callable[..., None] | None = None,
     ) -> Performance:
-        """Every run from `since` to `until` (the newest `limit` when there are more), from the REPORT line Lambda
-        logs after each: run time, billed time, memory used, and the start-up time of cold starts."""
+        """
+        Every run from `since` to `until` (the newest `limit` when there are more), from the REPORT line Lambda
+        logs after each: run time, billed time, memory used, and the start-up time of cold starts.
+        """
         fn = self.function(ref, region=region)
         start, end = self._window(since, until)
         return self._performance(fn, start, end, limit=limit, progress=progress)
@@ -5637,7 +6012,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
         limit: int | None = 5_000,
         progress: Callable[..., None] | None = None,
     ) -> Performance:
-        """performance() for a function already read (no GetFunction)."""
+        """
+        performance() for a function already read (no GetFunction).
+        """
         perf = Performance(fn, fn.log_group, start, end)
         try:
             events, perf.truncated, perf.covered_from = self._filter(
@@ -5660,7 +6037,9 @@ class LambdaAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ code
 
     def _download(self, url: str, max_bytes: int | None) -> bytes:
-        """The deployment package, from the short-lived link GetFunction gives (an HTTPS download from S3)."""
+        """
+        The deployment package, from the short-lived link GetFunction gives (an HTTPS download from S3).
+        """
         if not url.lower().startswith("https://"):
             raise ValueError("Lambda's link to the code isn't an https:// address, so it isn't downloaded")
         too_big = (
@@ -5684,8 +6063,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return data
 
     def _package(self, fn: Function, max_size: Any = "50MB") -> bytes | None:
-        """A function's deployment package (fn as function() returns it, with the link GetFunction gives), downloaded up
-        to max_size; None for a container image, or when Lambda gave no link."""
+        """
+        A function's deployment package (fn as function() returns it, with the link GetFunction gives), downloaded up
+        to max_size; None for a container image, or when Lambda gave no link.
+        """
         if fn.package_type == "Image" or not fn.code_location:
             return None
         return self._download(fn.code_location, parse_size(max_size))
@@ -5693,27 +6074,33 @@ class LambdaAnalyzer(_BaseAnalyzer):
     def code(
         self, ref: str, *, file: str | None = None, max_size: Any = "50MB", region: str | None = None
     ) -> CodePackage:
-        """A function's deployment package: every file in the .zip with its size, the file that holds the
+        """
+        A function's deployment package: every file in the .zip with its size, the file that holds the
         handler, and the text of that file (or of file=, a path, a file name or a glob like '*.py'). Downloads the
         package (up to max_size) from the link Lambda gives; nothing in it is run. A secrets file (.env, keys,
-        credentials) is named but its text isn't read, and a container image is named, not pulled."""
+        credentials) is named but its text isn't read, and a container image is named, not pulled.
+        """
         fn = self.function(ref, region=region)
         return read_package(fn, self._package(fn, max_size), file=file)
 
     def code_map(self, ref: str, *, max_size: Any = "50MB", region: str | None = None) -> CodeMap:
-        """How a Python function's code works (see map_code()): downloads its package, up to max_size, like code(),
+        """
+        How a Python function's code works (see map_code()): downloads its package, up to max_size, like code(),
         and reads its own .py files with Python's ast module, starting at the handler. Nothing in it is run. A function
-        on another runtime, or a container image, gives a CodeMap with only a note saying so."""
+        on another runtime, or a container image, gives a CodeMap with only a note saying so.
+        """
         fn = self.function(ref, region=region)
         data = self._package(fn, max_size) if runtime_family(fn.runtime) == "python" else None
         return map_package(fn, data)
 
     def download(self, ref: str, path: str | None = None, *, region: str | None = None) -> PackageDownload:
-        """Saves a function's deployment package on the notebook's disk, the .zip as Lambda stores it: at `path` (a
+        """
+        Saves a function's deployment package on the notebook's disk, the .zip as Lambda stores it: at `path` (a
         file, or a folder to put <name>.zip in), else in the downloads folder (see downloads_folder()) as
         'etl.zip', or 'etl-v3.zip' for a published version. A file of that name is replaced. Nothing in it is
         unzipped or run, and its SHA-256 is checked against the one Lambda reports. A container image is named, not
-        pulled."""
+        pulled.
+        """
         fn = self.function(ref, region=region)
         if fn.package_type == "Image":
             raise _Hint(f"{fn.name} is a container image ({fn.image_uri or 'image URI not shown'}): its code is in the "
@@ -5724,13 +6111,17 @@ class LambdaAnalyzer(_BaseAnalyzer):
         return self._save_package(fn, data, path)
 
     def downloads_folder(self) -> str:
-        """The folder download() saves in when it's given no path (absolute): `self.downloads`, 'lambda-downloads'
-        next to the notebook unless LambdaAnalyzer(downloads=...) says otherwise."""
+        """
+        The folder download() saves in when it's given no path (absolute): `self.downloads`, 'lambda-downloads'
+        next to the notebook unless LambdaAnalyzer(downloads=...) says otherwise.
+        """
         return os.path.abspath(os.path.expanduser(str(self.downloads).strip() or "."))
 
     def _save_package(self, fn: Function, data: bytes, path: str | None = None) -> PackageDownload:
-        """Writes a package already downloaded (data, from _package) where download() would: no AWS call. A downloads
-        folder it makes gets a .gitignore that keeps it out of git, since a package can hold secrets."""
+        """
+        Writes a package already downloaded (data, from _package) where download() would: no AWS call. A downloads
+        folder it makes gets a .gitignore that keeps it out of git, since a package can hold secrets.
+        """
         name = package_file_name(fn)
         target = os.path.abspath(os.path.expanduser(path)) if path else os.path.join(self.downloads_folder(), name)
         if os.path.isdir(target) or (path and path.endswith(("/", os.sep))):
@@ -5770,8 +6161,10 @@ class LambdaAnalyzer(_BaseAnalyzer):
 
 @dataclass
 class _Wiring:
-    """How a function is wired, left to right: what calls it, the function, and where its results, failed events and
-    logs go. A diagram in HTML, a line for each side in text."""
+    """
+    How a function is wired, left to right: what calls it, the function, and where its results, failed events and
+    logs go. A diagram in HTML, a line for each side in text.
+    """
 
     inputs: list[tuple[str, str, str, str]]  # (kind, name, detail, tone 'warn' | 'bad' | '')
     center: tuple[str, str]  # (the function's name, what it runs)
@@ -5782,8 +6175,10 @@ class _Wiring:
 
 @dataclass
 class _Columns:
-    """Numbers over time, a column each (a day, or an hour), with part of each column in a second colour: errors in
-    red, or a column's average under its longest. A row of columns in HTML, a sparkline in text."""
+    """
+    Numbers over time, a column each (a day, or an hour), with part of each column in a second colour: errors in
+    red, or a column's average under its longest. A row of columns in HTML, a sparkline in text.
+    """
 
     items: list[tuple[str, float, float, str]]  # (label, the column's value, the part in the second colour, tooltip)
     title: str = ""
@@ -5795,9 +6190,11 @@ class _Columns:
 
 @dataclass
 class _Outline:
-    """how_it_works()'s steps: the lines of the code that do something, as a tree (a loop's lines under it, each of its
+    """
+    how_it_works()'s steps: the lines of the code that do something, as a tree (a loop's lines under it, each of its
     own functions folded under the line that calls it), with what each line does. In HTML the code in colour with
-    its line numbers and coloured tags for what it does; in text the lines indented, what they do as a # comment."""
+    its line numbers and coloured tags for what it does; in text the lines indented, what they do as a # comment.
+    """
 
     steps: list[CodeStep]
     title: str = ""
@@ -5806,8 +6203,10 @@ class _Outline:
 
 @dataclass
 class _Graph:
-    """how_it_works()'s graph: a CodeGraph drawn as boxes in columns joined by arrows. In HTML an SVG, where pointing
-    at a box leaves only what it's joined to in sight; in text each box with the arrows that leave it."""
+    """
+    how_it_works()'s graph: a CodeGraph drawn as boxes in columns joined by arrows. In HTML an SVG, where pointing
+    at a box leaves only what it's joined to in sight; in text each box with the arrows that leave it.
+    """
 
     graph: CodeGraph
     title: str = ""
@@ -5974,7 +6373,9 @@ _BADGE = "⚡ Lambda"  # the chip before each report's title, so reports from di
 
 
 def _render_html(blocks: list[Any], max_rows: int) -> str:
-    """A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws."""
+    """
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
 
 
@@ -6043,14 +6444,18 @@ def _columns_lines(block: _Columns, report: _Report) -> list[str]:
 
 
 def _called_text(where: str) -> str:
-    """'app.store.Orders.save line 16' -> 'Orders.save() line 16'."""
+    """
+    'app.store.Orders.save line 16' -> 'Orders.save() line 16'.
+    """
     key, _, line = where.rpartition(" line ")
     return f"{_short_name(key)}() line {line}" if key else where
 
 
 def _segments(path: tuple[str, ...]) -> list[str]:
-    """An event field's path as the levels of the event table: ('Records', '[]', 'body', '{json}', 'bucket') ->
-    ['Records[]', 'body (JSON)', 'bucket']."""
+    """
+    An event field's path as the levels of the event table: ('Records', '[]', 'body', '{json}', 'bucket') ->
+    ['Records[]', 'body (JSON)', 'bucket'].
+    """
     out: list[str] = []
     for part in path:
         if part == "[]" and out:
@@ -6063,7 +6468,9 @@ def _segments(path: tuple[str, ...]) -> list[str]:
 
 
 def _event_rows(fields: list[EventField]) -> list[list[Any]]:
-    """The event table: each field the code reads under the one it's in, how it's read and where."""
+    """
+    The event table: each field the code reads under the one it's in, how it's read and where.
+    """
     labels = [f.label for f in fields]
     leaves = [f for f in fields if not any(o.startswith((f.label + "[", f.label + ".", f.label + " (")) for o in labels)]
     tree: dict[str, Any] = {}
@@ -6091,7 +6498,9 @@ _IMPORT_ORDER = ("missing", "removed", "layer", "package", "runtime", "stdlib")
 
 
 def _import_rows(cmap: CodeMap) -> list[list[Any]]:
-    """What it imports (its own modules left out), the ones Lambda can't find first."""
+    """
+    What it imports (its own modules left out), the ones Lambda can't find first.
+    """
     found: dict[str, ImportUse] = {}
     for use in cmap.imports:
         if use.source == "own":
@@ -6185,7 +6594,9 @@ _G_LEGEND = (("call", "calls"), ("reads", "reads"), ("writes", "writes"), ("send
 
 
 def _g_sans(text: str, size: float, bold: bool = False) -> float:
-    """About how wide `text` is in the sans stack, a little generous (Segoe UI, Roboto and Inter run wider)."""
+    """
+    About how wide `text` is in the sans stack, a little generous (Segoe UI, Roboto and Inter run wider).
+    """
     return sum(_G_SANS.get(ch) or (1000 if ch == "…" or _g_wide(ch) else 600) for ch in text) / 1000 * size * (
         1.1 if bold else 1.05)
 
@@ -6195,12 +6606,16 @@ def _g_mono(text: str, size: float) -> float:
 
 
 def _g_wide(ch: str) -> bool:
-    """A character drawn twice as wide: Chinese, Japanese, Korean."""
+    """
+    A character drawn twice as wide: Chinese, Japanese, Korean.
+    """
     return unicodedata.east_asian_width(ch) in "WF"
 
 
 def _g_fit(text: str, room: float, measure: Callable[[str], float]) -> str:
-    """text, cut with … to fit `room` pixels."""
+    """
+    text, cut with … to fit `room` pixels.
+    """
     if measure(text) <= room:
         return text
     while text and measure(text + "…") > room:
@@ -6209,7 +6624,9 @@ def _g_fit(text: str, room: float, measure: Callable[[str], float]) -> str:
 
 
 def _g_wrap(text: str, room: float, measure: Callable[[str], float], most: int = 2) -> list[str]:
-    """Words in lines that fit `room`, at most `most`, the last cut with … when there's more."""
+    """
+    Words in lines that fit `room`, at most `most`, the last cut with … when there's more.
+    """
     words, lines, line = text.split(), [], ""
     for i, word in enumerate(words):
         trial = f"{line} {word}".strip()
@@ -6234,7 +6651,9 @@ def _g_icon(n: GraphNode) -> str:
 
 
 class _GCard:
-    """A box of the graph being drawn: its node, its size, and what it shows in what order."""
+    """
+    A box of the graph being drawn: its node, its size, and what it shows in what order.
+    """
 
     def __init__(self, node: GraphNode) -> None:
         self.node = node
@@ -6259,7 +6678,9 @@ def _g_measure_label(n: GraphNode, text: str) -> float:
 
 
 def _g_need(card: _GCard) -> float:
-    """How wide its card would like to be: its name, what's under it and its listed lines whole."""
+    """
+    How wide its card would like to be: its name, what's under it and its listed lines whole.
+    """
     n = card.node
     need = 52 + _g_measure_label(n, n.label) + 16 + (26 if n.tone == "warn" else 0)
     if n.sub:
@@ -6277,7 +6698,9 @@ def _g_need(card: _GCard) -> float:
 
 
 def _g_route(card: _GCard) -> tuple[str, str, str]:
-    """A route's pill: the first route the box answers, its method ('GET', or 'GET, POST') and ' +1' for the rest."""
+    """
+    A route's pill: the first route the box answers, its method ('GET', or 'GET, POST') and ' +1' for the rest.
+    """
     first, *rest = card.route.split("; ")
     return first, first.rpartition(" ")[0], f" +{len(rest)}" if rest else ""
 
@@ -6324,12 +6747,14 @@ def _g_size(cards: dict[str, _GCard], widths: dict[int, float], column_of: dict[
 def _graph_layout(graph: CodeGraph, cards: dict[str, _GCard]) -> tuple[
         dict[str, tuple[float, float, float, float]], dict[int, list[float]], float, float, dict[int, float],
         dict[int, float], dict[str, int]]:
-    """Where each box goes: (x, y, width, height) by its id; for each arrow that skips columns, the heights where it
+    """
+    Where each box goes: (x, y, width, height) by its id; for each arrow that skips columns, the heights where it
     crosses the columns between (a waypoint in each, so it runs between their boxes, not behind them); the drawing's
     width and height; and each column's x and width, and each box's column. A column is as wide as its boxes want,
     within limits. Each column is put in the order of its neighbours' heights, a few passes left to right and back
     (the barycenter method), so arrows cross less; then each box is moved as near its neighbours as the boxes around
-    it let it be."""
+    it let it be.
+    """
     order = sorted({n.column for n in graph.nodes})
     place = {col: i for i, col in enumerate(order)}
     column_of = {n.id: place[n.column] for n in graph.nodes}
@@ -6380,8 +6805,10 @@ def _graph_layout(graph: CodeGraph, cards: dict[str, _GCard]) -> tuple[
         return _GRAPH_ROW_GAP if not (x.startswith("~") or y.startswith("~")) else 12.0
 
     def settle(items: list[str], wanted: list[float]) -> None:
-        """Each box at the height it wants, pushed down so none overlaps, then the column moved back up by how far
-        it was pushed on average."""
+        """
+        Each box at the height it wants, pushed down so none overlaps, then the column moved back up by how far
+        it was pushed on average.
+        """
         at = list(wanted)
         for j in range(1, len(items)):
             at[j] = max(at[j], at[j - 1] + height[items[j - 1]] / 2 + gap(items[j - 1], items[j]) + height[items[j]] / 2)
@@ -6420,8 +6847,10 @@ def _g_names(e: GraphEdge) -> list[str]:
 
 
 def _g_rows(card: _GCard, e: GraphEdge) -> list[str]:
-    """The rows of its box an arrow leaves from or lands on: the variables it carries, the operations it calls (the
-    '+3 more' row for one that isn't listed); none for the event as a whole or a client."""
+    """
+    The rows of its box an arrow leaves from or lands on: the variables it carries, the operations it calls (the
+    '+3 more' row for one that isn't listed); none for the event as a whole or a client.
+    """
     if card.node.kind not in _GRAPH_LISTS or e.kind in ("event", "client"):
         return []
     if e.label in card.rows:
@@ -6434,10 +6863,12 @@ def _g_rows(card: _GCard, e: GraphEdge) -> list[str]:
 
 def _g_anchors(graph: CodeGraph, cards: dict[str, _GCard], boxes: dict[str, tuple[float, float, float, float]]
                ) -> dict[int, tuple[list[float], list[float]]]:
-    """Where each arrow leaves and arrives, as heights on the page: from the rows of the variables it carries, to the
+    """
+    Where each arrow leaves and arrives, as heights on the page: from the rows of the variables it carries, to the
     rows of the operations or requests it makes; otherwise spread down the box's side in the order of what's at the
     other end, outgoing arrows and incoming ones on separate parts of a side they share. Rows are first put in the
-    order of what they're joined to, so arrows cross less."""
+    order of what they're joined to, so arrows cross less.
+    """
     def middle(node_id: str) -> float:
         return boxes[node_id][1] + boxes[node_id][3] / 2
 
@@ -6507,9 +6938,11 @@ def _g_spots(curve: tuple[tuple[float, float], ...]) -> list[tuple[float, float]
 
 
 def _g_strand(points: list[tuple[float, float]]) -> tuple[str, list[tuple[float, float]]]:
-    """One line through `points`: (start, then a column's left and right for each column it skips, then the end).
+    """
+    One line through `points`: (start, then a column's left and right for each column it skips, then the end).
     Curves in the gaps, straight across each column it skips; returns the path and where its marks can go, the best
-    first: along its middle straight run, in the clear between a column's boxes, or else along its curve."""
+    first: along its middle straight run, in the clear between a column's boxes, or else along its curve.
+    """
     (x1, y1) = points[0]
     parts: list[str] = [f"M{x1:.1f},{y1:.1f}"]
     runs: list[tuple[float, float, float]] = []
@@ -6531,13 +6964,17 @@ def _g_strand(points: list[tuple[float, float]]) -> tuple[str, list[tuple[float,
 
 
 def _g_head(x: float, y: float, d: int) -> str:
-    """A slim arrowhead with a notched back, its tip at (x, y), pointing right (d=1) or left (d=-1)."""
+    """
+    A slim arrowhead with a notched back, its tip at (x, y), pointing right (d=1) or left (d=-1).
+    """
     return (f"M{x:.1f},{y:.1f} L{x - 9 * d:.1f},{y - 4.4:.1f} Q{x - 6.2 * d:.1f},{y:.1f} {x - 9 * d:.1f},{y + 4.4:.1f}"
             " Z")
 
 
 def _g_edge_tip(e: GraphEdge, graph: CodeGraph) -> str:
-    """What an arrow says on hover, in a sentence."""
+    """
+    What an arrow says on hover, in a sentence.
+    """
     source, target = graph.node(e.source), graph.node(e.target)
     src = source.label if source else e.source
     dst = target.label if target else e.target
@@ -6564,10 +7001,12 @@ def _edge_svg(e: GraphEdge, graph: CodeGraph, boxes: dict[str, tuple[float, floa
               ys_in: list[float], hops: list[float] | None, mark_loop: bool = True,
               hot: set[tuple[int, int]] | None = None, taken: list[tuple[float, float]] | None = None,
               lane: int = 0) -> tuple[str, str]:
-    """An arrow: its lines (one from each row it leaves to each row it reaches), its head, its loop mark; and, drawn
+    """
+    An arrow: its lines (one from each row it leaves to each row it reaches), its head, its loop mark; and, drawn
     over the boxes, the dots where it leaves them. A warned arrow's glow and ! go on the lines in `hot` (by the index
     of the row each leaves and reaches), or on all of them. Its marks go on its line, clear of the marks in `taken`
-    (other arrows'), which they're added to; `lane` puts a call within a column outside the ones drawn before it."""
+    (other arrows'), which they're added to; `lane` puts a call within a column outside the ones drawn before it.
+    """
     sx, _, sw, _ = boxes[e.source]
     tx, _, tw, _ = boxes[e.target]
     lines: list[str] = []
@@ -6654,8 +7093,10 @@ def _g_sub_svg(n: GraphNode, room: float) -> str:
 
 def _node_svg(card: _GCard, box: tuple[float, float, float, float], neighbours: list[str], access: dict[str, str]
               ) -> str:
-    """A box: its badge and name, what's under it, a route's pill, its listed lines (an operation's dot in its arrows'
-    colour, a line a warning is about with its flag) or its docstring, and a warning badge."""
+    """
+    A box: its badge and name, what's under it, a route's pill, its listed lines (an operation's dot in its arrows'
+    colour, a line a warning is about with its flag) or its docstring, and a warning badge.
+    """
     n = card.node
     x, y, w, h = box
     warn = n.tone == "warn"
@@ -6707,7 +7148,9 @@ def _node_svg(card: _GCard, box: tuple[float, float, float, float], neighbours: 
 
 
 def _g_captions(graph: CodeGraph, xs: dict[int, float], widths: dict[int, float], column_of: dict[str, int]) -> str:
-    """The words over the columns: COMES IN, HANDLER, CALLS, REACHES, each over the columns it covers."""
+    """
+    The words over the columns: COMES IN, HANDLER, CALLS, REACHES, each over the columns it covers.
+    """
     kinds: dict[int, set[str]] = defaultdict(set)
     for n in graph.nodes:
         kinds[column_of[n.id]].add(n.kind)
@@ -6854,7 +7297,9 @@ _FOLDED_KINDS = ("aws-reads", "aws-writes", "aws-sends", "aws-runs", "aws-signs"
 
 
 def _note_text(kind: str, text: str) -> str:
-    """An outline tag in words: 'S3 GetObject (reads)', 'env DB_HOST', 'event Records[].body'."""
+    """
+    An outline tag in words: 'S3 GetObject (reads)', 'env DB_HOST', 'event Records[].body'.
+    """
     if kind.startswith("aws-"):
         return f"{text} ({kind[4:]})"
     return f"{kind} {text}" if kind in ("env", "event") else text
@@ -6870,7 +7315,9 @@ def _chips_html(notes: Iterable[tuple[str, str]]) -> str:
 
 
 def _inside(step: CodeStep) -> list[tuple[str, str]]:
-    """The tags of every line under a step, once each: what a folded function does."""
+    """
+    The tags of every line under a step, once each: what a folded function does.
+    """
     found: list[tuple[str, str]] = []
     for each in step.walk():
         for note in each.notes:
@@ -6880,8 +7327,10 @@ def _inside(step: CodeStep) -> list[tuple[str, str]]:
 
 
 def _def_html(step: CodeStep) -> str:
-    """One of its functions called on a line (or a module it imports), folded under it: its name, where it is and what
-    it does inside; open, its steps."""
+    """
+    One of its functions called on a line (or a module it imports), folded under it: its name, where it is and what
+    it does inside; open, its steps.
+    """
     if step.kind == "module":
         label = f'<b>{_esc(step.file)}</b> <span class="of">runs when it\'s imported</span>'
     else:
@@ -6962,8 +7411,10 @@ def _outline_lines(block: _Outline, report: _Report) -> list[str]:
 
 
 def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
-    """A log line's time, to the second, in the zone reports show times in (UTC unless set_timezone() chose another);
-    zone=True adds the zone's name."""
+    """
+    A log line's time, to the second, in the zone reports show times in (UTC unless set_timezone() chose another);
+    zone=True adds the zone's name.
+    """
     return _fmt_dt(moment, seconds=True, zone=zone)
 
 
@@ -7011,8 +7462,10 @@ _INFO_ORDER = ("head", "runs", "triggers", "async", "access", "versions", "days"
 
 
 def _unread(errors: dict[str, str], owner: str) -> _Note | None:
-    """One note naming the sections that couldn't be read ('its versions', "us-east-1's limits"), each with the
-    permission it needs."""
+    """
+    One note naming the sections that couldn't be read ('its versions', "us-east-1's limits"), each with the
+    permission it needs.
+    """
     parts = []
     for section, code in errors.items():
         what, permission = _SECTIONS.get(section, (section, "the permission"))
@@ -7025,7 +7478,9 @@ def _label(fn: Function, multi: bool) -> str:
 
 
 def _triggers_cell(triggers: list[Trigger]) -> Any:
-    """'SQS, S3' for a table cell: amber when anyone may call the function."""
+    """
+    'SQS, S3' for a table cell: amber when anyone may call the function.
+    """
     if not triggers:
         return "-"
     labels = list(dict.fromkeys(t.short for t in triggers))
@@ -7068,7 +7523,9 @@ def _handler_meaning(fn: Function) -> str:
 
 
 def _cpu(fn: Function) -> str:
-    """The CPU a function's memory buys: 'about 0.58 vCPU', 'about 2.0 vCPUs' (6 at most)."""
+    """
+    The CPU a function's memory buys: 'about 0.58 vCPU', 'about 2.0 vCPUs' (6 at most).
+    """
     return f"about {fn.vcpus:.2f} vCPU" if fn.vcpus < 1 else f"about {min(fn.vcpus, 6):.1f} vCPUs"
 
 
@@ -7092,7 +7549,9 @@ def _concurrency_cell(fn: Function) -> tuple[Any, str]:
 
 
 def _log_line(message: str) -> str:
-    """A log line for a table: a REPORT line summed up, JSON shown as its level and message, the rest as written."""
+    """
+    A log line for a table: a REPORT line summed up, JSON shown as its level and message, the rest as written.
+    """
     run = parse_report(message)
     if run is not None:
         parts = [f"run {human_ms(run.duration)} (billed {human_ms(run.billed)})",
@@ -7124,7 +7583,9 @@ _LINE_PREFIX_RE = re.compile(
 
 
 def _lifecycle(message: str) -> bool:
-    """START / END / INIT_START lines, and their JSON platform records: there's one of each per run."""
+    """
+    START / END / INIT_START lines, and their JSON platform records: there's one of each per run.
+    """
     text = message.lstrip()
     if _LIFECYCLE_RE.match(text) or text.startswith("INIT_START"):
         return True
@@ -7133,12 +7594,15 @@ def _lifecycle(message: str) -> bool:
 
 
 def _since_arg(since: Any, default: str) -> dict[str, Any]:
-    """since= for a next step: carried over when the user chose one (as text), left out when it's the default."""
+    """
+    since= for a next step: carried over when the user chose one (as text), left out when it's the default.
+    """
     return {"since": since} if isinstance(since, str) and since != default else {}
 
 
 class LambdaView(_BaseView):
-    """Notebook UI over LambdaAnalyzer. Each method renders a report and returns nothing; for the underlying data
+    """
+    Notebook UI over LambdaAnalyzer. Each method renders a report and returns nothing; for the underlying data
     call the matching method on `view.core` (a LambdaAnalyzer): functions() -> overview(), function_info() ->
     describe(), logs() -> log_events(), and errors(), performance() and code() by the same name.
 
@@ -7178,7 +7642,9 @@ class LambdaView(_BaseView):
     # ------------------------------------------------------------------ plumbing
 
     def _explain(self, code: str, message: str) -> str:
-        """The AWS error message plus what to do about it."""
+        """
+        The AWS error message plus what to do about it.
+        """
         lowered = message.lower()
         text = message.rstrip() + ("" if message.rstrip().endswith((".", "!", "?")) else ".")
         if code == "ResourceNotFoundException":
@@ -7191,7 +7657,9 @@ class LambdaView(_BaseView):
         return message
 
     def _missing(self, ref: str, region: str | None) -> _Hint:
-        """What to say when a function isn't there: the closest names, and where else functions() saw it."""
+        """
+        What to say when a function isn't there: the closest names, and where else functions() saw it.
+        """
         name, qualifier, where = self.core.locate(ref, region)
         try:
             names = [f.name for f in self.core.list_functions(where)]
@@ -7211,7 +7679,9 @@ class LambdaView(_BaseView):
 
     @contextmanager
     def _named(self, ref: str, region: str | None) -> Generator[None, None, None]:
-        """Turns AWS's bare 'function not found' into a hint with the closest names."""
+        """
+        Turns AWS's bare 'function not found' into a hint with the closest names.
+        """
         try:
             yield
         except ClientError as exc:
@@ -7220,7 +7690,9 @@ class LambdaView(_BaseView):
             raise self._missing(ref, region) from None
 
     def _call_for(self, command: str, fn: Function, *args: Any, **kwargs: Any) -> str:
-        """A next step about a function, with region= when it isn't in the view's region."""
+        """
+        A next step about a function, with region= when it isn't in the view's region.
+        """
         if fn.region and fn.region != self.core.region:
             kwargs = {**kwargs, "region": fn.region}
         return _call(command, fn.name, *args, **kwargs)
@@ -7237,11 +7709,13 @@ class LambdaView(_BaseView):
         metrics: bool = True,
         details: bool = True,
     ) -> None:
-        """Every Lambda function in the region: its runtime (and when that loses support), memory, timeout, what
+        """
+        Every Lambda function in the region: its runtime (and when that loses support), memory, timeout, what
         triggers it, calls, error rate and run time over the last 30 days, the estimated monthly cost, and
         warnings. regions='all' covers every region your account has turned on (or pass a list); match='etl-*'
         keeps matching names; metrics=False skips CloudWatch and details=False the reads made per function
-        (resource policy, provisioned concurrency), for speed."""
+        (resource policy, provisioned concurrency), for speed.
+        """
         with self._progress("Reading functions", unit="functions") as tick:
             ov = self.core.overview(match=match, regions=regions, days=days, metrics=metrics, details=details,
                                     progress=tick)
@@ -7413,11 +7887,13 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def function_info(self, name: str, *, region: str | None = None, days: int = 30) -> None:
-        """One function in plain English: what it runs (the runtime and when it loses support, memory and the CPU
+        """
+        One function in plain English: what it runs (the runtime and when it loses support, memory and the CPU
         it buys, timeout), what triggers it and who may call it, what happens to failed events, what it can reach
         (role, network, environment variable names: values stay hidden), versions, aliases and provisioned
         concurrency, its last 30 days day by day, the estimated monthly cost, and findings with the command for
-        each. name can also be 'name:alias', an ARN or a console link."""
+        each. name can also be 'name:alias', an ARN or a console link.
+        """
         with self._progress("Reading the function", unit="parts") as tick, self._named(name, region):
             detail = self.core.describe(name, region=region, days=days, progress=tick)
         sections = self._function_sections(detail, name=name, days=days)
@@ -7425,9 +7901,11 @@ class LambdaView(_BaseView):
 
     def _function_sections(self, detail: FunctionDetail, *, name: str | None = None, days: int = 30,
                            ) -> dict[str, list[Any]]:
-        """function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
+        """
+        function_info()'s blocks by part (_INFO_ORDER), so the explorer window can show its health and its setup
         on different tabs: 'head' (title, cards, findings), 'runs', 'triggers', 'async', 'access', 'versions', 'days',
-        'cost', 'tags', 'raw' and 'next'."""
+        'cost', 'tags', 'raw' and 'next'.
+        """
         fn, m = detail.function, detail.metrics
         now = _utcnow()
         prices = self.core.prices
@@ -7621,10 +8099,12 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def errors(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 10_000) -> None:
-        """A function's errors in the last 24 hours, grouped by cause: timeouts, running out of memory, code that
+        """
+        A function's errors in the last 24 hours, grouped by cause: timeouts, running out of memory, code that
         can't load, missing permissions and exceptions, each with how often, when, an example and the run to look
         at, next to CloudWatch's count of failed and throttled calls. since='7d' or '2026-10-01' looks further
-        back; reading stops at the newest `limit` error lines."""
+        back; reading stops at the newest `limit` error lines.
+        """
         limit = _as_count(limit, "limit")
         with self._progress("Reading error lines", unit="lines") as tick, self._named(name, region):
             report = self.core.errors(name, since=since, region=region, limit=limit, progress=tick)
@@ -7632,8 +8112,10 @@ class LambdaView(_BaseView):
 
     def _errors_blocks(self, report: ErrorReport, *, since: Any = "24h", limit: int | None = 10_000,
                        for_window: bool = False) -> list[Any]:
-        """errors()'s report, as blocks; for_window=True leaves out the newest error lines (the explorer lists them as
-        runs to click)."""
+        """
+        errors()'s report, as blocks; for_window=True leaves out the newest error lines (the explorer lists them as
+        runs to click).
+        """
         fn, m = report.function, report.metrics
         window = _window((report.until - report.since).total_seconds())
         found = error_findings(report)
@@ -7696,7 +8178,9 @@ class LambdaView(_BaseView):
         return blocks
 
     def _log_notes(self, errors: dict[str, str], fn: Function, group: str) -> list[Any]:
-        """Notes for what couldn't be read: no log group yet, logs that can't be read, or CloudWatch's numbers."""
+        """
+        Notes for what couldn't be read: no log group yet, logs that can't be read, or CloudWatch's numbers.
+        """
         notes: list[Any] = []
         code = errors.get("logs")
         if code == "ResourceNotFoundException":
@@ -7722,10 +8206,12 @@ class LambdaView(_BaseView):
         n: Any = 50,
         region: str | None = None,
     ) -> None:
-        """The newest lines a function logged (50, from the last hour), with each run's REPORT line summed up: run
+        """
+        The newest lines a function logged (50, from the last hour), with each run's REPORT line summed up: run
         time, memory used and cold start. search='KeyError' keeps lines with that text (case-sensitive; a
         CloudWatch Logs filter pattern works too), request_id= shows one run from start to end (from the last 24
-        hours), and since='24h' or '2026-10-01' looks further back."""
+        hours), and since='24h' or '2026-10-01' looks further back.
+        """
         n = _as_int(n, "n")
         if n < 1:
             raise ValueError("n= is how many lines to show: 1 or more")
@@ -7816,10 +8302,12 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def performance(self, name: str, *, since: Any = "24h", region: str | None = None, limit: Any = 5_000) -> None:
-        """How a function's runs went in the last 24 hours, from the REPORT line Lambda logs after each one: run time
+        """
+        How a function's runs went in the last 24 hours, from the REPORT line Lambda logs after each one: run time
         (median, slowest 1 in 100, longest) against the timeout, memory used against what it has and the size that
         would do, cold starts and their start-up time, timeouts, and the slowest runs. since='7d' looks further
-        back; reading stops at the newest `limit` runs."""
+        back; reading stops at the newest `limit` runs.
+        """
         limit = _as_count(limit, "limit")
         with self._progress("Reading REPORT lines", unit="lines") as tick, self._named(name, region):
             perf = self.core.performance(name, since=since, region=region, limit=limit, progress=tick)
@@ -7827,8 +8315,10 @@ class LambdaView(_BaseView):
 
     def _performance_blocks(self, perf: Performance, *, since: Any = "24h", limit: int | None = 5_000,
                             for_window: bool = False) -> list[Any]:
-        """performance()'s report, as blocks; for_window=True leaves out the slowest runs (the explorer lists them as runs
-        to click)."""
+        """
+        performance()'s report, as blocks; for_window=True leaves out the slowest runs (the explorer lists them as runs
+        to click).
+        """
         fn, runs = perf.function, perf.invocations
         window = _window((perf.until - perf.since).total_seconds())
         found = performance_findings(perf, prices=self.core.prices)
@@ -7922,18 +8412,22 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def code(self, name: str, file: str | None = None, *, region: str | None = None, max_size: Any = "50MB") -> None:
-        """What's in a function's deployment package: its files and folders by size, findings (secrets packed in it,
+        """
+        What's in a function's deployment package: its files and folders by size, findings (secrets packed in it,
         size near the limit, files that never run), and the source of the file that holds the handler, or of
         file='utils.py' (a path, a name or a glob). Downloads the .zip, up to max_size, from the link Lambda gives;
         nothing in it is run. A secrets file's text (.env, keys) isn't shown, and a container image is named, not
-        pulled."""
+        pulled.
+        """
         with self._named(name, region):
             package = self.core.code(name, file=file, max_size=max_size, region=region)
         self._show(self._code_blocks(package))
 
     def _code_blocks(self, package: CodePackage, *, source: bool = True) -> list[Any]:
-        """code()'s report, as blocks; source=False leaves out the shown file's text (the explorer shows it on its
-        own)."""
+        """
+        code()'s report, as blocks; source=False leaves out the shown file's text (the explorer shows it on its
+        own).
+        """
         fn = package.function
         found = package_findings(package)
         blocks: list[Any] = [_Title(
@@ -7992,19 +8486,23 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def how_it_works(self, name: str, *, region: str | None = None, max_size: Any = "50MB") -> None:
-        """How a Python function's code works, read from its package with Python's ast module (nothing in it is run):
+        """
+        How a Python function's code works, read from its package with Python's ast module (nothing in it is run):
         a few sentences, then each step of a call from the handler on, with the functions it calls in its own files
         folded under the lines that call them, and what each line does (AWS calls, environment variables, event
         fields, HTTP requests, logs); then its AWS calls with the IAM permissions they need, a test event with the
         fields it reads, its libraries and where Lambda finds them, and findings (a variable that isn't set, an import
         that isn't there, an HTTP call without a timeout, a list call that reads one page, errors it drops).
-        Downloads the .zip, up to max_size, like code()."""
+        Downloads the .zip, up to max_size, like code().
+        """
         with self._named(name, region):
             cmap = self.core.code_map(name, region=region, max_size=max_size)
         self._show(self._how_blocks(cmap))
 
     def _how_blocks(self, cmap: CodeMap) -> list[Any]:
-        """how_it_works()'s report, as blocks (the explorer's How it works shows them too)."""
+        """
+        how_it_works()'s report, as blocks (the explorer's How it works shows them too).
+        """
         fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
         read = (f"read from {_plural(cmap.files, 'Python file')} ({cmap.lines:,} lines) with Python's ast, nothing run"
                 if cmap.files else "")
@@ -8137,16 +8635,20 @@ class LambdaView(_BaseView):
 
     @_friendly_errors
     def download(self, name: str, path: str | None = None, *, region: str | None = None) -> None:
-        """Saves a function's deployment package (the .zip) on the notebook's disk, in lambda-downloads next to the
+        """
+        Saves a function's deployment package (the .zip) on the notebook's disk, in lambda-downloads next to the
         notebook, or at path= (a file, or a folder), and says where, how big, and whether it's the code Lambda runs
         (its SHA-256 against Lambda's). In JupyterLab, right-click it in the file browser and pick Download to get it
-        on your computer. Nothing in it is unzipped or run; a container image is named, not pulled."""
+        on your computer. Nothing in it is unzipped or run; a container image is named, not pulled.
+        """
         with self._named(name, region):
             saved = self.core.download(name, path, region=region)
         self._show(self._download_blocks(saved))
 
     def _download_blocks(self, saved: PackageDownload) -> list[Any]:
-        """download()'s report, as blocks."""
+        """
+        download()'s report, as blocks.
+        """
         fn = saved.function
         where = _local_path(saved.path)
         ref = fn.name if fn.version in ("", "$LATEST") else f"{fn.name}:{fn.version}"  # the version it saved
@@ -8194,11 +8696,13 @@ class LambdaView(_BaseView):
     @_friendly_errors
     def explore(self, name: str | None = None, *, tab: str | None = None, region: str | None = None,
                 height: int | str | None = None) -> None:
-        """The explorer window: every function in the region to click through, and for the one you pick, how it's
+        """
+        The explorer window: every function in the region to click through, and for the one you pick, how it's
         doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
         in), its errors grouped by cause, its run times, the code in its package and every setting. Needs Jupyter and
         ipywidgets; view.explorer is the window. name opens one function, on tab= 'logs', 'errors', 'performance',
-        'code' or 'settings'; region='all' lists every region."""
+        'code' or 'settings'; region='all' lists every region.
+        """
         if not self.use_html:
             raise _Hint(
                 "The explorer window needs Jupyter (SageMaker, JupyterLab or VS Code). Here, functions() lists every "
@@ -8281,7 +8785,9 @@ _DESTINATIONS = {"sqs": "SQS queue", "sns": "SNS topic", "lambda": "Lambda funct
 
 
 def _explorer_rules() -> str:
-    """The explorer's icons, the tabs' and the Hide files button's: .lmx-i-<key> sets --lx-icon, which ::before draws."""
+    """
+    The explorer's icons, the tabs' and the Hide files button's: .lmx-i-<key> sets --lx-icon, which ::before draws.
+    """
     icons = [(key, paths) for key, _, _, paths in _EXPLORER_TABS] + list(_FILES_ICONS)
     return "\n".join(f".lmx-app .lmx-i-{key}{{--lx-icon:{_icon_url(paths)}}}" for key, paths in icons)
 
@@ -8635,9 +9141,11 @@ _WINDOW_WORDS = [(re.compile(pattern), plain) for pattern, plain in (  # a comma
 
 
 def _window_text(text: str) -> str:
-    """A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab
+    """
+    A sentence from a report, as the explorer window says it: a command the window has a tab for becomes that tab
     (errors('etl') -> "the Errors tab", logs('etl', request_id='8f5c...') -> "the Logs tab (run 8f5ce35b)"), and the
-    arguments it names become what they do; other calls and AWS CLI commands stay."""
+    arguments it names become what they do; other calls and AWS CLI commands stay.
+    """
 
     def swap(match: re.Match[str]) -> str:
         call = match.group(0)
@@ -8659,7 +9167,9 @@ _SENTENCE_START_RE = re.compile(r"(^|[.!?]\s+)(the [A-Z]\w* tab|the region field
 
 @dataclass
 class _Facts:
-    """What the explorer's list says about one function, worked out once each time more is read."""
+    """
+    What the explorer's list says about one function, worked out once each time more is read.
+    """
 
     fn: Function
     metrics: FunctionMetrics | None
@@ -8693,7 +9203,9 @@ def _function_facts(fn: Function, ov: Overview, prices: dict[str, float], now: d
 
 
 def _seconds(since: str) -> float:
-    """How far back a time range reaches, in seconds: '1h' -> 3600, '7d' -> 604800, a date -> the time since it."""
+    """
+    How far back a time range reaches, in seconds: '1h' -> 3600, '7d' -> 604800, a date -> the time since it.
+    """
     start = parse_time(since)
     return (_utcnow() - start).total_seconds() if start is not None else 0.0
 
@@ -8707,21 +9219,27 @@ def _short_day(moment: datetime) -> str:
 
 
 def _run_clock(moment: datetime, today: date) -> str:
-    """A run's start in the zone reports show times in: '14:02:31' today, 'Oct 5 14:02' another day."""
+    """
+    A run's start in the zone reports show times in: '14:02:31' today, 'Oct 5 14:02' another day.
+    """
     moment = _in_zone(moment)
     return moment.strftime("%H:%M:%S") if moment.date() == today else f"{_short_day(moment)} {moment:%H:%M}"
 
 
 def _offset(seconds: float) -> str:
-    """How far into a run a line came: '+0.052s', '+12.4s', '+184s'."""
+    """
+    How far into a run a line came: '+0.052s', '+12.4s', '+184s'.
+    """
     if seconds < 10:
         return f"+{seconds:.3f}s"
     return f"+{seconds:.1f}s" if seconds < 100 else f"+{seconds:,.0f}s"
 
 
 def _line_parts(message: str) -> tuple[str, str]:
-    """A log line as the window shows it: (its text, without what Lambda writes before it (the time, request ID and
-    level, which the window shows in its own columns), and its other fields as indented JSON when it's a JSON line)."""
+    """
+    A log line as the window shows it: (its text, without what Lambda writes before it (the time, request ID and
+    level, which the window shows in its own columns), and its other fields as indented JSON when it's a JSON line).
+    """
     text = message.rstrip()
     if text.startswith("{"):
         try:
@@ -8760,8 +9278,10 @@ _LEVEL_PREFIX_RE = re.compile(r"^(?:\[(?:ERROR|CRITICAL|FATAL|WARNING|WARN|INFO|
 
 
 def _error_text_of(doc: dict[str, Any]) -> str:
-    """An error as JSON logs carry it ({"errorType", "errorMessage", "stack"}) as a traceback reads: 'TypeError:
-    Cannot read ...' and then the stack's lines."""
+    """
+    An error as JSON logs carry it ({"errorType", "errorMessage", "stack"}) as a traceback reads: 'TypeError:
+    Cannot read ...' and then the stack's lines.
+    """
     head = ": ".join(str(doc[k]) for k in ("errorType", "errorMessage") if doc.get(k))
     stack = doc.get("stack") or doc.get("stackTrace") or doc.get("trace") or []
     lines = stack.splitlines() if isinstance(stack, str) else [str(line) for line in stack]
@@ -8771,8 +9291,10 @@ def _error_text_of(doc: dict[str, Any]) -> str:
 
 
 def _run_summary(run: LogRun) -> tuple[str, str]:
-    """(what a run's line says after its time and numbers, its tone): what made it fail, else the first thing it
-    logged."""
+    """
+    (what a run's line says after its time and numbers, its tone): what made it fail, else the first thing it
+    logged.
+    """
     error = run.error
     if error is not None:
         return error[1].splitlines()[0][:300], "bad" if run.status in ("failed", "timeout") else "warn"
@@ -8787,7 +9309,9 @@ def _run_summary(run: LogRun) -> tuple[str, str]:
 
 
 def _run_tip(run: LogRun, opened: bool) -> str:
-    """A run's tooltip: what happened, when, its request ID, and what a click does."""
+    """
+    A run's tooltip: what happened, when, its request ID, and what a click does.
+    """
     label = _RUN_STATES.get(run.status, ("", "", run.status))[2]
     return " · ".join(filter(None, [label[:1].upper() + label[1:], f"started {_stamp(run.start, zone=True)}",
                                     f"request {run.request_id}" if run.request_id else "",
@@ -8795,8 +9319,10 @@ def _run_tip(run: LogRun, opened: bool) -> str:
 
 
 def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
-    """A run's line in the Logs tab: its status, when it started, its run time against the timeout, the memory it
-    used, a cold start, what failed or the first thing it logged, and its request ID."""
+    """
+    A run's line in the Logs tab: its status, when it started, its run time against the timeout, the memory it
+    used, a cold start, what failed or the first thing it logged, and its request ID.
+    """
     icon, tone, _ = _RUN_STATES.get(run.status, ("?", "", run.status))
     report = run.report
     took = ""
@@ -8821,8 +9347,10 @@ def _run_face(run: LogRun, timeout: int, words: list[str], today: date) -> str:
 
 
 def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
-    """An open run's lines: how far into the run each came, its level, and its text (JSON lines as their message, with
-    their other fields a click away), then what its REPORT line says and its request ID to copy."""
+    """
+    An open run's lines: how far into the run each came, its level, and its text (JSON lines as their message, with
+    their other fields a click away), then what its REPORT line says and its request ID to copy.
+    """
     started = next((e.time for e in run.events if (_marker(e.message) or ("",))[0] == "start"), run.start)
     lines = [e for e in run.events if (_marker(e.message) or ("",))[0] not in ("start", "end", "report")]
     rows = []
@@ -8868,7 +9396,9 @@ def _run_body(run: LogRun, words: list[str], limit: int = _BODY_LINES) -> str:
 
 
 def _function_face(f: _Facts, words: list[str], multi: bool, numbers: bool, now: datetime) -> str:
-    """A function's line in the list: its health dot, name, runtime and description, then its numbers in columns."""
+    """
+    A function's line in the list: its health dot, name, runtime and description, then its numbers in columns.
+    """
     fn, m = f.fn, f.metrics
     runtime = f.status.label
     parts = [fn.description, _triggers_text(f.triggers), f"{fn.memory:,} MB", f"{fn.timeout} s"]
@@ -8907,15 +9437,19 @@ def _triggers_text(triggers: list[Trigger]) -> str:
 
 
 def _destination(arn: str | None) -> tuple[str, str]:
-    """(what it is, its name) for an on-success / on-failure destination or a dead-letter queue: an SQS queue, an SNS
-    topic, another function..."""
+    """
+    (what it is, its name) for an on-success / on-failure destination or a dead-letter queue: an SQS queue, an SNS
+    topic, another function...
+    """
     parts = (arn or "").split(":")
     kind = _DESTINATIONS.get(parts[2], parts[2]) if len(parts) > 5 else ""
     return kind or "destination", _source_name(arn)[0] or (arn or "-")
 
 
 def _file_badge(path: str) -> tuple[str, str]:
-    """A file's type as the Code tab's tree shows it: (its badge, its colour), 'KEY' for a secrets file."""
+    """
+    A file's type as the Code tab's tree shows it: (its badge, its colour), 'KEY' for a secrets file.
+    """
     name = path.rpartition("/")[2]
     if _SECRET_FILE_RE.search(path):
         return "KEY", "key"
@@ -8927,7 +9461,9 @@ def _file_badge(path: str) -> tuple[str, str]:
 
 @dataclass
 class _TreeLine:
-    """A line of the Code tab's tree: a folder or a file, how deep it sits, and what it shows."""
+    """
+    A line of the Code tab's tree: a folder or a file, how deep it sits, and what it shows.
+    """
 
     path: str  # 'boto3/' for a folder (its deepest, when the line holds a chain), 'boto3/__init__.py' for a file
     label: str  # the name shown: '__init__.py', 'boto3/', or 'botocore/data/' for a folder that holds only a folder
@@ -8943,17 +9479,21 @@ class _TreeLine:
 
 
 def _folders_of(path: str) -> list[str]:
-    """The folders a file is in, outermost first: 'a/b/c.py' -> ['a/', 'a/b/']."""
+    """
+    The folders a file is in, outermost first: 'a/b/c.py' -> ['a/', 'a/b/'].
+    """
     parts = path.split("/")[:-1]
     return ["/".join(parts[:i]) + "/" for i in range(1, len(parts) + 1)]
 
 
 def _file_tree(files: Iterable[CodeFile], opened: set[str], query: str = "", shut: set[str] | None = None
                ) -> list[_TreeLine]:
-    """The Code tab's tree, as the lines it shows: in each folder its folders, then its files, A to Z; a folder's
+    """
+    The Code tab's tree, as the lines it shows: in each folder its folders, then its files, A to Z; a folder's
     lines under it when `opened` holds its path ('boto3/'), and a folder that holds only a folder on one line with it
     ('botocore/data/'). With a query, only the files it finds, inside the folders that hold them, open unless `shut`
-    holds them."""
+    holds them.
+    """
     files = list(files)
     if query:
         files = [f for f in files if search_rank(query, (f.path, posixpath.basename(f.path))) is not None]
@@ -8998,8 +9538,10 @@ def _file_tree(files: Iterable[CodeFile], opened: set[str], query: str = "", shu
 
 
 def _tree_face(line: _TreeLine, words: list[str], handler: str | None) -> str:
-    """A line of the Code tab's tree: indented by its depth (with a guide for each folder it's in), a folder's chevron
-    and icon or a file's type, its name, and its size."""
+    """
+    A line of the Code tab's tree: indented by its depth (with a guide for each folder it's in), a folder's chevron
+    and icon or a file's type, its name, and its size.
+    """
     junk = " junk" if _JUNK_RE.search(line.path) else ""
     style = f' style="--d:{line.depth}"'
     size = f'<span class="tz">{_esc(human_size(line.size))}</span>'
@@ -9013,8 +9555,10 @@ def _tree_face(line: _TreeLine, words: list[str], handler: str | None) -> str:
 
 
 def _copy_html(name: str, text: str, part: bool = False) -> str:
-    """A file's Copy button: a click selects the text it holds (hidden: the button shows only its label), so Ctrl+C
-    copies the file, with no JavaScript (the window has none)."""
+    """
+    A file's Copy button: a click selects the text it holds (hidden: the button shows only its label), so Ctrl+C
+    copies the file, with no JavaScript (the window has none).
+    """
     what = f"the part of {name} shown" if part else f"all of {name}"
     held = text + "\n" if text.endswith("\n") else text  # a browser copies a text without its last line break
     return (f'<span class="cpy" tabindex="0" role="button" aria-label="Copy {_esc(name)}" '
@@ -9023,7 +9567,9 @@ def _copy_html(name: str, text: str, part: bool = False) -> str:
 
 
 def _source_html(path: str, text: str) -> str:
-    """A file's text with line numbers, Python and JSON in colour (every piece escaped)."""
+    """
+    A file's text with line numbers, Python and JSON in colour (every piece escaped).
+    """
     lines = text.count("\n") + (0 if text.endswith("\n") else 1)
     body = (_python_html(text) if path.endswith(".py") else _json_source_html(text) if path.endswith(".json")
             else _esc(text))
@@ -9032,11 +9578,13 @@ def _source_html(path: str, text: str) -> str:
 
 
 class _FunctionField(_Picker):
-    """The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
+    """
+    The explorer's function field: a button under its face (the function's name, health dot and runtime) that opens
     a list over the window, with a search box that finds a function by any part of its name, description, runtime or
     region. Enter picks the first line, or hands what's typed to on_text when no line has it (an ARN, or a function the
     list doesn't hold). Plain widgets and CSS: each line is a button under its text, so the whole line is the click
-    target. While the list is open, the window's backdrop takes a click anywhere else and closes it."""
+    target. While the list is open, the window's backdrop takes a click anywhere else and closes it.
+    """
 
     def __init__(self, app: LambdaExplorer, *, on_pick: Callable[[Function], None], on_text: Callable[[str], None]):
         super().__init__(app, app._w, "lmx", on_pick=on_pick, on_text=on_text, tooltip="Pick another function",
@@ -9126,8 +9674,10 @@ class _FunctionField(_Picker):
             self.on_pick(fn)
 
 class _Row:
-    """One reusable line of a list: a full-width button under its face (HTML), so the whole line is the click target,
-    with an optional small action button on its right (the function list's Logs). `item` is what it shows."""
+    """
+    One reusable line of a list: a full-width button under its face (HTML), so the whole line is the click target,
+    with an optional small action button on its right (the function list's Logs). `item` is what it shows.
+    """
 
     def __init__(self, app: LambdaExplorer, on_click: Callable[[Any], None], *, short: bool = False,
                  action: tuple[str, str, Callable[[Any], None]] | None = None):
@@ -9148,8 +9698,10 @@ class _Row:
 
 
 class _RunRow:
-    """One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
-    memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again."""
+    """
+    One reusable run in the Logs tab: a full-width button under its face (its status, when it started, run time,
+    memory, cold start, what failed, its request ID) that opens its lines below it, or folds them again.
+    """
 
     def __init__(self, app: LambdaExplorer):
         w, layout = app._w, app._w.Layout
@@ -9163,7 +9715,8 @@ class _RunRow:
 
 
 class LambdaExplorer(_Explorer):
-    """The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
+    """
+    The Lambda explorer: a window to look through your functions by clicking, with nothing to type but a search.
     The region field and the function field at the top pick what it shows; the cards beside them say how it's doing.
 
         Functions    every function in the region (or in every region): runtime, calls, errors, run time, cost and
@@ -9193,7 +9746,8 @@ class LambdaExplorer(_Explorer):
     Nothing here invokes or changes a function: the window only reads, and where a change would help it shows the
     command. The one file it writes is the package Download .zip saves, on the notebook's disk. x.ui is a LambdaView
     for reports in other cells (x.ui.errors(...)); x.overview, x.function, x.detail, x.logs_page, x.package and x.saved
-    hold the data behind what's shown."""
+    hold the data behind what's shown.
+    """
 
     _PREFIX, _THREADS = "lmx", "lambda-explorer"
     _reword = staticmethod(_window_text)
@@ -9284,8 +9838,10 @@ class LambdaExplorer(_Explorer):
 
     @_window_errors
     def open(self, name: str, *, tab: str | None = None) -> None:
-        """Opens a function (its name, 'name:alias', an ARN or a console link), as picking it in the function field
-        does: its Overview, or tab= ('logs', 'errors', 'performance', 'code', 'settings')."""
+        """
+        Opens a function (its name, 'name:alias', an ARN or a console link), as picking it in the function field
+        does: its Overview, or tab= ('logs', 'errors', 'performance', 'code', 'settings').
+        """
         if tab is not None and tab not in _FUNCTION_TABS:
             raise ValueError(f"tab= is one of {', '.join(map(repr, _FUNCTION_TABS))}; got {tab!r}")
         parse_function_ref(name)  # says what a name looks like, before anything is read
@@ -9300,9 +9856,11 @@ class LambdaExplorer(_Explorer):
 
     @_window_errors
     def logs(self, name: str | None = None, *, search: str | None = None, since: str | None = None) -> None:
-        """Shows a function's logs in the Logs tab (the one picked, or name=), as clicking the tab does. since= picks
+        """
+        Shows a function's logs in the Logs tab (the one picked, or name=), as clicking the tab does. since= picks
         the time range ('15m', '1h', '24h', '7d', a date...), and search= finds the runs with a line that has the text
-        (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole time range."""
+        (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole time range.
+        """
         if since is not None:
             LambdaAnalyzer._window(since)  # a time it can't read is said before anything changes
         if self._w is None:
@@ -9333,8 +9891,10 @@ class LambdaExplorer(_Explorer):
 
     @_window_errors
     def run(self, request_id: str) -> None:
-        """Shows one run of the picked function in the Logs tab, every line of it, by its request ID (from an error, a
-        REPORT line or your own logs), looking back at least 24 hours."""
+        """
+        Shows one run of the picked function in the Logs tab, every line of it, by its request ID (from an error, a
+        REPORT line or your own logs), looking back at least 24 hours.
+        """
         if self.function is None:
             raise _Hint("Pick a function first: click one in the Functions tab, or x.open('my-function').")
         if self._w is None:
@@ -9349,14 +9909,18 @@ class LambdaExplorer(_Explorer):
 
     @_window_errors
     def refresh(self) -> None:
-        """Reads everything again: the functions, and the picked function's tabs (the ↻ button)."""
+        """
+        Reads everything again: the functions, and the picked function's tabs (the ↻ button).
+        """
         keep = self.function
         self._load_list(reopen=keep)
 
     # ------------------------------------------------------------------ plumbing
 
     def _reports(self, note: str, mode: str) -> None:
-        """Without the window (no ipywidgets, or not in Jupyter): the same as reports."""
+        """
+        Without the window (no ipywidgets, or not in Jupyter): the same as reports.
+        """
         if note:
             self.ui._show([_Note(note, "warn")])
         elif mode != "text":
@@ -9370,7 +9934,9 @@ class LambdaExplorer(_Explorer):
             self.ui.functions(regions=regions)
 
     def _report_for(self, name: str, tab: str | None) -> None:
-        """A function's tab, as a report (without the window)."""
+        """
+        A function's tab, as a report (without the window).
+        """
         region = None if self.region in (None, "all") else self.region
         command = {"logs": self.ui.logs, "errors": self.ui.errors, "performance": self.ui.performance,
                    "code": self.ui.code}.get(tab or "", self.ui.function_info)
@@ -9378,24 +9944,32 @@ class LambdaExplorer(_Explorer):
 
     @property
     def multi(self) -> bool:
-        """Whether the list holds more than one region's functions."""
+        """
+        Whether the list holds more than one region's functions.
+        """
         return self.region == "all" or bool(self.overview is not None and len(self.overview.regions) > 1)
 
     def _where(self) -> str:
         return "every region" if self.region == "all" else str(self.region or "this region")
 
     def _full(self) -> Function:
-        """The picked function as GetFunction gave it, once describe() has read it (else as the list has it)."""
+        """
+        The picked function as GetFunction gave it, once describe() has read it (else as the list has it).
+        """
         assert self.function is not None
         return self.detail.function if self.detail is not None else self.function
 
     def _html(self, blocks: list[Any]) -> str:
-        """Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
-        report CSS each one carries (the window's style holds it)."""
+        """
+        Report blocks as the window shows them: the commands in their sentences turned into tabs, and without the
+        report CSS each one carries (the window's style holds it).
+        """
         return _render_html(_for_window(blocks, _window_text), self.ui.max_rows).replace(_CSS, "", 1)
 
     def _empty(self, key: str, text: str) -> Any:
-        """The line an empty list shows, one widget per list, kept."""
+        """
+        The line an empty list shows, one widget per list, kept.
+        """
         if key not in self._empties:
             self._empties[key] = self._w.HTML(layout=self._w.Layout(width="100%"))
         self._set(self._empties[key], f'<div class="lmx-empty">{_esc(text)}</div>')
@@ -9441,14 +10015,18 @@ class LambdaExplorer(_Explorer):
         self._show_tab(self._tab)
 
     def _scroll_page(self, children: list[Any], above: list[Any] | None = None) -> Any:
-        """A tab's page: what stays at its top (`above`), then a box that scrolls (`children`)."""
+        """
+        A tab's page: what stays at its top (`above`), then a box that scrolls (`children`).
+        """
         w = self._w
         scroller = w.VBox(children, layout=w.Layout(width="100%"))
         scroller.add_class("lmx-scroll")
         return w.VBox([*(above or []), scroller])
 
     def _renew(self, key: str) -> None:
-        """A new scrolling box for a tab's page, which starts at the top (widgets can't be scrolled from Python)."""
+        """
+        A new scrolling box for a tab's page, which starts at the top (widgets can't be scrolled from Python).
+        """
         page = self.pages[key]
         old = page.children[-1]
         scroller = self._w.VBox(list(old.children), layout=self._w.Layout(width="100%"))
@@ -9574,7 +10152,9 @@ class LambdaExplorer(_Explorer):
         return page
 
     def _range_bar(self, value: str, on_change: Callable[[dict[str, Any]], None], label: str) -> tuple[Any, Any]:
-        """A time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs."""
+        """
+        A time range dropdown and a ↻ button that reads the tab again, for the Errors and Performance tabs.
+        """
         w, layout = self._w, self._w.Layout
         pick = w.Dropdown(options=[option for option in _RANGES if option[1] != "15m"], value=value,
                           layout=layout(width="auto"))
@@ -9663,7 +10243,9 @@ class LambdaExplorer(_Explorer):
             self._status(self._tab_line(key))
 
     def _need_function(self, key: str) -> None:
-        """A function's tab before one is picked: how to pick one."""
+        """
+        A function's tab before one is picked: how to pick one.
+        """
         hint = ('<div class="lmx-hint">👆 <div><b>Pick a function first.</b> Click one in the <b>Functions</b> tab, or '
                 "in the function field above (it searches as you type).</div></div>")
         widget = {"overview": self.overview_view, "settings": self.settings_view, "errors": self.errors_view,
@@ -9671,7 +10253,9 @@ class LambdaExplorer(_Explorer):
         self._set(widget, hint)
 
     def _tab_line(self, key: str) -> str:
-        """The status line for a tab: what's in it, or how to use it."""
+        """
+        The status line for a tab: what's in it, or how to use it.
+        """
         fn, ov = self.function, self.overview
         if key == "functions":
             if ov is None:
@@ -9745,9 +10329,11 @@ class LambdaExplorer(_Explorer):
         self._load_list(reopen=self.function, elsewhere=False)
 
     def _load_list(self, reopen: Function | None = None, elsewhere: bool = True) -> None:
-        """Lists the region's functions (in the background); then CloudWatch's numbers, then who may call each.
+        """
+        Lists the region's functions (in the background); then CloudWatch's numbers, then who may call each.
         reopen: the function to show again once they're listed; elsewhere=False closes it if the list doesn't hold it
-        (another region was picked)."""
+        (another region was picked).
+        """
         self._drop("list", "numbers", "extras")
         self.overview, self._facts, self._numbers_pending = None, {}, False
         self._offset = 0
@@ -9879,8 +10465,10 @@ class LambdaExplorer(_Explorer):
         self._facts = {fn.arn: _function_facts(fn, ov, self.core.prices, now) for fn in ov.functions} if ov else {}
 
     def _draw_list_note(self) -> None:
-        """Notes above the list: regions whose functions couldn't be listed, sections that couldn't be read, regions
-        left out, and limits that are close to running out."""
+        """
+        Notes above the list: regions whose functions couldn't be listed, sections that couldn't be read, regions
+        left out, and limits that are close to running out.
+        """
         ov = self.overview
         if ov is None:
             return
@@ -9935,8 +10523,10 @@ class LambdaExplorer(_Explorer):
                 "public": any(t.public for t in f.triggers), "idle": bool(m is not None and not m.invocations)}[key]
 
     def _chip_button(self, store: dict[str, Any], key: str, tone: str, on_click: Callable[[str], None]) -> Any:
-        """The chip button for `key`, made once and kept: redrawing changes its label, not the widget (Live redraws
-        the run chips every few seconds, and a widget is never freed unless it's closed)."""
+        """
+        The chip button for `key`, made once and kept: redrawing changes its label, not the widget (Live redraws
+        the run chips every few seconds, and a widget is never freed unless it's closed).
+        """
         if key not in store:
             chip = self._w.Button(layout=self._w.Layout(width="auto"))
             for name in ("lmx-chip", f"lmx-t-{tone}"):
@@ -9946,7 +10536,9 @@ class LambdaExplorer(_Explorer):
         return store[key]
 
     def _show_chips(self, box: Any, chips: list[tuple[Any, str, str, bool]]) -> None:
-        """Puts chips (button, label, tooltip, picked) in their row, changing only what changed."""
+        """
+        Puts chips (button, label, tooltip, picked) in their row, changing only what changed.
+        """
         for chip, label, tip, picked in chips:
             if chip.description != label:
                 chip.description = label
@@ -9958,7 +10550,9 @@ class LambdaExplorer(_Explorer):
             box.children = shown
 
     def _draw_chips(self) -> None:
-        """A chip per kind of function there is, with how many: a click shows only those (again shows all)."""
+        """
+        A chip per kind of function there is, with how many: a click shows only those (again shows all).
+        """
         facts = list(self._facts.values())
         chips = []
         for key, label, tone in _FUNCTION_CHIPS:
@@ -10081,7 +10675,9 @@ class LambdaExplorer(_Explorer):
                               f'<div class="lmx-sub">{_esc(" · ".join(p for p in sub if p))}</div></div></div>')
 
     def _draw_stats(self) -> None:
-        """The cards beside the function field: the region at a glance, or the picked function."""
+        """
+        The cards beside the function field: the region at a glance, or the picked function.
+        """
         now = _utcnow()
         cards: list[tuple[str, str, str]] = []
         loading = self._numbers_pending or (self.overview is None and self._listing)
@@ -10135,8 +10731,10 @@ class LambdaExplorer(_Explorer):
         self._set(self.stats, f'<div class="lmx-stats">{html_cards}</div>')
 
     def _draw_alerts(self) -> None:
-        """A dot on a tab that holds something to look at: amber on Overview for warnings, red on Errors when calls
-        fail often enough to act on."""
+        """
+        A dot on a tab that holds something to look at: amber on Overview for warnings, red on Errors when calls
+        fail often enough to act on.
+        """
         fn = self.function
         f = self._facts.get(fn.arn) if fn is not None else None
         m = self.detail.metrics if self.detail is not None and self.detail.metrics is not None else (
@@ -10151,7 +10749,9 @@ class LambdaExplorer(_Explorer):
     # ------------------------------------------------------------------ one function
 
     def _close_function(self) -> None:
-        """Back to no function picked: the Functions tab, the header showing the region."""
+        """
+        Back to no function picked: the Functions tab, the header showing the region.
+        """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
         self.function = self.detail = None
@@ -10173,8 +10773,10 @@ class LambdaExplorer(_Explorer):
         self._open_named(text, None)
 
     def _open_named(self, name: str, tab: str | None, *, search: str | None = None) -> None:
-        """Opens a function named the way you'd paste it: from the list when it's there, else read with GetFunction
-        (an ARN in another region, a function the list doesn't hold)."""
+        """
+        Opens a function named the way you'd paste it: from the list when it's there, else read with GetFunction
+        (an ARN in another region, a function the list doesn't hold).
+        """
         wanted, _, region = parse_function_ref(name)
         listed = self.overview.functions if self.overview is not None else []
         fn = next((f for f in listed if f.name == wanted and (region is None or f.region == region)), None)
@@ -10202,7 +10804,9 @@ class LambdaExplorer(_Explorer):
                     lambda got: self._open_function(got, tab, search=search), failed)
 
     def _open_function(self, fn: Function, tab: str | None = None, *, search: str | None = None) -> None:
-        """Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened."""
+        """
+        Shows a function: its Overview (or tab), read in the background; the other tabs read when they're opened.
+        """
         self._drop("describe", "logs", "search", "older", "errors", "perf", "code", "map", "lookup")
         self._stop_live()
         self.function, self.detail = fn, None
@@ -10272,7 +10876,9 @@ class LambdaExplorer(_Explorer):
         self._draw("overview", self.overview_view, blocks)
 
     def _wiring(self, detail: FunctionDetail) -> _Wiring:
-        """What calls the function, and where its results, failed events and logs go."""
+        """
+        What calls the function, and where its results, failed events and logs go.
+        """
         fn = detail.function
         inputs = []
         for t in detail.triggers:
@@ -10313,7 +10919,9 @@ class LambdaExplorer(_Explorer):
                        empty="Nothing calls it on its own: it's called directly (an SDK, Step Functions...)")
 
     def _charts(self, detail: FunctionDetail) -> list[Any]:
-        """Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days."""
+        """
+        Calls a day (the failed part in red) and run time a day (the average under the longest), for 30 days.
+        """
         m, fn = detail.metrics, detail.function
         if m is None or not m.invocations or m.period < 86400:
             return []
@@ -10361,7 +10969,9 @@ class LambdaExplorer(_Explorer):
     # ------------------------------------------------------------------ logs
 
     def _set_range(self, since: str) -> None:
-        """Picks a time range in the Logs tab's field, adding it to the list when it isn't one of the presets."""
+        """
+        Picks a time range in the Logs tab's field, adding it to the list when it isn't one of the presets.
+        """
         options = list(_RANGES)
         if since not in {value for _, value in options}:
             options.append((f"Since {since}", since))
@@ -10369,7 +10979,9 @@ class LambdaExplorer(_Explorer):
         self._quietly(self.range_pick, options=options, value=since)
 
     def _range_text(self, value: str | None = None) -> str:
-        """'the last hour', 'the last 3 days', 'since 2026-10-01'."""
+        """
+        'the last hour', 'the last 3 days', 'since 2026-10-01'.
+        """
         value = value or self._range
         label = next((label for label, v in _RANGES if v == value), None)
         return f"the {label.lower()}" if label else f"since {value}"
@@ -10390,7 +11002,9 @@ class LambdaExplorer(_Explorer):
             self._load_logs()
 
     def _load_logs(self) -> None:
-        """Reads the time range's newest lines, as runs (in the background)."""
+        """
+        Reads the time range's newest lines, as runs (in the background).
+        """
         fn = self.function
         if fn is None:
             return
@@ -10423,7 +11037,9 @@ class LambdaExplorer(_Explorer):
         self._finish("logs", self._logs_line(), "warn" if page.errors else "", tabs=("logs",))
 
     def _logs_line(self) -> str:
-        """The status line for the Logs tab."""
+        """
+        The status line for the Logs tab.
+        """
         fn, page = self.function, self.found if self.found is not None else self.logs_page
         if fn is None or page is None:
             return "Reading the logs…" if fn is not None else ""
@@ -10467,8 +11083,10 @@ class LambdaExplorer(_Explorer):
             self._status(self._logs_line())
 
     def _log_search(self) -> None:
-        """Enter in the search box: CloudWatch searches the whole time range, and the runs with a matching line come
-        back whole (in the background)."""
+        """
+        Enter in the search box: CloudWatch searches the whole time range, and the runs with a matching line come
+        back whole (in the background).
+        """
         fn = self.function
         text = str(self.log_find.value or "").strip()
         if fn is None:
@@ -10506,8 +11124,10 @@ class LambdaExplorer(_Explorer):
         self._finish("logs", self._logs_line(), "warn" if page.errors else "", tabs=("logs",))
 
     def _show_run(self, moment: datetime, stream: str, request_id: str | None) -> None:
-        """Opens one run in the Logs tab, every line of it: a failed run from the Errors tab, a slow one from the
-        Performance tab."""
+        """
+        Opens one run in the Logs tab, every line of it: a failed run from the Errors tab, a slow one from the
+        Performance tab.
+        """
         fn = self._full()
         self._show_tab("logs")
         if request_id:
@@ -10630,8 +11250,10 @@ class LambdaExplorer(_Explorer):
                 "logs somewhere else.")
 
     def _draw_run_head(self, visible: list[LogRun]) -> None:
-        """The line over the runs: how many, how many failed, how long they took, the memory they used, the cold
-        starts; and what couldn't be read, or where reading stopped."""
+        """
+        The line over the runs: how many, how many failed, how long they took, the memory they used, the cold
+        starts; and what couldn't be read, or where reading stopped.
+        """
         fn = self.function
         page = self.found if self.found is not None else self.logs_page
         if fn is None or page is None:
@@ -10705,7 +11327,9 @@ class LambdaExplorer(_Explorer):
         row.button.tooltip = _run_tip(run, opened)
 
     def _older(self) -> None:
-        """Reads the lines before the oldest one read (when reading stopped at the limit), and adds their runs."""
+        """
+        Reads the lines before the oldest one read (when reading stopped at the limit), and adds their runs.
+        """
         page, fn = self.logs_page, self.function
         if page is None or fn is None or not page.truncated or page.covered_from is None:
             return
@@ -11011,7 +11635,9 @@ class LambdaExplorer(_Explorer):
         self._finish("code", self._tab_line("code"), tabs=("code",))
 
     def _draw_saved(self) -> None:
-        """The line beside Download .zip: where it saves, or where it saved."""
+        """
+        The line beside Download .zip: where it saves, or where it saved.
+        """
         saved = self.saved
         if saved is None:
             where = _local_path(self.core.downloads_folder())
@@ -11023,7 +11649,9 @@ class LambdaExplorer(_Explorer):
                                    "and pick Download</div>")
 
     def _save_code(self) -> None:
-        """Download .zip: the package the tab downloaded, saved where download() would (no new download)."""
+        """
+        Download .zip: the package the tab downloaded, saved where download() would (no new download).
+        """
         fn, data = self._code_fn, self._package_data
         if fn is None or data is None:
             return
@@ -11043,7 +11671,9 @@ class LambdaExplorer(_Explorer):
                      + (", replacing the one there." if saved.replaced else "."), "ok")
 
     def _toggle_files(self) -> None:
-        """Hide files / Show files: folds the tree away so the source has the tab's whole width, or brings it back."""
+        """
+        Hide files / Show files: folds the tree away so the source has the tab's whole width, or brings it back.
+        """
         self._files_shown = not self._files_shown
         self._draw_files_toggle()
         if not self._said[2] and self._said[1] != "warn":
@@ -11059,7 +11689,9 @@ class LambdaExplorer(_Explorer):
         _class_if(self.files_toggle, "lmx-i-files-show", not shown)
 
     def _reads_python(self) -> bool:
-        """Whether How it works can read the code: a Python function's .zip, downloaded, with files in it."""
+        """
+        Whether How it works can read the code: a Python function's .zip, downloaded, with files in it.
+        """
         fn = self._code_fn
         return (fn is not None and runtime_family(fn.runtime) == "python" and self._package_data is not None
                 and self.package is not None and bool(self.package.files))
@@ -11073,13 +11705,17 @@ class LambdaExplorer(_Explorer):
             "makes, the environment variables and event fields it reads, and what to fix")
 
     def _renew_source(self) -> None:
-        """The right side in a new box, which starts at the top."""
+        """
+        The right side in a new box, which starts at the top.
+        """
         self.code_right = self._w.VBox([self.source_view])
         self.code_right.add_class("lmx-right")
         self.code_split.children = [self.code_left, self.code_right]
 
     def _toggle_how(self) -> None:
-        """How it works: the code read with ast, in place of the source; again, back to the source."""
+        """
+        How it works: the code read with ast, in place of the source; again, back to the source.
+        """
         fn, data = self._code_fn, self._package_data
         if fn is None or data is None:
             return
@@ -11237,7 +11873,8 @@ def explore(
     profile: str | None = None,
     height: int | str | None = None,
 ) -> LambdaExplorer:
-    """Opens the Lambda explorer window and returns it: every function in the region, and for the one you click, how
+    """
+    Opens the Lambda explorer window and returns it: every function in the region, and for the one you click, how
     it's doing, its logs run by run (failed runs in red, a search box, a time range, and Live to watch new runs come
     in), its errors grouped by cause, its run times, the code in its package and every setting, all by clicking.
 
@@ -11248,5 +11885,6 @@ def explore(
         explore(region="eu-west-1", profile="dev")  # another region or AWS profile
 
     The tabs' pages fill the browser's height; height= sets theirs instead (800 pixels, or CSS such as '70vh'). It only
-    reads: where a change would help, it shows the command to run."""
+    reads: where a change would help, it shows the command to run.
+    """
     return LambdaExplorer(name, tab=tab, region=region, profile=profile, height=height)
