@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-18
+
 ### Added
 
 - **Ask about your account in plain English**: `AgentView().ask("Which Lambda failed last night?")` answers from the
@@ -24,7 +26,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 - The agent's tools come in **toolkits**, one per AWS service: `AgentView(toolkits=["lambda", Runbooks()])` adds a
   `Toolkit` of your own (from `aws_analyzer.agent`) beside the Lambda one, and its tools get the same budget, error
-  handling, read-only guard and report. The agent guide's "Your own tools" has an example.
+  handling, read-only guard and report. The agent guide's "Your own tools" has an example ([#88](https://github.com/utkarsh5026/aws-analyzer/pull/88)).
 
 - **The agent covers S3 too, and the bucket events that invoke Lambda functions**:
   `AgentView().ask("Were last night's uploads to acme-raw processed?")` checks the bucket's event notifications, the
@@ -34,19 +36,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   at all, next to the function's runs and failures in that window. It also answers about buckets on their own (their
   setup, size and cost, what's in a folder, which files arrived when, one file's headers), and never reads what's
   inside a file. `AgentView(toolkits=["s3"])` gives S3 alone, and `budget={"s3_keys": 500_000}` lets a listing read
-  more than its default 100,000 keys.
+  more than its default 100,000 keys ([#89](https://github.com/utkarsh5026/aws-analyzer/pull/89)).
 
 - S3: `S3Analyzer().notifications("my-bucket")` lists a bucket's **event notifications**: which Lambda functions, SQS
   queues and SNS topics it sends which events to, for which keys, and whether EventBridge gets them all
   (`parse_notifications` does the same on a `GetBucketNotificationConfiguration` response). It needs
-  `s3:GetBucketNotification`.
+  `s3:GetBucketNotification` ([#89](https://github.com/utkarsh5026/aws-analyzer/pull/89)).
 
 - `set_timezone("Asia/Kolkata")` (from `aws_analyzer`) shows **times in your own time zone** instead of UTC, in every
   report and window of every service, and their columns and sentences say which zone (`Last modified (IST)`,
   `since 2024-05-01 14:02 IST`). It takes a tz database name, its city alone (`"kolkata"`, `"new york"`), `"local"`
   for the machine's own zone, an offset (`"+05:30"`) or `"UTC"` to go back, and dates you type in
   (`since="2024-05-01 10:00"`) are read in the same zone. The `AWS_ANALYZER_TZ` environment variable picks it for every
-  notebook, and `help()` says which zone times are in. CloudWatch's daily numbers stay in UTC days, as AWS adds them up.
+  notebook, and `help()` says which zone times are in. CloudWatch's daily numbers stay in UTC days, as AWS adds them up ([#86](https://github.com/utkarsh5026/aws-analyzer/pull/86)).
 
 ## [0.19.0] - 2026-10-16
 
@@ -629,7 +631,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.16.1...v0.17.0
