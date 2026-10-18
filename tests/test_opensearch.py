@@ -13,6 +13,7 @@ from fake_opensearch import FakeCluster, FakeIndex, score, topic_vector, unit
 from moto import mock_aws
 
 from aws_analyzer import opensearch as osmod
+from aws_analyzer.opensearch import helpers, style
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.opensearch import (
     GB,
@@ -329,8 +330,8 @@ def test_engine_versions():
 
 
 def test_cat_values():
-    assert osmod._int("1,024") == 1024 and osmod._int("") is None and osmod._int("n/a") is None
-    assert osmod._bytes("123456") == 123456 and osmod._bytes("1.5kb") == 1536 and osmod._bytes(None) is None
+    assert helpers._int("1,024") == 1024 and helpers._int("") is None and helpers._int("n/a") is None
+    assert helpers._bytes("123456") == 123456 and helpers._bytes("1.5kb") == 1536 and helpers._bytes(None) is None
 
 
 def test_parse_mapping_reads_vector_fields_and_their_settings():
@@ -1141,7 +1142,7 @@ def test_ui_html_renders(ui, capsys):
     ui.sample("vectors-prod/docs")
     ui.search(like="doc-1", index="vectors-prod/docs")
     for blocks in shown:
-        page = osmod._render_html(blocks, 50)
+        page = style._render_html(blocks, 50)
         assert page.startswith("<style>") and 'class="osv"' in page and "🔎 OpenSearch" in page
 
 
