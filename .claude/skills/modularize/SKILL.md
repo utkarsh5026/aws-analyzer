@@ -170,18 +170,37 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
 
    The full check must pass. This commit changes no line of code beyond those imports.
 
-4. **Extract modules in layer order**, one commit per module: helpers, models, analysis (by topic), analyzer, style,
-   blocks, view, explorer. Rules for every extraction:
-   - **Move code with a script, never by retyping it.** Write a short Python script in the scratchpad that finds each
-     top-level definition by `ast` (decorators and the constants and comments right above it included), cuts those
-     line ranges out of `__init__.py` and appends them to the new module. Retyping thousands of lines lets mistakes
-     in that tests can miss.
-   - The new module imports what it uses: `_kit` names, and lower layers of its own package
-     (`from .models import Function`). `__init__.py` imports the public names back for re-export.
-   - Order inside a module follows CLAUDE.md: helpers above the code that uses them.
-   - A class over the limit is split into mixins in the same commit (decision 5), each mixin in its own module.
-   - After each commit: `ruff check .`, `python .claude/skills/check/rules.py`,
-     `python -m pytest tests/test_$S.py tests/test_agent.py tests/test_package.py -q`.
+4. **Split it with `split.py`, in one commit.** Never retype code: retyping thousands of lines lets in mistakes that
+   tests can miss.
+   1. **Write the plan** in the scratchpad, `$SCRATCH/$S_plan.py`, the way `plans/opensearch.py` does:
+      - `MODULES`: every top-level statement by name, in layer order;
+      - `DOCS`: each module's docstring;
+      - `REEXPORT_KIT`: the public `_kit` names the old module imported, which `__init__` keeps exporting.
+
+      To list the statements, run `split.py` with an empty plan: it names the ones not placed. A class over the limit
+      needs splitting into mixins first (decision 5), so it's several statements before the plan can place it.
+   2. **Split** the file as it was before step 3 (`git show HEAD~1:src/aws_analyzer/$S.py`), so its imports have
+      their original depth:
+
+      ```bash
+      python .claude/skills/modularize/split.py "$SCRATCH/$S.py" "$SCRATCH/$S_plan.py" "$SCRATCH/$S-out"
+      ```
+
+      It moves each statement verbatim with the comments above it, drops the `# ====` banners, writes each module's
+      imports from the names it reads (relative ones for its own package), and stops if a module would read a name
+      from a later one at run time. Fix that by reordering the plan.
+   3. **Put the output in place** of `src/aws_analyzer/$S/`. Then remove the imports it wrote generously:
+      `ruff check src/aws_analyzer/$S --select F401 --fix`.
+   4. **Print the config entries** each module needs, and replace the one entry in `ruff.toml` and in
+      `COMMENTS_LEFT` with them:
+
+      ```bash
+      python .claude/skills/modularize/split.py --report src/aws_analyzer/$S C901,PLR0912,PLR0913,PLR0915
+      ```
+
+      Use the old entry's rules. Then take `$S` off `LONG_FILES`.
+   5. **Check:** `ruff check .`, `python .claude/skills/check/rules.py` and
+      `python -m pytest tests/test_$S.py tests/test_package.py tests/test_style.py -k "not docstrings" -q`.
 
 5. **Fix the tests and scripts that reached into the old file:**
    - `monkeypatch.setattr(lfmod, "_RUN_LINES", 6)` must now patch the module that *reads* the name
@@ -201,7 +220,9 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
    ```
 
    Every output must be identical, and no name `LOST`. Private names that moved into a module are reported as
-   `moved`, which is fine. A difference is a bug in the move: find it, don't accept it.
+   `moved`, which is fine. The snapshot's `apis.txt` differs only by the file it names
+   (`<pkg>/$S.py` → `<pkg>/$S/analyzer.py`): check that by diffing it with the path swapped back. Any other
+   difference is a bug in the move: find it, don't accept it.
 
 7. **Docs for agents:**
    - Update CLAUDE.md where it names this service's file (`lambda_functions.py`'s `_EXPLORER_CSS`, ...) so a path
@@ -228,7 +249,7 @@ same code just changes file:
 Line counts are from 0.20.0. A class over 1,500 lines needs mixins. The exact grouping is the agent's call, made by
 reading the code, but follow the topics below and the View's `_GROUPS`.
 
-### `opensearch` (4,198 lines) — the pilot, do it first
+### `opensearch` (4,198 lines) — the pilot, done
 
 It's small and has most of the layers, so it proves Phase 0's tooling and the recipe cheaply, and its PR stays easy
 to review. It doesn't exercise mixins, an explorer window, the service's own blocks or the agent's private names.
@@ -376,7 +397,9 @@ A flat package, like the template, with no mixins expected. DynamoDB JSON ↔ Py
 
 - Update the `new-analyzer` skill to scaffold a package from the template, with dynamodb as its model.
 - Update CLAUDE.md: remove "Architecture of an analyzer file" and the five-sections rule in `rules.py`.
-- Update README / docs wherever they say "each service is one module".
+- Update README / docs wherever they say "each service is one module", and the module name each guide's eyebrow
+  and `docs/index.md` show (`<code>opensearch.py</code>`). These were left alone so the split wouldn't collide
+  with the docs rewrite on `docs-skimmable`.
 - Make the private-names warning from Phase 0 an error.
 
 ## Phase 2 (needs its own plan and the user's go-ahead): findings that carry actions
@@ -399,8 +422,8 @@ Update this table in each step's PR.
 
 | Step | Status | PR | Notes |
 |---|---|---|---|
-| Phase 0: tooling | done, PR not opened yet | | branch `modularize/tooling` |
-| opensearch | not started | | pilot |
+| Phase 0: tooling | done, PR not opened yet | | branch `modularize/tooling` (opensearch builds on it) |
+| opensearch | done, PR not opened yet | | branch `modularize/opensearch`, plan in `plans/opensearch.py` |
 | lambda_functions | not started | | second pilot: mixins, explorer, blocks, decision 7 |
 | s3 + s3_explorer | not started | | |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
@@ -430,6 +453,22 @@ Update this table in each step's PR.
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
 
+- **opensearch:**
+  - **One commit for the whole split, not one per module.** Code moved by `split.py` changes in no other way, and
+    the snapshot checks every module at once. The recipe (step 4) now says so.
+  - **The old module's docstring stays as written** in `__init__.py`, even where it says "this file". It's what
+    `help(aws_analyzer.opensearch)` shows, and rewording it is a change of its own.
+  - **`__init__` re-exports the public `_kit` names the old module imported** (`human_size`, `HOURS_PER_MONTH`,
+    ...), since `aws_analyzer.opensearch.human_size` worked before. Stdlib and botocore names it imported
+    (`datetime`, `ClientError`) aren't re-exported. Nothing used them, and they were never its API.
+  - **Two modules were added to the layout:**
+    - `prices.py` (core), for the price tables. They were 240 lines of section 1, and a price check touches only
+      them.
+    - `embeddings.py` (core), for building Bedrock embedding requests.
+
+    The analyzer-only helpers `_exists` / `_drop` stayed in `analyzer.py`.
+  - **A view importing a core module's private helper** (`_key_label`, `_is_serverless`, `_base_model`) is fine:
+    they're in the same package.
 - **Phase 0:** `test_docstrings_have_their_quotes_on_their_own_lines` takes about 100 s, almost all of it on the
   long files (`ast.get_source_segment` slows down on very long files). Expect it to speed up as services are
   split. Until then, run `pytest tests/test_<service>.py` while you work, and the full suite at the end.
