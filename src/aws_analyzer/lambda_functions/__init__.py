@@ -79,20 +79,20 @@ from urllib.parse import unquote
 
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
-from ._kit.analyzer import _BaseAnalyzer
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _require
-from ._kit.errors import _Hint, _error_code, _why
-from ._kit.fmt import (
+from .._kit.analyzer import _BaseAnalyzer
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
+from .._kit.deps import _require
+from .._kit.errors import _Hint, _error_code, _why
+from .._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _duration, _fmt_dt, _in_zone, _plural, _share, _total, _tz_label,
     _utcnow, _zone_name, human_age, human_money, human_size, parse_size, parse_time,
 )
-from ._kit.highlight import _json_source_html, _python_html
-from ._kit.jsontree import _JsonTree, _json_tree_css
-from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc, _marked, search_rank
-from ._kit.view import _BaseView, _friendly_errors
-from ._kit.window import (
+from .._kit.highlight import _json_source_html, _python_html
+from .._kit.jsontree import _JsonTree, _json_tree_css
+from .._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
+from .._kit.text import _clip, _esc, _marked, search_rank
+from .._kit.view import _BaseView, _friendly_errors
+from .._kit.window import (
     _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _running_loop, _skeleton, _window_errors,
 )
 
