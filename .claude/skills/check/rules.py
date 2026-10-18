@@ -232,6 +232,19 @@ def top_modules() -> set[str]:
 
 
 @functools.lru_cache(maxsize=None)
+def owner_functions(owner: str) -> frozenset[str]:
+    """
+    Every function and method an analyzer defines, across all its modules: a call like `self.core.list_functions()`
+    in its view is its own method, not the ListFunctions operation, though the view's module doesn't define it.
+    """
+    names: set[str] = set()
+    for path in module_files(owner):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    return frozenset(names)
+
+
+@functools.lru_cache(maxsize=None)
 def owner_services(owner: str) -> frozenset[str]:
     """
     The services every module of an analyzer creates clients for, together: a module of a package that calls a
@@ -519,6 +532,7 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
         services |= owner_services(parent)
     ops = _operations(services)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    defined |= owner_functions(owner)
     # Strings that are keyword values or compared with something (engine="converse", kind == "scan") are labels,
     # not operation names handed to a client.
     labels = {id(n.value) for n in ast.walk(tree) if isinstance(n, ast.keyword)}

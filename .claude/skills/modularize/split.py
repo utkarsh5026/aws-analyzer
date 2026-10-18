@@ -149,15 +149,36 @@ def _annotations(node: ast.AST) -> list[ast.expr]:
     return hints
 
 
+def _locally_imported(node: ast.stmt) -> set[int]:
+    """
+    The name nodes a function's own import binds: `LambdaExplorer` in a method that does `from .explorer.window import
+    LambdaExplorer` (the way a lower layer reaches a higher one lazily) needs no import at the top of the module.
+    """
+    bound: set[int] = set()
+    for function in ast.walk(node):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        imported = set()
+        for sub in ast.walk(function):
+            if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                imported |= {(alias.asname or alias.name).split(".")[0] for alias in sub.names}
+        for sub in ast.walk(function):
+            if isinstance(sub, ast.Name) and sub.id in imported:
+                bound.add(id(sub))
+    return bound
+
+
 def used_names(node: ast.stmt) -> tuple[set[str], set[str]]:
     """
-    (the names a statement reads at run time, the names it reads only in type hints).
+    (the names a statement reads at run time, the names it reads only in type hints), leaving out what a function
+    imports for itself.
     """
     in_hints = {id(sub) for hint in _annotations(node) for sub in ast.walk(hint)}
+    bound_inside = _locally_imported(node)
     at_run_time: set[str] = set()
     in_hints_only: set[str] = set()
     for sub in ast.walk(node):
-        if not (isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)):
+        if not (isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load)) or id(sub) in bound_inside:
             continue
         (in_hints_only if id(sub) in in_hints else at_run_time).add(sub.id)
     return at_run_time, in_hints_only - at_run_time
@@ -182,7 +203,21 @@ def read_source(path: Path) -> Source:
         else:
             source.statements.append(Statement(statement_name(node), node, previous_end + 1))
         previous_end = node.end_lineno or node.lineno
+    _name_repeats(source.statements)
     return source
+
+
+def _name_repeats(statements: list[Statement]) -> None:
+    """
+    Give a name assigned more than once at the top level its line, `_SECRET_NAME_RE@1669`, so a plan can place each.
+    Check what a split does to them: in one file the last assignment wins for every function, wherever it is.
+    """
+    counts: dict[str, int] = {}
+    for statement in statements:
+        counts[statement.name] = counts.get(statement.name, 0) + 1
+    for statement in statements:
+        if counts[statement.name] > 1:
+            statement.name = f"{statement.name}@{statement.first_line}"
 
 
 def load_plan(path: Path) -> ModuleType:
