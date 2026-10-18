@@ -1574,7 +1574,7 @@ policy that covers every command.
 English, whether its graphs fit in the memory the nodes have, documents without a vector, vectors that repeat or are
 all zeros, and the documents nearest a question.
 
-📄 [`src/aws_analyzer/opensearch.py`](src/aws_analyzer/opensearch.py) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
+📄 [`src/aws_analyzer/opensearch/`](src/aws_analyzer/opensearch/) · 📖 [OpenSearch guide](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/opensearch-index-info-dark.webp">

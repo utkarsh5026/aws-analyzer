@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch.py` for
+through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package, split by layer: see "Architecture of a
+service package") for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
@@ -177,8 +178,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   findings show `rm -rf ...` instead).
   Bedrock `Converse` generates text and changes nothing, so its call line carries a `# read-only:` comment for
   `rules.py` (RetrieveAndGenerate and RetrieveAndGenerateStream pass as `Retrieve*`; `rules.py` maps the stream to
-  the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch.py`'s `InvokeModel`, which only embeds a
-  question. `opensearch.py` also talks to each domain's or collection's own REST API, signing requests with botocore's
+  the `bedrock:RetrieveAndGenerate` permission), and so does `opensearch`'s `InvokeModel` (in `opensearch/analyzer.py`), which only
+  embeds a question. `opensearch` also talks to each domain's or collection's own REST API, signing requests with botocore's
   `SigV4Auth` (service `es` or `aoss`) and sending them with botocore's `URLLib3Session`, so no OpenSearch client
   library is needed. `rules.py` can't see those calls: `OpenSearchAnalyzer.request()` sends GET, and POSTs only to
   `_search` / `_count` (`_READ_POSTS`), refusing anything else before it's sent, and `tests/fake_opensearch.py` fails a
@@ -649,7 +650,7 @@ Cost estimates come from module-level price tables (`S3_PRICES`, `DYNAMODB_PRICE
 `MODEL_PRICES` for $ per 1M tokens by model family, with `GLOBAL_MODEL_PRICES` for the cheaper `global.` inference
 profiles, and `SAGEMAKER_PRICES`, storage plus the hourly price of each type in `INSTANCE_TYPES`, which also holds
 its vCPUs, memory and GPUs, and `OPENSEARCH_PRICES`, EBS storage and Serverless OCUs plus the hourly price of each
-OpenSearch instance type in that file's own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
+OpenSearch instance type in `opensearch/prices.py`'s own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
 with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, and `LAMBDA_PRICES`, requests, GB-seconds
 (x86_64 and arm64), provisioned concurrency, `/tmp` and CloudWatch Logs ingestion and storage; us-east-1 list prices
 with the date they were read) that callers override with `prices={...}` (and
