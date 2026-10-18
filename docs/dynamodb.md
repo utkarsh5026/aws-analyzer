@@ -17,36 +17,42 @@ No more `{"S": ...}` and `{"N": ...}`. See items as rows, one item with every ne
   <li>Plain text outside Jupyter</li>
 </ul>
 
-Every example uses a table called `acme-app`, a single-table design that keeps customers (`sk = "PROFILE"`), their orders (`sk = "ORDER#<date>#<id>"`) and support tickets under one partition key, `CUSTOMER#<id>`. Use your own table names. The screenshots are real output from the tool, run against demo tables with synthetic data.
+The examples use `acme-app`, a single-table design: customers (`sk = "PROFILE"`), their orders (`sk = "ORDER#<date>#<id>"`) and support tickets under one partition key, `CUSTOMER#<id>`. The screenshots are the tool's real output on demo tables.
 { .muted }
 
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
 
-1. **Install the package**, in a notebook cell:
+1. **Install it** in a notebook cell:
 
     ```bash
     %pip install aws-analyzer
     ```
 
-    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
+2. **Make the view.** It uses the notebook's IAM role and region, so there's nothing to configure.
+
+    ```python
+    from aws_analyzer import DynamoDBView
+
+    ui = DynamoDBView()
+    ui.help()             # every command, grouped by task; ui.help("scan") shows one in full
+    ```
+
+</div>
+
+??? more "No internet in the notebook (VPC-only mode)?"
+
+    On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
     ```bash
     !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
     %pip install --no-index --find-links wheels aws-analyzer
     ```
 
-2. **Import it and create the view.** It uses the notebook's IAM execution role and region, so there's nothing to configure.
+??? more "Another region or profile, plain text, more columns"
 
-    ```python
-    from aws_analyzer import DynamoDBView
-
-    ui = DynamoDBView()   # uses the notebook's IAM role and region
-    ui.help()             # every command, grouped by task; ui.help("scan") shows one in full
-    ```
-
-3. **Optional:** another region or AWS profile, plain-text output, or longer tables. Tables are regional, so if `tables()` comes back empty, check the region first.
+    Tables are regional, so if `tables()` comes back empty, check the region first. Only boto3 is required; pandas is used only when you ask for a DataFrame.
 
     ```python
     from aws_analyzer import DynamoDBAnalyzer, DynamoDBView
@@ -57,36 +63,82 @@ Every example uses a table called `acme-app`, a single-table design that keeps c
     ui = DynamoDBView(progress="plain")     # a plain progress line on long scans instead of tqdm bars ("off": none)
     ```
 
+## Start here { #tour }
+
+Five questions people bring to a table, and the one line that answers each. None of them write anything.
+{ .gist }
+
+<div class="quick" markdown>
+
+-   **Which tables do I have, and what do they cost?**
+
+    ```python
+    ui.tables()
+    ```
+
+    [Your tables](#tables)
+
+-   **What's in this table? Show me some items.**
+
+    ```python
+    ui.sample("acme-app", 20)
+    ```
+
+    [Look at items](#items)
+
+-   **Everything for one customer.**
+
+    ```python
+    ui.query("acme-app", "CUSTOMER#1042")
+    ```
+
+    [One partition key](#query)
+
+-   **What attributes do the items really have?**
+
+    ```python
+    ui.schema("acme-app")
+    ```
+
+    [What the items look like](#schema)
+
+-   **Which items match a condition?**
+
+    ```python
+    ui.scan("acme-app", where={"status": "failed"})
+    ```
+
+    [Filter items](#filters)
+
+-   **I want them in pandas.**
+
+    ```python
+    df = ui.core.scan("acme-app", n=5000).to_df()
+    ```
+
+    [Use the data in Python](#python)
+
 </div>
 
-!!! note ""
+Items come back as plain Python, not DynamoDB JSON: numbers are `int` or `float`, sets are sets, maps and lists are dicts and lists. A key value is converted to the key's type, so `"42"` works for a number key.
 
-    **Only boto3 is required.** pandas (preinstalled on SageMaker) is used only when you ask for a DataFrame.
+??? more "How to read a report"
 
-## Five-minute tour { #tour }
+    Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after.
 
-The commands you'll use most. Each one prints a report under the cell; none of them change anything.
+    - **Sort** by clicking a column's header (again for the other way, a third time for the original order).
+    - **Filter** a column with a few repeated values (a status, a billing mode) to see only those rows.
+    - **Columns** lets you untick the columns you don't need.
+    - **Next** at the bottom lists two or three commands with the arguments filled in, such as `get('acme-app', 'USER#42', 'ORDER#0017')`.
 
-```python
-ui.tables()                                   # every table: key, items, size, billing, cost
-ui.table_info("acme-app")                     # indexes and how to query each, usage, backups, risks
-ui.scan("acme-app")                           # the first 20 items as a table...
-ui.more()                                     # ...and the next 20
-ui.query("acme-app", "CUSTOMER#1042")         # everything stored under one partition key
-ui.get("acme-app", "CUSTOMER#1042", "PROFILE")   # one item, nested fields laid out
-ui.schema("acme-app")                         # which attributes the items hold, and their types
-df = ui.core.scan("acme-app", n=5000).to_df() # a pandas DataFrame
-```
-
-**Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after, with status cells such as `FAILED` in colour. Click a column's header to sort by it (again for the other way, a third time for the original order), pick a value in a column's **Filter** to see only those rows (a status, a billing mode), and untick columns under **Columns** to focus on the ones you need. It's all plain HTML and CSS, so it still works when you reopen the notebook. At the bottom is a **Next** row of two or three commands with the arguments filled in from this report, such as `get('acme-app', 'USER#42', 'ORDER#0017')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. `ui.help()` lists every command by task; `ui.help("scan")` shows one in full.
-
-Items come back as plain Python, not DynamoDB JSON: numbers are `int` or `float` (not `Decimal`), sets are sets, binary is `bytes`, and maps and lists are dicts and lists. A key value is converted to the key's type, so `"42"` works for a number key.
+    One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy. It's all plain HTML and CSS, so it still works when you reopen the notebook.
 
 ## Your tables { #tables }
 
 ### Every table at a glance
 
-`tables()` describes every table in the region in parallel: status, item count, size, key, billing mode, number of indexes, and estimated monthly cost for storage and provisioned capacity. It reads no items, so it's instant however big the tables are.
+`tables()` lists every table in the region with its size, key, billing mode and monthly cost, in seconds: it reads no items.
+{ .gist }
 
 ```python
 ui.tables()
@@ -100,7 +152,10 @@ ui.tables()
 
 ### One table in detail
 
-`table_info()` shows the keys and their types, and every index with its key, what it projects, and the `query(...)` call that reads it. It adds the last 24 hours of usage from CloudWatch (read and write units, the busiest 5 minutes, throttling), TTL, the stream, point-in-time recovery, deletion protection, encryption and tags. Then it flags what's risky or wasteful: no point-in-time recovery, throttled requests, provisioned capacity far above or close to what's used.
+`table_info()` tells you how to read a table (every index with the `query(...)` call for it) and what's risky or wasteful about it.
+{ .gist }
+
+Its findings catch no point-in-time recovery, throttled requests, and provisioned capacity far above or close to what's used. It also shows the last 24 hours of usage from CloudWatch, TTL, the stream, encryption and tags.
 
 ```python
 ui.table_info("acme-app")
@@ -118,7 +173,10 @@ ui.table_info("acme-app", metrics=False)      # skip CloudWatch
 
 ### Scan and page through
 
-`scan()` shows items from the start of the table as a table: key attributes first, then the other attributes by how many items have them, and nested maps as `address.city` columns. A missing attribute is a blank cell, and an empty string shows as `""`, so you can tell them apart. `more()` continues exactly where the last page stopped.
+`scan()` shows items as a table, 20 at a time; `more()` shows the next 20. For a first look, `sample()` is better: it reads from all over the table.
+{ .gist }
+
+Keys come first, then the other attributes by how many items have them, with nested maps as `address.city` columns. A missing attribute is a blank cell and an empty string shows as `""`, so you can tell them apart.
 
 ```python
 ui.scan("acme-app")                                   # first 20 items
@@ -128,11 +186,12 @@ ui.scan("acme-app", index="by-status")                # read an index instead of
 ui.sample("acme-app", 20)                             # 20 items spread across the whole table
 ```
 
-The start of a table can all belong to a handful of partition keys, so for a first look at what a table holds, `sample()` is better: it reads a few items from each of many slices of the key space, in parallel.
+### Everything under one partition key { #query }
 
-### Everything under one partition key
+`query()` reads everything stored under one partition key, in sort-key order. It's the cheapest way to read a table.
+{ .gist }
 
-`query()` reads the items that share a partition key, in sort-key order. `sort=` narrows the sort key with a value or a condition, `index=` queries a secondary index, and `descending=True` starts from the highest sort key (the newest, for date-based keys).
+`sort=` narrows the sort key with a value or a condition, `index=` queries a secondary index, and `descending=True` starts from the newest, for date-based keys.
 
 ```python
 ui.query("acme-app", "CUSTOMER#1042")                                 # profile, orders and tickets
@@ -150,7 +209,10 @@ ui.query("acme-app", "failed", index="by-status")                     # on a glo
 
 ### One item, every field
 
-`get()` reads one item by its key and lays it out as a tree: every attribute with its DynamoDB type, maps and lists of maps expanded underneath, long text on several lines. It also shows the item's size and what it costs to read and write. Pass the key values in order, or a dict.
+`get()` lays out one item as a tree, every nested field expanded, with what it costs to read and write.
+{ .gist }
+
+Pass the key values in order, or a dict.
 
 ```python
 ui.get("acme-app", "CUSTOMER#1042", "ORDER#2026-08-14#7731")
@@ -166,33 +228,22 @@ ui.get("acme-app", "CUSTOMER#1042", "PROFILE", as_json=True)   # add a JSON copy
 
 ### PartiQL
 
-If you'd rather write SQL, `sql()` runs a PartiQL statement. `?` placeholders are filled from the extra arguments, in order.
+If you'd rather write SQL, `sql()` runs a PartiQL statement, with `?` placeholders filled from the extra arguments.
+{ .gist }
 
 ```python
 ui.sql('SELECT * FROM "acme-app" WHERE pk = ?', "CUSTOMER#1042")
 ui.sql('SELECT pk, sk, total FROM "acme-app"."by-status" WHERE status = ?', "failed")
 ```
 
-!!! warning ""
+!!! tip "Worth knowing"
 
     A `SELECT` without the partition key in its `WHERE` clause scans the whole table, and you pay for every item it reads.
 
 ## Filter items { #filters }
 
-`where=` works on `scan`, `query`, `sample`, `schema`, `value_counts`, `largest` and `count`. It takes a dict, and every condition must match:
-
-| `where=` | Means |
-|---|---|
-| `{"status": "failed"}` | `status` equals `"failed"` |
-| `{"total": (">", 100)}` | Also `"="`, `"!="`, `"<"`, `"<="` and `">="` |
-| `{"total": ("between", 10, 100)}` | Both ends included |
-| `{"sk": ("begins_with", "ORDER#")}` | Starts with |
-| `{"tags": ("contains", "vip")}` | A substring, or a member of a set or list |
-| `{"status": ("in", ["pending", "failed"])}` | Any of these values |
-| `{"shipped_at": ("not_exists",)}` | The attribute is missing. Also `("exists",)`, and `("type", "N")` to check the stored type |
-| `{"address.city": "Pune"}` | Dots reach into maps |
-
-For `OR` and `NOT`, pass a boto3 condition instead: `where=Attr("status").eq("failed") | Attr("total").gt(500)`, with `from boto3.dynamodb.conditions import Attr`.
+`where=` filters items with a plain dict, on `scan`, `query`, `sample`, `schema`, `value_counts`, `largest` and `count`.
+{ .gist }
 
 ```python
 ui.scan("acme-app", 10, where={"status": "failed", "total": (">", 300)},
@@ -205,17 +256,35 @@ ui.scan("acme-app", 10, where={"status": "failed", "total": (">", 300)},
 A filter runs after DynamoDB reads the items, so you pay for everything read, not just what matches.
 ///
 
-If you search by an attribute often, a `query` on a key or a global index is far cheaper than a filtered scan. A filtered `ui.scan` reads at most 100,000 items per page (`scan_limit=`); `more()` continues from there.
+!!! tip "Worth knowing"
+
+    A filter runs after DynamoDB reads the items, so you pay for everything read, not just what matches. If you search by an attribute often, a `query` on a key or a global index is far cheaper.
+
+??? more "Every condition `where=` takes, and OR / NOT"
+
+    Every condition in the dict must match:
+
+    | `where=` | Means |
+    |---|---|
+    | `{"status": "failed"}` | `status` equals `"failed"` |
+    | `{"total": (">", 100)}` | Also `"="`, `"!="`, `"<"`, `"<="` and `">="` |
+    | `{"total": ("between", 10, 100)}` | Both ends included |
+    | `{"sk": ("begins_with", "ORDER#")}` | Starts with |
+    | `{"tags": ("contains", "vip")}` | A substring, or a member of a set or list |
+    | `{"status": ("in", ["pending", "failed"])}` | Any of these values |
+    | `{"shipped_at": ("not_exists",)}` | The attribute is missing. Also `("exists",)`, and `("type", "N")` to check the stored type |
+    | `{"address.city": "Pune"}` | Dots reach into maps |
+
+    For `OR` and `NOT`, pass a boto3 condition instead: `where=Attr("status").eq("failed") | Attr("total").gt(500)`, with `from boto3.dynamodb.conditions import Attr`. A filtered `ui.scan` reads at most 100,000 items per page (`scan_limit=`); `more()` continues from there.
 
 ## What the items look like { #schema }
 
-DynamoDB doesn't store a schema, so `schema()` works one out from about 1,000 items spread across the table. For every attribute, and every field inside a map, it shows:
+DynamoDB doesn't store a schema, so `schema()` works one out from about 1,000 items: every attribute, its types, and how many items have it.
+{ .gist }
 
-- its type, or the mix of types when items disagree;
-- how many items have it;
-- how many distinct values it takes, a few examples, and the range of numbers or lengths.
-
-The key patterns turn key values into shapes, such as `ORDER#<date>#<number>`, so the entity types of a single-table design stand out. Findings point at data problems: one attribute stored with different types, empty strings, items close to the 400 KB limit, and attribute names built from data.
+- **Data problems** are findings: one attribute stored with different types, empty strings, items close to the 400 KB limit, and attribute names built from data.
+- **Key patterns** turn key values into shapes, such as `ORDER#<date>#<number>`, so the entity types of a single-table design stand out.
+- **Each attribute** shows its distinct values, a few examples, and the range of numbers or lengths, down into maps.
 
 ```python
 ui.schema("acme-app")
@@ -231,7 +300,10 @@ ui.schema("acme-app", n=5000, max_depth=3)                        # more items, 
 
 ## Values and sizes { #values }
 
-`value_counts()` counts each value of an attribute, with the size of the items that hold it. On the partition key, each count is the size of one item collection, so hot or oversized partitions stand out. It reads the first 10,000 items unless you pass `limit=None`.
+`value_counts()` counts each value of an attribute. On the partition key, it shows hot or oversized partitions.
+{ .gist }
+
+It reads the first 10,000 items unless you pass `limit=None`, and shows the size of the items holding each value.
 
 ```python
 ui.value_counts("acme-app", "status")
@@ -250,6 +322,8 @@ ui.largest("acme-app")                                  # the 10 biggest items, 
 ui.count("acme-app", where={"status": "pending"})       # exact count: a full scan
 ui.count("acme-app")                                    # next to DynamoDB's own estimate
 ```
+
+<p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, large tables and cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
 

@@ -17,7 +17,7 @@ description: "How to click through Amazon S3 buckets and folders like a file exp
   <li>Plain text outside Jupyter</li>
 </ul>
 
-Every example uses a bucket called `acme-ml-data`; use your own bucket names. The screenshots are the real explorer in JupyterLab, run against a demo bucket with synthetic data. For reports you run from code (costs, search, duplicates, lifecycle rules, deleted files), see the [S3 guide](s3.md).
+The examples use a bucket called `acme-ml-data`, and the screenshots are the real explorer in JupyterLab on a demo bucket. For reports you run from code (costs, duplicates, lifecycle rules, deleted files), see the [S3 guide](s3.md).
 { .muted }
 
 ![S3Explorer in a notebook, animated: it starts on the list of four buckets; the pointer opens acme-ml-data, then curated, features and churn, and clicks train.parquet, whose preview appears on the right with its row, column and row-group counts and first rows; then it clicks acme-ml-data in the path at the top, opens docs and clicks a Word model card, which appears on the right laid out with its title, headings and bullet points; last it opens training, turns on Include subfolders and clicks the .tar chip, and the list shows each model.tar.gz below with the training run it came from](images/explorer-tour-light.webp#only-light){ width="984" height="586" loading=lazy }
@@ -28,24 +28,15 @@ Every example uses a bucket called `acme-ml-data`; use your own bucket names. Th
 
 ## Set up in SageMaker { #setup }
 
-The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AWS calls all come from it, and both come in the package.
-
 <div class="steps" markdown>
 
-1. **Install the package**, in a notebook cell (`[all]` adds what the previews use: pandas, pyarrow, the PDF and Excel readers):
+1. **Install it** in a notebook cell (`[all]` adds what the previews use: pandas, pyarrow, the PDF and Excel readers):
 
     ```bash
     %pip install "aws-analyzer[all]"
     ```
 
-    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
-
-    ```bash
-    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
-    %pip install --no-index --find-links wheels aws-analyzer
-    ```
-
-2. **Open the explorer.** It uses the notebook's IAM execution role, so there's nothing to configure.
+2. **Open the explorer.** It uses the notebook's IAM role, so there's nothing to configure.
 
     ```python
     from aws_analyzer import S3Explorer
@@ -55,7 +46,18 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
     S3Explorer("s3://acme-ml-data/curated/features/churn/train.parquet")   # a file's folder, with the file shown
     ```
 
-3. **Optional:** another AWS profile or region, a fixed height, or bigger zips:
+</div>
+
+??? more "No internet in the notebook (VPC-only mode)?"
+
+    On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
+
+    ```bash
+    !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
+    %pip install --no-index --find-links wheels aws-analyzer
+    ```
+
+??? more "Another profile or region, a fixed height, bigger zips"
 
     ```python
     from aws_analyzer import S3Analyzer
@@ -67,17 +69,39 @@ The explorer builds on [`s3.py`](s3.md): the previews, the formatting and the AW
     S3Explorer(downloads="~/scratch/s3")             # save downloads and zips there (default: s3-downloads)
     ```
 
+    It needs boto3 and ipywidgets, both on SageMaker already. Without ipywidgets, or outside Jupyter, each folder prints as a table instead (see [without the window](#text)). A preview that needs a package that isn't installed says which one.
+
+## Start here { #start }
+
+Three things to try in your first minute. Nothing you click changes anything in S3.
+{ .gist }
+
+<div class="quick" markdown>
+
+-   **Look inside a file**
+
+    Open a bucket, open its folders, click a file. Its first rows, pages or contents show on the right.
+
+    [Look inside a file](#files)
+
+-   **Find every file of one type**
+
+    Type `.parquet` in the search box and turn on **Include subfolders**.
+
+    [Find files](#search)
+
+-   **Take some files home**
+
+    Tick them, click **⬇ Download selected**, then download the zip from JupyterLab's file browser.
+
+    [Download some files](#select)
+
 </div>
-
-!!! note ""
-
-    **boto3 and ipywidgets.** Both are preinstalled on SageMaker (Studio and notebook instances). Without ipywidgets, or outside Jupyter, each folder prints as a table instead, and `open()` moves around (see [without the window](#text)).
-
-    Files are read by `s3.py`'s `preview`, so they need the same optional packages: pandas and pyarrow for tables (preinstalled on SageMaker), and for Excel files, PDF text and PDF pages `%pip install openpyxl pypdf pypdfium2 pillow`. A preview that needs a package that isn't installed says which one.
 
 ## Find your way around { #browse }
 
-The toolbar is at the top, the folder you're in on the left under a search box, and on the right whatever you clicked. The bar at the bottom counts what's listed and shows where you are.
+The folder you're in is on the left, whatever you clicked on the right. Click folders to go down, the path at the top to go back up.
+{ .gist }
 
 ![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-light.webp#only-light){ width="984" height="587" loading=lazy }
 ![S3Explorer: a toolbar with back, forward, up and refresh buttons, the path acme-ml-data › curated › features › churn, and edit and settings buttons; on the left a search box, All, Folders and Files buttons and Include subfolders over three parquet files with sizes and ages, train.parquet highlighted; on the right Preview, Details, Download and Open in new tab buttons over the preview of train.parquet with row, column and row-group counts and the first rows](images/explorer-dark.webp#only-dark){ width="984" height="587" loading=lazy }
@@ -92,13 +116,18 @@ The folder on the left, the file you clicked on the right. One click on the path
 - **Page through** a long list with **«** **‹** **›** **»** under it. The list shows 100 rows at a time, and the bar says which ones, of how many: `2,401–2,500 of 3,000`.
 - **The bar at the bottom** counts the folders and files listed and adds up their size. On the right it shows the path of the folder you're in, or of the file you clicked; one click selects it, ready to copy.
 
-Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
+??? more "What the icons mean, and what the right shows before you click a file"
 
-Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **Include subfolders** [counts everything below](#search), and **📊 What's in here** [adds it all up](#folders).
+    Each file's icon says what it is: 📊 tables (CSV, Parquet, Avro...), 📗 Excel, 📕 PDF, 📘 Word, 📙 PowerPoint, 📋 JSON, YAML and other config, 🖼️ pictures, 🎵 audio, 🎬 video, 📦 archives, 🧠 models, 🔢 NumPy arrays and 📓 notebooks. ❄ marks a file in [Glacier](#archived).
+
+    Until you click a file, the right shows what the folder holds, from the listing it already has: how many folders and files, their size, the newest file, how many are archived, and the file types by size. These numbers cover the files at this level; **Include subfolders** [counts everything below](#search), and **📊 What's in here** [adds it all up](#folders).
 
 ## Find files { #search }
 
-Above the list are a search box and the buttons that narrow it. They cover the whole folder, not only the rows on screen or the first page S3 returns: a big folder is [listed in the background](#big) as soon as it opens. Typing doesn't ask S3 for anything, and they combine: the `.csv` files whose names have `2025` in them, below this folder.
+Type part of a name, or a file type like `.csv`, to narrow the list. It searches the whole folder, not only the rows on screen.
+{ .gist }
+
+A big folder is [listed in the background](#big) as soon as it opens, and typing doesn't ask S3 for anything.
 
 ![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-light.webp#only-light){ width="984" height="587" loading=lazy }
 ![S3Explorer in the training folder with .tar in the search box and Include subfolders on: chips for .pt (600 files), .tar (13, lit) and .json (12); the list shows each model.tar.gz with the training run folder it's in, its size and age; on the right 38 folders and 625 files below, 1.0 TB, and the file types below](images/explorer-search-dark.webp#only-dark){ width="984" height="587" loading=lazy }
@@ -117,7 +146,10 @@ When nothing matches, the note under the list says why and offers the fix: **Sea
 
 ## Look inside a file { #files }
 
-Click a file and the right shows what's inside it, read by the same [`preview`](s3.md#files) as the S3 reports: a table's first rows, a Parquet file's schema and row groups, a JSON file's fields, a PDF's first pages as they look, a Word file laid out with its pictures, a picture, an archive's contents, a model's tensors. Every [file type `s3.py` reads](s3.md#file-types) works here. The buttons above it do the rest:
+Click a file and the right shows what's inside it: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents.
+{ .gist }
+
+Every [file type `s3.py` reads](s3.md#file-types) works here. The buttons above it do the rest:
 
 | Button | What it does |
 | --- | --- |
@@ -130,7 +162,7 @@ Click a file and the right shows what's inside it, read by the same [`preview`](
 | **▾ Expand all** | For a JSON file: opens every object and array in the tree at once, instead of a click on each. It stays on for the next JSON files you open, until you click it again. Long strings stay collapsed to their start; click one to read it |
 | **✕** | Closes the file and shows the folder again |
 
-Clicking through files doesn't wait. In a notebook, previews and details load in the background: each click shows its file as soon as it's read, and files you clicked past are skipped instead of holding you up. Reports you've opened are kept, so going back to a file shows it at once; **↻** reads the folder and its files again.
+Clicking through files doesn't wait: previews load in the background, and files you clicked past are skipped.
 
 ![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-light.webp#only-light){ width="984" height="587" loading=lazy }
 ![S3Explorer in the docs folder: a PDF, a Word file and a PowerPoint deck on the left, the Word model card highlighted; on the right its word, paragraph, heading, table and picture counts, title and author, and the document laid out with its headings and lists](images/explorer-docx-dark.webp#only-dark){ width="984" height="587" loading=lazy }
@@ -140,9 +172,10 @@ A Word file's first paragraphs; **📖 Read all** shows the whole document, pict
 
 ### Read a PDF, as it looks or as text { #pdf }
 
-**📖 Read all** on a PDF shows its pages as they look, 20 at a time, with each page's text folded underneath. Buttons under the last page show the 20 before and after. Click a page to see it as big as the notebook: **‹** **›** step to the pages before and after, and **✕** (or a click on the page) goes back.
+**📖 Read all** shows a PDF's pages as they look; **📄 Text** shows its words laid out to read, without the headers and page numbers on every page.
+{ .gist }
 
-**📄 Text** shows its words instead, 50 pages at a time, laid out to read like a web page: headings (from the font sizes), paragraphs joined back up from the PDF's lines, bullet and numbered lists, and a thin line where each page starts. The running headers, footers and page numbers are left out, and a note under the text says which. It's the quickest way to read a long report, or to check what a knowledge base or a model will get from a PDF. A page without text (a scan) says so; **📖 Read all** shows it as a picture. A PDF only places lines of text on a page, so the layout is worked out: lists drawn as shapes read as a paragraph, and a table reads as one line per row (see [the S3 guide](s3.md#documents)).
+Click a page to see it as big as the notebook, with **‹** **›** to step through. **📄 Text** is the quickest way to read a long report, or to check what a knowledge base or a model will get from a PDF.
 
 ![S3Explorer in the docs folder with the data retention policy PDF highlighted and 📄 Text pressed; on the right its page and word counts, title and author, then the policy laid out to read under a thin Page 1 line: its title, a paragraph, a heading and a bulleted list](images/explorer-pdf-text-light.webp#only-light){ width="984" height="587" loading=lazy }
 ![S3Explorer in the docs folder with the data retention policy PDF highlighted and 📄 Text pressed; on the right its page and word counts, title and author, then the policy laid out to read under a thin Page 1 line: its title, a paragraph, a heading and a bulleted list](images/explorer-pdf-text-dark.webp#only-dark){ width="984" height="587" loading=lazy }
@@ -150,11 +183,18 @@ A Word file's first paragraphs; **📖 Read all** shows the whole document, pict
 **📄 Text** on a two-page PDF: the words to read, without the header and page numbers repeated on every page.
 ///
 
-**📄 Text** needs `pypdf`, and drawing the pages also needs `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, the button says what to install. Word and PowerPoint files need nothing extra.
+??? more "Pages 20 at a time, scans, and what it needs"
+
+    **📖 Read all** shows 20 pages at a time, each page's text folded underneath; buttons under the last page show the 20 before and after. **📄 Text** shows 50 pages at a time. A page without text (a scan) says so, and **📖 Read all** shows it as a picture. A PDF only places lines of text on a page, so the layout is worked out: lists drawn as shapes read as a paragraph, and a table reads as one line per row (see [the S3 guide](s3.md#documents)).
+
+    **📄 Text** needs `pypdf`, and drawing the pages also needs `pypdfium2` and `pillow` (`%pip install pypdf pypdfium2 pillow`); without them, the button says what to install. Word and PowerPoint files need nothing extra.
 
 ### Files in Glacier { #archived }
 
-Files in GLACIER or DEEP_ARCHIVE are marked ❄, and can't be read until they're restored. Opening one says how long a restore takes (3 to 5 hours for GLACIER, up to 12 for DEEP_ARCHIVE) and shows the command that makes it readable for 7 days, ready to copy:
+Files marked ❄ are in Glacier and can't be read until they're restored. Opening one shows the restore command, ready to copy.
+{ .gist }
+
+A restore takes 3 to 5 hours for GLACIER and up to 12 for DEEP_ARCHIVE, and keeps the file readable for 7 days:
 
 ```bash
 aws s3api restore-object --bucket acme-ml-data --key raw/2021/events.csv \
@@ -165,7 +205,8 @@ The explorer never runs it: a restore costs a retrieval fee, so that's your call
 
 ## Folders and buckets { #folders }
 
-The buttons above the right pane change with where you are:
+The buttons above the right pane change with where you are: a summary of a folder, a bucket's settings, or every bucket side by side.
+{ .gist }
 
 | Where | Button | What it shows |
 | --- | --- | --- |
@@ -182,21 +223,27 @@ The buttons above the right pane change with where you are:
 
 ### Download a folder as a .zip { #zip }
 
-**⬇ Download .zip** packs everything below the folder you're in into one `.zip` in [`s3-downloads`](s3.md#downloads), next to the notebook, named after the folder. First it checks, like [`download_zip()`](s3.md#download), that the folder is within 100 MB and 10,000 files, that there's room on the disk and in memory, and that you can read the files. If a check fails, it says which and writes nothing. Files in Glacier are left out, and the report says how many. To get the zip onto your computer, right-click it in JupyterLab's file browser and choose **Download**.
+**⬇ Download .zip** packs the folder you're in into one `.zip` next to the notebook. Right-click it in JupyterLab's file browser and choose **Download**.
+{ .gist }
 
-**⚙** at the top right changes the limits and the folder downloads and zips go to (Enter in a box saves, like **Save**). They last until the kernel restarts. To start with others:
+First it checks, like [`download_zip()`](s3.md#download), that the folder is within 100 MB and 10,000 files and that there's room; if a check fails, it says which and writes nothing.
 
-```python
-x = S3Explorer(zip_max_size="2GB")   # folders up to 2 GB
-x.zip_max_files = 50_000             # and up to 50,000 files
-x.downloads = "~/zips"               # where ⬇ Download and the zips save; made with the first one
-```
+??? more "Bigger limits, another folder, and cleaning up"
 
-The folder is the same one `S3View`'s [`download()`](s3.md#downloads) uses, so `x.ui.downloads()` in a cell lists what you've downloaded and how much disk it takes, and `x.ui.clean_downloads()` deletes it.
+    **⚙** at the top right changes the limits and the folder downloads and zips go to (Enter in a box saves, like **Save**). They last until the kernel restarts. To start with others:
+
+    ```python
+    x = S3Explorer(zip_max_size="2GB")   # folders up to 2 GB
+    x.zip_max_files = 50_000             # and up to 50,000 files
+    x.downloads = "~/zips"               # where ⬇ Download and the zips save; made with the first one
+    ```
+
+    The folder is the same one `S3View`'s [`download()`](s3.md#downloads) uses, so `x.ui.downloads()` in a cell lists what you've downloaded and how much disk it takes, and `x.ui.clean_downloads()` deletes it. Files in Glacier are left out of a zip, and the report says how many.
 
 ### Download some files { #select }
 
-To download a few files and not the whole folder, tick them and zip them together:
+Tick a few files, or a search's worth, and download them as one zip.
+{ .gist }
 
 <div class="steps" markdown>
 
@@ -212,11 +259,16 @@ To download a few files and not the whole folder, tick them and zip them togethe
 Five files ticked, one `.zip` with a name that says what's in it.
 ///
 
-The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it.
+??? more "How the zip is laid out, and doing it from code"
+
+    The zip holds the files as they're laid out below the folder they share, so files from different folders keep their paths and never clash. It goes through the same checks as a folder's (size, file count, disk space and read access), and [**⚙**](#zip) sets the same limits. Opening another folder starts a new selection; the search, the sort and **↻** keep it. From code, `x.picked` lists what's ticked, and `x.ui.download_zip(x.picked)` zips it.
+
+<p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: big folders, driving the explorer from code, permissions, troubleshooting and every argument.</p>
 
 ## Big folders { #big }
 
 The explorer lists one level at a time, never the whole bucket, so a folder opens in a moment even in a bucket of billions of files.
+{ .gist }
 
 - S3 lists a folder 1,000 entries per request. The explorer shows the first 1,000 at once, then lists the rest in the background, up to 10,000 entries (about a second per few thousand). Meanwhile you can click, sort and search; each page that comes in updates the list, the counts, the type chips and your search, and the bar at the bottom says **Listing…** with a spinner. Opening another folder stops it, and coming back carries on from where it stopped.
 - So the search, the sort and the counts cover the whole folder: a file that's the 2,500th in S3's order is found by typing part of its name, and **Size** puts the biggest file in the folder on top, not the biggest of the first 1,000.
