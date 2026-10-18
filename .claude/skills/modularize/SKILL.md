@@ -177,10 +177,26 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
       - `DOCS`: each module's docstring;
       - `REEXPORT_KIT`: the public `_kit` names the old module imported, which `__init__` keeps exporting.
 
-      To list the statements, run `split.py` with an empty plan: it names the ones not placed. A class over the limit
-      needs splitting into mixins first (decision 5), so it's several statements before the plan can place it.
-   2. **Split** the file as it was before step 3 (`git show HEAD~1:src/aws_analyzer/$S.py`), so its imports have
-      their original depth:
+      To list the statements, run `split.py` with an empty plan: it names the ones not placed. A name assigned twice
+      at the top level is named with its line, `_SECRET_NAME_RE@1669`. In one file the last assignment wins for every
+      function, so check what giving each half its own module changes before you place them.
+   2. **A class over the limit becomes mixins first** (decision 5), with `mixins.py`. Add `MIXINS` to the same plan:
+      the class, then each mixin's name, docstring and members, in the order they go in its bases. Keep `__init__`
+      and anything that calls `super()` on the class. Then split its output instead of the file:
+
+      ```bash
+      python .claude/skills/modularize/mixins.py "$SCRATCH/$S.py" "$SCRATCH/$S_plan.py" "$SCRATCH/$S-mixed.py"
+      ```
+
+      The mixins are top-level classes now, so the plan places them like any other statement. Compare the sorted
+      non-blank lines of the two files: only the mixins' headers and docstrings, and the class's new bases, should be
+      new.
+   3. **A lower layer that has to reach a higher one at run time** imports it inside the function, and that's the
+      one line a split may add. It happens when the View opens the window (`from .explorer.window import
+      LambdaExplorer` in `LambdaView.explore()`). Make the edit in the scratch copy before splitting, and say so in
+      the commit. `split.py` doesn't ask for a top-level import of a name a function imports itself.
+   4. **Split** the file as it was before step 3 (`git show HEAD~1:src/aws_analyzer/$S.py`), so its imports have
+      their original depth, with the edits from 2 and 3 applied:
 
       ```bash
       python .claude/skills/modularize/split.py "$SCRATCH/$S.py" "$SCRATCH/$S_plan.py" "$SCRATCH/$S-out"
@@ -188,10 +204,13 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
 
       It moves each statement verbatim with the comments above it, drops the `# ====` banners, writes each module's
       imports from the names it reads (relative ones for its own package), and stops if a module would read a name
-      from a later one at run time. Fix that by reordering the plan.
-   3. **Put the output in place** of `src/aws_analyzer/$S/`. Then remove the imports it wrote generously:
+      from a later one at run time. Fix that by reordering the plan, or by moving the statement next to what it
+      reads: a dataclass whose property calls an analysis function belongs in that analysis module, not in
+      `models.py`. Otherwise `models` and `analysis` would import each other. To see every such dependency at once,
+      not one per run, loop over the plan with `split.py`'s `read_source`, `defined_names` and `used_names`.
+   5. **Put the output in place** of `src/aws_analyzer/$S/`. Then remove the imports it wrote generously:
       `ruff check src/aws_analyzer/$S --select F401 --fix`.
-   4. **Print the config entries** each module needs, and replace the one entry in `ruff.toml` and in
+   6. **Print the config entries** each module needs, and replace the one entry in `ruff.toml` and in
       `COMMENTS_LEFT` with them:
 
       ```bash
@@ -199,14 +218,18 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
       ```
 
       Use the old entry's rules. Then take `$S` off `LONG_FILES`.
-   5. **Check:** `ruff check .`, `python .claude/skills/check/rules.py` and
+   7. **Check:** `ruff check .`, `python .claude/skills/check/rules.py` and
       `python -m pytest tests/test_$S.py tests/test_package.py tests/test_style.py -k "not docstrings" -q`.
 
 5. **Fix the tests and scripts that reached into the old file:**
    - `monkeypatch.setattr(lfmod, "_RUN_LINES", 6)` must now patch the module that *reads* the name
      (`from aws_analyzer.lambda_functions.explorer import logs as logs_tab`). Patching the package's re-export changes
      nothing, and the test then passes or fails for the wrong reason.
-   - Private names a test imports come from their new module.
+   - Private names a test imports come from their new module. Import the submodules under names that can't clash
+     with a test's local variables (`stylemod`, `wiring_block`, `logs_tab`): ruff's F823 catches a local that
+     shadows one.
+   - A test that swaps a name by assignment (`lfmod.map_package = held_back`) swaps it on the module that looks it
+     up, the same as a monkeypatch.
    - Do the same in `.claude/skills/demo/*.py` and in `snapshot.py`'s `DEMO_CASES`.
 
    Test files keep their names (`tests/test_$S.py`). Splitting them is a separate change.
@@ -291,7 +314,17 @@ opensearch/
   `aws_analyzer.opensearch.style`. There are no monkeypatches to re-target. `tests/fake_opensearch.py` and demo.py's
   `seed_opensearch()` use public names only, but grep them anyway.
 
-### `lambda_functions` (11,890 lines) — second, the full pilot
+### `lambda_functions` (11,890 lines) — second, the full pilot, done
+
+The layout below was the plan. What it became is `plans/lambda_functions.py` (34 modules, the largest `view.py` at
+1,450 lines). It differs in these ways:
+- `prices.py` holds the price table.
+- `analysis/text.py` holds the findings' wording helpers (`_window`, `_cli`).
+- `analysis/overview.py` holds `Overview`.
+- `LogRun` / `LogPage` live in `analysis/logs.py`, the code map's dataclasses in `analysis/codemap/model.py`, and the
+  graph's in `analysis/codemap/graph.py`: each next to the functions its properties call.
+- `analysis/codemap/` has `terms.py` (what the reader knows) and `syntax.py`.
+- The explorer is `frame.py`, `widgets.py`, a module per tab and `window.py`.
 
 It has every kind of front-end (View, explorer, agent tools), so it proves what OpenSearch couldn't: mixins, an
 explorer, blocks, and decision 7.
@@ -422,9 +455,9 @@ Update this table in each step's PR.
 
 | Step | Status | PR | Notes |
 |---|---|---|---|
-| Phase 0: tooling | in review | #97 | branch `modularize/tooling` |
-| opensearch | in review | #98 | stacked on #97; plan in `plans/opensearch.py` |
-| lambda_functions | not started | | second pilot: mixins, explorer, blocks, decision 7 |
+| Phase 0: tooling | done | #97 | branch `modularize/tooling` |
+| opensearch | done | #98 | plan in `plans/opensearch.py` |
+| lambda_functions | in review | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | not started | | |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
@@ -453,6 +486,28 @@ Update this table in each step's PR.
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
 
+- **lambda_functions:**
+  - **Some dataclasses call analysis functions** in their properties (`Overview` reads `function_monthly_cost`,
+    `LogPage` reads `split_runs`). In one file that works because names are looked up when they're called. Split
+    apart, `models` and `analysis` would import each other. They moved next to the functions they call, which keeps
+    the layers acyclic without changing a line. Expect the same in every big service.
+  - **A name was assigned twice at the top level.** `_SECRET_NAME_RE` was the environment-variable pattern for
+    `secret_like()` and, 1,200 lines later, the code reader's. The second won everywhere. The two patterns match the
+    same names, so giving each its own module changed nothing, but check this every time. Follow-up: one pattern,
+    one name.
+  - **Mixins by tab worked.** `LambdaExplorer`'s methods were already grouped by tab, so each mixin is a run of
+    them, and a constant only one tab reads moved into that tab's module. A test then patches it there
+    (`logs_tab._RUN_LINES`). Rules now check the explorer's public commands, and they already had `@_window_errors`.
+  - **Reaching up a layer took one lazy import**, in `LambdaView.explore()`. It's the only line in the split that
+    isn't a move.
+  - **The OpenSearch PR left a dead link** in README's services table (`opensearch.py`). Grep README for the old file
+    name, not only the line the recipe names.
+  - **`rules.py --apis` showed a false `lambda:ListFunctions` in `view.py`.** The view calls
+    `self.core.list_functions()`, the analyzer's own method, and the check skipped method names only when the same
+    file defined them. It now reads every function the package defines (`owner_functions`). If a split's API list
+    gains a line in a UI module, look for the same thing before anything else.
+  - **`view.py` is 1,450 lines**, close to the limit. The next command that grows it should split it into
+    `_<Topic>Commands` mixins by `_GROUPS`.
 - **opensearch:**
   - **One commit for the whole split, not one per module.** Code moved by `split.py` changes in no other way, and
     the snapshot checks every module at once. The recipe (step 4) now says so.

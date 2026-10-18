@@ -184,7 +184,7 @@ searches, and opens the Syncs tab. `--out <folder>` writes PNGs there instead, t
 .venv/bin/python .claude/skills/demo/kb_explorer_shots.py kb-explorer-chunks  # just this one
 ```
 
-The Lambda explorer (`lambda_functions.py`'s `explore()`) works the same way: `lambda_explorer_shots.py` opens it on
+The Lambda explorer (`lambda_functions`' `explore()`) works the same way: `lambda_explorer_shots.py` opens it on
 demo.py's Lambda functions, reads the Functions tab, opens orders-etl's Overview (scrolled to how it's wired), its Logs
 over the last 24 hours with a failed run open, searches them for AccessDenied, opens the Errors and Code tabs, and
 picks report-api for its JSON logs. Its figures are `lambda-explorer*`, in `docs/lambda_functions.md`.

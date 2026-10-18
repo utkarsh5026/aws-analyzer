@@ -394,9 +394,9 @@ AWS Lambda
         regions: 'us-east-1,eu-west-1' or 'all'; empty for the default regions.
         """
         core = self.analyzer
-        start, end = core._window(since or "24h", until or None)
+        start, end = core.time_range(since or "24h", until or None)
         ov = core.overview(match or None, regions=self._regions(regions), metrics=False, details=False)
-        found, read, _, errors = core._numbers(ov.functions, since=start, until=end)
+        found, read, _, errors = core.overview_numbers(ov.functions, since=start, until=end)
         self._count_metrics(read, core.prices["metric_request"])
         out = summarize_health(ov.functions, found, start, end, ov.regions, {**ov.errors, **errors})
         failed = out["failed"]
@@ -532,7 +532,7 @@ AWS Lambda
         """
         core = self.analyzer
         log_days = self.budget.log_days
-        start, end = core._window(since or "24h", until or None)
+        start, end = core.time_range(since or "24h", until or None)
         days = (end - start).total_seconds() / 86400
         if days > log_days + 1e-9:
             stored = None
