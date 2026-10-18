@@ -23,6 +23,13 @@ read-only tools built on `LambdaAnalyzer` and `S3Analyzer` (see "The agent" belo
 than a file, because it grows by toolkits (one module per AWS service it has tools for) and by capabilities of the
 agent itself, each in its own module.
 
+## In progress: each service becomes a package
+
+The service modules are being split into packages (core: `helpers`, `models`, `analysis`, `analyzer`; UI: `style`,
+`blocks`, `view`, `explorer`), one service per PR, with no change a user can see. The plan, the rules each step keeps,
+the recipe and the progress table are in `.claude/skills/modularize/SKILL.md` (`/modularize`). Read it before
+changing a service that the table shows as started.
+
 ## Product goal: help the user decide what to do
 
 The tool should be simple to use, and its output should help the user decide what to do next. It should not just
@@ -660,6 +667,30 @@ Both Bedrock analyzers make their clients with the base's `_cached_client` (once
 read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions.py`'s
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and
 `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
+
+## Architecture of a service package
+
+A service that has been split (see the progress table in `.claude/skills/modularize/SKILL.md`) is a package
+`src/aws_analyzer/<service>/` instead of one file. Each of the five sections above becomes modules: the core is
+`helpers`, `models`, `analysis` (or an `analysis/` package by topic) and `analyzer`, plus the service's own core
+modules. The UI is `style` (`_ROOT`, `_CSS`, `_BADGE`, `_render_html`), `blocks`, `view` and `explorer`. The package's
+`__init__.py` holds the old module docstring, re-exports every public name and lists them in `__all__`, so
+`from aws_analyzer.<service> import ...` doesn't change. Private names live in the module that defines them, so
+tests import and patch them there.
+
+`rules.py` checks what keeps the layers apart:
+
+- The core never imports the UI. That covers the package's UI modules and `_kit`'s `blocks`, `render`, `view`,
+  `window`, `progress`, `highlight` and `jsontree`; `render._call` / `_signature` are allowed.
+- `analysis` never imports `analyzer`.
+- No function or class is defined in two modules of a package.
+- Every `*View`, `*Explorer`, `_<Topic>Commands` and `_<Topic>Tab` class (a View or window split into mixins) has
+  its public commands guarded and documented.
+- The read-only check reads the clients every module of the package makes.
+- `agent/` reaching into an analyzer's private names is a warning.
+
+`tests/test_style.py` keeps modules under `MAX_MODULE_LINES` (1,500), except the files in `LONG_FILES` that haven't
+been split yet.
 
 ## The agent (`agent/`)
 

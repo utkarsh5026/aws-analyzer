@@ -22,18 +22,26 @@ Errors (exit 1):
     (help() lists the docstring's first line), or one that prints / displays directly instead of building blocks
     for self._show()
   - print() outside the View class (the analyzer and the pure functions never print)
+  - in an analyzer that is a package (a service split into one, see .claude/skills/modularize): a core module
+    importing the UI (its package's style / blocks / view / explorer / window, or _kit's blocks, render, view,
+    window, progress, highlight or jsontree; render's _call and _signature are allowed), its analysis importing its
+    analyzer, a function or class defined in two of its modules, and the command checks above on its *Explorer and
+    on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab). Its AWS calls are checked against
+    the clients every module of the package makes.
 Warnings:
   - PartiQL (execute_statement and friends) can write; it needs a guard that only lets SELECT through, marked
     with a `# read-only: <why>` comment on the call's line
   - a function-level import of a third-party package other than IPython (use _require(module, purpose))
   - a public View method not annotated `-> None`
   - an AWS operation whose IAM permission isn't in README.md
+  - a companion package (agent/) reaching into a private name of an analyzer it builds on (core._window)
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import re
 import sys
 from pathlib import Path
@@ -54,6 +62,11 @@ COMPANIONS = {"s3_explorer": ("s3",), "agent": ("lambda_functions", "s3")}
 SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}  # the agent shows its answers with _bedrock's _Answer
 # An analyzer can be a package (agent/): its modules are checked like an analyzer's file, as one analyzer.
 PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")}
+UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
+KIT_UI = {"blocks", "render", "view", "window", "progress", "highlight", "jsontree"}
+CORE_FROM_RENDER = {"_call", "_signature"}
+MIXIN_RE = re.compile(r"_\w+(Commands|Tab)$")
+REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
                  "Retrieve")
@@ -196,17 +209,212 @@ def kit_names() -> dict[str, str]:
     return names
 
 
+def module_files(name: str) -> list[Path]:
+    """
+    The files of a module of the package, by its name there: [s3.py] for a file, every module of a package (agent/,
+    _bedrock/ once it's one), its __init__.py included. Empty for a name that isn't there.
+    """
+    path = ANALYZERS / f"{name}.py"
+    if path.exists():
+        return [path]
+    if (ANALYZERS / name / "__init__.py").exists():
+        return sorted(p for p in (ANALYZERS / name).rglob("*.py") if "__pycache__" not in p.parts)
+    return []
+
+
+def top_modules() -> set[str]:
+    """
+    The name of every module directly in the package, a file or a package, except _kit, which every analyzer imports.
+    """
+    files = {p.stem for p in ANALYZERS.glob("*.py")} - {"__init__"}
+    packages = {p.parent.name for p in ANALYZERS.glob("*/__init__.py")} - {KIT.name}
+    return files | packages
+
+
+@functools.lru_cache(maxsize=None)
+def owner_services(owner: str) -> frozenset[str]:
+    """
+    The services every module of an analyzer creates clients for, together: a module of a package that calls a
+    client another of its modules made is checked against that client's service too.
+    """
+    services: set[str] = set()
+    for path in module_files(owner):
+        services |= _client_services(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+    return frozenset(services)
+
+
 def shared_names() -> dict[str, set[str]]:
     """
     Every name each shared module defines: {"_bedrock": {"MODEL_PRICES", ...}} (none for one not written yet).
     """
     names: dict[str, set[str]] = {}
     for module in SHARED:
-        path = ANALYZERS / f"{module}.py"
-        if path.exists():
+        for path in module_files(module):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            names[module] = {name for name, _ in _top_level_names(tree)}
+            names.setdefault(module, set()).update(name for name, _ in _top_level_names(tree))
     return names
+
+
+def _ui_classes(tree: ast.Module, *, in_package: bool, is_companion: bool) -> list[ast.ClassDef]:
+    """
+    The classes whose public methods are commands a user runs: the <Service>View, a companion's <Service>Explorer, and
+    in a package also its <Service>Explorer and the mixins they're made of (_<Topic>Commands, _<Topic>Tab).
+    A file analyzer's own explorer window isn't checked here (rules for it came with the packages).
+    """
+    suffixes = ("View", "Explorer") if in_package or is_companion else ("View",)
+    classes = []
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        is_mixin = in_package and MIXIN_RE.fullmatch(node.name) is not None
+        if node.name.endswith(suffixes) or is_mixin:
+            classes.append(node)
+    return classes
+
+
+def _guards(class_name: str, *, is_companion: bool) -> set[str]:
+    """
+    The decorators that guard a command of this class: @_friendly_errors on a View's, _kit's @_window_errors on a
+    window's (an explorer or one of its tabs). A companion's classes may use either.
+    """
+    if is_companion:
+        return {"_friendly_errors", "_window_errors"}
+    if class_name.endswith(("Explorer", "Tab")):
+        return {"_window_errors"}
+    return {"_friendly_errors"}
+
+
+def _is_attribute(member: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """
+    Whether a method is a property (or its setter or deleter): an attribute to read or set, not a command.
+    """
+    return any(isinstance(d, ast.Name) and d.id == "property"
+               or isinstance(d, ast.Attribute) and d.attr in ("setter", "deleter") for d in member.decorator_list)
+
+
+def check_commands(ui_class: ast.ClassDef, rel: str, report: Report, *, guards: set[str]) -> None:
+    """
+    Each public command of a View, an explorer or one of their mixins is guarded, documented, returns None, and draws
+    through blocks rather than printing or displaying.
+    """
+    for member in ui_class.body:
+        if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) or member.name.startswith("_"):
+            continue
+        if _is_attribute(member):
+            continue
+        where = f"{rel}:{member.lineno} {ui_class.name}.{member.name}"
+        decorators = {d.id if isinstance(d, ast.Name) else getattr(d, "attr", "") for d in member.decorator_list}
+        if member.name != "help" and not decorators & guards:
+            report.error(where, f"no @{' or @'.join(sorted(guards))} (an AWS or input error would show a traceback)")
+        doc = ast.get_docstring(member)
+        if not doc or not doc.strip().split("\n")[0].strip():
+            report.error(where, "no docstring; help() shows its first line as the description")
+        if not (isinstance(member.returns, ast.Constant) and member.returns.value is None):
+            report.warn(where, "not annotated -> None (View methods render and return nothing)")
+        for node in ast.walk(member):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            if node.func.id in ("print", "display", "HTML"):
+                report.error(f"{rel}:{node.lineno} {ui_class.name}.{member.name}",
+                             f"calls {node.func.id}(); add blocks and pass them to self._show()")
+
+
+def _path_in_package(path: Path, inside: tuple[str, ...]) -> tuple[str, ...]:
+    """
+    Where a module sits below its analyzer's package: opensearch/analysis/findings.py -> ("analysis", "findings"),
+    opensearch/view.py -> ("view",), and () for the package's own __init__.py.
+    """
+    below = inside[1:]
+    return below if path.stem == "__init__" else (*below, path.stem)
+
+
+def _import_targets(node: ast.Import | ast.ImportFrom, inside: tuple[str, ...]) -> list[tuple[tuple[str, ...], set[str]]]:
+    """
+    What an import loads from aws_analyzer, as (its path below the package, the names taken from it):
+    `from .._kit.render import _call` in opensearch/analysis.py -> [(("_kit", "render"), {"_call"})], and
+    `from . import view` in opensearch/explorer.py -> [(("opensearch", "view"), set())]. Imports from outside the
+    package give nothing.
+    """
+    if isinstance(node, ast.Import):
+        prefix = f"{PACKAGE}."
+        return [(tuple(alias.name[len(prefix):].split(".")), set()) for alias in node.names
+                if alias.name.startswith(prefix)]
+    module = node.module or ""
+    if node.level:
+        base = tuple(inside[:max(len(inside) - (node.level - 1), 0)])
+    elif module == PACKAGE or module.startswith(f"{PACKAGE}."):
+        base, module = (), module[len(PACKAGE) + 1:]
+    else:
+        return []
+    names = {alias.name for alias in node.names}
+    if module:
+        return [((*base, *module.split(".")), names)]
+    return [((*base, alias.name), set()) for alias in node.names]
+
+
+def check_layers(tree: ast.Module, rel: str, report: Report, *, owner: str, own_path: tuple[str, ...]) -> None:
+    """
+    A package's core (helpers, models, analysis, analyzer and the service's other core modules) never imports its
+    UI (style, blocks, view, explorer, window) or _kit's (blocks, render, view, window, progress, highlight,
+    jsontree; render's _call and _signature, which write a call into a finding's text, are the exception), and its
+    pure analysis never imports the analyzer, which talks to AWS. The UI may import anything, and the package's
+    __init__.py re-exports both.
+    """
+    if not own_path or own_path[0] in UI_LAYERS:
+        return
+    is_analysis = own_path[0].startswith("analysis")
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        where = f"{rel}:{node.lineno}"
+        for target, names in _import_targets(node, (owner, *own_path[:-1])):
+            if len(target) < 2:
+                continue
+            if target[0] == owner and target[1] in UI_LAYERS:
+                report.error(where, f"the core module {'.'.join(own_path)} imports {target[1]}, which is UI; the "
+                                    "core never knows a front-end exists (move what both need into the core)")
+            elif target[0] == KIT.name and target[1] in KIT_UI and not (
+                    target[1] == "render" and names and names <= CORE_FROM_RENDER):
+                report.error(where, f"the core module {'.'.join(own_path)} imports _kit.{target[1]}, which is UI")
+            elif is_analysis and target[0] == owner and target[1].startswith("analyzer"):
+                report.error(where, f"{'.'.join(own_path)} is pure analysis but imports {target[1]}, which talks "
+                                    "to AWS")
+
+
+def _reaching_receivers(tree: ast.Module) -> set[str]:
+    """
+    The names a companion binds to an analyzer it builds on or to that analyzer's module: `core = self.analyzer`,
+    `lf = _lambda_module()`.
+    """
+    receivers: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            continue
+        value = node.value
+        is_analyzer = isinstance(value, ast.Attribute) and value.attr == "analyzer"
+        is_module = (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                     and REACHING_RECEIVER_RE.fullmatch(value.func.id) is not None)
+        if is_analyzer or is_module:
+            receivers.add(node.targets[0].id)
+    return receivers
+
+
+def check_reach(tree: ast.Module, rel: str, report: Report) -> None:
+    """
+    A companion package (agent/) reads the analyzers it builds on through their public names only: their private
+    ones may move or change in any refactor (`core._window`, `s3._exposure`). A warning until every service is a
+    package (see .claude/skills/modularize).
+    """
+    receivers = _reaching_receivers(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or not node.attr.startswith("_") or node.attr.startswith("__"):
+            continue
+        value = node.value
+        is_receiver = isinstance(value, ast.Name) and value.id in receivers
+        is_analyzer = isinstance(value, ast.Attribute) and value.attr == "analyzer"
+        if is_receiver or is_analyzer:
+            report.warn(f"{rel}:{node.lineno}", f"reaches into the private name {node.attr} of an analyzer it builds "
+                                                "on; make it public there and use that")
 
 
 def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]],
@@ -222,10 +430,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
     owner, inside = _owner(path)
     in_kit = owner == KIT.name
     in_package = owner in PACKAGES
-    is_shared = not in_kit and not in_package and path.stem in SHARED
+    is_shared = not in_kit and not in_package and owner in SHARED
     parents = () if in_kit else COMPANIONS.get(owner, ())
     uses = set() if in_kit else {module for module, users in SHARED.items() if owner in users}
-    siblings = ({p.stem for p in ANALYZERS.glob("*.py")} | PACKAGES) - {owner, "__init__", *parents} - uses
+    siblings = top_modules() - {owner, *parents} - uses
     kit = kit_names() if kit is None else kit
     shared = shared_names() if shared is None else shared
 
@@ -284,38 +492,21 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                           "(Helpers, Data models, Pure analysis, <Service>Analyzer, <Service>View)")
 
     # View methods: decorated, documented, render through blocks.
-    ui_suffixes = ("View", "Explorer") if parents else ("View",)
-    guards = {"_friendly_errors", "_window_errors"} if parents else {"_friendly_errors"}  # a window: _kit's guard
-    view = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name.endswith(ui_suffixes)), None)
-    if view is None:
-        if not in_kit and not is_shared and not in_package:  # a package's View is in one of its modules
-            report.error(rel, "no <Service>View class")
-    else:
-        for member in view.body:
-            if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) or member.name.startswith("_"):
-                continue
-            if any(isinstance(d, ast.Name) and d.id == "property"
-                   or isinstance(d, ast.Attribute) and d.attr in ("setter", "deleter") for d in member.decorator_list):
-                continue  # an attribute to read or set, not a command
-            where = f"{rel}:{member.lineno} {view.name}.{member.name}"
-            decorators = {d.id if isinstance(d, ast.Name) else getattr(d, "attr", "") for d in member.decorator_list}
-            if member.name != "help" and not decorators & guards:
-                report.error(where, f"no @{' or @'.join(sorted(guards))} (an AWS or input error would show a "
-                                    "traceback)")
-            doc = ast.get_docstring(member)
-            if not doc or not doc.strip().split("\n")[0].strip():
-                report.error(where, "no docstring; help() shows its first line as the description")
-            if not (isinstance(member.returns, ast.Constant) and member.returns.value is None):
-                report.warn(where, "not annotated -> None (View methods render and return nothing)")
-            for node in ast.walk(member):
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in (
-                        "print", "display", "HTML"):
-                    report.error(f"{rel}:{node.lineno} {view.name}.{member.name}",
-                                 f"calls {node.func.id}(); add blocks and pass them to self._show()")
+    ui_classes = _ui_classes(tree, in_package=in_package, is_companion=bool(parents))
+    has_view = any(isinstance(n, ast.ClassDef) and n.name.endswith("View") for n in tree.body)
+    if not has_view and not ui_classes and not in_kit and not is_shared and not in_package:
+        report.error(rel, "no <Service>View class")
+    for ui_class in ui_classes:
+        check_commands(ui_class, rel, report, guards=_guards(ui_class.name, is_companion=bool(parents)))
+
+    if in_package:
+        check_layers(tree, rel, report, owner=owner, own_path=_path_in_package(path, inside))
+    if in_package and parents:
+        check_reach(tree, rel, report)
 
     # print() outside the View.
     for stmt in tree.body:
-        if stmt is view:
+        if stmt in ui_classes:
             continue
         for node in ast.walk(stmt):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
@@ -323,10 +514,9 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                                                      "return data and never print")
 
     # AWS operations: read-only, and each one's permission documented in README.md.
-    services = _client_services(tree)
+    services = _client_services(tree) | owner_services(owner)
     for parent in parents:  # it calls AWS through the analyzers' clients
-        if (ANALYZERS / f"{parent}.py").exists():
-            services |= _client_services(ast.parse((ANALYZERS / f"{parent}.py").read_text(encoding="utf-8")))
+        services |= owner_services(parent)
     ops = _operations(services)
     defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     # Strings that are keyword values or compared with something (engine="converse", kind == "scan") are labels,
@@ -380,18 +570,30 @@ def package_files(package: str) -> list[Path]:
     """
     Every module of an analyzer that is a package (agent/), its __init__.py included.
     """
-    return sorted((ANALYZERS / package).rglob("*.py"))
+    return module_files(package)
 
 
 def check_package(package: str, report: Report) -> None:
     """
-    What a package must have as a whole: a <Service>View class in one of its modules.
+    What a package must have as a whole: a <Service>View class in one of its modules, and each function and class
+    defined in one module only (two modules defining the same helper are a copy; one imports it from the other).
+    Constants may share a name, since a module's own limit (_ERROR_CHARACTERS) can differ from another's.
     """
+    has_view = False
+    defined_in: dict[str, list[str]] = {}
     for path in package_files(package):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        if any(isinstance(n, ast.ClassDef) and n.name.endswith("View") for n in tree.body):
-            return
-    report.error(f"src/{PACKAGE}/{package}/", "no <Service>View class in any of its modules")
+        has_view = has_view or any(isinstance(n, ast.ClassDef) and n.name.endswith("View") for n in tree.body)
+        rel = path.relative_to(ANALYZERS).as_posix()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                defined_in.setdefault(node.name, []).append(f"{rel}:{node.lineno}")
+    if not has_view:
+        report.error(f"src/{PACKAGE}/{package}/", "no <Service>View class in any of its modules")
+    for name, places in sorted(defined_in.items()):
+        if len(places) > 1:
+            report.error(f"src/{PACKAGE}/{places[1]}", f"defines {name}, which {places[0]} defines too; keep one and "
+                                                     "import it")
 
 
 def _client_services(tree: ast.AST) -> set[str]:
@@ -423,6 +625,7 @@ def main() -> int:
         p for p in [*ANALYZERS.glob("*.py"), *KIT.glob("*.py")] if p.name != "__init__.py")
     if not args.files:
         files += [path for package in sorted(PACKAGES) for path in package_files(package)]
+        files += [path for module in sorted(SHARED) if (ANALYZERS / module).is_dir() for path in module_files(module)]
     kit, shared = kit_names(), shared_names()
     for path in files:
         check_file(path, report, readme, apis, kit, shared)

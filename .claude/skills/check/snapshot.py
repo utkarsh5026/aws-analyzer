@@ -15,7 +15,8 @@ monotonic clock, moto's random IDs, the checkout's own path) is normalized: two 
 OUT also gets names.json, every name each module defines and the attributes of each class it defines, and
 apis.txt, the AWS operations rules.py finds. `compare` reports any case whose output changed, a name or class
 attribute that no longer exists (`--allow-lost s3._band` for one removed on purpose), and any change in the AWS
-operations.
+operations. A package promises the names in its __all__; a private name that left its top level for one of its
+modules (a service split into a package, see .claude/skills/modularize) counts as moved, not lost.
 
 Needs the dev requirements, plus time-machine (pip install time-machine).
 """
@@ -315,6 +316,28 @@ def _defined(path: Path) -> list[str]:
     return sorted(set(names))
 
 
+def _public_api(mod, path: Path, present: list[str]) -> list[str]:
+    """
+    The names a module promises its users: a package's __all__ (its __init__.py re-exports them from its modules),
+    else every name its file defines.
+    """
+    exported = getattr(mod, "__all__", None)
+    if path.name == "__init__.py" and exported is not None:
+        return sorted(n for n in exported if n in present)
+    return [n for n in _defined(path) if n in present]
+
+
+def _defined_inside(path: Path) -> list[str]:
+    """
+    Every name a package's modules define (its __init__.py's own for a file module): where a private name that left
+    the package's top level may have moved to.
+    """
+    if path.name != "__init__.py":
+        return _defined(path)
+    return sorted({name for module in path.parent.rglob("*.py") if "__pycache__" not in module.parts
+                   for name in _defined(module)})
+
+
 def names_worker(root: Path, out: Path) -> int:
     """
     names.json, per module: the names its file defines (what a user may import from it), every name the imported
@@ -336,8 +359,8 @@ def names_worker(root: Path, out: Path) -> int:
         present = sorted(n for n in dir(mod) if not (n.startswith("__") and n.endswith("__")))
         classes = {n: sorted(a for a in dir(getattr(mod, n)) if not (a.startswith("__") and a.endswith("__")))
                    for n in present if isinstance(getattr(mod, n), type) and is_ours(getattr(mod, n))}
-        report[names[path]] = {"defined": [n for n in _defined(path) if n in present], "present": present,
-                               "classes": classes}
+        report[names[path]] = {"defined": _public_api(mod, path, present), "present": present, "classes": classes,
+                               "inside": _defined_inside(path)}
     (out / "names.json").write_text(json.dumps(report, indent=1, sort_keys=True), encoding="utf-8")
     return 0
 
@@ -389,6 +412,49 @@ def run(root: Path, out: Path, sources: list[str], services: list[str]) -> int:
 # ----------------------------------------------------------------------------- comparing two snapshots
 
 
+def _lost_names(base: Path, new: Path, allow_lost: set[str]) -> int:
+    """
+    How many names or class attributes the base snapshot had that the new one lost, printing each. A private name
+    that moved into a module of its package isn't lost, and only their number is printed.
+    """
+    old_names = json.loads((base / "names.json").read_text(encoding="utf-8"))
+    new_names = json.loads((new / "names.json").read_text(encoding="utf-8"))
+    lost = moved = 0
+    for module, before in old_names.items():
+        after = new_names.get(module)
+        if after is None:
+            print(f"LOST     module {module}")
+            lost += 1
+            continue
+        present = set(after["present"])
+        inside = set(after.get("inside", ()))
+        for name in before["defined"]:
+            if name in present:
+                continue
+            if name.startswith("_") and name in inside:
+                moved += 1
+                continue
+            if f"{module}.{name}" in allow_lost:
+                print(f"removed  {module}.{name} (--allow-lost)")
+                continue
+            print(f"LOST     {module}.{name}")
+            lost += 1
+        for cls, attrs in before["classes"].items():
+            if cls not in present:
+                continue  # reported above, if the file defined it
+            if cls not in after["classes"]:
+                print(f"LOST     {module}.{cls} is no longer a class")
+                lost += 1
+                continue
+            missing = sorted(set(attrs) - set(after["classes"][cls]))
+            if missing:
+                print(f"LOST     {module}.{cls}: {', '.join(missing)}")
+                lost += 1
+    if moved:
+        print(f"moved    {moved} private name{'s' * (moved != 1)} into a module of their package (not lost)")
+    return lost
+
+
 def compare(base: Path, new: Path, context: int, max_lines: int, allow_lost: set[str]) -> int:
     def files(root: Path) -> set[str]:
         return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file() and p.name != "names.json"}
@@ -415,35 +481,7 @@ def compare(base: Path, new: Path, context: int, max_lines: int, allow_lost: set
         if len(diff) > max_lines:
             print(f"    ... {len(diff) - max_lines} more diff lines")
 
-    old_names = json.loads((base / "names.json").read_text(encoding="utf-8"))
-    new_names = json.loads((new / "names.json").read_text(encoding="utf-8"))
-    lost = 0
-    for module, before in old_names.items():
-        after = new_names.get(module)
-        if after is None:
-            print(f"LOST     module {module}")
-            lost += 1
-            continue
-        present = set(after["present"])
-        for name in before["defined"]:
-            if name in present:
-                continue
-            if f"{module}.{name}" in allow_lost:
-                print(f"removed  {module}.{name} (--allow-lost)")
-                continue
-            print(f"LOST     {module}.{name}")
-            lost += 1
-        for cls, attrs in before["classes"].items():
-            if cls not in present:
-                continue  # reported above, if the file defined it
-            if cls not in after["classes"]:
-                print(f"LOST     {module}.{cls} is no longer a class")
-                lost += 1
-                continue
-            missing = sorted(set(attrs) - set(after["classes"][cls]))
-            if missing:
-                print(f"LOST     {module}.{cls}: {', '.join(missing)}")
-                lost += 1
+    lost = _lost_names(base, new, allow_lost)
     problems += lost
     print(f"\n{same} of {len(old_files & new_files)} outputs identical; {problems} difference{'s' * (problems != 1)}"
           f"{f', including {lost} lost names' if lost else ''}.")
