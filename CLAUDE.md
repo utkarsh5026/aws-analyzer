@@ -592,7 +592,7 @@ How the View layer works:
   with its searchable list and `backdrop`), custom tab buttons over pages (`_EXPLORER_TABS`, `_tab_bar`). The region
   field (`region_pick`: a region, or `"all"`) and the
   function field pick what it shows. The Functions tab is `overview()` read in three background steps so the list shows
-  at once: `overview(metrics=False, details=False)`, then `_numbers()` (CloudWatch) and `_all_extras()` (resource
+  at once: `overview(metrics=False, details=False)`, then `overview_numbers()` (CloudWatch) and `_all_extras()` (resource
   policies, provisioned concurrency), which return data that `Overview.add_numbers` / `add_extras` merge on the loop
   (`overview()` itself is built from the same three). `_function_facts` works out each line (findings, cost, the dot's
   tone); the list sorts by a click on a column header (`_COLUMNS`, `_sort_by`) and filters with `_FUNCTION_CHIPS` and

@@ -679,8 +679,9 @@ class Overview:
     def add_numbers(self, metrics: dict[str, FunctionMetrics], read: int, peaks: dict[str, float | None],
                     errors: dict[str, str]) -> None:
         """
-        Adds CloudWatch's numbers (LambdaAnalyzer._numbers): each function's by ARN, how many metrics that read,
-        each region's most runs at once, and 'region:metrics' -> the error code of a region that couldn't be read.
+        Adds CloudWatch's numbers (LambdaAnalyzer.overview_numbers): each function's by ARN, how many metrics that
+        read, each region's most runs at once, and 'region:metrics' -> the error code of a region that couldn't be
+        read.
         """
         self.metrics.update(metrics)
         self.metrics_read += read
@@ -5485,7 +5486,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         if details and ov.functions:
             ov.add_extras(self._all_extras(ov.functions, progress=progress))
         if metrics:
-            ov.add_numbers(*self._numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
+            ov.add_numbers(*self.overview_numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
         return ov
 
     def _extras(self, fn: Function) -> tuple[list[Trigger], list[ProvisionedConcurrency], dict[str, str]]:
@@ -5526,7 +5527,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
                 progress(min(start + 50, len(functions)), len(functions))
         return found
 
-    def _numbers(
+    def overview_numbers(
         self, functions: list[Function], *, since: datetime, until: datetime, limits: set[str] | None = None
     ) -> tuple[dict[str, FunctionMetrics], int, dict[str, float | None], dict[str, str]]:
         """
@@ -5666,7 +5667,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
     # ------------------------------------------------------------------ logs
 
     @staticmethod
-    def _window(since: Any, until: Any = None) -> tuple[datetime, datetime]:
+    def time_range(since: Any, until: Any = None) -> tuple[datetime, datetime]:
         """
         (start, end) from since= / until=: '1h', '24h', '7d', '2026-10-01' or a datetime.
         """
@@ -5782,7 +5783,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         run, the lines it printed without the ID included.
         """
         fn = self.function(ref, region=region)
-        start, end = self._window(since, until)
+        start, end = self.time_range(since, until)
         return self._log_page(fn, start, end, pattern=pattern, request_id=request_id, limit=limit, progress=progress)
 
     def _log_page(
@@ -5841,7 +5842,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         runs with a matching line, each with all of its lines (the matching ones are marked).
         """
         fn = self.function(ref, region=region)
-        start, end = self._window(since, until)
+        start, end = self.time_range(since, until)
         return self._log_runs(fn, start, end, search=search, limit=limit, progress=progress)
 
     def _log_runs(
@@ -5946,7 +5947,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         CloudWatch's count of failed and throttled calls over the same window.
         """
         fn = self.function(ref, region=region)
-        start, end = self._window(since, until)
+        start, end = self.time_range(since, until)
         return self._errors(fn, start, end, limit=limit, progress=progress)
 
     def _errors(
@@ -6000,7 +6001,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         logs after each: run time, billed time, memory used, and the start-up time of cold starts.
         """
         fn = self.function(ref, region=region)
-        start, end = self._window(since, until)
+        start, end = self.time_range(since, until)
         return self._performance(fn, start, end, limit=limit, progress=progress)
 
     def _performance(
@@ -9862,7 +9863,7 @@ class LambdaExplorer(_Explorer):
         (an order ID, KeyError, a request ID, or a CloudWatch Logs filter pattern), searching the whole time range.
         """
         if since is not None:
-            LambdaAnalyzer._window(since)  # a time it can't read is said before anything changes
+            LambdaAnalyzer.time_range(since)  # a time it can't read is said before anything changes
         if self._w is None:
             target = name or (self.function.name if self.function is not None else None)
             if target is None:
@@ -10392,7 +10393,8 @@ class LambdaExplorer(_Explorer):
             functions, limits = list(ov.functions), set(ov.accounts)
             self._finish("list", f"{_plural(len(ov.functions), 'function')} in {self._where()} · reading their calls, "
                          "errors and run times from CloudWatch…", tabs=("functions",), busy=True)
-            self._later("numbers", lambda: self.core._numbers(functions, since=since, until=until, limits=limits),
+            self._later("numbers",
+                        lambda: self.core.overview_numbers(functions, since=since, until=until, limits=limits),
                         self._got_numbers, self._numbers_failed)
         elif not any(key.endswith(":list") for key in ov.errors):
             self._finish("list", f"No Lambda functions in {self._where()}"
@@ -11010,7 +11012,7 @@ class LambdaExplorer(_Explorer):
             return
         self._asked.add("logs")
         self._stop_live()
-        start, end = LambdaAnalyzer._window(self._range)
+        start, end = LambdaAnalyzer.time_range(self._range)
         self.logs_page, self._runs, self._run_offset = None, [], 0
         self.jump_button.layout.display = self.older_button.layout.display = "none"
         self._set(self.run_head, _skeleton(f"Reading what {fn.name} logged in {self._range_text()}…"))
@@ -11099,7 +11101,7 @@ class LambdaExplorer(_Explorer):
             else:
                 self._draw_runs(renew=True)
             return
-        start, end = LambdaAnalyzer._window(self._range)
+        start, end = LambdaAnalyzer.time_range(self._range)
         self._searched = self._log_query = text
         self._stop_live()
         self._status(f"Searching {fn.name}'s logs from {self._range_text()} for {text!r}, then reading each run it's "
@@ -11472,7 +11474,7 @@ class LambdaExplorer(_Explorer):
             return
         self._asked.add("errors")
         fn = self._full()
-        start, end = LambdaAnalyzer._window(self._errors_range)
+        start, end = LambdaAnalyzer.time_range(self._errors_range)
         self.error_report = None
         self._set(self.errors_view, _skeleton(f"Reading {fn.name}'s errors from {self._range_text(self._errors_range)}"
                                               "…"))
@@ -11521,7 +11523,7 @@ class LambdaExplorer(_Explorer):
             return
         self._asked.add("performance")
         fn = self._full()
-        start, end = LambdaAnalyzer._window(self._perf_range)
+        start, end = LambdaAnalyzer.time_range(self._perf_range)
         self.perf = None
         self._set(self.perf_view, _skeleton(f"Reading {fn.name}'s runs from {self._range_text(self._perf_range)}…"))
         self._set(self.slow_head, "")

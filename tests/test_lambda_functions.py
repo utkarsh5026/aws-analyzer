@@ -1755,7 +1755,7 @@ def test_overview_in_parts_adds_up_to_overview(core):
     assert not ov.metrics and not ov.details and ov.metrics_read == 0
     until = datetime.now(timezone.utc)
     since = lfmod._midnight(until) - timedelta(days=29)
-    ov.add_numbers(*core._numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
+    ov.add_numbers(*core.overview_numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
     ov.add_extras(core._all_extras(ov.functions))
     assert ov.details and ov.metrics_read == whole.metrics_read
     assert {arn: m.invocations for arn, m in ov.metrics.items()} == {
