@@ -28,7 +28,7 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 </div>
 
 <div class="nb" role="img" aria-label="A notebook cell running ui.instance(): the space churn-analysis on an ml.g5.2xlarge at $1.52 an hour, with idle shutdown off and the GPU idle, and a finding that an ml.m5.2xlarge without a GPU would cost up to $773.07 a month less">
-<div class="nb-in"><span class="prompt">[1]:</span><span class="call">ui.instance()</span></div>
+<div class="nb-in"><span class="prompt">[1]:</span><span class="call" style="--aa-chars:13">ui.instance()</span></div>
 <div class="nb-out">
 <p class="r-title">JupyterLab space churn-analysis</p>
 <p class="r-sub">us-east-1 · the notebook this code runs in · running for 2d 5h</p>

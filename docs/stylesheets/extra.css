@@ -20,6 +20,9 @@
   --aa-muted: #5a6378;
   --aa-raw: #7a8297;
   --aa-shadow: 0 1px 2px rgba(23, 32, 54, .05), 0 8px 24px rgba(23, 32, 54, .06);
+  --aa-lift: 0 2px 4px rgba(23, 32, 54, .06), 0 14px 32px rgba(23, 32, 54, .12);
+  --aa-glow: #8f9bff;
+  --aa-ease: cubic-bezier(.2, .7, .2, 1);
 
   --md-primary-fg-color: var(--aa-ink);
   --md-primary-fg-color--light: #2a3552;
@@ -55,6 +58,8 @@
   --aa-muted: #a2a9bf;
   --aa-raw: #8088a3;
   --aa-shadow: none;
+  --aa-lift: 0 2px 4px rgba(0, 0, 0, .3), 0 14px 32px rgba(0, 0, 0, .45);
+  --aa-glow: #a3adff;
 
   --md-default-bg-color: #10152a;
   --md-primary-fg-color: #0b1020;
@@ -93,7 +98,11 @@
 .md-typeset code { border-radius: 4px; }
 .md-typeset :not(pre) > code { background: var(--aa-blue-soft); color: var(--aa-ink); }
 .md-typeset pre > code { border: 1px solid var(--aa-line); border-radius: 8px; }
-.md-typeset mark { background: var(--aa-mark); color: var(--aa-mark-fg); padding: 0 .15em; border-radius: 2px; }
+/* The highlighter is a background image, not a colour, so motion.js can sweep it in from the left */
+.md-typeset mark {
+  background: linear-gradient(var(--aa-mark), var(--aa-mark)) no-repeat 0 0 / 100% 100%;
+  color: var(--aa-mark-fg); padding: 0 .15em; border-radius: 2px;
+}
 
 /* ---- Buttons */
 .md-typeset .md-button {
@@ -355,3 +364,173 @@
 }
 .md-typeset p.part strong { color: var(--aa-ink); font-family: "Bricolage Grotesque", sans-serif; font-size: .95rem; display: block; }
 .md-typeset p.part + h2 { border-top: none; margin-top: 1.2em; }
+
+/* ======== Motion: a page that's shown to you, not handed over ========
+
+   Hover and focus states work everywhere. What moves on its own (a page's opening, things rising into view as you
+   scroll, the highlighter, the home page's notebook cell running) moves only when the reader hasn't asked their
+   system to reduce motion, and what scrolls into view is hidden only once javascripts/motion.js has put .aa-motion
+   on <html>, so a page without the script shows everything at once. Moves are short (under half a second each)
+   and small (a few pixels), so reading is never kept waiting. */
+
+/* ---- Under the pointer: things you can click lift a little and say so */
+.md-typeset .md-button { transition: background-color .2s, border-color .2s, color .2s, box-shadow .2s, transform .2s var(--aa-ease); }
+.md-typeset .md-button:hover { transform: translateY(-1px); }
+.md-typeset .md-button--primary { box-shadow: 0 1px 2px rgba(23, 32, 54, .12), 0 4px 14px rgba(57, 73, 198, .28); }
+.md-typeset .md-button--primary:hover { box-shadow: 0 2px 4px rgba(23, 32, 54, .14), 0 8px 22px rgba(57, 73, 198, .36); }
+.md-typeset .md-button:active { transform: translateY(0); transition-duration: .05s; }
+
+[dir] .md-typeset .quick > ul > li, .md-typeset .grid.cards > ul > li {
+  transition: border-color .2s, box-shadow .25s var(--aa-ease), transform .25s var(--aa-ease);
+}
+[dir] .md-typeset .quick > ul > li:hover, .md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--aa-blue); box-shadow: var(--aa-lift); transform: translateY(-2px);
+}
+.md-typeset .quick > ul > li > p:last-child a::after {
+  content: "\2192"; display: inline-block; margin-left: .3em; transition: transform .2s var(--aa-ease);
+}
+.md-typeset .quick > ul > li:hover > p:last-child a::after { transform: translateX(3px); }
+
+.md-typeset .svc .aws-icon, .md-typeset .svc .go { transition: transform .25s var(--aa-ease); }
+.md-typeset .svc a:hover .aws-icon { transform: translateY(-2px) scale(1.06); }
+.md-typeset .svc a:hover .go { transform: translateX(4px); }
+
+.md-typeset .anatomy ol > li::before { transition: background-color .2s, color .2s; }
+.md-typeset .anatomy ol > li:hover::before { background: var(--aa-blue); color: var(--md-default-bg-color); }
+
+.md-typeset figure img { transition: box-shadow .3s var(--aa-ease), transform .3s var(--aa-ease); }
+.md-typeset figure img.aa-zoomable { cursor: zoom-in; }
+.md-typeset figure img.aa-zoomable:hover { box-shadow: var(--aa-lift); transform: translateY(-2px); }
+.md-typeset figure img.aa-zoomable:focus-visible { outline: 2px solid var(--aa-blue); outline-offset: 3px; }
+
+.md-typeset table:not([class]) tbody tr { transition: background-color .15s; }
+.md-typeset table:not([class]) tbody tr:hover { background: var(--aa-paper); }
+
+.md-typeset details > summary { transition: color .15s; }
+.md-typeset details.question:hover:not([open]) { border-left-color: var(--aa-blue); }
+.md-typeset details.question { transition: border-color .2s; }
+
+.md-nav__link { transition: color .15s, transform .2s var(--aa-ease); }
+.md-sidebar--primary .md-nav__link:not(.md-nav__link--active):hover { transform: translateX(2px); }
+
+/* ---- How far through the page: a thin bar along the bottom of the header */
+.md-header .aa-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--aa-glow);
+  transform: scaleX(0); transform-origin: 0 50%; opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+.md-header .aa-progress.aa-shown { opacity: 1; }
+
+/* ---- A screenshot full size, over the page */
+.aa-zoom {
+  position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 3rem 2rem 2rem;
+  background: rgba(11, 16, 32, .78); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  opacity: 0; visibility: hidden; transition: opacity .25s, visibility 0s .25s; cursor: zoom-out;
+}
+.aa-zoom.aa-open { opacity: 1; visibility: visible; transition: opacity .25s; }
+.aa-zoom figure { margin: 0; max-width: min(1400px, 100%); display: flex; flex-direction: column; align-items: center; gap: .8rem; }
+.aa-zoom img {
+  max-width: 100%; max-height: calc(100vh - 8rem); width: auto; height: auto; border-radius: 10px;
+  border-left: 4px solid var(--aa-blue); box-shadow: 0 30px 80px rgba(0, 0, 0, .5);
+  transform: scale(.96) translateY(8px); transition: transform .35s var(--aa-ease);
+}
+.aa-zoom.aa-open img { transform: none; }
+.aa-zoom figcaption { color: rgba(255, 255, 255, .82); font-size: .75rem; max-width: 46rem; text-align: center; }
+.aa-zoom figcaption code { background: rgba(255, 255, 255, .12); color: #fff; }
+.aa-zoom .aa-zoom-x {
+  position: absolute; top: 1rem; right: 1.2rem; width: 2.2rem; height: 2.2rem; border-radius: 50%; cursor: pointer;
+  color: #fff; background: rgba(255, 255, 255, .12); font-size: .9rem; transition: background-color .15s;
+}
+.aa-zoom .aa-zoom-x:hover, .aa-zoom .aa-zoom-x:focus-visible { background: rgba(255, 255, 255, .24); outline: none; }
+html.aa-zoomed { overflow: hidden; }
+
+@keyframes aa-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes aa-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes aa-pop { from { opacity: 0; transform: scale(.6); } 70% { transform: scale(1.08); } to { opacity: 1; transform: none; } }
+@keyframes aa-sweep { from { background-size: 0 100%; } to { background-size: 100% 100%; } }
+@keyframes aa-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes aa-busy { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes aa-cell { 50% { border-left-color: var(--aa-glow); } }
+@keyframes aa-unfold { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: no-preference) {
+
+  /* ---- A guide's opening: icon, title, lede and promises arrive one after another */
+  .md-content__inner > .eyebrow, .md-content__inner > h1, .md-content__inner > .lede,
+  .md-content__inner > ul.pills {
+    animation: aa-rise .55s var(--aa-ease) both;
+  }
+  .md-content__inner > .eyebrow { animation-delay: .02s; }
+  .md-content__inner > h1 { animation-delay: .08s; }
+  .md-content__inner > .lede { animation-delay: .16s; }
+  .md-content__inner > ul.pills { animation-delay: .24s; }
+  .md-content__inner > .eyebrow .aws-icon { animation: aa-pop .5s var(--aa-ease) .1s both; }
+  .md-typeset ul.pills li::before { animation: aa-pop .4s var(--aa-ease) both; }
+  .md-typeset ul.pills li:nth-child(1)::before { animation-delay: .34s; }
+  .md-typeset ul.pills li:nth-child(2)::before { animation-delay: .4s; }
+  .md-typeset ul.pills li:nth-child(3)::before { animation-delay: .46s; }
+  .md-typeset ul.pills li:nth-child(4)::before { animation-delay: .52s; }
+  .md-typeset ul.pills li:nth-child(n+5)::before { animation-delay: .58s; }
+
+  /* ---- A fold that opens slides its contents in */
+  .md-typeset details[open] > :not(summary) { animation: aa-unfold .25s var(--aa-ease); }
+
+  /* ---- The home page: the promise arrives, then the notebook cell runs its call */
+  .md-typeset .hero > div:first-child > * { animation: aa-rise .6s var(--aa-ease) both; }
+  .md-typeset .hero > div:first-child > :nth-child(2) { animation-delay: .1s; }
+  .md-typeset .hero > div:first-child > :nth-child(3) { animation-delay: .2s; }
+  .md-typeset .hero > div:first-child > :nth-child(n+4) { animation-delay: .3s; }
+
+  /* The call types itself, the cell's bar pulses while it runs, then the report arrives part by part */
+  .md-typeset .hero .nb { animation: aa-rise .6s var(--aa-ease) .15s both, aa-cell .45s ease-in-out 1s 2; }
+  .md-typeset .hero .nb-in .call { display: inline-block; animation: aa-type .55s steps(var(--aa-chars, 13)) .45s both; }
+  .md-typeset .hero .nb-in .prompt { animation: aa-busy .3s ease-in-out 1s 3; }
+  .md-typeset .hero .nb-out > * { animation: aa-rise .5s var(--aa-ease) both; }
+  .md-typeset .hero .nb-out > .r-title { animation-delay: 1.85s; }
+  .md-typeset .hero .nb-out > .r-sub { animation-delay: 1.93s; }
+  .md-typeset .hero .nb-out > .r-cards { animation: none; }
+  .md-typeset .hero .r-cards > div { animation: aa-rise .45s var(--aa-ease) both; }
+  .md-typeset .hero .r-cards > div:nth-child(1) { animation-delay: 2.02s; }
+  .md-typeset .hero .r-cards > div:nth-child(2) { animation-delay: 2.09s; }
+  .md-typeset .hero .r-cards > div:nth-child(3) { animation-delay: 2.16s; }
+  .md-typeset .hero .r-cards > div:nth-child(4) { animation-delay: 2.23s; }
+  .md-typeset .hero .nb-out > .r-finding { animation-delay: 2.4s; }
+  .md-typeset .hero .nb-out > .r-next { animation-delay: 2.6s; }
+  .md-typeset .hero mark { animation: aa-sweep .8s cubic-bezier(.6, 0, .2, 1) 2.75s both; }
+
+  /* ---- Rising into view as the page scrolls (motion.js marks what's below the fold) */
+  .aa-motion .aa-reveal {
+    opacity: 0; transform: translateY(16px);
+    transition: opacity .55s var(--aa-ease), transform .55s var(--aa-ease);
+    transition-delay: calc(var(--aa-i, 0) * 70ms);
+  }
+  .aa-motion .aa-reveal.aa-in { opacity: 1; transform: none; }
+  .aa-motion .md-typeset figure.aa-reveal { transform: translateY(22px) scale(.985); }
+  .aa-motion .md-typeset figure.aa-reveal.aa-in { transform: none; }
+  .aa-motion .md-typeset .tr > .arrow.aa-reveal { transform: translateX(-8px); }
+  .aa-motion .md-typeset .tr > .arrow.aa-reveal.aa-in { transform: none; }
+
+  /* A section's rule draws itself from the left as its heading arrives */
+  .aa-motion .md-typeset h2.aa-reveal {
+    border-top-color: transparent;
+    background: linear-gradient(var(--aa-line), var(--aa-line)) no-repeat 0 0 / 0 1px border-box;
+    transition: opacity .55s var(--aa-ease), transform .55s var(--aa-ease), background-size .9s var(--aa-ease) .1s;
+  }
+  .aa-motion .md-typeset h2.aa-reveal.aa-in { background-size: 100% 1px; }
+  .aa-motion .md-typeset p.part + h2.aa-reveal { background: none; }
+
+  /* Set-up steps: each number pops in, then the line down to the next one draws */
+  .aa-motion .md-typeset .steps > ol > li.aa-reveal::before { transform: scale(.6); transition: transform .4s var(--aa-ease); transition-delay: inherit; }
+  .aa-motion .md-typeset .steps > ol > li.aa-reveal.aa-in::before { transform: none; }
+  .aa-motion .md-typeset .steps > ol > li.aa-reveal::after { transform: scaleY(0); transform-origin: 50% 0; transition: transform .6s var(--aa-ease) .3s; }
+  .aa-motion .md-typeset .steps > ol > li.aa-reveal.aa-in::after { transform: none; }
+
+  /* The highlighter, swept in the first time a <mark> is on screen */
+  .aa-motion .md-typeset mark.aa-sweep { transition: background-size .8s cubic-bezier(.6, 0, .2, 1) .25s; }
+  .aa-motion .md-typeset mark.aa-sweep:not(.aa-in) { background-size: 0 100%; }
+}
+
+@media print {
+  .aa-motion .aa-reveal { opacity: 1 !important; transform: none !important; }
+  .md-typeset mark { background-size: 100% 100% !important; }
+  .md-header .aa-progress, .aa-zoom { display: none; }
+}

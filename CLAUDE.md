@@ -978,7 +978,7 @@ does both, a page at a time). How the UI works:
   `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
   styles them. The site's look is there too: ink navy chrome, the blue of a selected Jupyter cell (`--aa-blue`) for
   links and the bar beside every screenshot, highlighter amber (`--aa-mark`, `<mark>`) only for what a report wants
-  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. A guide opens with its
+  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. Its motion is in `docs/javascripts/motion.js` (`extra_javascript`) and the Motion section of `extra.css`: a guide's opening rises in, what's below the fold rises as it's scrolled to (`.aa-reveal` / `.aa-in`, a group's items one after another by `--aa-i`), the highlighter sweeps over each `<mark>`, the home page's notebook cell types and runs its call, a bar under the header shows how far through the page you are, and a click on a screenshot opens it full size. All of it is short and small, nothing is hidden unless the script has put `.aa-motion` on `<html>`, and `prefers-reduced-motion` turns it off. A guide opens with its
   eyebrow (icon, service name, module as code), an H1 that says what the reader gets ("Find out which Lambda failed,
   and why, without the console"), a short `.lede` and the `pills` it promises. Write for a data scientist: the
   question they have first, then what the page lets them do, in plain words. A guide reads in layers, so a reader who
