@@ -17,36 +17,40 @@ Each vector field in plain English, whether its graphs fit in the memory your no
   <li>Plain text outside Jupyter</li>
 </ul>
 
-Every example uses `vectors-prod`, an OpenSearch Service domain holding `support-docs`, the help-center articles a support assistant retrieves from, and `kb-support`, the Serverless collection behind a Bedrock knowledge base. Use your own names. The screenshots are real output from the tool, run against a simulated OpenSearch with synthetic data.
+The examples use `vectors-prod`, a domain holding `support-docs` (the help-center articles a support assistant retrieves from), and `kb-support`, the Serverless collection behind a Bedrock knowledge base. The screenshots are the tool's real output on a simulated OpenSearch.
 { .muted }
 
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
 
-1. **Install the package**, in a notebook cell:
+1. **Install it** in a notebook cell:
 
     ```bash
     %pip install aws-analyzer
     ```
 
-    No internet in the notebook (VPC-only mode)? On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
+2. **Make the view.** It signs its requests to OpenSearch with the notebook's IAM role, so there's nothing to configure.
+
+    ```python
+    from aws_analyzer import OpenSearchView
+
+    ui = OpenSearchView()
+    ui.help()               # every command, grouped by task; ui.help("search") shows one in full
+    ```
+
+</div>
+
+??? more "No internet in the notebook (VPC-only mode)?"
+
+    On a computer that has internet, download the package and copy it to a bucket the notebook can read (`pip download aws-analyzer --no-deps -d wheels`, then `aws s3 cp --recursive wheels/ s3://acme-ml-data/tools/wheels/`), and install it from there:
 
     ```bash
     !aws s3 cp --recursive s3://acme-ml-data/tools/wheels/ wheels/
     %pip install --no-index --find-links wheels aws-analyzer
     ```
 
-2. **Import it and create the view.** It uses the notebook's IAM execution role and region, and signs its requests to OpenSearch with that role, so there's nothing to configure.
-
-    ```python
-    from aws_analyzer import OpenSearchView
-
-    ui = OpenSearchView()   # uses the notebook's IAM role and region
-    ui.help()               # every command, grouped by task; ui.help("search") shows one in full
-    ```
-
-3. **Optional:** another region or AWS profile, a user name and password, an OpenSearch you run yourself, or plain-text output.
+??? more "Another region or profile, a user name and password, your own OpenSearch, plain text"
 
     ```python
     from aws_analyzer import OpenSearchAnalyzer, OpenSearchView
@@ -57,37 +61,82 @@ Every example uses `vectors-prod`, an OpenSearch Service domain holding `support
     ui = OpenSearchView(mode="text")                                     # plain text, e.g. in a terminal or a script
     ```
 
-</div>
+    Only boto3 is required, and no OpenSearch client library: botocore signs the requests the way boto3 signs its own. pandas is used only when you ask for a DataFrame.
 
-!!! note ""
-
-    **Only boto3 is required**, and no OpenSearch client library: requests to a domain or collection are signed with your AWS credentials by botocore, the way boto3 signs its own. pandas (preinstalled on SageMaker) is used only when you ask for a DataFrame.
-
-!!! warning ""
+!!! tip "Worth knowing"
 
     **The notebook has to be able to reach the endpoint.** A domain inside a VPC answers only there, and a Serverless collection only where its network policy allows. If `indexes()` says it couldn't reach one, run the notebook in that VPC (SageMaker notebooks and Studio domains can be placed in one) and allow HTTPS from it in the domain's security group.
 
-## Five-minute tour { #tour }
+## Start here { #tour }
 
-The commands you'll use most. Each one prints a report under the cell; none of them change anything.
+Five questions people bring to a vector index, and the one line that answers each. None of them change anything.
+{ .gist }
 
-```python
-ui.overview()                                # every domain and Serverless collection: size, cost, warnings
-ui.indexes("vectors-prod")                   # its indexes: vector fields, documents without vectors, memory
-ui.index_info("vectors-prod/support-docs")   # one vector index in plain English, and the query to copy
-ui.use("vectors-prod/support-docs")          # later commands use this index...
-ui.sample()                                  # ...a few documents, and how healthy their vectors are
-ui.search("how do I get my money back?")     # the documents nearest a question
-ui.search(like="art-00156")                  # the documents nearest an existing one: no model needed
-```
+<div class="quick" markdown>
 
-**Reading a report.** Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after. Click a column's header to sort by it (again for the other way, a third time for the original order), pick a value in a column's **Filter** to see only those rows (an index's health, a collection's type), and untick columns under **Columns** to focus on the ones you need. It's all plain HTML and CSS, so it still works when you reopen the notebook. At the bottom is a **Next** row of two or three commands with the arguments filled in from this report, such as `index_info('vectors-prod/support-docs')`. One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
+-   **What domains and collections do I have, and what do they cost?**
 
-**Naming an index.** Commands that work on one index take it as `"domain/index"` or `"collection/index"`, like a path. A collection also works by its ID, and anything by its ARN or endpoint URL, so you can paste the URL your code already uses. After `use("vectors-prod")`, the index name alone is enough; after `use("vectors-prod/support-docs")`, nothing is. Without either, commands use the only domain or collection in the region and its only vector index, or ask which one you mean.
+    ```python
+    ui.overview()
+    ```
+
+    [Domains and collections](#overview)
+
+-   **Do my vectors fit in the memory the nodes have?**
+
+    ```python
+    ui.indexes("vectors-prod")
+    ```
+
+    [Indexes](#indexes)
+
+-   **How is this index set up, in plain English?**
+
+    ```python
+    ui.index_info("vectors-prod/support-docs")
+    ```
+
+    [One vector index](#index-info)
+
+-   **Are my vectors healthy?**
+
+    ```python
+    ui.sample("vectors-prod/support-docs")
+    ```
+
+    [Look at the vectors](#sample)
+
+-   **What comes back for this question?**
+
+    ```python
+    ui.search("how do I get my money back?", index="vectors-prod/support-docs")
+    ```
+
+    [Search](#search)
+
+</div>
+
+Name an index like a path, `"domain/index"` or `"collection/index"`. After `ui.use("vectors-prod/support-docs")` you can leave it out.
+
+??? more "How to read a report, and other ways to name an index"
+
+    Every report puts the answer first: cards with the numbers that matter (a card turns amber or red when a finding is about it), then the findings, warnings first, each a bold headline with why it matters and what to do underneath. The tables of detail come after.
+
+    - **Sort** by clicking a column's header (again for the other way, a third time for the original order).
+    - **Filter** a column with a few repeated values (an index's health, a collection's type) to see only those rows.
+    - **Columns** lets you untick the columns you don't need.
+    - **Next** at the bottom lists two or three commands with the arguments filled in, such as `index_info('vectors-prod/support-docs')`.
+
+    One click on a command anywhere in a report, or on a code block, selects all of it, ready to copy.
+
+    A collection also works by its ID, and anything by its ARN or endpoint URL, so you can paste the URL your code already uses. After `use("vectors-prod")`, the index name alone is enough. Without `use()`, commands use the only domain or collection in the region and its only vector index, or ask which one you mean.
 
 ## Domains and collections { #overview }
 
-`overview()` lists every OpenSearch Service domain and Serverless collection in the region, from the AWS APIs alone, so it's quick and needs no access to the clusters themselves.
+`overview()` lists every domain and Serverless collection in the region, what it costs, and how much memory its nodes have for vector graphs.
+{ .gist }
+
+It reads the AWS APIs alone, so it's quick and needs no access to the clusters themselves.
 
 ```python
 ui.overview()
@@ -99,17 +148,21 @@ ui.overview()
 `ui.overview()`: what each domain runs on and costs, how much memory its nodes have for vector graphs, and what Serverless bills even when idle.
 ///
 
-- **Domains**: engine and version, data nodes, storage, whether the endpoint is public or inside a VPC, and the **k-NN memory**: what the data nodes have for vector graphs. OpenSearch Service gives the Java heap half of each node's memory (up to 32 GiB), and the k-NN plugin may use half of the rest, so an `r6g.large.search` with 16 GiB has about 4 GB for graphs.
-- **Serverless collections**: type (vector search, search or time series), standby replicas, network access and encryption key. Serverless bills in OpenSearch Compute Units (OCUs): at least 2 for each group of collections that share an encryption key, a type and the standby setting (1 without standby replicas), even with no traffic. The capacity table puts that minimum next to what the account used in the last 24 hours (CloudWatch) and the most it can scale to.
-- **Warnings** come from each domain's settings: open to the internet without fine-grained access control, the old Elasticsearch k-NN plugin, versions without on-disk vectors, burstable instances, one data node, gp2 storage, encryption or HTTPS off, a waiting software update. `indexes("name")` shows every finding for one.
+Its warnings catch a domain open to the internet without fine-grained access control, the old Elasticsearch k-NN plugin, burstable instances, one data node and more. `indexes("name")` shows every finding for one.
 
-`use("vectors-prod")` makes a domain or collection the one later commands work on, and `use("vectors-prod/support-docs")` an index in it.
+??? more "What k-NN memory and the Serverless minimum mean"
+
+    - **k-NN memory** is what a domain's data nodes have for vector graphs. OpenSearch Service gives the Java heap half of each node's memory (up to 32 GiB), and the k-NN plugin may use half of the rest, so an `r6g.large.search` with 16 GiB has about 4 GB for graphs.
+    - **Serverless** bills in OpenSearch Compute Units (OCUs): at least 2 for each group of collections that share an encryption key, a type and the standby setting (1 without standby replicas), even with no traffic. The capacity table puts that minimum next to what the account used in the last 24 hours (CloudWatch) and the most it can scale to.
 
 ## Indexes { #indexes }
 
 ### Every index in a domain or collection
 
-`indexes()` lists the indexes with their documents, size and shards, and for each vector field its dimensions, engine and similarity, how many documents have a vector, and the memory its graphs need, estimated with OpenSearch's own sizing rule. On a domain it also reads the cluster's health and what the k-NN plugin has in memory now.
+`indexes()` lists the indexes in a domain or collection, and whether their vector graphs fit in the memory the nodes have.
+{ .gist }
+
+For each vector field: its dimensions, engine and similarity, how many documents have a vector, and the memory its graphs need. On a domain it also reads the cluster's health and what the k-NN plugin has in memory now.
 
 ```python
 ui.indexes("vectors-prod")
@@ -121,7 +174,7 @@ ui.indexes("vectors-prod")
 `ui.indexes("vectors-prod")`: the graphs need more memory than the nodes have, so searches load them from disk; one index uses a deprecated engine, another has documents vector search can't find.
 ///
 
-The findings that matter most for vector search:
+The three findings that matter most for vector search:
 
 - **The graphs don't fit.** faiss and nmslib graphs live in the k-NN plugin's memory. When all the copies' graphs need more than the nodes have, searches load graphs from disk (slow) and indexing can trip the k-NN circuit breaker. The fix is bigger memory-optimized instances, more nodes, or compressed vectors (`index_info()` shows how much each option saves).
 - **Documents without a vector.** A document with no vector is never returned by a vector search, however relevant its text. `sample("vectors-prod/support-docs", where={"embedding": ("missing",)})` shows some.
@@ -129,9 +182,12 @@ The findings that matter most for vector search:
 
 On Serverless, shards, replicas and memory are managed for you, so the report leaves them out.
 
-### One vector index in detail
+### One vector index in detail { #index-info }
 
-`index_info()` explains one index: each vector field's dimensions, engine and algorithm with its settings, the similarity and **what a score means**, how many documents have a vector, the memory the graphs need against what the nodes have, the fields you can filter on (each with the `where=` to copy), and the k-NN query as code.
+`index_info()` explains one index in plain English, with the k-NN query and the filters to copy.
+{ .gist }
+
+Each vector field's dimensions, engine and settings, the similarity and **what a score means**, the memory its graphs need against what the nodes have, and the fields you can filter on, each with its `where=`.
 
 ```python
 ui.index_info("vectors-prod/support-docs")
@@ -143,21 +199,24 @@ ui.index_info("vectors-prod/support-docs")
 `ui.index_info("vectors-prod/support-docs")`: 32-bit vectors that need 15.7 GB with replicas, and what on-disk mode would need instead.
 ///
 
-**How the memory is estimated.** OpenSearch's sizing rule for HNSW is 1.1 × (bytes per vector + 8 × `m`) per vector, for every copy (primary and replicas each build their own graphs); for IVF it's 1.1 × (bytes per vector × vectors + 4 × `nlist` × dimensions). A 32-bit float vector takes 4 bytes per dimension, and compression shrinks that:
+??? more "How the memory is estimated, and how compression shrinks it"
 
-| Mapping | Bytes per vector (1,024 dimensions) | Needs |
-|---|---|---|
-| `"data_type": "float"` (the default) | 4,096 | |
-| an `fp16` encoder (faiss) | 2,048 | OpenSearch 2.13 |
-| `"data_type": "byte"` | 1,024 | lucene 2.9, faiss 2.17 |
-| `"mode": "on_disk"` (32x by default), or `"compression_level"` | 128 at 32x | OpenSearch 2.17 |
-| `"data_type": "binary"` | 128 | OpenSearch 2.16 |
+    OpenSearch's sizing rule for HNSW is 1.1 × (bytes per vector + 8 × `m`) per vector, for every copy (primary and replicas each build their own graphs); for IVF it's 1.1 × (bytes per vector × vectors + 4 × `nlist` × dimensions). A 32-bit float vector takes 4 bytes per dimension, and compression shrinks that:
 
-On-disk mode keeps the compressed vectors in memory and rescores the best matches with the full vectors from disk, so recall stays close to the full-precision index. The mapping can't change in place: create a new index with it and reindex. lucene's graphs live in the operating system's file cache rather than the k-NN plugin's memory, so they don't count against the k-NN limit, though they still want the memory.
+    | Mapping | Bytes per vector (1,024 dimensions) | Needs |
+    |---|---|---|
+    | `"data_type": "float"` (the default) | 4,096 | |
+    | an `fp16` encoder (faiss) | 2,048 | OpenSearch 2.13 |
+    | `"data_type": "byte"` | 1,024 | lucene 2.9, faiss 2.17 |
+    | `"mode": "on_disk"` (32x by default), or `"compression_level"` | 128 at 32x | OpenSearch 2.17 |
+    | `"data_type": "binary"` | 128 | OpenSearch 2.16 |
+
+    On-disk mode keeps the compressed vectors in memory and rescores the best matches with the full vectors from disk, so recall stays close to the full-precision index. The mapping can't change in place: create a new index with it and reindex. lucene's graphs live in the operating system's file cache rather than the k-NN plugin's memory, so they don't count against the k-NN limit, though they still want the memory.
 
 ## Look at the vectors { #sample }
 
-`sample()` reads random documents and shows a few with their text, where each came from and their other fields (vectors as dimensions and length). It checks 200 documents' vectors on the way: whether they all have one size, whether they're unit length, and whether any are all zeros or exact repeats.
+`sample()` shows a few documents and checks 200 vectors for the problems that quietly break search: zeros, repeats and mixed lengths.
+{ .gist }
 
 ```python
 ui.sample("vectors-prod/support-docs")
@@ -179,7 +238,10 @@ What the checks mean:
 
 ## Search { #search }
 
-`search()` runs one k-NN search and shows the k nearest documents with their score, the **similarity the score stands for** (the cosine, inner product or distance, read back from OpenSearch's score formula), their text, source and fields.
+`search()` shows the documents nearest a question, with the similarity each score stands for.
+{ .gist }
+
+Scores are read back into the cosine, inner product or distance behind them, next to each document's text, source and fields.
 
 ```python
 ui.search("how do I get my money back?", index="vectors-prod/support-docs")
@@ -201,31 +263,37 @@ ui.search("how do I get my money back?", index="vectors-prod/support-docs")
 | `search(vector=v)` | A vector you already have (a list or a numpy array) |
 | `search(like="art-00156")` | That document's own vector, so no model is needed; the document itself is left out of the results |
 
-!!! warning ""
+!!! tip "Worth knowing"
 
     **Embed the question with the model that embedded the documents.** Vectors from different models aren't comparable, so the wrong model gives results that look random. The report says which model it used and why. A vector of the wrong size is refused before anything is searched.
 
 ### Filters (`where=`) { #filters }
 
-`where=` narrows a search (or a sample) to documents whose fields match, during the search when the engine can (faiss and lucene), so you still get k results. It takes a dict, and every condition must match:
+`where=` narrows a search or a sample to documents whose fields match, with a plain dict: `where={"lang": "en", "year": (">=", 2024)}`.
+{ .gist }
 
-| `where=` | Means |
-|---|---|
-| `{"lang": "en"}` | `lang` is `en` (a text field is matched through its `.keyword` sub-field when it has one) |
-| `{"product": ["store", "app"]}` | one of these, also `("in", [...])` |
-| `{"year": (">=", 2024)}` | also `">"`, `"<"`, `"<="`, `"="`, `"!="` |
-| `{"updated": ("between", "2026-01-01", "2026-06-30")}` | both ends included |
-| `{"metadata.source": ("prefix", "s3://acme-support/articles/refunds")}` | starts with |
-| `{"text": ("contains", "gift card")}` | the words, anywhere in a text field |
-| `{"embedding": ("missing",)}` | the field isn't set, also `("exists",)` |
+faiss and lucene filter during the search, so you still get k results. nmslib finds the k nearest and then drops the ones that don't match, so fewer can come back; the report says so when it happens.
 
-A field the index doesn't have is reported with the closest names. Query DSL works too: `where={"bool": {...}}` is passed through as it is. `index_info()` lists the fields you can filter on, each with a `where=` to copy.
+??? more "Every condition `where=` takes"
 
-nmslib can't filter during the search: it finds the k nearest, then drops the ones that don't match, so fewer than k can come back. The report says so when it happens.
+    Every condition in the dict must match:
+
+    | `where=` | Means |
+    |---|---|
+    | `{"lang": "en"}` | `lang` is `en` (a text field is matched through its `.keyword` sub-field when it has one) |
+    | `{"product": ["store", "app"]}` | one of these, also `("in", [...])` |
+    | `{"year": (">=", 2024)}` | also `">"`, `"<"`, `"<="`, `"="`, `"!="` |
+    | `{"updated": ("between", "2026-01-01", "2026-06-30")}` | both ends included |
+    | `{"metadata.source": ("prefix", "s3://acme-support/articles/refunds")}` | starts with |
+    | `{"text": ("contains", "gift card")}` | the words, anywhere in a text field |
+    | `{"embedding": ("missing",)}` | the field isn't set, also `("exists",)` |
+
+    A field the index doesn't have is reported with the closest names. Query DSL works too: `where={"bool": {...}}` is passed through as it is. `index_info()` lists the fields you can filter on, each with a `where=` to copy.
 
 ### Reading scores { #scores }
 
-OpenSearch turns each distance into a score where higher is closer. The report reads the score back into the measure behind it:
+A score isn't a similarity: OpenSearch turns each distance into a score where higher is closer, and the report reads it back into the measure behind it.
+{ .gist }
 
 | Space type | OpenSearch's score | Shown as |
 |---|---|---|
@@ -235,6 +303,8 @@ OpenSearch turns each distance into a score where higher is closer. The report r
 | `l1`, `linf`, `hamming` | 1 / (1 + distance) | Distance |
 
 For unit-length vectors (most embedding models return them), L2 distance, inner product and cosine all rank documents the same way.
+
+<p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
 

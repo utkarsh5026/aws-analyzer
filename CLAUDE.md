@@ -949,7 +949,14 @@ does both, a page at a time). How the UI works:
   noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. A guide opens with its
   eyebrow (icon, service name, module as code), an H1 that says what the reader gets ("Find out which Lambda failed,
   and why, without the console"), a short `.lede` and the `pills` it promises. Write for a data scientist: the
-  question they have first, then what the page lets them do, in plain words. A screenshot is two images and a caption:
+  question they have first, then what the page lets them do, in plain words. A guide reads in layers, so a reader who
+  skims still gets the point: `## Start here { #tour }` is a `<div class="quick" markdown>` list of tiles (the
+  question in bold, the one call, a link to its section); each section opens with its takeaway in one sentence marked
+  `{ .gist }`; detail most readers can skip (the offline install, options, how it works inside, every filter) goes in
+  `??? more "what's inside"` folds; the one thing that costs money or loses data if missed is `!!! tip "Worth
+  knowing"`; and `<p class="part">` marks where the guide ends and reference begins (the data in Python, cost,
+  permissions, troubleshooting, the command reference). Keep a visible paragraph under about 60 words.
+  A screenshot is two images and a caption:
   `![alt](images/<name>-light.webp#only-light){ width="984" height="..." loading=lazy }`, the same line with
   `-dark` / `#only-dark` (Material shows the one for the reader's theme), then `/// caption` ... `///`.
   The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by

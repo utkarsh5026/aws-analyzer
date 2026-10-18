@@ -7,7 +7,7 @@ description: "How to ask questions about your AWS account in plain English from 
 
 # Ask your AWS account a question, and get an answer you can check
 
-Type "Which Lambda failed last night?" in a notebook cell and get which functions failed, how often, why, and the run that shows it. Ask "Were last night's uploads to acme-raw processed?" and it checks the bucket, the files that arrived and the function they should have run. Every answer says what it checked, in your time zone, what it couldn't read, what it cost, and the commands to look closer.
+Ask "Which Lambda failed last night?" in a notebook cell and get the answer: which functions, how often, why, and the run that shows it. Every answer says what it checked, what it couldn't read and what it cost.
 { .lede }
 
 <ul class="pills">
@@ -18,14 +18,14 @@ Type "Which Lambda failed last night?" in a notebook cell and get which function
   <li>Lambda and S3, joined</li>
 </ul>
 
-It covers AWS Lambda and Amazon S3, and the bucket events that invoke functions. The model is your Azure OpenAI deployment, and the agent loop is LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's functions from the [Lambda guide](lambda_functions.md): `orders-etl`, which loads each day's orders into the warehouse from the files that arrive in the `acme-raw` bucket, and `report-api`.
+It covers AWS Lambda and Amazon S3. The model is your Azure OpenAI deployment, run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
 { .muted }
 
 ## Set up in SageMaker { #setup }
 
 <div class="steps" markdown>
 
-1. **Install the package with the agent's extra**, in a notebook cell. The agent needs deepagents and langchain-openai, which need Python 3.11 or newer; the rest of aws-analyzer still runs on 3.10 with boto3 alone.
+1. **Install it with the agent's extra** in a notebook cell. It needs Python 3.11 or newer.
 
     ```bash
     %pip install "aws-analyzer[agent]"
@@ -41,7 +41,6 @@ It covers AWS Lambda and Amazon S3, and the bucket events that invoke functions.
     os.environ["AZURE_OPENAI_DEPLOYMENT"] = "gpt-4o"     # the deployment's name in Azure AI Foundry
     ```
 
-    Or pass them: `AgentView(endpoint=..., deployment=..., api_key=...)`. For Microsoft Entra ID instead of a key, pass `azure_ad_token_provider=` (from `azure.identity.get_bearer_token_provider`). The API version is `2024-10-21` unless `OPENAI_API_VERSION` or `api_version=` says otherwise.
 
 3. **Create the view.** It reads AWS with the notebook's IAM execution role and region, like every other view.
 
@@ -53,19 +52,28 @@ It covers AWS Lambda and Amazon S3, and the bucket events that invoke functions.
     agent.help()
     ```
 
+</div>
+
+??? more "Passing the deployment in code, Entra ID, and time zones"
+
+    Pass the deployment in code instead: `AgentView(endpoint=..., deployment=..., api_key=...)`. For Microsoft Entra ID instead of a key, pass `azure_ad_token_provider=` (from `azure.identity.get_bearer_token_provider`). The API version is `2024-10-21` unless `OPENAI_API_VERSION` or `api_version=` says otherwise.
+
     [`set_timezone()`](index.md#timezone) is the package's own: every report then shows its times in your zone too, and the agent's table of what it checked does. `AgentView(timezone="Europe/London")` gives the agent a zone of its own instead. Without either, the agent works in UTC and says so.
 
     ```python
     agent = AgentView(timezone="kolkata")   # a tz database name, its city, or an offset like "+05:30"
     ```
 
-</div>
+    The agent needs deepagents and langchain-openai, which need Python 3.11; the rest of aws-analyzer still runs on 3.10 with boto3 alone.
 
-!!! warning ""
+!!! tip "Worth knowing"
 
     **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, with anything that looks like a key or password hidden) are sent to your Azure OpenAI deployment. Environment variable values and what's inside your files are never read. Use a deployment your organisation allows for that data.
 
-## Five-minute tour { #tour }
+## Start here { #tour }
+
+Ask the way you'd ask a colleague. Every answer says what it checked, so you know how far to trust it.
+{ .gist }
 
 ```python
 agent.ask("Which Lambda failed last night?")
@@ -78,59 +86,71 @@ agent.tools()                                                  # what it can cal
 agent.transcript()                                             # every question and answer so far, with their cost
 ```
 
-Each `ask()` shows a report: the answer first, then **What it checked**, a line per tool call with the window and regions it covered (and for S3, the keys it read) and what it found, then what it couldn't read or was refused, the AWS reads it made, the tokens and their cost, and the `LambdaView` and `S3View` commands that show the same thing as a full report, arguments filled in.
+Each answer comes with **What it checked**: a line per tool call with the window and regions it covered and what it found. Then what it couldn't read, its cost, and the `LambdaView` and `S3View` commands that show the same as a full report.
 
 ## How it answers { #how-it-works }
 
-The model gets a set of tools and decides which to call. For "Which Lambda failed last night?" it usually:
+The model picks which read-only tools to call. For "Which Lambda failed last night?" it usually:
+{ .gist }
 
 1. Turns "last night" into a window in your time zone (`set_timezone()`'s; 18:00 yesterday to 08:00 today, unless you say otherwise) and converts it to UTC, which CloudWatch uses. Each question is sent with the time it was asked, in your time zone and in UTC.
 2. Calls `function_health` for that window: CloudWatch's counts for every function at once, in a few seconds.
 3. Calls `function_errors` for the functions that failed, which reads their logs and groups the errors by cause.
 4. Answers, and ends with the window and regions it checked.
 
-For "Were last night's uploads to acme-raw processed?" it calls `s3_triggers` for the bucket and the window. That reads the bucket's event notifications (which functions it invokes, on which events, for which keys), lists the files written in the window, checks that the function is there and that its resource policy lets the bucket invoke it, and reads the function's runs and failures from CloudWatch for the same window. The findings name what broke the link: files whose ending is `.CSV` when the filter says `.csv` (S3 compares case-sensitively), files uploaded in parts when the notification fires only on PUT uploads, a function that isn't there, a permission that's missing (with the `aws lambda add-permission` command), or no file arriving at all. Then `function_errors` reads why the runs that did happen failed.
+??? more "How it checks that uploads were processed"
+
+    For "Were last night's uploads to acme-raw processed?" it calls `s3_triggers` for the bucket and the window. That reads the bucket's event notifications (which functions it invokes, on which events, for which keys), lists the files written in the window, checks that the function is there and that its resource policy lets the bucket invoke it, and reads the function's runs and failures from CloudWatch for the same window. The findings name what broke the link: files whose ending is `.CSV` when the filter says `.csv` (S3 compares case-sensitively), files uploaded in parts when the notification fires only on PUT uploads, a function that isn't there, a permission that's missing (with the `aws lambda add-permission` command), or no file arriving at all. Then `function_errors` reads why the runs that did happen failed.
 
 Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. `new=True` or `agent.new_conversation()` starts a fresh one. The kernel's stop button stops a question, and the report shows what it found until then.
 
 ## What it can call { #tools }
 
-Fourteen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` rather than one tool per question. They take parameters (a time window, a name glob, regions, a location, a search), so a few of them answer many questions, and each returns a compact summary with what it covered instead of raw AWS data.
-
-**Lambda**
-
-| Tool | What it returns |
-|---|---|
-| `find_functions(match, regions)` | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed |
-| `function_health(since, until, match, regions)` | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called |
-| `function_errors(function, since, until, region)` | One function's errors from its logs, grouped by cause, with counts, an example line and request IDs |
-| `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error |
-| `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs |
-| `function_details(function, region)` | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding |
-| `function_code(function, region)` | What a Python function's code calls, read with `ast` and never run: AWS operations, environment variables by name, event fields |
-
-**S3**, which never reads what's inside a file:
-
-| Tool | What it returns |
-|---|---|
-| `find_buckets(match, sizes)` | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first |
-| `bucket_details(bucket)` | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, its event notifications, size and monthly cost, and its findings |
-| `list_folder(location)` | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first |
-| `find_files(location, match, since, until, min_size, max_size, limit)` | The files under a location that match a name glob, a time window or a size: how many, how big, the newest |
-| `folder_summary(location)` | What a location holds by file type, storage class and folder, the largest files, the monthly cost and findings |
-| `file_info(location)` | One file's headers: size, type, storage class (Glacier needs a restore first), encryption (a KMS key means readers need `kms:Decrypt`), metadata and tags |
-
-**S3 and Lambda together:**
-
-| Tool | What it returns |
-|---|---|
-| `s3_triggers(bucket, function, since, until, region)` | Which bucket events invoke which functions, on which keys. Give a bucket, a function, or both. For each link: whether the function is there and lets the bucket invoke it, how many files its filter covers arrived in the window and how many of them ran it (and which were missed, by the case of their ending or by how they were uploaded), and the function's runs, failures and throttles in that window |
-
-`s3_triggers` is there when the agent has both toolkits, as it does by default. From a function, it finds the buckets its resource policy names; when the policy lets any bucket invoke it (or none), it looks through the buckets in the function's region, up to 50.
+Fourteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
+{ .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
 
+??? more "Every tool, and what it returns"
+
+    They're building blocks over `LambdaAnalyzer` and `S3Analyzer` rather than one tool per question: they take a time window, a name glob, regions, a location or a search, so a few of them answer many questions.
+
+    **Lambda**
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_functions(match, regions)` | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed |
+    | `function_health(since, until, match, regions)` | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called |
+    | `function_errors(function, since, until, region)` | One function's errors from its logs, grouped by cause, with counts, an example line and request IDs |
+    | `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error |
+    | `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs |
+    | `function_details(function, region)` | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding |
+    | `function_code(function, region)` | What a Python function's code calls, read with `ast` and never run: AWS operations, environment variables by name, event fields |
+
+    **S3**, which never reads what's inside a file:
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_buckets(match, sizes)` | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first |
+    | `bucket_details(bucket)` | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, its event notifications, size and monthly cost, and its findings |
+    | `list_folder(location)` | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first |
+    | `find_files(location, match, since, until, min_size, max_size, limit)` | The files under a location that match a name glob, a time window or a size: how many, how big, the newest |
+    | `folder_summary(location)` | What a location holds by file type, storage class and folder, the largest files, the monthly cost and findings |
+    | `file_info(location)` | One file's headers: size, type, storage class (Glacier needs a restore first), encryption (a KMS key means readers need `kms:Decrypt`), metadata and tags |
+
+    **S3 and Lambda together:**
+
+    | Tool | What it returns |
+    |---|---|
+    | `s3_triggers(bucket, function, since, until, region)` | Which bucket events invoke which functions, on which keys. Give a bucket, a function, or both. For each link: whether the function is there and lets the bucket invoke it, how many files its filter covers arrived in the window and how many of them ran it (and which were missed, by the case of their ending or by how they were uploaded), and the function's runs, failures and throttles in that window |
+
+    `s3_triggers` is there when the agent has both toolkits, as it does by default. From a function, it finds the buckets its resource policy names; when the policy lets any bucket invoke it (or none), it looks through the buckets in the function's region, up to 50.
+
+
 ## Safe and bounded { #safety }
+
+It can't change your account, it says what it checked, and each question has a budget.
+{ .gist }
 
 - **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell or code execution: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
@@ -138,7 +158,8 @@ Fourteen tools in two toolkits, each a building block over `LambdaAnalyzer` or `
 
 ### The budget { #budget }
 
-Each question has limits. Past one, the tools stop running and tell the model to answer with what it has; the report says what was cut short and how to raise the limit.
+Past a limit, the tools stop and the model answers with what it has; the report says what was cut short and how to raise the limit.
+{ .gist }
 
 | Limit | Default | Past it |
 |---|---|---|
@@ -153,7 +174,11 @@ Each question has limits. Past one, the tools stop running and tell the model to
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 ```
 
-Log reads are limited because searching weeks of a busy function's logs is slow. For long windows the agent uses CloudWatch's counts, which cover months in seconds, and reads logs only for a short window around what it found. S3 listings are limited for the same reason: S3 lists 1,000 keys per request, in key order, so the agent is told to give `find_files` and `folder_summary` the narrowest prefix it can (a day's folder rather than the bucket).
+??? more "Why log reads and S3 listings are limited"
+
+    Log reads are limited because searching weeks of a busy function's logs is slow. For long windows the agent uses CloudWatch's counts, which cover months in seconds, and reads logs only for a short window around what it found. S3 listings are limited for the same reason: S3 lists 1,000 keys per request, in key order, so the agent is told to give `find_files` and `folder_summary` the narrowest prefix it can (a day's folder rather than the bucket).
+
+<p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python and your own tools, cost, permissions, troubleshooting and every command.</p>
 
 ## Use the data in Python { #python }
 
