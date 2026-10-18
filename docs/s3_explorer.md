@@ -3,15 +3,15 @@ title: S3 Explorer Guide
 description: "How to click through Amazon S3 buckets and folders like a file explorer in a SageMaker notebook with aws-analyzer's s3_explorer.py, and see what's inside each file as you click it."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/s3.svg" alt="" width="32" height="32"> aws-analyzer · s3_explorer.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/s3.svg" alt="" width="32" height="32"> Amazon S3 <code>s3_explorer.py</code></p>
 
-# Click through your S3 buckets like a file explorer
+# Click through S3 like the folders on your laptop
 
-One call, `S3Explorer()`, turns a notebook cell into a file explorer for S3. Your buckets and folders are on the left; click one to open it. Click a file and the right shows what's inside: a table's first rows, a PDF's pages, a Word file with its pictures, an archive's contents. No paths to type, no commands to remember.
+`S3Explorer()` turns a notebook cell into a file explorer. Your buckets and folders are on the left; click a file and the right shows what's inside it: a table's first rows, a PDF page by page, a Word file with its pictures, an archive's contents. Nothing to type, nothing to remember.
 { .lede }
 
 <ul class="pills">
-  <li>Two files, boto3 + ipywidgets</li>
+  <li>One install, boto3 + ipywidgets</li>
   <li>Read-only: never changes your data</li>
   <li>Opens folders of millions of files</li>
   <li>Plain text outside Jupyter</li>
@@ -120,7 +120,7 @@ When nothing matches, the note under the list says why and offers the fix: **Sea
 Click a file and the right shows what's inside it, read by the same [`preview`](s3.md#files) as the S3 reports: a table's first rows, a Parquet file's schema and row groups, a JSON file's fields, a PDF's first pages as they look, a Word file laid out with its pictures, a picture, an archive's contents, a model's tensors. Every [file type `s3.py` reads](s3.md#file-types) works here. The buttons above it do the rest:
 
 | Button | What it does |
-|---|---|
+| --- | --- |
 | **👁️ Preview** | What's inside the file (the [`preview`](s3.md#files) report) |
 | **🏷️ Details** | Its size, dates, storage class, encryption, version, metadata and tags (the `head` report) |
 | **📖 Read all** | For a PDF, Word or PowerPoint file: the whole document, page by page or slide by slide (the [`document`](s3.md#documents) report) |
@@ -168,7 +168,7 @@ The explorer never runs it: a restore costs a retrieval fee, so that's your call
 The buttons above the right pane change with where you are:
 
 | Where | Button | What it shows |
-|---|---|---|
+| --- | --- | --- |
 | In a folder | **📊 What's in here** | Every file below this folder, not only this level: sizes, file types, the biggest files and folders, the monthly cost, and findings (the [`summary`](s3.md#summary) report). It lists everything below, so a big folder takes a while; a progress bar shows how far it's got |
 | In a folder | **⬇ Download .zip** | Everything below this folder as one `.zip` ([see below](#zip)) |
 | At a bucket's top level | **🛡️ Bucket settings** | Versioning, encryption, public access, lifecycle rules and the policy in plain English, and what's risky (the [`bucket_info`](s3.md#buckets) report) |
@@ -304,7 +304,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 ```
 
 | Permission | Used by |
-|---|---|
+| --- | --- |
 | `s3:ListAllMyBuckets` | The list of buckets you start from. Without it, open a bucket by its path |
 | `s3:ListBucket` | Listing folders, **Include subfolders**, **Look up**, **📊 What's in here** and **⬇ Download .zip** |
 | `s3:GetObject` | Opening files: **👁️ Preview**, **🏷️ Details**, **📖 Read all**, **📄 Text**, **⬇ Download** and **⬇ Download .zip**, and the links **↗ Open in new tab** opens |
@@ -350,7 +350,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 <div class="ref" markdown>
 
 | Argument | What it does |
-|---|---|
+| --- | --- |
 | `uri` | Where to start: a folder, a file (its folder opens with the file shown), `bucket/prefix`, an S3 console link or an object URL. Left out: your buckets |
 | `core` | An `S3Analyzer` or `S3View` to use; without one, one is made from `profile` and `region` |
 | `profile`, `region` | The AWS profile and region |
@@ -362,7 +362,7 @@ The explorer only reads. A folder or bucket the notebook's role can't list shows
 | `progress` | Progress bars for long reports: `"auto"`, `"plain"` or `"off"`, as for `S3View` |
 
 | Command | What it does |
-|---|---|
+| --- | --- |
 | `open(uri="")` | Goes to a folder, or shows a file in its folder; `open()` goes to your buckets |
 | `back()`, `forward()` | **←** and **→** |
 | `up()` | **↑**: the folder above |

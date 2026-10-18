@@ -3,11 +3,11 @@ title: OpenSearch Vector Index Guide
 description: "How to inspect Amazon OpenSearch Service and OpenSearch Serverless vector (k-NN) indexes from a SageMaker notebook with aws-analyzer's opensearch.py: vector fields in plain English, memory, vector health and nearest-neighbour search, with examples."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/opensearch.svg" alt="" width="32" height="32"> aws-analyzer · opensearch.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/opensearch.svg" alt="" width="32" height="32"> Amazon OpenSearch <code>opensearch.py</code></p>
 
-# Look inside your OpenSearch vector indexes from a SageMaker notebook
+# See what your vector indexes really hold
 
-Install it in your notebook and see what your vector indexes hold: each vector field in plain English, whether its graphs fit in the memory the nodes have, documents that have no vector, vectors that repeat or are all zeros, and the documents nearest a question, without leaving Jupyter.
+Each vector field in plain English, whether its graphs fit in the memory your nodes have, documents that never got a vector, vectors that repeat or are all zeros, and the documents nearest a question, for OpenSearch Service domains and Serverless collections alike.
 { .lede }
 
 <ul class="pills">

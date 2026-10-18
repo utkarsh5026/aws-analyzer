@@ -3,21 +3,18 @@ title: Bedrock Chat Guide
 description: "How to chat with an Amazon Bedrock knowledge base from a SageMaker notebook with aws-analyzer's bedrock_chat.py: pick the model, change any RetrieveAndGenerate setting, see the request as JSON, check the search apart from the answer, test a list of questions with many setups at once, keep the runs, and copy the setup as code."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> aws-analyzer · bedrock_chat.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> Amazon Bedrock <code>bedrock_chat.py</code></p>
 
-# Chat with a Bedrock knowledge base, and see exactly what's sent
+# Tune your knowledge base's answers, and see exactly what's sent
 
-One install and one call, `chat()`, open a chat window in your notebook. Pick the knowledge base and the model, ask questions, and change what's sent (passages, search type, filter, reranker, temperature, prompt, or any other field of the API) while you watch the request it makes, as JSON you can edit. Switch to **Retrieve only** to see just the search behind an answer. Then ask a whole list of test questions with the setup you've built, or with every combination of the settings you're unsure of at once, see which setup does best, keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
+`chat()` opens a chat window in your notebook. Pick the knowledge base and the model, ask, and change any setting while you watch the request it makes. Then ask a list of test questions with every combination of the settings you're unsure of, see which setup answers best, and copy it as Python, JSON or an AWS CLI command.
 { .lede }
 
 <ul class="pills">
   <li>One install, boto3 + ipywidgets</li>
   <li>Every RetrieveAndGenerate field</li>
   <li>Answers stream as they're written</li>
-  <li>Retrieval and answer, checked apart</li>
-  <li>A list of test questions, compared run to run</li>
   <li>Every combination of settings, ranked</li>
-  <li>Test runs kept in a file</li>
   <li>The setup as Python, JSON or the AWS CLI</li>
   <li>Read-only: changes no knowledge base</li>
 </ul>

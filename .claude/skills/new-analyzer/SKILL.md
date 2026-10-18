@@ -1,6 +1,6 @@
 ---
 name: new-analyzer
-description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout, the shared helpers imported from _kit and its Analyzer and View built on _kit's base classes, a first set of useful commands, moto tests, a README section, a docs guide page and a home-page card. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
+description: Scaffold a new AWS service analyzer - src/aws_analyzer/<service>.py with the five-section layout, the shared helpers imported from _kit and its Analyzer and View built on _kit's base classes, a first set of useful commands, moto tests, a README section, a docs guide page and a line on the home page. Use when starting a new service; bedrock_kb.py (Bedrock Knowledge Bases) is the latest one built this way.
 argument-hint: "<module name, e.g. sagemaker> [what users should be able to see first]"
 ---
 
@@ -137,9 +137,10 @@ to the first boto3 release that has every operation the file calls, and put any 
   SageMaker, a five-minute tour, a section per area, using the data in Python, cost, permissions,
   troubleshooting and a command reference. Leave out screenshots you can't make yet (see `/demo --html`).
 - `docs/images/aws/<service>.svg`: the service's 64 px icon from AWS's Architecture Icons package
-  (https://aws.amazon.com/architecture/icons/), unchanged; the card, the guide's eyebrow and README's Services table
+  (https://aws.amazon.com/architecture/icons/), unchanged; the home page's line, the guide's eyebrow and README's Services table
   and section show it.
-- `docs/index.md`: add a card for the new guide next to the existing ones, and add the guide to `nav` in
+- `docs/index.md`: add a line for the new guide to the `.svc` list (its icon, name, module and two or three
+  questions a data scientist would ask that it answers), and add the guide to `nav` in
   `mkdocs.yml`. Check it with `mkdocs build --strict` (`pip install -r requirements-docs.txt`).
 - `CHANGELOG.md`: a bullet under `## [Unreleased]` → `### Added` naming the service, its file and View, and its
   first commands.
