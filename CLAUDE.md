@@ -9,16 +9,16 @@ AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as 
 `src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package, split by layer: see "Architecture of a
 service package") for
-OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions.py` for Lambda functions in one
+OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
 `src/aws_analyzer/_bedrock.py` (see "Hard constraints"). `sagemaker_env.py` isn't `sagemaker.py` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
-would have hidden it), and `lambda_functions.py` isn't `lambda.py` because `lambda` is a Python keyword
+would have hidden it), and `lambda_functions` isn't `lambda` because `lambda` is a Python keyword
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
 next to a notebook; that's gone, and the package is the one way in.
 `s3_explorer.py` is a **companion** to `s3.py`: a clickable file explorer (ipywidgets) that imports `s3` for its
-previews, formatting and AWS calls. `agent/` is a companion to `lambda_functions.py` and `s3.py`: `AgentView().ask("Which
+previews, formatting and AWS calls. `agent/` is a companion to `lambda_functions` and `s3.py`: `AgentView().ask("Which
 Lambda failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
 read-only tools built on `LambdaAnalyzer` and `S3Analyzer` (see "The agent" below). It's the one analyzer that is a package rather
 than a file, because it grows by toolkits (one module per AWS service it has tools for) and by capabilities of the
@@ -143,7 +143,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
   public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
   `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
-  The `agent/` package is a companion of `lambda_functions.py` the same way (its Lambda toolkit's `_lambda_module()`,
+  The `agent/` package is a companion of `lambda_functions` the same way (its Lambda toolkit's `_lambda_module()`,
   imported when the first tool runs; its type hints import it under `TYPE_CHECKING`), and of every analyzer a later
   toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock.py` (`SHARED`), for the
   `_Answer` block its answers are drawn with. `rules.py` checks each of its modules like an analyzer file, reading
@@ -184,7 +184,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   library is needed. `rules.py` can't see those calls: `OpenSearchAnalyzer.request()` sends GET, and POSTs only to
   `_search` / `_count` (`_READ_POSTS`), refusing anything else before it's sent, and `tests/fake_opensearch.py` fails a
   test on any other request. Index fixes (replicas, force merge) are shown as opensearch-py calls, never run.
-  `lambda_functions.py` never invokes, changes or deletes a function (findings show the `aws lambda ...` /
+  `lambda_functions` never invokes, changes or deletes a function (findings show the `aws lambda ...` /
   `aws logs put-retention-policy ...` command instead); its `filter_log_events` call lines carry `# read-only:`
   comments (`FilterLogEvents` isn't a Get/List/Describe name), and `code()` and `download()` download the deployment
   package with urllib from the short-lived S3 link `GetFunction` returns (`LambdaAnalyzer._download`, https only),
@@ -435,7 +435,9 @@ How the View layer works:
   (`_midnight`), so "last called" reads today / yesterday / 3d ago; `_errors_level` is the one rule for when failed
   calls are a warning (in findings, the Error rate card and the table's tone). Log reads go backwards in growing
   slices (`_filter`) so the newest lines are the ones kept when a window holds more than `limit`.
-- `LambdaView.how_it_works()` is `LambdaAnalyzer.code_map()` -> `map_package()` (the package's own `.py` files;
+- `LambdaView.how_it_works()` (its pure side in `lambda_functions/analysis/codemap/`: `terms`, `aws_model`, `syntax`,
+  `model`, `reader`, `mapping`, `findings`, `graph`) is `LambdaAnalyzer.code_map()` -> `map_package()` (the
+  package's own `.py` files;
   libraries are told apart by their `.dist-info` RECORD and `_LIBRARIES`) -> `map_code()`, all pure. A `_CodeReader`
   loads the handler's module the way Python imports it (its packages' `__init__` first; module-level code is the
   start-up, `loading > 0`), then follows the handler with `ast`, keeping what each name holds as a `_Sym` (a boto3
@@ -584,7 +586,10 @@ How the View layer works:
   `_tab_line`), and callbacks go through `_safely`, public commands (`open`, `file`, `search`, `refresh`) through
   `_window_errors`. ⬇ List (`_save_list`) saves the list's `_visible` files in their order with `core.save_file_list`
   and draws a `_Download` under the list (`saved_view`; `x.saved`), its link a data: URL up to `_LIST_LINK_BYTES`. Without ipywidgets or Jupyter it shows the reports instead (`_reports`).
-- `lambda_functions`' explorer window, `LambdaExplorer` (after the View, with `explore()`; `LambdaView.explore()` keeps it
+- `lambda_functions`' explorer window, `LambdaExplorer` (`lambda_functions/explorer/`: `window.py` composes it from a
+  mixin per tab, `_FunctionsTab`, `_FunctionTab`, `_LogsTab`, `_ErrorsTab`, `_PerformanceTab` and `_CodeTab`, each in
+  its module with the constants and line drawings only it uses; `frame.py` holds what the tabs share and `widgets.py`
+  the field and rows; with `explore()`; `LambdaView.explore()` imports it lazily and keeps it
   in `view.explorer`), is the fourth interactive UI, not a companion, and built like `KBExplorer`, on the windows' kit:
   ipywidgets styled by `_EXPLORER_CSS` (scoped under `.lmx-app`, report CSS `_CSS` included once), no JavaScript,
   full-row buttons under their faces (`_Row`, which can carry a small action button such as the function list's Logs;
@@ -657,7 +662,7 @@ with the date they were read) that callers override with `prices={...}` (and
 `model_prices={...}`); the View shows whether list prices or the caller's prices were used. Check them against the
 AWS Price List API (`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/<AmazonS3|AmazonBedrock|
 AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonCloudWatch>/current/us-east-1/index.json`;
-`index.csv` is easier to grep), which is what AWS bills from. `lambda_functions.py`'s `RUNTIMES` holds each managed
+`index.csv` is easier to grep), which is what AWS bills from. `lambda_functions/helpers.py`'s `RUNTIMES` holds each managed
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
@@ -665,7 +670,7 @@ runtime per language that findings suggest moving to. A model missing from `MODE
 once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, `SEARCHABLE`, and
 `presigned_url` (both analyzers' `file_url`, signed by an `s3` client each makes).
 Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
-read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions.py`'s
+read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions/explorer/`'s
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and
 `explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
 
