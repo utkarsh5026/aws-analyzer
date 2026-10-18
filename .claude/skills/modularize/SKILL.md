@@ -1,0 +1,435 @@
+---
+name: modularize
+description: Turn one service module (lambda_functions.py, s3.py, ...) into a package of small modules - core (models, analysis, analyzer) that every front-end shares, and front-ends (report blocks, View, explorer window) on top - without changing anything a user sees. Holds the plan, the target layout per service, the rules the split must keep, the step-by-step recipe and the progress table. Use for "/modularize lambda_functions", for the tooling step ("/modularize tooling"), or before touching code in a service that is half-way through the split.
+argument-hint: "<service | tooling | status>"
+---
+
+# Modularize: one service, one package
+
+Request: `$ARGUMENTS`. A service name (`lambda_functions`, `s3`, `_bedrock`, ...) means: do that service's step,
+following the recipe below. `tooling` means Phase 0. `status` means: read the progress table, check it against the
+tree (`ls src/aws_analyzer/`), and say what's next.
+
+Read CLAUDE.md first. Everything there still holds, and this plan doesn't relax any of it, except where it says so
+explicitly (the per-file lists in "Config files that are keyed by file").
+
+## Why
+
+Each service is one file with five `# ====` sections, and four of them are 8,500 to 12,000 lines. They grow with
+every command, window tab and agent tool. Nobody (human or agent) can hold such a file in their head, and the parts
+used by different consumers are mixed together.
+
+The library has one core and several front-ends:
+
+```
+                 ┌──────────── core (per service) ─────────────┐
+                 │ helpers · models · analysis · analyzer       │
+                 │ (parses, decides, talks to AWS, returns data)│
+                 └──────▲───────────────▲───────────────▲───────┘
+                        │               │               │
+           View (reports)    explorer / window (widgets)    agent toolkit (AI, in agent/)
+                 └──── _kit's UI runtime ────┘                └── agent/'s runtime
+```
+
+The goal: **the core is written once and every front-end uses it its own way.** A front-end only reads the core.
+The core never knows a front-end exists. That only holds if the code is laid out so it's visible and checked.
+
+## The decisions (already made, don't reopen them in a step's PR)
+
+1. **Each service becomes a package with the same layer names.** Every package uses the same names, so an agent who
+   knows one service knows where things are in all of them. Small services stay flat; big ones get sub-packages
+   where they grow.
+2. **The public import path doesn't change.** `from aws_analyzer.lambda_functions import parse_function, LambdaView`
+   keeps working: the package's `__init__.py` re-exports every public name. Submodule paths
+   (`aws_analyzer.lambda_functions.analysis.logs`) are internal and may move again.
+3. **Moves only. No behaviour change.** A split step changes no output, no public name, no method or attribute of a
+   public class. It doesn't fix bugs, rename things or clean up style on the way: moved code is pasted as it was,
+   so `git diff --color-moved` shows it as moved and review is fast. Anything else goes in its own PR.
+4. **A module stays under `MAX_MODULE_LINES` (1,500).** `tests/test_style.py` enforces it. The files that were
+   already longer are listed in `LONG_FILES` until they're split.
+5. **A class that's too big for one module is split into mixins by concern, in the same commit.** For example,
+   `LambdaExplorer(_LogsTab, _CodeTab, ..., _Explorer)` or `S3View(_ListingCommands, _FileCommands, ..., _BaseView)`.
+   Methods and attributes keep their names, so tests and users see the same class. Turning mixins into proper
+   components later is a separate design change, not part of this plan.
+6. **Agent toolkits stay in `agent/toolkits/`.** We considered moving each toolkit into its service's package and
+   rejected it. A toolkit subclasses `agent.toolkits.base.Toolkit`, which needs the agent's `Budget`, and a tool
+   can join two services (`s3_triggers` reads S3 and, through `peer("lambda")`, Lambda). Either would make a service
+   import the agent or another service, which breaks "importing one analyzer loads no other". The agent is a
+   cross-service front-end, and it keeps being the companion of the services it reads.
+7. **The agent reads only the core's public API.** Today it reaches into private names
+   (`LambdaAnalyzer._window`, `._numbers`, `S3Analyzer._cloudwatch_in`, `s3._rule_scope`, `s3._rule_actions`,
+   `s3._exposure`, `s3._encryption_label`, `s3._block_label`). Each service's step makes the ones it owns public
+   (a plain rename, all callers updated) as its first commit, because `__init__` only re-exports public names.
+8. **`_kit` files don't move.** `rules.py` classifies them instead.
+   - **Core-safe:** `fmt`, `text`, `errors`, `deps`, `analyzer`.
+   - **UI:** `blocks`, `render`, `view`, `window`, `progress`, `highlight`, `jsontree`.
+   - The one exception is `render._call` (and `_signature`). The core uses them to write calls into findings. They
+     stay allowed until Phase 2 removes the need.
+
+## Target layout of a service package
+
+```
+src/aws_analyzer/<service>/
+  __init__.py      # module docstring (the old file's), public re-exports, __all__. Nothing else.
+  helpers.py       # section 1: parsing and formatting
+  models.py        # section 2: dataclasses
+  analysis.py      # section 3: pure functions and *_findings  -> analysis/ package once over the limit
+  analyzer.py      # section 4: <Service>Analyzer, the only module that makes AWS clients
+  style.py         # _ROOT, _EXTRA_CSS, _CSS, _BADGE, _render_html: the service's look
+  blocks.py        # the service's own render blocks and their @_draws drawers  -> blocks/ when big
+  view.py          # <Service>View, its cell/row helpers  -> view/ with _<Topic>Commands mixins when big
+  explorer/        # only if the service has a widget window: the window class, tabs as mixins, its CSS
+```
+
+Service-specific core modules go next to these, at the layer they belong to. Examples: `readers/` (S3's file parsers),
+`http.py` (OpenSearch's signed REST client), `machine.py` / `envs.py` (SageMaker).
+
+**Layers, lowest first.** A module imports only from its own layer or lower ones:
+
+| Layer | Modules | May also import |
+|---|---|---|
+| core | helpers → models → analysis → analyzer (and the service-specific core modules) | stdlib, boto3/botocore, core-safe `_kit` (+ `render._call`), `_bedrock` for the Bedrock pair |
+| UI | style → blocks → view → explorer | anything in core, every `_kit` module |
+
+- `analysis` never imports `analyzer`. Pure functions make no AWS calls.
+- `view` imports `explorer` only lazily, inside `explore()`, to avoid an import cycle.
+- Optional packages still load lazily (`_require`), in every module.
+- Every module starts with a docstring and `from __future__ import annotations`. The `# ====` section banners go
+  away, since the module is the section now.
+- Mixin naming, so `rules.py` can find them:
+  - View command mixins: `_<Topic>Commands`.
+  - Explorer tab mixins: `_<Topic>Tab`.
+  - Analyzer mixins: `_<Topic>Reads`.
+  - The composed class lives in the module named for its layer (`view.py` or `view/__init__.py`, ...).
+
+## Phase 0: tooling (done)
+
+The guardrails used to assume one file per analyzer. Now they check packages, and every later step relies on them.
+This is what they do, so you know what a failing check means. All of it was tried on a throwaway copy of the repo
+where `dynamodb`, `s3` and `_bedrock` were packages, with a deliberate violation for each rule.
+
+`.claude/skills/check/rules.py`:
+- **The read-only check covers the whole package.** It finds the services an analyzer makes clients for across
+  every module of its package (`owner_services`), plus its COMPANIONS parents', each a file or a package. So a
+  module that calls `client.put_item` on a client another module made is still caught.
+- **Parents and SHARED may be packages** (`module_files`, `top_modules`): `s3/` as the agent's parent, `_bedrock/`
+  as the Bedrock pair's shared package.
+- **Commands in mixins are checked.** In a package, every class named `*View`, `*Explorer`, `_*Commands` or `_*Tab`
+  (`_ui_classes`) gets the command checks (`check_commands`): a guard (`@_friendly_errors` on a View or
+  `_*Commands`, `@_window_errors` on an explorer or `_*Tab`), a docstring, `-> None`, and no
+  `print` / `display` / `HTML`.
+- **The layer rule** (`check_layers`). A core module that imports its package's `style` / `blocks` / `view` /
+  `explorer` / `window`, or a UI module of `_kit` (except `render._call` / `_signature`), is an error, and so is
+  `analysis*` importing `analyzer*`. The package's `__init__.py` is exempt, since it re-exports both layers.
+- **No copies inside a package** (`check_package`). A function or class defined in two modules of one package is an
+  error. Constants may share a name.
+- **No reaching into private names** (`check_reach`). A companion package (`agent/`) touching a private name of
+  an analyzer or of its module (`core._window`, `lf._x`, `s3._exposure`) is a warning. It found exactly the nine
+  in decision 7. It becomes an error in "the leftovers".
+
+`tests/test_style.py`:
+- `MAX_MODULE_LINES = 1500` applies to every module under `src/aws_analyzer/` except those in `LONG_FILES`.
+- `LONG_FILES` is the set of files that were longer than that before this plan. A file in it may still grow, since
+  features keep landing in services that haven't been split yet.
+- The second test fails once a listed file is gone or fits the limit, so its entry gets removed.
+
+`.claude/skills/check/snapshot.py`:
+- **What `names.json` records for a package:** `defined` is the names in its `__all__`, which is its promise to
+  users. `inside` is every name its modules define.
+- **How `compare` judges a missing name:**
+  - a private name that left the top level but is in `inside` counts as `moved`, not `LOST`;
+  - a public name missing from the top level is always `LOST`.
+
+  No flag is needed.
+
+`tests/test_package.py`: a `SHARED` module may be a package.
+
+Found on the way and fixed:
+- `agent/toolkits/s3_tools.py` had its own copy of `_lambda_module`. It now imports the one in `lambda_tools.py`.
+
+## The recipe for one service
+
+One PR per service, branch `modularize/<service>`, one commit per bullet so each can be checked on its own.
+`.venv/bin/python` if it exists, else `python`; `$S` below is the service.
+
+1. **Baseline**, from main, before changing anything. Save both outputs in the scratchpad, not the repo:
+
+   ```bash
+   python .claude/skills/check/snapshot.py run "$SCRATCH/base" --service $S
+   python .claude/skills/check/rules.py --apis > "$SCRATCH/base-apis.txt"
+   ```
+
+2. **Make the private names the agent uses public** (decision 7), if this service owns any. Rename the name and
+   update every caller: the module, `agent/`, tests, `demo.py` and `snapshot.py`'s cases. Nothing else changes.
+
+3. **File becomes a package:** `git mv src/aws_analyzer/$S.py src/aws_analyzer/$S/__init__.py` (git keeps the
+   history). Then:
+   - Fix relative imports: `from ._kit` → `from .._kit`, and `from ._bedrock` → `from .._bedrock`.
+   - Re-key the per-file config: `ruff.toml` per-file-ignores and `COMMENTS_LEFT`. Swap the path in `LONG_FILES`
+     for `src/aws_analyzer/$S/__init__.py`, since it's still the long file until step 4 empties it.
+
+   The full check must pass. This commit changes no line of code beyond those imports.
+
+4. **Extract modules in layer order**, one commit per module: helpers, models, analysis (by topic), analyzer, style,
+   blocks, view, explorer. Rules for every extraction:
+   - **Move code with a script, never by retyping it.** Write a short Python script in the scratchpad that finds each
+     top-level definition by `ast` (decorators and the constants and comments right above it included), cuts those
+     line ranges out of `__init__.py` and appends them to the new module. Retyping thousands of lines lets mistakes
+     in that tests can miss.
+   - The new module imports what it uses: `_kit` names, and lower layers of its own package
+     (`from .models import Function`). `__init__.py` imports the public names back for re-export.
+   - Order inside a module follows CLAUDE.md: helpers above the code that uses them.
+   - A class over the limit is split into mixins in the same commit (decision 5), each mixin in its own module.
+   - After each commit: `ruff check .`, `python .claude/skills/check/rules.py`,
+     `python -m pytest tests/test_$S.py tests/test_agent.py tests/test_package.py -q`.
+
+5. **Fix the tests and scripts that reached into the old file:**
+   - `monkeypatch.setattr(lfmod, "_RUN_LINES", 6)` must now patch the module that *reads* the name
+     (`from aws_analyzer.lambda_functions.explorer import logs as logs_tab`). Patching the package's re-export changes
+     nothing, and the test then passes or fails for the wrong reason.
+   - Private names a test imports come from their new module.
+   - Do the same in `.claude/skills/demo/*.py` and in `snapshot.py`'s `DEMO_CASES`.
+
+   Test files keep their names (`tests/test_$S.py`). Splitting them is a separate change.
+
+6. **Prove nothing changed:**
+
+   ```bash
+   python .claude/skills/check/snapshot.py run "$SCRATCH/new" --service $S
+   python .claude/skills/check/snapshot.py compare "$SCRATCH/base" "$SCRATCH/new"
+   python .claude/skills/check/rules.py --apis | diff "$SCRATCH/base-apis.txt" -   # only paths may differ
+   ```
+
+   Every output must be identical, and no name `LOST`. Private names that moved into a module are reported as
+   `moved`, which is fine. A difference is a bug in the move: find it, don't accept it.
+
+7. **Docs for agents:**
+   - Update CLAUDE.md where it names this service's file (`lambda_functions.py`'s `_EXPLORER_CSS`, ...) so a path
+     search lands in the right module.
+   - Update the progress table below.
+   - No CHANGELOG entry: users see no change.
+
+8. Run `/check` in full, then open the PR. The PR description says it's a move-only refactor, links this plan, and
+   tells the reviewer to use `git diff main --color-moved=dimmed-zebra -M`.
+
+### Config files that are keyed by file
+
+These lists normally only shrink, and a new file is never added. A split is the one sanctioned exception, because the
+same code just changes file:
+- **`ruff.toml` per-file-ignores:** replace the service's one entry with one entry per new module, listing only the
+  rules that module actually breaks. Run `ruff check <module> --select <the old entry's rules>` without the ignore
+  to see which. Never a rule the old entry didn't have.
+- **`COMMENTS_LEFT`:** one entry per new module, with its real count. The new counts must add up to no more than the
+  old number. The `# ====` / `# 1. ...` banners aren't counted, so dropping them changes nothing.
+- **`LONG_FILES`:** the old file's entry goes once the split is done, and no new module may be added to it.
+
+## Per-service plans
+
+Line counts are from 0.20.0. A class over 1,500 lines needs mixins. The exact grouping is the agent's call, made by
+reading the code, but follow the topics below and the View's `_GROUPS`.
+
+### `opensearch` (4,198 lines) — the pilot, do it first
+
+It's small and has most of the layers, so it proves Phase 0's tooling and the recipe cheaply, and its PR stays easy
+to review. It doesn't exercise mixins, an explorer window, the service's own blocks or the agent's private names.
+`lambda_functions` comes next and proves those, so treat it as the second pilot. After each of the two, write what
+went differently from this plan under "Lessons" at the end and fix the recipe, before the next service starts.
+
+```
+opensearch/
+  __init__.py
+  helpers.py         # section 1 (~400 lines): parse_location, endpoint_service, parse_engine_version,
+                     #   version_at_least, vector_norm, vector_summary, values_at, _int, _bytes, ...
+  models.py          # section 2 (~390): Domain, Collection, Endpoint, VectorField, IndexInfo, ClusterHealth,
+                     #   KnnStats, StoreReport, VectorCheck, Sample, Embedding, Hit, SearchResult, Overview
+  analysis/          # section 3 (~1,280): under the limit, but split by topic to prove the analysis/ pattern
+    parsing.py       #   the names tables, similarity_name, score_meaning, parse_domain, parse_collection,
+                     #   network_access, parse_mapping, unindexed_fields, read_settings, guess_text_field,
+                     #   source_field, source_of, index_from_cat, parse_knn_stats
+    vectors.py       #   vector_memory, vector_count, index_vector_memory, knn_memory_limit, domain_knn_memory,
+                     #   score_to_similarity, check_vectors
+    cost.py          #   domain_monthly_cost, serverless_minimum, ocu_monthly_cost
+    queries.py       #   the filter operators, build_filter, describe_filter, knn_query, query_python,
+                     #   describe_vector_field
+    findings.py      #   domain_findings ... search_findings (~450)
+  http.py            # _READ_POSTS, OpenSearchError, _error_details, _path, _store_url
+  embeddings.py      # _as_vector, _base_model, _embedding_style, _embedding_request, _embedding_from
+  analyzer.py        # OpenSearchAnalyzer (~850)
+  style.py           # _ROOT, _CSS, _BADGE, _render_html
+  view.py            # the cell and label helpers (_state_tone ... _filter_rows) and OpenSearchView (~1,050)
+```
+
+- **`request()` and the signing stay methods of `OpenSearchAnalyzer`.** Taking them out of the class would change
+  code, not move it. `http.py` holds only the module-level REST helpers, and `analyzer.py` imports `_READ_POSTS`
+  from it. CLAUDE.md's description of `request()` stays true.
+- `_exists` and `_drop` (in section 4, before the class) go to whichever module their callers are in.
+- A constant that both the view and the analysis read (the names tables, `_FILTER_OPS`, ...) goes in the lower
+  layer, and the view imports it from there.
+- No first commit for decision 7: the agent has no OpenSearch tools.
+- Tests: `osmod._bytes` and `osmod._int` come from `aws_analyzer.opensearch.helpers`, and `osmod._render_html` from
+  `aws_analyzer.opensearch.style`. There are no monkeypatches to re-target. `tests/fake_opensearch.py` and demo.py's
+  `seed_opensearch()` use public names only, but grep them anyway.
+
+### `lambda_functions` (11,890 lines) — second, the full pilot
+
+It has every kind of front-end (View, explorer, agent tools), so it proves what OpenSearch couldn't: mixins, an
+explorer, blocks, and decision 7.
+
+```
+lambda_functions/
+  helpers.py              # section 1 (lines ~100-320)
+  models.py               # section 2: Function, Invocation, Overview, LogEvent, CodeMap, CodeStep, CodeGraph, ...
+  analysis/
+    functions.py          # masked_config, parse_function, runtime_status, parse_policy, parse_event_source_mapping
+    cost.py               # provisioned_monthly_cost, log_storage_monthly_cost, function_monthly_cost
+    findings.py           # function_findings, account_findings, _runtime_findings, _usage_findings, _errors_level
+    errors.py             # request_id_of, classify_error, group_errors, error_findings
+    logs.py               # parse_report, split_runs, line_level
+    performance.py        # percentile, suggest_memory, performance_findings
+    package.py            # handler_file, package_file_name, read_package, package_findings
+    codemap/              # ~2,300 lines on its own
+      aws_model.py        # _service_name, _botocore_loader, _aws_model, _iam_action, events, secrets
+      reader.py           # _Sym, _Frame, _Module, _Collect, _CodeReader (~1,060 lines)
+      mapping.py          # map_code, map_package
+      findings.py         # code_map_findings, _code_summary
+      graph.py            # code_graph, the mermaid helpers
+  analyzer.py             # LambdaAnalyzer (~1,130 lines)
+  style.py
+  blocks/
+    wiring.py             # _Wiring, _Columns and their drawers
+    outline.py            # _Outline, _flow_html, _outline_html/_lines
+    graph.py              # _Graph, _GCard, the _g_* SVG layout and drawing (~700 lines)
+  view.py                 # LambdaView (~1,180 lines) and its cell helpers (_label, _runtime_meaning, ...)
+  explorer/
+    __init__.py           # LambdaExplorer composed from its tabs, explore()
+    window.py             # _explorer_rules, _EXPLORER_CSS, _window_text, _FunctionField, _Row, _RunRow
+    functions.py logs.py code.py ...   # LambdaExplorer (~2,150 lines) as _<Topic>Tab mixins
+```
+
+- First commit (decision 7): `LambdaAnalyzer._window` → `window` and `._numbers` → `numbers`. Pick clearer names if
+  they collide with an attribute; every caller changes.
+- Tests to re-target: `_RUN_LINES`, `_TOGGLE_GRACE`, `map_package` (patched where the explorer looks it up),
+  `urllib.request.urlopen` (on the module that calls it).
+
+### `s3` (11,679) and `s3_explorer` (2,932)
+
+- `helpers.py` plus `readers/`: the stdlib-only Avro, DOCX and PPTX parsers and format sniffing (section 1 is
+  1,440 lines, mostly these).
+- `analysis/`: summary, lifecycle (simulate_lifecycle), policy (explain_policy), cost, findings.
+- `S3Analyzer` (~3,590 lines) → `analyzer/` with `_<Topic>Reads` mixins: listing, configuration, files and preview,
+  downloads (`clean_downloads` and the downloads-folder guards stay together in one module, because they are the
+  one place that deletes files), CloudWatch.
+- `S3View` (~2,460 lines) → `view/` with `_<Topic>Commands` mixins by `_GROUPS`.
+- **Fold `s3_explorer.py` in as `s3/explorer/`** (S3Navigator and the pure helpers in `explorer/navigator.py`).
+  `aws_analyzer/s3_explorer.py` stays as a module that re-exports `S3Explorer` and `S3Navigator`, so old imports
+  work. Along with it:
+  - Remove `s3_explorer` from `COMPANIONS`.
+  - Point `_EXPORTS` for `S3Explorer` and `S3Navigator` at `s3`.
+  - Update `test_explorer_builds_on_the_s3_installed_with_it` and the bare-name list in `tests/conftest.py`.
+  - `_s3_module()` becomes a plain import of the parent package. Its `import s3` / `__main__` fallbacks date from
+    the standalone files and go.
+
+  This is the one step in the plan that changes a test's expectation (where `S3Explorer` is defined). Say so in the
+  PR.
+- First commit (decision 7): `S3Analyzer._cloudwatch_in`, and `s3._rule_scope`, `_rule_actions`, `_exposure`,
+  `_encryption_label`, `_block_label`.
+
+### `_bedrock.py` (2,078) → `_bedrock/`, before the two Bedrock services
+
+`prices.py` (price tables, `DEFAULT_MODEL`, `model_price`, `short_model`, `parse_models`, `ModelInfo`), `parsing.py`
+(`Passage`, `Citation`, `KBDocument`, `parse_retrieve`, `parse_document`), `filters.py`, `estimates.py`
+(cost and tokens), `markdown.py` (`_Markdown`, `_Answer`, `_Json` and their drawers: UI layer), `files.py`
+(`presigned_url`, the file lists, `_Download`). `SHARED` and `rules.py`'s shared-name check follow the package.
+
+### `bedrock_kb` (8,566)
+
+`analysis/`: inventory and file states (`inventory_files`, `file_state`, `FILE_STATES`), chunks (`place_chunks`,
+`order_chunks`, `chunk_overlap`), retrieval and answers, findings. `BedrockKBAnalyzer` (~1,950) → `_<Topic>Reads`
+mixins (configuration, files, search). `BedrockKBView` (~2,585) → `_<Topic>Commands`. Blocks (`_Steps`,
+`_Pipeline`, `_Chunks`, `_Shares`, `_Passage`) into `blocks/`. `KBExplorer` (~1,000) → `explorer/`.
+
+### `bedrock_chat` (9,079)
+
+`analysis/`: the request schema (`request_schema`, `Field`, `Schema`, `_KNOWN`, `build_request`,
+`settings_from_request`, `validate_request`), runs and sweeps (`parse_questions`, `sweep_setups`, `rank_runs`,
+`run_score`, `ranking_findings`), the code it writes (`python_script`, `config_json`, `cli_command`), and saved runs
+(`run_record`, `read_runs`). `_ChatApp` (~2,020) → `window/` with a `_<Topic>Tab` mixin per side tab (settings,
+test, runs, code, request/response) and one for the pickers and composer. `BedrockChatView` (~2,230) →
+`_<Topic>Commands`.
+
+### `sagemaker_env` (5,044)
+
+The core has three parts, not one:
+- `machine.py`: `/proc`, disks, GPU, the metadata file, `_shown` / `_real`.
+- `envs.py`: environments, kernels, tools, `env_plan`.
+- `analyzer.py`: AWS.
+
+`create_env` and `_run` are the module's only writes, so keep them together in one module with nothing else that
+writes. The View (~1,055) stays one module.
+
+### `dynamodb` (3,499)
+
+A flat package, like the template, with no mixins expected. DynamoDB JSON ↔ Python conversion stays in
+`helpers.py`.
+
+### Last: the leftovers
+
+- Update the `new-analyzer` skill to scaffold a package from the template, with dynamodb as its model.
+- Update CLAUDE.md: remove "Architecture of an analyzer file" and the five-sections rule in `rules.py`.
+- Update README / docs wherever they say "each service is one module".
+- Make the private-names warning from Phase 0 an error.
+
+## Phase 2 (needs its own plan and the user's go-ahead): findings that carry actions
+
+Today a finding is `("warn", "... (see errors('etl'))")`. The View call is written into the sentence, and each
+window rewrites it with regexes (`_window_text`, `_WINDOW_WORDS`) into "the Errors tab". The core is speaking one
+front-end's language. The direction is a core-side `Finding(level, message, action)` with
+`Action(command, args, kwargs)`, rendered by each front-end: the View through `_call`, a window as its tab, the
+agent as a `_next`.
+
+It isn't part of the moves because:
+- It changes what `*_findings` return, which is public API.
+- CLAUDE.md says the pairs stay as they are.
+
+Write that plan only after the moves are done, and ask the user before starting it.
+
+## Progress
+
+Update this table in each step's PR.
+
+| Step | Status | PR | Notes |
+|---|---|---|---|
+| Phase 0: tooling | done, PR not opened yet | | branch `modularize/tooling` |
+| opensearch | not started | | pilot |
+| lambda_functions | not started | | second pilot: mixins, explorer, blocks, decision 7 |
+| s3 + s3_explorer | not started | | |
+| _bedrock | not started | | before bedrock_kb / bedrock_chat |
+| bedrock_kb | not started | | |
+| bedrock_chat | not started | | |
+| sagemaker_env | not started | | |
+| dynamodb | not started | | |
+| leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
+| Phase 2: findings with actions | needs a plan | | ask the user first |
+
+## Mistakes to avoid
+
+- **Mixing a fix into a move.** If you spot a bug while moving code, note it for a follow-up PR. A move commit that
+  also changes code is hard to review, and the snapshot can't tell the two apart.
+- **Patching the re-export.** `monkeypatch.setattr(package, name, ...)` doesn't reach a submodule that imported the
+  name. Patch the module that looks it up.
+- **Import cycles.** If `view.py` and `explorer/` import each other at the top, the package fails to import.
+  Lower layers never import higher ones, and `explore()` imports the explorer inside the function.
+- **Leaving `__init__.py` heavy.** It holds the docstring, the imports for re-export and `__all__`. No logic, no
+  constants, no helper "for now".
+- **Losing an AWS operation from `rules.py --apis`.** That means the read-only check no longer sees a call. Fix the
+  services lookup; don't accept the diff.
+- **Raising a number** in `COMMENTS_LEFT`, `LONG_FILES` or a per-file-ignores entry to make a check pass.
+
+## Lessons
+
+What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
+the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **Phase 0:** `test_docstrings_have_their_quotes_on_their_own_lines` takes about 100 s, almost all of it on the
+  long files (`ast.get_source_segment` slows down on very long files). Expect it to speed up as services are
+  split. Until then, run `pytest tests/test_<service>.py` while you work, and the full suite at the end.

@@ -99,7 +99,8 @@ def test_each_analyzer_loads_alone():
     # import each other, so importing one loads no other (s3_explorer builds on s3, which it loads when it first needs
     # it), and a shared module loads no analyzer.
     modules = sorted(_modules())
-    modules += sorted(module for module in SHARED if (PACKAGE / f"{module}.py").exists())
+    modules += sorted(module for module in SHARED
+                      if (PACKAGE / f"{module}.py").exists() or (PACKAGE / module / "__init__.py").exists())
     for module in modules:
         code = f"import sys, aws_analyzer.{module}; print(*sorted(sys.modules))"
         loaded = subprocess.run([sys.executable, "-c", code], cwd=PACKAGE.parent, capture_output=True, text=True,

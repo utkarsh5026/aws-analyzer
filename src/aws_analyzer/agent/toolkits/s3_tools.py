@@ -36,6 +36,7 @@ from ..._kit.text import _clip
 from ..budget import Budget
 from ..results import _iso, _window, _with_permissions, hide_secrets
 from .base import Toolkit
+from .lambda_tools import _lambda_module
 
 if TYPE_CHECKING:
     from ...lambda_functions import Function, FunctionMetrics, LambdaAnalyzer
@@ -1211,15 +1212,6 @@ S3 and Lambda together
                     "close_keys": difflib.get_close_matches(key, names, n=3, cutoff=0.6),
                     "hint": "Use one of close_keys, or list_folder / find_files to see what's there."}
         return None
-
-
-def _lambda_module() -> Any:
-    """
-    aws_analyzer.lambda_functions, which s3_triggers reads Lambda's policies with (loaded when it first runs).
-    """
-    from ... import lambda_functions
-
-    return lambda_functions
 
 
 def _metrics_read(metrics: BucketMetrics) -> int:

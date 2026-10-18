@@ -17,7 +17,7 @@ CHECKED_FOLDERS = ["src", "tests", ".claude/skills"]
 ALLOWED_COMMENT = re.compile(r"#(!| =+$| \d+\. | read-only:| noqa\b| type: ignore| pragma: )")
 
 COMMENTS_LEFT = {
-    ".claude/skills/check/rules.py": 36,
+    ".claude/skills/check/rules.py": 33,
     ".claude/skills/check/run.py": 6,
     ".claude/skills/check/snapshot.py": 23,
     ".claude/skills/demo/chat_shots.py": 25,
@@ -49,6 +49,21 @@ COMMENTS_LEFT = {
     "tests/test_s3.py": 187,
     "tests/test_s3_explorer.py": 120,
     "tests/test_sagemaker_env.py": 36,
+}
+
+
+MAX_MODULE_LINES = 1500
+PACKAGE = ROOT / "src" / "aws_analyzer"
+LONG_FILES = {
+    "src/aws_analyzer/_bedrock.py",
+    "src/aws_analyzer/bedrock_chat.py",
+    "src/aws_analyzer/bedrock_kb.py",
+    "src/aws_analyzer/dynamodb.py",
+    "src/aws_analyzer/lambda_functions.py",
+    "src/aws_analyzer/opensearch.py",
+    "src/aws_analyzer/s3.py",
+    "src/aws_analyzer/s3_explorer.py",
+    "src/aws_analyzer/sagemaker_env.py",
 }
 
 
@@ -117,3 +132,27 @@ def test_comment_allowance_shrinks_with_the_code():
     assert not loose, (
         "Comments were removed: lower COMMENTS_LEFT in tests/test_style.py to match, so they can't come back. "
         + ", ".join(f"{name}: {allowed} -> {count}" for name, (allowed, count) in loose.items()))
+
+
+def _module_lengths() -> dict[str, int]:
+    """
+    How many lines each module of the package has, by its path from the repository's root.
+    """
+    return {str(path.relative_to(ROOT)): len(path.read_text().splitlines()) for path in sorted(PACKAGE.rglob("*.py"))
+            if "__pycache__" not in path.parts}
+
+
+def test_no_module_runs_past_the_limit():
+    lengths = _module_lengths()
+    long = {name: count for name, count in lengths.items() if count > MAX_MODULE_LINES and name not in LONG_FILES}
+    assert not long, (
+        f"A module of the package stays under {MAX_MODULE_LINES} lines: split it by what its parts do (see "
+        ".claude/skills/modularize). " + ", ".join(f"{name} has {count}" for name, count in long.items()))
+
+
+def test_long_files_list_shrinks_with_the_code():
+    lengths = _module_lengths()
+    done = sorted(name for name in LONG_FILES if lengths.get(name, 0) <= MAX_MODULE_LINES)
+    assert not done, (
+        "These are gone or now fit the limit: take them off LONG_FILES in tests/test_style.py, so they can't grow "
+        "back. " + ", ".join(done))
