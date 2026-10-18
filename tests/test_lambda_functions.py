@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import threading
+import urllib.request
 import zipfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -19,8 +20,17 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import lambda_functions as lfmod
+from aws_analyzer.lambda_functions import helpers, style as stylemod, view as viewmod
+from aws_analyzer.lambda_functions.analysis import text as textmod
+from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
+from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
+from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
+from aws_analyzer.lambda_functions.blocks import graph as graph_block, wiring as wiring_block
+from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, logs as logs_tab
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
+from aws_analyzer._kit.blocks import _Next
+from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.lambda_functions import (
@@ -173,18 +183,18 @@ def test_runtime_table_is_well_formed():
 
 
 def test_times_and_sizes_read_the_way_people_write_them():
-    assert lfmod._lambda_time("2024-05-01T10:00:00.000+0000") == datetime(2024, 5, 1, 10, tzinfo=timezone.utc)
-    assert lfmod._lambda_time("2026-10-05T19:34:24.781359000Z").microsecond == 781359
-    assert lfmod._lambda_time("2026-10-05T19:34:24Z").second == 24
-    assert lfmod._lambda_time(None) is None and lfmod._lambda_time("yesterday") is None
+    assert helpers._lambda_time("2024-05-01T10:00:00.000+0000") == datetime(2024, 5, 1, 10, tzinfo=timezone.utc)
+    assert helpers._lambda_time("2026-10-05T19:34:24.781359000Z").microsecond == 781359
+    assert helpers._lambda_time("2026-10-05T19:34:24Z").second == 24
+    assert helpers._lambda_time(None) is None and helpers._lambda_time("yesterday") is None
     assert [human_ms(v) for v in (0.42, 102.4, 1530, 15300, 75000, 185000)] == [
         "0.42 ms", "102 ms", "1.53 s", "15.3 s", "75.0 s", "3m 05s"]
-    assert lfmod._ms(1530) == "1,530 ms (1.5s)" and lfmod._ms(None) == "-"
-    assert [lfmod._ms(v) for v in (102.4, 30000, 185000, 3_725_000)] == [
+    assert helpers._ms(1530) == "1,530 ms (1.5s)" and helpers._ms(None) == "-"
+    assert [helpers._ms(v) for v in (102.4, 30000, 185000, 3_725_000)] == [
         "102 ms", "30,000 ms (30s)", "185,000 ms (3m 05s)", "3,725,000 ms (1h 02m)"]
-    assert [lfmod._pct(v) for v in (0, 0.0004, 0.024, None)] == ["0%", "<0.1%", "2.4%", "-"]
-    assert lfmod._window(900) == "15 minutes" and lfmod._window(3600) == "hour"
-    assert lfmod._window(86400) == "24 hours" and lfmod._window(30 * 86400) == "30 days"
+    assert [helpers._pct(v) for v in (0, 0.0004, 0.024, None)] == ["0%", "<0.1%", "2.4%", "-"]
+    assert textmod._window(900) == "15 minutes" and textmod._window(3600) == "hour"
+    assert textmod._window(86400) == "24 hours" and textmod._window(30 * 86400) == "30 days"
     assert lfmod.parse_size("50MB") == 50 * MB
     assert lfmod.parse_time("24h", now=NOW) == NOW - timedelta(hours=24)
 
@@ -443,17 +453,17 @@ def test_request_ids_and_report_lines():
 
 
 def test_log_lines_drop_what_the_columns_show():
-    assert lfmod._log_line(f"2026-10-05T23:28:28.000Z {RID} Task timed out after 60.00 seconds") == (
+    assert viewmod._log_line(f"2026-10-05T23:28:28.000Z {RID} Task timed out after 60.00 seconds") == (
         "Task timed out after 60.00 seconds")
-    assert lfmod._log_line(f"[ERROR]\t2026-10-05T12:00:00.123Z\t{RID}\tCouldn't save") == "[ERROR]\tCouldn't save"
-    assert lfmod._log_line(f"2026-10-05T12:00:00.123Z\t{RID}\tERROR\tInvoke Error") == "ERROR\tInvoke Error"
-    assert lfmod._log_line("[ERROR] KeyError: 'x'") == "[ERROR] KeyError: 'x'"
-    assert lfmod._log_line('{"level": "WARN", "message": "slow"}') == "[WARN] slow"
-    assert lfmod._log_line(f"REPORT RequestId: {RID}\tDuration: 5.00 ms\tBilled Duration: 5 ms\tMemory Size: 128 MB"
+    assert viewmod._log_line(f"[ERROR]\t2026-10-05T12:00:00.123Z\t{RID}\tCouldn't save") == "[ERROR]\tCouldn't save"
+    assert viewmod._log_line(f"2026-10-05T12:00:00.123Z\t{RID}\tERROR\tInvoke Error") == "ERROR\tInvoke Error"
+    assert viewmod._log_line("[ERROR] KeyError: 'x'") == "[ERROR] KeyError: 'x'"
+    assert viewmod._log_line('{"level": "WARN", "message": "slow"}') == "[WARN] slow"
+    assert viewmod._log_line(f"REPORT RequestId: {RID}\tDuration: 5.00 ms\tBilled Duration: 5 ms\tMemory Size: 128 MB"
                            "\tMax Memory Used: 64 MB") == "REPORT: run 5 ms (billed 5 ms), 64 of 128 MB used"
-    assert lfmod._lifecycle(f"START RequestId: {RID} Version: $LATEST") and lfmod._lifecycle("INIT_START Runtime")
-    assert lfmod._lifecycle('{"time":"2026-10-05T12:00:00Z","type":"platform.start","record":{}}')
-    assert not lfmod._lifecycle("hello")
+    assert viewmod._lifecycle(f"START RequestId: {RID} Version: $LATEST") and viewmod._lifecycle("INIT_START Runtime")
+    assert viewmod._lifecycle('{"time":"2026-10-05T12:00:00Z","type":"platform.start","record":{}}')
+    assert not viewmod._lifecycle("hello")
 
 
 def test_group_errors_by_cause():
@@ -563,26 +573,26 @@ def test_file_tree_folds_folders_and_finds_files():
     files = [CodeFile(path, size, 1) for path, size in [
         ("app.py", 10), ("README.md", 5), ("boto3/__init__.py", 100), ("botocore/data/endpoints.json", 1000),
         ("botocore/data/ec2.json", 500), ("pkg/sub/mod.py", 20), ("pkg/util.py", 30), ("Zeta/x.txt", 1)]]
-    tree = lfmod._file_tree(files, set())
+    tree = code_tab._file_tree(files, set())
     assert [(t.label, t.depth, t.folder, t.files, t.size) for t in tree] == [
         ("boto3/", 0, True, 1, 100), ("botocore/data/", 0, True, 2, 1500), ("pkg/", 0, True, 2, 50),
         ("Zeta/", 0, True, 1, 1), ("app.py", 0, False, 1, 10), ("README.md", 0, False, 1, 5)]
     assert tree[1].path == "botocore/data/"  # a folder that holds only a folder shares its line
-    opened = [(t.label, t.depth) for t in lfmod._file_tree(files, {"pkg/", "pkg/sub/", "botocore/data/"})]
+    opened = [(t.label, t.depth) for t in code_tab._file_tree(files, {"pkg/", "pkg/sub/", "botocore/data/"})]
     assert opened[1:7] == [("botocore/data/", 0), ("ec2.json", 1), ("endpoints.json", 1), ("pkg/", 0), ("sub/", 1),
                            ("mod.py", 2)]
     assert opened[7] == ("util.py", 1)
-    found = lfmod._file_tree(files, set(), "json")
+    found = code_tab._file_tree(files, set(), "json")
     assert [(t.label, t.open) for t in found] == [("botocore/data/", True), ("ec2.json", False),
                                                   ("endpoints.json", False)]
-    assert [t.label for t in lfmod._file_tree(files, set(), "json", shut={"botocore/data/"})] == ["botocore/data/"]
-    assert lfmod._file_tree(files, set(), "nothing-like-it") == []
-    assert lfmod._folders_of("a/b/c.py") == ["a/", "a/b/"] and lfmod._folders_of("c.py") == []
-    assert plain(lfmod._tree_face(found[1], [], None)) == "JSON ec2.json 500 B"
-    assert "ec2.<mark>json</mark>" in lfmod._tree_face(found[1], ["json"], None)
-    assert 'style="--d:1"' in lfmod._tree_face(found[1], [], None)
-    assert "HANDLER" in lfmod._tree_face(tree[4], [], "app.py") and " d open" in lfmod._tree_face(found[0], [], None)
-    assert lfmod._file_badge(".env") == ("KEY", "key") and lfmod._file_badge("bin/tool") == ("FILE", "")
+    assert [t.label for t in code_tab._file_tree(files, set(), "json", shut={"botocore/data/"})] == ["botocore/data/"]
+    assert code_tab._file_tree(files, set(), "nothing-like-it") == []
+    assert code_tab._folders_of("a/b/c.py") == ["a/", "a/b/"] and code_tab._folders_of("c.py") == []
+    assert plain(code_tab._tree_face(found[1], [], None)) == "JSON ec2.json 500 B"
+    assert "ec2.<mark>json</mark>" in code_tab._tree_face(found[1], ["json"], None)
+    assert 'style="--d:1"' in code_tab._tree_face(found[1], [], None)
+    assert "HANDLER" in code_tab._tree_face(tree[4], [], "app.py") and " d open" in code_tab._tree_face(found[0], [], None)
+    assert code_tab._file_badge(".env") == ("KEY", "key") and code_tab._file_badge("bin/tool") == ("FILE", "")
 
 
 def test_package_file_name():
@@ -904,7 +914,7 @@ def test_code_map_findings():
     assert "It makes a new DynamoDB client on every call, at app/store.py line 10 in Orders()" in text
     assert "It sleeps at app/notify.py line 10 in tell() (time.sleep(2))" in text
     assert "S3 client" not in text  # _client() makes it once
-    summary = " ".join(lfmod._code_summary(cmap))
+    summary = " ".join(codemap_findings._code_summary(cmap))
     assert summary.startswith("When Lambda starts it (once per cold start), the code makes an SNS client. Each call "
                               "runs handler() in app/main.py. It reads Records[].s3.bucket.name, ")
     assert "which looks like an S3 event" in summary
@@ -912,7 +922,7 @@ def test_code_map_findings():
             "(SendMessage) and SNS (Publish); and sends 1 HTTP request.") in summary
     assert "It calls Orders() from app/store.py, _client(), Orders.save() from app/store.py and tell()" in summary
     assert summary.endswith("from app/notify.py and returns a dict with statusCode and body.")
-    assert lfmod._sample_event(cmap.event) == {"Records": [{"s3": {"bucket": {"name": "..."},
+    assert aws_model._sample_event(cmap.event) == {"Records": [{"s3": {"bucket": {"name": "..."},
                                                                     "object": {"key": "..."}}}],
                                                "detail": {"user": "..."}}
 
@@ -1004,7 +1014,7 @@ def countdown(n):
     steps = outline(cmap.steps)
     assert "      def get_order(id):  [GET /orders/<id>]" in steps
     assert "        with table.batch_writer() as batch:" in steps
-    summary = " ".join(lfmod._code_summary(cmap))
+    summary = " ".join(codemap_findings._code_summary(cmap))
     assert "answers 2 web routes (GET /orders/<id> and POST /orders)" in summary
     assert "It reads from DynamoDB (GetItem) and S3 (ListObjects); writes to DynamoDB (BatchWriteItem) and S3" in summary
     loop = map_code({"app.py": source.replace("return app.resolve(event, context)", "countdown(3)")}, "app.handler")
@@ -1022,12 +1032,12 @@ def test_map_code_never_shows_a_secret():
         ("aws_secret_access_key", 2), ("password", 3), ("password", 6), ("an AWS access key", 2)]
     shown = repr(cmap) + "".join(m for _, m in code_map_findings(cmap))
     assert not any(secret in shown for secret in ("AKIAABCD", "wJalr", "hunter2", "pa55word"))
-    broken = lfmod._CodeReader._call
+    broken = reader._CodeReader._call
     try:
-        lfmod._CodeReader._call = lambda self, node, frame: 1 / 0  # a bug in following some code
+        reader._CodeReader._call = lambda self, node, frame: 1 / 0  # a bug in following some code
         partial = map_code({"app.py": source}, "app.handler")
     finally:
-        lfmod._CodeReader._call = broken
+        reader._CodeReader._call = broken
     assert partial.limited == "stopped partway, at code it couldn't follow (ZeroDivisionError: division by zero)"
     guessed = map_code({"app.py": "def handler(event, context):\n    for x in event['xs']:\n"
                                   "        store.put_item(Item=x)\n"}, "app.handler")
@@ -1074,7 +1084,7 @@ def test_code_graph():
     # a chain deeper than the graph draws: the rest are counted, not drawn
     chain = "".join(f"def f{i}():\n    return f{i + 1}()\n\n" for i in range(8)) + "def f8():\n    return 1\n"
     deep = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"))
-    assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + lfmod._GRAPH_DEPTH
+    assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + codemap_graph._GRAPH_DEPTH
     assert {e.target for e in deep.edges} <= {n.id for n in deep.nodes}  # no arrow to a box that isn't drawn
 
     # a handler that's an object (a web app's adapter): its routes hang off it
@@ -1090,21 +1100,21 @@ def test_graph_layout_and_drawing():
     cmap = map_code(APP, "app.main.handler", names=APP_NAMES,
                     function=fn(name="uploads", handler="app.main.handler", env_names=["TABLE"], timeout=30))
     graph = code_graph(cmap)
-    cards = lfmod._g_cards(graph)
-    boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(graph, cards)
+    cards = graph_block._g_cards(graph)
+    boxes, routes, width, tall, xs, widths, column_of = graph_block._graph_layout(graph, cards)
     assert set(boxes) == {n.id for n in graph.nodes} and sorted(xs) == list(range(5))
-    assert all(xs[k + 1] == xs[k] + widths[k] + lfmod._GRAPH_GAP for k in range(4))  # columns left to right
-    assert all(lfmod._GRAPH_MIN_W <= w <= lfmod._GRAPH_MAX_FLAGGED for w in widths.values())
-    assert widths[4] > lfmod._GRAPH_MAX_W  # the S3 box's ListObjectsV2 is whole beside its flag
-    assert width == xs[4] + widths[4] + lfmod._GRAPH_PAD_X  # no arrow goes back, so no room kept to curl round
+    assert all(xs[k + 1] == xs[k] + widths[k] + graph_block._GRAPH_GAP for k in range(4))  # columns left to right
+    assert all(graph_block._GRAPH_MIN_W <= w <= graph_block._GRAPH_MAX_FLAGGED for w in widths.values())
+    assert widths[4] > graph_block._GRAPH_MAX_W  # the S3 box's ListObjectsV2 is whole beside its flag
+    assert width == xs[4] + widths[4] + graph_block._GRAPH_PAD_X  # no arrow goes back, so no room kept to curl round
     by_column = defaultdict(list)
     for n in graph.nodes:
         assert boxes[n.id][0] == xs[column_of[n.id]] and boxes[n.id][2] == widths[column_of[n.id]]
         by_column[column_of[n.id]].append(boxes[n.id])
     for column in by_column.values():  # no two boxes in a column overlap
         column.sort(key=lambda b: b[1])
-        assert all(a[1] + a[3] + lfmod._GRAPH_ROW_GAP - 0.1 <= b[1] for a, b in zip(column, column[1:]))
-    assert all(lfmod._GRAPH_BAND <= y and y + h <= tall for _, y, _, h in boxes.values())  # under the captions
+        assert all(a[1] + a[3] + graph_block._GRAPH_ROW_GAP - 0.1 <= b[1] for a, b in zip(column, column[1:]))
+    assert all(graph_block._GRAPH_BAND <= y and y + h <= tall for _, y, _, h in boxes.values())  # under the captions
     skipping = {i for i, e in enumerate(graph.edges) if abs(column_of[e.target] - column_of[e.source]) > 1}
     assert set(routes) == skipping and skipping  # an arrow that skips columns has a waypoint in each
     for i, ys in routes.items():
@@ -1112,13 +1122,13 @@ def test_graph_layout_and_drawing():
         for k, y in enumerate(ys):  # ...which runs between the boxes of the column it crosses, not behind one
             crossed = column_of[e.source] + k + 1
             assert not any(by <= y <= by + bh for bx, by, _, bh in boxes.values() if bx == xs[crossed])
-    ends = lfmod._g_anchors(graph, cards, boxes)
+    ends = graph_block._g_anchors(graph, cards, boxes)
     writes = next(i for i, e in enumerate(graph.edges) if e.target == "aws-dynamodb")
     assert ends[writes][1] == [boxes["aws-dynamodb"][1] + cards["aws-dynamodb"].row_y("PutItem")]  # lands on its row
     reads = next(i for i, e in enumerate(graph.edges) if e.kind == "env" and e.target == "f5")
     assert ends[reads][0] == [boxes["env"][1] + cards["env"].row_y("QUEUE_URL")]  # leaves from the variable's row
 
-    page = lfmod._render_html([lfmod._Graph(graph, "How it fits together")], 50)
+    page = stylemod._render_html([graph_block._Graph(graph, "How it fits together")], 50)
     assert page.count('<g class="cn ') == len(graph.nodes) and page.count('<g class="ce ek-') == 2 * len(graph.edges)
     assert '<g class="cn k-handler n-f0 a-event a-f1' in page and '<g class="cn k-env n-env a-f1 a-f5 a-f0 warn"' in page
     assert ('<g class="ce ek-reads s-f0 t-aws-s3 warn"><title>handler() reads from S3: ListObjectsV2; in a loop, once '
@@ -1132,7 +1142,7 @@ def test_graph_layout_and_drawing():
     assert '<svg class="sw ek-reads"' in page and "</svg>reads</span>" in page and "in a loop: once per item" in page
     assert "a warning is about it</span>" in page and "guessed" not in page and "not drawn" not in page
     assert "<script" not in page and f'viewBox="0 0 {width:.0f} {tall:.0f}"' in page
-    text = _render_text([lfmod._Graph(graph, "How it fits together")], 50)
+    text = _render_text([graph_block._Graph(graph, "How it fits together")], 50)
     assert "-- How it fits together --" in text
     assert "  An S3 event: Records[].s3.bucket.name, Records[].s3.object.key, detail.user\n      → handler()" in text
     assert ("  Environment: TABLE, QUEUE_URL (not set), HOOK_URL (!)\n      → Orders() reads TABLE\n"
@@ -1141,8 +1151,8 @@ def test_graph_layout_and_drawing():
     assert "      reads from S3: ListObjectsV2, in a loop (!)" in text and "      makes the SNS client" in text
     assert "  Orders()  app/store.py line 9\n      (does nothing this follows: no AWS calls, own functions or HTTP)" in text
     assert "S3  reads" not in text  # what it reaches shows as the arrows that reach it
-    empty = lfmod._Graph(lfmod.CodeGraph(), "How it fits together")
-    assert "(nothing to draw)" in lfmod._render_html([empty], 50) and "(nothing to draw)" in _render_text([empty], 50)
+    empty = graph_block._Graph(lfmod.CodeGraph(), "How it fits together")
+    assert "(nothing to draw)" in stylemod._render_html([empty], 50) and "(nothing to draw)" in _render_text([empty], 50)
 
     # a call back to an earlier column, one within a column, a guessed call and one through functions not drawn
     nodes = [lfmod.GraphNode("f0", "handler", "handler()", "app.py line 1", column=1),
@@ -1155,11 +1165,11 @@ def test_graph_layout_and_drawing():
              lfmod.GraphEdge("f3", "aws-sqs", "sends", "SendMessage", guessed=True),
              lfmod.GraphEdge("f1", "aws-sqs", "sends", "SendMessage", indirect=True)]
     odd = lfmod.CodeGraph(nodes, edges)
-    cards = lfmod._g_cards(odd)
-    boxes, routes, width, tall, xs, widths, column_of = lfmod._graph_layout(odd, cards)
+    cards = graph_block._g_cards(odd)
+    boxes, routes, width, tall, xs, widths, column_of = graph_block._graph_layout(odd, cards)
     assert set(routes) == {2, 5} and len(routes[2]) == 1  # the call back to handler() runs between b()'s neighbours
-    assert width == xs[3] + widths[3] + lfmod._GRAPH_PAD_X  # the loop from b() round to c() curls in a gap
-    page = lfmod._render_html([lfmod._Graph(odd, "")], 50)
+    assert width == xs[3] + widths[3] + graph_block._GRAPH_PAD_X  # the loop from b() round to c() curls in a gap
+    page = stylemod._render_html([graph_block._Graph(odd, "")], 50)
     assert '<g class="ce ek-sends s-f3 t-aws-sqs guess">' in page and '<g class="ce ek-sends s-f1 t-aws-sqs via">' in page
     assert "guessed from a method's name</span>" in page and "through functions not drawn</span>" in page
 
@@ -1167,7 +1177,7 @@ def test_graph_layout_and_drawing():
     env = lfmod.GraphNode("env", "env", "Environment", "variables it reads", ["TABLE", "TOPIC"], "warn", column=0,
                           flags={"TOPIC": "not set"})
     two = lfmod.CodeGraph([env, nodes[0]], [lfmod.GraphEdge("env", "f0", "env", "TABLE, TOPIC", "warn")])
-    page = lfmod._render_html([lfmod._Graph(two, "")], 50)
+    page = stylemod._render_html([graph_block._Graph(two, "")], 50)
     lines = re.search(r'<path class="ln" d="([^"]*)"', page).group(1)
     halo = re.search(r'<path class="halo" d="([^"]*)"', page).group(1)
     assert lines.count("M") == 2 and halo.count("M") == 1 and halo in lines and ">not set</text>" in page
@@ -1175,7 +1185,7 @@ def test_graph_layout_and_drawing():
     # a service reached in four ways: the words under its name are cut to fit, never past the card
     sfn = lfmod.GraphNode("aws-states", "aws", "Step Functions", "runs · reads · sends · writes", ["StartExecution"],
                           column=2)
-    page = lfmod._render_html([lfmod._Graph(lfmod.CodeGraph([nodes[0], sfn], [
+    page = stylemod._render_html([graph_block._Graph(lfmod.CodeGraph([nodes[0], sfn], [
         lfmod.GraphEdge("f0", "aws-states", "runs", "StartExecution")]), "")], 50)
     assert '<tspan class="ac ek-runs">runs</tspan>' in page and '<tspan class="sep"> · </tspan>…</text>' in page
 
@@ -1184,9 +1194,9 @@ def test_graph_layout_and_drawing():
                               "    requests.post(os.environ.get('HOOK', 'https://a.example'), json={})\n"
                               "    return requests.get('https://b.example', timeout=2)\n"}, "app.handler")
     graph = code_graph(two)
-    cards = lfmod._g_cards(graph)
-    boxes = lfmod._graph_layout(graph, cards)[0]
-    ends = lfmod._g_anchors(graph, cards, boxes)
+    cards = graph_block._g_cards(graph)
+    boxes = graph_block._graph_layout(graph, cards)[0]
+    ends = graph_block._g_anchors(graph, cards, boxes)
     sent = next(i for i, e in enumerate(graph.edges) if e.kind == "http")
     assert sorted(ends[sent][1]) == sorted(boxes["http"][1] + cards["http"].row_y(r) for r in cards["http"].rows)
 
@@ -1196,7 +1206,7 @@ def test_graph_layout_and_drawing():
                                "handler = Mangum(app)\n"}, "main.handler")
     graph = code_graph(web)
     assert [e.label for e in graph.edges if e.kind == "call"] == ["GET /items; HEAD /items"]
-    page = lfmod._render_html([lfmod._Graph(graph, "")], 50)
+    page = stylemod._render_html([graph_block._Graph(graph, "")], 50)
     assert '<tspan class="mt">GET</tspan> /items +1</text>' in page
 
 
@@ -1224,7 +1234,7 @@ def test_search_rank_finds_by_any_field():
 
 
 def test_window_lines_drop_what_the_columns_show():
-    parts = lfmod._line_parts
+    parts = logs_tab._line_parts
     assert parts(f"[ERROR]\t2026-10-05T12:00:00.123Z\t{RID}\tCouldn't save") == ("Couldn't save", "")
     assert parts(f"2026-10-05T12:00:00.123Z\t{RID}\tINFO\tready") == ("ready", "")
     assert parts(f"2026-10-05T23:28:28.000Z {RID} Task timed out after 60.00 seconds") == (
@@ -1243,7 +1253,7 @@ def test_window_lines_drop_what_the_columns_show():
 
 
 def test_window_text_points_at_the_tabs():
-    text = lfmod._window_text
+    text = frame._window_text
     assert text("errors('etl') groups them by cause.") == "The Errors tab groups them by cause."
     assert text(f"It failed. logs('etl', request_id='{RID}') shows that whole run.") == (
         f"It failed. Run {RID[:8]} in the Logs tab shows that whole run.")
@@ -1256,21 +1266,21 @@ def test_window_text_points_at_the_tabs():
 
 
 def test_wiring_and_columns_render_as_html_and_text():
-    wiring = lfmod._Wiring([("SQS queue", "orders", "batches of up to 10", ""), ("Function URL", "anyone", "", "warn")],
+    wiring = wiring_block._Wiring([("SQS queue", "orders", "batches of up to 10", ""), ("Function URL", "anyone", "", "warn")],
                            ("etl", "python3.12 · 1,024 MB"), [("On failure", "nowhere: dropped", "", "warn")],
                            title="How it's wired")
-    page = lfmod._render_html([wiring], 50)
+    page = stylemod._render_html([wiring], 50)
     assert '<div class="wire">' in page and "orders" in page and 'class="wn warn"' in page and "λ" in page
     out = _render_text([wiring], 50)
     assert "Called by: SQS queue orders; Function URL anyone (!)" in out and "Then:      On failure: nowhere" in out
-    assert "Nothing calls it on its own" in lfmod._render_html([lfmod._Wiring([], ("etl", ""), [])], 50)
-    columns = lfmod._Columns([("Oct 1", 10.0, 2.0, "10 calls"), ("Oct 2", 0.0, 0.0, "none"), ("Oct 3", 5.0, 0.0, "")],
+    assert "Nothing calls it on its own" in stylemod._render_html([wiring_block._Wiring([], ("etl", ""), [])], 50)
+    columns = wiring_block._Columns([("Oct 1", 10.0, 2.0, "10 calls"), ("Oct 2", 0.0, 0.0, "none"), ("Oct 3", 5.0, 0.0, "")],
                              title="Calls a day")
-    page = lfmod._render_html([columns], 50)
+    page = stylemod._render_html([columns], 50)
     assert page.count("<i ") == 3 and 'title="10 calls"' in page and "height:20.0%" in page
     assert "Oct 1 █ ▄ Oct 3   (the most: 10, Oct 1)" in _render_text([columns], 50)
-    timed = lfmod._Columns([("a", 900.0, 100.0, "")], part="dim", limit=1000.0, limit_label="timeout 1 s", unit="ms")
-    assert 'class="lim"' in lfmod._render_html([timed], 50) and "the most: 900 ms" in _render_text([timed], 50)
+    timed = wiring_block._Columns([("a", 900.0, 100.0, "")], part="dim", limit=1000.0, limit_label="timeout 1 s", unit="ms")
+    assert 'class="lim"' in stylemod._render_html([timed], 50) and "the most: 900 ms" in _render_text([timed], 50)
 
 
 # ---- AWS (moto)
@@ -1633,16 +1643,16 @@ def test_download_checks_size_and_network(core, monkeypatch):
             return self.body if size < 0 else self.body[:size]
 
     download = LambdaAnalyzer._download.__get__(core)
-    monkeypatch.setattr(lfmod.urllib.request, "urlopen", lambda url, timeout: Answer(b"x" * 100))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: Answer(b"x" * 100))
     assert download("https://s3.example/pkg.zip", 1000) == b"x" * 100
-    monkeypatch.setattr(lfmod.urllib.request, "urlopen", lambda url, timeout: Answer(b"x" * 10, length=80 * MB))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: Answer(b"x" * 10, length=80 * MB))
     with pytest.raises(ValueError, match="The package is 80.0 MB, more than max_size"):
         download("https://s3.example/pkg.zip", 50 * MB)
 
     def offline(url, timeout):
         raise OSError("Network is unreachable")
 
-    monkeypatch.setattr(lfmod.urllib.request, "urlopen", offline)
+    monkeypatch.setattr(urllib.request, "urlopen", offline)
     with pytest.raises(ValueError, match="S3 gateway endpoint"):
         download("https://s3.example/pkg.zip", 50 * MB)
     with pytest.raises(ValueError, match="isn't an https"):
@@ -1678,7 +1688,7 @@ def test_code_of_a_container_image(core, monkeypatch):
     monkeypatch.setattr(core, "function", lambda ref, region=None: image)
     package = core.code("etl")
     assert package.files == [] and "container image" in package.note and "etl:1" in package.note
-    with pytest.raises(lfmod._Hint, match="etl is a container image .*etl:1.*docker pull"):
+    with pytest.raises(_Hint, match="etl is a container image .*etl:1.*docker pull"):
         core.download("etl")
 
 
@@ -1754,7 +1764,7 @@ def test_overview_in_parts_adds_up_to_overview(core):
     ov = core.overview(metrics=False, details=False)
     assert not ov.metrics and not ov.details and ov.metrics_read == 0
     until = datetime.now(timezone.utc)
-    since = lfmod._midnight(until) - timedelta(days=29)
+    since = helpers._midnight(until) - timedelta(days=29)
     ov.add_numbers(*core.overview_numbers(ov.functions, since=since, until=until, limits=set(ov.accounts)))
     ov.add_extras(core._all_extras(ov.functions))
     assert ov.details and ov.metrics_read == whole.metrics_read
@@ -1950,7 +1960,7 @@ def test_how_it_works_report(ui, capsys):
     assert "It runs nodejs18.x: how_it_works() reads Python code" in note and "code('eu-fn', region='eu-west-1')" in note
     assert "No function 'etl-nightlx' in us-east-1. Did you mean 'etl-nightly'?" in run(capsys, ui.how_it_works,
                                                                                        "etl-nightlx")
-    page = lfmod._render_html(ui._how_blocks(ui.core.code_map("etl-nightly")), 50)
+    page = stylemod._render_html(ui._how_blocks(ui.core.code_map("etl-nightly")), 50)
     assert '<details class="od">' in page and '<span class="nt n-aws-reads"' in page
     assert '<code class="ocd"><span class="pk">def</span> <span class="pf">handler</span>' in page
     assert "save()</b>" in page and "store.py line 4" in page
@@ -1995,11 +2005,11 @@ def test_html_report(core):
     ui = LambdaView(core, mode="html")
     ui._show = shown.append
     ui.functions()
-    page = lfmod._render_html(shown[0], 50)
+    page = stylemod._render_html(shown[0], 50)
     assert page.startswith("<style>") and 'class="lmb"' in page and "⚡ Lambda" in page
     assert '<span class="pill bad">python3.9 (ended)</span>' in page
     ui.function_info("etl-nightly")
-    page = lfmod._render_html(shown[1], 50)
+    page = stylemod._render_html(shown[1], 50)
     # the configuration is a JSON tree to fold, coloured like code, with each line's path from fn.raw
     assert '<details class="sec"><summary>Configuration, as Lambda returns it' in page
     assert '<div class="jt">' in page and ".lmb .jt .jk{" in page
@@ -2092,7 +2102,7 @@ def test_explorer_lists_the_functions_and_opens_one(explorer):
     assert "How it's wired" in overview and "SQS queue orders batches of up to 10" in overview
     assert "On failure nowhere: dropped events from S3 bucket that still fail after 2 retries are lost" in overview
     assert "Calls a day, the failed part in red" in overview and "Estimated monthly cost" in overview
-    assert not any(isinstance(b, lfmod._Next) for b in x.shown["overview"])
+    assert not any(isinstance(b, _Next) for b in x.shown["overview"])
     assert "lmx-alert" in x.tab_buttons["overview"]._dom_classes and "lmx-alarm" in x.tab_buttons["errors"]._dom_classes
     assert plain(x.status.value) == "etl-nightly: 3 warnings · the Logs tab shows what it logged, run by run"
     x.tab_buttons["settings"].click()
@@ -2123,7 +2133,7 @@ def test_explorer_holds_the_report_css_once(explorer):
     row_of(x, "etl-nightly").button.click()
     x.tab_buttons["settings"].click()
     panes = html_widgets(x.root)
-    [style] = [pane for pane in panes if lfmod._CSS in pane.value]
+    [style] = [pane for pane in panes if stylemod._CSS in pane.value]
     assert style.layout.display == "none"
     pages = [pane for pane in panes if '<div class="lmb">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
@@ -2227,7 +2237,7 @@ def test_explorer_logs_tab_reaches_further_back(core, explorer, monkeypatch):
     assert quiet.jump_button.layout.display == "" and quiet.jump_button.description == "Show last 12 hours ›"
     quiet.jump_button.click()
     assert quiet._range == "12h" and quiet.range_pick.value == "12h" and len(quiet._runs) == 1
-    monkeypatch.setattr(lfmod, "_RUN_LINES", 6)  # reading stops at 6 lines: Older runs reads the rest
+    monkeypatch.setattr(logs_tab, "_RUN_LINES", 6)  # reading stops at 6 lines: Older runs reads the rest
     ids = seed_runs(datetime.now(timezone.utc))
     x._reload_logs()
     assert x.logs_page.truncated and x.older_button.layout.display == ""
@@ -2296,7 +2306,7 @@ def tree_of(x):
 
 def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 0)
+    monkeypatch.setattr(code_tab, "_TOGGLE_GRACE", 0)
     x = explorer("etl-nightly", tab="code")
     assert x.package is not None and x._code_file == "app.py" and x.code_split.layout.display == ""
     assert tree_of(x) == ["KEY .env 20 B", "PY app.py HANDLER 61 B", "PY utils.py 28 B"]
@@ -2359,10 +2369,10 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
     assert "lmx-on" in nested._code_rows[2].box._dom_classes
     nested._code_rows[0].button.click()  # folds lib/ again
     assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
-    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 60)
+    monkeypatch.setattr(code_tab, "_TOGGLE_GRACE", 60)
     nested._code_rows[0].button.click()  # so soon after the last click on it: a double click's second click
     assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
-    monkeypatch.setattr(lfmod, "_TOGGLE_GRACE", 0)
+    monkeypatch.setattr(code_tab, "_TOGGLE_GRACE", 0)
     nested._code_rows[0].button.click()
     opened = tree_of(nested)
     assert opened == ["lib/ 37 B", "data/ 10 B", "PY helpers.py 27 B", "vendor/requests/ 22 B",
@@ -2416,7 +2426,7 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch):
     assert button.tooltip == "Back to the source of the file picked in the tree"
     button.click()  # back to the source
     assert not x._how and x.source_view.value == source and "lmx-on" not in button._dom_classes
-    monkeypatch.setattr(lfmod, "map_package", lambda *args: pytest.fail("the code is read once"))
+    monkeypatch.setattr(code_tab, "map_package", lambda *args: pytest.fail("the code is read once"))
     button.click()
     assert x._how and "How etl-nightly works" in plain(x.source_view.value)
     x._code_rows[2].button.click()  # a file in the tree: its source, and the button is up again
@@ -2439,8 +2449,8 @@ def test_explorer_how_it_works_in_the_background(core, explorer):
         x = explorer("etl-nightly", tab="code")
         while x._tasks:
             await asyncio.gather(*x._tasks.values())
-        lfmod_map = lfmod.map_package
-        lfmod.map_package = held_back
+        original_map = code_tab.map_package
+        code_tab.map_package = held_back
         try:
             x.how_button.click()
             assert "map" in x._tasks and x.code_map is None and "skw" in x.source_view.value  # it returned at once
@@ -2455,7 +2465,7 @@ def test_explorer_how_it_works_in_the_background(core, explorer):
                 await asyncio.gather(*x._tasks.values())
             assert x._how and x.code_map.event[0].label == "x" and "How etl-nightly works" in plain(x.source_view.value)
         finally:
-            lfmod.map_package = lfmod_map
+            code_tab.map_package = original_map
 
     asyncio.run(main())
 
@@ -2563,9 +2573,9 @@ def test_explorer_reads_in_the_background(seeded):
         assert "api-handler has no log group yet" in plain(x.run_head.value)
         x.open("etl-nightly", tab="logs")
         await settle(x)
-        lfmod_live = lfmod._LIVE_SECONDS
+        live_seconds = logs_tab._LIVE_SECONDS
         try:
-            lfmod._LIVE_SECONDS = 0.05
+            logs_tab._LIVE_SECONDS = 0.05
             x.live_button.click()
             assert "live" in x._tasks
             ids = seed_runs(datetime.now(timezone.utc), count=1)
@@ -2579,7 +2589,7 @@ def test_explorer_reads_in_the_background(seeded):
             await asyncio.wait_for(task, 20)  # a look still in flight finishes, and is dropped
             assert not x._live and "live" not in x._tasks and plain(x.status.value) == "Live is off."
         finally:
-            lfmod._LIVE_SECONDS = lfmod_live
+            logs_tab._LIVE_SECONDS = live_seconds
 
     asyncio.run(main())
 
