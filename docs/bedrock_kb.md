@@ -3,11 +3,11 @@ title: Bedrock Knowledge Bases Analyzer Guide
 description: "How to check, search and ask Amazon Bedrock Knowledge Bases from a SageMaker notebook with aws-analyzer's bedrock_kb.py, with examples."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> aws-analyzer · bedrock_kb.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="32" height="32"> Amazon Bedrock Knowledge Bases <code>bedrock_kb.py</code></p>
 
-# Check, search and ask your Bedrock knowledge bases from a SageMaker notebook
+# Find out why your knowledge base answered that
 
-Install it in your notebook to see whether your knowledge bases are healthy, how each file was indexed, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it. Or open the explorer window and see it all by clicking.
+See whether your knowledge bases are healthy, how each file was indexed and which ones failed, what a question retrieves, and how well an answer is backed by its sources, with each claim linked to the passage behind it. Or open the explorer window and see it all by clicking.
 { .lede }
 
 <ul class="pills">

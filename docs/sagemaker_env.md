@@ -3,11 +3,11 @@ title: SageMaker Guide
 description: "How to see what your SageMaker notebook is, what it costs, whether it stops when idle, what fills its disk and what else is running, and how to make a Python environment with another version that survives restarts, with aws-analyzer's sagemaker_env.py."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> aws-analyzer · sagemaker_env.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="32" height="32"> Amazon SageMaker <code>sagemaker_env.py</code></p>
 
-# Know the SageMaker notebook you're working in
+# Know what this notebook costs, and stop paying for idle
 
-Install it in your notebook and see what the notebook is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and which notebooks, apps and endpoints in the region are still running. Need another Python? One call makes an environment with the version you want, kept when the notebook stops, with its own Jupyter kernel.
+See what the notebook you're in is and what it's costing you, whether it stops when you walk away, how full its memory, disk and GPU are, what's filling the disk, and what else in the region is still running and billing. Need another Python? One call makes an environment with the version you want and its own Jupyter kernel, kept when the notebook stops.
 { .lede }
 
 <ul class="pills">

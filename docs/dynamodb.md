@@ -3,11 +3,11 @@ title: DynamoDB Analyzer Guide
 description: "How to browse, query and understand Amazon DynamoDB tables from a SageMaker notebook with aws-analyzer's dynamodb.py, with examples."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/dynamodb.svg" alt="" width="32" height="32"> aws-analyzer · dynamodb.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/dynamodb.svg" alt="" width="32" height="32"> Amazon DynamoDB <code>dynamodb.py</code></p>
 
-# Explore your DynamoDB tables from a SageMaker notebook
+# Read your DynamoDB tables as plain tables
 
-Install it in your notebook and read your tables the easy way: items as plain tables, one item with every nested field laid out, what attributes the items actually hold, and what each read costs, without leaving Jupyter.
+No more `{"S": ...}` and `{"N": ...}`. See items as rows, one item with every nested field laid out, which attributes the items really hold, and what each read cost, so a scan never surprises you on the bill.
 { .lede }
 
 <ul class="pills">

@@ -6,9 +6,9 @@
 
 site_name: aws-analyzer
 site_description: >-
-  Guides for aws-analyzer: one Python file per AWS service that explains your S3 buckets, DynamoDB tables,
-  Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker
-  notebook.
+  aws-analyzer explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch
+  vector indexes and Lambda functions in plain English from a SageMaker notebook: what's there, what it costs, what's
+  wrong and what to run next.
 site_url: https://utkarsh5026.github.io/aws-analyzer/
 repo_url: https://github.com/utkarsh5026/aws-analyzer
 repo_name: utkarsh5026/aws-analyzer
@@ -42,6 +42,9 @@ theme:
   favicon: images/logo.svg
   icon:
     repo: fontawesome/brands/github
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
   palette:
     # Follow the system's light or dark mode until the reader picks one.
     - media: "(prefers-color-scheme)"

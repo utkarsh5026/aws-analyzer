@@ -1,172 +1,229 @@
 ---
-description: "Guides for aws-analyzer: one install that explains your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, a file explorer for S3, an explorer and a chat window for a knowledge base, and an explorer for Lambda functions and their logs."
+description: "aws-analyzer reads your S3 buckets, DynamoDB tables, Bedrock knowledge bases, SageMaker notebooks, OpenSearch vector indexes and Lambda functions from a SageMaker notebook, and tells you in plain English what's there, what it costs, what's wrong and what to run next."
 hide:
+  - navigation
   - toc
 ---
 
-# Understand your AWS data from a SageMaker notebook
+<div class="home" markdown>
 
-Install it in your notebook and get readable reports on each AWS service: what's there, what it costs, and what to do next, without leaving Jupyter.
+<div class="hero" markdown>
+
+<div markdown>
+
+# AWS, explained in your notebook
+
+You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your buckets, tables, knowledge bases, notebooks, vector indexes and Lambda functions, and tells you what's there, what it costs, what's wrong, and the exact call to run next.
 { .lede }
 
-<ul class="pills">
-  <li>One install, boto3 only</li>
-  <li>Read-only: never changes your data</li>
-  <li>Plain text outside Jupyter</li>
-</ul>
+```bash
+%pip install aws-analyzer
+```
 
-## Guides { #services }
-
-Each guide covers setting up in SageMaker, every command with examples of its output, and the IAM permissions it needs.
-
-<!-- One card per service. A new analyzer gets its own guide (docs/<service>.md), a card here and an entry in mkdocs.yml's nav. -->
-<div class="grid cards services" markdown>
-
--   ![](images/aws/s3.svg){ .aws-icon width="40" height="40" } `s3.py`
-
-    **Amazon S3**
-
-    Buckets and the files in them.
-    { .what }
-
-    - Every bucket's size, monthly cost and risks
-    - Folder trees, and search by name, size or date
-    - Preview CSV, Parquet, JSON, Excel, PDF, Word and more
-    - Cut storage costs and recover deleted files
-
-    [Open the S3 guide →](s3.md)
-
--   ![](images/aws/s3.svg){ .aws-icon width="40" height="40" } `s3_explorer.py`
-
-    **S3 file explorer**
-
-    Click through buckets and folders, and see inside each file.
-    { .what }
-
-    - Your buckets and folders, one click at a time
-    - What's inside a file, as soon as you click it
-    - PDFs page by page, Word files with their pictures
-    - A folder as one .zip, after checking it fits
-
-    [Open the explorer guide →](s3_explorer.md)
-
--   ![](images/aws/dynamodb.svg){ .aws-icon width="40" height="40" } `dynamodb.py`
-
-    **Amazon DynamoDB**
-
-    Tables and the items in them.
-    { .what }
-
-    - Every table's key, size, billing and cost
-    - Scan, query and get items as plain tables
-    - Which attributes the items hold, and their types
-    - The read units each report used; scans stop early
-
-    [Open the DynamoDB guide →](dynamodb.md)
-
--   ![](images/aws/bedrock.svg){ .aws-icon width="40" height="40" } `bedrock_kb.py`
-
-    **Amazon Bedrock Knowledge Bases**
-
-    Knowledge bases, what they retrieve, and the answers built on them.
-    { .what }
-
-    - An explorer window: every file, and how it was indexed
-    - Settings in plain English, sync health and failed files
-    - Search with highlighted passages; answers with each claim linked to its source
-    - Compare search settings and measure retrieval hit rate
-
-    [Open the Knowledge Bases guide →](bedrock_kb.md)
-
--   ![](images/aws/bedrock.svg){ .aws-icon width="40" height="40" } `bedrock_chat.py`
-
-    **Bedrock knowledge base chat**
-
-    A chat window on a knowledge base, with every setting in reach.
-    { .what }
-
-    - Pick the knowledge base and the model; answers stream in
-    - Each answer's citations, sources, request and response, or only the search behind it
-    - Any RetrieveAndGenerate setting, and the setup as Python, JSON or an AWS CLI command
-    - Test a list of questions, and see which did better after a change
-
-    [Open the chat guide →](bedrock_chat.md)
-
--   ![](images/aws/sagemaker.svg){ .aws-icon width="40" height="40" } `sagemaker_env.py`
-
-    **Amazon SageMaker**
-
-    The notebook you're working in, and everything else SageMaker bills you for.
-    { .what }
-
-    - This notebook's type, cost so far and idle shutdown
-    - Its CPU, memory, disk and GPU use right now
-    - What fills the disk, and what's safe to clear
-    - A Python environment with another version, and its kernel, in one call
-    - What's running in the region, and what looks forgotten
-
-    [Open the SageMaker guide →](sagemaker_env.md)
-
--   ![](images/aws/opensearch.svg){ .aws-icon width="40" height="40" } `opensearch.py`
-
-    **Amazon OpenSearch**
-
-    Vector indexes in OpenSearch Service domains and Serverless collections.
-    { .what }
-
-    - Every vector field in plain English: size, engine, similarity
-    - Whether the graphs fit in the memory the nodes have
-    - Documents without a vector; zero or repeated vectors
-    - The nearest neighbours of a question, a vector or a document
-
-    [Open the OpenSearch guide →](opensearch.md)
-
--   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `lambda_functions.py`
-
-    **AWS Lambda**
-
-    Lambda functions, in one region or all of them.
-    { .what }
-
-    - An explorer window: every function, and its logs run by run
-    - Every function's runtime, triggers, calls, errors and cost
-    - Runtimes losing support, and functions anyone can call
-    - Errors grouped by cause, from the function's own logs
-    - Memory used and cold starts, and the size that would do
-
-    [Open the Lambda guide →](lambda_functions.md)
-
--   ![](images/aws/lambda.svg){ .aws-icon width="40" height="40" } `agent/`
-
-    **Ask in plain English**
-
-    Questions about your account, answered by an agent.
-    { .what }
-
-    - "Which Lambda failed last night?", answered with the numbers
-    - Every answer says the window and regions it checked
-    - Follow-up questions, and the commands to look closer
-    - Read-only, with a budget per question
-
-    [Open the agent guide →](agent.md)
+<p class="actions">
+<a class="md-button md-button--primary" href="s3.html">Start with your S3 buckets</a>
+<a class="md-button" href="#services">Pick a service</a>
+</p>
 
 </div>
 
-## Every service works the same way { #pattern }
+<div class="nb" role="img" aria-label="A notebook cell running ui.instance(): the space churn-analysis on an ml.g5.2xlarge at $1.52 an hour, with idle shutdown off and the GPU idle, and a finding that an ml.m5.2xlarge without a GPU would cost up to $773.07 a month less">
+<div class="nb-in"><span class="prompt">[1]:</span><span class="call">ui.instance()</span></div>
+<div class="nb-out">
+<p class="r-title">JupyterLab space churn-analysis</p>
+<p class="r-sub">us-east-1 · the notebook this code runs in · running for 2d 5h</p>
+<div class="r-cards">
+<div><span>Instance</span><b>ml.g5.2xlarge</b></div>
+<div><span>Price</span><b>$1.52/hour</b></div>
+<div class="warn"><span>Idle shutdown</span><b>off</b></div>
+<div class="warn"><span>GPU</span><b>idle</b></div>
+</div>
+<p class="r-finding"><strong>This ml.g5.2xlarge costs $1.52/hour, and its GPU is idle right now.</strong> If this notebook doesn't use the GPU, ml.m5.2xlarge has as many vCPUs and as much memory without one: <mark>$1.06/hour less, up to $773.07/month</mark>. Switch when the notebook is stopped.</p>
+<p class="r-next">Next <code>disk('/home/sagemaker-user')</code> <code>running()</code></p>
+</div>
+</div>
 
-`%pip install aws-analyzer` gives you every service, and only needs boto3, which SageMaker already has. Each guide shows how to install it, from a bucket too when the notebook has no internet access.
+</div>
+
+## It reads AWS so you don't have to { #translate }
+
+The console and the API hand you JSON, log lines and metrics. aws-analyzer turns them into sentences that say what it means for you, put a price on it, and name the next step. These are lines from its reports.
+{ .section-lede }
+
+<div class="tr">
+<div class="head">What AWS gives you</div>
+<div class="head">What aws-analyzer says</div>
+
+<div class="raw"><pre><code>{
+  "Sid": "PartnerRead",
+  "Effect": "Allow",
+  "Principal": {"AWS": "arn:aws:iam::210987654321:root"},
+  "Action": ["s3:GetObject", "s3:ListBucket"],
+  "Resource": ["arn:aws:s3:::acme-ml-data",
+               "arn:aws:s3:::acme-ml-data/curated/*"]
+}</code></pre></div>
+<div class="arrow" aria-hidden="true">→</div>
+<div class="said">
+<p>Statement PartnerRead gives <mark>other AWS accounts access (210987654321)</mark>: read files, list files.</p>
+<table class="kv">
+<tr><td>Who</td><td>account 210987654321</td></tr>
+<tr><td>Can</td><td>read files, list files</td></tr>
+<tr><td>On</td><td>bucket acme-ml-data, s3://acme-ml-data/curated/*</td></tr>
+</table>
+<p class="where">From <code>bucket_info()</code> in the <a href="s3.html#buckets">S3 guide</a>. <code>policy()</code> shows every statement this way, and its JSON.</p>
+</div>
+
+<div class="raw"><pre><code>[ERROR] ClientError: An error occurred (AccessDeniedException)
+when calling the PutItem operation: User: arn:aws:sts::123456789012:
+assumed-role/acme-lambda-role/orders-etl is not authorized to perform:
+dynamodb:PutItem on resource: arn:aws:dynamodb:us-east-1:
+123456789012:table/orders</code></pre></div>
+<div class="arrow" aria-hidden="true">→</div>
+<div class="said">
+<p>Its code was refused access twice (the last 6h ago): its role <code>acme-lambda-role</code> <mark>isn't allowed dynamodb:PutItem</mark> on <code>arn:aws:dynamodb:us-east-1:123456789012:table/orders</code>. Add the permission to the role's policy in IAM.</p>
+<p class="where">From <code>errors('orders-etl')</code> in the <a href="lambda_functions.html#errors">Lambda guide</a>, which groups a function's errors by cause and links each to the run that shows it.</p>
+</div>
+
+<div class="raw"><pre><code>{"pk": {"S": "USER#0"}, "sk": {"S": "ORDER#0000"},
+ "status": {"S": "shipped"}, "total": {"N": "69.83"},
+ "lines": {"L": [{"M": {"sku": {"S": "SKU-046"},
+                         "qty": {"N": "1"}}}]}}</code></pre></div>
+<div class="arrow" aria-hidden="true">→</div>
+<div class="said">
+<table class="kv">
+<tr><td>pk (partition key)</td><td>USER#0</td></tr>
+<tr><td>status</td><td>shipped</td></tr>
+<tr><td>total</td><td>69.83</td></tr>
+<tr><td>lines</td><td>1 element</td></tr>
+<tr><td class="in">sku</td><td>SKU-046</td></tr>
+</table>
+<p class="where">From <code>get('orders', 'USER#0', 'ORDER#0000')</code> in the <a href="dynamodb.html#items">DynamoDB guide</a>, with what that read cost: 1 read unit.</p>
+</div>
+</div>
+
+## Start from the question you have { #services }
+
+Each guide sets you up in SageMaker, walks through every command with real output, and lists the IAM permissions it needs.
+{ .section-lede }
+
+<!-- One line per service. A new analyzer gets its own guide (docs/<service>.md), a line here and an entry in mkdocs.yml's nav. -->
+<ul class="svc">
+<li><a href="s3.html">
+<img class="aws-icon" src="images/aws/s3.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon S3</span><code>s3.py</code></span>
+<span class="asks"><span>What's in this bucket, and what is it costing me?</span><span>What's inside this Parquet, Excel or PDF file?</span><span>Someone deleted a file. Can I get it back?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="s3_explorer.html">
+<img class="aws-icon" src="images/aws/s3.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">S3 file explorer</span><code>s3_explorer.py</code></span>
+<span class="asks"><span>Can I just click through my buckets like folders?</span><span>What's in this file, without downloading it?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="dynamodb.html">
+<img class="aws-icon" src="images/aws/dynamodb.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon DynamoDB</span><code>dynamodb.py</code></span>
+<span class="asks"><span>What does an item in this table actually look like?</span><span>Which attributes do the items really have?</span><span>How much did that scan just cost?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="bedrock_kb.html">
+<img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Bedrock Knowledge Bases</span><code>bedrock_kb.py</code></span>
+<span class="asks"><span>Why did my knowledge base answer that?</span><span>Which files failed to index, and why?</span><span>Does a search find the passage it should?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="bedrock_chat.html">
+<img class="aws-icon" src="images/aws/bedrock.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Bedrock chat</span><code>bedrock_chat.py</code></span>
+<span class="asks"><span>Which settings give the best answers to my test questions?</span><span>What exactly is sent to Bedrock?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="sagemaker_env.html">
+<img class="aws-icon" src="images/aws/sagemaker.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon SageMaker</span><code>sagemaker_env.py</code></span>
+<span class="asks"><span>What is this notebook costing me, and does it stop when I leave?</span><span>Why is the disk full?</span><span>What did I leave running?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="opensearch.html">
+<img class="aws-icon" src="images/aws/opensearch.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Amazon OpenSearch</span><code>opensearch.py</code></span>
+<span class="asks"><span>Do my vectors fit in the memory the nodes have?</span><span>Which documents have no vector?</span><span>What's nearest to this question?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="lambda_functions.html">
+<img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">AWS Lambda</span><code>lambda_functions.py</code></span>
+<span class="asks"><span>Which function failed last night, and why?</span><span>Which runtimes lose support soon?</span><span>Is it paying for memory it never uses?</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+<li><a href="agent.html">
+<img class="aws-icon" src="images/aws/lambda.svg" alt="" width="40" height="40">
+<span class="who"><span class="name">Ask in plain English</span><code>agent/</code></span>
+<span class="asks"><span>Were last night's uploads to acme-raw processed?</span><span>Any question about Lambda and S3, in a sentence.</span></span>
+<span class="go" aria-hidden="true">›</span>
+</a></li>
+</ul>
+
+## Every report reads the same way { #pattern }
+
+Learn one and you can read them all. Each report puts the answer first and ends with what to do about it.
+{ .section-lede }
+
+<div class="anatomy" markdown>
+
+<div markdown>
+
+1. **The answer**
+   Cards with the few numbers that matter, in units you know: sizes, dollars a month, how long ago. A card turns amber when a warning below is about it.
+2. **What needs a look**
+   Findings, warnings first. Each one says what's wrong, why it matters, what it costs, and what to change.
+3. **The detail**
+   Tables you can sort, filter and trim, and the raw JSON folded away for when you want it.
+4. **What to run next**
+   Two or three calls with the arguments already filled in. One click selects a call, ready to copy.
+
+</div>
+
+<figure markdown>
+![overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, and a list of warnings](images/overview-light.webp#only-light){ width="984" height="700" loading=lazy }
+![overview(): a table of four buckets with objects, size, estimated monthly cost, versioning, encryption and public access, and a list of warnings](images/overview-dark.webp#only-dark){ width="984" height="700" loading=lazy }
+<figcaption><code>ui.overview()</code> in the S3 guide: every bucket, what it costs, and what needs a look.</figcaption>
+</figure>
+
+</div>
+
+Every service starts the same way. It uses the notebook's IAM role, so there's nothing to configure:
 
 ```python
 from aws_analyzer import S3View  # or DynamoDBView, BedrockKBView, SageMakerView, OpenSearchView, LambdaView
 
-ui = S3View()              # uses the notebook's IAM role; nothing to configure
+ui = S3View()              # uses the notebook's IAM role
 ui.help()                  # every command, grouped by task; ui.help("name") shows one in full
 s3 = ui.core               # the analyzer behind the view: returns data instead of a report
 ```
 
-Every report reads the same way: cards with the numbers that matter (amber or red when something needs a look), findings that each end in what to do, the tables of detail, and a **Next** row of the commands worth running next, with the arguments already filled in. One click on any command in a report selects all of it, ready to copy.
+## What it will never do { #promises }
 
-### Times in your time zone { #timezone }
+<div class="never">
+<div>
+<p>Change anything in your account</p>
+<p>It only reads. When a finding suggests a fix, it shows you the command and leaves running it to you.</p>
+</div>
+<div>
+<p>Ask you to set it up</p>
+<p>It uses the notebook's IAM role and region. A missing permission becomes a note naming it, and the rest of the report still shows.</p>
+</div>
+<div>
+<p>Need more than boto3</p>
+<p>SageMaker already has it. pandas, file readers and widgets are used when they're there, and a report says what to install when one is missing.</p>
+</div>
+<div>
+<p>Pretend an estimate is a bill</p>
+<p>Costs say which prices they used, partial results say where they stopped, and long scans stop early unless you ask for more.</p>
+</div>
+</div>
+
+## Times in your time zone { #timezone }
 
 Times are in UTC until you pick a zone. Then every report and window, for every service, shows its times in your zone and says which one (`Last modified (IST)`, `since 2024-05-01 14:02 IST`), and dates you type in (`since="2024-05-01 10:00"`) are read there too:
 
@@ -177,6 +234,8 @@ set_timezone("Asia/Kolkata")   # or its city, "kolkata"; "America/New_York", "+0
 ```
 
 `set_timezone("local")` uses the machine's own zone, which on SageMaker is UTC, so name yours there. The `AWS_ANALYZER_TZ` environment variable picks the zone for every notebook (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
+
+</div>
 
 <script>
 // This page used to be the S3 guide, so old links to its sections (e.g. /#costs) go to where they are now:

@@ -3,11 +3,11 @@ title: Ask in Plain English (Agent) Guide
 description: "How to ask questions about your AWS account in plain English from a SageMaker notebook with aws-analyzer's agent: an agent (an Azure OpenAI deployment, run by LangChain's deepagents) answers questions like which Lambda failed last night, or whether last night's uploads to a bucket were processed, from read-only tools, says what it checked, and stays within a budget per question."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · agent/</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> Ask in plain English <code>agent/</code></p>
 
-# Ask about your AWS account in plain English
+# Ask your AWS account a question, and get an answer you can check
 
-Ask "Which Lambda failed last night?" in a notebook cell and get the answer: which functions failed and how often, why, and the run that shows it. Ask "Were last night's uploads to acme-raw processed?" and it checks the bucket, the files that arrived and the function they should have run. An agent works it out with the same read-only tools the reports use, and every answer says what it checked (the time window, in your time zone, and the regions), what it couldn't read, what it cost, and the commands to look closer.
+Type "Which Lambda failed last night?" in a notebook cell and get which functions failed, how often, why, and the run that shows it. Ask "Were last night's uploads to acme-raw processed?" and it checks the bucket, the files that arrived and the function they should have run. Every answer says what it checked, in your time zone, what it couldn't read, what it cost, and the commands to look closer.
 { .lede }
 
 <ul class="pills">

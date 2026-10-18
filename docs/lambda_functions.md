@@ -3,11 +3,11 @@ title: Lambda Functions Guide
 description: "How to see every AWS Lambda function, in one region or all of them, from a SageMaker notebook with aws-analyzer's lambda_functions.py: runtimes and their end of support, triggers and public access, calls, errors and cost, errors grouped by cause, logs run by run, memory and cold starts, and the code, in reports or in an explorer window you click through, with examples."
 ---
 
-<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> aws-analyzer · lambda_functions.py</p>
+<p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> AWS Lambda <code>lambda_functions.py</code></p>
 
-# See every Lambda function from a SageMaker notebook
+# Find out which Lambda failed, and why, without the console
 
-Install it in your notebook and see your Lambda functions, in one region or every one your account uses: what each one runs and when its runtime loses support, what triggers it and who else can call it, how often it ran, failed and was throttled, what it costs, and why it fails, read from its own logs, without leaving Jupyter. Or open the explorer window and see it all by clicking, its logs run by run.
+See every function, in one region or all of them: what it runs and when that runtime loses support, what triggers it and who else can call it, how often it failed, what it costs, and why it fails, read from its own logs and grouped by cause. Or open the explorer window and read its logs run by run.
 { .lede }
 
 <ul class="pills">

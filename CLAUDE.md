@@ -929,20 +929,27 @@ does both, a page at a time). How the UI works:
 - `docs/` is the guide site: Markdown built by MkDocs with the Material theme (`mkdocs.yml`, versions pinned in
   `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
-  README links and old links still work. `index.md` is the home page with one card per service (Material grid
-  cards); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
+  README links and old links still work. `index.md` is the home page, with no sidebars: a hero beside a notebook
+  cell drawn in HTML (`.hero`, `.nb`), lines from real reports beside the AWS data they read (`.tr`), one line per
+  service led by the questions it answers (`.svc`), how a report reads (`.anatomy`), what it never does (`.never`)
+  and time zones (`#timezone`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
   `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
-  analyzer gets its own `docs/<service>.md`, a card on `index.md`, an entry in `mkdocs.yml`'s `nav` and a link in
-  README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
+  analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
+  and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
   AWS's [icon package](https://aws.amazon.com/architecture/icons/), copied unchanged, never recoloured or
-  cropped) on its home-page card, in its guide's eyebrow, and in README's Services table and
+  cropped) on its home-page line, in its guide's eyebrow, and in README's Services table and
   section; a new service copies its icon in from the package. `index.md` ends with a script that forwards old `/#section` links (from when it was the S3 guide) to
   `s3.html` when the id isn't on the home page. A guide's building blocks: section headings keep explicit ids
   (`## Permissions { #permissions }`) because README and other pages link to them; code blocks are fenced with a
   language and an optional `title="IAM policy"`; callouts are `!!! note ""` / `!!! warning ""`, troubleshooting
   entries `??? question "..."`, card grids `<div class="grid cards" markdown>`, the set-up steps
   `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
-  styles them. A screenshot is two images and a caption:
+  styles them. The site's look is there too: ink navy chrome, the blue of a selected Jupyter cell (`--aa-blue`) for
+  links and the bar beside every screenshot, highlighter amber (`--aa-mark`, `<mark>`) only for what a report wants
+  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. A guide opens with its
+  eyebrow (icon, service name, module as code), an H1 that says what the reader gets ("Find out which Lambda failed,
+  and why, without the console"), a short `.lede` and the `pills` it promises. Write for a data scientist: the
+  question they have first, then what the page lets them do, in plain words. A screenshot is two images and a caption:
   `![alt](images/<name>-light.webp#only-light){ width="984" height="..." loading=lazy }`, the same line with
   `-dark` / `#only-dark` (Material shows the one for the reader's theme), then `/// caption` ... `///`.
   The screenshots (`docs/images/*-{light,dark}.webp`) are the tool's own output, made by
