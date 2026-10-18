@@ -422,8 +422,8 @@ Update this table in each step's PR.
 
 | Step | Status | PR | Notes |
 |---|---|---|---|
-| Phase 0: tooling | done, PR not opened yet | | branch `modularize/tooling` (opensearch builds on it) |
-| opensearch | done, PR not opened yet | | branch `modularize/opensearch`, plan in `plans/opensearch.py` |
+| Phase 0: tooling | in review | #97 | branch `modularize/tooling` |
+| opensearch | in review | #98 | stacked on #97; plan in `plans/opensearch.py` |
 | lambda_functions | not started | | second pilot: mixins, explorer, blocks, decision 7 |
 | s3 + s3_explorer | not started | | |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
