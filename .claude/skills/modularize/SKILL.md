@@ -455,9 +455,9 @@ Update this table in each step's PR.
 
 | Step | Status | PR | Notes |
 |---|---|---|---|
-| Phase 0: tooling | in review | #97 | branch `modularize/tooling` |
-| opensearch | in review | #98 | stacked on #97; plan in `plans/opensearch.py` |
-| lambda_functions | in review | | plan in `plans/lambda_functions.py` (mixins and modules) |
+| Phase 0: tooling | done | #97 | branch `modularize/tooling` |
+| opensearch | done | #98 | plan in `plans/opensearch.py` |
+| lambda_functions | in review | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | not started | | |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
