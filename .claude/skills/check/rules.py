@@ -26,8 +26,8 @@ Errors (exit 1):
     importing the UI (its package's style / blocks / view / explorer / window, or _kit's blocks, render, view,
     window, progress, highlight or jsontree; render's _call and _signature are allowed), its analysis importing its
     analyzer, a function or class defined in two of its modules, and the command checks above on its *Explorer and
-    on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab). Its AWS calls are checked against
-    the clients every module of the package makes.
+    on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab, _<Topic>Pane). Its AWS calls are
+    checked against the clients every module of the package makes.
 Warnings:
   - PartiQL (execute_statement and friends) can write; it needs a guard that only lets SELECT through, marked
     with a `# read-only: <why>` comment on the call's line
@@ -68,7 +68,7 @@ PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.pare
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
 KIT_UI = {"blocks", "render", "view", "window", "progress", "highlight", "jsontree"}
 CORE_FROM_RENDER = {"_call", "_signature"}
-MIXIN_RE = re.compile(r"_\w+(Commands|Tab)$")
+MIXIN_RE = re.compile(r"_\w+(Commands|Tab|Pane)$")
 REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
@@ -291,11 +291,11 @@ def _ui_classes(tree: ast.Module, *, in_package: bool, is_companion: bool) -> li
 def _guards(class_name: str, *, is_companion: bool) -> set[str]:
     """
     The decorators that guard a command of this class: @_friendly_errors on a View's, _kit's @_window_errors on a
-    window's (an explorer or one of its tabs). A companion's classes may use either.
+    window's (an explorer or one of its tabs or panes). A companion's classes may use either.
     """
     if is_companion:
         return {"_friendly_errors", "_window_errors"}
-    if class_name.endswith(("Explorer", "Tab")):
+    if class_name.endswith(("Explorer", "Tab", "Pane")):
         return {"_window_errors"}
     return {"_friendly_errors"}
 
