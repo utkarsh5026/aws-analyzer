@@ -420,7 +420,18 @@ lines). It differs in these ways:
 (cost and tokens), `markdown.py` (`_Markdown`, `_Answer`, `_Json` and their drawers: UI layer), `files.py`
 (`presigned_url`, the file lists, `_Download`). `SHARED` and `rules.py`'s shared-name check follow the package.
 
-### `bedrock_kb` (8,566)
+### `bedrock_kb` (8,566), done
+
+The layout below was the plan. What it became is `plans/bedrock_kb.py` (34 modules, the largest `explorer/window.py`
+at 1,060 lines). It differs in these ways:
+- `BedrockKBAnalyzer` was 1,370 lines, under the limit, but took mixins by its own sub-banners: `_KnowledgeBaseReads`
+  (knowledge bases and data sources), `_SearchReads` (retrieval and generation), `_DecidingReads` and `_FileReads`,
+  in `analyzer/`, with `kb_analyzer.py` keeping `__init__` and `client`.
+- `BedrockKBView` is `_KnowledgeBaseCommands`, `_IndexCommands` ("What's indexed", 840 lines), `_SearchCommands` and
+  `_MeasureCommands` by `_GROUPS`, in `view/`; `kb_view.py` keeps the plumbing and `explore()`, and `view/cells.py`
+  the labels and tones the View and the window share.
+- `analysis/` is common, prompting, parsing, settings, filters, deciding, cost, findings, files, metadata and chunks.
+- The blocks fit in one `blocks.py` (290 lines), and the explorer is `frame.py`, `widgets.py` and `window.py`.
 
 `analysis/`: inventory and file states (`inventory_files`, `file_state`, `FILE_STATES`), chunks (`place_chunks`,
 `order_chunks`, `chunk_overlap`), retrieval and answers, findings. `BedrockKBAnalyzer` (~1,950) → `_<Topic>Reads`
@@ -496,8 +507,8 @@ Update this table in each step's PR.
 | opensearch | done | #98 | plan in `plans/opensearch.py` |
 | lambda_functions | done | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
-| _bedrock | in review | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
-| bedrock_kb | not started | | |
+| _bedrock | done | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
+| bedrock_kb | in review | | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
 | bedrock_chat | not started | | |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | not started | | |
@@ -522,6 +533,19 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **bedrock_kb:**
+  - **`REEXPORT_KIT` takes any public name the old module imported**, not only `_kit`'s: `split.py` finds where each
+    came from in the old imports. bedrock_kb's `_bedrock` names (`MODEL_PRICES`, `Passage`, the `X as X` ones) are
+    listed there, so `bedrock_kb.MODEL_PRICES` still works.
+  - **`split.py` rewrites the imports, so a comment above them is dropped.** bedrock_kb's two lines above its
+    `_bedrock` imports went, and `COMMENTS_LEFT`'s total went down by two.
+  - **Module-level helpers in section 4 that several mixins call** (`_question_text`, `_eval_pairs`, `_with_errors`)
+    were pure, so they went to `analysis/`, not into one mixin's module.
+  - **A test patched a stdlib module through the service** (`monkeypatch.setattr(kbmod.time, "monotonic", ...)`):
+    it's the same module object, so the test imports `time` itself.
+  - **`apis.txt` lists the operations per module now**: compare the union per service with the baseline's (a short
+    script over both files), as s3's lesson says.
 
 - **_bedrock:**
   - **Its users imported its private names** (`from ._bedrock import _highlight, _Answer, ...`), and a package's

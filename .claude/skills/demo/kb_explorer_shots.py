@@ -1,5 +1,5 @@
 """
-Remake the knowledge base explorer's screenshots: bedrock_kb.py's explore() window, used in a real JupyterLab,
+Remake the knowledge base explorer's screenshots: bedrock_kb's explore() window, used in a real JupyterLab,
 light and dark.
 
     .venv/bin/python .claude/skills/demo/kb_explorer_shots.py                  # every figure
@@ -60,7 +60,7 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     """
     Open the notebook, run it, use the window, and screenshot each wanted figure into `out`.
     """
-    for kernel in api(base, token, "/api/kernels"):  # a fresh kernel, so the newest bedrock_kb.py is imported
+    for kernel in api(base, token, "/api/kernels"):  # a fresh kernel, so the newest bedrock_kb is imported
         api(base, token, f"/api/kernels/{kernel['id']}", "DELETE")
     api(base, token, "/lab/api/settings/@jupyterlab/apputils-extension:themes", "PUT",
         {"raw": json.dumps({"theme": "JupyterLab Dark" if theme == "dark" else "JupyterLab Light"})})
