@@ -81,18 +81,18 @@ from typing import Any, BinaryIO, Callable, Iterable, Iterator
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from ._kit.analyzer import _BaseAnalyzer
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _require
-from ._kit.errors import _error_code
-from ._kit.fmt import (
+from .._kit.analyzer import _BaseAnalyzer
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
+from .._kit.deps import _require
+from .._kit.errors import _error_code
+from .._kit.fmt import (
     Stat, _band, _duration, _fmt_dt, _in_zone, _plural, _share, _tz_label, _utcnow, file_extension, human_age,
     human_money, human_size, parse_size, parse_time,
 )
-from ._kit.jsontree import _JSON_KEYS, _JSON_ROWS, _JsonTree, _json_tree_css
-from ._kit.render import _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc
-from ._kit.view import _BaseView, _friendly_errors
+from .._kit.jsontree import _JSON_KEYS, _JSON_ROWS, _JsonTree, _json_tree_css
+from .._kit.render import _base_css, _call, _prose, _report_html
+from .._kit.text import _clip, _esc
+from .._kit.view import _BaseView, _friendly_errors
 
 # =============================================================================
 # 1. Helpers: parsing and formatting

@@ -70,7 +70,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/opensearch/prices.py": 25,
     "src/aws_analyzer/opensearch/style.py": 2,
     "src/aws_analyzer/opensearch/view.py": 13,
-    "src/aws_analyzer/s3.py": 320,
+    "src/aws_analyzer/s3/__init__.py": 320,
     "src/aws_analyzer/s3_explorer.py": 118,
     "src/aws_analyzer/sagemaker_env.py": 176,
     "tests/conftest.py": 5,
@@ -96,7 +96,7 @@ LONG_FILES = {
     "src/aws_analyzer/bedrock_chat.py",
     "src/aws_analyzer/bedrock_kb.py",
     "src/aws_analyzer/dynamodb.py",
-    "src/aws_analyzer/s3.py",
+    "src/aws_analyzer/s3/__init__.py",
     "src/aws_analyzer/s3_explorer.py",
     "src/aws_analyzer/sagemaker_env.py",
 }
