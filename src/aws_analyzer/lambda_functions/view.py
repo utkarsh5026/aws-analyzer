@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generator
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Tabs, _Text, _Title, _Tone
 from .._kit.deps import _require
 from .._kit.errors import _Hint, _error_code, _why
 from .._kit.fmt import (
@@ -47,102 +47,19 @@ from .analysis.performance import percentile, performance_findings
 from .analysis.package import (
     _HANDLER_EXTENSIONS, _JUNK_RE, _SOURCE_LIMIT, _local_path, _top_folder, package_file_name, package_findings,
 )
-from .analysis.codemap.terms import _LAMBDA_ENV, _REMOVED_MODULES
-from .analysis.codemap.aws_model import _event_kind, _sample_event, _service_name
-from .analysis.codemap.model import AwsCall, CodeMap, EventField, ImportUse
-from .analysis.codemap.findings import _code_summary, _short_name, _where, code_map_findings
+from .analysis.codemap.terms import _LAMBDA_ENV
+from .analysis.codemap.aws_model import _event_kind
+from .analysis.codemap.model import CodeMap
+from .analysis.codemap.findings import _code_summary, _short_name, code_map_findings
 from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
-from .blocks.outline import _Outline
+from .blocks.walk import _Walk
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
-
-
-def _called_text(where: str) -> str:
-    """
-    'app.store.Orders.save line 16' -> 'Orders.save() line 16'.
-    """
-    key, _, line = where.rpartition(" line ")
-    return f"{_short_name(key)}() line {line}" if key else where
-
-
-def _segments(path: tuple[str, ...]) -> list[str]:
-    """
-    An event field's path as the levels of the event table: ('Records', '[]', 'body', '{json}', 'bucket') ->
-    ['Records[]', 'body (JSON)', 'bucket'].
-    """
-    out: list[str] = []
-    for part in path:
-        if part == "[]" and out:
-            out[-1] += "[]"
-        elif part in ("{json}", "{base64}") and out:
-            out[-1] += " (JSON)" if part == "{json}" else " (base64)"
-        else:
-            out.append(part)
-    return out
-
-
-def _event_rows(fields: list[EventField]) -> list[list[Any]]:
-    """
-    The event table: each field the code reads under the one it's in, how it's read and where.
-    """
-    labels = [f.label for f in fields]
-    leaves = [f for f in fields if not any(o.startswith((f.label + "[", f.label + ".", f.label + " (")) for o in labels)]
-    tree: dict[str, Any] = {}
-    for f in leaves:
-        node = tree
-        segments = _segments(f.path)
-        for i, segment in enumerate(segments):
-            entry = node.setdefault(segment, [{}, None])
-            if i == len(segments) - 1:
-                entry[1] = f
-            node = entry[0]
-    rows: list[list[Any]] = []
-
-    def walk(node: dict[str, Any], depth: int) -> None:
-        for segment, (children, f) in node.items():
-            how = ("" if f is None else "event[...]: needed" if f.required else ".get(...): optional")
-            rows.append(["  " * depth + segment, how, f"{f.file} line {f.line}" if f else ""])
-            walk(children, depth + 1)
-
-    walk(tree, 0)
-    return rows
-
-
-_IMPORT_ORDER = ("missing", "removed", "layer", "package", "runtime", "stdlib")
-
-
-def _import_rows(cmap: CodeMap) -> list[list[Any]]:
-    """
-    What it imports (its own modules left out), the ones Lambda can't find first.
-    """
-    found: dict[str, ImportUse] = {}
-    for use in cmap.imports:
-        if use.source == "own":
-            continue
-        known = found.get(use.top)
-        if known is None or _IMPORT_ORDER.index(use.source) < _IMPORT_ORDER.index(known.source):
-            found[use.top] = use
-    words = {"package": "the package: packed with its code", "runtime": "the Lambda runtime",
-             "stdlib": "Python's standard library"}
-    rows = []
-    for use in sorted(found.values(), key=lambda u: (_IMPORT_ORDER.index(u.source), u.top.lower())):
-        if use.source == "missing":
-            where: Any = _Tone("nowhere: not in the package or the runtime", "bad")
-        elif use.source == "removed":
-            version = _REMOVED_MODULES[use.top]
-            where = _Tone(f"nowhere: Python {version[0]}.{version[1]} removed it", "bad")
-        elif use.source == "layer":
-            where = _Tone("not in the package: one of its layers?", "warn")
-        else:
-            where = words[use.source]
-        rows.append([use.top, where, f"{use.file} line {use.line}" + (" (optional)" if use.optional else "")
-                     + ("" if use.startup else " (inside a function)")])
-    return rows
 
 
 def _stamp(moment: datetime | None, *, zone: bool = False) -> str:
@@ -1226,12 +1143,12 @@ class LambdaView(_BaseView):
     def how_it_works(self, name: str, *, region: str | None = None, max_size: Any = "50MB") -> None:
         """
         How a Python function's code works, read from its package with Python's ast module (nothing in it is run):
-        a few sentences, then each step of a call from the handler on, with the functions it calls in its own files
-        folded under the lines that call them, and what each line does (AWS calls, environment variables, event
-        fields, HTTP requests, logs); then its AWS calls with the IAM permissions they need, a test event with the
-        fields it reads, its libraries and where Lambda finds them, and findings (a variable that isn't set, an import
-        that isn't there, an HTTP call without a timeout, a list call that reads one page, errors it drops).
-        Downloads the .zip, up to max_size, like code().
+        two tabs, a graph of what comes in, who calls whom and what it reaches, and its steps to click through like
+        a debugger, from the handler into each function it calls, with what each line does (AWS calls, environment
+        variables, event fields, HTTP requests, logs); then a few sentences and findings (a variable that isn't set,
+        an import that isn't there, an HTTP call without a timeout, a list call that reads one page, errors it drops).
+        Downloads the .zip, up to max_size, like code(). core.code_map() returns the same as data: its AWS calls,
+        environment variables, event fields and imports.
         """
         with self._named(name, region):
             cmap = self.core.code_map(name, region=region, max_size=max_size)
@@ -1299,7 +1216,7 @@ class LambdaView(_BaseView):
         services = cmap.services
         kind = _event_kind(cmap.event)
         files = len({f.file for f in cmap.functions})
-        blocks.append(_Cards([
+        overview: list[Any] = [_Cards([
             ("Starts at", f"{entry}() in {cmap.handler_file}" if entry else f"no {handler_name}() in {cmap.handler_file}",
              "" if entry else "warn"),
             ("Expects", kind or ("an event" if cmap.event else "-")),
@@ -1308,89 +1225,28 @@ class LambdaView(_BaseView):
             ("Environment", (f"{_plural(len(names), 'variable')} read" + (f" · {len(unset)} not set" if unset else ""))
              if names else "none read", "warn" if unset else ""),
             ("Functions run", f"{len(cmap.functions):,}" + (f" in {files:,} files" if files > 1 else "")),
-        ]))
+        ])]
         summary = _code_summary(cmap)
         if summary:
-            blocks.append(_Note(" ".join(summary)))
-        blocks.append(_Findings(found, empty=(
+            overview.append(_Note(" ".join(summary)))
+        overview.append(_Findings(found, empty=(
             "Nothing in the code stands out: the variables it needs are set, what it imports is there, and its HTTP "
             "and list calls look complete.")))
         graph = graph or code_graph(cmap)
+        graph_blocks: list[Any] = []
         if graph.nodes:
-            blocks.append(_Graph(graph, "How it fits together: what comes in, who calls whom, and what it reaches"))
+            graph_blocks.append(_Graph(graph, "How it fits together: what comes in, who calls whom, and what it reaches"))
             if graph.what_was_cut():
-                blocks.append(_Note(f"The graph is cut to fit here: it {graph.what_was_cut()}. "
-                                    f"{self._call_for('how_it_works_page', fn)} saves a page with the whole graph."))
-            blocks.append(_Text(graph.mermaid(), code=True, collapsed=True, title=(
+                graph_blocks.append(_Note(f"The graph is cut to fit here: it {graph.what_was_cut()}. "
+                                          f"{self._call_for('how_it_works_page', fn)} saves a page with the whole graph."))
+            graph_blocks.append(_Text(graph.mermaid(), code=True, collapsed=True, title=(
                 "The same graph in Mermaid, to paste in a Markdown file, a wiki or a pull request")))
-        if cmap.startup:
-            blocks.append(_Outline(cmap.startup, "When Lambda starts it (once per cold start, before the first call)"))
-        blocks.append(_Outline(
-            cmap.steps, f"What each call does, step by step from {entry}()" if entry else "What each call does",
-            empty=f"Lambda calls {handler_name}(), which isn't in {cmap.handler_file}." if not entry else
-            "(nothing it can follow)"))
-        if cmap.aws:
-            grouped: dict[tuple[str, str, str], list[AwsCall]] = {}
-            for call in cmap.aws:
-                grouped.setdefault((call.service, call.operation, call.access), []).append(call)
-            rows = []
-            for (service, op, access), calls in grouped.items():
-                where = [f"{c.file} line {c.line}" + (", at start-up" if c.startup else f" in {_short_name(c.function)}()")
-                         + (", in a loop" if c.loop else "") + (", first page only" if c.pages == "one" else "")
-                         + (", guessed from its name" if c.guessed else "") for c in calls]
-                rows.append([_service_name(service), op, access, "\n".join(where[:3]) + (
-                    f"\n+{len(where) - 3} more" if len(where) > 3 else ""), calls[0].permission or "(none needed)"])
-            blocks.append(_Table(["Service", "Call", "Does", "Where", "IAM permission"], rows,
-                                 title="The AWS calls it makes", code_cols=(4,), max_rows=0))
-            actions = sorted({c.permission for c in cmap.aws if c.permission})
-            if actions:
-                policy = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": actions, "Resource": "*"}]}
-                blocks.append(_Text(json.dumps(policy, indent=2), code=True, collapsed=True, title=(
-                    "The permissions those calls need, as an IAM policy to compare with its role's (narrow Resource to "
-                    "its own tables, buckets and queues)")))
-        if names:
-            rows = []
-            for name in names:
-                reads = [e for e in cmap.env if e.name == name]
-                needed = any(e.required for e in reads)
-                default = next((e.default for e in reads if e.default), "")
-                how = ("os.environ[...]: needed" if needed else f"a default: {default}" if default
-                       else "optional: None when it isn't set")
-                if name in _LAMBDA_ENV:
-                    is_set: Any = "set by Lambda"
-                elif cmap.function is None:
-                    is_set = "-"
-                elif fn.env_error:
-                    is_set = "can't tell"
-                elif name in fn.env_names:
-                    is_set = _Tone("yes", "ok")
-                else:
-                    is_set = _Tone("no", "warn") if needed else "no: it uses the default"
-                where = f"{reads[0].file} line {reads[0].line}" + (f" (+{len(reads) - 1} more)" if len(reads) > 1 else "")
-                rows.append([name, how, where, is_set])
-            blocks.append(_Table(["Variable", "Read with", "Where", "Set on the function"], rows, max_rows=0,
-                                 title="The environment variables it reads (their names: values are never read)"))
-        if cmap.event:
-            blocks.append(_Table(["Field", "Read with", "Where"], _event_rows(cmap.event), tree=True, max_rows=0,
-                                 title="What it reads from the event" + (f", which looks like {kind}" if kind else "")))
-            blocks.append(_Text(json.dumps(_sample_event(cmap.event), indent=2), code=True, title=(
-                "A test event with those fields, to paste in the console's Test tab (fill in the values)")))
-        if cmap.functions:
-            rows = [[f"{_short_name(f.name)}()", f"{f.file} line {f.line}", f"{f.lines:,}",
-                     "\n".join(_called_text(c) for c in f.called_from[:3]) + (
-                         f"\n+{len(f.called_from) - 3} more" if len(f.called_from) > 3 else "") or "Lambda",
-                     f.doc or "-"] for f in cmap.functions]
-            blocks.append(_Table(["Function", "Where", "Lines", "Called from", "What its docstring says"], rows,
-                                 title="Its own functions that run"))
-        libraries = _import_rows(cmap)
-        if libraries:
-            blocks.append(_Table(["Module", "Lambda finds it in", "Imported at"], libraries,
-                                 title="What it imports, and where Lambda finds it"))
-        http = [s for s in cmap.spots if s.kind == "http"]
-        if http:
-            blocks.append(_Table(["Request", "Where", "Timeout"], [
-                [s.detail, _where(s.file, s.line, s.function), "set" if s.ok else _Tone("none", "warn")] for s in http],
-                title="The HTTP requests it sends", max_rows=0))
+        walk = _Walk(cmap.startup, cmap.steps, "When Lambda starts it (once per cold start, before the first call)",
+                     f"What each call does, step by step from {entry}()" if entry else "What each call does",
+                     empty=f"Lambda calls {handler_name}(), which isn't in {cmap.handler_file}." if not entry else
+                     "(nothing it can follow)")
+        blocks.append(_Tabs([("Graph", graph_blocks), ("Step by step", [walk])]) if graph_blocks else walk)
+        blocks.extend(overview)
         said = ["It reads its own code with Python's ast module and runs none of it. It follows the boto3 clients the "
                 "code makes and calls into its own functions; a client handed in from elsewhere or made inside a "
                 "library isn't followed, so there may be AWS calls this doesn't list."]

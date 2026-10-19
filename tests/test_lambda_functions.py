@@ -26,10 +26,11 @@ from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
 from aws_analyzer.lambda_functions.blocks import graph as graph_block, wiring as wiring_block
+from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, logs as logs_tab
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import window as windowmod
-from aws_analyzer._kit.blocks import _Next
+from aws_analyzer._kit.blocks import _Next, _Report
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
@@ -1999,12 +2000,9 @@ def test_how_it_works_report(ui, capsys):
     assert "   12      save(body)" in out and "    4          ↳ def save(body):   # store.py" in out
     assert ("    6              boto3.client('dynamodb').put_item(TableName='orders', Item={'body': {'B': body}})   # "
             "makes a DynamoDB client · DynamoDB PutItem (writes)") in out
-    assert "S3        GetObject  reads   app.py line 11 in handler(), in a loop  s3:GetObject" in out
-    assert '"dynamodb:PutItem",' in out and '"Resource": "*"' in out
-    assert "BUCKET    os.environ[...]: needed  app.py line 11  no" in out
-    assert '"key": "..."' in out and "  object" in out
-    assert "save()     store.py line 4" in out and "Saves one order." in out
-    assert "boto3   the Lambda runtime" in out and "hunter2" not in out
+    assert "The AWS calls it makes" not in out and "A test event" not in out and "hunter2" not in out
+    assert out.index("How it fits together") < out.index("step by step from handler()") < out.index("Starts at:")
+    assert out.index("Starts at:") < out.index("BUCKET isn't set on etl-nightly")
     assert "code('etl-nightly', file='app.py')" in out and "code('etl-nightly', file='store.py')" in out
     assert "-- How it fits together: what comes in, who calls whom, and what it reaches --" in out
     assert "  handler()  app.py line 9\n      calls save() (line 12)\n      reads from S3: GetObject, in a loop" in out
@@ -2014,9 +2012,42 @@ def test_how_it_works_report(ui, capsys):
     assert "No function 'etl-nightlx' in us-east-1. Did you mean 'etl-nightly'?" in run(capsys, ui.how_it_works,
                                                                                        "etl-nightlx")
     page = stylemod._render_html(ui._how_blocks(ui.core.code_map("etl-nightly")), 50)
-    assert '<details class="od">' in page and '<span class="nt n-aws-reads"' in page
+    assert page.index('<div class="tabs">') < page.index("Starts at") and '<details class="od">' not in page
+    assert re.search(r'<label><input type="radio" name="t\w+" class="tr0" checked hidden="hidden">Graph</label>', page)
+    assert '<div class="tp tp1"><div class="wk">' in page and '<span class="nt n-aws-reads"' in page
     assert '<code class="ocd"><span class="pk">def</span> <span class="pf">handler</span>' in page
-    assert "save()</b>" in page and "store.py line 4" in page
+    assert "save()</b>" in page and "store.py line 4" in page and "Step 5 of 8" in page
+    assert ".lmb .wk:has(.w7:checked) .wp7{display:block}" in page and "Cascadia Mono" in page
+
+
+def test_how_it_works_steps_walk_like_a_debugger(ui):
+    ui.core._download = lambda url, most: HOW
+    cmap = ui.core.code_map("etl-nightly")
+    walk = _Walk(cmap.startup, cmap.steps, "At start-up", "Each call")
+    drawn = _WalkHtml(walk, _Report(0, root="lmb"))
+    stops = drawn.stops
+    assert [(s.part, s.step.line, s.depth) for s in stops] == [
+        ("start", 6, 0), ("call", 9, 0), ("call", 10, 1), ("call", 11, 2), ("call", 12, 2), ("call", 4, 3),
+        ("call", 6, 4), ("call", 13, 1)]
+    assert stops[5].caller == 4 and stops[6].frames == [1, 5] and stops[3].around == [2] and stops[2].end == 7
+
+    def buttons(i):
+        found = re.findall(r'<(label|span) class="wbt[^"]*"(?: for="w\w+-(\d+)")?[^>]*>([^<]+)<', drawn._buttons(i, stops[i]))
+        return [(text, int(to) if to else None) for _, to, text in found]
+
+    assert buttons(0) == [("‹ Back", None), ("Next ›", 1), ("Over ⤼", None), ("Out ↑", None)]
+    assert buttons(4) == [("‹ Back", 3), ("Into save() ›", 5), ("Over ⤼", 7), ("Out ↑", None)]
+    assert buttons(6) == [("‹ Back", 5), ("Next ›", 7), ("Over ⤼", None), ("Out ↑", 7)]
+    assert buttons(2)[2] == ("Over ⤼", 7) and buttons(7)[1] == ("From the top ⟲", 0)
+    assert "Goes into save(), in store.py line 4, called from line 12." in drawn._does(5, stops[5])
+    assert "Returns: what Lambda hands back" in drawn._does(7, stops[7])
+    assert "A loop: the lines under it run once for each pass." in drawn._does(2, stops[2])
+    page = drawn.html()
+    assert page.count('type="radio"') == 8 and page.count(" checked") == 1 and page.count('class="wp wp') == 8
+    assert "handler()</label> › <b>save()</b>" in drawn._crumbs(5, stops[5])
+    assert '-5" title="Go to its first line">save()</label>' in drawn._crumbs(6, stops[6])
+    empty = stylemod._render_html([_Walk([], [], title="Each call", empty="Lambda calls handler(), which isn't in app.py.")], 0)
+    assert "Lambda calls handler(), which isn&#x27;t in app.py." in empty
 
 
 def test_how_it_works_page_saves_a_page_to_open_in_a_tab(ui, capsys, tmp_path, monkeypatch):
@@ -2029,9 +2060,9 @@ def test_how_it_works_page_saves_a_page_to_open_in_a_tab(ui, capsys, tmp_path, m
     assert "lambda-downloads was made for downloads, with a .gitignore" in out and "how_it_works('etl-nightly')" in out
     page = page_path.read_text(encoding="utf-8")
     assert page.startswith("<!doctype html>") and "<title>How etl-nightly works</title>" in page
-    assert "color-scheme:light dark" in page and ".lmb .flow{max-width:none;max-height:none}" in page
+    assert "color-scheme:light dark" in page and ".lmb .flow,.lmb .wk{max-width:none;max-height:none}" in page
     assert "BUCKET isn&#x27;t set on etl-nightly" in page
-    assert '<details class="od">' in page and "<script" not in page and "hunter2" not in page
+    assert '<div class="wk">' in page and "<script" not in page and "hunter2" not in page
     again = run(capsys, ui.how_it_works_page, "etl-nightly", "notes/etl.html")
     assert (tmp_path / "notes" / "etl.html").exists() and "notes/etl.html" in again
     saved = ui._save_how_page(ui.core.code_map("etl-nightly"))
@@ -2506,9 +2537,9 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch, tmp_path):
     assert x._how and "lmx-on" in button._dom_classes and x.code_map.entry == "app.handler"
     shown = plain(x.source_view.value)
     assert "How etl-nightly works" in shown and "BUCKET isn't set on etl-nightly" in shown
-    assert "What each call does, step by step from handler()" in shown and "Next" not in shown
-    assert "code(" not in shown and [type(b).__name__ for b in x.shown["how"]][:2] == ["_Title", "_Cards"]
-    assert "_Graph" in [type(b).__name__ for b in x.shown["how"]] and '<g class="cn k-handler n-f0' in x.source_view.value
+    assert "What each call does, step by step from handler()" in shown and "Next:" not in shown
+    assert "code(" not in shown and [type(b).__name__ for b in x.shown["how"]][:3] == ["_Title", "_Tabs", "_Cards"]
+    assert '<g class="cn k-handler n-f0' in x.source_view.value and "Into save() ›" in x.source_view.value
     assert ".lmb .cg:has(.n-f0:hover)" in x.source_view.value  # the pointing rules come with the pane
     assert plain(x.status.value) == ("How it works, read from 2 Python files with nothing run · click a file to see its "
                                      "source · 1 warning")

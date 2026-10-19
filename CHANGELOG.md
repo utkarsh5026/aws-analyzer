@@ -23,6 +23,25 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   tools stop, and the model answers from what it had read and says what it didn't get to check. Before, a stopped
   question usually ended with only its steps and a note that no answer was written.
   ([#124](https://github.com/utkarsh5026/aws-analyzer/pull/124))
+- Lambda: `how_it_works("orders-etl")` shows its graph and its steps in two tabs, **Graph** and **Step by step**,
+  and the steps are now a walk you click through like a debugger: the code on the left, and on the right the step
+  you're on, with the functions it's in, the loops and branches around it and what the line does. **Next** goes
+  into the functions a line calls, **Over** past them and **Out** back to the caller, and a click on a line jumps to
+  it. Before, each function was folded under the line that calls it, to open one at a time. The tabs come first in
+  the report, with the numbers, sentences and findings under them. The same in the explorer's **How it works** and in
+  `how_it_works_page()`, where the arrow keys step too.
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
+- Lambda: code in Lambda's reports and explorer is drawn in Cascadia Mono when it's installed, else the system's
+  monospace font as before.
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
+
+### Removed
+
+- Lambda: `how_it_works()` no longer ends with tables of its AWS calls and their IAM policy, the environment
+  variables it reads, the event's fields and a test event, its own functions, its imports and its HTTP requests. The
+  graph, the steps and the findings show what matters in them; `core.code_map(name)` still returns all of it as data
+  (`.aws`, `.env`, `.event`, `.functions`, `.imports`).
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
 
 ## [0.25.0] - 2026-10-19
 

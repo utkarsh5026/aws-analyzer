@@ -444,7 +444,7 @@ ui.how_it_works("support-agent-actions")
 ui.how_it_works("orders-etl", max_size="200MB")   # packages up to 50 MB are read by default
 ```
 
-The report opens with a few sentences on what the code does, then the findings, then **a graph of how it fits together**: what comes in on the left, the handler and its functions in the middle, the AWS services it reaches on the right.
+The report opens with two tabs. **Graph** shows how it fits together: what comes in on the left, the handler and its functions in the middle, the AWS services it reaches on the right.
 
 ![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-light.webp#only-light){ width="984" height="441" loading=lazy }
 ![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-dark.webp#only-dark){ width="984" height="441" loading=lazy }
@@ -452,7 +452,15 @@ The report opens with a few sentences on what the code does, then the findings, 
 The graph in `ui.how_it_works("support-agent-actions")`: `open_ticket()` reads `TEAM_TOPIC`, which isn't set, and `tracking()` calls the shipping API with no timeout.
 ///
 
-Its findings are what would break or cost it:
+**Step by step** lets you walk through a call the way a debugger would, without running anything. The code is on the left, and the step you're on is on the right: the functions it's in, the loops and branches around it, and what the line does. **Next** goes to the next line that runs, into the functions a line calls; **Over** goes past them, and **Out** back to the line after the one that called the function you're in. Click any line to jump to it, or a function in the path above the code to go back to where it starts.
+
+![The Step by step tab of how_it_works("support-agent-actions"): the code from the import at start-up through handler(), find_order(), tracking() and open_ticket() on the left, each line tagged with what it does, and step 1 of 35 on the right, the import of support/orders.py, with the Back, Into support/orders.py, Over and Out buttons](images/lambda-how-it-works-steps-light.webp#only-light){ width="984" height="620" loading=lazy }
+![The Step by step tab of how_it_works("support-agent-actions"): the code from the import at start-up through handler(), find_order(), tracking() and open_ticket() on the left, each line tagged with what it does, and step 1 of 35 on the right, the import of support/orders.py, with the Back, Into support/orders.py, Over and Out buttons](images/lambda-how-it-works-steps-dark.webp#only-dark){ width="984" height="620" loading=lazy }
+/// caption
+The **Step by step** tab: it starts with what runs when Lambda loads the code, then follows the handler line by line, into each function it calls.
+///
+
+Under the tabs are a few numbers (where it starts, the event it expects, its AWS calls and environment variables), a few sentences on what the code does, and the findings, what would break or cost it:
 
 - An environment variable it reads with `os.environ[...]` that isn't set on the function: a `KeyError`, on every call when it's read at start-up.
 - A module it imports that isn't in the package, the runtime or the standard library (`Runtime.ImportModuleError`), with the `pip install ... -t .` line, or one that a newer Python removed (`imp`, `distutils`, `cgi`), which breaks it when you move it to a newer runtime.
@@ -470,16 +478,20 @@ Its findings are what would break or cost it:
     - A dotted arrow from **At start-up** is a client made there. A dotted arrow in a call's colour is one known only by the method's name, because its client couldn't be followed, and a dash-dot one is a call made in functions further down that the graph leaves out.
     - Point at a box to leave only it and what it's joined to in sight, and at an arrow for what goes along it, in a sentence.
 
-??? more "Mermaid, the step-by-step outline, and the detail tables"
+??? more "Mermaid, and the steps in detail"
 
-    The graph is plain SVG and CSS, with no JavaScript, so it's still drawn when you reopen your notebook. JupyterLab doesn't keep a report's drawings and styles in a notebook it doesn't trust, such as one someone else saved, so run the cell again there. The same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. In the notebook it draws at most 24 functions, 5 calls deep, and 5 lines a box, and says what it left out; the steps below have them all, and [`how_it_works_page()`](#how-it-works-page) draws the whole graph.
+    The graph and the steps are plain HTML, SVG and CSS, with no JavaScript, so it's still drawn when you reopen your notebook. JupyterLab doesn't keep a report's drawings and styles in a notebook it doesn't trust, such as one someone else saved, so run the cell again there. The same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. In the notebook it draws at most 24 functions, 5 calls deep, and 5 lines a box, and says what it left out; the steps below have them all, and [`how_it_works_page()`](#how-it-works-page) draws the whole graph.
 
-    Then the steps:
+    The **Step by step** tab walks through two parts:
 
     - **When Lambda starts it**: the lines that run when Lambda loads the code, before the first call, such as the boto3 clients made at the top of a file and the environment variables read there, with the modules it imports that do something themselves.
-    - **What each call does, step by step**: the handler's lines that do something worth knowing, in order, with the loops, `if`s, `with`s and `try`s around them, each tagged with what it does: an AWS call (blue when it reads, orange when it writes, pink when it sends a message, purple when it runs something), an environment variable, a field of the event, an HTTP request, a log line, a file. The plain lines between them are left out. A call to one of its own functions, in the same file or another, is folded under the line that calls it, showing what happens inside it. Click to open it for its own steps, and so on down, so you can follow a call through the whole package.
+    - **What each call does, step by step**: the handler's lines that do something worth knowing, in order, with the loops, `if`s, `with`s and `try`s around them, each tagged with what it does: an AWS call (blue when it reads, orange when it writes, pink when it sends a message, purple when it runs something), an environment variable, a field of the event, an HTTP request, a log line, a file. The plain lines between them are left out. A call to one of its own functions, in the same file or another, is followed by that function's lines, indented under it, and so on down, so **Next** follows a call through the whole package. A function called again shows its lines only the first time, and its step says where.
 
-    Then the detail: the **AWS calls** it makes, with where and the IAM permission each needs, and the same as an IAM policy to compare with the function's role (one it lacks is an `AccessDenied` waiting to happen); the **environment variables** it reads, and whether each is set on the function (names only, never values); **what it reads from the event**, as a tree, and which source sends events like that (an SQS batch, an S3 event, an HTTP request, a Bedrock agent action), with **a test event** holding those fields to paste in the console's **Test** tab; its own functions that run, with their docstrings; and what it imports, and where Lambda finds each module: its own files, the package, the Lambda runtime (boto3), the standard library, or nowhere.
+    The steps follow the code as it's written, not one run: both sides of an `if` are there, one after the other, and a loop's lines once. The code side scrolls to the step you're on. In the page [`how_it_works_page()`](#how-it-works-page) saves, opened in a browser tab, <kbd>↑</kbd> and <kbd>↓</kbd> step too once you've clicked a line (JupyterLab keeps the arrow keys for its cells).
+
+    The code in the report is in [Cascadia Mono](https://github.com/microsoft/cascadia-code) when it's installed (Windows Terminal and many editors bring it), else your system's monospace font.
+
+    For the detail as data, `core.code_map("support-agent-actions")` returns it: its AWS calls with the IAM permission each needs (`.aws`, and `.to_df()`), the environment variables it reads (`.env`), the event's fields (`.event`), its own functions (`.functions`) and what it imports (`.imports`).
 
 #### Read it in a tab of its own { #how-it-works-page }
 
@@ -491,7 +503,7 @@ ui.how_it_works_page("support-agent-actions")    # lambda-downloads/support-agen
 ui.how_it_works_page("orders-etl", "notes/etl.html")
 ```
 
-In JupyterLab, a click on the link opens the page in a JupyterLab tab you can drag beside the notebook. Middle-click it, or right-click it and pick **Open link in new tab**, for a browser tab with the whole screen. The page is plain HTML and CSS, light or dark like your browser, and the outline and graph get all the room they need instead of scrolling in a box. The graph there is whole: every function the steps follow, and every operation, variable and event field in each box, where the notebook stops at 24 functions, 5 calls deep. In the explorer, **↗ Open in a tab** beside **How it works** does the same.
+In JupyterLab, a click on the link opens the page in a JupyterLab tab you can drag beside the notebook. Middle-click it, or right-click it and pick **Open link in new tab**, for a browser tab with the whole screen. The page is plain HTML and CSS, light or dark like your browser, and the steps and graph get all the room they need instead of scrolling in a box. The graph there is whole: every function the steps follow, and every operation, variable and event field in each box, where the notebook stops at 24 functions, 5 calls deep. In the explorer, **↗ Open in a tab** beside **How it works** does the same.
 
 !!! tip "Worth knowing"
     The page is a snapshot of the code when you saved it. After a deploy, run it again: it replaces the page of the same name.
@@ -689,7 +701,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
-| `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and step by step from the handler: its AWS calls and the permissions they need, the environment variables and event fields it reads, a test event, its imports, findings |
+| `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |
 | `how_it_works_page(name, path=None, region=None, max_size="50MB")` | The same report as a page of its own, saved in `lambda-downloads/` (or at `path=`), with a link that opens it in a tab |
 | `download(name, path=None, region=None)` | Its deployment package saved on the notebook's disk, in `lambda-downloads/` (or at `path=`), checked against Lambda's SHA-256 |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |

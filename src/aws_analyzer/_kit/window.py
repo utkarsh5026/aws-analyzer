@@ -27,7 +27,7 @@ from urllib.parse import quote
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .blocks import _Findings, _Next, _Note, _Table, _Title
+from .blocks import _Findings, _Next, _Note, _Table, _Tabs, _Title
 from .deps import _in_notebook, _require
 from .errors import _Hint
 from .render import _prose
@@ -169,6 +169,8 @@ def _for_window(blocks: list[Any], words: Callable[[str], str]) -> list[Any]:
             block = dataclasses.replace(block, text=words(block.text))
         elif isinstance(block, _Title):
             block = dataclasses.replace(block, sub=words(block.sub))
+        elif isinstance(block, _Tabs):
+            block = _Tabs([(name, _for_window(part, words)) for name, part in block.tabs])
         elif isinstance(block, _Table):
             rows = [[words(cell) if j in block.prose_cols and isinstance(cell, str) else cell
                      for j, cell in enumerate(row)] for row in block.rows]

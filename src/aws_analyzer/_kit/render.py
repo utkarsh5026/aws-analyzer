@@ -23,18 +23,21 @@ bare `hidden` attribute, but keeps hidden="hidden".
 from __future__ import annotations
 
 import inspect
+import os
 import re
 from collections import Counter
 from typing import Any, Callable, NamedTuple
 
 from .blocks import (
-    _CELLS, _HTML, _TEXT, _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _drawer, _draws,
+    _CELLS, _HTML, _TEXT, _Cards, _Findings, _Next, _Note, _Report, _Table, _Tabs, _Text, _Title, _Tone, _drawer,
+    _draws,
 )
 from .fmt import _plural, file_extension
 from .text import _clip, _esc, _pad, _text_bar, _width
 from .themes import _theme_class, _theme_css
 
 _SORT_COLUMNS = 12
+_MAX_TABS = 8
 _BASE_RULES = """\
 .{root}{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.45}
 .{root} h3{margin:10px 0 2px;font-size:16px}
@@ -166,10 +169,19 @@ _BASE_RULES = """\
 .{root} .next{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:12px 0 4px;padding-top:8px}
 .{root} .next{border-top:1px dashed rgba(127,127,127,.35)}
 .{root} .next .nl{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;opacity:.6}
-.{root} .next .nw{font-size:12px;opacity:.65;margin-left:6px}""".replace("{sort_rules}", "".join(
+.{root} .next .nw{font-size:12px;opacity:.65;margin-left:6px}
+.{root} .tabs{margin:12px 0 4px}
+.{root} .tabs>.tbar{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:10px;border-bottom:1px solid rgba(127,127,127,.28)}
+.{root} .tabs>.tbar>label{display:inline-flex;align-items:center;gap:6px;padding:6px 14px 7px;margin-bottom:-1px;border-radius:7px 7px 0 0;font-weight:600;cursor:pointer;opacity:.62;user-select:none;-webkit-user-select:none;transition:opacity .12s,background-color .12s}
+.{root} .tabs>.tbar>label:hover{opacity:.9;background:rgba(127,127,127,.08)}
+.{root} .tabs>.tbar>label:has(:checked){opacity:1;color:#3b82f6;box-shadow:inset 0 -2px #3b82f6}
+.{root} .tabs>.tp{display:none}
+{tab_rules}""".replace("{sort_rules}", "".join(
     f".{{root}} form.tbl:has(.k{j} .ra:checked) tbody tr{{order:var(--a{j})}}\n"
     f".{{root}} form.tbl:has(.k{j} .rd:checked) tbody tr{{order:var(--d{j})}}\n"
     for j in range(_SORT_COLUMNS)
+)).replace("{tab_rules}", "\n".join(
+    f".{{root}} .tabs:has(>.tbar .tr{j}:checked)>.tp{j}{{display:block}}" for j in range(_MAX_TABS)
 ))
 
 
@@ -933,6 +945,25 @@ def _block_html(block: Any, report: _Report) -> str:
     return draw(block, report) if draw else _note_html(_undrawn(block), report)
 
 
+@_draws(_Tabs, "html")
+def _tabs_html(block: _Tabs, report: _Report) -> str:
+    """
+    A tab bar of labels over hidden radio buttons, then each tab's part; a :has() rule shows the part whose radio is
+    checked. A random group name keeps two reports in one notebook apart. The bar is hidden until the stylesheet
+    shows it, so a notebook opened without its styles shows every part, one after the other.
+    """
+    tabs = block.tabs[:_MAX_TABS]
+    group = "t" + os.urandom(5).hex()
+    labels = []
+    for j, (name, _blocks) in enumerate(tabs):
+        checked = " checked" if j == 0 else ""
+        labels.append(f'<label><input type="radio" name="{group}" class="tr{j}"{checked}{_HIDE}>{_esc(name)}</label>')
+    parts = []
+    for j, (_name, blocks) in enumerate(tabs):
+        parts.append(f'<div class="tp tp{j}">' + "".join(_block_html(b, report) for b in blocks) + "</div>")
+    return f'<div class="tabs"><div class="tbar"{_HIDE}>{"".join(labels)}</div>{"".join(parts)}</div>'
+
+
 def _rules_html(report: _Report) -> str:
     """
     The <style> holding the CSS rules the report's blocks added (its tables' filters and columns), if any.
@@ -980,6 +1011,15 @@ def _block_lines(block: Any, report: _Report) -> list[str]:
     """
     draw = _drawer(_TEXT, block)
     return draw(block, report) if draw else _note_lines(_undrawn(block), report)
+
+
+@_draws(_Tabs, "text")
+def _tabs_lines(block: _Tabs, report: _Report) -> list[str]:
+    lines: list[str] = []
+    for _name, blocks in block.tabs:
+        for each in blocks:
+            lines.extend(_block_lines(each, report))
+    return lines
 
 
 def _render_text(blocks: list[Any], max_rows: int) -> str:
