@@ -489,7 +489,7 @@ Update this table in each step's PR.
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
 | bedrock_chat | not started | | |
-| sagemaker_env | in review | | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
+| sagemaker_env | in review | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | not started | | |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
 | Phase 2: findings with actions | needs a plan | | ask the user first |
