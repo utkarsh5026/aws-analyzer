@@ -472,7 +472,7 @@ Its findings are what would break or cost it:
 
 ??? more "Mermaid, the step-by-step outline, and the detail tables"
 
-    The graph is plain SVG and CSS, with no JavaScript, so it's still drawn when you reopen your notebook. JupyterLab doesn't keep a report's drawings and styles in a notebook it doesn't trust, such as one someone else saved, so run the cell again there. The same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. It draws at most 24 functions, 5 calls deep; the steps below have them all.
+    The graph is plain SVG and CSS, with no JavaScript, so it's still drawn when you reopen your notebook. JupyterLab doesn't keep a report's drawings and styles in a notebook it doesn't trust, such as one someone else saved, so run the cell again there. The same graph is under it in [Mermaid](https://mermaid.js.org/), folded, to paste in a Markdown file, a wiki or a pull request that draws it. In the notebook it draws at most 24 functions, 5 calls deep, and 5 lines a box, and says what it left out; the steps below have them all, and [`how_it_works_page()`](#how-it-works-page) draws the whole graph.
 
     Then the steps:
 
@@ -491,7 +491,7 @@ ui.how_it_works_page("support-agent-actions")    # lambda-downloads/support-agen
 ui.how_it_works_page("orders-etl", "notes/etl.html")
 ```
 
-In JupyterLab, a click on the link opens the page in a JupyterLab tab you can drag beside the notebook. Middle-click it, or right-click it and pick **Open link in new tab**, for a browser tab with the whole screen. The page is plain HTML and CSS, light or dark like your browser, and the outline and graph get all the room they need instead of scrolling in a box. In the explorer, **↗ Open in a tab** beside **How it works** does the same.
+In JupyterLab, a click on the link opens the page in a JupyterLab tab you can drag beside the notebook. Middle-click it, or right-click it and pick **Open link in new tab**, for a browser tab with the whole screen. The page is plain HTML and CSS, light or dark like your browser, and the outline and graph get all the room they need instead of scrolling in a box. The graph there is whole: every function the steps follow, and every operation, variable and event field in each box, where the notebook stops at 24 functions, 5 calls deep. In the explorer, **↗ Open in a tab** beside **How it works** does the same.
 
 !!! tip "Worth knowing"
     The page is a snapshot of the code when you saved it. After a deploy, run it again: it replaces the page of the same name.

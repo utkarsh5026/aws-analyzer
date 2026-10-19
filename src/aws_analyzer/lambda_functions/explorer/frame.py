@@ -411,6 +411,7 @@ _IN_WINDOW = {  # a command a report names -> where the explorer window shows th
     "performance": "the Performance tab",
     "code": "the Code tab",
     "how_it_works": "How it works in the Code tab",
+    "how_it_works_page": "↗ Open in a tab",
 }
 
 

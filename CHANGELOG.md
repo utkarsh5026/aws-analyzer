@@ -17,6 +17,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   a middle-click (or right-click, **Open link in new tab**) in a browser tab. The explorer's Code tab has the same as
   **↗ Open in a tab**, beside **How it works**.
   ([#120](https://github.com/utkarsh5026/aws-analyzer/pull/120))
+- Lambda: `how_it_works_page("orders-etl")` (and the explorer's **↗ Open in a tab**) draws the whole graph: every
+  function the steps follow and every operation, variable and event field in each box, where `how_it_works()` in the
+  notebook stops at 24 functions, 5 calls deep, and 5 lines a box. When the notebook's graph leaves something out, a
+  note under it says what and points to the page. `code_graph(cmap, max_functions=None, max_depth=None,
+  max_lines=None)` gives the whole graph in Python.
 
 ## [0.24.0] - 2026-10-19
 
