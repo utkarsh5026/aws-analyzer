@@ -50,7 +50,7 @@ from .analysis.codemap.terms import _LAMBDA_ENV, _REMOVED_MODULES
 from .analysis.codemap.aws_model import _event_kind, _sample_event, _service_name
 from .analysis.codemap.model import AwsCall, CodeMap, EventField, ImportUse
 from .analysis.codemap.findings import _code_summary, _short_name, _where, code_map_findings
-from .analysis.codemap.graph import code_graph
+from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
 from .style import _render_html, _render_page
 from .blocks.outline import _Outline
@@ -1254,7 +1254,8 @@ class LambdaView(_BaseView):
         how_it_works()'s report drawn as a page and saved where download() saves (the explorer's ↗ Open in a tab too).
         """
         fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
-        page = _render_page(self._how_blocks(cmap), f"How {fn.name} works")
+        whole_graph = code_graph(cmap, max_functions=None, max_depth=None, max_lines=None)
+        page = _render_page(self._how_blocks(cmap, whole_graph), f"How {fn.name} works")
         return self.core._save_page(fn, page, path)
 
     def _page_blocks(self, saved: SavedPage) -> list[Any]:
@@ -1273,9 +1274,10 @@ class LambdaView(_BaseView):
                 _PageLink(saved.path), _Note(" ".join(said)),
                 _Next([(self._call_for("how_it_works", fn), "the same report here, in the notebook")])]
 
-    def _how_blocks(self, cmap: CodeMap) -> list[Any]:
+    def _how_blocks(self, cmap: CodeMap, graph: CodeGraph | None = None) -> list[Any]:
         """
-        how_it_works()'s report, as blocks (the explorer's How it works shows them too).
+        how_it_works()'s report, as blocks (the explorer's How it works shows them too). graph is the one to draw:
+        by default code_graph()'s, cut to fit a notebook; the saved page draws all of it.
         """
         fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
         read = (f"read from {_plural(cmap.files, 'Python file')} ({cmap.lines:,} lines) with Python's ast, nothing run"
@@ -1312,9 +1314,12 @@ class LambdaView(_BaseView):
         blocks.append(_Findings(found, empty=(
             "Nothing in the code stands out: the variables it needs are set, what it imports is there, and its HTTP "
             "and list calls look complete.")))
-        graph = code_graph(cmap)
+        graph = graph or code_graph(cmap)
         if graph.nodes:
             blocks.append(_Graph(graph, "How it fits together: what comes in, who calls whom, and what it reaches"))
+            if graph.what_was_cut():
+                blocks.append(_Note(f"The graph is cut to fit here: it {graph.what_was_cut()}. "
+                                    f"{self._call_for('how_it_works_page', fn)} saves a page with the whole graph."))
             blocks.append(_Text(graph.mermaid(), code=True, collapsed=True, title=(
                 "The same graph in Mermaid, to paste in a Markdown file, a wiki or a pull request")))
         if cmap.startup:

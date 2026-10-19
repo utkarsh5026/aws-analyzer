@@ -1086,6 +1086,17 @@ def test_code_graph():
     deep = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"))
     assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + codemap_graph._GRAPH_DEPTH
     assert {e.target for e in deep.edges} <= {n.id for n in deep.nodes}  # no arrow to a box that isn't drawn
+    whole = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"),
+                       max_functions=None, max_depth=None, max_lines=None)
+    assert whole.hidden == 0 and len([n for n in whole.nodes if n.kind == "function"]) == 9
+    assert not any(e.indirect for e in whole.edges)
+    variables = "".join(f"    os.environ['V{i}']\n" for i in range(8))
+    many = map_code({"app.py": f"import os\n\ndef handler(event, context):\n{variables}"}, "app.handler")
+    assert code_graph(many).node("env").lines[-1] == "+4 more" and code_graph(many).shortened == 1
+    every = code_graph(many, max_lines=None)
+    assert every.node("env").lines == [f"V{i}" for i in range(8)] and every.shortened == 0
+    assert code_graph(many).what_was_cut() == "shortens 1 box's list" and every.what_was_cut() == ""
+    assert deep.what_was_cut() == "leaves out 4 functions (too deep or too many)"
 
     # a handler that's an object (a web app's adapter): its routes hang off it
     app = ("from mangum import Mangum\nfrom fastapi import FastAPI\nimport boto3\napp = FastAPI()\n"
@@ -2030,6 +2041,18 @@ def test_how_it_works_page_saves_a_page_to_open_in_a_tab(ui, capsys, tmp_path, m
             in link)
     outside = ui._save_how_page(ui.core.code_map("etl-nightly"), str(tmp_path.parent / "elsewhere.html"))
     assert '<a class="pgo"' not in stylemod._render_html(ui._page_blocks(outside), 50)
+
+
+def test_how_it_works_page_draws_the_whole_graph(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    chain = "".join(f"def step{i}():\n    return step{i + 1}()\n\n" for i in range(8)) + "def step8():\n    return 1\n"
+    ui.core._download = lambda url, most: zipped({"app.py": chain + "def handler(event, context):\n    return step0()\n"})
+    out = run(capsys, ui.how_it_works, "etl-nightly")
+    assert ("The graph is cut to fit here: it leaves out 4 functions (too deep or too many). "
+            "how_it_works_page('etl-nightly') saves a page with the whole graph.") in out
+    run(capsys, ui.how_it_works_page, "etl-nightly")
+    page = (tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html").read_text(encoding="utf-8")
+    assert "step8()" in page and "not drawn" not in page and "The graph is cut" not in page
 
 
 def test_download_report(ui, capsys, tmp_path, monkeypatch):
