@@ -473,7 +473,7 @@ Update this table in each step's PR.
 | Phase 0: tooling | done | #97 | branch `modularize/tooling` |
 | opensearch | done | #98 | plan in `plans/opensearch.py` |
 | lambda_functions | in review | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
-| s3 + s3_explorer | in review | | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
+| s3 + s3_explorer | in review | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
 | bedrock_chat | not started | | |
