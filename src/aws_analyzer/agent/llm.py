@@ -105,6 +105,15 @@ def provider_info(provider: str) -> Provider:
     return PROVIDERS.get(provider) or Provider(provider, provider)
 
 
+def provider_names() -> list[str]:
+    """
+    Every provider the agent can answer with, as provider= takes it: PROVIDERS first, then the other providers
+    LangChain's init_chat_model knows, A to Z (without its second names for Azure OpenAI and Bedrock).
+    """
+    others = sorted(_LANGCHAIN_PROVIDERS - set(PROVIDERS) - set(_ALIASES))
+    return [*PROVIDERS, *others]
+
+
 def provider_of(chat_model: Any) -> str:
     """
     The provider a LangChain chat model is from, by its class ('bedrock' for ChatBedrockConverse); '' when the

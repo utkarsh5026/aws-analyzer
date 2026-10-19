@@ -23,6 +23,7 @@ from .answers import AgentAnswer, AgentStep
 from .budget import Budget, _Run
 from .guard import _Guard
 from .llm import (
+    AZURE_API_VERSION,
     answer_cost,
     azure_chat_model,
     azure_settings,
@@ -49,6 +50,8 @@ if TYPE_CHECKING:
 
 _THREAD_ID_LENGTH = 12
 _WORKERS = 8
+_MODEL_SETTINGS = ("provider", "model_id", "deployment", "endpoint", "api_version", "_api_key", "_token_provider",
+                   "chat_model", "given_chat_model")
 
 
 def _new_thread() -> str:
@@ -90,6 +93,7 @@ class AgentAnalyzer(_BaseAnalyzer):
     chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
     10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
     either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
+    use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
     the default is DEFAULT_TOOLKITS: Lambda and S3, with s3_triggers joining them). The Lambda toolkit reads through
@@ -134,18 +138,9 @@ class AgentAnalyzer(_BaseAnalyzer):
         s3_core: S3Analyzer | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
-        azure_given = bool(deployment or azure_ad_token_provider or "azure" in (endpoint or "").lower())
-        self.provider, wanted = pick_provider(provider, model, chat_model=chat_model, azure=azure_given,
-                                              api_key=bool(api_key))
-        self.deployment, self.endpoint, self.api_version = deployment, endpoint, api_version
-        if self.provider == "azure":
-            self.deployment, self.endpoint, self.api_version = azure_settings(deployment or wanted or None, endpoint,
-                                                                              api_version)
-            wanted = self.deployment or ""
-        self.model_id = wanted or provider_info(self.provider).default
-        self._api_key = api_key
-        self._token_provider = azure_ad_token_provider
-        self.chat_model = chat_model
+        self.given_chat_model: Any = None
+        self._set_model(provider, model, deployment=deployment, endpoint=endpoint, api_key=api_key,
+                        api_version=api_version, token_provider=azure_ad_token_provider, chat_model=chat_model)
         self.max_tokens = max_tokens
         self.timezone = _checked_zone(timezone)
         self.regions = regions
@@ -163,6 +158,65 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
         self.thread = _new_thread()
         self.history: list[AgentAnswer] = []
+
+    def _set_model(self, provider: str | None, model: str | None, *, deployment: str | None,  # noqa: PLR0913
+                   endpoint: str | None, api_key: str | None, api_version: str | None,
+                   token_provider: Callable[[], str] | None, chat_model: Any) -> None:
+        """
+        The model settings as AgentAnalyzer() takes them: the provider and model pick_provider() works out, Azure's
+        deployment, endpoint and API version (from the environment when not given), the key and the chat model. A
+        chat model passed in is also kept apart (given_chat_model), so the agent can switch back to it.
+        """
+        azure_given = bool(deployment or token_provider or "azure" in (endpoint or "").lower())
+        self.provider, wanted = pick_provider(provider, model, chat_model=chat_model, azure=azure_given,
+                                              api_key=bool(api_key))
+        self.deployment, self.endpoint, self.api_version = deployment, endpoint, api_version
+        if self.provider == "azure":
+            self.deployment, self.endpoint, self.api_version = azure_settings(deployment or wanted or None, endpoint,
+                                                                              api_version)
+            wanted = self.deployment or ""
+        self.model_id = wanted or provider_info(self.provider).default
+        self._api_key = api_key
+        self._token_provider = token_provider
+        self.chat_model = chat_model
+        if chat_model is not None:
+            self.given_chat_model = chat_model
+
+    def use_model(  # noqa: PLR0913
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        *,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        deployment: str | None = None,
+        api_version: str | None = None,
+        azure_ad_token_provider: Callable[[], str] | None = None,
+        chat_model: Any = None,
+    ) -> str:
+        """
+        Switches the model the agent answers with and starts a new conversation with it; returns the conversation's
+        ID. provider=, model= and the rest are what AgentAnalyzer() takes. Without api_key= (or
+        azure_ad_token_provider=) it keeps the key it has when the provider stays the same, and otherwise reads the
+        provider's environment variable. The model is made at once, so a missing key, setting or package raises here
+        (_Hint, ImportError) and the agent keeps the model it had.
+        """
+        before = {name: getattr(self, name) for name in _MODEL_SETTINGS}
+        self._set_model(provider, model, deployment=deployment, endpoint=endpoint, api_key=api_key,
+                        api_version=api_version, token_provider=azure_ad_token_provider, chat_model=chat_model)
+        keeps_key = api_key is None and azure_ad_token_provider is None and self.provider == before["provider"]
+        if keeps_key:
+            self._api_key, self._token_provider = before["_api_key"], before["_token_provider"]
+        if self.endpoint != before["endpoint"]:
+            self._clients.pop("bedrock-runtime", None)
+        try:
+            self._chat()
+        except Exception:
+            for name, value in before.items():
+                setattr(self, name, value)
+            raise
+        self._graph = None
+        return self.new_conversation()
 
     def toolkit(self, name: str) -> Toolkit:
         """
@@ -233,7 +287,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         if not self.provider:
             raise _Hint(no_model_hint(self.model_id))
         if self.provider == "azure":
-            return azure_chat_model(endpoint=self.endpoint, deployment=self.deployment, api_version=self.api_version,
+            return azure_chat_model(endpoint=self.endpoint, deployment=self.deployment,
+                                    api_version=self.api_version or AZURE_API_VERSION,
                                     api_key=self._api_key, token_provider=self._token_provider,
                                     max_tokens=self.max_tokens)
         if self.provider == "bedrock":

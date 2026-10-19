@@ -9,8 +9,9 @@ The window is ipywidgets, which only draw in a browser connected to a kernel, so
 that opens the window on demo.py's Lambda functions (moto, us-east-1), with a scripted model standing in for Claude
 Haiku 4.5 on Amazon Bedrock: it says what it means to do, calls function_health and function_errors (which really
 run, on the demo data), and answers from what they found, pausing before each reply the way a model does. It takes
-the window empty (agent-chat-start: the greeting and the questions to start from), then asks the question the way a
-person would, and takes it while the agent works (agent-chat-working: two tool calls done, Thinking… and Stop), once
+the window empty (agent-chat-start: the greeting and the questions to start from), with its model settings open on
+Amazon Bedrock (agent-chat-model: the provider list, the model box filled from demo.py's fake Bedrock model list, and
+where questions go and what they cost), then asks the question the way a person would, and takes it while the agent works (agent-chat-working: two tool calls done, Thinking… and Stop), once
 it has answered (agent-chat: the steps folded above the answer), and with the steps and a tool call open
 (agent-chat-details: the first call's operations, window and data open). Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/agent.md, by shots.py's
@@ -41,7 +42,7 @@ import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("agent-chat-start", "agent-chat-working", "agent-chat", "agent-chat-details")
+FIGURES = ("agent-chat-start", "agent-chat-model", "agent-chat-working", "agent-chat", "agent-chat-details")
 QUESTION = "Which Lambda failed in the last 24 hours, and why?"
 MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 PAUSE_SECONDS = 1.5
@@ -72,6 +73,7 @@ from aws_analyzer import AgentView, lambda_functions
 lambda_core = lambda_functions.LambdaAnalyzer(region="us-east-1", **demo.seed_lambda_functions())
 agent = AgentView(region="us-east-1", lambda_core=lambda_core, chat_model=agent_chat_shots.scripted_model())
 agent.core.provider = "bedrock"
+agent.core._clients["bedrock"] = demo.seed_bedrock_kb()["clients"]["bedrock"]
 agent.chat(height=600)"""
 
 
@@ -149,6 +151,13 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
             app.screenshot(path=str(taken[name]))
 
     shot("agent-chat-start")
+    if "agent-chat-model" in wanted:
+        page.locator(".agc-app .agc-head .agc-new").first.click()
+        page.locator(".agc-app .agc-set select").select_option(label="Amazon Bedrock")
+        page.wait_for_function("!document.querySelector('.agc-app .ag-sn').textContent.includes('Listing')",
+                               timeout=30_000)
+        shot("agent-chat-model")
+        page.locator(".agc-app .agc-acts .agc-new").click()
     box = page.locator(".agc-app .agc-composer input")
     box.fill(QUESTION)
     box.press("Enter")
