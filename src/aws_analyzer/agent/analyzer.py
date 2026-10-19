@@ -11,13 +11,32 @@ import uuid
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
+from botocore.exceptions import BotoCoreError, ClientError
+
+from .._bedrock import ModelInfo, parse_models
 from .._kit.analyzer import _BaseAnalyzer
+from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
 from .answers import AgentAnswer
 from .budget import Budget, _Run
 from .guard import _Guard
-from .llm import answer_cost, azure_chat_model, azure_settings, model_name
+from .llm import (
+    answer_cost,
+    azure_chat_model,
+    azure_settings,
+    bedrock_chat_model,
+    bedrock_model_id,
+    is_bedrock_profile,
+    is_bedrock_version,
+    langchain_chat_model,
+    model_name,
+    model_rates,
+    no_model_hint,
+    openai_chat_model,
+    pick_provider,
+    provider_info,
+)
 from .prompt import asked_at, system_prompt
 from .runtime import as_tool
 from .toolkits import Toolkit, make_toolkits
@@ -50,15 +69,26 @@ def _checked_zone(timezone: str | tzinfo | None) -> str | tzinfo | None:
 
 class AgentAnalyzer(_BaseAnalyzer):
     """
-    Answers questions about your AWS account with an agent: a model (an Azure OpenAI deployment) calling read-only
-    tools built on the package's analyzers, in LangChain's deepagents loop. Every method returns data; nothing is
-    printed.
+    Answers questions about your AWS account with an agent: a model (on Amazon Bedrock, OpenAI, Azure OpenAI or any
+    provider LangChain supports) calling read-only tools built on the package's analyzers, in LangChain's deepagents
+    loop. Every method returns data; nothing is printed.
 
-    The model: deployment= (or AZURE_OPENAI_DEPLOYMENT), endpoint= (or AZURE_OPENAI_ENDPOINT), api_key= (or
-    AZURE_OPENAI_API_KEY; azure_ad_token_provider= for Microsoft Entra ID instead) and api_version= (or
-    OPENAI_API_VERSION, else AZURE_API_VERSION). chat_model= takes any LangChain chat model instead (one on Amazon
-    Bedrock, a fake one in tests). model_prices= {'gpt-4o': (2.50, 10.00)} (USD per 1M input and output tokens) puts
-    a price on each answer; without it the cost is unknown and only the tokens are counted.
+    The model: provider= says who serves it ('bedrock', 'openai', 'azure', or any provider LangChain's
+    init_chat_model knows: 'anthropic', 'google_genai', 'ollama', 'mistralai', ...) and model= which one;
+    model='openai:gpt-4.1' says both. Without them, pick_provider() works it out from the model's name and the
+    environment: AWS_ANALYZER_AGENT_MODEL, then Azure's AZURE_OPENAI_* settings, then OPENAI_API_KEY.
+    Amazon Bedrock is called with the agent's own session (the notebook's credentials and region), so nothing leaves
+    AWS. Its model is Claude Haiku 4.5 unless model= names another: a model ID, an inference profile, or a short name
+    like 'sonnet' that the region's model list resolves. Its tokens are priced at Bedrock's list prices.
+    OpenAI answers with OPENAI_MODEL (gpt-4.1) unless model= says otherwise, with api_key= (or OPENAI_API_KEY);
+    endpoint= points it at any server that speaks OpenAI's API (a LiteLLM or vLLM gateway, OpenRouter).
+    Azure OpenAI takes deployment= (or AZURE_OPENAI_DEPLOYMENT; model= works too), endpoint= (or
+    AZURE_OPENAI_ENDPOINT), api_key= (or AZURE_OPENAI_API_KEY; azure_ad_token_provider= for Microsoft Entra ID
+    instead) and api_version= (or OPENAI_API_VERSION, else AZURE_API_VERSION).
+    Another LangChain provider takes api_key= (else its own environment variable) and endpoint= as its base URL.
+    chat_model= takes any LangChain chat model instead (a fake one in tests). model_prices= {'gpt-4o': (2.50,
+    10.00)} (USD per 1M input and output tokens) puts a price on each answer, over Bedrock's list prices; without
+    either the cost is unknown and only the tokens are counted. max_tokens caps each of the model's replies.
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
     the default is DEFAULT_TOOLKITS: Lambda and S3, with s3_triggers joining them). The Lambda toolkit reads through
@@ -69,8 +99,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
     IST"). `budget` caps each question (Budget, or a dict of its fields).
 
-    It has no list prices: Azure OpenAI's depend on the deployment (see model_prices=). `thread` is the conversation
-    follow-up questions continue, and `history` every question asked, in order.
+    Its only list prices are Amazon Bedrock's (_bedrock's MODEL_PRICES): the other providers' depend on the plan or
+    the deployment (see model_prices=). `provider` and `model_id` are the provider and model it was given or worked
+    out, `thread` is the conversation follow-up questions continue, and `history` every question asked, in order.
     """
 
     _LIST_PRICES: dict[str, Any] = {}
@@ -81,6 +112,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         *,
         region: str | None = None,
         profile: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
         deployment: str | None = None,
         endpoint: str | None = None,
         api_key: str | None = None,
@@ -100,7 +133,15 @@ class AgentAnalyzer(_BaseAnalyzer):
         s3_core: S3Analyzer | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
-        self.deployment, self.endpoint, self.api_version = azure_settings(deployment, endpoint, api_version)
+        azure_given = bool(deployment or azure_ad_token_provider or "azure" in (endpoint or "").lower())
+        self.provider, wanted = pick_provider(provider, model, chat_model=chat_model, azure=azure_given,
+                                              api_key=bool(api_key))
+        self.deployment, self.endpoint, self.api_version = deployment, endpoint, api_version
+        if self.provider == "azure":
+            self.deployment, self.endpoint, self.api_version = azure_settings(deployment or wanted or None, endpoint,
+                                                                              api_version)
+            wanted = self.deployment or ""
+        self.model_id = wanted or provider_info(self.provider).default
         self._api_key = api_key
         self._token_provider = azure_ad_token_provider
         self.chat_model = chat_model
@@ -169,19 +210,98 @@ class AgentAnalyzer(_BaseAnalyzer):
     @property
     def model(self) -> str:
         """
-        The deployment or model that answers: the Azure deployment name, or the chat model's own name.
+        The model that answers: the chat model's own name once it's made (a Bedrock model's resolved ID or inference
+        profile), else the model or Azure deployment it was given.
         """
-        return model_name(self.chat_model, self.deployment)
+        return model_name(self.chat_model, self.model_id)
 
     def _chat(self) -> Any:
         """
-        The LangChain chat model: chat_model= when given, else AzureChatOpenAI from the settings.
+        The LangChain chat model: chat_model= when given, else one made for its provider and model.
         """
         if self.chat_model is None:
-            self.chat_model = azure_chat_model(endpoint=self.endpoint, deployment=self.deployment,
-                                               api_version=self.api_version, api_key=self._api_key,
-                                               token_provider=self._token_provider, max_tokens=self.max_tokens)
+            self.chat_model = self._new_chat_model()
         return self.chat_model
+
+    def _new_chat_model(self) -> Any:
+        """
+        The chat model for its provider (see pick_provider()): Azure OpenAI, OpenAI, a Bedrock model called through
+        the agent's own session, or another provider through LangChain's init_chat_model. _Hint says how to set one up
+        when there's none.
+        """
+        if not self.provider:
+            raise _Hint(no_model_hint(self.model_id))
+        if self.provider == "azure":
+            return azure_chat_model(endpoint=self.endpoint, deployment=self.deployment, api_version=self.api_version,
+                                    api_key=self._api_key, token_provider=self._token_provider,
+                                    max_tokens=self.max_tokens)
+        if self.provider == "bedrock":
+            return bedrock_chat_model(self._bedrock_model(), runtime=self._bedrock_runtime(),
+                                      control=self._bedrock_control(), max_tokens=self.max_tokens)
+        if self.provider == "openai":
+            return openai_chat_model(self.model_id, api_key=self._api_key, endpoint=self.endpoint,
+                                     max_tokens=self.max_tokens)
+        return langchain_chat_model(self.provider, self.model_id, api_key=self._api_key, endpoint=self.endpoint,
+                                    max_tokens=self.max_tokens)
+
+    def _bedrock_runtime(self) -> Any:
+        """
+        The bedrock-runtime client the Bedrock model calls Converse with, made once from the agent's own session (the
+        notebook's credentials, region and retries). The read-only guard is for the tools' clients: Converse only
+        generates text. endpoint= is its endpoint URL, for a VPC endpoint without private DNS.
+        """
+        return self._cached_client("bedrock-runtime", lambda: self.session.client(
+            "bedrock-runtime", endpoint_url=self.endpoint or None, config=self._config))
+
+    def _bedrock_control(self) -> Any:
+        """
+        The bedrock client the region's models and inference profiles are listed with, made once from the agent's own
+        session.
+        """
+        return self._cached_client("bedrock", lambda: self.session.client("bedrock", config=self._config))
+
+    def _inference_profiles(self) -> list[dict[str, Any]] | None:
+        """
+        The inference profiles in the agent's region (ListInferenceProfiles); None when they can't be listed.
+        """
+        profiles: list[dict[str, Any]] = []
+        try:
+            for page in self._bedrock_control().get_paginator("list_inference_profiles").paginate():
+                profiles.extend(page.get("inferenceProfileSummaries", []))
+        except (ClientError, BotoCoreError):
+            return None
+        return profiles
+
+    def _bedrock_models(self) -> list[ModelInfo]:
+        """
+        The text models Bedrock offers in the agent's region and how to call each, on demand or through an inference
+        profile (ListFoundationModels and ListInferenceProfiles). Without the profiles, a model that needs one can't
+        be picked by name.
+        """
+        bedrock = self._bedrock_control()
+        summaries = bedrock.list_foundation_models(byOutputModality="TEXT").get("modelSummaries", [])
+        return parse_models(summaries, self._inference_profiles(), bedrock.meta.region_name)
+
+    def _bedrock_model(self) -> str:
+        """
+        The ID or inference profile the Bedrock model is called with: an ARN or a cross-region profile as given, else
+        what bedrock_model_id() finds in the region's model list for the model it was given (a short name like
+        'sonnet', a family, or a model ID served through a profile). When the list can't be read, a model ID with its
+        version is called as given, and a short name gets a _Hint saying what to pass instead.
+        """
+        wanted = self.model_id
+        if is_bedrock_profile(wanted):
+            return wanted
+        try:
+            models = self._bedrock_models()
+        except (ClientError, BotoCoreError) as exc:
+            if is_bedrock_version(wanted):
+                return wanted
+            raise _Hint(f"Couldn't list Amazon Bedrock's models to find the one {wanted!r} names "
+                        f"({_error_name(exc)}). Pass its model ID or inference profile instead, like "
+                        "AgentView(provider='bedrock', model='us.anthropic.claude-haiku-4-5-20251001-v1:0'), or allow "
+                        "bedrock:ListFoundationModels and bedrock:ListInferenceProfiles.") from exc
+        return bedrock_model_id(wanted, models)
 
     def instructions(self) -> str:
         """
@@ -230,13 +350,14 @@ class AgentAnalyzer(_BaseAnalyzer):
         graph = self._harness()
         moment = now or _utcnow()
         run = _Run(self.budget, stop=stop or threading.Event())
-        answer = AgentAnswer(question=question, model=self.model, thread=self.thread, asked=moment)
+        answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
+                             asked=moment)
         self._guard.reset()
         self._run = run
         try:
             answer.text = harness.stream_turn(graph, f"{asked_at(moment, self.zone)}\n\n{question}",
                                               thread=self.thread, run=run, answer=answer, model_prices=self.prices,
-                                              progress=progress)
+                                              progress=progress, provider=self.provider)
         finally:
             self._run = None
         answer.calls = list(run.calls)
@@ -244,7 +365,9 @@ class AgentAnalyzer(_BaseAnalyzer):
         answer.blocked = list(self._guard.blocked)
         answer.metrics_read = run.metrics_read
         answer.aws_cost = run.aws_cost + sum(t.request_cost(answer.aws_calls) for t in self.toolkits)
-        answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices)
+        answer.rates = model_rates(answer.model, self.prices, self.provider)
+        answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
+                                  provider=self.provider)
         answer.seconds = run.elapsed
         if answer.stopped is None:
             refused = [c.refused for c in answer.calls if c.refused in ("tool_calls", "time", "cost")]
