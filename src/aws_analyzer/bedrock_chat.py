@@ -4183,8 +4183,11 @@ body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}
 .kbc-app.kbc-app .kbc-composer:focus-within{border-color:var(--kc-accent);box-shadow:0 0 0 3px var(--kc-soft)}
 .kbc-app.kbc-app .kbc-composer .widget-text input,.kbc-app.kbc-app .kbc-composer .jupyter-widget-text input{border:0;box-shadow:none;background:transparent;font-size:14px;padding:4px 8px}
 .kbc-app.kbc-app .kbc-composer .jupyter-button{border-radius:999px;height:34px;line-height:34px;padding:0 18px}
-.kbc-app.kbc-app .kbc-composer .widget-toggle-buttons,.kbc-app.kbc-app .kbc-composer .jupyter-widget-toggle-buttons{border-radius:999px;margin:0 4px 0 0}
-.kbc-app.kbc-app .kbc-composer .widget-toggle-buttons .widget-toggle-button,.kbc-app.kbc-app .kbc-composer .jupyter-widget-toggle-buttons .jupyter-widget-toggle-button{height:26px;line-height:26px;padding:0 11px;border-radius:999px}
+.kbc-app.kbc-app .kbc-top{gap:8px}
+.kbc-app.kbc-app .kbc-mode{border-radius:999px;margin:0}
+.kbc-app.kbc-app .kbc-mode .widget-toggle-button,.kbc-app.kbc-app .kbc-mode .jupyter-widget-toggle-button{height:28px;line-height:28px;padding:0 12px;border-radius:999px}
+.kbc-app.kbc-app .kbc-toggle{background:transparent;opacity:.6}
+.kbc-app.kbc-app .kbc-toggle.kbc-on{background:var(--kc-soft);border-color:var(--kc-accent);color:var(--kc-accent);opacity:1}
 .kbc-app.kbc-app .kbc-row{border:1px solid transparent;border-top-color:var(--kc-line);border-radius:0;padding:6px 2px 7px 6px;margin:0;background:transparent;transition:background-color .2s,border-color .2s,box-shadow .2s}
 .kbc-app.kbc-app .kbc-row:hover{background:var(--kc-tint)}
 .kbc-app.kbc-app .kbc-row .rp{margin-top:1px}
@@ -4897,6 +4900,11 @@ class _ChoicePicker(_Picker):
             self._draw_list()
 
 
+_SIDE_MAX_WIDTH = "580px"
+_CHAT_MARGIN = "0 16px 8px 0"
+_CHAT_ALONE_MARGIN = "0 0 8px 0"
+
+
 class _ChatApp(_Window):
     """
     The chat window: ipywidgets wired to a BedrockChatView, which holds the settings and the conversation. Every
@@ -4959,7 +4967,19 @@ class _ChatApp(_Window):
         self.source_pick = self._source_picker()
         self.model_pick = self._model_picker()
         self.files_pick = self._files_picker()
-        top = w.HBox([self.title, self.new_button], layout=layout(width="100%", align_items="center"))
+        self.mode_pick = w.ToggleButtons(
+            options=[("Answer", "answer"), ("Retrieve only", "retrieve")],
+            value="retrieve" if self.view.retrieve_only else "answer",
+            tooltips=["Search, then the model answers with citations (RetrieveAndGenerate)",
+                      "Only search: every passage found, best first, with its score, and no answer (Retrieve)"],
+            style={"button_width": "auto"}, layout=layout(flex="0 0 auto"))
+        self.mode_pick.add_class("kbc-mode")
+        self.mode_pick.observe(self._safely(self._mode_changed), names="value")
+        self.chat_toggle = self._pane_toggle("Chat", "Show or hide the conversation")
+        self.side_toggle = self._pane_toggle("Settings", "Show or hide the side tabs: Settings, Test, Runs, ...")
+        top = w.HBox([self.title, self.mode_pick, self.new_button, self.chat_toggle, self.side_toggle],
+                     layout=layout(width="100%", align_items="center"))
+        top.add_class("kbc-top")
         pickers = w.HBox([self.kb_pick.field, self.source_pick.field, self.model_pick.field, self.files_pick.field],
                          layout=layout(width="100%", flex_flow="row wrap", margin="12px 0 0 0"))
         pickers.add_class("kbc-pickers")
@@ -4971,13 +4991,6 @@ class _ChatApp(_Window):
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto",
                                         height=_css_height(self.view.height), width="100%"))
         self.log.add_class("kbc-log")  # column-reverse keeps it scrolled to the newest message, without a script
-        self.mode_pick = w.ToggleButtons(
-            options=[("Answer", "answer"), ("Retrieve only", "retrieve")],
-            value="retrieve" if self.view.retrieve_only else "answer",
-            tooltips=["Search, then the model answers with citations (RetrieveAndGenerate)",
-                      "Only search: every passage found, best first, with its score, and no answer (Retrieve)"],
-            style={"button_width": "auto"}, layout=layout(flex="0 0 auto"))
-        self.mode_pick.observe(self._safely(self._mode_changed), names="value")
         self.question = w.Text(placeholder="Ask a question, then press Enter", continuous_update=True,
                                layout=layout(flex="1 1 auto", width="auto"))
         self.question.on_msg(self._on_enter(self._send))
@@ -4985,12 +4998,12 @@ class _ChatApp(_Window):
                                     layout=layout(width="auto", flex="0 0 auto"))
         self.send_button.on_click(self._safely(self._send))
         self.status = w.HTML(layout=layout(width="100%"))
-        self.composer = w.HBox([self.mode_pick, self.question, self.send_button], layout=layout(width="100%"))
+        self.composer = w.HBox([self.question, self.send_button], layout=layout(width="100%"))
         self.composer.add_class("kbc-composer")
-        chat = w.VBox([self.log, self.composer, self.status], layout=layout(flex="1 1 460px", min_width="320px",
-                                                                      margin="0 16px 8px 0"))
+        self.chat = w.VBox([self.log, self.composer, self.status], layout=layout(
+            flex="1 1 460px", min_width="320px", margin=_CHAT_MARGIN))
         side = self._side()
-        body = w.HBox([chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
+        body = w.HBox([self.chat, side], layout=layout(width="100%", flex_flow="row wrap", align_items="flex-start"))
         root = w.VBox([style, head, body, self.backdrop], layout=layout(width="100%"))
         root.add_class("kbc-app")
 
@@ -5013,6 +5026,33 @@ class _ChatApp(_Window):
         else:
             self._set_status(self.view._conversation_line())
         return root
+
+    def _pane_toggle(self, label: str, tooltip: str) -> Any:
+        """
+        A small header button that shows or hides one of the window's two panes, lit while it's shown.
+        """
+        button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto",
+                                                                                         flex="0 0 auto"))
+        button.add_class("kbc-small")
+        button.add_class("kbc-toggle")
+        button.add_class("kbc-on")
+        button.on_click(self._safely(self._toggle_pane))
+        return button
+
+    def _toggle_pane(self, button: Any) -> None:
+        """
+        Hides the pane the button names, or shows it again. One pane always stays: hiding the last one shows the
+        other, and the side tabs grow to the window's width while the conversation is hidden.
+        """
+        pane, other = (self.chat, self.tabs) if button is self.chat_toggle else (self.tabs, self.chat)
+        hiding = pane.layout.display != "none"
+        pane.layout.display = "none" if hiding else None
+        if hiding and other.layout.display == "none":
+            other.layout.display = None
+        self.tabs.layout.max_width = "none" if self.chat.layout.display == "none" else _SIDE_MAX_WIDTH
+        self.chat.layout.margin = _CHAT_MARGIN if self.tabs.layout.display != "none" else _CHAT_ALONE_MARGIN
+        _class_if(self.chat_toggle, "kbc-on", self.chat.layout.display != "none")
+        _class_if(self.side_toggle, "kbc-on", self.tabs.layout.display != "none")
 
     def _side(self) -> Any:
         w, layout = self.w, self.w.Layout
@@ -5110,7 +5150,7 @@ class _ChatApp(_Window):
 
         tabs = w.Tab(children=[settings_tab, self._test_tab(), self._runs_tab(), self._code_tab(), request_tab,
                                response_tab],
-                     layout=layout(flex="1 1 400px", min_width="340px", max_width="580px"))
+                     layout=layout(flex="1 1 400px", min_width="340px", max_width=_SIDE_MAX_WIDTH))
         for i, (title, _) in enumerate(_TABS):
             tabs.set_title(i, title)
         tabs.observe(self._safely(self._tab_changed), names="selected_index")
@@ -5500,7 +5540,7 @@ class _ChatApp(_Window):
             "press Enter.",
             "<b>Data source</b> asks only one of the knowledge base's data sources." if self.source_pick.visible else "",
             "<b>Files</b> asks only the files you tick.",
-            "<b>Retrieve only</b>, beside the box, only searches: every passage found, best first, with its score, "
+            "<b>Retrieve only</b>, at the top right, only searches: every passage found, best first, with its score, "
             "and no answer.",
             "<b>Settings</b> change what every question sends. <b>Add a setting</b> finds any field the API has.",
             "<b>Request</b> shows the next request as JSON, to edit by hand or copy as <b>Python</b>; "
