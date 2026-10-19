@@ -35,7 +35,7 @@ just as well for people. The rules that matter most:
   it's drawn with `@_draws`. Each service's View and analyzer build on `_kit`'s base classes (`_BaseView`,
   `_BaseAnalyzer`), which bring `help()`, progress bars and the error notes. What the two Bedrock modules share
   (prices, models, passages, filters, the answer's markdown) lives once in
-  [`src/aws_analyzer/_bedrock.py`](src/aws_analyzer/_bedrock.py), which only they import. The notebook windows (the
+  [`src/aws_analyzer/_bedrock/`](src/aws_analyzer/_bedrock/), which only they import. The notebook windows (the
   explorers and the chat) build on what [`_kit/window.py`](src/aws_analyzer/_kit/window.py) gives them: the error
   guard for clicks, reading AWS in the background, the searchable picker and the full-width rows.
 - **Only boto3 and the standard library at import time.** pandas, pyarrow, IPython and the file readers are

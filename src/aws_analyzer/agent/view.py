@@ -15,7 +15,8 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError
 
-from .._bedrock import _Answer, _per_million, short_model
+from .._bedrock.blocks import _Answer
+from .._bedrock.prices import _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money
 from .._kit.render import _base_css, _report_html

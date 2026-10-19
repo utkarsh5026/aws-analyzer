@@ -26,7 +26,8 @@ from typing import Any, Callable, Mapping, NamedTuple
 
 from botocore.exceptions import ClientError
 
-from .._bedrock import DEFAULT_MODEL, MODEL_PRICES, ModelInfo, _family_match, _MODEL_ALIASES, model_price, short_model
+from .._bedrock.models import ModelInfo
+from .._bedrock.prices import DEFAULT_MODEL, MODEL_PRICES, _MODEL_ALIASES, _family_match, model_price, short_model
 from .._kit.deps import _require
 from .._kit.errors import _error_code, _Hint
 

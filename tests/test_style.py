@@ -142,7 +142,6 @@ COMMENTS_LEFT = {
 MAX_MODULE_LINES = 1500
 PACKAGE = ROOT / "src" / "aws_analyzer"
 LONG_FILES = {
-    "src/aws_analyzer/_bedrock.py",
     "src/aws_analyzer/bedrock_chat.py",
     "src/aws_analyzer/bedrock_kb.py",
     "src/aws_analyzer/dynamodb.py",

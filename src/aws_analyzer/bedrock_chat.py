@@ -115,19 +115,32 @@ from botocore.validate import ParamValidator
 
 # What bedrock_kb.py and bedrock_chat.py share. A name imported as itself isn't used here: it's imported so that
 # bedrock_chat.<name> still works.
-from ._bedrock import (
-    BEDROCK_PRICES, Citation, DATA_SOURCE_KEY, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, KBDocument, MODEL_PRICES,
-    ModelInfo, Passage, SEARCHABLE, SavedFileList, _Answer, _Download, _Json, _KB_ID_RE, _LIST_LINK_BYTES,
-    _MODEL_ALIASES, _REFUSAL, _RERANK_ALIASES, _answer_html, _answer_lines, _data_href, _download_css, _family_match,
-    _file_list_blocks, _highlight, _is_bedrock_filter, _json_html, _link_seconds, _list_target, _markdown_html,
-    _match_kb, _match_sources, _model_id, _notebook_href, _per_million, _plain_json, _session_expired, _span,
-    _with_markers, best_snippet, build_filter, describe_sources, estimate_tokens, file_list_name, generation_cost,
-    match_expected, parse_document, parse_kb_ref, parse_list_link, parse_models, parse_passage, parse_retrieve,
-    presigned_url, query_cost, question_terms, short_model, source_name, with_data_sources, write_file_list,
-    FILE_LIST_LINKS as FILE_LIST_LINKS, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES,
-    data_source_filter as data_source_filter, file_list_lines as file_list_lines, model_price as model_price,
-    split_metadata as split_metadata,
+from ._bedrock.blocks import (
+    _Answer, _Download, _Json, _answer_html, _download_css, _file_list_blocks, _json_html, _plain_json,
 )
+from ._bedrock.estimates import estimate_tokens, generation_cost, query_cost
+from ._bedrock.files import (
+    _LIST_LINK_BYTES, SavedFileList, _data_href, _link_seconds, _list_target, _notebook_href, file_list_name,
+    parse_list_link, presigned_url, write_file_list, FILE_LIST_LINKS as FILE_LIST_LINKS,
+    file_list_lines as file_list_lines,
+)
+from ._bedrock.filters import (
+    DATA_SOURCE_KEY, _is_bedrock_filter, build_filter, describe_sources, with_data_sources,
+    data_source_filter as data_source_filter,
+)
+from ._bedrock.foundation_models import parse_models
+from ._bedrock.helpers import (
+    SEARCHABLE, _KB_ID_RE, _REFUSAL, _match_kb, _match_sources, _model_id, _session_expired, parse_kb_ref,
+    source_name, split_metadata as split_metadata,
+)
+from ._bedrock.markdown import _answer_lines, _markdown_html, _with_markers
+from ._bedrock.models import Citation, KBDocument, ModelInfo, Passage
+from ._bedrock.parsing import _span, match_expected, parse_document, parse_passage, parse_retrieve
+from ._bedrock.prices import (
+    BEDROCK_PRICES, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, MODEL_PRICES, _MODEL_ALIASES, _RERANK_ALIASES,
+    _family_match, _per_million, short_model, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES, model_price as model_price,
+)
+from ._bedrock.words import _highlight, best_snippet, question_terms
 from ._kit.analyzer import _BaseAnalyzer
 from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Title, _Tone, _draws
 from ._kit.deps import _require
