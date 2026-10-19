@@ -508,7 +508,7 @@ Update this table in each step's PR.
 | lambda_functions | done | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | done | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
-| bedrock_kb | in review | | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
+| bedrock_kb | in review | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
 | bedrock_chat | not started | | |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | not started | | |
