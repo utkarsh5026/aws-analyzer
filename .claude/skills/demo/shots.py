@@ -970,7 +970,8 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
     with mock_aws():
         kwargs = SCENES[service]()
         mod = importlib.import_module(f"aws_analyzer.{service}")
-        ours = {k: v for k, v in vars(mod).items() if isinstance(v, type) and v.__module__ == mod.__name__}
+        ours = {k: v for k, v in vars(mod).items()
+                if isinstance(v, type) and (v.__module__ == mod.__name__ or v.__module__.startswith(f"{mod.__name__}."))}
         view_cls = next(v for k, v in ours.items() if k.endswith("View"))  # not the _BaseView it imports
         core_cls = next(v for k, v in ours.items() if k.endswith("Analyzer"))
         core = core_cls(region=REGION, **kwargs) if "session" not in kwargs else core_cls(**kwargs)
@@ -981,7 +982,7 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
             scope = {"ui": ui, "core": core, "mod": mod}
             ui._show = lambda blocks: None
             exec(figure.setup, scope)
-            ui._show = lambda blocks, ui=ui, shown=shown: shown.append(mod._render_html(blocks, ui.max_rows))
+            ui._show = lambda blocks, ui=ui, shown=shown: shown.append(ui._render_html(blocks, ui.max_rows))
             exec(figure.code, scope)
             out[figure.name] = shown
         return out

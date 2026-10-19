@@ -190,7 +190,7 @@ def _layout(root: Path) -> tuple[Path, str]:
     (the folder the analyzers are in, the prefix their modules import under) for this checkout: the package in
     src/aws_analyzer/, or the analyzers/ folder of the files before 0.14 (a stale analyzers/__pycache__ doesn't count).
     """
-    if (root / "src" / "aws_analyzer" / "s3.py").exists():
+    if (root / "src" / "aws_analyzer" / "__init__.py").exists():
         return root / "src" / "aws_analyzer", "aws_analyzer."
     return root / "analyzers", ""
 
