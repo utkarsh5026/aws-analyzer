@@ -1134,7 +1134,7 @@ keep every run in a file that outlasts a restart, and copy the setup as a Python
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">
-  <img src="docs/images/chat-window-light.webp" alt="The chat window: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
+  <img src="docs/images/chat-window-light.webp" alt="The chat window, drawn like a terminal in a monospace font: four fields at the top, Knowledge base support-docs with its ID, Data source All data sources, Model Claude Sonnet 5 with its price, and Files All files; an answer about digital goods with its source opened, then a summary asked for as a list and answered in markdown, a bold lead-in and two bullets with their cited spans shaded and numbered, and its sources; on the right, the Settings tab with Passages and Search type, each on one line with its value beside its name and explained in a sentence, and a button to add a setting">
 </picture>
 
 <p align="center"><sub><code>chat("support-docs", model="sonnet")</code>: a question and a follow-up answered in markdown, each with its citations and sources, and the settings every question sends.</sub></p>
@@ -1960,7 +1960,7 @@ agent.transcript()                                      # every question and ans
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/agent-chat-dark.webp">
-  <img src="docs/images/agent-chat-light.webp" alt="The agent's chat window, drawn like a terminal in a monospace font: › Which Lambda failed in the last 24 hours, and why?; a folded line 2 tool calls · 11s with badges for the services they read, lambda, logs and cloudwatch; then the answer: orders-etl failed 66 of its 2,226 calls with three causes (a KeyError on customer_id in etl.py line 23, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem), report-api's errors and throttles, and the call to look closer; then the model, 2 tool calls, 11s and $0.02, a details link, and a › prompt with a send button">
+  <img src="docs/images/agent-chat-light.webp" alt="The agent's chat window, drawn like a terminal in a monospace font: on the right, the question Which Lambda failed in the last 24 hours, and why?, marked with a person emoji; a folded line 2 tool calls · 11s with badges for the services they read, lambda, logs and cloudwatch; then the answer, marked with a robot emoji: orders-etl failed 66 of its 2,226 calls with three causes (a KeyError on customer_id in etl.py line 23, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem), report-api's errors and throttles, and the call to look closer; then the model, 2 tool calls, 11s and $0.02, a details link, and a › prompt with a send button">
 </picture>
 
 <p align="center"><sub><code>agent.chat()</code>: every call shows as it runs, with a badge for each AWS service it reads, then folds into one line above the answer. The <a href="docs/agent.md#chat">agent guide</a> shows it at work.</sub></p>

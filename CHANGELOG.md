@@ -25,6 +25,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- **`chat()`'s window looks like the agent's chat**: a monospace font on your notebook editor's colours, light or
+  dark; your questions on the right, marked 🧑, and the answers on the left, marked 🤖, behind a thin rule; flat tabs,
+  fields and buttons; and a header with just the knowledge base's name. Everything it does is the same. The agent's
+  chat (`AgentView().chat()`) marks questions and answers the same way
+  ([#116](https://github.com/utkarsh5026/aws-analyzer/pull/116)).
 - **Searching a Lambda function's logs is several times faster**: the Lambda explorer's Logs search (Enter),
   `logs()`, `errors()`, `performance()` and `log_runs(search=...)` now ask CloudWatch Logs for up to four slices of
   the time range at once, newest first, instead of one after another, so a search over a day or a week comes back in

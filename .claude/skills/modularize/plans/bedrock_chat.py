@@ -108,7 +108,7 @@ MODULES = {
     "blocks": ["_Turn", "_Code", "_ResultRow", "_Results", "_json_text_html", "_SHELL_RE", "_shell_html",
                "_code_html", "_code_block_html", "expr@4291", "_SHOWN_ELSEWHERE", "_META_VALUE_CHARS",
                "_NO_OWN_METADATA", "_meta_value", "_bedrock_keys", "_meta_text", "_passage_meta_html",
-               "_sources_html", "_AVATAR", "_YOU", "_SEARCH", "_meta_html", "_score", "_search_html", "_turn_html",
+               "_sources_html", "_AVATAR", "_SEARCH", "_meta_html", "_score", "_search_html", "_turn_html",
                "_writing_html", "_question_html", "_row_stats", "_expected_text", "_result_html", "_waiting_html",
                "_result_lines", "_results_html", "_results_lines", "_turn_block_html", "_turn_block_lines",
                "_passage_lines", "_kind_text", "_wrap", "_waiting", "_setting_marks", "_QUICK"],

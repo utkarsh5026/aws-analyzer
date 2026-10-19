@@ -18,9 +18,7 @@ from ..analysis.request import retrieve_settings, settings_from_request
 from ..analysis.findings import settings_findings
 from ..analysis.batches import parse_questions
 from ..analysis.code import cli_command, config_of, python_call, python_script
-from ..style import _BADGE
-from ..blocks import _AVATAR, _json_text_html, _setting_marks, _shell_html, _wrap
-
+from ..blocks import _json_text_html, _setting_marks, _shell_html, _wrap
 
 _PYTHON_WIDTH = 64  # where the Request tab's Python breaks lines, so it fits the tab
 
@@ -51,19 +49,12 @@ class _RequestTab:
 
     def _refresh(self) -> None:
         """
-        Everything that depends on the settings: the title, findings, the next request, the setup line.
+        Everything that depends on the settings: the title (the knowledge base's name), findings, the next request,
+        the setup line.
         """
         view = self.view
         name = view.core.kb_name(view.kb) if view.kb else "no knowledge base yet"
-        try:
-            region = view.core.region
-        except ValueError:
-            region = "no region"
-        api = "Retrieve (retrieve only)" if view.retrieve_only else "RetrieveAndGenerate"
-        sub = " · ".join(filter(None, [view.kb if view.kb != name else "", region, api]))
-        self._set(self.title, _wrap(f'<div class="whd">{_AVATAR}<div style="min-width:0"><h3>{_esc(name)}<span '
-                                    f'class="badge">{_esc(_BADGE)}</span></h3><div class="sub">{_esc(sub)}</div></div>'
-                                    "</div>"))
+        self._set(self.title, _wrap(f'<div class="whd"><span class="av">\u203a</span><h3>{_esc(name)}</h3></div>'))
         params, problems = view._preview()
         found = [("warn", f"Bedrock would refuse this request: {p}") for p in problems]
         found += [("warn", f"{key} isn't sent: {why}") for key, why in self.broken.items()]

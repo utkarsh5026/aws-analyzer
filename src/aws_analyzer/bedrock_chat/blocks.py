@@ -21,6 +21,7 @@ from .._kit.fmt import _plural
 from .._kit.highlight import _json_source_html, _python_html
 from .._kit.render import _MARKS, _SELECT, _TONES, _ordered, _prose, _text_lines
 from .._kit.text import _clip, _esc
+from .._kit.window import _HUMAN, _MACHINE
 
 from .helpers import _number, _short
 from .models import Answer, Schema
@@ -182,14 +183,14 @@ def _sources_html(a: Answer) -> str:
         items.append(f'<details class="src"><summary><span class="sx">{i}</span><span class="sf">{_esc(where)}</span>'
                      f'<span class="sn">{_esc(best_snippet(p.text, terms, 120))}</span></summary>{body}</details>')
     count = f" · {len(items)}" if len(items) > 1 else ""
-    return f'<div class="srcs"><div class="sh">📎 Sources{count}</div>{"".join(items)}</div>' if items else ""
+    return f'<div class="srcs"><div class="sh">Sources{count}</div>{"".join(items)}</div>' if items else ""
 
 
-_AVATAR = '<span class="av">\u2726</span>'  # the mark before the model's name on each answer
+_AVATAR = f'<span class="av">{_MACHINE}</span>'  # the mark before the model's name on each answer
 
-_YOU = '<span class="av me" title="You">🧑</span>'  # and the one beside each of your questions
+_YOU = f'<span class="av me">{_HUMAN}</span>'
 
-_SEARCH = '<span class="av">🔎</span>'  # and the one on a retrieve-only search's passages
+_SEARCH = '<span class="av">\U0001F50E</span>'  # and the one on a retrieve-only search's passages
 
 
 def _meta_html(meta: str, avatar: str = _AVATAR) -> str:
@@ -278,7 +279,7 @@ def _writing_html(model: str, text: str) -> str:
 
 
 def _question_html(question: str) -> str:
-    return f'<div class="ask"><div class="msg you">{_esc(question)}</div>{_YOU}</div>'
+    return f'<div class="ask">{_YOU}<div class="msg you">{_esc(question)}</div></div>'
 
 
 def _row_stats(item: BatchItem) -> str:

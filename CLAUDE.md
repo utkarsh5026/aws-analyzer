@@ -463,7 +463,10 @@ How the View layer works:
 - **The windows' kit** (`_kit/window.py`) is what the four windows share, written once: `_css_height`,
   `_running_loop`, `_cell_number`, `_class_if`, `_skeleton`, `_icon_url` (a line drawing as the CSS `url()` every
   window masks its icons with), `_row_button` (a line whose whole width is the click target: a full-width button under
-  its HTML face, in a box) and `_for_window(blocks, words)`. `_Window`, which `_ChatApp` and both explorers subclass,
+  its HTML face, in a box), `_for_window(blocks, words)` and `_terminal_theme(roots, prefix)`, the chat windows' look
+  (`_MONO_FONT` and a code editor's colours, light and dark, as `--<prefix>-*` properties: the agent's window uses
+  `ag`, `bedrock_chat` `kt`, with its own `--kc-*` tokens made of them), so the two chats can't drift apart.
+  `_Window`, which `_ChatApp` and both explorers subclass,
   has `_safely` (a widget callback's error said in the window), `_on_enter` (a text box's `submit` message),
   `_error_text`, `_quietly`, `_set` (only HTML that changed) and `_close_lists` (the backdrop's click), with three
   hooks: `_warn` (where an error is said), `_explain` (its View's) and `_reword` (an explorer's `_window_text`).
@@ -796,7 +799,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `stream_turn` tells `AgentStep('thinking')` for a model message with tool calls and text, and `as_tool` tells
   `'tool'` before a call runs and `'tool_done'` after (the same `ToolCall`, filled in). Tools run on LangGraph's
   threads, so the window runs `core.ask` in the loop's executor and drains a queue of steps on the loop every
-  `_DRAW_EVERY` (`_run_later`; inline without a loop). It's drawn like a terminal (`--ag-mono`, `›` questions, `●`
+  `_DRAW_EVERY` (`_run_later`; inline without a loop). It's drawn like a terminal (`--ag-mono`, questions on the right marked `_HUMAN` 🧑 and answers on the left `_MACHINE` 🤖, both `_kit`'s, as in `bedrock_chat`, `●`
   the model's words, `✻ Thinking…`). Each step is its own HTML widget in the `_Turn`'s box, so a line that changes
   redraws alone. A tool call is its call in colour (`_python_html`) with a badge per service it reads and a `# comment`
   from `_TOOL_WORDS` (`{t}` from `_target`; a tool it doesn't know reads as its name). The services come from

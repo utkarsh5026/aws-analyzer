@@ -38,7 +38,7 @@ from .._kit.highlight import _python_html
 from .._kit.jsontree import _json_tree_css, _JsonTree
 from .._kit.render import _blocks_html, _prose
 from .._kit.text import _clip, _esc
-from .._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _Window
+from .._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
 from .answers import AgentAnswer, AgentStep, ToolCall, services_of
 from .llm import no_model_hint
 from .view import _CSS, _ROOT, _coverage_text
@@ -152,13 +152,9 @@ _TOOL_WORDS = {
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 
-_THEME_CSS = """\
-.agc-app{--ag-mono:"JetBrains Mono","Cascadia Code","Fira Code",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;--ag-bg:var(--jp-cell-editor-background,var(--vscode-editor-background,#f6f8fa));--ag-line:rgba(127,127,127,.22);--ag-dim:rgba(127,127,127,.95);--ag-hover:rgba(127,127,127,.1);--ag-accent:#0969da;--ag-prompt:#8250df;--ag-ok:#1a7f37;--ag-bad:#cf222e;--ag-warn:#9a6700;--ag-comment:#6e7781;--ag-k:#cf222e;--ag-f:#8250df;--ag-a:#953800;--ag-s:#0a3069;--ag-n:#0550ae;--ag-l:#0550ae}
-body[data-jp-theme-light="false"] .agc-app,body.vscode-dark .agc-app,body.vscode-high-contrast .agc-app{--ag-bg:var(--jp-cell-editor-background,var(--vscode-editor-background,#0d1117));--ag-accent:#58a6ff;--ag-prompt:#d2a8ff;--ag-ok:#3fb950;--ag-bad:#f85149;--ag-warn:#d29922;--ag-comment:#8b949e;--ag-k:#ff7b72;--ag-f:#d2a8ff;--ag-a:#ffa657;--ag-s:#a5d6ff;--ag-n:#79c0ff;--ag-l:#79c0ff}
-@media (prefers-color-scheme:dark){body:not([data-jp-theme-light]):not(.vscode-light) .agc-app{--ag-bg:var(--jp-cell-editor-background,var(--vscode-editor-background,#0d1117));--ag-accent:#58a6ff;--ag-prompt:#d2a8ff;--ag-ok:#3fb950;--ag-bad:#f85149;--ag-warn:#d29922;--ag-comment:#8b949e;--ag-k:#ff7b72;--ag-f:#d2a8ff;--ag-a:#ffa657;--ag-s:#a5d6ff;--ag-n:#79c0ff;--ag-l:#79c0ff}}
+_THEME_CSS = _terminal_theme((".agc-app",), "ag") + """
 @keyframes ag-spin{to{transform:rotate(360deg)}}
-@keyframes ag-shine{to{background-position:-200% 0}}
-@keyframes ag-blink{50%{opacity:.25}}"""
+@keyframes ag-shine{to{background-position:-200% 0}}"""
 
 _FRAME_CSS = """\
 .agc-app.agc-app{font-family:var(--ag-mono);font-size:13px;border:1px solid var(--ag-line);border-radius:10px;background:var(--ag-bg);overflow:hidden}
@@ -213,7 +209,9 @@ _CONVERSATION_CSS = """\
 .agt .jn{color:var(--ag-n)}
 .agt .jl{color:var(--ag-l)}
 .agt .jk{color:var(--ag-a)}
-.agt .ag-q{display:flex;gap:10px;margin:16px 0 6px;padding-top:12px;border-top:1px dashed var(--ag-line);font-weight:600;white-space:pre-wrap;overflow-wrap:anywhere}
+.agt .ag-q{display:flex;flex-direction:row-reverse;align-items:flex-start;gap:10px;margin:18px 0 8px;font-weight:600}
+.agt .ag-q>.ag-said{max-width:min(680px,80%);padding:7px 12px;border:1px solid var(--ag-line);border-radius:6px;background:var(--ag-hover);white-space:pre-wrap;overflow-wrap:anywhere}
+.agt .ag-q>.ag-mark{margin-top:6px}
 .agt .ag-say{display:flex;gap:10px;margin:6px 0 2px}
 .agt .ag-say>.ag-bul{color:var(--ag-comment)}
 .agt .ag-say .ans{margin:0;font-size:13px;color:var(--ag-dim)}
@@ -256,8 +254,9 @@ _CONVERSATION_CSS = """\
 .agt .ag-trail[open]>summary .ag-car{transform:rotate(90deg)}
 .agt .ag-trail>summary .ag-bad{color:var(--ag-bad)}
 .agt .ag-trail>.ag-steps{margin:2px 0 6px 6px;padding-left:12px;border-left:1px solid var(--ag-line)}
-.agt .ag-ans{margin:8px 0 2px;padding-left:14px;border-left:2px solid var(--ag-accent)}
-.agt .ag-ans .ans{font-size:13px;line-height:1.65;margin:0}
+.agt .ag-mark{flex:0 0 auto;font-size:15px;line-height:1.5}
+.agt .ag-ans{display:flex;gap:10px;margin:8px 0 2px}
+.agt .ag-ans .ans{font-size:13px;line-height:1.65;margin:0;padding-left:12px;border-left:2px solid var(--ag-accent);min-width:0}
 .agt .ag-ans .ans code{background:var(--ag-hover);padding:1px 4px;border-radius:4px;font-size:12.5px}
 .agt .ag-fd .fd{margin:10px 0 4px}
 .agt .ag-fail{margin:8px 0;padding-left:14px;border-left:2px solid var(--ag-bad);color:var(--ag-bad)}
@@ -322,7 +321,10 @@ def _answer_text_html(text: str) -> str:
 
 
 def _question_html(question: str) -> str:
-    return f'<div class="ag-q"><span class="ag-pr">›</span><span>{_esc(question)}</span></div>'
+    """
+    A question on the right, in a box, with the person's mark beside it.
+    """
+    return f'<div class="ag-q"><span class="ag-mark">{_HUMAN}</span><span class="ag-said">{_esc(question)}</span></div>'
 
 
 def _thinking_html(text: str) -> str:
@@ -849,7 +851,8 @@ class _AgentChat(_Window):
         went_wrong = bool(answer.error) or not answer.text
         parts = [_trail_html(trail, answer.seconds, is_open=went_wrong)] if trail else []
         if answer.text:
-            parts.append(f'<div class="ag-ans">{_answer_text_html(answer.text)}</div>')
+            mark = f'<span class="ag-mark">{_MACHINE}</span>'
+            parts.append(f'<div class="ag-ans">{mark}{_answer_text_html(answer.text)}</div>')
         elif not answer.error:
             parts.append(_blocks_html([_Note("The agent stopped before it wrote an answer: the steps above show what "
                                              "it read.", "warn")], root=_ROOT))
