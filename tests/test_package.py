@@ -85,19 +85,21 @@ def test_changelog_has_an_entry_for_this_version(package):
 
 
 def test_explorer_builds_on_the_s3_installed_with_it(package):
-    # The explorer finds the s3 module installed next to it, not some other s3 on sys.path.
-    assert package.s3_explorer._s3_module() is package.s3
-    assert package.S3Explorer.__module__ == "aws_analyzer.s3_explorer"
+    # The explorer is part of the s3 package; aws_analyzer.s3_explorer, where it was before, still has its names.
+    assert package.s3.explorer._s3_module() is package.s3
+    assert package.S3Explorer.__module__.startswith("aws_analyzer.s3.explorer")
+    assert package.s3_explorer.S3Explorer is package.S3Explorer is package.s3.S3Explorer
 
 
 # Modules a few analyzers share (SHARED in .claude/skills/check/rules.py) -> the analyzers that import them.
 SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}
+ALIASES = {"s3_explorer": "s3"}
 
 
 def test_each_analyzer_loads_alone():
     # Analyzers share code through aws_analyzer._kit (the Bedrock pair also through aws_analyzer._bedrock) and never
-    # import each other, so importing one loads no other (s3_explorer builds on s3, which it loads when it first needs
-    # it), and a shared module loads no analyzer.
+    # import each other, so importing one loads no other (s3_explorer, the explorer's old home, loads s3), and a
+    # shared module loads no analyzer (ALIASES: a module kept where an analyzer was, and the analyzer it loads).
     modules = sorted(_modules())
     modules += sorted(module for module in SHARED
                       if (PACKAGE / f"{module}.py").exists() or (PACKAGE / module / "__init__.py").exists())
@@ -105,6 +107,7 @@ def test_each_analyzer_loads_alone():
         code = f"import sys, aws_analyzer.{module}; print(*sorted(sys.modules))"
         loaded = subprocess.run([sys.executable, "-c", code], cwd=PACKAGE.parent, capture_output=True, text=True,
                                 check=True).stdout.split()
-        allowed = {module, "_kit"} | {shared for shared, users in SHARED.items() if module in users}
+        allowed = {module, "_kit", ALIASES.get(module, module)}
+        allowed |= {shared for shared, users in SHARED.items() if module in users}
         others = {name.split(".")[1] for name in loaded if name.startswith("aws_analyzer.")} - allowed
         assert not others, f"importing aws_analyzer.{module} also loads {', '.join(sorted(others))}"

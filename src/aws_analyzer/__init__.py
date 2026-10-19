@@ -50,8 +50,7 @@ if TYPE_CHECKING:
     from .dynamodb import DynamoDBAnalyzer, DynamoDBView
     from .lambda_functions import LambdaAnalyzer, LambdaExplorer, LambdaView
     from .opensearch import OpenSearchAnalyzer, OpenSearchView
-    from .s3 import S3Analyzer, S3View
-    from .s3_explorer import S3Explorer, S3Navigator
+    from .s3 import S3Analyzer, S3Explorer, S3Navigator, S3View
     from .sagemaker_env import SageMakerAnalyzer, SageMakerView
 
 __version__ = "0.20.0"
@@ -84,8 +83,8 @@ __all__ = [
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
     "S3View": "s3",
-    "S3Explorer": "s3_explorer",
-    "S3Navigator": "s3_explorer",
+    "S3Explorer": "s3",
+    "S3Navigator": "s3",
     "DynamoDBAnalyzer": "dynamodb",
     "DynamoDBView": "dynamodb",
     "BedrockKBAnalyzer": "bedrock_kb",

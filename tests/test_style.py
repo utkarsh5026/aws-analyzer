@@ -71,7 +71,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/opensearch/style.py": 2,
     "src/aws_analyzer/opensearch/view.py": 13,
     "src/aws_analyzer/s3/__init__.py": 320,
-    "src/aws_analyzer/s3_explorer.py": 118,
+    "src/aws_analyzer/s3/explorer/__init__.py": 118,
     "src/aws_analyzer/sagemaker_env.py": 176,
     "tests/conftest.py": 5,
     "tests/fake_opensearch.py": 11,
@@ -84,7 +84,7 @@ COMMENTS_LEFT = {
     "tests/test_opensearch.py": 20,
     "tests/test_package.py": 10,
     "tests/test_s3.py": 187,
-    "tests/test_s3_explorer.py": 120,
+    "tests/test_s3_explorer.py": 117,
     "tests/test_sagemaker_env.py": 36,
 }
 
@@ -97,7 +97,7 @@ LONG_FILES = {
     "src/aws_analyzer/bedrock_kb.py",
     "src/aws_analyzer/dynamodb.py",
     "src/aws_analyzer/s3/__init__.py",
-    "src/aws_analyzer/s3_explorer.py",
+    "src/aws_analyzer/s3/explorer/__init__.py",
     "src/aws_analyzer/sagemaker_env.py",
 }
 

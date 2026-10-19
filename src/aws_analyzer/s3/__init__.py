@@ -11677,3 +11677,6 @@ class S3View(_BaseView):
                 )
             ]
         )
+
+
+from .explorer import S3Explorer as S3Explorer, S3Navigator as S3Navigator  # noqa: E402

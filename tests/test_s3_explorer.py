@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sys
 import threading
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -11,7 +10,7 @@ from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from aws_analyzer import s3 as s3mod
-from aws_analyzer import s3_explorer as sx
+from aws_analyzer.s3 import explorer as sx
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer.s3 import S3Analyzer, S3View
 from aws_analyzer.s3_explorer import (
@@ -821,14 +820,14 @@ def test_explorer_text_mode(core, capsys):
 
 
 def test_explorer_without_ipywidgets_falls_back_to_text(core, capsys, monkeypatch):
-    real = s3mod._require
+    real = sx._require
 
     def require(module, purpose, package=None):
         if module == "ipywidgets":
             raise ImportError(f"{purpose} needs `ipywidgets` (pip install ipywidgets)")
         return real(module, purpose, package)
 
-    monkeypatch.setattr(s3mod, "_require", require)
+    monkeypatch.setattr(sx, "_require", require)
     x = S3Explorer("s3://lake/", core=core, mode="widgets", progress="off")
     out = capsys.readouterr().out
     assert "pip install ipywidgets" in out and "-- In this folder --" in out and x._widgets is None
@@ -845,17 +844,9 @@ def test_explorer_without_s3_py(capsys, monkeypatch):
     assert "builds on s3.py" in capsys.readouterr().out and repr(x) == "S3Explorer(not ready)"
 
 
-def test_s3_module_is_found_where_s3_py_is(monkeypatch):
-    view = S3View(mode="text")
-    assert sx._s3_module(view) is s3mod and sx._s3_module() is s3mod
-    monkeypatch.setitem(sys.modules, "aws_analyzer.s3", None)  # no s3 installed next to it...
-    monkeypatch.setitem(sys.modules, "s3", None)  # ...and `import s3` fails...
-    main = sys.modules["__main__"]
-    with pytest.raises(ImportError, match="Upload s3.py next to this notebook"):
-        sx._s3_module()
-    for name in ("S3Analyzer", "S3View", "_render_html"):  # ...but it was pasted into a cell
-        monkeypatch.setattr(main, name, getattr(s3mod, name), raising=False)
-    assert sx._s3_module() is main
+def test_s3_module_is_the_package_the_explorer_is_part_of():
+    assert sx._s3_module() is s3mod
+    assert S3Explorer("s3://lake/", mode="text").s3 is s3mod
 
 
 # ----------------------------------------------------------------------------- PDFs, background loading, zips
