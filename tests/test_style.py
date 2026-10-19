@@ -109,7 +109,7 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/s3/view/files.py": 7,
     "src/aws_analyzer/s3/view/folders.py": 3,
     "src/aws_analyzer/s3/view/s3_view.py": 5,
-    "src/aws_analyzer/sagemaker_env.py": 176,
+    "src/aws_analyzer/sagemaker_env/__init__.py": 176,
     "tests/conftest.py": 5,
     "tests/fake_opensearch.py": 11,
     "tests/test_agent.py": 34,
@@ -133,7 +133,7 @@ LONG_FILES = {
     "src/aws_analyzer/bedrock_chat.py",
     "src/aws_analyzer/bedrock_kb.py",
     "src/aws_analyzer/dynamodb.py",
-    "src/aws_analyzer/sagemaker_env.py",
+    "src/aws_analyzer/sagemaker_env/__init__.py",
 }
 
 
