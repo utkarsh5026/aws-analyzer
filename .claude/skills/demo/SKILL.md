@@ -163,7 +163,7 @@ Linux machine. It needs `pip install jupyterlab playwright` on top of the dev re
 To click around the explorer yourself, start `jupyter lab` and seed the scene in the first cell the same way
 (`mock_aws().start()`, then `core = S3Analyzer(**shots.seed_s3_docs())`, then `S3Explorer(core=core)`).
 
-The chat window (`bedrock_chat.py`) is ipywidgets, which only draw in a browser connected to a kernel, so its figures
+The chat window (`bedrock_chat/window/`) is ipywidgets, which only draw in a browser connected to a kernel, so its figures
 (`chat-*`, in `docs/bedrock_chat.md`) come from `chat_shots.py`: it starts JupyterLab on a notebook that opens the
 window on the fake Bedrock, types and clicks through it with Playwright, and writes the WebP files and the figures'
 heights the same way. It needs `pip install jupyterlab playwright` on top of the dev requirements, and Chromium (`$CHROME`, or

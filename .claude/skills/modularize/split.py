@@ -97,10 +97,13 @@ class Needs:
 
 def statement_name(node: ast.stmt) -> str:
     """
-    How a plan names a statement: a function's or class's name, an assignment's targets ("KB, MB, GB, TB").
+    How a plan names a statement: a function's or class's name, an assignment's targets ("KB, MB, GB, TB"), or a
+    bare expression's line ("expr@4291", such as a drawer registered with `_draws(_Code, "text")(_text_lines)`).
     """
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return node.name
+    if isinstance(node, ast.Expr):
+        return f"expr@{node.lineno}"
     if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
         return node.target.id
     if isinstance(node, ast.Assign):

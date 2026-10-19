@@ -18,6 +18,8 @@ from botocore.validate import ParamValidator
 
 from aws_analyzer import bedrock_chat as chatmod
 from aws_analyzer._kit import view as viewmod
+from aws_analyzer._bedrock.markdown import _answer_lines, _markdown_html
+from aws_analyzer._kit.highlight import _python_html
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.bedrock_chat import (
     DEFAULT_PROMPT,
@@ -29,12 +31,6 @@ from aws_analyzer.bedrock_chat import (
     BedrockChatView,
     Citation,
     Passage,
-    _answer_lines,
-    _diff,
-    _markdown_html,
-    _py_literal,
-    _python_html,
-    _question_text,
     answer_cost,
     answer_findings,
     apply_setup,
@@ -89,6 +85,16 @@ from aws_analyzer.bedrock_chat import (
     split_data_sources,
     validate_request,
 )
+from aws_analyzer.bedrock_chat import blocks as blocksmod
+from aws_analyzer.bedrock_chat import style as stylemod
+from aws_analyzer.bedrock_chat.analysis.batches import _question_text
+from aws_analyzer.bedrock_chat.analysis.code import _py_literal
+from aws_analyzer.bedrock_chat.helpers import _diff
+from aws_analyzer.bedrock_chat.view import chat as chat_commands
+from aws_analyzer.bedrock_chat.view import chat_view
+from aws_analyzer.bedrock_chat.window import app as app_window
+from aws_analyzer.bedrock_chat.window import pickers as pickers_pane
+from aws_analyzer.bedrock_chat.window import settings as settings_tab
 
 KB_ID, KB2_ID = "KBID123456", "KBID654321"
 ACCOUNT = "123456789012"
@@ -541,7 +547,7 @@ def test_parse_rag_numbers_each_passage_once():
 def test_each_source_opens_to_its_metadata():
     tagged = ref("Refunds go back to the card.", team="billing", tags=["refunds", "cards"], owner={"name": "Ana"})
     a = parse_rag(rag_resp(citations=(("Refunds take 5-7 business days.", [tagged, BANK]),)))
-    shown = chatmod._sources_html(a)
+    shown = blocksmod._sources_html(a)
     first, second = shown.split('<details class="src">')[1:]
     for text in ('<span class="mk">team</span><span class="mv">billing</span>',
                  '<span class="mv">refunds, cards</span>', '{&quot;name&quot;: &quot;Ana&quot;}',
@@ -551,9 +557,9 @@ def test_each_source_opens_to_its_metadata():
     assert "None of the file&#x27;s own" in second
     assert '<span class="mk mb">document-page-number</span><span class="mv mb">4</span>' in second
     from_old_log = chatmod.Passage(rank=1, text="t", chunk_id="c-1", data_source_id="DS1")
-    assert chatmod._bedrock_keys(from_old_log) == {"chunk-id": "c-1", "data-source-id": "DS1"}
-    assert chatmod._meta_text(a.sources[0]) == 'team=billing · tags=refunds, cards · owner={"name": "Ana"}'
-    assert chatmod._meta_text(a.sources[1]) == "-"
+    assert blocksmod._bedrock_keys(from_old_log) == {"chunk-id": "c-1", "data-source-id": "DS1"}
+    assert blocksmod._meta_text(a.sources[0]) == 'team=billing · tags=refunds, cards · owner={"name": "Ana"}'
+    assert blocksmod._meta_text(a.sources[1]) == "-"
 
 
 def test_collect_stream_builds_a_response_like_retrieve_and_generates():
@@ -674,7 +680,7 @@ def test_python_is_highlighted_and_escaped():
                  '<span class="pf">print</span>'):
         assert part in out
     assert _python_html("x = (1, '<b>'") == "x = (1, &#x27;&lt;b&gt;&#x27;"  # doesn't tokenize: plain, still escaped
-    out = chatmod._json_text_html({"a": [1, True, None, 'x"<']})
+    out = blocksmod._json_text_html({"a": [1, True, None, 'x"<']})
     assert json.loads(plain(out)) == {"a": [1, True, None, 'x"<']}
     assert '<span class="jk">&quot;a&quot;</span>:' in out and '<span class="jl">true</span>' in out
 
@@ -1226,11 +1232,11 @@ def test_config_json_and_the_aws_cli_command():
 
 def test_code_is_highlighted_and_escaped():
     command = cli_command(build_request("<b>?", KB_ID, SONNET_PROFILE, {}, SCHEMA), "us-east-1")
-    out = chatmod._shell_html(command)
+    out = blocksmod._shell_html(command)
     assert plain(out) == command and '<span class="pa">--cli-input-json</span>' in out
     assert '<span class="jk">&quot;knowledgeBaseId&quot;</span>' in out and "<b>" not in out
-    assert chatmod._code_html('{"a": 1}', "json") == '{<span class="jk">&quot;a&quot;</span>: <span class="jn">1</span>}'
-    assert chatmod._code_html("<x>", "other") == "&lt;x&gt;"
+    assert blocksmod._code_html('{"a": 1}', "json") == '{<span class="jk">&quot;a&quot;</span>: <span class="jn">1</span>}'
+    assert blocksmod._code_html("<x>", "other") == "&lt;x&gt;"
 
 
 # ----------------------------------------------------------------------------- AWS
@@ -1943,7 +1949,7 @@ def test_ui_app_outside_jupyter_says_what_to_use(ui, capsys):
 
 
 def test_chat_opens_the_window_and_names_unusable_settings(core, monkeypatch, capsys):
-    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    monkeypatch.setattr(chat_view, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
     view = chatmod.chat("support-docs", model="sonnet", temperature=0.3, bogus=1, settings={"n": 9})
     assert view.values == {"n": 9, "temperature": 0.3} and view.model == "sonnet"
     assert view._notes == ["Not used: No setting 'bogus'. fields() lists every one RetrieveAndGenerate takes in this "
@@ -2141,7 +2147,7 @@ def test_ui_code_gives_the_setup_to_copy(ui, capsys):
 
 
 def test_chat_fills_the_test_tab(core, monkeypatch, capsys):
-    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    monkeypatch.setattr(chat_view, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
     view = chatmod.chat("support-docs", questions="One?\nTwo? | two.md")
     assert view.questions == [("One?", None), ("Two?", "two.md")]
     view = chatmod.chat("support-docs", questions=[42])
@@ -2155,12 +2161,20 @@ def test_chat_fills_the_test_tab(core, monkeypatch, capsys):
 widgets = pytest.importorskip("ipywidgets")
 
 
+def in_cell(monkeypatch, number):
+    """
+    Makes every cell number the window asks for `number`: app() records it, _ipython_display_() compares with it.
+    """
+    for module in (chat_commands, chat_view):
+        monkeypatch.setattr(module, "_cell_number", lambda: number)
+
+
 @pytest.fixture
 def window(core, monkeypatch):
     """
     A view in HTML mode with its window built, as app() would show it in Jupyter.
     """
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 7)
+    in_cell(monkeypatch, 7)
     view = BedrockChatView(core, kb="support-docs", mode="html", progress="off")
     view._shown = []
     view._display = view._shown.append
@@ -2229,9 +2243,9 @@ def test_window_opens_on_the_knowledge_base_and_model(window):
 def test_window_fills_the_browser_unless_given_a_height(window, core, monkeypatch):
     app = window._app
     assert app.log.layout.height is None and all(tab.layout.max_height is None for tab in app.tabs.children)
-    assert ".kbc-app.kbc-app .kbc-log{height:clamp(540px,calc(100vh - 400px),1400px);" in chatmod._CSS
-    assert "body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}" in chatmod._CSS
-    monkeypatch.setattr(chatmod, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
+    assert ".kbc-app.kbc-app .kbc-log{height:clamp(540px,calc(100vh - 400px),1400px);" in stylemod._CSS
+    assert "body[class*=vscode-] .kbc-app.kbc-app .kbc-log{height:540px}" in stylemod._CSS
+    monkeypatch.setattr(chat_view, "BedrockChatAnalyzer", lambda region=None, profile=None: core)
     monkeypatch.setattr(viewmod, "_in_notebook", lambda: True)  # where the View's mode='auto' asks
     shown = []
     monkeypatch.setattr(BedrockChatView, "_display", lambda self, widget: shown.append(widget))
@@ -2299,7 +2313,7 @@ def test_window_finds_any_field_by_name_path_or_what_it_does(window):
     app.add_name.value = "rerank"
     assert listed()[:2] == ["reranker", "rerank_n"] and len(listed()) == len(SCHEMA.search("rerank"))
     app.add_name.value = "model"
-    assert len(listed()) == chatmod._SHOWN_MATCHES and "more match" in app.results.children[-1].value
+    assert len(listed()) == settings_tab._SHOWN_MATCHES and "more match" in app.results.children[-1].value
     app.add_name.value = "rerank"
     assert "re-orders the passages" in app.picks["reranker"][0].children[0].value
     app.picks["rerank_n"][1].click()
@@ -2334,7 +2348,7 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     app.send_button.click()
     a = window.answers[-1]
     assert a.streamed and app.question.value == "" and not app.busy
-    assert "How long do refunds take?" in texts(app)[1] and chatmod._YOU in texts(app)[1]  # your mark beside it
+    assert "How long do refunds take?" in texts(app)[1] and blocksmod._YOU in texts(app)[1]  # your mark beside it
     assert "Refunds take 5-7 business days" in texts(app)[2] and "<sup>[1]</sup>" in texts(app)[2]
     assert '<div class="sh">📎 Sources' in texts(app)[2]
     assert "Request and response JSON" in texts(app)[2] and "refund-policy.pdf · p.3" in texts(app)[2]
@@ -2354,13 +2368,13 @@ def test_window_hides_and_shows_its_panes(window):
     assert "kbc-on" in app.chat_toggle._dom_classes and "kbc-on" in app.side_toggle._dom_classes
     app.side_toggle.click()
     assert app.tabs.layout.display == "none" and "kbc-on" not in app.side_toggle._dom_classes
-    assert app.chat.layout.margin == chatmod._CHAT_ALONE_MARGIN
+    assert app.chat.layout.margin == app_window._CHAT_ALONE_MARGIN
     app.chat_toggle.click()
     assert app.chat.layout.display == "none" and app.tabs.layout.display is None
     assert app.tabs.layout.max_width == "none" and "kbc-on" in app.side_toggle._dom_classes
     app.chat_toggle.click()
     assert app.chat.layout.display is None and app.tabs.layout.display is None
-    assert app.tabs.layout.max_width == chatmod._SIDE_MAX_WIDTH and app.chat.layout.margin == chatmod._CHAT_MARGIN
+    assert app.tabs.layout.max_width == app_window._SIDE_MAX_WIDTH and app.chat.layout.margin == app_window._CHAT_MARGIN
 
 
 def test_window_retrieve_only_searches_without_an_answer(window, clients):
@@ -2413,7 +2427,7 @@ def test_window_retrieve_only_searches_without_an_answer(window, clients):
 
 
 def test_window_opens_on_retrieve_only(core, monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     view = BedrockChatView(core, kb=KB_ID, mode="html", retrieve_only=True, settings={"n": 5, "temperature": 0.3})
     view._display = lambda widget: None
     view.app()
@@ -2430,7 +2444,7 @@ def test_window_shows_errors_where_the_answer_would_be(core, monkeypatch):
     def denied(**_):
         raise client_error("AccessDeniedException", "You don't have access to the model with the specified model ID.")
 
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     view = BedrockChatView(BedrockChatAnalyzer(clients=fakes(rag=denied, stream=denied)), kb=KB_ID, mode="html")
     view._display = lambda widget: None
     view.app()
@@ -2499,7 +2513,7 @@ def test_window_applies_edited_json(window):
 
 
 def test_window_switches_model_and_knowledge_base(core, monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")])
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients), mode="html")
     view._display = lambda widget: None
@@ -2518,7 +2532,7 @@ def test_window_switches_model_and_knowledge_base(core, monkeypatch):
 
 
 def test_window_finds_a_knowledge_base_by_name_or_id(monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales"), kb_summary("ZZZZ999999", "archive", "FAILED")])
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html")
     view._display = lambda widget: None
@@ -2561,7 +2575,7 @@ def test_window_finds_a_knowledge_base_by_name_or_id(monkeypatch):
 
 
 def test_window_picks_a_data_source(monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")], sources=TWO_SOURCES)
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html")
     view._display = lambda widget: None
@@ -2617,7 +2631,7 @@ def test_window_data_source_from_another_cell_and_one_it_cant_list(window, monke
     def denied(**_):
         raise client_error("AccessDeniedException", "not authorized", "ListDataSources")
 
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes()
     clients["bedrock-agent"].handlers["list_data_sources"] = denied
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb=KB_ID, mode="html", data_source=DS2_ID)
@@ -2691,14 +2705,14 @@ def test_window_saves_the_files_list(window, tmp_path, monkeypatch):
     find(files, "nothing-like-it")
     app.files_list_button.click()
     assert "No file in the list to save: change the search." in plain(files.foot.value)
-    monkeypatch.setattr(chatmod, "_LIST_LINK_BYTES", 10)
+    monkeypatch.setattr(pickers_pane, "_LIST_LINK_BYTES", 10)
     find(files, "")
     app.files_list_button.click()
     assert "href" not in app.files_saved.value and "download it from Jupyter's file browser" in plain(app.status.value)
 
 
 def test_window_files_reset_with_another_knowledge_base(monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes(kbs=[kb_summary(), kb_summary(KB2_ID, "sales")])
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients), kb="support-docs", mode="html",
                            files=["refund-policy.pdf"])
@@ -2738,7 +2752,7 @@ def test_window_follows_other_cells(window, capsys):
 def test_window_shows_once_per_cell(window, monkeypatch):
     window._ipython_display_()  # chat() in the cell's last line: already shown
     assert len(window._shown) == 1
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 8)
+    in_cell(monkeypatch, 8)
     window._ipython_display_()  # `ui` in a later cell shows it again
     assert len(window._shown) == 2 and window._shown[1] is window._shown[0]
 
@@ -2757,7 +2771,7 @@ def test_window_lists_nothing_it_cant_read(core, monkeypatch):
         raise client_error("AccessDeniedException", "not authorized to perform: bedrock:ListKnowledgeBases",
                            "ListKnowledgeBases")
 
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes()
     clients["bedrock-agent"].handlers["list_knowledge_bases"] = denied
     clients["bedrock"].handlers["list_foundation_models"] = denied
@@ -2785,7 +2799,7 @@ def test_window_lists_nothing_it_cant_read(core, monkeypatch):
 
 
 def open_window(monkeypatch, clients=None, **kwargs):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients or fakes()), kb="support-docs", mode="html",
                            progress="off", **kwargs)
     view._display = lambda widget: None
@@ -2892,8 +2906,8 @@ def test_window_test_tab_runs_in_the_background_and_stops(monkeypatch):
 
 
 def test_window_tabs_stay_on_one_row_with_an_icon_each():
-    rules = chatmod._tab_rules()
-    assert rules in chatmod._CSS and len(chatmod._TABS) == 6
+    rules = stylemod._tab_rules()
+    assert rules in stylemod._CSS and len(stylemod._TABS) == 6
     for x in ("lm", "p"):  # ipywidgets 8 and 7
         assert f".kbc-side>.{x}-TabBar>.{x}-TabBar-content{{gap:2px;border:0;align-items:stretch;flex-wrap:nowrap}}" \
             in rules
@@ -2947,7 +2961,7 @@ def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
     head = html.unescape(app.sweep_head.value)
     assert "Sweep 1" in head and "Setups, best first" in head and "n=8 · search_type=SEMANTIC did best" in head
     assert '<div class="kbc">' in head and only_table_rules(head)  # the window's style holds the report CSS, once
-    assert [pane for pane in html_widgets(app.root) if chatmod._CSS in pane.value] == [app.root.children[0]]
+    assert [pane for pane in html_widgets(app.root) if stylemod._CSS in pane.value] == [app.root.children[0]]
     assert app.sweep_bar.layout.display == "" and app.setup_pick.value == 3 and sweep.best is view.batches[2]
     assert [label for label, _ in app.setup_pick.options][0] == "#1 · run 3 · n=8 · search_type=SEMANTIC"
     assert "Test run 3 (n=8 · search_type=SEMANTIC)" in app.test_head.value and len(app.test_rows.children) == 3
@@ -2969,7 +2983,7 @@ def test_window_try_variations_asks_every_combination(monkeypatch, capsys):
 
 
 def test_window_asks_twice_before_a_costly_sweep(monkeypatch):
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     clients = fakes()
     view = BedrockChatView(BedrockChatAnalyzer(clients=clients, model_prices={"claude-haiku-4-5": (900.0, 900.0)}),
                            kb="support-docs", mode="html", progress="off")
@@ -3077,7 +3091,7 @@ def test_window_opens_on_the_test_questions_and_the_last_run(core, monkeypatch, 
     capsys.readouterr()
     view.use_html = True
     view._display = lambda widget: None
-    monkeypatch.setattr(chatmod, "_cell_number", lambda: 1)
+    in_cell(monkeypatch, 1)
     view.app()
     app = view._app
     assert app.test_box.value == "One?\nTwo? | two.md" and len(app.test_rows.children) == 2

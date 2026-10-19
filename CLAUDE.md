@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
+through one by clicking, `bedrock_chat/` (a package too) for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
@@ -121,7 +121,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
   `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
   max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it).
-  What `bedrock_kb.py` and `bedrock_chat.py` share is written once in `src/aws_analyzer/_bedrock/`, a package by
+  What `bedrock_kb/` and `bedrock_chat/` share is written once in `src/aws_analyzer/_bedrock/`, a package by
   topic: the Bedrock price tables, `DEFAULT_MODEL`, `model_price` and `short_model` (`prices.py`), the region's model
   list (`parse_models` in `foundation_models.py`, into `ModelInfo`), what Bedrock returns (`Passage`, `Citation`,
   `KBDocument`, `ModelInfo` in `models.py`; `parse_retrieve`, `parse_document`, ... in `parsing.py`), knowledge base
@@ -483,9 +483,12 @@ How the View layer works:
   explorers' `_html`, `_reports`, `_show_tab`, `_tab_line`, `_renew` and stylesheets (`_EXPLORER_CSS`: about half
   their rules match, in different orders). `_CLICK_GRACE` (S3) and `_TOGGLE_GRACE` (Lambda) drop different clicks.
 - `bedrock_chat` is, with the S3 explorer, one of the two interactive UIs, but not a companion: like the other
-  analyzers, it imports `_kit` (and, like `bedrock_kb`, `_bedrock`), and its window is a `_Window`. `chat()` (module
-  level) builds a `BedrockChatView` and calls
-  `app()`, which shows `_ChatApp`, an ipywidgets window (pickers, the conversation as `HTML` widgets in a
+  analyzers, it imports `_kit` (and, like `bedrock_kb`, `_bedrock`), and its window is a `_Window`. `chat()`
+  (`bedrock_chat/view/chat_view.py`, with `BedrockChatView`, made of a `_<Topic>Commands` mixin per `_GROUPS` entry
+  in `view/`) builds a `BedrockChatView` and calls
+  `app()`, which shows `_ChatApp` (`bedrock_chat/window/`: `app.py` composes it from `_PickersPane`,
+  `_ConversationPane`, `_SettingsTab`, `_RequestTab` (Request, Response and Code), `_TestTab` and `_RunsTab`, a module
+  each, and keeps `__init__`, the layout and what the View tells it: `sync`, `added`, `ran`, ...), an ipywidgets window (pickers, the conversation as `HTML` widgets in a
   `column-reverse` box so it stays scrolled to the newest, and the side tabs).
   Widgets live in the kernel, so the window doesn't survive a reopened notebook; `transcript()` renders the
   conversation as an ordinary report that does. Its settings come from botocore's service model:
@@ -671,7 +674,7 @@ runtime's end of support, block-create and block-update dates from AWS's Lambda 
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
 `BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in
-`_bedrock/prices.py`, once for `bedrock_kb.py` and `bedrock_chat.py`, and `_bedrock/` also holds `_Json` with
+`_bedrock/prices.py`, once for `bedrock_kb/` and `bedrock_chat/`, and `_bedrock/` also holds `_Json` with
 `_json_html` / `_plain_json` (`blocks.py`), `SEARCHABLE` (`helpers.py`), and `presigned_url` (`files.py`) (both analyzers' `file_url`, signed by an `s3` client each makes).
 Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
 read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions/explorer/`'s
