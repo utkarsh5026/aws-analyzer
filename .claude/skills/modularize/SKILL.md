@@ -469,7 +469,10 @@ The core has three parts, not one:
 `create_env` and `_run` are the module's only writes, so keep them together in one module with nothing else that
 writes. The View (~1,055) stays one module.
 
-### `dynamodb` (3,499)
+### `dynamodb` (3,499), done
+
+The layout below was the plan. What it became is `plans/dynamodb.py` (7 modules, the largest `view.py` at 1,300
+lines). It differs in one way: `prices.py` holds `DYNAMODB_PRICES`, as in every other package.
 
 A flat package, like the template, with no mixins expected. DynamoDB JSON ↔ Python conversion stays in
 `helpers.py`.
@@ -508,10 +511,10 @@ Update this table in each step's PR.
 | lambda_functions | done | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | done | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
-| bedrock_kb | in review | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
+| bedrock_kb | done | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
 | bedrock_chat | not started | | |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
-| dynamodb | not started | | |
+| dynamodb | in review | | plan in `plans/dynamodb.py`; branch `modularize/dynamodb` |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
 | Phase 2: findings with actions | needs a plan | | ask the user first |
 
@@ -533,6 +536,13 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **dynamodb:**
+  - **`rules.py --apis` lists `dynamodb:Scan` / `Query` under `models.py` and `view.py`.** Strings that name an
+    operation (`operation: str = "scan"`, `_GROUPS`'s `"query"`, `_call("scan", ...)`) count as one unless they're a
+    keyword value or compared. In one file they merged with the analyzer's real calls; split apart they show. The union
+    per service is the baseline's, which is what to compare.
+  - **Nothing for decision 7**: the agent has no DynamoDB tools.
 
 - **bedrock_kb:**
   - **`REEXPORT_KIT` takes any public name the old module imported**, not only `_kit`'s: `split.py` finds where each
