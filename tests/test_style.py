@@ -28,7 +28,34 @@ COMMENTS_LEFT = {
     ".claude/skills/demo/shots.py": 23,
     ".claude/skills/release/release.py": 4,
     "src/aws_analyzer/__init__.py": 3,
-    "src/aws_analyzer/bedrock_chat/__init__.py": 281,
+    "src/aws_analyzer/bedrock_chat/analysis/batches.py": 26,
+    "src/aws_analyzer/bedrock_chat/analysis/code.py": 2,
+    "src/aws_analyzer/bedrock_chat/analysis/filters.py": 2,
+    "src/aws_analyzer/bedrock_chat/analysis/findings.py": 1,
+    "src/aws_analyzer/bedrock_chat/analysis/parsing.py": 1,
+    "src/aws_analyzer/bedrock_chat/analysis/ranking.py": 10,
+    "src/aws_analyzer/bedrock_chat/analysis/request.py": 4,
+    "src/aws_analyzer/bedrock_chat/analysis/schema.py": 22,
+    "src/aws_analyzer/bedrock_chat/analysis/sweeps.py": 5,
+    "src/aws_analyzer/bedrock_chat/analyzer.py": 23,
+    "src/aws_analyzer/bedrock_chat/blocks.py": 14,
+    "src/aws_analyzer/bedrock_chat/helpers.py": 11,
+    "src/aws_analyzer/bedrock_chat/models.py": 31,
+    "src/aws_analyzer/bedrock_chat/style.py": 7,
+    "src/aws_analyzer/bedrock_chat/view/chat.py": 1,
+    "src/aws_analyzer/bedrock_chat/view/chat_view.py": 20,
+    "src/aws_analyzer/bedrock_chat/view/knowledge_bases.py": 2,
+    "src/aws_analyzer/bedrock_chat/view/runs.py": 3,
+    "src/aws_analyzer/bedrock_chat/view/settings.py": 2,
+    "src/aws_analyzer/bedrock_chat/view/tests.py": 4,
+    "src/aws_analyzer/bedrock_chat/window/app.py": 40,
+    "src/aws_analyzer/bedrock_chat/window/conversation.py": 4,
+    "src/aws_analyzer/bedrock_chat/window/pickers.py": 6,
+    "src/aws_analyzer/bedrock_chat/window/request.py": 4,
+    "src/aws_analyzer/bedrock_chat/window/runs.py": 3,
+    "src/aws_analyzer/bedrock_chat/window/settings.py": 5,
+    "src/aws_analyzer/bedrock_chat/window/test.py": 13,
+    "src/aws_analyzer/bedrock_chat/window/widgets.py": 13,
     "src/aws_analyzer/bedrock_kb/analysis/chunks.py": 2,
     "src/aws_analyzer/bedrock_kb/analysis/cost.py": 1,
     "src/aws_analyzer/bedrock_kb/analysis/deciding.py": 1,
@@ -173,9 +200,7 @@ COMMENTS_LEFT = {
 
 MAX_MODULE_LINES = 1500
 PACKAGE = ROOT / "src" / "aws_analyzer"
-LONG_FILES = {
-    "src/aws_analyzer/bedrock_chat/__init__.py",
-}
+LONG_FILES: set[str] = set()
 
 
 def _python_files() -> list[Path]:
