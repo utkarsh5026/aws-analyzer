@@ -791,6 +791,28 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its `_EXTRA_CSS`), cards, `answers.py`'s
   `answer_findings()`, the table of tool calls (each window in the reports' zone, `_fmt_dt`; what the model reads
   stays ISO UTC), the AWS reads (folded) and `answer_next()` under a title naming the Views they're on.
+- **The chat window** (`window.py`, `_AgentChat`, a `_Window`; `AgentView.chat()` imports it lazily and keeps it in
+  `view.window`): the agent's steps drawn as they happen. `ask(on_step=)` puts a listener on the `_Run` (`_Run.tell`):
+  `stream_turn` tells `AgentStep('thinking')` for a model message with tool calls and text, and `as_tool` tells
+  `'tool'` before a call runs and `'tool_done'` after (the same `ToolCall`, filled in). Tools run on LangGraph's
+  threads, so the window runs `core.ask` in the loop's executor and drains a queue of steps on the loop every
+  `_DRAW_EVERY` (`_run_later`; inline without a loop). It's drawn like a terminal (`--ag-mono`, `›` questions, `●`
+  the model's words, `✻ Thinking…`). Each step is its own HTML widget in the `_Turn`'s box, so a line that changes
+  redraws alone. A tool call is its call in colour (`_python_html`) with a badge per service it reads and a `# comment`
+  from `_TOOL_WORDS` (`{t}` from `_target`; a tool it doesn't know reads as its name). The services come from
+  `ToolCall.reads` (`as_tool` copies the toolkit's `reads` for the tool; `services_of` takes their prefixes), and
+  `_SERVICES` maps each to its badge (AWS's category colour and a `_DRAWINGS` line drawing, `ag-s-<code>`); an unknown
+  service gets a grey badge with the start of its name, so a new toolkit's calls show without a change here, and a
+  new service only needs its line in `_SERVICES`. A finished call opens to its operations, coverage, next calls and
+  `ToolCall.result` (what `_reported` handed the model) as a `_JsonTree`. Once answered, the steps fold into one
+  `<details>` line (`_trail_html`, open when something went wrong) naming the services, drawn into the pulse's widget
+  so the log stays pinned to the newest; the rest of the report is `AgentView._checked_blocks` under details. Every
+  box in the log is `flex: 0 0 auto` (`_box`), or the log shrinks it and cuts off its end. An empty conversation is
+  `empty` (the services' legend and `_SUGGESTIONS` rows, `_row_button`s); new chat clears the log back to it. Send
+  turns into stop (the `_Run`'s stop Event) while `busy`, and `AgentView.ask()` refuses while it is and adds its
+  answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
+  `InvokeModelWithResponseStream`. Tests drive it like the other windows (`window()`, `enter()`, `page()` in
+  `test_agent.py`), holding the scripted model back with a `threading.Event` among its replies.
 
 ## The S3 explorer (`s3/explorer/`)
 
@@ -1032,11 +1054,13 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   (`chat-*`, in `bedrock_chat.md`) come from `chat_shots.py` the same way: it opens the window on demo.py's fake
   Bedrock, types and clicks through it, and sets the heights with `shots.set_height`, and so do the knowledge base
   explorer's (`kb-explorer*`, in `bedrock_kb.md`), from `kb_explorer_shots.py`, and the Lambda explorer's
-  (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`. Remake the affected figures when
+  (`lambda-explorer*`, in `lambda_functions.md`), from `lambda_explorer_shots.py`, and the agent's chat window's
+  (`agent-chat*`, in `agent.md`), from `agent_chat_shots.py`, which needs Python 3.11+ with the agent's packages and
+  plays a scripted model over demo.py's Lambda functions. Remake the affected figures when
   a report's look changes, and check their captions and alt text still match, in the guides and in README, which
-  shows twelve of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
+  shows thirteen of them (`overview`, `dynamodb-table-info`, `preview-parquet`, `explorer-tour`, `dynamodb-scan-filter`,
   `bedrock-ask`, `kb-explorer-file`, `chat-window`, `sagemaker-instance`, `opensearch-index-info`, `lambda-functions`,
-  `lambda-explorer-logs`) as `<picture>`s that
+  `lambda-explorer-logs`, `agent-chat`) as `<picture>`s that
   switch to the `-dark` file in dark mode.
 - Versions in `requirements-dev.txt` (which also pins `build`, `twine` and `readme-renderer[md]` for the package
   checks) and `requirements-docs.txt` are pinned and updated by Dependabot; the

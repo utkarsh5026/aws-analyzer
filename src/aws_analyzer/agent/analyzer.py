@@ -19,7 +19,7 @@ from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
-from .answers import AgentAnswer
+from .answers import AgentAnswer, AgentStep
 from .budget import Budget, _Run
 from .guard import _Guard
 from .llm import (
@@ -328,20 +328,23 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.thread = _new_thread()
         return self.thread
 
-    def ask(
+    def ask(  # noqa: PLR0913
         self,
         question: str,
         *,
         new: bool = False,
         stop: threading.Event | None = None,
         progress: Callable[..., None] | None = None,
+        on_step: Callable[[AgentStep], None] | None = None,
         now: datetime | None = None,
     ) -> AgentAnswer:
         """
         Answers a question: the model calls the tools until it can answer, within the budget. Follow-up questions
         continue the conversation (new=True starts a new one). Set `stop` (a threading.Event) to stop it early, or
         interrupt the kernel: either way the answer covers what it read until then. progress(count) is told each
-        step. A model or loop that fails gives an answer with .error set (and .exception) instead of raising.
+        step, and on_step(AgentStep) what the agent does as it does it (its words, its plan, each tool call as it
+        starts and ends), from the threads the tools run on. A model or loop that fails gives an answer with .error
+        set (and .exception) instead of raising.
         """
         question = str(question or "").strip()
         if not question:
@@ -350,7 +353,7 @@ class AgentAnalyzer(_BaseAnalyzer):
             self.new_conversation()
         graph = self._harness()
         moment = now or _utcnow()
-        run = _Run(self.budget, stop=stop or threading.Event())
+        run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step)
         answer = AgentAnswer(question=question, model=self.model, provider=self.provider, thread=self.thread,
                              asked=moment)
         self._guard.reset()

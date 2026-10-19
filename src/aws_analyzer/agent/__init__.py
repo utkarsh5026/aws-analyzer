@@ -31,6 +31,7 @@ Quick start
     agent = AgentView(model="openai:gpt-4.1")            # OpenAI, with OPENAI_API_KEY
     agent = AgentView()                                  # Azure OpenAI from AZURE_OPENAI_ENDPOINT, _API_KEY, _DEPLOYMENT
     agent = AgentView(model="anthropic:claude-sonnet-4-5")   # any provider LangChain's init_chat_model knows
+    agent.chat()                                         # a chat window: ask, and watch each tool call as it runs
     agent.ask("Which Lambda failed last night?")
     agent.ask("Why did orders-etl fail?")                # a follow-up: it remembers the conversation
     agent.ask("Were last night's uploads to acme-raw processed?")   # S3 and Lambda together
@@ -39,6 +40,7 @@ Quick start
     agent.transcript()                                   # every question and answer so far, with their cost
 
     answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .calls, .aws_calls, .cost
+    agent.core.ask("Which functions are slow?", on_step=print)   # each AgentStep as it happens
 
 How it's built
 --------------
@@ -57,15 +59,17 @@ One concern per module, so a new service's tools or a new agent capability goes 
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
     harness.py       The agent loop: deepagents built once, and one question streamed through it.
-    answers.py       AgentAnswer and ToolCall, and the pure findings and next steps a report shows about them.
+    answers.py       AgentAnswer, ToolCall and AgentStep (what the agent does, told as it happens), and the pure
+                     findings and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
+    window.py        The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer.
 """
 
 from __future__ import annotations
 
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
+from .answers import AgentAnswer, AgentStep, ToolCall, answer_findings, answer_next
 from .budget import Budget
 from .guard import READ_PREFIXES, ReadOnlyError
 from .llm import (
@@ -117,6 +121,7 @@ __all__ = [
     "AgentAnalyzer",
     "AgentView",
     "AgentAnswer",
+    "AgentStep",
     "ToolCall",
     "Budget",
     "ReadOnlyError",

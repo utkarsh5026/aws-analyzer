@@ -1949,13 +1949,21 @@ from aws_analyzer import AgentView, set_timezone
 
 set_timezone("Asia/Kolkata")                            # so "last night" means your night (every report follows it too)
 agent = AgentView(provider="bedrock")                   # pick a model: see "Which model" below
-agent.ask("Which Lambda failed last night?")
+agent.chat()                                            # a chat window: ask, and watch each tool call as it runs
+agent.ask("Which Lambda failed last night?")            # or ask in a cell: the answer as a report
 agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
 agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/agent-chat-dark.webp">
+  <img src="docs/images/agent-chat-light.webp" alt="The agent's chat window, drawn like a terminal in a monospace font: › Which Lambda failed in the last 24 hours, and why?; a folded line 2 tool calls · 11s with badges for the services they read, lambda, logs and cloudwatch; then the answer: orders-etl failed 66 of its 2,226 calls with three causes (a KeyError on customer_id in etl.py line 23, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem), report-api's errors and throttles, and the call to look closer; then the model, 2 tool calls, 11s and $0.02, a details link, and a › prompt with a send button">
+</picture>
+
+<p align="center"><sub><code>agent.chat()</code>: every call shows as it runs, with a badge for each AWS service it reads, then folds into one line above the answer. The <a href="docs/agent.md#chat">agent guide</a> shows it at work.</sub></p>
 
 ### Which model
 
@@ -2022,6 +2030,7 @@ alone. No S3 tool reads what's inside a file.
 
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over. Questions asked with `ask()` in other cells join it |
 | `ask(question, new=False)`  | The answer first, then **what it checked**: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
