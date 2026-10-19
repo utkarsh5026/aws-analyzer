@@ -71,7 +71,7 @@ Build in section order, so each layer can be tested on its own:
    card a tone only when a warning in the same report is about it; show statuses in tables as `_Tone` cells, a
    snippet to copy as `_Text(code=True)`, and raw JSON or tags with `collapsed=True`.
 
-A helper that another service has, or could use, goes in `_kit/` once (`_bedrock.py` for one only the Bedrock pair
+A helper that another service has, or could use, goes in `_kit/` once (`_bedrock/` for one only the Bedrock pair
 uses), never as a copy: `rules.py` fails when a service defines a name `_kit` has.
 
 ## 4. Tests

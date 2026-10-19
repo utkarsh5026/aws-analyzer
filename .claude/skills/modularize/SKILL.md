@@ -403,7 +403,17 @@ lines) and `plans/s3_explorer.py` (`s3/explorer/`, 8 modules). It differs in the
 - First commit (decision 7): `S3Analyzer._cloudwatch_in`, and `s3._rule_scope`, `_rule_actions`, `_exposure`,
   `_encryption_label`, `_block_label`.
 
-### `_bedrock.py` (2,078) → `_bedrock/`, before the two Bedrock services
+### `_bedrock.py` (2,078) → `_bedrock/`, done
+
+The layout below was the plan. What it became is `plans/_bedrock.py` (11 modules, the largest `markdown.py` at 730
+lines). It differs in these ways:
+- The dataclasses (`KBDocument`, `Passage`, `Citation`, `ModelInfo`) are in `models.py`, and `parse_models` with its
+  helpers in `foundation_models.py`, so `prices.py` holds only the tables, `model_price`, `short_model` and the
+  rerank models.
+- `helpers.py` (IDs, source names, Bedrock's metadata keys, name matching) and `words.py` (the question's words,
+  snippets and `_highlight`) are new.
+- `markdown.py` is pure (it imports only `_kit.text`), and `blocks.py` is the one UI module: `_Answer`, `_Json`,
+  `_Download`, their drawers and `_file_list_blocks`.
 
 `prices.py` (price tables, `DEFAULT_MODEL`, `model_price`, `short_model`, `parse_models`, `ModelInfo`), `parsing.py`
 (`Passage`, `Citation`, `KBDocument`, `parse_retrieve`, `parse_document`), `filters.py`, `estimates.py`
@@ -486,10 +496,10 @@ Update this table in each step's PR.
 | opensearch | done | #98 | plan in `plans/opensearch.py` |
 | lambda_functions | done | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
-| _bedrock | not started | | before bedrock_kb / bedrock_chat |
+| _bedrock | in review | | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
 | bedrock_kb | not started | | |
 | bedrock_chat | not started | | |
-| sagemaker_env | in review | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
+| sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | not started | | |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
 | Phase 2: findings with actions | needs a plan | | ask the user first |
@@ -512,6 +522,18 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **_bedrock:**
+  - **Its users imported its private names** (`from ._bedrock import _highlight, _Answer, ...`), and a package's
+    `__init__` re-exports only public names. bedrock_kb, bedrock_chat and the agent now import each name from the
+    module that defines it (`from ._bedrock.words import _highlight`), their `X as X` re-exports kept; that was the
+    one change outside the package. When bedrock_kb or bedrock_chat is split, `split.py` carries those imports over
+    with the right depth (`from .._bedrock.words import ...`).
+  - **No snapshot covers it on its own**, and `names.json` skips modules whose name starts with `_`. Run the snapshot
+    for bedrock_kb and bedrock_chat (whose names include what they import from it), the agent's tests, and compare
+    `dir(aws_analyzer._bedrock)` before and after against the names its submodules define.
+  - **`rules.py` read the package's `__all__` as a shared name** and flagged every other `__all__` as a copy of it.
+    `shared_names()` now leaves dunders out and says which module has each name.
 
 - **sagemaker_env:**
   - **An analyzer under the limit can still take mixins**, when the plan splits it by where it reads from. They

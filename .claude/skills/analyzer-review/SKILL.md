@@ -25,11 +25,11 @@ List the View commands the scope adds or changes. Those get the output review in
 ```
 
 `rules.py` covers read-only calls, lazy imports, imports between analyzers, copies of `_kit` helpers (and, in the
-Bedrock pair, of `_bedrock.py`'s), banners,
+Bedrock pair, of `_bedrock/`'s), banners,
 View decoration and docstrings, and
 IAM permissions missing from the README. Report its errors, and any warnings the change caused. It can't see a
 helper copied from one service into another: when the change adds a function another service has too, say whether
-it's the same code (it goes in `_kit/`, or `_bedrock.py` for the Bedrock pair) or a different thing under the name.
+it's the same code (it goes in `_kit/`, or `_bedrock/` for the Bedrock pair) or a different thing under the name.
 
 Don't run the whole test suite here. That's `/check`'s job. Suggest it at the end if it hasn't been run since
 the change.

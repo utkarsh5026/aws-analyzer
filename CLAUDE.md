@@ -11,7 +11,7 @@ through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
-`src/aws_analyzer/_bedrock.py` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
+`src/aws_analyzer/_bedrock/` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
 would have hidden it), and `lambda_functions` isn't `lambda` because `lambda` is a Python keyword
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
@@ -121,17 +121,20 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
   `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
   max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it).
-  What `bedrock_kb.py` and `bedrock_chat.py` share is written once in `src/aws_analyzer/_bedrock.py`: the Bedrock
-  price tables, `DEFAULT_MODEL` and the model helpers (`model_price`, `short_model`, `parse_models`, `ModelInfo`), what
-  Bedrock returns (`Passage`, `Citation`, `KBDocument`, `parse_retrieve`, `parse_document`, ...), the filter helpers
-  (`build_filter`, `with_data_sources`, `describe_sources`), the cost and token estimates, the question's words and
-  snippets, the `_Answer` block (with `_Markdown`) and the `_Json` block, with their drawings, and a file's link and
-  the list of files saved as text (`presigned_url`, `parse_list_link`, `file_list_lines`, `write_file_list`,
-  `SavedFileList`, `_file_list_blocks`, and the `_Download` block with `_download_css`). It's Bedrock's, so
+  What `bedrock_kb.py` and `bedrock_chat.py` share is written once in `src/aws_analyzer/_bedrock/`, a package by
+  topic: the Bedrock price tables, `DEFAULT_MODEL`, `model_price` and `short_model` (`prices.py`), the region's model
+  list (`parse_models` in `foundation_models.py`, into `ModelInfo`), what Bedrock returns (`Passage`, `Citation`,
+  `KBDocument`, `ModelInfo` in `models.py`; `parse_retrieve`, `parse_document`, ... in `parsing.py`), knowledge base
+  IDs, source names and name matching (`helpers.py`), the filter helpers (`build_filter`, `with_data_sources`,
+  `describe_sources` in `filters.py`), the cost and token estimates (`estimates.py`), the question's words and
+  snippets (`words.py`), the answer's markdown (`_Markdown`, `_with_markers`, `_answer_lines` in `markdown.py`), the
+  `_Answer`, `_Json` and `_Download` blocks with their drawings and `_file_list_blocks` (`blocks.py`, the one UI
+  module), and a file's link and the list of files saved as text (`presigned_url`, `parse_list_link`,
+  `file_list_lines`, `write_file_list`, `SavedFileList`, `_notebook_href` in `files.py`). It's Bedrock's, so
   it isn't in `_kit`: only those two import it (`SHARED` in `rules.py`), it imports `_kit` and never an analyzer, and
-  `rules.py` fails when either defines one of its names. Each imports the names it uses, and the public ones it doesn't
-  as `from ._bedrock import model_price as model_price` (a re-export ruff accepts), so `bedrock_chat.model_price` still
-  works. The price tables are one dict for both: `prices=` / `model_prices=` copy them per analyzer, so nothing edits
+  `rules.py` fails when either defines one of its names. Each imports the names it uses from the module that defines
+  them, and the public ones it doesn't as `from ._bedrock.prices import model_price as model_price` (a re-export ruff
+  accepts), so `bedrock_chat.model_price` still works; `_bedrock/__init__.py` re-exports only the public names. The price tables are one dict for both: `prices=` / `model_prices=` copy them per analyzer, so nothing edits
   them. Some names are the same in both files but mean different things, and stay in each: `Answer`, `DEFAULT_PROMPT`,
   `parse_rag`, `describe_filter`, `answer_findings`, `_question_text` and the View's `_answer_blocks`.
   A test that patches a helper patches it where it's looked up: on the analyzer module for a call the analyzer
@@ -143,7 +146,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): the `agent/` package imports
   `lambda_functions` (its Lambda toolkit's `_lambda_module()`, imported when the first tool runs; its type hints
   import it under `TYPE_CHECKING`) and reuses it instead of copying it, and so it does with every analyzer a later
-  toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock.py` (`SHARED`), for the
+  toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock/` (`SHARED`), for the
   `_Answer` block its answers are drawn with. `rules.py` checks each of its modules like an analyzer file, reading
   relative imports from the module's own package (`from ..budget import` is the agent's, `from ...lambda_functions
   import` the analyzer). Nothing imports a companion.
@@ -345,7 +348,7 @@ How the View layer works:
   indexed, the Syncs timeline), `_Pipeline` (each data source's stages, left to right), `_Chunks` (a file's chunks in
   document order: a bar of their sizes, and of where each sits in the file when its text was read, then each folded,
   the text it repeats from the one before in `<mark class="ov">`) and `_Shares` (parts of a whole in one bar: files by
-  state), and in both `_Json` and `_Download` (from `_bedrock.py`; a saved file's ⬇ Download link: its path from the
+  state), and in both `_Json` and `_Download` (from `_bedrock/blocks.py`; a saved file's ⬇ Download link: its path from the
   notebook's folder, which JupyterLab rewrites to its `/files/` URL and downloads because of the `download`
   attribute, or in a window a data: URL up to `_LIST_LINK_BYTES`, since JupyterLab doesn't resolve links in widgets),
   and in `bedrock_chat` `_Code` (code to copy: Python highlighted by
@@ -453,7 +456,7 @@ How the View layer works:
   for (lambda, logs, cloudwatch, ec2), so a writing operation of those can't be named in a literal.
 - Text from a knowledge base is untrusted: HTML blocks escape every piece before wrapping it in markup, and
   `build_prompt` sends passages to a model as data inside `<source>` tags, never as instructions. Answers are
-  markdown: `_Markdown` (stdlib only, in `_bedrock.py` for both) parses blocks and inline markup
+  markdown: `_Markdown` (stdlib only, in `_bedrock/markdown.py` for both) parses blocks and inline markup
   keeping each character's offset in the answer, because citations are offsets into the raw text. Raw HTML stays
   text, links open only http(s) and mailto, and pictures become links. Text mode prints the markdown as written
   (`_answer_lines` leaves code and tables unwrapped).
@@ -666,9 +669,9 @@ AmazonBedrockFoundationModels|AmazonES|AmazonSageMaker|AWSLambda|AmazonCloudWatc
 runtime's end of support, block-create and block-update dates from AWS's Lambda runtimes page (cfn-lint's
 `LmbdRuntimeLifecycle.json` carries the same data when the page can't be reached), and `LATEST_RUNTIMES` the newest
 runtime per language that findings suggest moving to. A model missing from `MODEL_PRICES` shows its cost as unknown rather than a guess.
-`BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in `_bedrock.py`,
-once for `bedrock_kb.py` and `bedrock_chat.py`, and so are `_Json` with `_json_html` / `_plain_json`, `SEARCHABLE`, and
-`presigned_url` (both analyzers' `file_url`, signed by an `s3` client each makes).
+`BEDROCK_PRICES`, `MODEL_PRICES`, `GLOBAL_MODEL_PRICES`, `DEFAULT_MODEL` and the model helpers are in
+`_bedrock/prices.py`, once for `bedrock_kb.py` and `bedrock_chat.py`, and `_bedrock/` also holds `_Json` with
+`_json_html` / `_plain_json` (`blocks.py`), `SEARCHABLE` (`helpers.py`), and `presigned_url` (`files.py`) (both analyzers' `file_url`, signed by an `s3` client each makes).
 Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
 read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions/explorer/`'s
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and

@@ -9,7 +9,7 @@ Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzers it
     builds on (COMPANIONS: the agent/ package on lambda_functions/ and s3/); an import of a
-    module a few analyzers share by any other analyzer (SHARED: _bedrock.py, for bedrock_kb.py, bedrock_chat.py and
+    module a few analyzers share by any other analyzer (SHARED: _bedrock/, for bedrock_kb.py, bedrock_chat.py and
     agent/); a shared module importing an analyzer;
     and _kit/ importing any of them
   - an analyzer defining a name that _kit/ has, or the shared module it imports (a copy of a shared helper: import
