@@ -6,7 +6,8 @@ Split a class that's too big for one module into mixins, moving its methods verb
 PLAN.py defines MIXINS = {"LambdaExplorer": [("_LogsTab", "the mixin's docstring", ["_set_range", ...]), ...]}:
 for each class, its mixins in the order they go in its bases, each with the members it takes. Each member moves with
 the comments above it into a new class before the original, which lists the mixins first in its bases and keeps every
-member the plan doesn't name (its docstring, attributes, __init__ and anything that calls super()). Methods keep their
+member the plan doesn't name (its docstring, attributes, __init__ and anything that calls super()). An alias of a
+method (`_preview_tsv = _preview_csv`) is named by its first name and goes with the method. Methods keep their
 names, so the class has the same attributes and its MRO finds each method where it did.
 """
 
@@ -42,8 +43,14 @@ def load_plan(path: Path) -> ModuleType:
 
 
 def member_name(node: ast.stmt) -> str | None:
+    """
+    How a plan names a member: a method's or nested class's name, or an alias's first name
+    (`_preview_tsv = _preview_psv = _preview_csv` is "_preview_tsv", and moves with the method it names).
+    """
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         return node.name
+    if isinstance(node, ast.Assign) and all(isinstance(target, ast.Name) for target in node.targets):
+        return node.targets[0].id
     return None
 
 

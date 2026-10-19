@@ -6,9 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
-`src/aws_analyzer/` (`s3.py`, `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package, split by layer: see "Architecture of a
-service package") for
+`src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
+through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
@@ -17,8 +16,9 @@ never mixed up with the SageMaker Python SDK (when each analyzer was a file next
 would have hidden it), and `lambda_functions` isn't `lambda` because `lambda` is a Python keyword
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
 next to a notebook; that's gone, and the package is the one way in.
-`s3_explorer.py` is a **companion** to `s3.py`: a clickable file explorer (ipywidgets) that imports `s3` for its
-previews, formatting and AWS calls. `agent/` is a companion to `lambda_functions` and `s3.py`: `AgentView().ask("Which
+`s3/explorer/` is S3's window: a clickable file explorer (ipywidgets) on the package's previews, formatting and AWS
+calls; `s3_explorer.py`, where it was until 0.20.0, only re-exports it now (an alias: `ALIASES` in `rules.py`).
+`agent/` is a companion to `lambda_functions` and `s3`: `AgentView().ask("Which
 Lambda failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
 read-only tools built on `LambdaAnalyzer` and `S3Analyzer` (see "The agent" below). It's the one analyzer that is a package rather
 than a file, because it grows by toolkits (one module per AWS service it has tools for) and by capabilities of the
@@ -139,12 +139,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   (`monkeypatch.setattr(viewmod, "_progress_bar_class", ...)` with `from aws_analyzer._kit import view as viewmod`:
   `_ProgressLine`, the line `_BaseView._progress` shows, makes that call, and `_BaseView.__init__` asks
   `_in_notebook` there too; an explorer's once-per-cell display asks `_cell_number` on `_kit.window`).
-  The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): `s3_explorer.py` imports `s3`
-  (lazily, inside `_s3_module()`), reuses its helpers instead of copying them. Its
-  public commands are guarded by `_kit`'s `@_window_errors`, through its `_ready` (nothing runs without s3.py) and
-  `_command_failed` (the error as a note in its pane; `rules.py` accepts that decorator on a companion's window).
-  The `agent/` package is a companion of `lambda_functions` the same way (its Lambda toolkit's `_lambda_module()`,
-  imported when the first tool runs; its type hints import it under `TYPE_CHECKING`), and of every analyzer a later
+  The exception is a companion (`COMPANIONS` in `.claude/skills/check/rules.py`): the `agent/` package imports
+  `lambda_functions` (its Lambda toolkit's `_lambda_module()`, imported when the first tool runs; its type hints
+  import it under `TYPE_CHECKING`) and reuses it instead of copying it, and so it does with every analyzer a later
   toolkit reads through (`COMPANIONS["agent"]` lists them), and the third user of `_bedrock.py` (`SHARED`), for the
   `_Answer` block its answers are drawn with. `rules.py` checks each of its modules like an analyzer file, reading
   relative imports from the module's own package (`from ..budget import` is the agent's, `from ...lambda_functions
@@ -161,7 +158,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   restore call but never runs it, and Bedrock findings show the `start-ingestion-job` command instead of syncing),
   and nothing stops a notebook, deletes an app or endpoint, or deletes a local file (`sagemaker_env` shows the
   `aws sagemaker stop-notebook-instance ...` / `rm -rf ~/.../.Trash-1000/*` command instead). The one exception is
-  `s3.py`'s `clean_downloads()`, which deletes what the user downloaded, and only from a downloads folder s3.py made:
+  `s3`'s `clean_downloads()` (`s3/analyzer/downloads.py`, with every guard below), which deletes what the user
+  downloaded, and only from a downloads folder s3 made:
   `S3Analyzer._make_downloads_folder` writes `_DOWNLOADS_MARK` (a `.gitignore` of `*`) when the folder is new or
   empty, `_made_for_downloads` checks for it, and `_protected_folder` refuses the notebook's own folder, the home
   folder and the ones above them, even when marked. Local files are only written where the user asks: S3 downloads,
@@ -690,8 +688,8 @@ tests import and patch them there.
   `window`, `progress`, `highlight` and `jsontree`; `render._call` / `_signature` are allowed.
 - `analysis` never imports `analyzer`.
 - No function or class is defined in two modules of a package.
-- Every `*View`, `*Explorer`, `_<Topic>Commands` and `_<Topic>Tab` class (a View or window split into mixins) has
-  its public commands guarded and documented.
+- Every `*View`, `*Explorer`, `_<Topic>Commands`, `_<Topic>Tab` and `_<Topic>Pane` class (a View or window split into
+  mixins) has its public commands guarded and documented.
 - The read-only check reads the clients every module of the package makes.
 - `agent/` reaching into an analyzer's private names is a warning.
 
@@ -775,18 +773,20 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `answer_findings()`, the table of tool calls (each window in the reports' zone, `_fmt_dt`; what the model reads
   stays ISO UTC), the AWS reads (folded) and `answer_next()` under a title naming the Views they're on.
 
-## The S3 explorer (`s3_explorer.py`)
+## The S3 explorer (`s3/explorer/`)
 
-Same five sections: pure helpers (`parse_location`, which also takes S3 console links and object URLs,
-`breadcrumbs`, `sort_entries`, `parse_filter`, `filter_entries`, `count_types`, `folder_stats`), `S3Navigator` as the
+`navigator.py` holds the pure helpers (`parse_location`, which also takes S3 console links and object URLs,
+`breadcrumbs`, `sort_entries`, `parse_filter`, `filter_entries`, `count_types`, `folder_stats`) and `S3Navigator`, the
 logic layer (one `list_objects_v2` level per page, `list_rest()` up to `list_limit` entries, or everything below a
 folder with `below()`, back / forward / up history, a folder cache capped by count and by `_CACHED_ENTRIES`, listing
-errors in `Folder.error`, never prints), and `S3Explorer` as the UI. Listing is split so it can run off the main
-thread: `_request()` makes one request and changes nothing, and `_add()` adds its page to the `Folder` (`_list()`
-does both, a page at a time). How the UI works:
+errors in `Folder.error`, never prints). `S3Explorer` (`window.py`) is the UI, made of a mixin per pane: `_ListPane`
+(`listing.py`, the list on the left), `_ReportPane` (`report.py`, the right pane), `_SelectionPane` (`selection.py`)
+and `_SettingsPane` (`settings.py`), with what they share in `frame.py` (the stylesheet, `_Row`). Listing is split so
+it can run off the main thread: `_request()` makes one request and changes nothing, and `_add()` adds its page to the
+`Folder` (`_list()` does both, a page at a time). How the UI works:
 
-- It finds `s3.py` with `_s3_module()`: the module `core` came from, else `import s3`, else `__main__` (s3.py pasted
-  into a cell). Without it, a note; without ipywidgets, a text listing (`mode="text"` forces that).
+- It's part of the s3 package and imports what it draws from there; `_s3_module()` (`x.s3`) is that package.
+  Without ipywidgets, a text listing (`mode="text"` forces that).
 - The right pane is a private `S3View` whose `_show` is replaced by `_capture`: its reports (`preview`, `head`,
   `document`, `download`, `link`, `summary`, `bucket_info`, `overview`) land in an `HTML` widget, with the `_Next`
   block dropped and the file's path shortened to its name. Progress bars go into an `Output` above it. `x.ui` is a
@@ -855,9 +855,7 @@ does both, a page at a time). How the UI works:
   classes lazily through a module `__getattr__` (importing `aws_analyzer` loads no analyzer). A new analyzer needs
   its module name in `__init__.py`'s `_MODULES` (`tests/test_package.py` checks every module is listed) and its
   classes in `__all__`, `_EXPORTS` and the `TYPE_CHECKING` imports.
-- Every analyzer imports `._kit` relatively, so it runs only as part of the package. `s3_explorer._s3_module()`
-  looks for `s3` next to itself (`{__package__}.s3`) first; its `import s3` and `__main__` fallbacks date from the
-  standalone files.
+- Every analyzer imports `._kit` relatively, so it runs only as part of the package.
 - The one dependency is `boto3>=1.35.72`, the first release whose service models have every AWS operation the
   analyzers call (Bedrock's `ListKnowledgeBaseDocuments`). A call to a newer operation means raising it; otherwise
   keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's
@@ -951,8 +949,8 @@ does both, a page at a time). How the UI works:
   helper. Each service's help test checks that `set(_commands(<Service>View))` is what its `_GROUPS` list.
 - `tests/test_s3_explorer.py` builds `S3Explorer(mode="widgets")` without a kernel (ipywidgets works without one),
   clicks with `button.click()`, sets text boxes' `.value`, sends the path box's Enter with
-  `_handle_custom_msg({"event": "submit"}, [])`, sets `_CLICK_GRACE` to 0, and reads the right pane as blocks in
-  `x.shown`.
+  `_handle_custom_msg({"event": "submit"}, [])`, sets `_CLICK_GRACE` to 0 (on `s3.explorer.listing`, the module that
+  reads it), and reads the right pane as blocks in `x.shown`.
 
 ## Docs and dependencies
 

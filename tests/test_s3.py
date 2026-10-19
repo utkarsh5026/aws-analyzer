@@ -5,8 +5,10 @@ import hashlib
 import io
 import itertools
 import json
+import os
 import pickle
 import re
+import shutil
 import sys
 import tarfile
 import time
@@ -35,9 +37,24 @@ from aws_analyzer import s3 as s3mod
 from aws_analyzer import set_timezone
 from aws_analyzer._kit import jsontree, render
 from aws_analyzer._kit import view as viewmod
-from aws_analyzer._kit.blocks import _Report
+from aws_analyzer._kit.blocks import _Cards, _Findings, _Next, _Report, _Table, _Text, _Title, _Tone
+from aws_analyzer._kit.deps import _require
+from aws_analyzer._kit.fmt import _duration
+from aws_analyzer._kit.jsontree import _JsonTree
 from aws_analyzer._kit.progress import _progress_text
-from aws_analyzer._kit.view import _commands
+from aws_analyzer._kit.render import _call, _prose
+from aws_analyzer._kit.view import _commands, _friendly_errors
+from aws_analyzer.s3.analysis import downloads as downloads_analysis
+from aws_analyzer.s3.analysis.downloads import _nice_size
+from aws_analyzer.s3.analyzer import downloads as downloads_reads
+from aws_analyzer.s3.analyzer import streams
+from aws_analyzer.s3.blocks import _Flow, _Pages
+from aws_analyzer.s3.helpers import _restore_note
+from aws_analyzer.s3.readers.data import _json_lines_start, _json_prefix, _json_shape
+from aws_analyzer.s3.readers.formats import _browser_type
+from aws_analyzer.s3.style import _render_html
+from aws_analyzer.s3.view import files as file_commands
+from aws_analyzer.s3.view.files import _flow_items, _web_picture
 from aws_analyzer.s3 import (
     GB,
     KB,
@@ -659,7 +676,7 @@ def test_zip_checks_and_findings():
         True,
         None,
     ]
-    assert [s3mod._nice_size(n) for n in (3 * MB + 1, 340 * MB, 3 * GB + 1)] == [
+    assert [_nice_size(n) for n in (3 * MB + 1, 340 * MB, 3 * GB + 1)] == [
         "4MB",
         "400MB",
         "4GB",
@@ -709,7 +726,7 @@ def test_progress_text():
     assert _progress_text("Checking", "buckets", 3, 12, 2.0).startswith(
         "Checking... 3 of 12 buckets (25%)"
     )
-    assert [s3mod._duration(t) for t in (0.42, 42.4, 125, 7500)] == [
+    assert [_duration(t) for t in (0.42, 42.4, 125, 7500)] == [
         "0.4s",
         "42s",
         "2m 05s",
@@ -1306,40 +1323,40 @@ def test_picture_shows_itself_in_a_notebook():
 
 def test_web_picture(monkeypatch):
     small = Picture(PNG, "image/png", "chart.png")
-    assert s3mod._web_picture(small) == (small, "")
+    assert _web_picture(small) == (small, "")
     noise = np.random.default_rng(0).integers(0, 256, (1700, 2000, 3), dtype=np.uint8)
     big = Picture(image_bytes(Image.fromarray(noise), "PNG"), "image/png", "photo.png", part=4, alt="A photo")
-    shrunk, why = s3mod._web_picture(big)
+    shrunk, why = _web_picture(big)
     assert shrunk is not None and why == "" and len(shrunk.data) < len(big.data)
     assert max(Image.open(io.BytesIO(shrunk.data)).size) == 1600 and (shrunk.part, shrunk.alt) == (4, "A photo")
     tiff = Picture(image_bytes(Image.new("L", (50, 40), 128), "TIFF"), "", "scan.tiff")
-    converted, _ = s3mod._web_picture(tiff)
+    converted, _ = _web_picture(tiff)
     assert converted is not None and converted.mime == "image/png" and converted.data.startswith(b"\x89PNG")
-    assert s3mod._web_picture(Picture(EMF, "", "diagram.emf")) == (None, "EMF format, which browsers can't show")
+    assert _web_picture(Picture(EMF, "", "diagram.emf")) == (None, "EMF format, which browsers can't show")
     monkeypatch.setitem(sys.modules, "PIL.Image", None)
-    assert "pip install pillow" in s3mod._web_picture(tiff)[1]
-    assert s3mod._web_picture(small) == (small, "")  # small pictures a browser can show need nothing
+    assert "pip install pillow" in _web_picture(tiff)[1]
+    assert _web_picture(small) == (small, "")  # small pictures a browser can show need nothing
 
 
 def test_flow_items():
-    items, cut, capped = s3mod._flow_items(parse_docx(io.BytesIO(docx_bytes())))
+    items, cut, capped = _flow_items(parse_docx(io.BytesIO(docx_bytes())))
     assert items[:4] == [("title", "Churn study"), ("h1", "Data"), ("p", "Rows: 2,000\tok"), ("li", "direct bullet")]
     assert ("table", [["plan", "churn"], ["pro", "11%"]]) in items and not cut and not capped
     doc = parse_docx(io.BytesIO(docx_bytes(PICTURE_BODY, media=PICTURE_MEDIA)), pictures=True)
-    items, cut, capped = s3mod._flow_items(doc)
+    items, cut, capped = _flow_items(doc)
     assert [role for role, _ in items] == ["title", "picture", "p", "missing", "table", "picture"]
     assert items[3][1].startswith("Picture diagram.emf, 108 B: ") and items[3][1].endswith("EMF format, which browsers can't show")
-    items, cut, capped = s3mod._flow_items(doc, max_parts=1, max_pictures=0)
+    items, cut, capped = _flow_items(doc, max_parts=1, max_pictures=0)
     assert [role for role, _ in items] == ["title", "missing"] and "not shown here" in items[1][1]
     assert cut and capped == 1
-    assert s3mod._flow_items(doc, max_chars=3)[0][0] == ("title", "Rep")
+    assert _flow_items(doc, max_chars=3)[0][0] == ("title", "Rep")
 
 
 def test_pages_and_flow_render_as_html():
     page = Picture(PNG, "image/png", "Page 1", page=1)
     flow = [("title", "<script>alert(1)</script>"), ("li", "one"), ("li", "two"), ("p", "text"),
             ("table", [["h1", "h2"], ["a", "b"]]), ("picture", page), ("missing", "Picture a.emf: EMF format")]
-    html = s3mod._render_html([s3mod._Pages([page, page], "Pages 1–2"), s3mod._Flow(flow), s3mod._Pages([page])], 50)
+    html = _render_html([_Pages([page, page], "Pages 1–2"), _Flow(flow), _Pages([page])], 50)
     assert html.count('src="data:image/png;base64,') == 4 and "<figcaption>Page 1</figcaption>" in html
     # a page fills the screen when clicked (CSS only), keeping its place in the report meanwhile, with ‹ › to the
     # pages before and after it, across the report's _Pages blocks
@@ -1350,12 +1367,12 @@ def test_pages_and_flow_render_as_html():
     assert f'<label class="zn zprev" for="{group}-1"' in html and f'<label class="zn znext" for="{group}-3"' in html
     assert f'for="{group}-0"' in html and f'for="{group}-4"' not in html  # no › after the last page
     assert '<span class="zh">Page 1 · 3 of 3 · click the page or ✕ to go back</span>' in html
-    other = s3mod._render_html([s3mod._Pages([page])], 50)
+    other = _render_html([_Pages([page])], 50)
     assert group not in other and "zprev" not in other.split("</style>")[1] and " of " not in other.split("</style>")[1]
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "<script>" not in html
     assert "<ul><li>one</li><li>two</li></ul>" in html and '<div class="dh d0">' in html
     assert "<h1" not in html and "<th>h1</th>" in html and 'class="pm"' in html
-    text = render._render_text([s3mod._Pages([page]), s3mod._Flow(flow)], 50)
+    text = render._render_text([_Pages([page]), _Flow(flow)], 50)
     assert "[Page 1: a picture" in text and "# <script>" in text and "- one\n- two" in text
     assert "h1 | h2\na | b" in text and "[Picture Page 1, " in text and "[Picture a.emf: EMF format]" in text
 
@@ -1917,8 +1934,9 @@ def test_download_zip(core, aws, tmp_path, monkeypatch):
     assert one.plan.path == str(tmp_path / "readme.zip") and zipfile.ZipFile(
         one.plan.path
     ).namelist() == ["readme.md"]
+    monkeypatch.setattr(downloads_analysis, "_ZIP_SMALL_FILE", 1024)
     monkeypatch.setattr(
-        s3mod, "_ZIP_SMALL_FILE", 1024
+        downloads_reads, "_ZIP_SMALL_FILE", 1024
     )  # big files stream into the zip instead of being read whole
     big = core.download_zip(
         f"s3://{BUCKET}/big/", str(tmp_path)
@@ -1946,7 +1964,7 @@ def test_download_zip(core, aws, tmp_path, monkeypatch):
     assert few.more and len(few.files) + len(few.left_out) == 3 and not few.can_download
     aws.put_object(Bucket=BUCKET, Key="raw//etc/escape.txt", Body=b"x")
     assert "raw//etc/escape.txt" in core.plan_zip(f"s3://{BUCKET}/raw/").left_out
-    monkeypatch.setattr(s3mod, "_free_space", lambda path: 10)
+    monkeypatch.setattr(downloads_reads, "_free_space", lambda path: 10)
     assert not core.download_zip(f"s3://{BUCKET}/raw/", "full-disk.zip").written
     with pytest.raises(ValueError, match="max_size"):
         core.plan_zip(f"s3://{BUCKET}/raw/", max_size=None)
@@ -2163,17 +2181,17 @@ def test_preview_details(core):
 
 
 def test_json_prefix_reads_the_start_of_a_cut_document():
-    assert s3mod._json_prefix('{"a": 1, "b": [1, 2, {"c": "x') == ({"a": 1, "b": [1, 2, {}]}, 3)
-    assert s3mod._json_prefix('[{"id": 1}, {"id": 2}, {"id": 3') == ([{"id": 1}, {"id": 2}, {}], 2)  # 3 may be 30
-    assert s3mod._json_prefix('{"a": tr') == ({}, 1)
-    assert s3mod._json_prefix('﻿{"k\\n": "v\\u00e9", "n": -1.5e3}') == ({"k\n": "vé", "n": -1500.0}, 0)
+    assert _json_prefix('{"a": 1, "b": [1, 2, {"c": "x') == ({"a": 1, "b": [1, 2, {}]}, 3)
+    assert _json_prefix('[{"id": 1}, {"id": 2}, {"id": 3') == ([{"id": 1}, {"id": 2}, {}], 2)  # 3 may be 30
+    assert _json_prefix('{"a": tr') == ({}, 1)
+    assert _json_prefix('﻿{"k\\n": "v\\u00e9", "n": -1.5e3}') == ({"k\n": "vé", "n": -1500.0}, 0)
     for broken in ("", "{'a': 1, ", '"a lone string', '{"a": [1}', "{1: 2", '{"a": 1} {'):
-        assert s3mod._json_prefix(broken) in (None, ({"a": 1}, 0)), broken
-    assert s3mod._json_prefix('{"a": 1} {') == ({"a": 1}, 0)  # a whole document, then something else
-    assert s3mod._json_lines_start(b'{"a": 1}\n{"a": 2}') and not s3mod._json_lines_start(b'{\n  "a": 1')
-    assert not s3mod._json_lines_start(b'{"a": 1}')
-    assert s3mod._json_shape({"a": {"b": [1, {"c": {}}]}}) == {"keys": 1, "depth": 4}
-    assert s3mod._json_shape([1, 2], cut=1) == {"items": "2+"} and s3mod._json_shape("x") == {}
+        assert _json_prefix(broken) in (None, ({"a": 1}, 0)), broken
+    assert _json_prefix('{"a": 1} {') == ({"a": 1}, 0)  # a whole document, then something else
+    assert _json_lines_start(b'{"a": 1}\n{"a": 2}') and not _json_lines_start(b'{\n  "a": 1')
+    assert not _json_lines_start(b'{"a": 1}')
+    assert _json_shape({"a": {"b": [1, {"c": {}}]}}) == {"keys": 1, "depth": 4}
+    assert _json_shape([1, 2], cut=1) == {"items": "2+"} and _json_shape("x") == {}
 
 
 def test_json_tree_folds_caps_and_reads_json_in_strings():
@@ -2186,7 +2204,7 @@ def test_json_tree_folds_caps_and_reads_json_in_strings():
         "prompt": "line one\nline two " + "x" * 500,
         "<b>": "<script>alert(1)</script>",
     }
-    tree = s3mod._JsonTree(value, items=5)
+    tree = _JsonTree(value, items=5)
     lines = {child.key: child for child in tree.root.children}
     assert "".join(text for _, text in lines['"shape"'].tokens) == "[3, 224, 224]"  # short: one line
     embedding = lines['"embedding"']
@@ -2204,24 +2222,24 @@ def test_json_tree_folds_caps_and_reads_json_in_strings():
     assert '  "shape": [3, 224, 224],\n' in text and "    0.0, 0.1, 0.2, 0.3, 0.4,\n    … 45 more items\n" in text
     assert '"message": (JSON in a string) {' in text and "(518 characters)" in text
     assert '"rows": [\n    {\n      "id": 0,\n      "ok": null\n    },' in text
-    html = s3mod._render_html([tree], 50)
+    html = _render_html([tree], 50)
     assert "<script>" not in html and "&lt;script&gt;" in html and "&lt;b&gt;" in html
     assert '<details class="jo" open><summary title="data">' in html
     assert '<summary title="data[&#x27;rows&#x27;][1]">' in html  # each line's path in Python, on hover
     assert 'data-n="30 items"' in html and 'data-n="518 characters"' in html and "JSON in a string" in html
     assert '<div class="jv">line one\nline two xxx' in html  # a long string unfolds to its text as it reads
 
-    many = s3mod._JsonTree({f"k{i}": i for i in range(150)})
+    many = _JsonTree({f"k{i}": i for i in range(150)})
     assert len(many.root.children) == 100 and many.root.more == 50 and many.capped == {"key"}
-    huge = s3mod._JsonTree([[i] for i in range(3000)], items=3000)
+    huge = _JsonTree([[i] for i in range(3000)], items=3000)
     assert huge.full and huge.root.more == 3000 - 1999
-    cut = s3mod._JsonTree({"a": [1, 2]}, cut=2)
+    cut = _JsonTree({"a": [1, 2]}, cut=2)
     assert jsontree._json_tree_text(cut).splitlines() == ["{", '  "a": [', "    1, 2", jsontree._JSON_END]
     assert 'data-n="2+ items"' in jsontree._json_tree_html(cut)
 
 
 def test_json_tree_unfolds_all_and_back():
-    tree = s3mod._JsonTree({"rows": [{"id": i, "tags": {"a": i}} for i in range(9)], "prompt": "x" * 500})
+    tree = _JsonTree({"rows": [{"id": i, "tags": {"a": i}} for i in range(9)], "prompt": "x" * 500})
     folded = {node.path for node in tree._nodes() if node.kind in ("object", "array") and not node.open}
     assert tree.folded and "data['rows'][1]" in folded and "data['rows'][0]['tags']" not in folded
     tree.unfold()
@@ -2229,7 +2247,7 @@ def test_json_tree_unfolds_all_and_back():
     assert not tree.root.children[1].open  # a long string stays folded to its start
     tree.unfold("start")
     assert {node.path for node in tree._nodes() if node.kind in ("object", "array") and not node.open} == folded
-    assert not s3mod._JsonTree({"a": 1, "b": [1, 2]}).folded  # all of it shows: nothing to unfold
+    assert not _JsonTree({"a": 1, "b": [1, 2]}).folded  # all of it shows: nothing to unfold
 
 
 def test_preview_shows_the_start_of_a_json_file_too_big_to_read(core, aws, capsys):
@@ -2260,7 +2278,7 @@ def test_preview_archived_file_says_how_to_restore_it(core, aws):
     p = core.preview(f"s3://{BUCKET}/cold/old events.csv")
     assert p.kind == "unavailable" and "can't be read until it's restored, which takes 3-5 hours" in p.note
     assert f"aws s3api restore-object --bucket {BUCKET} --key 'cold/old events.csv' --restore-request Days=7" in p.note
-    assert "under way" in s3mod._restore_note(BUCKET, "k", "DEEP_ARCHIVE", 'ongoing-request="true"')
+    assert "under way" in _restore_note(BUCKET, "k", "DEEP_ARCHIVE", 'ongoing-request="true"')
 
 
 def test_bucket_config(core, aws):
@@ -2422,7 +2440,7 @@ def test_simulate_lifecycle(core):
     ],
 )
 def test_browser_type(key, expected):
-    assert s3mod._browser_type(key) == expected
+    assert _browser_type(key) == expected
 
 
 def test_presigned_url_and_download(core, tmp_path):
@@ -2484,7 +2502,7 @@ def test_download_folder(core, aws, tmp_path, monkeypatch):
     assert core.download_folder(f"s3://{BUCKET}/", "partial", limit=2).truncated
 
     monkeypatch.setattr(
-        s3mod.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10)
+        shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10)
     )
     with pytest.raises(ValueError, match="Not enough disk space"):
         core.download_folder(f"s3://{BUCKET}/big/", "big")
@@ -2523,7 +2541,7 @@ def test_downloads_folder_and_cleaning(core, tmp_path, monkeypatch):
         raise PermissionError(13, "Permission denied", path)
 
     core.download(f"s3://{BUCKET}/docs/readme.md")
-    monkeypatch.setattr(s3mod.os, "remove", locked)
+    monkeypatch.setattr(os, "remove", locked)
     stuck = core.clean_downloads(core.list_downloads().entries)  # LocalDownloads work too
     assert stuck.failed == {"readme.md": "Permission denied"} and stuck.freed == 0 and (home / "readme.md").exists()
     monkeypatch.undo()
@@ -3498,7 +3516,7 @@ def test_file_details_stops_at_max_read_and_skips_archives(core, aws, monkeypatc
     skipped = [d.key for d in report.files if d.skipped == "max_read"]
     assert skipped == ["f3.csv", "f4.csv", "f5.csv"] and report.read_capped and report.bytes_read == 768 * KB
     assert [d.skipped for d in report.files if d.key == "z/cold.pdf"] == ["archived"]
-    monkeypatch.setattr(s3mod, "DETAILS_FILE_MAX", 256 * KB)
+    monkeypatch.setattr(streams, "DETAILS_FILE_MAX", 256 * KB)
     aws.put_object(Bucket="lots", Key="big.tar", Body=tar_bytes({f"m{i}": bytes(300 * KB) for i in range(4)}, "w"))
     tar = core.file_details("s3://lots/big.tar").files[0]
     assert tar.facts["files"] == 1 and tar.facts["files_estimate"] == "at least"
@@ -3674,7 +3692,7 @@ def test_ui_documents_as_pictures(ui, capsys, formats, monkeypatch):
     every = run(capsys, ui.document, uri_of("docs/report.pdf"), pictures=True)
     assert "[Page 1: a picture" in every and "-- Text of page 1 --\nHello S3" in every
     assert "a picture" not in run(capsys, ui.document, uri_of("docs/scan.pdf"), pictures=False)
-    monkeypatch.setattr(s3mod, "_MAX_PICTURES", 1)
+    monkeypatch.setattr(file_commands, "_MAX_PICTURES", 1)
     capped = run(capsys, ui.document, uri_of("docs/scan.pdf"))
     assert "Drew 1 of the 2 pages without text" in capped
     assert "document('s3://formats/docs/scan.pdf', pages=[2], pictures=True) draws the next ones" in capped
@@ -3705,7 +3723,7 @@ def test_ui_document_lays_out_a_pdfs_text(ui, capsys, aws, formats):
     every = run(capsys, ui.document, uri, pictures=True)  # every page drawn: no text laid out, nothing left out
     assert "## Quarterly report" not in every and "-- Text of page 1 --\nACME - internal" in every
     assert "Left out" not in every
-    html = s3mod._render_html([s3mod._Flow([("page", 2), ("li", "2. Two"), ("li", "A bullet"), ("p", "a\nb")])], 0)
+    html = _render_html([_Flow([("page", 2), ("li", "2. Two"), ("li", "A bullet"), ("p", "a\nb")])], 0)
     assert '<div class="pg">Page 2</div><ul><li class="n">2. Two</li><li>A bullet</li></ul><p>a\nb</p>' in html
     assert ".s3a .flow li.n{list-style:none}" in html
 
@@ -3820,7 +3838,7 @@ def test_ui_download_and_ls_of_a_file(ui, capsys, tmp_path, monkeypatch):
         capsys, ui.download, f"s3://{BUCKET}/nothing-here/"
     )
     monkeypatch.setattr(
-        s3mod.shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10)
+        shutil, "disk_usage", lambda path: types.SimpleNamespace(free=10)
     )
     assert "Not enough disk space" in run(
         capsys, ui.download, f"s3://{BUCKET}/big/file.bin", "big.bin"
@@ -3978,7 +3996,7 @@ def test_progress_shows_one_tqdm_bar_at_a_time(ui, monkeypatch):
 
 def test_progress_without_tqdm(core, capsys, monkeypatch):
     clock = itertools.count(0, 1.0)
-    monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # tqdm not installed
     for progress in ("auto", "plain"):
         ui = S3View(core, mode="text", progress=progress)
@@ -4048,27 +4066,27 @@ def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
     assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
     assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
     clock = itertools.count(0, 1.0)
-    monkeypatch.setattr(s3mod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm either: the plain line
     with ui._progress("Reading", unit="B") as tick:
         tick(MB, 4 * MB)
         tick(2 * MB, 4 * MB)
     assert "Reading... 2.0 MB of 4.0 MB (50%)" in capsys.readouterr().err
-    needs = s3mod._friendly_errors(lambda self: s3mod._require("no_such_pkg", "Drawing this"))
+    needs = _friendly_errors(lambda self: _require("no_such_pkg", "Drawing this"))
     assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_html_escapes_untrusted_keys():
     blocks = [
-        s3mod._Title("<b>x</b>"),
-        s3mod._Table(["Key"], [["<script>alert(1)</script>"]]),
+        _Title("<b>x</b>"),
+        _Table(["Key"], [["<script>alert(1)</script>"]]),
     ]
-    rendered = s3mod._render_html(blocks, 50)
+    rendered = _render_html(blocks, 50)
     assert "<script>alert" not in rendered and "&lt;script&gt;" in rendered
 
 
 def test_text_tables_cap_rows():
-    table = s3mod._Table(["n"], [[str(i)] for i in range(10)])
+    table = _Table(["n"], [[str(i)] for i in range(10)])
     out = render._render_text([table], 3)
     assert "7 more rows" in out
 
@@ -4079,10 +4097,10 @@ def test_findings_panel_puts_warnings_first():
         ("warn", "call documents(status='FAILED') <b>now</b>"),
         ("info", "another"),
     ]
-    text = render._render_text([s3mod._Findings(found)], 50)
+    text = render._render_text([_Findings(found)], 50)
     assert "-- Findings: 1 warning, 2 notes --" in text
     assert text.index("[!] call") < text.index("[i] a note") < text.index("[i] another")
-    rendered = s3mod._render_html([s3mod._Findings(found)], 50)
+    rendered = _render_html([_Findings(found)], 50)
     assert (
         '<span class="chip warn">1 warning</span><span class="chip info">2 notes</span>' in rendered
         and "&lt;b&gt;now&lt;/b&gt;" in rendered
@@ -4093,14 +4111,14 @@ def test_findings_panel_puts_warnings_first():
         in rendered
     )
     assert (
-        render._render_text([s3mod._Findings([], empty="No issues found.")], 50).strip()
+        render._render_text([_Findings([], empty="No issues found.")], 50).strip()
         == "[ok] No issues found."
     )
-    assert render._render_text([s3mod._Findings([])], 50).strip() == ""
+    assert render._render_text([_Findings([])], 50).strip() == ""
 
 
 def test_prose_marks_commands_and_escapes_them():
-    rendered = s3mod._prose(
+    rendered = _prose(
         "run x('<script>alert(1)</script>') (see what_if), then aws s3api get-bucket-policy "
         "--bucket b --output json."
     )
@@ -4110,36 +4128,36 @@ def test_prose_marks_commands_and_escapes_them():
     )
     assert "(see what_if)" in rendered  # a word in brackets isn't a call
     assert ">aws s3api get-bucket-policy --bucket b --output json</code>." in rendered
-    assert s3mod._prose("plain text") == "plain text"
+    assert _prose("plain text") == "plain text"
 
 
 def test_call_formats_next_steps():
     from decimal import Decimal
 
-    assert s3mod._call("tree", "s3://b/", depth=2) == "tree('s3://b/', depth=2)"
-    assert s3mod._call("more") == "more()"
+    assert _call("tree", "s3://b/", depth=2) == "tree('s3://b/', depth=2)"
+    assert _call("more") == "more()"
     assert (
-        s3mod._call(
+        _call(
             "scan", "t", where={"n": Decimal("42"), "r": ("between", Decimal("1.5"), 2)}
         )
         == "scan('t', where={'n': 42, 'r': ('between', 1.5, 2)})"
     )
-    assert s3mod._call("x", (1,), [2]) == "x((1,), [2])"
+    assert _call("x", (1,), [2]) == "x((1,), [2])"
 
 
 def test_render_tones_pills_scroll_folds_and_next():
     blocks = [
-        s3mod._Cards([("Encryption", "none", "warn"), ("Objects", "12")]),
-        s3mod._Table(
+        _Cards([("Encryption", "none", "warn"), ("Objects", "12")]),
+        _Table(
             ["Status", "N"],
-            [[s3mod._Tone("FAILED", "bad"), s3mod._Tone("3", "warn")]] * 35,
+            [[_Tone("FAILED", "bad"), _Tone("3", "warn")]] * 35,
         ),
-        s3mod._Table(["Tag", "Value"], [["env", "prod"]], title="Tags", collapsed=True),
-        s3mod._Table(["Call"], [["query('t', 1)"]], code_cols=(0,)),
-        s3mod._Text("{}", title="JSON", code=True),
-        s3mod._Next([("summary('s3://b/')", "what's in it"), ("more()", "")]),
+        _Table(["Tag", "Value"], [["env", "prod"]], title="Tags", collapsed=True),
+        _Table(["Call"], [["query('t', 1)"]], code_cols=(0,)),
+        _Text("{}", title="JSON", code=True),
+        _Next([("summary('s3://b/')", "what's in it"), ("more()", "")]),
     ]
-    rendered = s3mod._render_html(blocks, 50)
+    rendered = _render_html(blocks, 50)
     assert (
         'class="card warn"' in rendered
         and '<div class="card"><div class="l">Objects' in rendered
@@ -4159,8 +4177,8 @@ def test_render_tones_pills_scroll_folds_and_next():
         '<span class="nl">Next</span>' in rendered
         and '<span class="badge">🪣 S3</span>' not in rendered
     )
-    assert '<span class="badge">🪣 S3</span>' in s3mod._render_html(
-        [s3mod._Title("Summary")], 50
+    assert '<span class="badge">🪣 S3</span>' in _render_html(
+        [_Title("Summary")], 50
     )
     text = render._render_text(blocks, 50)
     assert (
@@ -4175,9 +4193,9 @@ def test_text_tables_say_how_to_see_hidden_rows():
     rows = [[str(i)] for i in range(10)]
     assert (
         "7 more rows not shown (the view shows 3; ui.max_rows = 0 shows all)"
-        in render._render_text([s3mod._Table(["n"], rows)], 3)
+        in render._render_text([_Table(["n"], rows)], 3)
     )
-    assert render._render_text([s3mod._Table(["n"], rows, max_rows=4)], 3).endswith(
+    assert render._render_text([_Table(["n"], rows, max_rows=4)], 3).endswith(
         "6 more rows not shown"
     )
 
@@ -4201,7 +4219,7 @@ def test_html_tables_sort_filter_and_pick_columns():
     report = _Report(50, root="s3a")
     rules = report.rules
     html_out = render._table_html(
-        s3mod._Table(["Key", "Size", "Storage class"], rows, title="Files", path_cols=(0,)), report)
+        _Table(["Key", "Size", "Storage class"], rows, title="Files", path_cols=(0,)), report)
     assert html_out.startswith('<form class="tbl" method="dialog" autocomplete="off">')
     assert '<th class="srt k1 n"><label class="o1" title="Sort: largest first">' in html_out
     assert '<label class="o2" title="Sort: smallest first" hidden="hidden">' in html_out
@@ -4234,17 +4252,17 @@ def test_html_tables_sort_filter_and_pick_columns():
         "Reports 2024/q1 summary.pdf\n… and 3 more")
     assert render._path_html("… and 3 more") == '<span class="pl"><span class="pn">… and 3 more</span></span>'
     # small tables, tree tables and lists of commands stay plain
-    assert "<form" not in render._table_html(s3mod._Table(["Tag", "Value"], [["a", "1"], ["b", "2"]]), _Report(50))
-    tree = render._table_html(s3mod._Table(["Folder", "Objects"], [["a/", "1"], ["  b/", "2"], ["c/", "3"]], tree=True),
+    assert "<form" not in render._table_html(_Table(["Tag", "Value"], [["a", "1"], ["b", "2"]]), _Report(50))
+    tree = render._table_html(_Table(["Folder", "Objects"], [["a/", "1"], ["  b/", "2"], ["c/", "3"]], tree=True),
                               _Report(50))
     assert "srt" not in tree
-    rendered = s3mod._render_html([s3mod._Table(["Key", "Size", "Storage class"], rows)], 50)
+    rendered = _render_html([_Table(["Key", "Size", "Storage class"], rows)], 50)
     assert rendered.index("<style>.s3a form.tbl:has(") < rendered.index("<form")  # its rules ship with it
 
 
 def test_text_tables_keep_file_names():
     key = "raw/events/year=2026/month=09/day=01/hour=05/source=mobile-app/region=us-east-1/part-00001-c000.parquet"
-    out = render._render_text([s3mod._Table(["Key", "Note"], [[key, "x" * 120]], path_cols=(0,))], 50)
+    out = render._render_text([_Table(["Key", "Note"], [[key, "x" * 120]], path_cols=(0,))], 50)
     assert "…/" in out and "part-00001-c000.parquet" in out and "raw/events" not in out
     assert "x" * 89 + "…" in out  # other columns are still cut at the end
     assert render._clip_path("a/b.csv") == "a/b.csv"

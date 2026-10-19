@@ -105,7 +105,8 @@ jobs:
             from aws_analyzer import s3, s3_explorer
             for name in aws_analyzer.__all__[1:]:
                 getattr(aws_analyzer, name)
-            assert s3_explorer._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
+            assert s3.explorer.navigator._s3_module() is s3, "S3Explorer should build on aws_analyzer.s3"
+            assert s3_explorer.S3Explorer is s3.S3Explorer, "aws_analyzer.s3_explorer should re-export it"
             print(f"aws-analyzer {aws_analyzer.__version__}: every module imports with only boto3")
 
   # One stable status to require in branch protection, so the rule doesn't need editing

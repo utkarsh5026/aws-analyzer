@@ -8,7 +8,7 @@ Check the analyzers against the hard constraints in CLAUDE.md that ruff and pyte
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzers it
-    builds on (COMPANIONS: s3_explorer.py on s3.py, the agent/ package on lambda_functions.py and s3.py); an import of a
+    builds on (COMPANIONS: the agent/ package on lambda_functions/ and s3/); an import of a
     module a few analyzers share by any other analyzer (SHARED: _bedrock.py, for bedrock_kb.py, bedrock_chat.py and
     agent/); a shared module importing an analyzer;
     and _kit/ importing any of them
@@ -26,8 +26,8 @@ Errors (exit 1):
     importing the UI (its package's style / blocks / view / explorer / window, or _kit's blocks, render, view,
     window, progress, highlight or jsontree; render's _call and _signature are allowed), its analysis importing its
     analyzer, a function or class defined in two of its modules, and the command checks above on its *Explorer and
-    on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab). Its AWS calls are checked against
-    the clients every module of the package makes.
+    on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab, _<Topic>Pane). Its AWS calls are
+    checked against the clients every module of the package makes.
 Warnings:
   - PartiQL (execute_statement and friends) can write; it needs a guard that only lets SELECT through, marked
     with a `# read-only: <why>` comment on the call's line
@@ -35,6 +35,8 @@ Warnings:
   - a public View method not annotated `-> None`
   - an AWS operation whose IAM permission isn't in README.md
   - a companion package (agent/) reaching into a private name of an analyzer it builds on (core._window)
+  - an alias module (ALIASES: s3_explorer.py) holding anything but its docstring, imports from the analyzer it stands
+    for and __all__ (that's an error)
 """
 
 from __future__ import annotations
@@ -55,7 +57,8 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
 # S3Toolkit on S3Analyzer).
-COMPANIONS = {"s3_explorer": ("s3",), "agent": ("lambda_functions", "s3")}
+COMPANIONS = {"agent": ("lambda_functions", "s3")}
+ALIASES = {"s3_explorer": "s3"}
 # Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the
 # analyzers that import it don't define its names again.
@@ -65,7 +68,7 @@ PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.pare
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
 KIT_UI = {"blocks", "render", "view", "window", "progress", "highlight", "jsontree"}
 CORE_FROM_RENDER = {"_call", "_signature"}
-MIXIN_RE = re.compile(r"_\w+(Commands|Tab)$")
+MIXIN_RE = re.compile(r"_\w+(Commands|Tab|Pane)$")
 REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")
 NEWER_STDLIB = {"compression", "annotationlib", "tomllib", "zoneinfo", "graphlib"}  # stdlib on newer Pythons
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Scan", "Query", "Select", "BatchGet", "Lookup", "Search",
@@ -288,11 +291,11 @@ def _ui_classes(tree: ast.Module, *, in_package: bool, is_companion: bool) -> li
 def _guards(class_name: str, *, is_companion: bool) -> set[str]:
     """
     The decorators that guard a command of this class: @_friendly_errors on a View's, _kit's @_window_errors on a
-    window's (an explorer or one of its tabs). A companion's classes may use either.
+    window's (an explorer or one of its tabs or panes). A companion's classes may use either.
     """
     if is_companion:
         return {"_friendly_errors", "_window_errors"}
-    if class_name.endswith(("Explorer", "Tab")):
+    if class_name.endswith(("Explorer", "Tab", "Pane")):
         return {"_window_errors"}
     return {"_friendly_errors"}
 
@@ -619,6 +622,26 @@ def _client_services(tree: ast.AST) -> set[str]:
             and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)}
 
 
+def check_alias(path: Path, report: Report) -> None:
+    """
+    An alias module (ALIASES) is kept where an analyzer used to be, so old imports still work (s3_explorer.py, since
+    the explorer became s3/explorer/). It holds its docstring, `from __future__ import annotations`, imports from the
+    analyzer that took its place and __all__, and nothing else: the code lives in that analyzer.
+    """
+    rel = path.relative_to(ROOT).as_posix()
+    target = ALIASES[path.stem]
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for index, node in enumerate(tree.body):
+        is_docstring = index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+        is_future = isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        is_target = isinstance(node, ast.ImportFrom) and _analyzers_imported(node) == [target]
+        is_all = (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                  and node.targets[0].id == "__all__")
+        if not (is_docstring or is_future or is_target or is_all):
+            report.error(f"{rel}:{node.lineno}", f"is an alias of {target} (ALIASES), so it only re-exports names "
+                                                 f"from there; put this in {target}")
+
+
 def _documented(action: str, readme: str) -> bool:
     if action in readme:
         return True
@@ -642,7 +665,10 @@ def main() -> int:
         files += [path for module in sorted(SHARED) if (ANALYZERS / module).is_dir() for path in module_files(module)]
     kit, shared = kit_names(), shared_names()
     for path in files:
-        check_file(path, report, readme, apis, kit, shared)
+        if path.parent == ANALYZERS and path.stem in ALIASES:
+            check_alias(path, report)
+        else:
+            check_file(path, report, readme, apis, kit, shared)
     for package in sorted(PACKAGES) if not args.files else ():
         check_package(package, report)
     for label, items in (("error", report.errors), ("warning", report.warnings)):
@@ -654,12 +680,12 @@ def main() -> int:
             for name in sorted(names):
                 actions = [iam_action(c) or "(none needed)" for c in name.split(" | ")]
                 print(f"  {name:<52} IAM: {' | '.join(actions)}")
-    owners = [_owner(path)[0] for path in files]
+    owners = [_owner(path)[0] for path in files if not (path.parent == ANALYZERS and path.stem in ALIASES)]
     in_kit = owners.count(KIT.name)
     in_shared = sum(owner in SHARED for owner in owners)
     packages = sorted({owner for owner in owners if owner in PACKAGES})
     in_packages = sum(owner in PACKAGES for owner in owners)
-    modules = f"{len(files) - in_kit - in_shared - in_packages + len(packages)} analyzers"
+    modules = f"{len(owners) - in_kit - in_shared - in_packages + len(packages)} analyzers"
     if packages:
         modules += f" ({', '.join(f'{p}/' for p in packages)} as a package of {in_packages} modules)"
     if in_shared:
