@@ -30,8 +30,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   it. Before, each function was folded under the line that calls it, to open one at a time. The tabs come first in
   the report, with the numbers, sentences and findings under them. The same in the explorer's **How it works** and in
   `how_it_works_page()`, where the arrow keys step too.
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
 - Lambda: code in Lambda's reports and explorer is drawn in Cascadia Mono when it's installed, else the system's
   monospace font as before.
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
 
 ### Removed
 
@@ -39,6 +41,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   variables it reads, the event's fields and a test event, its own functions, its imports and its HTTP requests. The
   graph, the steps and the findings show what matters in them; `core.code_map(name)` still returns all of it as data
   (`.aws`, `.env`, `.event`, `.functions`, `.imports`).
+  ([#125](https://github.com/utkarsh5026/aws-analyzer/pull/125))
 
 ## [0.25.0] - 2026-10-19
 
