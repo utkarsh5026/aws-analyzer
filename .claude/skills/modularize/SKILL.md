@@ -514,7 +514,7 @@ Update this table in each step's PR.
 | bedrock_kb | done | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
 | bedrock_chat | not started | | |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
-| dynamodb | in review | | plan in `plans/dynamodb.py`; branch `modularize/dynamodb` |
+| dynamodb | in review | #109 | plan in `plans/dynamodb.py`; branch `modularize/dynamodb` |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
 | Phase 2: findings with actions | needs a plan | | ask the user first |
 
