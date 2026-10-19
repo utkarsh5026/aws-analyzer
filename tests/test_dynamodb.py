@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import boto3
@@ -7,9 +8,15 @@ import pytest
 from moto import mock_aws
 
 from aws_analyzer import dynamodb as ddbmod
+from aws_analyzer._kit import blocks as kitblocks
+from aws_analyzer._kit import deps as depsmod
+from aws_analyzer._kit import fmt as fmtmod
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
+from aws_analyzer.dynamodb import analysis as ddb_analysis
+from aws_analyzer.dynamodb import analyzer as ddb_analyzer
+from aws_analyzer.dynamodb import style as stylemod
 from aws_analyzer.dynamodb import (
     DYNAMODB_PRICES,
     GB,
@@ -175,7 +182,7 @@ def test_key_pattern(value, expected):
 
 
 def test_build_filter():
-    params = ddbmod._expression_params(
+    params = ddb_analysis._expression_params(
         where=build_filter(
             {
                 "status": "failed",
@@ -463,12 +470,12 @@ def test_table_findings_name_missing_permissions():
 
 def test_count_arguments():
     assert [
-        ddbmod._as_count(v, "n") for v in (None, 5, 5.0, "10,000", "10k", "1.5k", "2M")
+        fmtmod._as_count(v, "n") for v in (None, 5, 5.0, "10,000", "10k", "1.5k", "2M")
     ] == [None, 5, 5, 10_000, 10_000, 1500, 2_000_000]
     with pytest.raises(ValueError, match="or None for no limit"):
-        ddbmod._as_count("lots", "limit")
+        fmtmod._as_count("lots", "limit")
     with pytest.raises(ValueError, match="n takes a number of items"):
-        ddbmod._as_int(None, "n")
+        fmtmod._as_int(None, "n")
 
 
 # ------------------------------------------------------------------- AWS (moto)
@@ -702,7 +709,7 @@ def test_sample_spreads_over_segments(core):
 def test_sql(core):
     page = core.sql('SELECT * FROM "orders" WHERE pk = ?', "USER#3")
     assert len(page.items) == 9 and page.keys == ["pk", "sk"] and page.table == TABLE
-    match = ddbmod._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1')
+    match = ddb_analyzer._FROM_RE.search('SELECT * FROM "orders"."by-status" WHERE x = 1')
     assert match and match.groups() == ("orders", None, "by-status")
 
 
@@ -916,7 +923,7 @@ def test_ui_progress_options(capsys, monkeypatch):
         DynamoDBView(mode="text", progress="fancy")
     monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm: a plain line
     clock = iter(range(100))
-    monkeypatch.setattr(ddbmod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
     for progress, shown in (("auto", True), ("plain", True), ("off", False)):
         with DynamoDBView(mode="text", progress=progress)._progress(
             "Reading", unit="items"
@@ -963,26 +970,26 @@ def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
     out = run(capsys, ui.help)
     assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
     assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
-    needs = ddbmod._friendly_errors(lambda self: ddbmod._require("no_such_pkg", "Drawing this"))
+    needs = viewmod._friendly_errors(lambda self: depsmod._require("no_such_pkg", "Drawing this"))
     assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_html_escapes_item_values():
     blocks = [
-        ddbmod._Title("<b>x</b>"),
-        ddbmod._Table(["Value"], [["<script>alert(1)</script>"]]),
+        kitblocks._Title("<b>x</b>"),
+        kitblocks._Table(["Value"], [["<script>alert(1)</script>"]]),
     ]
-    rendered = ddbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert "<script>alert" not in rendered and "&lt;script&gt;" in rendered
 
 
 def test_render_findings_tones_and_next():
     blocks = [
-        ddbmod._Cards([("Point-in-time recovery", "off", "warn")]),
-        ddbmod._Findings(
+        kitblocks._Cards([("Point-in-time recovery", "off", "warn")]),
+        kitblocks._Findings(
             [("info", "b"), ("warn", "a: aws dynamodb update-table --table-name t")]
         ),
-        ddbmod._Next([("sample('t')", "a few items")]),
+        kitblocks._Next([("sample('t')", "a few items")]),
     ]
     text = _render_text(blocks, 50)
     assert (
@@ -990,11 +997,11 @@ def test_render_findings_tones_and_next():
         and "-- Findings: 1 warning, 1 note --\n[!] a:" in text
     )
     assert "Next:\n  sample('t')   a few items" in text
-    rendered = ddbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert (
         'class="card warn"' in rendered
         and '<span class="badge">🗄️ DynamoDB</span>'
-        in ddbmod._render_html([ddbmod._Title("Table t")], 50)
+        in stylemod._render_html([kitblocks._Title("Table t")], 50)
     )
     assert (
         ">aws dynamodb update-table --table-name t</code>" in rendered
