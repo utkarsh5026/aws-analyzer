@@ -21,7 +21,7 @@ from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
 from .._kit.deps import _require
 from .._kit.errors import _Hint
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money
-from .._kit.render import _base_css, _report_html
+from .._kit.render import _base_css, _Look, _report_html
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
@@ -55,12 +55,15 @@ _EXTRA_CSS = """\
 _CSS = _base_css(_ROOT, _EXTRA_CSS)
 _BADGE = "🤖 Agent"
 
+_LOOK = _Look(_CSS, _ROOT, _BADGE)
 
-def _render_html(blocks: list[Any], max_rows: int) -> str:
+
+def _render_html(blocks: list[Any], max_rows: int, theme: str = "") -> str:
     """
-    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
+    A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws, in
+    `theme` when one is named (set_theme's), else in the stylesheet's own look (the windows' reports).
     """
-    return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
+    return _report_html(blocks, max_rows, _LOOK, theme=theme)
 
 
 def _coverage_text(call: ToolCall) -> str:

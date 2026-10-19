@@ -94,6 +94,8 @@ markdown_extensions:
   - pymdownx.details      # ??? question "..." in Troubleshooting
   - pymdownx.highlight
   - pymdownx.superfences
+  - pymdownx.tabbed:       # === "Console" tabs: the themes on the home page
+      alternate_style: true
 
 validation:
   omitted_files: warn

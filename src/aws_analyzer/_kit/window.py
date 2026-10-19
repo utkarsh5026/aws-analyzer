@@ -32,6 +32,7 @@ from .deps import _in_notebook, _require
 from .errors import _Hint
 from .render import _prose
 from .text import _esc, search_rank
+from .themes import _DARK_PAGES, _UNSET_PAGE
 
 
 def _css_height(height: int | str | None) -> str | None:
@@ -81,8 +82,6 @@ _TERMINAL_DARK = {
     "prompt": "#d2a8ff", "ok": "#3fb950", "bad": "#f85149", "warn": "#d29922", "comment": "#8b949e", "k": "#ff7b72",
     "f": "#d2a8ff", "a": "#ffa657", "s": "#a5d6ff", "n": "#79c0ff", "l": "#79c0ff",
 }
-_DARK_PAGES = ('body[data-jp-theme-light="false"]', "body.vscode-dark", "body.vscode-high-contrast")
-_UNSET_PAGE = "body:not([data-jp-theme-light]):not(.vscode-light)"
 
 
 def _theme_tokens(prefix: str, values: dict[str, str]) -> str:

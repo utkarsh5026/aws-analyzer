@@ -27,6 +27,7 @@ from .fmt import _tz_label
 from .progress import _progress_bar, _progress_bar_class, _progress_text
 from .render import _render_text, _signature
 from .text import _esc
+from .themes import _theme_name
 
 
 def _commands(cls: type) -> dict[str, Callable]:
@@ -216,7 +217,7 @@ class _BaseView:
     What a service's View sets:
 
         core          its analyzer: the View's __init__ makes one when it isn't given one
-        _render_html  its look: its stylesheet, root class and badge
+        _render_html  its look: its stylesheet, root class and badge (drawn in set_theme's theme)
         _GROUPS       help() lists the commands in these groups, in this order
         _START        help()'s "Start here": (call, what it shows)
         _PROGRESS     the label and unit _progress() shows when it's given none
@@ -227,7 +228,7 @@ class _BaseView:
     """
 
     core: Any
-    _render_html: Callable[[list[Any], int], str]
+    _render_html: Callable[..., str]
     _render_text = staticmethod(_render_text)
     _GROUPS: dict[str, tuple[str, ...]] = {}
     _START: tuple[tuple[str, str], ...] = ()
@@ -257,7 +258,7 @@ class _BaseView:
                 note = "mode='html' only works in Jupyter (IPython isn't installed here), so this is shown as text."
                 blocks = [*blocks, _Note(note, "warn")]
             else:
-                display(HTML(self._render_html(blocks, self.max_rows)))
+                display(HTML(self._render_html(blocks, self.max_rows, theme=_theme_name())))
                 return
         print(self._render_text(blocks, self.max_rows))
 

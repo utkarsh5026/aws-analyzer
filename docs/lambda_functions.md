@@ -260,8 +260,8 @@ Start with `functions()`: one table answers what you have, what's failing, what 
 ui.functions(regions="all")
 ```
 
-![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-light.webp#only-light){ width="984" height="1283" loading=lazy }
-![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-dark.webp#only-dark){ width="984" height="1283" loading=lazy }
+![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-light.webp#only-light){ width="984" height="1491" loading=lazy }
+![functions(regions="all"): six functions in two of 24 regions with runtime, memory, timeout, triggers, calls, error rate, average run time, when each was last called, estimated monthly cost and warnings; a table by region with code storage and the most runs at once; and warnings about idle provisioned concurrency, runtimes past or near the end of support, rising errors, runs close to the timeout, throttled calls and a public function URL](images/lambda-functions-dark.webp#only-dark){ width="984" height="1491" loading=lazy }
 /// caption
 `ui.functions(regions="all")`: two runtimes AWS no longer patches, $70 a month of provisioned concurrency for a function that never runs two at once, and 3% of calls failing in the last three days, against 0.6% over the month.
 ///
@@ -357,8 +357,8 @@ ui.errors("orders-etl")
 ui.errors("orders-etl", since="7d")            # further back
 ```
 
-![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-light.webp#only-light){ width="984" height="1259" loading=lazy }
-![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-dark.webp#only-dark){ width="984" height="1259" loading=lazy }
+![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-light.webp#only-light){ width="984" height="1472" loading=lazy }
+![errors("orders-etl"): cards for 66 failed calls of 2,226, error lines, causes, 3 timeouts and the last error; findings that runs timed out at the 60 s limit, that the role isn't allowed dynamodb:PutItem, and that KeyError: 'customer_id' happened 8 times; and tables of errors by cause and the newest error lines with their request IDs](images/lambda-errors-dark.webp#only-dark){ width="984" height="1472" loading=lazy }
 /// caption
 `ui.errors("orders-etl")`: three different reasons to fail, each with what to do and the run to look at.
 ///
@@ -401,8 +401,8 @@ It reads the REPORT line Lambda logs at the end of every run: how long it ran an
 ui.performance("orders-etl")
 ```
 
-![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-light.webp#only-light){ width="984" height="1169" loading=lazy }
-![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-dark.webp#only-dark){ width="984" height="1169" loading=lazy }
+![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-light.webp#only-light){ width="984" height="1498" loading=lazy }
+![performance("orders-etl"): cards for 70 runs, the median and slowest run times against the 60 s timeout, memory used of 1,024 MB, cold starts and timeouts; findings that 3 runs timed out, that 256 MB would do instead of 1,024 MB, and that 11% of runs were cold starts; and tables of run time and memory percentiles, how long runs take and the slowest runs](images/lambda-performance-dark.webp#only-dark){ width="984" height="1498" loading=lazy }
 /// caption
 `ui.performance("orders-etl")`: runs use at most 182 MB of the 1,024 MB it has, and three ran into the 60 s timeout.
 ///
@@ -424,8 +424,8 @@ ui.code("orders-etl", "db.py")           # another file: a path, a name, or a gl
 ui.code("orders-etl", max_size="200MB")  # packages up to 50 MB are read by default
 ```
 
-![code("orders-etl"): cards for the package's size zipped and unzipped, its files, layers and handler file; a warning that the package holds a .env file and a note that it carries its own boto3 and botocore; the folders that take the space; and the source of etl.py](images/lambda-code-light.webp#only-light){ width="984" height="1034" loading=lazy }
-![code("orders-etl"): cards for the package's size zipped and unzipped, its files, layers and handler file; a warning that the package holds a .env file and a note that it carries its own boto3 and botocore; the folders that take the space; and the source of etl.py](images/lambda-code-dark.webp#only-dark){ width="984" height="1034" loading=lazy }
+![code("orders-etl"): cards for the package's size zipped and unzipped, its files, layers and handler file; a warning that the package holds a .env file and a note that it carries its own boto3 and botocore; the folders that take the space; and the source of etl.py](images/lambda-code-light.webp#only-light){ width="984" height="1150" loading=lazy }
+![code("orders-etl"): cards for the package's size zipped and unzipped, its files, layers and handler file; a warning that the package holds a .env file and a note that it carries its own boto3 and botocore; the folders that take the space; and the source of etl.py](images/lambda-code-dark.webp#only-dark){ width="984" height="1150" loading=lazy }
 /// caption
 `ui.code("orders-etl")`: a .env file anyone allowed `lambda:GetFunction` can read, and 13 MB of boto3 the runtime already has.
 ///
@@ -446,8 +446,8 @@ ui.how_it_works("orders-etl", max_size="200MB")   # packages up to 50 MB are rea
 
 The report opens with a few sentences on what the code does, then the findings, then **a graph of how it fits together**: what comes in on the left, the handler and its functions in the middle, the AWS services it reaches on the right.
 
-![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-light.webp#only-light){ width="984" height="434" loading=lazy }
-![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-dark.webp#only-dark){ width="984" height="434" loading=lazy }
+![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-light.webp#only-light){ width="984" height="441" loading=lazy }
+![The graph how_it_works("support-agent-actions") draws: the Bedrock agent's event and five environment variables on the left, handler() calling find_order(), open_ticket() and tracking() in the middle, and DynamoDB, the web and SNS on the right; TEAM_TOPIC is marked not set, Query first page only and the web request no timeout](images/lambda-how-it-works-dark.webp#only-dark){ width="984" height="441" loading=lazy }
 /// caption
 The graph in `ui.how_it_works("support-agent-actions")`: `open_ticket()` reads `TEAM_TOPIC`, which isn't set, and `tracking()` calls the shipping API with no timeout.
 ///

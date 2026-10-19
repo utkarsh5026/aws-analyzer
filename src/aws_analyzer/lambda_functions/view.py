@@ -26,6 +26,7 @@ from .._kit.fmt import (
 from .._kit.jsontree import _JsonTree
 from .._kit.render import _call
 from .._kit.text import _clip
+from .._kit.themes import _theme_name
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import (
@@ -1255,7 +1256,7 @@ class LambdaView(_BaseView):
         """
         fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
         whole_graph = code_graph(cmap, max_functions=None, max_depth=None, max_lines=None)
-        page = _render_page(self._how_blocks(cmap, whole_graph), f"How {fn.name} works")
+        page = _render_page(self._how_blocks(cmap, whole_graph), f"How {fn.name} works", theme=_theme_name())
         return self.core._save_page(fn, page, path)
 
     def _page_blocks(self, saved: SavedPage) -> list[Any]:

@@ -173,6 +173,21 @@ Dates you type in (`since="2024-05-01 10:00"`, `older_than="2024-05-01"`) are re
 every notebook, set the `AWS_ANALYZER_TZ` environment variable (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily
 numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
 
+Reports come in five themes, each made for a light or a dark notebook: `console` (the default: boxed panels, WARN and
+INFO tags, numbers in a monospace font), `soft` (rounded tiles on a light fill), `editorial` (a serif title, large
+figures, almost no boxes), `brand` (the guide site's navy, indigo and amber highlighter) and `classic` (thin borders
+and tinted boxes, the look before themes). Every report from then on uses the one you pick, and the ones already in
+the notebook keep theirs ([see them side by side](https://utkarsh5026.github.io/aws-analyzer/index.html#themes)):
+
+```python
+from aws_analyzer import set_theme
+
+set_theme("soft")                 # None goes back to the default
+```
+
+To pick it for every notebook, set the `AWS_ANALYZER_THEME` environment variable (`AWS_ANALYZER_THEME=editorial`).
+The explorer and chat windows keep their own look, and text output reads the same in every theme.
+
 </details>
 
 ## How it works

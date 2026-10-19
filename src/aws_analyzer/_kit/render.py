@@ -4,8 +4,8 @@ blocks every service uses (blocks.py); a service's own blocks register how they'
 
 Each service's reports sit in an HTML box of its own root class (.s3a, .ddb, .kba, ...): `_base_css(root, extra)`
 writes the shared rules for it and adds the rules for the service's own blocks, and the service's
-`_render_html(blocks, max_rows)` is `_report_html` with its stylesheet, root class and badge. `_render_text` is the
-same for every service.
+`_render_html(blocks, max_rows, theme)` is `_report_html` with its `_Look` (stylesheet, root class and badge) and the theme a
+View draws in (themes.py: set_theme's, scoped to the report's box). `_render_text` is the same for every service.
 
 Tables sort by a click on a header, filter a column of a few repeated values and choose their columns, and a finding
 reads as a headline over its detail. All of it is plain HTML and CSS (radio buttons, selects and checkboxes in a form,
@@ -25,13 +25,14 @@ from __future__ import annotations
 import inspect
 import re
 from collections import Counter
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from .blocks import (
     _CELLS, _HTML, _TEXT, _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _drawer, _draws,
 )
 from .fmt import _plural, file_extension
 from .text import _clip, _esc, _pad, _text_bar, _width
+from .themes import _theme_class, _theme_css
 
 _SORT_COLUMNS = 12
 _BASE_RULES = """\
@@ -949,14 +950,28 @@ def _blocks_html(blocks: list[Any], max_rows: int = 0, root: str = "") -> str:
     return _rules_html(report) + body
 
 
-def _report_html(blocks: list[Any], max_rows: int, css: str, root: str, badge: str) -> str:
+class _Look(NamedTuple):
     """
-    A report as HTML: the service's stylesheet, the rules its blocks added, then its blocks in a box of the
-    service's root class.
+    How a service's reports look: its stylesheet (`_base_css`'s), the root class its rules are scoped to and the
+    badge before a title.
     """
-    report = _Report(max_rows, badge, root, tuple(blocks))
+
+    css: str
+    root: str
+    badge: str
+
+
+def _report_html(blocks: list[Any], max_rows: int, look: _Look, *, theme: str = "") -> str:
+    """
+    A report as HTML: the service's stylesheet, the theme's (themes.py), the rules its blocks added, then its blocks
+    in a box of the service's root class, which also carries the theme's class, so the theme's rules reach this
+    report and no other.
+    """
+    report = _Report(max_rows, look.badge, look.root, tuple(blocks))
     body = [_block_html(block, report) for block in blocks]
-    return "".join([css, _rules_html(report), f'<div class="{root}">', *body, "</div>"])
+    theme_css = _theme_css(look.root, theme)
+    box_class = f"{look.root} {_theme_class(theme)}" if theme_css else look.root
+    return "".join([look.css, theme_css, _rules_html(report), f'<div class="{box_class}">', *body, "</div>"])
 
 
 def _block_lines(block: Any, report: _Report) -> list[str]:
