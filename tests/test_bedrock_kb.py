@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -11,16 +12,25 @@ from typing import Any
 import boto3
 import pytest
 from botocore import xform_name
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from botocore.stub import Stubber
 from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import bedrock_kb as kbmod
+from aws_analyzer._bedrock import blocks as bedrock_blocks
+from aws_analyzer._bedrock import files as bedrock_files
+from aws_analyzer._kit import blocks as kitblocks
+from aws_analyzer._kit import deps as depsmod
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit import window as windowmod
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.view import _commands
+from aws_analyzer.bedrock_kb import blocks as kb_blocks
+from aws_analyzer.bedrock_kb import style as stylemod
+from aws_analyzer.bedrock_kb.analysis import common as kb_common
+from aws_analyzer.bedrock_kb.explorer import frame as kb_frame
+from aws_analyzer.bedrock_kb.explorer import window as kb_window
 from aws_analyzer.bedrock_kb import (
     BEDROCK_PRICES,
     DEFAULT_PROMPT,
@@ -2495,13 +2505,13 @@ def test_file_url_signs_s3_files_to_open_in_the_browser():
 
 
 def test_browser_type():
-    assert kbmod._browser_type("s3://b/policies/refund-policy.pdf") == "application/pdf"
-    assert kbmod._browser_type("notes.MD") == "text/plain; charset=utf-8"  # a browser would save text/markdown
-    assert kbmod._browser_type("prices.csv") == "text/plain; charset=utf-8"
-    assert kbmod._browser_type("page.html") == "text/html; charset=utf-8"
-    assert kbmod._browser_type("diagram.png") == "image/png"
+    assert bedrock_files._browser_type("s3://b/policies/refund-policy.pdf") == "application/pdf"
+    assert bedrock_files._browser_type("notes.MD") == "text/plain; charset=utf-8"  # a browser would save text/markdown
+    assert bedrock_files._browser_type("prices.csv") == "text/plain; charset=utf-8"
+    assert bedrock_files._browser_type("page.html") == "text/html; charset=utf-8"
+    assert bedrock_files._browser_type("diagram.png") == "image/png"
     for saved in ("report.docx", "sheet.xlsx", "README", "a.csv.gz"):
-        assert kbmod._browser_type(saved) is None
+        assert bedrock_files._browser_type(saved) is None
 
 
 def test_ui_links_each_source_to_its_file(aws, ui, capsys):
@@ -2522,7 +2532,7 @@ def test_ui_links_each_source_to_its_file(aws, ui, capsys):
     shown: list[Any] = []
     ui._show = shown.extend
     ui.search("How long do refunds take?")
-    rendered = kbmod._render_html(shown, 50)
+    rendered = stylemod._render_html(shown, 50)
     links = re.findall(r'<a class="fl" href="([^"]+)" target="_blank" rel="noopener noreferrer"', rendered)
     assert len(links) == 2  # the custom document has no file to open
     assert links[0].startswith("https://support-docs-bucket.s3.amazonaws.com/policies/refund-policy.pdf?")
@@ -2549,7 +2559,7 @@ def test_ui_links_each_source_to_its_file(aws, ui, capsys):
 
 def test_ui_without_credentials_still_shows_sources(aws, ui, capsys, monkeypatch):
     def unsigned(*args, **kwargs):
-        raise kbmod.BotoCoreError()
+        raise BotoCoreError()
 
     monkeypatch.setattr(ui.core, "file_url", unsigned)
     aws.list_kbs()
@@ -2557,16 +2567,16 @@ def test_ui_without_credentials_still_shows_sources(aws, ui, capsys, monkeypatch
     shown: list[Any] = []
     ui._show = shown.extend
     ui.search("How long do refunds take?")
-    rendered = kbmod._render_html(shown, 50)
+    rendered = stylemod._render_html(shown, 50)
     assert "refund-policy.pdf" in rendered and '<a class="fl"' not in rendered
 
 
 def test_html_links_open_only_web_addresses():
     blocks = [
-        kbmod._Link("javascript:alert(1)", "bad"),
-        kbmod._Table(["File"], [[kbmod._Link("https://x.example/a?b=1&c=<2>", "a<b>.pdf")]]),
+        kb_blocks._Link("javascript:alert(1)", "bad"),
+        kitblocks._Table(["File"], [[kb_blocks._Link("https://x.example/a?b=1&c=<2>", "a<b>.pdf")]]),
     ]
-    rendered = kbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert "javascript:" not in rendered and ">bad<" in rendered
     assert 'href="https://x.example/a?b=1&amp;c=&lt;2&gt;" target="_blank"' in rendered
     assert ">a&lt;b&gt;.pdf</a>" in rendered
@@ -3121,7 +3131,7 @@ def test_ui_progress_options(capsys, monkeypatch):
         BedrockKBView(mode="text", progress="fancy")
     monkeypatch.setattr(viewmod, "_progress_bar_class", lambda notebook: None)  # no tqdm: a plain line
     clock = iter(range(100))
-    monkeypatch.setattr(kbmod.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
     for progress, shown in (("auto", True), ("plain", True), ("off", False)):
         with BedrockKBView(mode="text", progress=progress)._progress(
             "Reading", unit="items"
@@ -3164,22 +3174,22 @@ def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
     out = run(capsys, ui.help)
     assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
     assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
-    needs = kbmod._friendly_errors(lambda self: kbmod._require("no_such_pkg", "Drawing this"))
+    needs = viewmod._friendly_errors(lambda self: depsmod._require("no_such_pkg", "Drawing this"))
     assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
 def test_html_escapes_values():
     blocks = [
-        kbmod._Title("<b>x</b>"),
-        kbmod._Table(["Value"], [["<script>alert(1)</script>"]]),
+        kitblocks._Title("<b>x</b>"),
+        kitblocks._Table(["Value"], [["<script>alert(1)</script>"]]),
     ]
-    rendered = kbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert "<script>alert" not in rendered and "&lt;script&gt;" in rendered
 
 
 def test_html_escapes_passages_even_inside_highlights():
     blocks = [
-        kbmod._Passage(
+        kb_blocks._Passage(
             1,
             0.5,
             "<b>f</b>.pdf",
@@ -3190,7 +3200,7 @@ def test_html_escapes_passages_even_inside_highlights():
             "team=<i>x</i>",
         )
     ]
-    rendered = kbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert (
         "<script>" not in rendered
         and "<img" not in rendered
@@ -3207,15 +3217,15 @@ def test_html_escapes_passages_even_inside_highlights():
 def test_html_escapes_answers():
     text = "Use <script>alert(1)</script> to refund [1]. Plain <b>tail</b>."
     citations = [Citation(0, 44, text[:44], [1])]
-    rendered = kbmod._render_html([kbmod._Answer(text, citations, inline=True)], 50)
+    rendered = stylemod._render_html([bedrock_blocks._Answer(text, citations, inline=True)], 50)
     assert "<script>" not in rendered and "<b>" not in rendered
     assert (
         '<span class="cite">Use &lt;script&gt;alert(1)&lt;/script&gt; to refund <sup>[1]</sup>.</span>'
         in rendered
     )
     kb_text = "Refunds take <i>5</i> days. Rest."
-    rendered = kbmod._render_html(
-        [kbmod._Answer(kb_text, [Citation(0, 27, kb_text[:27], [1, 2])])], 50
+    rendered = stylemod._render_html(
+        [bedrock_blocks._Answer(kb_text, [Citation(0, 27, kb_text[:27], [1, 2])])], 50
     )
     assert (
         '<span class="cite">Refunds take &lt;i&gt;5&lt;/i&gt; days<sup>[1][2]</sup>.</span> Rest.'
@@ -3233,10 +3243,10 @@ def test_dataclasses_default_cleanly():
 
 def test_render_findings_tones_and_next():
     blocks = [
-        kbmod._Cards([("Last sync", "FAILED 2h ago", "bad")]),
-        kbmod._Findings([("warn", "run documents(status='FAILED')")]),
-        kbmod._Table(["Status"], [[kbmod._Tone("FAILED", "bad")]]),
-        kbmod._Next([("chunk(1)", "result #1 in full")]),
+        kitblocks._Cards([("Last sync", "FAILED 2h ago", "bad")]),
+        kitblocks._Findings([("warn", "run documents(status='FAILED')")]),
+        kitblocks._Table(["Status"], [[kitblocks._Tone("FAILED", "bad")]]),
+        kitblocks._Next([("chunk(1)", "result #1 in full")]),
     ]
     text = _render_text(blocks, 50)
     assert (
@@ -3244,7 +3254,7 @@ def test_render_findings_tones_and_next():
         and "-- Findings: 1 warning --" in text
         and "  chunk(1)   " in text
     )
-    rendered = kbmod._render_html(blocks, 50)
+    rendered = stylemod._render_html(blocks, 50)
     assert (
         'class="card bad"' in rendered
         and '<span class="pill bad">FAILED</span>' in rendered
@@ -3451,7 +3461,7 @@ def test_parse_metadata_file_reads_both_forms_and_says_whats_wrong():
         return parse_metadata_file(text, size=size).problems
 
     assert "It isn't valid JSON (Expecting ',' delimiter at line 1, column 20)" in problems('{"team": "billing" "x": 1}')[0]
-    assert problems("[1, 2]") == ["It holds a list; Bedrock reads an object like " + kbmod._METADATA_EXAMPLE + "."]
+    assert problems("[1, 2]") == ["It holds a list; Bedrock reads an object like " + kb_common._METADATA_EXAMPLE + "."]
     assert "put 'team' under metadataAttributes" in problems('{"team": "billing"}')[0]
     assert "metadataAttributes holds a list" in problems('{"metadataAttributes": []}')[0]
     assert "a name Bedrock keeps for its own metadata" in problems(
@@ -3635,33 +3645,33 @@ def test_pick_files_and_the_lines_of_a_file_list():
 
 
 def test_window_text_points_at_the_windows_tabs():
-    assert kbmod._window_text("documents(status='FAILED') shows which; syncs() the history.") == (
+    assert kb_frame._window_text("documents(status='FAILED') shows which; syncs() the history.") == (
         "the Files tab's Failed filter shows which; the Syncs tab the history.")
-    assert kbmod._window_text("Ask for n=6 passages, or narrow the search with data_source= or where=.") == (
+    assert kb_frame._window_text("Ask for n=6 passages, or narrow the search with data_source= or where=.") == (
         "Ask for 6 passages, or narrow the search with a data source or metadata filter.")
-    assert kbmod._window_text("so where= filters see old values; try search_type='HYBRID'") == (
+    assert kb_frame._window_text("so where= filters see old values; try search_type='HYBRID'") == (
         "so metadata filters see old values; try hybrid search")
-    assert kbmod._window_text("ask(q, n=10) and .core.file_inventory(...)") == "ask(q, n=10) and .core.file_inventory(...)"
-    blocks = kbmod._for_window([
-        kbmod._Title("t", "see kbs()"), kbmod._Findings([("warn", "run documents()")], empty="all fine: syncs()"),
-        kbmod._Note("files() lists them"), kbmod._Next([("file('a.pdf')", "how it was indexed")]),
-    ], kbmod._window_text)
+    assert kb_frame._window_text("ask(q, n=10) and .core.file_inventory(...)") == "ask(q, n=10) and .core.file_inventory(...)"
+    blocks = windowmod._for_window([
+        kitblocks._Title("t", "see kbs()"), kitblocks._Findings([("warn", "run documents()")], empty="all fine: syncs()"),
+        kitblocks._Note("files() lists them"), kitblocks._Next([("file('a.pdf')", "how it was indexed")]),
+    ], kb_frame._window_text)
     assert [type(b).__name__ for b in blocks] == ["_Title", "_Findings", "_Note"]
     assert blocks[0].sub == "see the knowledge base list" and blocks[1].items == [("warn", "run the Files tab")]
     assert blocks[1].empty == "all fine: the Syncs tab" and blocks[2].text == "the Files tab lists them"
 
 
 def test_file_report_blocks_render_and_escape():
-    steps = kbmod._Steps([("Read by the <b>parser</b>", "Default <i>", "s3://x/<script>.pdf", "bad"),
+    steps = kb_blocks._Steps([("Read by the <b>parser</b>", "Default <i>", "s3://x/<script>.pdf", "bad"),
                           ("Now", "Indexed", "", "ok")], title="How it was indexed")
-    pipeline = kbmod._Pipeline([("docs-<s3>", [("Parser", "Default", "", "ok"), ("Chunking", "Fixed", "300", "")])],
+    pipeline = kb_blocks._Pipeline([("docs-<s3>", [("Parser", "Default", "", "ok"), ("Chunking", "Fixed", "300", "")])],
                                title="Pipeline")
-    chunks = kbmod._Chunks([(1, chunk(0, 100, page=1), 0), (2, chunk(80, 180, page=1), 159)], title="Chunks",
+    chunks = kb_blocks._Chunks([(1, chunk(0, 100, page=1), 0), (2, chunk(80, 180, page=1), 159)], title="Chunks",
                            spans=[(0.0, 0.4), (0.3, 0.7)], coverage=0.7, terms=["word090"])
     chunks.items.append((3, Passage(3, "<img src=x onerror=alert(1)>", chunk_id="z"), 0))
-    shares = kbmod._Shares([("Indexed", 3, "indexed"), ("Failed <x>", 1, "failed")], title="Files")
-    blocks = [steps, pipeline, chunks, shares, kbmod._Json({"name": "<b>x</b>", "n": [1, 2]}, "Raw", open_depth=1)]
-    html = kbmod._render_html(blocks, 50)
+    shares = kb_blocks._Shares([("Indexed", 3, "indexed"), ("Failed <x>", 1, "failed")], title="Files")
+    blocks = [steps, pipeline, chunks, shares, bedrock_blocks._Json({"name": "<b>x</b>", "n": [1, 2]}, "Raw", open_depth=1)]
+    html = stylemod._render_html(blocks, 50)
     assert "<script>" not in html and "<img" not in html and "<b>parser" not in html and "<b>x</b>" not in html
     assert '<div class="st bad">' in html and "&lt;script&gt;.pdf" in html and "docs-&lt;s3&gt;" in html
     assert '<mark class="ov">' in html and "↩ 159 chars shared" in html and "<mark>word090</mark>" in html
@@ -3916,12 +3926,12 @@ def test_ui_save_file_list(aws, bucket, ui, capsys, tmp_path, monkeypatch):
 def test_save_file_list_report_links_the_file_in_html(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     saved = kbmod.SavedFileList(str(tmp_path / "sub dir" / "kb-files.txt"), 1, text="s3://b/<x>.pdf\n")
-    html_ = kbmod._render_html([kbmod._Download(saved.path, kbmod._notebook_href(saved.path))], 50)
+    html_ = stylemod._render_html([bedrock_blocks._Download(saved.path, bedrock_files._notebook_href(saved.path))], 50)
     assert '<a class="dl" href="sub%20dir/kb-files.txt" download="kb-files.txt"' in html_
-    assert kbmod._notebook_href(str(tmp_path.parent / "elsewhere.txt")) == ""  # outside the notebook's folder
-    data = kbmod._data_href(saved.text)
-    assert data == "data:text/plain;charset=utf-8;base64,czM6Ly9iLzx4Pi5wZGYK" and kbmod._data_href(saved.text, 5) == ""
-    assert "Saved in /x/y.txt" in kbmod._render_html([kbmod._Download("/x/y.txt")], 50)
+    assert bedrock_files._notebook_href(str(tmp_path.parent / "elsewhere.txt")) == ""  # outside the notebook's folder
+    data = bedrock_files._data_href(saved.text)
+    assert data == "data:text/plain;charset=utf-8;base64,czM6Ly9iLzx4Pi5wZGYK" and bedrock_files._data_href(saved.text, 5) == ""
+    assert "Saved in /x/y.txt" in stylemod._render_html([bedrock_blocks._Download("/x/y.txt")], 50)
     inv = FileInventory(KB_ID, "support-docs", sources={DS_ID: "docs-s3", DS2_ID: "more"}, limit=100,
                         truncated={DS_ID: ["files"]}, errors={DS2_ID: {"files": "AccessDenied"}})
     text = _render_text(BedrockKBView(mode="text", core=BedrockKBAnalyzer(client=object()))._saved_list_blocks(
@@ -4172,7 +4182,7 @@ def test_explorer_opens_the_knowledge_base_and_lists_its_files(world):
     assert "Its 6 files, by state" in overview and "1 file failed to index (scanned.pdf)" in overview
     assert "help-site is a WEB data source" in overview and "the Syncs tab shows how many each sync read" in overview
     assert "aws bedrock-agent start-ingestion-job" in overview and "docs-s3" in overview
-    assert not any(isinstance(b, kbmod._Next) for b in x.shown["overview"])  # no calls to copy into a cell
+    assert not any(isinstance(b, kitblocks._Next) for b in x.shown["overview"])  # no calls to copy into a cell
     assert repr(x) == "KBExplorer(support-docs) · help(KBExplorer) says what it shows"
 
 
@@ -4228,7 +4238,7 @@ def test_explorer_holds_the_report_css_once(world):
     x.tab_buttons["files"].click()
     row(x, "faq.md").button.click()
     panes = html_widgets(x.root)
-    [style] = [pane for pane in panes if kbmod._CSS in pane.value]
+    [style] = [pane for pane in panes if stylemod._CSS in pane.value]
     assert style.layout.display == "none"
     pages = [pane for pane in panes if '<div class="kba">' in pane.value]
     rules = [rule for page in pages for style in page.value.split("<style>")[1:]
@@ -4300,7 +4310,7 @@ def test_explorer_saves_the_list_it_shows(world, tmp_path, monkeypatch):
     x.find.value = "no such file"
     x.list_button.click()
     assert plain(x.status.value) == "No file in the list to save: clear the search, or pick All above."
-    monkeypatch.setattr(kbmod, "_LIST_LINK_BYTES", 10)
+    monkeypatch.setattr(kb_window, "_LIST_LINK_BYTES", 10)
     x.find.value = ""
     x.list_button.click()
     assert "href" not in x.saved_view.value and "download it from Jupyter's file browser" in plain(x.status.value)

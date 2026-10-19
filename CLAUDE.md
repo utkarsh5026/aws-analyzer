@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
-`src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
+`src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb.py`, `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
@@ -561,8 +561,9 @@ How the View layer works:
   `_ipython_display_` shows the window once per cell, so a cell
   ending in `chat()` doesn't show it twice. A setting named `rerank` would read as the Bedrock `Rerank` operation to
   `rules.py`, which is why it's `reranker`.
-- `bedrock_kb`'s explorer window, `KBExplorer` (after the View, with `explore()`; `BedrockKBView.explore()` keeps it in
-  `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way, on the
+- `bedrock_kb`'s explorer window, `KBExplorer` (`bedrock_kb/explorer/`: `window.py` with `explore()`, `frame.py` its
+  tabs, stylesheet and `_window_text`, `widgets.py` the field and rows; `BedrockKBView.explore()` imports it lazily and
+  keeps it in `view.explorer`), is the third interactive UI, not a companion, like `bedrock_chat`, and built the same way, on the
   windows' kit (an `_Explorer`): ipywidgets styled by `_EXPLORER_CSS` (scoped under `.kbx-app`, report CSS `_CSS`
   included once in its style widget, so `_html` strips it from each report), no JavaScript, full-row buttons under
   their faces (`_FileRow`, the knowledge base field `_Chooser`, a `_Picker`, with its searchable list and `backdrop`),
@@ -675,7 +676,7 @@ runtime per language that findings suggest moving to. A model missing from `MODE
 Both Bedrock analyzers make their clients with the base's `_cached_client` (once, under a lock, since both windows
 read from threads). What the windows share is in `_kit/window.py` (see "The windows' kit"); `lambda_functions/explorer/`'s
 `_EXPLORER_CSS`, `_EXPLORER_TABS`, `_explorer_rules`, `_LOGO`, `_IN_WINDOW`, `_WINDOW_WORDS`, `_window_text` and
-`explore` share names with `bedrock_kb.py`'s but are its own, as `_CSS` is.
+`explore` share names with `bedrock_kb/explorer/`'s but are its own, as `_CSS` is.
 
 ## Architecture of a service package
 

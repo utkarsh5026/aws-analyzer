@@ -174,7 +174,7 @@ Playwright's).
 .venv/bin/python .claude/skills/demo/chat_shots.py chat-request      # just this one
 ```
 
-The knowledge base explorer (`bedrock_kb.py`'s `explore()`) is ipywidgets too, so its figures (`kb-explorer*`, in
+The knowledge base explorer (`bedrock_kb/explorer/`'s `explore()`) is ipywidgets too, so its figures (`kb-explorer*`, in
 `docs/bedrock_kb.md`) come from `kb_explorer_shots.py`, which works like `chat_shots.py` and reuses its plumbing: it
 opens the window on support-docs, clicks warranty.pdf and one of its chunks, asks it a question, opens a failed file,
 searches, and opens the Syncs tab. `--out <folder>` writes PNGs there instead, to look at them first.
