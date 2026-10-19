@@ -259,15 +259,21 @@ def owner_services(owner: str) -> frozenset[str]:
     return frozenset(services)
 
 
-def shared_names() -> dict[str, set[str]]:
+def shared_names() -> dict[str, dict[str, str]]:
     """
-    Every name each shared module defines: {"_bedrock": {"MODEL_PRICES", ...}} (none for one not written yet).
+    Every name each shared module defines -> where, as a module path: {"_bedrock": {"MODEL_PRICES":
+    "_bedrock.prices", ...}} (none for one not written yet). A package's __all__ and other dunders aren't names
+    it shares.
     """
-    names: dict[str, set[str]] = {}
+    names: dict[str, dict[str, str]] = {}
     for module in SHARED:
         for path in module_files(module):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            names.setdefault(module, set()).update(name for name, _ in _top_level_names(tree))
+            parts = path.relative_to(ANALYZERS).with_suffix("").parts
+            where = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+            for name, _ in _top_level_names(tree):
+                if not (name.startswith("__") and name.endswith("__")):
+                    names.setdefault(module, {})[name] = where
     return names
 
 
@@ -434,7 +440,7 @@ def check_reach(tree: ast.Module, rel: str, report: Report) -> None:
 
 
 def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]],
-               kit: dict[str, str] | None = None, shared: dict[str, set[str]] | None = None) -> None:
+               kit: dict[str, str] | None = None, shared: dict[str, dict[str, str]] | None = None) -> None:
     rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else str(path)
     source = path.read_text(encoding="utf-8")
     lines = source.splitlines()
@@ -497,9 +503,10 @@ def check_file(path: Path, report: Report, readme: str, apis: dict[str, set[str]
                 report.error(f"{rel}:{line}", f"defines {name}, which _kit/{kit[name]}.py has; import it from there "
                                               "(from ._kit." + kit[name] + " import " + name + ") instead of a copy")
             for module in sorted(uses):
-                if name in shared.get(module, set()):
-                    report.error(f"{rel}:{line}", f"defines {name}, which {module}.py has; import it from there "
-                                                  f"(from .{module} import {name}) instead of a copy")
+                where = shared.get(module, {}).get(name)
+                if where:
+                    report.error(f"{rel}:{line}", f"defines {name}, which {where} has; import it from there "
+                                                  f"(from .{where} import {name}) instead of a copy")
 
     # Section banners 1..5 in order.
     banners = [int(m.group(1)) for m in re.finditer(r"^# (\d+)\. ", source, re.MULTILINE)]
@@ -688,8 +695,12 @@ def main() -> int:
     modules = f"{len(owners) - in_kit - in_shared - in_packages + len(packages)} analyzers"
     if packages:
         modules += f" ({', '.join(f'{p}/' for p in packages)} as a package of {in_packages} modules)"
+    shared_packages = sorted({owner for owner in owners if owner in SHARED and (ANALYZERS / owner).is_dir()})
+    in_shared_packages = sum(owner in shared_packages for owner in owners)
     if in_shared:
-        modules += f", {in_shared} shared module"
+        modules += f", {in_shared - in_shared_packages + len(shared_packages)} shared module"
+    if shared_packages:
+        modules += f" ({', '.join(f'{p}/' for p in shared_packages)} as a package of {in_shared_packages} modules)"
     print(f"\nrules: {modules} and {in_kit} _kit modules, {len(report.errors)} errors, "
           f"{len(report.warnings)} warnings")
     return 1 if report.errors else 0
