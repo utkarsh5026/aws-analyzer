@@ -1130,7 +1130,7 @@ of RetrieveAndGenerate) while you watch the request as JSON. Then ask a whole li
 see how each one did, try every combination of the settings you're unsure of at once and see which setup does best,
 keep every run in a file that outlasts a restart, and copy the setup as a Python script, JSON or an AWS CLI command.
 
-📄 [`src/aws_analyzer/bedrock_chat.py`](src/aws_analyzer/bedrock_chat.py) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
+📄 [`src/aws_analyzer/bedrock_chat/`](src/aws_analyzer/bedrock_chat/) · 📖 [Chat guide](https://utkarsh5026.github.io/aws-analyzer/bedrock_chat.html)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-window-dark.webp">

@@ -179,7 +179,8 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
 
       To list the statements, run `split.py` with an empty plan: it names the ones not placed. A name assigned twice
       at the top level is named with its line, `_SECRET_NAME_RE@1669`. In one file the last assignment wins for every
-      function, so check what giving each half its own module changes before you place them.
+      function, so check what giving each half its own module changes before you place them. A bare expression
+      statement (a drawer registered with `_draws(...)(...)`) is named by its line, `expr@4291`.
    2. **A class over the limit becomes mixins first** (decision 5), with `mixins.py`. Add `MIXINS` to the same plan:
       the class, then each mixin's name, docstring and members, in the order they go in its bases. Keep `__init__`
       and anything that calls `super()` on the class. An alias in the class body (`_preview_tsv = _preview_csv`) is
@@ -438,7 +439,21 @@ at 1,060 lines). It differs in these ways:
 mixins (configuration, files, search). `BedrockKBView` (~2,585) → `_<Topic>Commands`. Blocks (`_Steps`,
 `_Pipeline`, `_Chunks`, `_Shares`, `_Passage`) into `blocks/`. `KBExplorer` (~1,000) → `explorer/`.
 
-### `bedrock_chat` (9,079)
+### `bedrock_chat` (9,079), done
+
+The layout below was the plan. What it became is `plans/bedrock_chat.py` (34 modules, the largest `analyzer.py` at
+920 lines). It differs in these ways:
+- `BedrockChatAnalyzer` (880 lines) stayed one module, with no mixins.
+- `analysis/` is parsing, schema, filters, choices (what the pickers list), request, findings, batches, sweeps,
+  ranking, records and code. `Field` lives in `analysis/schema.py`, `Batch` / `BatchItem` in `analysis/batches.py` and
+  `Sweep` in `analysis/ranking.py`, each next to what its properties call; `_diff` went to `helpers.py`.
+- `BedrockChatView` is `_ChatCommands`, `_TestCommands`, `_RunsCommands`, `_SettingsCommands` and
+  `_KnowledgeBaseCommands` by `_GROUPS`, in `view/`; `chat_view.py` keeps the plumbing and `chat()`.
+- `_ChatApp` is `_PickersPane`, `_ConversationPane`, `_SettingsTab`, `_RequestTab` (Request, Response and Code),
+  `_TestTab` and `_RunsTab`, in `window/`; `app.py` keeps `__init__`, the layout, the plumbing and the public
+  methods the View calls (`sync`, `added`, `cleared`, `ran`, `swept`, `loaded`, `runs_changed`).
+- `blocks.py` also holds what the View and the window both draw with (`_wrap`, `_kind_text`, `_setting_marks`,
+  `_QUICK`), since the View can't import the window.
 
 `analysis/`: the request schema (`request_schema`, `Field`, `Schema`, `_KNOWN`, `build_request`,
 `settings_from_request`, `validate_request`), runs and sweeps (`parse_questions`, `sweep_setups`, `rank_runs`,
@@ -512,7 +527,7 @@ Update this table in each step's PR.
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | done | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
 | bedrock_kb | done | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
-| bedrock_chat | not started | | |
+| bedrock_chat | in review | | plan in `plans/bedrock_chat.py` (mixins and modules); every module now fits the limit, so `LONG_FILES` is empty |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | in review | #109 | plan in `plans/dynamodb.py`; branch `modularize/dynamodb` |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
@@ -536,6 +551,19 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **bedrock_chat:**
+  - **A window's public methods that the View calls aren't commands.** `_ChatApp.sync()`, `ran()`, ... have no
+    `@_window_errors`, and `rules.py` checks every public method of a `_*Tab` / `_*Pane` as a command. They stayed in
+    the composed class (`_ChatApp` isn't named `*Explorer`, so it isn't checked), and the mixins hold only private
+    methods. Adding the guard would change behaviour, so it's not part of a move.
+  - **A top-level bare expression** (`_draws(_Code, "text")(_text_lines)`, a drawer registered without a `def`) had no
+    name a plan could use. `split.py` now names one `expr@<line>`.
+  - **A test patched a name two modules look up** (`_cell_number`: `app()` records it, `_ipython_display_` compares
+    with it). Patching one would make the test pass for the wrong reason; `in_cell()` patches both.
+  - **mixins.py writes the new class line as one line**, which went past 120 characters for `BedrockChatView`. Wrap it
+    in the scratch copy before splitting, as with the lazy import.
+  - **Nothing for decision 7**: the agent doesn't read bedrock_chat.
 
 - **dynamodb:**
   - **`rules.py --apis` lists `dynamodb:Scan` / `Query` under `models.py` and `view.py`.** Strings that name an
