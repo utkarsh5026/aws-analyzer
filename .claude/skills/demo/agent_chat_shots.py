@@ -11,7 +11,8 @@ Haiku 4.5 on Amazon Bedrock: it says what it means to do, calls function_health 
 run, on the demo data), and answers from what they found, pausing before each reply the way a model does. It takes
 the window empty (agent-chat-start: the greeting and the questions to start from), with its model settings open on
 Amazon Bedrock (agent-chat-model: the provider list, the model box filled from demo.py's fake Bedrock model list, and
-where questions go and what they cost), then asks the question the way a person would, and takes it while the agent works (agent-chat-working: two tool calls done, Thinking… and Stop), once
+where questions go and what they cost), then asks the question the way a person would, and takes it while the agent works (agent-chat-working: two tool calls done, Thinking…, Stop, and a follow-up typed meanwhile,
+queued under it, which it then drops with its ✕ so the answer stays the last thing in the conversation), once
 it has answered (agent-chat: the steps folded above the answer), and with the steps and a tool call open
 (agent-chat-details: the first call's operations, window and data open). Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
 docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in docs/agent.md, by shots.py's
@@ -44,6 +45,7 @@ from chat_shots import api, chrome, free_port  # noqa: E402
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
 FIGURES = ("agent-chat-start", "agent-chat-model", "agent-chat-working", "agent-chat", "agent-chat-details")
 QUESTION = "Which Lambda failed in the last 24 hours, and why?"
+FOLLOW_UP = "How do I fix the KeyError in orders-etl?"
 MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 PAUSE_SECONDS = 1.5
 ANSWER_PAUSE_SECONDS = 8.0
@@ -163,8 +165,12 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     box.press("Enter")
     page.wait_for_function("document.querySelectorAll('.agc-app .ag-step:not(.ag-run)').length === 2 && "
                            "document.querySelector('.agc-app .ag-pulse')", timeout=60_000)
-    time.sleep(1.2)
+    box.fill(FOLLOW_UP)
+    box.press("Enter")
+    page.wait_for_selector(".agc-app .agc-queued", timeout=10_000)
     shot("agent-chat-working")
+    page.locator(".agc-app .agc-drop").click()
+    page.wait_for_selector(".agc-app .agc-queued", state="detached", timeout=10_000)
     page.wait_for_selector(".agc-app .ag-ans", timeout=60_000)
     shot("agent-chat")
     page.locator(".agc-app .ag-trail > summary").click()
@@ -254,7 +260,7 @@ def main() -> int:
                     save(taken, theme, args.out, heights)
                 browser.close()
             for name, sizes in heights.items():
-                shots.set_height("agent", name, max(sizes))
+                shots.set_height(shots.GUIDES["agent"], name, max(sizes))
                 print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()

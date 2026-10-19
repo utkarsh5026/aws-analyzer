@@ -204,7 +204,7 @@ def main() -> int:
                         heights.setdefault(name, set()).add(round(image.height / SCALE))
                 browser.close()
             for name, sizes in heights.items():
-                shots.set_height("bedrock_kb", name, max(sizes))
+                shots.set_height(shots.GUIDES["bedrock_kb"], name, max(sizes))
                 print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()

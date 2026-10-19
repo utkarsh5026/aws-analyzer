@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import sys
+import time
 from typing import Any, Callable, Iterable
 
 from .._kit.deps import _require
@@ -22,6 +23,10 @@ from .llm import answer_cost, explain_model_error
 _MIN_PYTHON = (3, 11)
 HIDDEN_TOOLS = frozenset({"task", "execute"})
 _OVERTIME_SECONDS = 60
+_WRAP_UP_STEPS = 8
+_WRAP_UP_SECONDS = 90
+_WRAP_UP = ("[The user pressed stop before you finished. Don't call any more tools: they won't run. Answer the "
+            "question now from what your tools already returned, and say what you didn't get to check.]")
 _AI_MESSAGES = ("AIMessage", "AIMessageChunk")
 
 
@@ -66,11 +71,12 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
     The run's listener is told what the model says before calling tools (the tools tell it their own steps). Each step comes whole: the model isn't streamed token by token, which on Bedrock would
     need another permission (InvokeModelWithResponseStream).
     Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button: it keeps what it found) or
-    the time budget is well past. A model or loop that fails, whatever it raises, sets answer.error (what it means
-    with this provider) and answer.exception instead of raising.
+    the time budget is well past. Stopped by `run.stop` before it wrote an answer, it asks the model for one
+    (_wrap_up). A model or loop that fails, whatever it raises, sets answer.error (what it means with this provider)
+    and answer.exception instead of raising.
     """
     cost_of = functools.partial(answer_cost, model_prices=model_prices, provider=provider)
-    base = answer.model
+    count = functools.partial(_count_usage, answer=answer, base=answer.model, run=run, cost_of=cost_of)
     steps = 0
     text = ""
     message = {"role": "user", "content": content}
@@ -78,7 +84,7 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
     try:
         for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
             for msg in _model_messages(update):
-                _count_usage(msg, answer, base, run, cost_of)
+                count(msg)
                 if getattr(msg, "tool_calls", None):
                     _tell_thinking(msg, run)
                 else:
@@ -96,6 +102,34 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
         answer.stopped = "steps" if type(exc).__name__ == "GraphRecursionError" else "error"
         answer.error = explain_model_error(exc, provider)
         answer.exception = exc
+    asked_to_stop = answer.stopped == "stopped" and run.stop.is_set()
+    if asked_to_stop and not text:
+        text = _wrap_up(graph, config, count)
+    return text
+
+
+def _wrap_up(graph: Any, config: dict[str, Any], count: Callable[[Any], None]) -> str:
+    """
+    The answer to a question the user stopped: one more turn in the same conversation, telling the model to answer
+    from what its tools returned, each model message counted like the question's own (`count`). Every tool it calls anyway is refused (run.stop is set, so check_budget says
+    so), and the turn ends after _WRAP_UP_STEPS steps or _WRAP_UP_SECONDS. A tool call the stop cut off is closed
+    by deepagents before the model sees it. A wrap-up that fails, or is interrupted, leaves the answer without text
+    and the stop as the reason, rather than an error the user didn't cause.
+    """
+    message = {"role": "user", "content": _WRAP_UP}
+    deadline = time.monotonic() + _WRAP_UP_SECONDS
+    text = ""
+    try:
+        for update in graph.stream({"messages": [message]}, config={**config, "recursion_limit": _WRAP_UP_STEPS},
+                                   stream_mode="updates"):
+            for msg in _model_messages(update):
+                count(msg)
+                if not getattr(msg, "tool_calls", None):
+                    text = _message_text(msg) or text
+            if text or time.monotonic() > deadline:
+                break
+    except (KeyboardInterrupt, Exception):  # noqa: BLE001
+        return text
     return text
 
 

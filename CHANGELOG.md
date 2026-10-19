@@ -9,6 +9,21 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Agent: the chat window (`AgentView.chat()`) takes your next question while it's still answering. Press Enter and
+  the question waits under the conversation, marked queued, and is asked as a follow-up once the current answer is
+  done, in the order you typed them. **✕** drops a queued question, and **stop** ends the current answer so the
+  next one starts sooner. Before, the window refused a question until the answer was finished.
+  ([#124](https://github.com/utkarsh5026/aws-analyzer/pull/124))
+
+### Changed
+
+- Agent: **stop** in the chat window (and `agent.core.ask(..., stop=event)`) now ends with a written answer. The
+  tools stop, and the model answers from what it had read and says what it didn't get to check. Before, a stopped
+  question usually ended with only its steps and a note that no answer was written.
+  ([#124](https://github.com/utkarsh5026/aws-analyzer/pull/124))
+
 ## [0.25.0] - 2026-10-19
 
 ### Added

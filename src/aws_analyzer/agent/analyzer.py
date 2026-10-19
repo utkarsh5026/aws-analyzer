@@ -395,8 +395,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     ) -> AgentAnswer:
         """
         Answers a question: the model calls the tools until it can answer, within the budget. Follow-up questions
-        continue the conversation (new=True starts a new one). Set `stop` (a threading.Event) to stop it early, or
-        interrupt the kernel: either way the answer covers what it read until then. progress(count) is told each
+        continue the conversation (new=True starts a new one). Set `stop` (a threading.Event) to stop it early: the
+        tools stop, and the model writes its answer from what it read until then. Interrupting the kernel stops it at
+        once, with what it read but no answer written. progress(count) is told each
         step, and on_step(AgentStep) what the agent does as it does it (its words, its plan, each tool call as it
         starts and ends), from the threads the tools run on. A model or loop that fails gives an answer with .error
         set (and .exception) instead of raising.

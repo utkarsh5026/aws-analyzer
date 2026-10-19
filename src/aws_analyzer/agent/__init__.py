@@ -63,7 +63,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      findings and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
-    window.py        The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer.
+    window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
+                     (chat.py), and its ⚙ model panel (model_panel.py).
 """
 
 from __future__ import annotations

@@ -328,7 +328,7 @@ def main() -> int:
                             image = Image.open(png).convert("RGB")
                             image.save(out, "WEBP", quality=90, method=6)
                         heights.add(round(image.height / shots.SCALE))
-                    shots.set_height("s3_explorer", figure.name, max(heights))
+                    shots.set_height(shots.GUIDES["s3_explorer"], figure.name, max(heights))
                     print(f"  {figure.name}: {shots.WIDTH} x {max(heights)}", file=sys.stderr)
                 browser.close()
         finally:

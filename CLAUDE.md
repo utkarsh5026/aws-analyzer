@@ -801,7 +801,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox. A new capability of the loop (a
   subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
-  `KeyboardInterrupt` or the hard time limit, and catches a model or loop error into `AgentAnswer.error` with
+  `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
+  `_WRAP_UP`, in which every tool is refused, so the model writes its answer), and catches a model or loop error into `AgentAnswer.error` with
   `.exception` kept. Everything about LangGraph's messages stays in this file.
 - **`AgentAnalyzer`** (`analyzer.py`) holds the settings and puts the parts together: `ask()` makes the `_Run` and
   the `AgentAnswer`, calls `stream_turn()`, and fills in what the guard and the run counted. `AgentView` (`view.py`)
@@ -826,8 +827,10 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   so the log stays pinned to the newest; the rest of the report is `AgentView._checked_blocks` under details. Every
   box in the log is `flex: 0 0 auto` (`_box`), or the log shrinks it and cuts off its end. An empty conversation is
   `empty` (the services' legend and `_SUGGESTIONS` rows, `_row_button`s); new chat clears the log back to it. Send
-  turns into stop (the `_Run`'s stop Event) while `busy`, and `AgentView.ask()` refuses while it is and adds its
-  answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
+  turns into stop (the `_Run`'s stop Event) while `busy`; Enter meanwhile queues the question (`queued`, `_Queued`:
+  its line and a ✕, drawn under `items` by `_show_log`), and `_answered` asks the next one (`_ask_next`), unless
+  the answer went wrong, when the queue waits for Enter in the empty box or the next answer. `AgentView.ask()`
+  refuses while it's busy and adds its answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
   `InvokeModelWithResponseStream`. **⚙ model** (`model_button`) toggles `_ModelPanel` (`panel`, between the head and
   the log; a package module named `window` because `rules.py` reads its first part as the UI layer): a Dropdown of
   `provider_options()` (`llm.provider_names()`, plus the chat model passed in, `AgentAnalyzer.given_chat_model`), a
