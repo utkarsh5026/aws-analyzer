@@ -211,7 +211,8 @@ class AgentView(_BaseView):
         """
         window = self.window
         if window is not None and window.busy:
-            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then ask again.")
+            raise _Hint("The chat window is answering a question: wait for it, press its Stop, or type the question in "
+                        "the window, which asks it next.")
         with self._progress() as tick:
             answer = self.core.ask(question, new=new, progress=tick)
         if window is not None:

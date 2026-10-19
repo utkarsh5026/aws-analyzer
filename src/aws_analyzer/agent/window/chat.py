@@ -10,7 +10,9 @@ A service's badge (_SERVICES) is its colour and a line drawing, the same whereve
 steps, the header, the empty conversation's legend), so a step's services can be told apart at a glance however many
 toolkits or agents take part; a service it doesn't know shows the start of its name.
 
-The question runs on a worker thread, so the window keeps answering clicks (Stop) while the agent works. The agent
+The question runs on a worker thread, so the window keeps answering clicks (Stop) while the agent works. A question
+typed meanwhile waits under it, marked queued with a ✕ to drop it, and is asked once the one before is answered (or
+stopped), in the order they were typed. The agent
 tells its steps (AgentStep) from whichever thread they happen on, into a queue the window drains on the kernel's
 event loop, where the widgets are drawn. Without a running loop (a script, the tests) the question runs right away
 and the steps are drawn when it's done.
@@ -49,6 +51,10 @@ if TYPE_CHECKING:
     from ..view import AgentView
 
 _DRAW_EVERY = 0.15
+_SEND_HINT = "enter to send · stop ends a question with what it found · read-only"
+_QUEUE_HELD = ("The questions you queued wait, since this one went wrong: press Enter in the empty box to ask the "
+               "next, or ✕ to drop it.")
+_QUEUE_HINT = "enter queues a question for after this one · stop ends this one with what it found · read-only"
 _TARGET_CHARACTERS = 48
 _DATA_ITEMS = 8
 
@@ -179,6 +185,10 @@ _FRAME_CSS = """\
 .agc-app.agc-app .agc-new:hover:enabled,.agc-app.agc-app .agc-send:hover:enabled{border-color:var(--ag-accent);color:var(--ag-accent)}
 .agc-app.agc-app .agc-send.agc-stop{border-color:var(--ag-bad);color:var(--ag-bad)}
 .agc-app.agc-app .agc-send:disabled{opacity:.5}
+.agc-app.agc-app .agc-queued{gap:6px}
+.agc-app.agc-app .agc-queued>.widget-html,.agc-app.agc-app .agc-queued>.jupyter-widget-html{flex:1 1 auto;margin:0}
+.agc-app.agc-app .agc-drop{height:22px;line-height:20px;padding:0 7px;margin:10px 0 0;border-radius:6px;font-size:11px;background:transparent;border:1px solid var(--ag-line);box-shadow:none;color:inherit;opacity:.7}
+.agc-app.agc-app .agc-drop:hover:enabled{border-color:var(--ag-bad);color:var(--ag-bad);opacity:1}
 .agc-app.agc-app .agc-log{height:clamp(460px,calc(100vh - 320px),1400px);padding:4px 16px 12px}
 body[class*=vscode-] .agc-app.agc-app .agc-log{height:520px}
 .agc-app.agc-app .agc-log>*,.agc-app.agc-app .agc-turn>*,.agc-app.agc-app .agc-empty>*{margin:0}
@@ -214,6 +224,8 @@ _CONVERSATION_CSS = """\
 .agt .ag-q{display:flex;flex-direction:row-reverse;align-items:flex-start;gap:10px;margin:18px 0 8px;font-weight:600}
 .agt .ag-q>.ag-said{max-width:min(680px,80%);padding:7px 12px;border:1px solid var(--ag-line);border-radius:6px;background:var(--ag-hover);white-space:pre-wrap;overflow-wrap:anywhere}
 .agt .ag-q>.ag-mark{margin-top:6px}
+.agt .ag-q.ag-queued>.ag-said{border-style:dashed;opacity:.65;font-weight:500}
+.agt .ag-q>.ag-wait{align-self:center;font-size:11px;font-weight:400;opacity:.6}
 .agt .ag-say{display:flex;gap:10px;margin:6px 0 2px}
 .agt .ag-say>.ag-bul{color:var(--ag-comment)}
 .agt .ag-say .ans{margin:0;font-size:13px;color:var(--ag-dim)}
@@ -336,6 +348,14 @@ def _thinking_html(text: str) -> str:
     return f'<div class="ag-say"><span class="ag-bul">●</span>{_answer_text_html(text)}</div>'
 
 
+def _queued_html(question: str) -> str:
+    """
+    A question that waits for the one being answered: on the right like any question, dimmed and marked queued.
+    """
+    return (f'<div class="ag-q ag-queued"><span class="ag-mark">{_HUMAN}</span><span class="ag-said">'
+            f'{_esc(question)}</span><span class="ag-wait">queued</span></div>')
+
+
 def _switch_html(model: str) -> str:
     """
     The line across the conversation where the agent switched model: a new conversation starts under it.
@@ -431,15 +451,18 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
             f'<div class="ag-detail">{_tool_detail_html(call)}</div></details></div>')
 
 
-def _pulse_html(turn: _Turn) -> str:
+def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
     """
-    The line at the bottom of a question while the agent works: thinking, for how long, and how to stop it.
+    The line at the bottom of a question while the agent works: thinking, for how long, how many questions wait
+    after it, and how to stop it.
     """
-    waiting = len(turn.running)
-    doing = f"Waiting for {_plural(waiting, 'tool call')}…" if waiting else "Thinking…"
+    running = len(turn.running)
+    doing = f"Waiting for {_plural(running, 'tool call')}…" if running else "Thinking…"
     counts = [_duration(time.monotonic() - turn.started)]
     if turn.calls:
         counts.append(_plural(len(turn.calls), "tool call"))
+    if queued:
+        counts.append(f"{queued} queued")
     return (f'<div class="ag-pulse"><span class="ag-star">✻</span><span class="ag-think">{_esc(doing)}</span>'
             f'<span class="ag-dim">({_esc(" · ".join(counts))} · stop ends it with what it found)</span></div>')
 
@@ -486,6 +509,17 @@ class _Turn:
     started: float = field(default_factory=time.monotonic)
 
 
+@dataclass
+class _Queued:
+    """
+    A question typed while another was answered: its text, and its line in the conversation (the question and a ✕
+    that drops it) until it's asked.
+    """
+
+    question: str
+    row: Any
+
+
 class _AgentChat(_Window):
     """
     The chat window: ipywidgets over an AgentView, which holds the agent and its conversation. Every widget callback
@@ -497,6 +531,8 @@ class _AgentChat(_Window):
                  it stays scrolled to the newest without a script)
         empty    what an empty conversation shows: what the agent does, its services, and questions to start from
         turn     the question being answered, while there is one
+        queued   questions typed while it's answered, asked one after another once it is (their lines sit under
+                 the conversation's, out of `items`, so the question asked next moves above the rest)
         busy     a question is being answered (the send button is Stop meanwhile)
         task     the asyncio task waiting for it, in a notebook (tests await it)
     """
@@ -507,6 +543,7 @@ class _AgentChat(_Window):
         self.quiet = False
         self.busy = False
         self.items: list[Any] = []
+        self.queued: list[_Queued] = []
         self.turn: _Turn | None = None
         self.stop: threading.Event | None = None
         self.task: Any = None
@@ -622,8 +659,9 @@ class _AgentChat(_Window):
         if text:
             self._set(self.status, _wrap(f'<div class="ag-hint {level}"><span>{_prose(text)}</span></div>'))
             return
-        self._set(self.status, _wrap('<div class="ag-hint"><span>enter to send · stop ends a question with what it '
-                                     f"found · read-only</span><span>{_esc(self._spent())}</span></div>"))
+        usage = _QUEUE_HINT if self.busy else _SEND_HINT
+        self._set(self.status, _wrap(f'<div class="ag-hint"><span>{_esc(usage)}</span>'
+                                     f"<span>{_esc(self._spent())}</span></div>"))
 
     def _spent(self) -> str:
         core = self.view.core
@@ -651,11 +689,18 @@ class _AgentChat(_Window):
                          "this model. Amazon Bedrock needs no key: it's called with this notebook's AWS credentials.",
                          "warn")
 
+    def _show_log(self) -> None:
+        """
+        The conversation, then the questions that wait, newest at the bottom (the log runs bottom-up).
+        """
+        rows = [waiting.row for waiting in self.queued]
+        self.log.children = tuple(reversed([*self.items, *rows]))
+
     def _add(self, widget: Any) -> Any:
         if self.empty in self.items:
             self.items.remove(self.empty)
         self.items.append(widget)
-        self.log.children = tuple(reversed(self.items))
+        self._show_log()
         return widget
 
     def _html(self, value: str) -> Any:
@@ -671,6 +716,7 @@ class _AgentChat(_Window):
         return box
 
     def _show_empty(self) -> None:
+        self.queued.clear()
         self.items = [self.empty]
         self.log.children = (self.empty,)
 
@@ -741,13 +787,57 @@ class _AgentChat(_Window):
 
     def _send(self, question: str | None = None) -> None:
         text = str(self.question.value if question is None else question).strip()
-        if self.busy:
-            self._set_status("Still answering the last question: wait for it, or press stop.", "warn")
+        if not text and self.queued and not self.busy:
+            self._ask_next()
             return
         if not text:
             self._set_status("Type a question first, then press Enter.")
             return
         self._quietly(self.question, value="")
+        if self.busy:
+            self._queue(text)
+            return
+        self._ask(text)
+
+    def _queue(self, question: str) -> None:
+        """
+        A question typed while another is answered: a line under the conversation, asked once the ones before it
+        are answered.
+        """
+        drop = self.w.Button(description="✕", tooltip="Don't ask this", layout=self.w.Layout(width="auto",
+                                                                                            flex="0 0 auto"))
+        drop.add_class("agc-drop")
+        row = self.w.HBox([self._html(_wrap(_queued_html(question))), drop],
+                          layout=self.w.Layout(width="100%", flex="0 0 auto", align_items="center"))
+        row.add_class("agc-queued")
+        waiting = _Queued(question, row)
+        drop.on_click(self._safely(lambda _button: self._unqueue(waiting)))
+        self.queued.append(waiting)
+        self._show_log()
+        self._tick()
+        ahead = len(self.queued) - 1
+        after = f"once the {_plural(ahead, 'question')} queued before it" if ahead else "once this answer is done"
+        self._set_status(f"Queued: it's asked {after}. Press stop to end this answer sooner, or ✕ to drop it.")
+
+    def _unqueue(self, waiting: _Queued) -> None:
+        if waiting not in self.queued:
+            return
+        self.queued.remove(waiting)
+        self._show_log()
+        self._tick()
+        self._set_status("Dropped: that question won't be asked.")
+
+    def _ask_next(self) -> None:
+        """
+        The question that waited longest, now that nothing is being answered. After a question the agent couldn't
+        answer they wait instead (the next would most likely fail the same way): Enter in the empty box, or the next
+        question answered, carries on.
+        """
+        if self.busy or not self.queued:
+            return
+        self._ask(self.queued.pop(0).question)
+
+    def _ask(self, text: str) -> None:
         self._begin(text)
         stop, steps = threading.Event(), queue.SimpleQueue()
         self.stop = stop
@@ -778,7 +868,7 @@ class _AgentChat(_Window):
         pulse = self._html("")
         box = self._add(self._box([pulse]))
         self.turn = _Turn(question, box, pulse)
-        self._set(pulse, _wrap(_pulse_html(self.turn)))
+        self._tick()
         self._set_status("")
 
     def _start(self, work: Callable[[], AgentAnswer], steps: queue.SimpleQueue) -> None:
@@ -827,7 +917,7 @@ class _AgentChat(_Window):
 
     def _tick(self) -> None:
         if self.turn is not None:
-            self._set(self.turn.pulse, _wrap(_pulse_html(self.turn)))
+            self._set(self.turn.pulse, _wrap(_pulse_html(self.turn, queued=len(self.queued))))
 
     def _stepped(self, step: AgentStep) -> None:
         """
@@ -915,6 +1005,10 @@ class _AgentChat(_Window):
             self._set(turn.pulse, self._reply_html(answer, turn.trail))
         self._done()
         self._say_ready()
+        if answer.error and self.queued:
+            self._set_status(_QUEUE_HELD, "warn")
+            return
+        self._ask_next()
 
     def _failed(self, exc: BaseException) -> None:
         """
@@ -927,7 +1021,9 @@ class _AgentChat(_Window):
             self._set(turn.pulse, _wrap(f'<div class="ag-fail">✗ {_prose(self._error_text(exc))}</div>'))
             self._quietly(self.question, value=turn.question)
         self._done()
-        self._set_status("Your question is back in the box: fix what's said above, then press Enter.", "warn")
+        waiting = f" {_QUEUE_HELD}" if self.queued else ""
+        self._set_status(f"Your question is back in the box: fix what's said above, then press Enter.{waiting}",
+                         "warn")
 
     def _done(self) -> None:
         self.turn = None

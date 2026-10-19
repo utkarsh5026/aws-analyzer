@@ -1272,7 +1272,11 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
         assert "# checked every function&#x27;s health" in shown and "ag-s-lambda" in shown
         assert "Thinking…" in shown and "stop ends it with what it found" in shown
         enter(x, "Another question")
-        assert "Still answering the last question" in x.status.value
+        assert x.question.value == "" and [waiting.question for waiting in x.queued] == ["Another question"]
+        assert "ag-queued" in page(x) and "asked once this answer is done" in x.status.value
+        assert "1 queued" in page(x) and "enter queues a question" not in x.status.value
+        x.queued[0].row.children[1].click()
+        assert not x.queued and "Another question" not in page(x) and "won&#x27;t be asked" in x.status.value
         x.send_button.click()
         assert x.send_button.disabled and x.send_button.tooltip == "Stopping…"
         gate.set()
@@ -1283,6 +1287,105 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
     assert "You stopped it" in shown and "Thinking…" not in shown
     assert '<span class="pf">function_errors</span>' not in shown and "never reached" not in shown
     assert not x.busy and not x.send_button.disabled and x.view.core.history[-1].stopped == "stopped"
+
+
+async def settle(x):
+    """
+    Waits until the window has answered every question, the queued ones too: each starts its own task.
+    """
+    while x.task is not None and not x.task.done():
+        await x.task
+
+
+def test_the_chat_window_queues_questions_typed_while_it_works(seeded):
+    gate = threading.Event()
+    model = scripted(thinks("Checking health first.", ("function_health", {"since": "2h"})), gate,
+                     says("first answer"), says("second answer"), says("third answer"))
+    x = window(model)
+
+    async def ask_three():
+        enter(x, "What failed?")
+        assert "enter queues a question for after this one" in x.status.value
+        enter(x, "Why did it fail?")
+        enter(x, "How do I fix it?")
+        assert [waiting.question for waiting in x.queued] == ["Why did it fail?", "How do I fix it?"]
+        assert "once the 1 question queued before it" in x.status.value and "2 queued" in page(x)
+        shown = page(x)
+        assert shown.index("What failed?") < shown.index("Why did it fail?") < shown.index("How do I fix it?")
+        gate.set()
+        await settle(x)
+
+    asyncio.run(ask_three())
+    shown = page(x)
+    assert [answer.question for answer in x.view.core.history] == ["What failed?", "Why did it fail?",
+                                                                    "How do I fix it?"]
+    assert shown.index("first answer") < shown.index("Why did it fail?") < shown.index("second answer")
+    assert shown.index("second answer") < shown.index("How do I fix it?") < shown.index("third answer")
+    assert not x.queued and not x.busy and "ag-queued" not in shown and "Thinking…" not in shown
+    assert len({answer.thread for answer in x.view.core.history}) == 1
+
+
+def test_a_queued_question_is_asked_after_stop(seeded):
+    gate = threading.Event()
+    model = scripted(thinks("Checking health first.", ("function_health", {"since": "2h"})), gate,
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})), says("the follow-up"))
+    x = window(model)
+
+    async def ask_stop_and_follow():
+        enter(x, "What failed?")
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if "functions had failed calls" in page(x):
+                break
+        enter(x, "Only etl-nightly, please")
+        x.send_button.click()
+        gate.set()
+        await settle(x)
+
+    asyncio.run(ask_stop_and_follow())
+    first, second = x.view.core.history
+    assert first.stopped == "stopped" and second.question == "Only etl-nightly, please"
+    assert second.text == "the follow-up" and not x.queued and not x.busy
+    assert "You stopped it" in page(x) and "the follow-up" in page(x)
+
+
+def test_the_queue_waits_after_an_answer_that_went_wrong(seeded):
+    gate = threading.Event()
+    model = scripted(gate, RuntimeError("model down"), says("answered"))
+    x = window(model)
+
+    async def fail_then_carry_on():
+        enter(x, "What failed?")
+        enter(x, "And why?")
+        enter(x, "Then what?")
+        gate.set()
+        await settle(x)
+        assert [waiting.question for waiting in x.queued] == ["And why?", "Then what?"] and not x.busy
+        assert "The questions you queued wait, since this one went wrong" in x.status.value
+        x.queued[1].row.children[1].click()
+        enter(x, "")
+        await settle(x)
+
+    asyncio.run(fail_then_carry_on())
+    first, second = x.view.core.history
+    assert first.error and second.question == "And why?" and second.text == "answered"
+    assert not x.queued and "Then what?" not in page(x)
+
+
+def test_new_chat_drops_the_queued_questions(seeded):
+    gate = threading.Event()
+    x = window(scripted(gate, RuntimeError("model down")))
+
+    async def fail_with_one_queued():
+        enter(x, "What failed?")
+        enter(x, "And why?")
+        gate.set()
+        await settle(x)
+
+    asyncio.run(fail_with_one_queued())
+    assert len(x.queued) == 1 and "ag-queued" in page(x)
+    x.new_button.click()
+    assert not x.queued and x.log.children == (x.empty,)
 
 
 def test_the_chat_window_without_a_model_opens_its_settings_on_bedrock(seeded):

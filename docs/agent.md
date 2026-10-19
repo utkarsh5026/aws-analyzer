@@ -166,6 +166,7 @@ Click the folded line to see the steps again, and click a call to see what's beh
 
 - **Follow-ups** continue the conversation. **new chat** starts over (`agent.transcript()` still has every question).
 - **stop** (the send button, while it works) ends the question: the agent finishes the step it's on and answers with what it found.
+- **Ask the next question while it works**: press Enter and it waits under the conversation, marked *queued*, and is asked as a follow-up once the answer before it is done. Questions you queue are asked in order; **✕** drops one, and **stop** ends the current answer so the next one starts sooner.
 - Questions asked with `agent.ask()` in other cells show up in the window too.
 
 ??? more "How it works"
@@ -392,7 +393,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
-| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; New chat starts over; ⚙ model picks the model |
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; ⚙ model picks the model |
 | `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |

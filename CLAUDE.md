@@ -826,8 +826,10 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   so the log stays pinned to the newest; the rest of the report is `AgentView._checked_blocks` under details. Every
   box in the log is `flex: 0 0 auto` (`_box`), or the log shrinks it and cuts off its end. An empty conversation is
   `empty` (the services' legend and `_SUGGESTIONS` rows, `_row_button`s); new chat clears the log back to it. Send
-  turns into stop (the `_Run`'s stop Event) while `busy`, and `AgentView.ask()` refuses while it is and adds its
-  answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
+  turns into stop (the `_Run`'s stop Event) while `busy`; Enter meanwhile queues the question (`queued`, `_Queued`:
+  its line and a ✕, drawn under `items` by `_show_log`), and `_answered` asks the next one (`_ask_next`), unless
+  the answer went wrong, when the queue waits for Enter in the empty box or the next answer. `AgentView.ask()`
+  refuses while it's busy and adds its answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
   `InvokeModelWithResponseStream`. **⚙ model** (`model_button`) toggles `_ModelPanel` (`panel`, between the head and
   the log; a package module named `window` because `rules.py` reads its first part as the UI layer): a Dropdown of
   `provider_options()` (`llm.provider_names()`, plus the chat model passed in, `AgentAnalyzer.given_chat_model`), a
