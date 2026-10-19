@@ -13,7 +13,11 @@ from .._kit.render import _base_css, _Look, _page_document, _report_html
 
 _ROOT = "lmb"  # the class around each report's HTML: its stylesheet's rules are scoped to it
 
+_CODE_FONT = '"Cascadia Mono","Cascadia Code",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace'
+
 _EXTRA_CSS = """\
+.lmb{--lmb-mono:%CODE_FONT%}
+.lmb.lmb.lmb :is(code,pre,kbd,samp,.jt,td.tree){font-family:var(--lmb-mono)}
 .lmb .wire{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,.9fr) 26px minmax(0,1fr);align-items:center;margin:6px 0 10px;max-width:980px}
 .lmb .wire .wc{display:flex;flex-direction:column;gap:6px;min-width:0}
 .lmb .wire .wa{text-align:center;font-size:18px;opacity:.45}
@@ -44,44 +48,89 @@ _EXTRA_CSS = """\
 .lmb .flow{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:6px 10px 6px 4px;margin:4px 0 10px;max-width:1180px;max-height:760px;overflow:auto;font-size:12px}
 .lmb .flow .ol{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:2px;padding:1px 4px;border-radius:5px;line-height:1.55;min-width:0}
 .lmb .flow .ol:hover{background:rgba(127,127,127,.08)}
-.lmb .flow .ln{flex:0 0 30px;text-align:right;font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;opacity:.45;user-select:none;-webkit-user-select:none}
-.lmb .flow code.ocd{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:none;padding:0;min-width:0}
+.lmb :is(.flow,.wk) .ln{flex:0 0 30px;text-align:right;font:11px var(--lmb-mono);opacity:.45;user-select:none;-webkit-user-select:none}
+.lmb .flow code.ocd{font:12px var(--lmb-mono);white-space:pre-wrap;overflow-wrap:anywhere;background:none;padding:0;min-width:0}
 .lmb .flow .k-def>code.ocd{font-weight:600}
 .lmb .flow .k-return>code.ocd,.lmb .flow .k-raise>code.ocd{font-weight:600}
 .lmb .flow .ox{margin-left:38px;padding-left:10px;border-left:1px solid rgba(127,127,127,.28)}
-.lmb .flow .nt{display:inline-block;font-size:10.5px;font-weight:600;line-height:1.6;padding:0 7px;border-radius:9px;white-space:nowrap;background:rgba(127,127,127,.14)}
-.lmb .flow .nt i{font-style:normal;font-weight:500;opacity:.7;margin-left:4px}
-.lmb .flow .n-aws-reads{background:rgba(59,130,246,.16);color:#2f6fdb}
-.lmb .flow .n-aws-writes{background:rgba(234,88,12,.16);color:#d0570c}
-.lmb .flow .n-aws-sends{background:rgba(219,39,119,.14);color:#c42a73}
-.lmb .flow .n-aws-runs{background:rgba(147,51,234,.15);color:#8b3fd9}
-.lmb .flow .n-aws-signs{background:rgba(100,116,139,.18)}
-.lmb .flow .n-env{background:rgba(13,148,136,.16);color:#0f8a7e}
-.lmb .flow .n-event{background:rgba(22,163,74,.15);color:#178a45}
-.lmb .flow .n-http{background:rgba(219,39,119,.14);color:#c42a73}
-.lmb .flow .n-client{background:rgba(59,130,246,.08);color:#2f6fdb}
-.lmb .flow .n-warn,.lmb .flow .n-sleep{background:rgba(245,158,11,.2);color:#b86e04}
-.lmb .flow .n-route{background:rgba(147,51,234,.15);color:#8b3fd9}
-.lmb .flow .n-log,.lmb .flow .n-file,.lmb .flow .n-command,.lmb .flow .n-more{font-weight:500;opacity:.85}
+.lmb :is(.flow,.wk) .nt{display:inline-block;font-size:10.5px;font-weight:600;line-height:1.6;padding:0 7px;border-radius:9px;white-space:nowrap;background:rgba(127,127,127,.14)}
+.lmb :is(.flow,.wk) .nt i{font-style:normal;font-weight:500;opacity:.7;margin-left:4px}
+.lmb :is(.flow,.wk) .n-aws-reads{background:rgba(59,130,246,.16);color:#2f6fdb}
+.lmb :is(.flow,.wk) .n-aws-writes{background:rgba(234,88,12,.16);color:#d0570c}
+.lmb :is(.flow,.wk) .n-aws-sends{background:rgba(219,39,119,.14);color:#c42a73}
+.lmb :is(.flow,.wk) .n-aws-runs{background:rgba(147,51,234,.15);color:#8b3fd9}
+.lmb :is(.flow,.wk) .n-aws-signs{background:rgba(100,116,139,.18)}
+.lmb :is(.flow,.wk) .n-env{background:rgba(13,148,136,.16);color:#0f8a7e}
+.lmb :is(.flow,.wk) .n-event{background:rgba(22,163,74,.15);color:#178a45}
+.lmb :is(.flow,.wk) .n-http{background:rgba(219,39,119,.14);color:#c42a73}
+.lmb :is(.flow,.wk) .n-client{background:rgba(59,130,246,.08);color:#2f6fdb}
+.lmb :is(.flow,.wk) .n-warn,.lmb :is(.flow,.wk) .n-sleep{background:rgba(245,158,11,.2);color:#b86e04}
+.lmb :is(.flow,.wk) .n-route{background:rgba(147,51,234,.15);color:#8b3fd9}
+.lmb :is(.flow,.wk) .n-log,.lmb :is(.flow,.wk) .n-file,.lmb :is(.flow,.wk) .n-command,.lmb :is(.flow,.wk) .n-more{font-weight:500;opacity:.85}
 .lmb .flow details.od{margin:0}
 .lmb .flow details.od>summary{list-style:none;cursor:pointer}
 .lmb .flow details.od>summary::-webkit-details-marker{display:none}
 .lmb .flow .on{white-space:nowrap}
-.lmb .flow .on b{font:600 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.lmb .flow .on b{font:600 12px var(--lmb-mono)}
 .lmb .flow .och{display:inline-block;width:6px;height:6px;margin:0 7px 2px 1px;border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;transform:rotate(-45deg);opacity:.6;transition:transform .15s}
 .lmb .flow details.od[open]>summary .och{transform:rotate(45deg);margin-bottom:4px}
 .lmb .flow details.od[open]>summary .os{display:none}
 .lmb .flow .oseen .on{padding-left:15px}
-.lmb .flow .of,.lmb .flow .oq{font-size:11px;opacity:.6}
-.lmb .flow .oq{font-style:italic}
+.lmb :is(.flow,.wk) :is(.of,.oq){font-size:11px;opacity:.6}
+.lmb :is(.flow,.wk) .oq{font-style:italic}
 .lmb .flow .os{display:inline-flex;flex-wrap:wrap;gap:3px 5px}
 .lmb .flow .ob{margin-left:22px}
-.lmb .flow .pk{color:var(--jp-mirror-editor-keyword-color,light-dark(#7c3aed,#c792ea))}
-.lmb .flow .pf{color:var(--jp-mirror-editor-def-color,light-dark(#2563eb,#82aaff))}
-.lmb .flow .js,.lmb .flow .jk{color:var(--jp-mirror-editor-string-color,light-dark(#047857,#a5d6a7))}
-.lmb .flow .jn,.lmb .flow .jl{color:var(--jp-mirror-editor-number-color,light-dark(#c2410c,#f78c6c))}
-.lmb .flow .pa{font-style:italic}
-.lmb .flow .pc{opacity:.6;font-style:italic}
+.lmb :is(.flow,.wk) .pk{color:var(--jp-mirror-editor-keyword-color,light-dark(#7c3aed,#c792ea))}
+.lmb :is(.flow,.wk) .pf{color:var(--jp-mirror-editor-def-color,light-dark(#2563eb,#82aaff))}
+.lmb :is(.flow,.wk) .js,.lmb :is(.flow,.wk) .jk{color:var(--jp-mirror-editor-string-color,light-dark(#047857,#a5d6a7))}
+.lmb :is(.flow,.wk) .jn,.lmb :is(.flow,.wk) .jl{color:var(--jp-mirror-editor-number-color,light-dark(#c2410c,#f78c6c))}
+.lmb :is(.flow,.wk) .pa{font-style:italic}
+.lmb :is(.flow,.wk) .pc{opacity:.6;font-style:italic}
+.lmb .wk{container-type:inline-size;max-width:1180px;margin:2px 0 10px}
+.lmb .wk .wtip{font-size:12px;opacity:.62;margin:0 0 8px}
+.lmb .wk .wg{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,1fr);gap:12px;align-items:start}
+@container (max-width:720px){.lmb .wk .wg{grid-template-columns:minmax(0,1fr)}.lmb .wk .wps{order:-1}}
+.lmb .wk .wtree{border:1px solid rgba(127,127,127,.25);border-radius:10px;padding:4px 0;max-height:560px;overflow:auto;font-size:12px;scroll-padding:48px 0}
+.lmb .wk .wsec{position:sticky;top:-4px;z-index:1;padding:6px 12px 4px;font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.75;background:var(--jp-layout-color0,var(--vscode-editor-background,Canvas))}
+.lmb .wk .wl{position:relative;display:flex;align-items:baseline;gap:8px;padding:1px 10px 1px 0;line-height:1.65;white-space:nowrap;cursor:pointer;border-left:3px solid transparent;transition:background-color .1s}
+.lmb .wk .wl:hover{background:rgba(127,127,127,.09)}
+.lmb .wk .wl:has(>.wr:checked){background:rgba(59,130,246,.15);border-left-color:#3b82f6}
+.lmb .wk .wl:has(>.wr:focus-visible){outline:1.5px solid rgba(59,130,246,.7);outline-offset:-1.5px}
+.lmb .wk .wr{display:block;position:absolute;left:0;top:0;width:1px;height:100%;margin:0;opacity:0;pointer-events:none}
+.lmb .wk .wl .ln{flex:0 0 30px}
+.lmb .wk .wt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;padding-left:calc(var(--d,0) * 16px);background-image:repeating-linear-gradient(90deg,rgba(127,127,127,.2) 0 1px,transparent 1px 16px);background-size:calc(var(--d,0) * 16px) 100%;background-repeat:no-repeat;background-position:4px 0}
+.lmb .wk .wt code.ocd{white-space:pre}
+.lmb .wk .wt b{font:600 12px var(--lmb-mono)}
+.lmb .wk .k-def>.wt code.ocd,.lmb .wk .k-return>.wt code.ocd,.lmb .wk .k-raise>.wt code.ocd{font-weight:600}
+.lmb .wk .wx{flex:0 1 auto;display:inline-flex;gap:4px;min-width:0;max-width:45%;overflow:hidden}
+.lmb .wk .wx .nt{font-size:10px;line-height:1.5;padding:0 6px}
+.lmb .wk .wps{position:sticky;top:8px;min-width:0}
+.lmb .wk .wp{display:none;border:1px solid rgba(127,127,127,.28);border-radius:12px;padding:12px 14px 14px;background:rgba(127,127,127,.04);box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 22px rgba(15,23,42,.06)}
+.lmb .wk .wh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.lmb .wk .wn{font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.7}
+.lmb .wk .wf{font-size:11.5px;opacity:.6;overflow-wrap:anywhere}
+.lmb .wk .wbar{height:3px;border-radius:2px;background:rgba(127,127,127,.18);margin:6px 0 10px;overflow:hidden}
+.lmb .wk .wbar i{display:block;height:100%;background:#3b82f6;border-radius:2px}
+.lmb .wk .wcr{font-size:12px;margin:0 0 4px;overflow-wrap:anywhere}
+.lmb .wk .wcr b{font:600 12px var(--lmb-mono)}
+.lmb .wk .wc0{opacity:.6;font-style:italic}
+.lmb .wk .wa{font-size:12px;opacity:.85;margin:0 0 4px;overflow-wrap:anywhere}
+.lmb .wk label.wc{cursor:pointer;color:#3b82f6;font:500 12px var(--lmb-mono);border-radius:4px}
+.lmb .wk label.wc:hover{text-decoration:underline}
+.lmb .wk .wa label.wc code.ocd{color:inherit}
+.lmb .wk .wcode{margin:8px 0 10px;padding:8px 10px;border-radius:8px;background:rgba(127,127,127,.09);border-left:3px solid #3b82f6}
+.lmb .wk .wcode code.ocd{font:12.5px var(--lmb-mono);white-space:pre-wrap;overflow-wrap:anywhere;background:none;padding:0}
+.lmb .wk code.ocd{background:none;padding:0;user-select:text;-webkit-user-select:text;cursor:inherit}
+.lmb .wk ul.wd{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;font-size:12.5px}
+.lmb .wk ul.wd li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;line-height:1.45}
+.lmb .wk ul.wd li>span:not(.nt){opacity:.72}
+.lmb .wk ul.wd li.wm{opacity:.9}
+.lmb .wk .wb{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.lmb .wk .wbt{display:inline-block;padding:5px 12px;border:1px solid rgba(127,127,127,.35);border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;user-select:none;-webkit-user-select:none;transition:background-color .1s,border-color .1s}
+.lmb .wk label.wbt:hover{background:rgba(127,127,127,.1);border-color:rgba(127,127,127,.6)}
+.lmb .wk .wbt.go{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.lmb .wk label.wbt.go:hover{background:#2563eb;border-color:#2563eb}
+.lmb .wk .wbt.off{opacity:.32;cursor:default}
 .lmb .cgb{width:fit-content;max-width:min(100%,1180px)}
 .lmb .cg{border:1px solid rgba(127,127,127,.2);border-radius:14px;margin:6px 0 8px;overflow:auto;background-color:rgba(127,127,127,.035);background-attachment:local;background-size:18px 18px;
  background-image:radial-gradient(circle at 1px 1px,rgba(127,127,127,.3) 1px,transparent 0);background-position:9px 9px}
@@ -94,14 +143,14 @@ _EXTRA_CSS = """\
 .lmb .cg .cn:hover .fg{stroke:rgba(127,127,127,.6)}
 .lmb .cg .cn text{fill:currentColor}
 .lmb .cg .cn .lb{font-size:14px;font-weight:650;letter-spacing:-.1px}
-.lmb .cg .k-handler .lb,.lmb .cg .k-function .lb{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;font-size:13.5px;font-weight:650;letter-spacing:0}
+.lmb .cg .k-handler .lb,.lmb .cg .k-function .lb{font-family:var(--lmb-mono);font-size:13.5px;font-weight:650;letter-spacing:0}
 .lmb .cg .k-handler .lb{font-size:14px;font-weight:700}
 .lmb .cg .cn .sb{font-size:12.5px;fill-opacity:.62}
 .lmb .cg .cn .sb .dir{fill-opacity:.4}
 .lmb .cg .cn .sb .ac{font-weight:600;fill-opacity:.95}
 .lmb .cg .cn .sb .sep{fill-opacity:.4}
 .lmb .cg .cn .dv{stroke:rgba(127,127,127,.2);stroke-width:1;fill:none}
-.lmb .cg .cn .rw{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill-opacity:.88}
+.lmb .cg .cn .rw{font:12.5px var(--lmb-mono);fill-opacity:.88}
 .lmb .cg .cn .rw.mo{font-family:inherit;font-style:italic;fill-opacity:.55}
 .lmb .cg .cn .pr{font-size:12.5px;fill-opacity:.7}
 .lmb .cg .cn .ns{font-size:12px;font-weight:650;fill:light-dark(#b45309,#fbbf24);letter-spacing:.2px}
@@ -126,7 +175,7 @@ _EXTRA_CSS = """\
 .lmb .cg .wb circle,.lmb .cg .wm circle{fill:#f59e0b;stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.5}
 .lmb .cg .wb path,.lmb .cg .wm path{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:2;stroke-linecap:round;fill:none}
 .lmb .cg .rt rect{fill:rgba(127,127,127,.1);stroke:rgba(127,127,127,.22)}
-.lmb .cg .rt text{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill-opacity:.85}
+.lmb .cg .rt text{font:12.5px var(--lmb-mono);fill-opacity:.85}
 .lmb .cg .rt .mt{font-weight:700;fill-opacity:1}
 .lmb .cg .ce path{fill:none}
 .lmb .cg .ce .ln{stroke:var(--c);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
@@ -170,7 +219,7 @@ _EXTRA_CSS = """\
 .lmb .cgk .kw circle{fill:#f59e0b}
 .lmb .cgk .kw path{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.8;stroke-linecap:round;fill:none}
 .lmb .cgk .kl circle{fill:none;stroke:currentColor;stroke-opacity:.55;stroke-width:1.2}
-.lmb .cgk .kl path{fill:none;stroke:currentColor;stroke-opacity:.8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}"""
+.lmb .cgk .kl path{fill:none;stroke:currentColor;stroke-opacity:.8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 
@@ -189,7 +238,8 @@ def _render_html(blocks: list[Any], max_rows: int, theme: str = "") -> str:
 
 _WIDE_CSS = """\
 <style>
-.lmb .flow{max-width:none;max-height:none}
+.lmb .flow,.lmb .wk{max-width:none;max-height:none}
+.lmb .wk .wtree{max-height:calc(100vh - 140px)}
 .lmb .cgb{max-width:100%}
 </style>
 """

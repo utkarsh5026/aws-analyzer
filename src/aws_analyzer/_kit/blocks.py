@@ -115,6 +115,16 @@ class _Next:
 
 
 @dataclass
+class _Tabs:
+    """
+    Parts of a report in tabs, one shown at a time: (name, blocks) for each, the first shown at first. In HTML a tab
+    bar over the parts, CSS only, so it still works in a reopened notebook; in text every part, one after the other.
+    """
+
+    tabs: list[tuple[str, list[Any]]]
+
+
+@dataclass
 class _Tone:
     """
     A table cell with a status colour (tone: 'warn', 'bad' or 'ok'): a pill in HTML, plain text elsewhere.

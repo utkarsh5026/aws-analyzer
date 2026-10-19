@@ -20,13 +20,13 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
-from aws_analyzer._kit.blocks import _Note, _Title
+from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
 from aws_analyzer._kit.render import _base_css, _Look, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
-from aws_analyzer._kit.window import _Window, _window_errors
+from aws_analyzer._kit.window import _for_window, _Window, _window_errors
 from aws_analyzer.dynamodb import style as ddb_style
 
 # Each service: its module, Analyzer and View, and its list prices.
@@ -57,6 +57,18 @@ def test_a_block_nothing_draws_becomes_a_note():
     assert _render_text([_Mystery()], 0).startswith("[!] Part of this report isn't shown")
 
 
+def test_tabs_show_one_part_at_a_time():
+    tabs = _Tabs([("First", [_Note("one")]), ("Second", [_Note("two"), _Next([("x()", "more")])])])
+    html = _report_html([tabs], 0, _Look(_base_css("x"), "x", ""))
+    assert re.search(r'<div class="tbar" hidden="hidden"><label><input type="radio" name="t\w{10}" class="tr0" checked '
+                     r'hidden="hidden">First</label><label><input type="radio" name="t\w{10}" class="tr1" hidden="hidden">'
+                     r'Second</label></div><div class="tp tp0">', html)
+    assert ".x .tabs:has(>.tbar .tr1:checked)>.tp1{display:block}" in html and "two" in html
+    assert _render_text([tabs], 0).splitlines()[:2] == ["[i] one", "[i] two"]
+    windowed = _for_window([tabs], str.upper)[0]
+    assert windowed.tabs == [("First", [_Note("ONE")]), ("Second", [_Note("TWO")])]
+
+
 def test_a_block_made_from_another_is_drawn_like_it():
     assert _report_html([_Loud("Careful", "warn")], 0, _Look("", "ddb", "")) == (
         '<div class="ddb"><div class="note warn">Careful</div></div>')
@@ -64,7 +76,7 @@ def test_a_block_made_from_another_is_drawn_like_it():
 
 
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 161
+    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 175
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")
