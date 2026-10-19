@@ -20,7 +20,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   model, time and cost, and **details** under it. Follow-ups continue the conversation, **stop** ends a question with
   what it found so far, and **new chat** starts over. `AgentAnalyzer.ask(on_step=...)` hands the same steps to your
   own code (`AgentStep`: the model's words, and each tool call as it starts and ends), and each `ToolCall` now keeps
-  the AWS operations it reads (`.reads`, `.services`) and what it handed the model (`.result`).
+  the AWS operations it reads (`.reads`, `.services`) and what it handed the model (`.result`)
+  ([#115](https://github.com/utkarsh5026/aws-analyzer/pull/115)).
 
 ### Changed
 
