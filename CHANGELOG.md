@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-19
+
 ### Added
 
 - **`AgentView().chat()` opens a chat window for the agent**, drawn like a terminal: type a question (or click one to
@@ -687,7 +689,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.19.0...v0.20.0
