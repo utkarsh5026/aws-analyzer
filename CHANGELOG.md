@@ -17,13 +17,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   boxes), `brand` (the guide site's navy, indigo and amber highlighter) and `classic` (the look until now). Every
   report from then on uses it, and the ones already in the notebook keep theirs. The `AWS_ANALYZER_THEME` environment
   variable picks it for every notebook, and `set_theme(None)` goes back to it. The windows keep their own look, and
-  text output is the same in every theme.
+  text output is the same in every theme ([#122](https://github.com/utkarsh5026/aws-analyzer/pull/122)).
 
 ### Changed
 
 - **Reports have a new look**: they're drawn in the `console` theme, with the title and findings in boxed panels,
   each card's tone as a coloured top edge and numbers in a monospace font. `set_theme("classic")` (or
-  `AWS_ANALYZER_THEME=classic`) brings back the look until now.
+  `AWS_ANALYZER_THEME=classic`) brings back the look until now ([#122](https://github.com/utkarsh5026/aws-analyzer/pull/122)).
 
 ## [0.24.0] - 2026-10-19
 
