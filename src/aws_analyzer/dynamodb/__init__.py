@@ -63,17 +63,17 @@ from boto3.dynamodb.conditions import (
 from boto3.dynamodb.types import Binary, TypeSerializer
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
-from ._kit.analyzer import _BaseAnalyzer
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
-from ._kit.deps import _require
-from ._kit.errors import _error_name, _why
-from ._kit.fmt import (
+from .._kit.analyzer import _BaseAnalyzer
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title, _Tone
+from .._kit.deps import _require
+from .._kit.errors import _error_name, _why
+from .._kit.fmt import (
     HOURS_PER_MONTH, Stat, _as_count, _as_int, _band, _count, _fmt_dt, _plural, _share, _utcnow, human_age,
     human_money, human_size,
 )
-from ._kit.render import _base_css, _call, _report_html
-from ._kit.text import _clip
-from ._kit.view import _BaseView, _friendly_errors
+from .._kit.render import _base_css, _call, _report_html
+from .._kit.text import _clip
+from .._kit.view import _BaseView, _friendly_errors
 
 # =============================================================================
 # 1. Helpers: conversion and formatting
