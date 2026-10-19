@@ -70,6 +70,14 @@ def package_file_name(fn: Function) -> str:
     return f"{fn.name}.zip" if fn.version in ("", "$LATEST") else f"{fn.name}-v{fn.version}.zip"
 
 
+def page_file_name(fn: Function) -> str:
+    """
+    The name how_it_works_page() saves a function's page as: 'etl-how-it-works.html', or
+    'etl-v3-how-it-works.html' for a published version.
+    """
+    return package_file_name(fn).removesuffix(".zip") + "-how-it-works.html"
+
+
 def _local_path(path: str) -> str:
     """
     A path on the notebook's disk as a report shows it: relative to the notebook's folder when it's in it, else

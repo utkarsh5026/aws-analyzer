@@ -2008,6 +2008,30 @@ def test_how_it_works_report(ui, capsys):
     assert "save()</b>" in page and "store.py line 4" in page
 
 
+def test_how_it_works_page_saves_a_page_to_open_in_a_tab(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ui.core._download = lambda url, most: HOW
+    out = run(capsys, ui.how_it_works_page, "etl-nightly")
+    page_path = tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html"
+    assert "Saved how etl-nightly works as a page" in out and "lambda-downloads/etl-nightly-how-it-works.html" in out
+    assert "middle-click it, or right-click it and pick Open link in new tab, for a browser tab of its own." in out
+    assert "lambda-downloads was made for downloads, with a .gitignore" in out and "how_it_works('etl-nightly')" in out
+    page = page_path.read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>") and "<title>How etl-nightly works</title>" in page
+    assert "color-scheme:light dark" in page and ".lmb .flow{max-width:none;max-height:none}" in page
+    assert "BUCKET isn&#x27;t set on etl-nightly" in page
+    assert '<details class="od">' in page and "<script" not in page and "hunter2" not in page
+    again = run(capsys, ui.how_it_works_page, "etl-nightly", "notes/etl.html")
+    assert (tmp_path / "notes" / "etl.html").exists() and "notes/etl.html" in again
+    saved = ui._save_how_page(ui.core.code_map("etl-nightly"))
+    assert saved.replaced and not saved.marked and saved.size == len(page.encode("utf-8"))
+    link = stylemod._render_html(ui._page_blocks(saved), 50)
+    assert ('<a class="pgo" href="lambda-downloads/etl-nightly-how-it-works.html" target="_blank" rel="noopener"'
+            in link)
+    outside = ui._save_how_page(ui.core.code_map("etl-nightly"), str(tmp_path.parent / "elsewhere.html"))
+    assert '<a class="pgo"' not in stylemod._render_html(ui._page_blocks(outside), 50)
+
+
 def test_download_report(ui, capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     out = run(capsys, ui.download, "etl-nightly")
@@ -2447,7 +2471,7 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
 
 
 
-def test_explorer_how_it_works(core, explorer, role, monkeypatch):
+def test_explorer_how_it_works(core, explorer, role, monkeypatch, tmp_path):
     core._download = lambda url, most: HOW
     x = explorer("etl-nightly", tab="code")
     button = x.how_button
@@ -2471,6 +2495,13 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch):
     monkeypatch.setattr(code_tab, "map_package", lambda *args: pytest.fail("the code is read once"))
     button.click()
     assert x._how and "How etl-nightly works" in plain(x.source_view.value)
+    assert x.page_button.layout.display == "" and x.page_link.layout.display == "none"
+    monkeypatch.chdir(tmp_path)
+    x.page_button.click()
+    assert x.page_saved.path == str(tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html")
+    assert x.page_link.layout.display == "" and "<!doctype" not in x.page_link.outputs[0]["data"]["text/html"]
+    assert 'href="lambda-downloads/etl-nightly-how-it-works.html"' in x.page_link.outputs[0]["data"]["text/html"]
+    assert plain(x.status.value).startswith("Saved how etl-nightly works as lambda-downloads/etl-nightly-how-it-works")
     x._code_rows[2].button.click()  # a file in the tree: its source, and the button is up again
     assert not x._how and "def save" in plain(x.source_view.value) and "lmx-on" not in button._dom_classes
     # a function on another runtime has no How it works

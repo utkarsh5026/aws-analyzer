@@ -34,7 +34,7 @@ from .helpers import (
 )
 from .models import (
     CodePackage, ErrorReport, Function, FunctionDetail, LogGroup, PackageDownload, Performance, RuntimeStatus,
-    Trigger,
+    SavedPage, Trigger,
 )
 from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
@@ -52,9 +52,10 @@ from .analysis.codemap.model import AwsCall, CodeMap, EventField, ImportUse
 from .analysis.codemap.findings import _code_summary, _short_name, _where, code_map_findings
 from .analysis.codemap.graph import code_graph
 from .analyzer import LambdaAnalyzer
-from .style import _render_html
+from .style import _render_html, _render_page
 from .blocks.outline import _Outline
 from .blocks.graph import _Graph
+from .blocks.page import _PageLink
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -353,7 +354,7 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
-        "📦 Code": ("code", "how_it_works", "download"),
+        "📦 Code": ("code", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -1234,6 +1235,43 @@ class LambdaView(_BaseView):
         with self._named(name, region):
             cmap = self.core.code_map(name, region=region, max_size=max_size)
         self._show(self._how_blocks(cmap))
+
+    @_friendly_errors
+    def how_it_works_page(self, name: str, path: str | None = None, *, region: str | None = None,
+                          max_size: Any = "50MB") -> None:
+        """
+        how_it_works() as a page of its own, to read in a tab with room for it: saved as <name>-how-it-works.html in
+        lambda-downloads next to the notebook (or at path=), with a link that opens it. In JupyterLab a click opens
+        it in a JupyterLab tab; middle-click, or right-click and Open link in new tab, for a browser tab.
+        """
+        with self._named(name, region):
+            cmap = self.core.code_map(name, region=region, max_size=max_size)
+        saved = self._save_how_page(cmap, path)
+        self._show(self._page_blocks(saved))
+
+    def _save_how_page(self, cmap: CodeMap, path: str | None = None) -> SavedPage:
+        """
+        how_it_works()'s report drawn as a page and saved where download() saves (the explorer's ↗ Open in a tab too).
+        """
+        fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
+        page = _render_page(self._how_blocks(cmap), f"How {fn.name} works")
+        return self.core._save_page(fn, page, path)
+
+    def _page_blocks(self, saved: SavedPage) -> list[Any]:
+        """
+        how_it_works_page()'s report: the link, and how to open it where.
+        """
+        fn = saved.function
+        said = ["In JupyterLab, a click opens it in a JupyterLab tab you can drag beside the notebook; middle-click "
+                "it, or right-click it and pick Open link in new tab, for a browser tab of its own"
+                + (", where it replaced the page saved before." if saved.replaced else ".")]
+        if saved.marked:
+            said.append(f"{_local_path(os.path.dirname(saved.path))} was made for downloads, with a .gitignore that "
+                        "keeps it out of git.")
+        said.append("It's a snapshot of the code as it is now: run it again after a deploy.")
+        return [_Title(f"Saved how {fn.name} works as a page", f"{_local_path(saved.path)} · {human_size(saved.size)}"),
+                _PageLink(saved.path), _Note(" ".join(said)),
+                _Next([(self._call_for("how_it_works", fn), "the same report here, in the notebook")])]
 
     def _how_blocks(self, cmap: CodeMap) -> list[Any]:
         """
