@@ -45,13 +45,23 @@
     "docs/images": true
   },
 
-  // Look and feel. The theme and icons come from the Catppuccin extensions
-  // (catppuccin.catppuccin-vsc, catppuccin.catppuccin-vsc-icons); without them VS Code
-  // falls back to its defaults, and to the next font in each list.
-  "workbench.colorTheme": "Visual Studio Dark - C++",
+  // Look and feel. The theme is Aura (daltonmenezes.aura-theme) and the icons Catppuccin's
+  // (catppuccin.catppuccin-vsc-icons); without them VS Code falls back to its defaults, and
+  // to the next font in each list.
+  "workbench.colorTheme": "Aura Dark (Soft Text)",
   "workbench.iconTheme": "catppuccin-mocha",
-  "editor.fontFamily": "'Source Code Pro', 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace",
-  "editor.fontLigatures": true,
+  "editor.fontFamily": "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+  "editor.fontLigatures": "'calt', 'zero', 'ss01'",
+  "editor.fontSize": 14,
+  "editor.lineHeight": 1.6,
+  "editor.letterSpacing": 0.2,
+  "editor.cursorStyle": "line",
+  "editor.cursorWidth": 2,
+  "editor.renderLineHighlight": "all",
+  "editor.bracketPairColorization.enabled": true,
+  "workbench.activityBar.location": "top",
+  "workbench.layoutControl.enabled": false,
+  "breadcrumbs.icons": true,
   "terminal.integrated.fontFamily": "'CaskaydiaCove Nerd Font Mono', 'Cascadia Mono', monospace",
   "editor.semanticHighlighting.enabled": true,
   "editor.guides.bracketPairs": "active",
@@ -77,21 +87,37 @@
   // Branch in the title bar, for when the status bar is hidden.
   "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeRepositoryBranchName}",
 
-  // Title bar in the guide's accent colour (docs/*.html), so this window is easy to
-  // pick out from other projects.
+  // Aura's violet on the title bar, and its mint for what's active, so this window is
+  // easy to pick out from other projects.
   "workbench.colorCustomizations": {
-    "titleBar.activeBackground": "#0f766e",
-    "titleBar.activeForeground": "#f0fdfa",
-    "titleBar.inactiveBackground": "#134e4a",
-    "titleBar.inactiveForeground": "#a7c7c2",
-    "titleBar.border": "#0f766e",
-    "commandCenter.background": "#ffffff14",
-    "commandCenter.activeBackground": "#ffffff26",
-    "commandCenter.border": "#ffffff33",
-    "commandCenter.foreground": "#f0fdfa",
-    "commandCenter.activeForeground": "#f0fdfa",
-    "activityBar.activeBorder": "#4fd1c1",
-    "tab.activeBorderTop": "#4fd1c1"
+    "[Aura Dark (Soft Text)]": {
+      "titleBar.activeBackground": "#2a2140",
+      "titleBar.activeForeground": "#edecee",
+      "titleBar.inactiveBackground": "#15141b",
+      "titleBar.inactiveForeground": "#6d6d6d",
+      "titleBar.border": "#a277ff55",
+      "commandCenter.background": "#a277ff1f",
+      "commandCenter.activeBackground": "#a277ff33",
+      "commandCenter.border": "#a277ff66",
+      "commandCenter.foreground": "#edecee",
+      "commandCenter.activeForeground": "#ffffff",
+      "activityBarTop.activeBorder": "#61ffca",
+      "activityBar.activeBorder": "#61ffca",
+      "tab.activeBorderTop": "#a277ff",
+      "tab.activeBorder": "#00000000",
+      "editorCursor.foreground": "#61ffca",
+      "editor.lineHighlightBackground": "#a277ff10",
+      "editor.lineHighlightBorder": "#00000000",
+      "editor.selectionBackground": "#a277ff40",
+      "statusBar.background": "#15141b",
+      "statusBar.border": "#a277ff33",
+      "statusBarItem.remoteBackground": "#a277ff",
+      "statusBarItem.remoteForeground": "#15141b",
+      "focusBorder": "#a277ff88",
+      "scrollbarSlider.background": "#a277ff22",
+      "scrollbarSlider.hoverBackground": "#a277ff44",
+      "scrollbarSlider.activeBackground": "#a277ff66"
+    }
   },
   "cSpell.words": [
     "AROA",
@@ -104,6 +130,7 @@
     "couldnt",
     "cpus",
     "datascience",
+    "deepagents",
     "deepseek",
     "delenv",
     "getaffinity",
@@ -112,6 +139,7 @@
     "hasn",
     "huggingface",
     "Inferentia",
+    "Kolkata",
     "loadavg",
     "Menlo",
     "mininterval",
@@ -126,6 +154,7 @@
     "smmod",
     "Stubber",
     "tkthreadd",
+    "toolkits",
     "Trainium",
     "trashinfo",
     "vcpus"
