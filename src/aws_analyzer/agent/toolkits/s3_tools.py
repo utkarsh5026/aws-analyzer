@@ -179,12 +179,12 @@ def summarize_bucket(cfg: BucketConfig, metrics: BucketMetrics | None,  # noqa: 
     errors = {**cfg.errors, **(errors or {})}
     out: dict[str, Any] = {
         "bucket": cfg.name, "region": cfg.region,
-        "public_access": s3._exposure(cfg, account_block),
-        "block_public_access": s3._block_label(cfg.public_access_block),
-        "encryption": s3._encryption_label(cfg), "kms_key": cfg.kms_key,
+        "public_access": s3.public_exposure(cfg, account_block),
+        "block_public_access": s3.block_label(cfg.public_access_block),
+        "encryption": s3.encryption_label(cfg), "kms_key": cfg.kms_key,
         "versioning": cfg.versioning, "object_ownership": cfg.object_ownership, "object_lock": cfg.object_lock,
-        "lifecycle_rules": [{"id": rule.get("ID"), "status": rule.get("Status"), "applies_to": s3._rule_scope(rule),
-                             "does": s3._rule_actions(rule).replace("\n", "; ")} for rule in cfg.lifecycle_rules],
+        "lifecycle_rules": [{"id": rule.get("ID"), "status": rule.get("Status"), "applies_to": s3.rule_scope(rule),
+                             "does": s3.rule_actions(rule).replace("\n", "; ")} for rule in cfg.lifecycle_rules],
         "replication_rules": len(cfg.replication_rules), "access_logs_to": cfg.logging_target,
         "tags": _shown(cfg.tags),
     }
@@ -1117,7 +1117,7 @@ S3 and Lambda together
         """
         core = self.analyzer
         for region in {b.region for b in buckets if b.region}:
-            core._cloudwatch_in(region)
+            core.cloudwatch_in(region)
 
         def size(bucket: BucketInfo) -> tuple[str, BucketMetrics | None, str | None]:
             try:

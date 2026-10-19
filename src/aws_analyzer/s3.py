@@ -5747,7 +5747,7 @@ class S3Analyzer(_BaseAnalyzer):
             )
         return self._regional_clients[region]
 
-    def _cloudwatch_in(self, region: str) -> Any:
+    def cloudwatch_in(self, region: str) -> Any:
         if region not in self._cloudwatch_clients:
             self._cloudwatch_clients[region] = self.session.client(
                 "cloudwatch", region_name=region
@@ -5929,7 +5929,7 @@ class S3Analyzer(_BaseAnalyzer):
         the fastest way to size a bucket with millions of objects). Needs cloudwatch:ListMetrics/GetMetricData.
         """
         bucket, _ = parse_s3_uri(bucket)
-        cloudwatch = self._cloudwatch_in(self.bucket_region(bucket))
+        cloudwatch = self.cloudwatch_in(self.bucket_region(bucket))
         result = BucketMetrics(bucket=bucket)
         metrics = [
             metric
@@ -6552,7 +6552,7 @@ class S3Analyzer(_BaseAnalyzer):
                 region
             )  # boto3 sessions aren't thread-safe: make every client before the threads start
             if metrics:
-                self._cloudwatch_in(region)
+                self.cloudwatch_in(region)
 
         def check(bucket: BucketInfo) -> BucketReport:
             report = BucketReport(bucket, self.bucket_config(bucket.name))
@@ -8645,7 +8645,7 @@ def _policy_table(statements: list[PolicyStatement], title: str = "") -> _Table:
     )
 
 
-def _exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
+def public_exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
     """
     One-word public access status for the overview table.
     """
@@ -8661,7 +8661,7 @@ def _exposure(cfg: BucketConfig, account_block: dict[str, bool] | None) -> str:
     return "not blocked"
 
 
-def _block_label(settings: dict[str, bool] | None) -> str:
+def block_label(settings: dict[str, bool] | None) -> str:
     """
     Block Public Access settings -> 'all on' / '2/4 on' / 'not set'.
     """
@@ -8958,7 +8958,7 @@ def _hexdump(data: bytes) -> str:
     return "\n".join(lines)
 
 
-def _encryption_label(cfg: BucketConfig) -> str:
+def encryption_label(cfg: BucketConfig) -> str:
     if "encryption" in cfg.errors:
         return f"? ({cfg.errors['encryption']})"
     labels = {"AES256": "SSE-S3", "aws:kms": "SSE-KMS", "aws:kms:dsse": "DSSE-KMS"}
@@ -8969,14 +8969,14 @@ def _encryption_label(cfg: BucketConfig) -> str:
 def _public_access_label(cfg: BucketConfig) -> str:
     if "public_access_block" in cfg.errors:
         return f"? ({cfg.errors['public_access_block']})"
-    return _block_label(cfg.public_access_block)
+    return block_label(cfg.public_access_block)
 
 
 def _section(cfg: BucketConfig, section: str, text: str) -> str:
     return f"? ({cfg.errors[section]})" if section in cfg.errors else text
 
 
-def _rule_scope(rule: dict) -> str:
+def rule_scope(rule: dict) -> str:
     filt = rule.get("Filter")
     if filt is None:
         return rule.get("Prefix") or "whole bucket"  # legacy rule format
@@ -8991,7 +8991,7 @@ def _rule_scope(rule: dict) -> str:
     return ", ".join(bits) or "whole bucket"
 
 
-def _rule_actions(rule: dict) -> str:
+def rule_actions(rule: dict) -> str:
     def when(spec: dict) -> str:
         if "Days" in spec:
             return f"{spec['Days']} days"
@@ -9356,13 +9356,13 @@ class S3View(_BaseView):
             ("Versioning", _section(cfg, "versioning", cfg.versioning or "?")),
             (
                 "Encryption",
-                _encryption_label(cfg),
+                encryption_label(cfg),
                 "" if cfg.encryption or "encryption" in cfg.errors else "warn",
             ),
             ("Block public access", _public_access_label(cfg), open_to_public),
             (
                 "Account block public access",
-                "?" if account_block is None else _block_label(account_block),
+                "?" if account_block is None else block_label(account_block),
                 open_to_public,
             ),
             (
@@ -9471,8 +9471,8 @@ class S3View(_BaseView):
                         [
                             r.get("ID", "-"),
                             r.get("Status"),
-                            _rule_scope(r),
-                            _rule_actions(r),
+                            rule_scope(r),
+                            rule_actions(r),
                         ]
                         for r in cfg.lifecycle_rules
                     ],
@@ -9585,7 +9585,7 @@ class S3View(_BaseView):
             enabled_rules = sum(
                 rule.get("Status") == "Enabled" for rule in cfg.lifecycle_rules
             )
-            exposure, encryption = _exposure(cfg, account_block), _encryption_label(cfg)
+            exposure, encryption = public_exposure(cfg, account_block), encryption_label(cfg)
             exposed = {"blocked": "ok", "not blocked": "warn"}.get(
                 exposure, "bad" if "PUBLIC" in exposure else ""
             )
@@ -9627,7 +9627,7 @@ class S3View(_BaseView):
                     ),
                     (
                         "Account block public access",
-                        "?" if account_block is None else _block_label(account_block),
+                        "?" if account_block is None else block_label(account_block),
                     ),
                     (
                         "Regions",
