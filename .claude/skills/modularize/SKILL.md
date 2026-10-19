@@ -98,7 +98,7 @@ Service-specific core modules go next to these, at the layer they belong to. Exa
   away, since the module is the section now.
 - Mixin naming, so `rules.py` can find them:
   - View command mixins: `_<Topic>Commands`.
-  - Explorer tab mixins: `_<Topic>Tab`.
+  - Explorer tab mixins: `_<Topic>Tab`, and `_<Topic>Pane` for a window without tabs (S3's list and report panes).
   - Analyzer mixins: `_<Topic>Reads`.
   - The composed class lives in the module named for its layer (`view.py` or `view/__init__.py`, ...).
 
@@ -182,7 +182,8 @@ One PR per service, branch `modularize/<service>`, one commit per bullet so each
       function, so check what giving each half its own module changes before you place them.
    2. **A class over the limit becomes mixins first** (decision 5), with `mixins.py`. Add `MIXINS` to the same plan:
       the class, then each mixin's name, docstring and members, in the order they go in its bases. Keep `__init__`
-      and anything that calls `super()` on the class. Then split its output instead of the file:
+      and anything that calls `super()` on the class. An alias in the class body (`_preview_tsv = _preview_csv`) is
+      a member named by its first name: put it in the mixin of the method it names, or the class can't be built. Then split its output instead of the file:
 
       ```bash
       python .claude/skills/modularize/mixins.py "$SCRATCH/$S.py" "$SCRATCH/$S_plan.py" "$SCRATCH/$S-mixed.py"
@@ -365,7 +366,21 @@ lambda_functions/
 - Tests to re-target: `_RUN_LINES`, `_TOGGLE_GRACE`, `map_package` (patched where the explorer looks it up),
   `urllib.request.urlopen` (on the module that calls it).
 
-### `s3` (11,679) and `s3_explorer` (2,932)
+### `s3` (11,679) and `s3_explorer` (2,932), done
+
+The layout below was the plan. What it became is `plans/s3.py` (51 modules, the largest `view/folders.py` at 860
+lines) and `plans/s3_explorer.py` (`s3/explorer/`, 8 modules). It differs in these ways:
+- `readers/` comes after `models` (the parsers return `Document`, `Picture`, `PdfPage`) and holds formats, avro,
+  office (Word, PowerPoint, Excel), pdf, media and data; `prices.py` holds the price tables and `ARCHIVE_CLASSES`.
+- `analysis/` is cost, summary, bucket (bucket_findings and the settings in words the agent reads), duplicates,
+  downloads, lifecycle, policy, notifications, documents (`pdf_flow`) and details (`file_details()`'s readers).
+- `S3Analyzer` keeps its plumbing (`__init__`, regions, clients, `account_id`) in `analyzer/s3_analyzer.py`, over
+  `_BucketReads`, `_ListingReads`, `_VersionReads`, `_FileReads`, `_PreviewReads` and `_DownloadReads`, a module
+  each; `threads.py` and `streams.py` hold the module-level helpers.
+- `S3View` (`view/s3_view.py`) is a `_<Topic>Commands` mixin per `_GROUPS` entry, in `view/buckets.py` ...
+  `view/downloads.py`, each with the cell helpers only it uses; `view/cells.py` has the two that several share.
+- `S3Explorer` (`explorer/window.py`) is `_ListPane`, `_ReportPane`, `_SelectionPane` and `_SettingsPane`, with
+  `navigator.py` (the pure helpers and `S3Navigator`) and `frame.py` (stylesheet, rows).
 
 - `helpers.py` plus `readers/`: the stdlib-only Avro, DOCX and PPTX parsers and format sniffing (section 1 is
   1,440 lines, mostly these).
@@ -458,7 +473,7 @@ Update this table in each step's PR.
 | Phase 0: tooling | done | #97 | branch `modularize/tooling` |
 | opensearch | done | #98 | plan in `plans/opensearch.py` |
 | lambda_functions | in review | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
-| s3 + s3_explorer | not started | | |
+| s3 + s3_explorer | in review | | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
 | bedrock_chat | not started | | |
@@ -485,6 +500,30 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **s3:**
+  - **The explorer couldn't stay a companion through the split.** It reached into s3 through `self.s3._Note`,
+    `self.s3._render_html`, `self.s3._zip_layout`, ..., and a package re-exports public names only. Its own commit
+    (before the split) made it part of the package: those names are imported from `_kit` and the parent package
+    instead, `_s3_module()` is the parent package, and `x.s3` stays. Do the same for any window that reads its
+    service through a module object.
+  - **An alias module** (`s3_explorer.py`) keeps the old import path. `rules.py` checks it holds nothing but
+    re-exports (`ALIASES`), and `test_package` lets it load its target. The snapshot's compare lists the old file's
+    private names as LOST, since a file module has no "inside"; check each one is in the new package's `inside` in
+    names.json (they all were) instead of `--allow-lost`-ing them.
+  - **Parsers in section 1 returned section-2 dataclasses**, and pure analysis read section-4 names (`_READ_ERRORS`,
+    `_ReadLimit`, `_columnar_info`, `_npy_header`). `readers/` went between `models` and `analysis`, and those names
+    moved down into it. `split.py` stops on each such case; the deps listing (`read_source`, `defined_names`,
+    `used_names` over every statement and every member of the big classes) showed them all at once.
+  - **Class-body aliases** (`_preview_tsv = _preview_psv = _preview_csv`) stayed behind in the class and broke it.
+    `mixins.py` now treats one as a member named by its first name.
+  - **A rename for decision 7 can collide with a local**: the View has `exposure = _exposure(...)`, so `_exposure`
+    became `public_exposure`. The View helpers the agent reads moved to the core (`analysis/bucket.py`), since the
+    agent reads only the core.
+  - **The tools assumed one file**: `snapshot.py`'s `_layout` looked for `s3.py`, and `shots.py` found the View by
+    `__module__ ==` (so it couldn't find a package's). Both fixed. `rules.py --apis` now lists S3's operations per
+    module; compare the union per service against the baseline, not the lines.
+  - **`--allow-lost` takes several names after one flag** (`--allow-lost a b c`); repeating the flag keeps the last.
 
 - **lambda_functions:**
   - **Some dataclasses call analysis functions** in their properties (`Overview` reads `function_monthly_cost`,
