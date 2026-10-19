@@ -16,6 +16,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   graph and steps get a whole tab instead of a notebook cell. In JupyterLab a click opens it in a JupyterLab tab, and
   a middle-click (or right-click, **Open link in new tab**) in a browser tab. The explorer's Code tab has the same as
   **↗ Open in a tab**, beside **How it works**.
+  ([#120](https://github.com/utkarsh5026/aws-analyzer/pull/120))
 
 ## [0.24.0] - 2026-10-19
 
