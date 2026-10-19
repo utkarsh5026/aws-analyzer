@@ -22,6 +22,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   notebook stops at 24 functions, 5 calls deep, and 5 lines a box. When the notebook's graph leaves something out, a
   note under it says what and points to the page. `code_graph(cmap, max_functions=None, max_depth=None,
   max_lines=None)` gives the whole graph in Python.
+  ([#121](https://github.com/utkarsh5026/aws-analyzer/pull/121))
 
 ## [0.24.0] - 2026-10-19
 
