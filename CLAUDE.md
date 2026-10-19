@@ -794,7 +794,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   draws the answer with `_bedrock._Answer` (markdown; `.ans` rules in its `_EXTRA_CSS`), cards, `answers.py`'s
   `answer_findings()`, the table of tool calls (each window in the reports' zone, `_fmt_dt`; what the model reads
   stays ISO UTC), the AWS reads (folded) and `answer_next()` under a title naming the Views they're on.
-- **The chat window** (`window.py`, `_AgentChat`, a `_Window`; `AgentView.chat()` imports it lazily and keeps it in
+- **The chat window** (`window/`: `chat.py`'s `_AgentChat`, a `_Window`, and `model_panel.py`; `AgentView.chat()` imports it lazily and keeps it in
   `view.window`): the agent's steps drawn as they happen. `ask(on_step=)` puts a listener on the `_Run` (`_Run.tell`):
   `stream_turn` tells `AgentStep('thinking')` for a model message with tool calls and text, and `as_tool` tells
   `'tool'` before a call runs and `'tool_done'` after (the same `ToolCall`, filled in). Tools run on LangGraph's
@@ -814,8 +814,17 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `empty` (the services' legend and `_SUGGESTIONS` rows, `_row_button`s); new chat clears the log back to it. Send
   turns into stop (the `_Run`'s stop Event) while `busy`, and `AgentView.ask()` refuses while it is and adds its
   answer to an open window (`added`). The model isn't streamed token by token: on Bedrock that would need
-  `InvokeModelWithResponseStream`. Tests drive it like the other windows (`window()`, `enter()`, `page()` in
-  `test_agent.py`), holding the scripted model back with a `threading.Event` among its replies.
+  `InvokeModelWithResponseStream`. **⚙ model** (`model_button`) toggles `_ModelPanel` (`panel`, between the head and
+  the log; a package module named `window` because `rules.py` reads its first part as the UI layer): a Dropdown of
+  `provider_options()` (`llm.provider_names()`, plus the chat model passed in, `AgentAnalyzer.given_chat_model`), a
+  Combobox for the model (Bedrock's region list, `bedrock_choices` over `_bedrock_models()`, read off the loop once),
+  and only the rows `form_for(provider)` (`_FORMS`) asks for: endpoint, key (a `Password`, cleared after use) and
+  API version. Its note says `model_place` and `price_text`; Use this model is `AgentAnalyzer.use_model()`, which
+  makes the chat model at once and restores every `_MODEL_SETTINGS` attribute when that raises, then starts a new
+  thread; the window's `model_changed()` (also called by `AgentView.use_model()`) redraws the head and draws an
+  `_switch_html` line across the conversation. With no model set up, the window opens the panel on Bedrock. Tests
+  drive it like the other windows (`window()`, `enter()`, `page()` in `test_agent.py`), holding the scripted model
+  back with a `threading.Event` among its replies.
 
 ## The S3 explorer (`s3/explorer/`)
 

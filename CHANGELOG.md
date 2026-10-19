@@ -9,6 +9,18 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- **The agent's chat window picks its model by clicking**: **⚙ model** in its head opens the model settings, a list of
+  providers (Amazon Bedrock, OpenAI, Azure OpenAI, Anthropic, Google Gemini, Ollama and every other provider
+  LangChain knows) and a model box that suggests names (the region's Bedrock models, read when Bedrock is picked). It
+  asks only for what that provider takes: a base URL or Azure endpoint, an API key (in a password box, never shown
+  back; leave it empty to use the environment variable) and Azure's API version. Under them it says where what the
+  agent sends would go (in AWS, or outside it) and how its tokens are priced. **Use this model** switches and starts
+  a new conversation; a missing key, setting or package is said in the panel, and the agent keeps the model it had.
+  When no model is set up, the window opens on it with Amazon Bedrock picked, which needs no key. From code,
+  `AgentView().use_model('openai', 'gpt-4.1', api_key=...)` and `AgentAnalyzer.use_model(...)` do the same.
+
 ## [0.23.0] - 2026-10-19
 
 ### Added

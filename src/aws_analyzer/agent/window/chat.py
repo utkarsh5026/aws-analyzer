@@ -24,27 +24,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
-from .._bedrock.markdown import _markdown_html
-from .._bedrock.prices import short_model
-from .._kit.blocks import _Findings, _Note
-from .._kit.fmt import _duration, _plural, human_money, human_size
-from .._kit.highlight import _python_html
-from .._kit.jsontree import _json_tree_css, _JsonTree
-from .._kit.render import _blocks_html, _prose
-from .._kit.text import _clip, _esc
-from .._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
-from .answers import AgentAnswer, AgentStep, ToolCall, services_of
-from .llm import no_model_hint
-from .view import _CSS, _ROOT, _coverage_text
+from ..._bedrock.markdown import _markdown_html
+from ..._bedrock.prices import short_model
+from ..._kit.blocks import _Findings, _Note
+from ..._kit.fmt import _duration, _plural, human_money, human_size
+from ..._kit.highlight import _python_html
+from ..._kit.jsontree import _json_tree_css, _JsonTree
+from ..._kit.render import _blocks_html, _prose
+from ..._kit.text import _clip, _esc
+from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
+from ..answers import AgentAnswer, AgentStep, ToolCall, services_of
+from ..llm import provider_info
+from ..view import _CSS, _ROOT, _coverage_text
+from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
 if TYPE_CHECKING:
-    from .view import AgentView
+    from ..view import AgentView
 
 _DRAW_EVERY = 0.15
 _TARGET_CHARACTERS = 48
@@ -278,7 +280,7 @@ def _service_rules() -> str:
 
 
 def _window_css() -> str:
-    return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _json_tree_css(_ROOT)])
+    return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _PANEL_CSS, _json_tree_css(_ROOT)])
 
 
 def _wrap(inner: str) -> str:
@@ -332,6 +334,13 @@ def _thinking_html(text: str) -> str:
     What the model said before it called tools: a grey bullet, then its words.
     """
     return f'<div class="ag-say"><span class="ag-bul">●</span>{_answer_text_html(text)}</div>'
+
+
+def _switch_html(model: str) -> str:
+    """
+    The line across the conversation where the agent switched model: a new conversation starts under it.
+    """
+    return f'<div class="ag-switch"><span>now answering with {_esc(model)} · a new conversation</span></div>'
 
 
 def _target(call: ToolCall) -> str | None:
@@ -507,10 +516,13 @@ class _AgentChat(_Window):
         w, layout = self.w, self.w.Layout
         style = w.HTML(f"{_CSS}<style>{_window_css()}</style>", layout=layout(display="none"))
         self.title = w.HTML(self._title_html(), layout=layout(flex="1 1 auto", min_width="0"))
+        self.model_button = self._button("⚙ model", "Pick the provider and model the agent answers with",
+                                         lambda: self.panel.toggle(), "agc-new")
         self.new_button = self._button("new chat", "Start over: the next question starts a new conversation",
                                        self._new_chat, "agc-new")
-        head = w.HBox([self.title, self.new_button], layout=layout(width="100%"))
+        head = w.HBox([self.title, self.model_button, self.new_button], layout=layout(width="100%"))
         head.add_class("agc-head")
+        self.panel = _ModelPanel(self, w, os.environ)
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto",
                                         height=_css_height(height), width="100%"))
         self.log.add_class("agc-log")
@@ -523,10 +535,12 @@ class _AgentChat(_Window):
         composer = w.HBox([prompt, self.question, self.send_button], layout=layout(width="100%"))
         composer.add_class("agc-composer")
         self.status = w.HTML(layout=layout(width="100%"))
-        root = w.VBox([style, head, self.log, composer, self.status], layout=layout(width="100%"))
+        root = w.VBox([style, head, self.panel.root, self.log, composer, self.status], layout=layout(width="100%"))
         root.add_class("agc-app")
         self._fill_log()
         self._say_ready()
+        if not self._has_model():
+            self._safely(self.panel.open)()
         return root
 
     def _button(self, label: str, tooltip: str, on_click: Callable[[], None], css: str) -> Any:
@@ -580,15 +594,24 @@ class _AgentChat(_Window):
     def resize(self, height: int | str | None) -> None:
         self.log.layout.height = _css_height(height)
 
+    def _has_model(self) -> bool:
+        core = self.view.core
+        return bool(core.provider) or core.chat_model is not None
+
+    def _model_where(self) -> str:
+        """
+        The model and who serves it: 'claude-haiku-4-5 @ bedrock', 'gpt-test @ Scripted', or that there's none.
+        """
+        core = self.view.core
+        served = core.provider or (type(core.chat_model).__name__ if core.chat_model is not None else "")
+        model = shown_model(core.provider, core.model) or "no model set up"
+        return f"{model} @ {served}" if served else model
+
     def _title_html(self) -> str:
         """
         The window's head: what it is, the model and who serves it, the services it reads, and that it only reads.
         """
-        core = self.view.core
-        served = core.provider or (type(core.chat_model).__name__ if core.chat_model is not None else "")
-        model = short_model(core.model) if core.provider == "bedrock" else core.model or "no model set up"
-        where = f"{model} @ {served}" if served else model
-        return (f'<div class="ag-head"><b>aws-agent</b><span class="ag-dim">{_esc(where)}</span>'
+        return (f'<div class="ag-head"><b>aws-agent</b><span class="ag-dim">{_esc(self._model_where())}</span>'
                 f'{_badges(self._services())}<span class="ag-ro">● read-only</span></div>')
 
     def _set_status(self, text: str, level: str = "") -> None:
@@ -621,11 +644,12 @@ class _AgentChat(_Window):
         """
         The line under the question box between questions: what's wrong with the setup first, else the usual.
         """
-        core = self.view.core
-        if not core.provider and core.chat_model is None:
-            self._set_status(no_model_hint(core.model_id), "warn")
-        else:
+        if self._has_model():
             self._set_status("")
+            return
+        self._set_status("The agent needs a model to answer with, and none is set up: pick one above and press use "
+                         "this model. Amazon Bedrock needs no key: it's called with this notebook's AWS credentials.",
+                         "warn")
 
     def _add(self, widget: Any) -> Any:
         if self.empty in self.items:
@@ -682,6 +706,20 @@ class _AgentChat(_Window):
         self._show_empty()
         self._say_ready()
 
+    def model_changed(self) -> None:
+        """
+        The agent answers with another model now (⚙ model, or use_model() in a cell): the head names it, the
+        settings show it, and when there was a conversation a line across it says a new one starts under it.
+        """
+        core = self.view.core
+        self._set(self.title, self._title_html())
+        self.panel.refresh()
+        if self.empty not in self.items:
+            self._add(self._html(_wrap(_switch_html(shown_model(core.provider, core.model)))))
+        title = provider_info(core.provider).title
+        self._set_status(f"Now answering with {shown_model(core.provider, core.model)} ({title}). A new conversation "
+                         "starts with the next question.", "ok")
+
     def _new_chat(self) -> None:
         if self.busy:
             self._set_status("Still answering: press stop first, then start a new chat.", "warn")
@@ -729,6 +767,7 @@ class _AgentChat(_Window):
         self.send_button.tooltip = "Stop: answer with what it found so far" if busy else "Send (Enter does too)"
         _class_if(self.send_button, "agc-stop", busy)
         self.new_button.disabled = busy
+        self.panel.use_button.disabled = busy
 
     def _begin(self, question: str) -> None:
         """

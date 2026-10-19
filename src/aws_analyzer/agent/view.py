@@ -154,7 +154,7 @@ class AgentView(_BaseView):
     _GROUPS = {
         "💬 Ask": ("chat", "ask", "new_conversation"),
         "🔎 Look back": ("transcript",),
-        "🧰 What it can do": ("tools",),
+        "🧰 What it can do": ("tools", "use_model"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -313,6 +313,35 @@ class AgentView(_BaseView):
             self.window.cleared()
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
+
+    @_friendly_errors
+    def use_model(  # noqa: PLR0913
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        *,
+        endpoint: str | None = None,
+        api_key: str | None = None,
+        api_version: str | None = None,
+        chat_model: Any = None,
+    ) -> None:
+        """
+        Switches the model the agent answers with, then says where what it sends goes and how its tokens are priced:
+        use_model('bedrock', 'sonnet'), use_model('openai', 'gpt-4.1', api_key=...), use_model('azure', 'prod-gpt-4o',
+        endpoint=...), or any LangChain provider. The chat window's ⚙ model does the same by clicking. A new
+        conversation starts, and a key or package that's missing is said here, keeping the model it had.
+        """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then switch.")
+        core = self.core
+        core.use_model(provider, model, endpoint=endpoint, api_key=api_key, api_version=api_version,
+                       chat_model=chat_model)
+        if window is not None:
+            window.model_changed()
+        place = model_place(core.provider, core.model, core.endpoint)
+        self._show([_Note(f"Now answering with {core.model} ({provider_info(core.provider).title}): what it sends "
+                          f"goes to {place}. A new conversation starts with the next question.", "ok")])
 
     @_friendly_errors
     def transcript(self) -> None:

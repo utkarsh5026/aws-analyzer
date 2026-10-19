@@ -16,7 +16,16 @@ from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
 from aws_analyzer.agent import view as viewmod
-from aws_analyzer.agent.llm import bedrock_model_id
+from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
+from aws_analyzer.agent.window.model_panel import (
+    bedrock_choices,
+    endpoint_placeholder,
+    form_for,
+    key_placeholder,
+    model_placeholder,
+    price_text,
+    provider_options,
+)
 from aws_analyzer.agent import (
     AgentAnalyzer,
     AgentAnswer,
@@ -1188,12 +1197,12 @@ def test_ask_tells_each_step_as_it_happens(seeded):
 
 
 
-def window(model, **settings):
+def window(model=None, *, core=None, **settings):
     """
-    The chat window on an agent with this model, as a notebook shows it (the display is replaced).
+    The chat window on an agent with this model (or on `core`), as a notebook shows it (the display is replaced).
     """
     pytest.importorskip("ipywidgets")
-    view = AgentView(make(model, **settings), mode="html", progress="off")
+    view = AgentView(core or make(model, **settings), mode="html", progress="off")
     view._display = lambda widget: None
     view.chat()
     return view.window
@@ -1276,10 +1285,20 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
     assert not x.busy and not x.send_button.disabled and x.view.core.history[-1].stopped == "stopped"
 
 
-def test_the_chat_window_without_a_model_says_how_to_set_one_up(seeded):
+def test_the_chat_window_without_a_model_opens_its_settings_on_bedrock(seeded):
     pytest.importorskip("deepagents")
-    x = window(None)
-    assert "The agent needs a model to answer with" in x.status.value
+    core = make()
+    control, _, _ = bedrock_clients(core)
+    control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+    with control:
+        x = window(core=core)
+    panel = x.panel
+    assert "The agent needs a model to answer with" in x.status.value and "pick one above" in x.status.value
+    assert panel.is_open and panel.provider_pick.value == "bedrock" and panel.provider_pick.label == "Amazon Bedrock"
+    assert "claude-haiku-4-5" in panel.model_box.options and panel.model_box.placeholder == "claude-haiku-4-5 (the default)"
+    assert panel.rows["key"].layout.display == "none" and panel.rows["endpoint"].layout.display == "none"
+    assert "so it stays in AWS" in panel.note.value and "Amazon Bedrock&#x27;s list prices: $1.10 in" in panel.note.value
     enter(x, "What failed?")
     assert "AgentView(provider=&#x27;bedrock&#x27;)" in page(x) or "AgentView(provider='bedrock')" in page(x)
     assert x.question.value == "What failed?" and not x.busy and "back in the box" in x.status.value
@@ -1297,3 +1316,100 @@ def test_questions_asked_in_a_cell_join_the_chat_window(seeded, capsys):
     view.use_html = False
     view.ask("Asked in a cell")
     assert "second answer" in page(view.window) and "This conversation: 2 questions" in view.window.status.value
+
+
+def test_the_chat_window_switches_the_model_from_its_settings(seeded, monkeypatch):
+    pytest.importorskip("langchain_openai")
+    for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY",
+                 "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+    x = window(scripted(says("etl-nightly failed.")))
+    panel, core = x.panel, x.view.core
+    assert not panel.is_open and panel.provider_pick.value == "" and panel.provider_pick.label == "your chat model (Scripted)"
+    enter(x, "What failed?")
+    x.model_button.click()
+    assert panel.is_open and "agc-on" in x.model_button._dom_classes
+    panel.provider_pick.value = "openai"
+    assert panel.rows["key"].layout.display == "" and panel.key_box.placeholder == "paste a key, or set OPENAI_API_KEY"
+    assert panel.model_box.placeholder == "gpt-4.1 (the default)" and "OpenAI (gpt-4.1), outside AWS" in panel.note.value
+    assert "starts a new conversation" in panel.note.value and "cost shows as unknown" in panel.note.value
+    panel.use_button.click()
+    assert "OPENAI_API_KEY is not set" in panel.note.value and panel.is_open
+    assert core.provider == "" and "gpt-test @ Scripted" in x.title.value
+    panel.model_box.value, panel.key_box.value = "gpt-4o", "not-a-real-key"
+    panel.key_box._handle_custom_msg({"event": "submit"}, [])
+    assert not panel.is_open and (core.provider, core.model, core._api_key) == ("openai", "gpt-4o", "not-a-real-key")
+    assert "gpt-4o @ openai" in x.title.value and "Now answering with gpt-4o (OpenAI)" in x.status.value
+    shown = page(x)
+    assert shown.index("etl-nightly failed.") < shown.index("now answering with gpt-4o · a new conversation")
+    x.model_button.click()
+    assert panel.model_box.value == "gpt-4o" and panel.key_box.value == ""
+    assert panel.key_box.placeholder.startswith("the key you gave is kept")
+    panel.provider_pick.value = "azure"
+    assert "deployment" in panel.labels["model"].value and panel.rows["version"].layout.display == ""
+    panel.use_button.click()
+    assert "AZURE_OPENAI_ENDPOINT" in panel.note.value and core.provider == "openai" and core.model == "gpt-4o"
+    panel.provider_pick.value = ""
+    panel.use_button.click()
+    assert core.chat_model is core.given_chat_model and "gpt-test @ Scripted" in x.title.value
+
+
+def test_use_model_switches_the_model_and_keeps_the_last_one_when_it_cant(seeded, monkeypatch, capsys):
+    pytest.importorskip("langchain_openai")
+    for name in ("OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
+        monkeypatch.delenv(name, raising=False)
+    given = types.SimpleNamespace(model_name="mine")
+    core = make(given)
+    thread, core._graph = core.thread, "built"
+    assert core.use_model("openai", api_key="not-a-real-key") != thread and core._graph is None
+    assert (core.provider, core.model, type(core.chat_model).__name__) == ("openai", "gpt-4.1", "ChatOpenAI")
+    core.use_model(model="gpt-4o")
+    assert (core.provider, core.model, core._api_key) == ("openai", "gpt-4o", "not-a-real-key")
+    made = core.chat_model
+    with pytest.raises(_Hint, match="AZURE_OPENAI_ENDPOINT"):
+        core.use_model("azure")
+    assert (core.provider, core.model, core.chat_model) == ("openai", "gpt-4o", made)
+    core.use_model(chat_model=core.given_chat_model)
+    assert core.chat_model is given and core.provider == "" and core.model == "mine"
+    view = AgentView(core, mode="text", progress="off")
+    out = run(capsys, view.use_model, "openai", "gpt-4o", api_key="not-a-real-key")
+    assert "Now answering with gpt-4o (OpenAI): what it sends goes to OpenAI (gpt-4o), outside AWS" in out
+    out = run(capsys, view.use_model, "azure")
+    assert "AZURE_OPENAI_ENDPOINT" in out and "Traceback" not in out and core.provider == "openai"
+
+
+def test_the_model_settings_ask_for_what_each_provider_takes():
+    names = provider_names()
+    assert names[:len(PROVIDERS)] == list(PROVIDERS) and "groq" in names
+    assert "azure_openai" not in names and "bedrock_converse" not in names
+    assert provider_options()[0] == ("Amazon Bedrock", "bedrock") and ("groq (LangChain)", "groq") in provider_options()
+    assert provider_options(types.SimpleNamespace())[0] == ("your chat model (SimpleNamespace)", "")
+    assert not form_for("bedrock").key and form_for("azure").version and form_for("groq").key
+    assert key_placeholder("openai", has_key=False, environ={}) == "paste a key, or set OPENAI_API_KEY"
+    assert key_placeholder("openai", has_key=False, environ={"OPENAI_API_KEY": "x"}) == ("from OPENAI_API_KEY: leave "
+                                                                                          "empty to use it")
+    assert model_placeholder("azure", {"AZURE_OPENAI_DEPLOYMENT": "prod"}) == "from AZURE_OPENAI_DEPLOYMENT: prod"
+    assert endpoint_placeholder("azure", {}) == "https://<resource>.openai.azure.com"
+    assert price_text("bedrock", "haiku", None) == ("Priced at Amazon Bedrock's list prices: $1.10 in, $5.50 out per "
+                                                    "1M tokens.")
+    assert price_text("openai", "gpt-4o", {"gpt-4o": (2.5, 10.0)}).startswith("Priced at the prices you passed")
+    assert "cost shows as unknown" in price_text("openai", "gpt-4o", None)
+    assert "claude-haiku-4-5" in bedrock_choices(parse_models(BEDROCK_MODELS, BEDROCK_PROFILES, REGION))
+
+
+def test_the_model_settings_list_bedrocks_models_off_the_loop(seeded):
+    core = make()
+    control, _, _ = bedrock_clients(core)
+    control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+
+    async def open_window():
+        with control:
+            x = window(core=core)
+            assert x.panel.listing and "Listing Amazon Bedrock&#x27;s models in us-east-1" in x.panel.note.value
+            await x.panel.task
+        return x
+
+    x = asyncio.run(open_window())
+    assert not x.panel.listing and "Listing" not in x.panel.note.value
+    assert list(x.panel.model_box.options) == ["claude-haiku-4-5", "nova-pro"]
