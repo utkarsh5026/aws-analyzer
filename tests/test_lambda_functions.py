@@ -20,7 +20,7 @@ from botocore.validate import ParamValidator
 from moto import mock_aws
 
 from aws_analyzer import lambda_functions as lfmod
-from aws_analyzer.lambda_functions import helpers, style as stylemod, view as viewmod
+from aws_analyzer.lambda_functions import analyzer as analyzer_mod, helpers, style as stylemod, view as viewmod
 from aws_analyzer.lambda_functions.analysis import text as textmod
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
@@ -1597,6 +1597,48 @@ def test_filter_keeps_the_newest_and_says_where_it_stopped(core):
     assert truncated and covered == events[0].time
     every, truncated, _ = core._filter("/aws/lambda/api-handler", None, now - timedelta(hours=1), now, None, 100)
     assert len(every) == 30 and not truncated
+
+
+def test_log_slices_cover_the_range_newest_first():
+    minute = 60_000
+    low, high = 0, 7 * 24 * 60 * minute - 1
+    for readers in (1, analyzer_mod._LOG_READERS):
+        slices = analyzer_mod._log_slices(low, high, readers)
+        assert slices[0] == (high - minute + 1, high) and slices[-1][0] == low
+        assert all(newer[0] == older[1] + 1 for newer, older in zip(slices, slices[1:]))
+    side_by_side = analyzer_mod._log_slices(low, high, 4)
+    assert max(last - first + 1 for first, last in side_by_side) == (high + 1) // 4
+    assert analyzer_mod._log_slices(low, minute // 2, 4) == [(low, minute // 2)]
+
+
+def test_a_search_reads_its_slices_side_by_side_and_keeps_the_newest(seeded):
+    now = datetime.now(timezone.utc)
+    put_logs("/aws/lambda/api-handler", [(now - timedelta(hours=150 - 5 * i), f"KeyError {i}") for i in range(30)])
+    together = threading.Barrier(analyzer_mod._LOG_READERS, timeout=10)
+    calls = []
+
+    def logs_client(region):
+        client = boto3.client("logs", region_name=region or REGION)
+
+        def filter_log_events(**params):
+            calls.append(params)
+            if len(calls) <= together.parties:
+                together.wait()
+            answer = client.filter_log_events(**params)
+            answer.pop("ResponseMetadata", None)
+            return answer
+
+        return Patched(client, {"filter_log_events": filter_log_events})
+
+    core = LambdaAnalyzer(region=REGION, clients={"lambda": lambda_clients(), "logs": logs_client})
+    args = ("/aws/lambda/api-handler", None, now - timedelta(days=7), now, '"KeyError"')
+    events, truncated, covered = core._filter(*args, 12)
+    assert not together.broken
+    assert [e.message for e in events] == [f"KeyError {i}" for i in range(18, 30)]
+    assert truncated and covered == events[0].time
+    core.max_workers = 1
+    assert core._filter(*args, 12) == (events, truncated, covered)
+    assert len(core._filter(*args, None)[0]) == 30
 
 
 def test_errors_and_performance(core):
