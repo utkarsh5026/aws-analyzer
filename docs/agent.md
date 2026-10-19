@@ -1,6 +1,6 @@
 ---
 title: Ask in Plain English (Agent) Guide
-description: "How to ask questions about your AWS account in plain English from a SageMaker notebook with aws-analyzer's agent: an agent (an Azure OpenAI deployment, run by LangChain's deepagents) answers questions like which Lambda failed last night, or whether last night's uploads to a bucket were processed, from read-only tools, says what it checked, and stays within a budget per question."
+description: "How to ask questions about your AWS account in plain English from a SageMaker notebook with aws-analyzer's agent: an agent (a model you pick, on Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider, run by LangChain's deepagents) answers questions like which Lambda failed last night, or whether last night's uploads to a bucket were processed, from read-only tools, says what it checked, and stays within a budget per question."
 ---
 
 <p class="eyebrow"><img class="aws-icon" src="images/aws/lambda.svg" alt="" width="32" height="32"> Ask in plain English <code>agent/</code></p>
@@ -16,9 +16,10 @@ Ask "Which Lambda failed last night?" in a notebook cell and get the answer: whi
   <li>A budget per question</li>
   <li>Follow-up questions</li>
   <li>Lambda and S3, joined</li>
+  <li>Any model: Bedrock, OpenAI, Azure, ...</li>
 </ul>
 
-It covers AWS Lambda and Amazon S3. The model is your Azure OpenAI deployment, run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
+It covers AWS Lambda and Amazon S3. The model is yours to pick (one on Amazon Bedrock keeps everything in AWS), run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
 { .muted }
 
 ## Set up in SageMaker { #setup }
@@ -31,32 +32,33 @@ It covers AWS Lambda and Amazon S3. The model is your Azure OpenAI deployment, r
     %pip install "aws-analyzer[agent]"
     ```
 
-2. **Point it at your Azure OpenAI deployment.** It reads the same environment variables as the OpenAI SDK, plus the deployment's name:
-
-    ```python
-    import os
-
-    os.environ["AZURE_OPENAI_ENDPOINT"] = "https://acme-ai.openai.azure.com"
-    os.environ["AZURE_OPENAI_API_KEY"] = "..."           # better: from a secret store, not typed in the notebook
-    os.environ["AZURE_OPENAI_DEPLOYMENT"] = "gpt-4o"     # the deployment's name in Azure AI Foundry
-    ```
-
-
-3. **Create the view.** It reads AWS with the notebook's IAM execution role and region, like every other view.
+2. **Pick the model it answers with.** On SageMaker the simplest is a model on Amazon Bedrock: it uses the notebook's IAM role, needs no key, and nothing leaves AWS.
 
     ```python
     from aws_analyzer import AgentView, set_timezone
 
     set_timezone("Asia/Kolkata")   # so "last night" and "today" mean your night and your day
-    agent = AgentView()
+    agent = AgentView(provider="bedrock")                    # Claude Haiku 4.5; model="sonnet" for another
+    # agent = AgentView(model="openai:gpt-4.1")              # OpenAI, with OPENAI_API_KEY set
+    # agent = AgentView()                                    # Azure OpenAI, from AZURE_OPENAI_ENDPOINT, _API_KEY, _DEPLOYMENT
+    # agent = AgentView(model="anthropic:claude-sonnet-4-5") # any provider LangChain supports
     agent.help()
     ```
 
+    It reads AWS with the notebook's IAM execution role and region, like every other view, and `agent.tools()` shows which model it picked.
+
 </div>
 
-??? more "Passing the deployment in code, Entra ID, and time zones"
+??? more "Every model it can use, and time zones"
 
-    Pass the deployment in code instead: `AgentView(endpoint=..., deployment=..., api_key=...)`. For Microsoft Entra ID instead of a key, pass `azure_ad_token_provider=` (from `azure.identity.get_bearer_token_provider`). The API version is `2024-10-21` unless `OPENAI_API_VERSION` or `api_version=` says otherwise.
+    | Model | How | Needs |
+    |---|---|---|
+    | Amazon Bedrock | `AgentView(provider="bedrock")`, Claude Haiku 4.5; `model=` takes a short name (`"sonnet"`, `"nova-pro"`), a model ID or an inference profile, and finds a short name's ID in the region's model list | `bedrock:InvokeModel` on the model; its cost uses Bedrock's list prices |
+    | OpenAI | `AgentView(model="openai:gpt-4.1")` (gpt-4.1 is the default); `endpoint=` for any server that speaks OpenAI's API: LiteLLM, vLLM, OpenRouter | `OPENAI_API_KEY`, or `api_key=` |
+    | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_DEPLOYMENT` in the environment, or `AgentView(endpoint=..., deployment=..., api_key=...)`; `azure_ad_token_provider=` (from `azure.identity.get_bearer_token_provider`) for Microsoft Entra ID; the API version is `2024-10-21` unless `OPENAI_API_VERSION` or `api_version=` says otherwise | A deployment of a model that supports tool calling |
+    | Any LangChain provider | `model="anthropic:claude-sonnet-4-5"`, `"google_genai:gemini-2.5-pro"`, `"ollama:llama3.1"`, ...; or `chat_model=` with a LangChain chat model of your own | Its LangChain package (Anthropic's and Google's come with the extra) and its key |
+
+    Without `provider=`, the agent works it out from the model's name and the environment: `AWS_ANALYZER_AGENT_MODEL` first (`os.environ["AWS_ANALYZER_AGENT_MODEL"] = "bedrock:sonnet"`, good for a lifecycle configuration), then the Azure settings, then `OPENAI_API_KEY`.
 
     [`set_timezone()`](index.md#timezone) is the package's own: every report then shows its times in your zone too, and the agent's table of what it checked does. `AgentView(timezone="Europe/London")` gives the agent a zone of its own instead. Without either, the agent works in UTC and says so.
 
@@ -64,11 +66,11 @@ It covers AWS Lambda and Amazon S3. The model is your Azure OpenAI deployment, r
     agent = AgentView(timezone="kolkata")   # a tz database name, its city, or an offset like "+05:30"
     ```
 
-    The agent needs deepagents and langchain-openai, which need Python 3.11; the rest of aws-analyzer still runs on 3.10 with boto3 alone.
+    The agent needs deepagents, langchain-openai and langchain-aws, which need Python 3.11; the rest of aws-analyzer still runs on 3.10 with boto3 alone.
 
 !!! tip "Worth knowing"
 
-    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, with anything that looks like a key or password hidden) are sent to your Azure OpenAI deployment. Environment variable values and what's inside your files are never read. Use a deployment your organisation allows for that data.
+    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and what's inside your files are never read.
 
 ## Start here { #tour }
 
@@ -189,7 +191,8 @@ answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
-answer.input_tokens, answer.output_tokens, answer.cost
+answer.provider, answer.model # who served it, and the model or profile that answered
+answer.input_tokens, answer.output_tokens, answer.cost   # answer.rates: whose prices the cost is at
 answer.stopped                 # None, or why it stopped early: 'tool_calls', 'time', 'cost', 'steps', 'stopped', 'error'
 answer.error                   # what went wrong with the model, and what to do
 agent.core.history             # every AgentAnswer so far
@@ -201,8 +204,8 @@ Settings, all optional:
 from aws_analyzer import AgentAnalyzer, AgentView
 
 core = AgentAnalyzer(
-    deployment="prod-gpt-4o", endpoint="https://acme-ai.openai.azure.com", api_key="...",
-    model_prices={"gpt-4o": (2.50, 10.00)},          # USD per 1M input and output tokens, from your price sheet
+    provider="bedrock", model="sonnet",              # or model="openai:gpt-4.1", deployment=..., ...
+    model_prices={"claude-sonnet-5": (2.00, 10.00)}, # USD per 1M input and output tokens, over the list prices
     timezone="Asia/Kolkata",                         # for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account
@@ -212,7 +215,7 @@ core = AgentAnalyzer(
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead of Azure OpenAI: for a model on Amazon Bedrock, `ChatBedrockConverse` from langchain-aws. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
@@ -245,13 +248,13 @@ Its tools get the same budget, error handling and report as the built-in ones, a
 
 ## Cost { #cost }
 
-Each answer counts the model's input and output tokens. Azure OpenAI's prices depend on the model, the region and the deployment type, so there are none built in: pass `model_prices=` and each answer shows its estimated cost, and the budget's `usd` limit applies. Without it the cost shows as unknown, never a guess.
+Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices, so each answer shows its estimated cost and the budget's `usd` limit applies. OpenAI's and Azure OpenAI's prices depend on the plan, the region and the deployment type, so there are none built in: pass `model_prices=` for them (or to override Bedrock's). Without a price the cost shows as unknown, never a guess.
 
 On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005.
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. Nothing more: no Bedrock and no permission to change anything. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 
@@ -261,9 +264,21 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
     deepagents needs Python 3.11. On SageMaker, pick a kernel with Python 3.11 or newer, or make one with the SageMaker guide's [`new_env("3.11")`](sagemaker_env.md#envs), then `%pip install "aws-analyzer[agent]"` in it.
 
+??? question "“The agent needs a model to answer with, and none is set up”"
+
+    Nothing says which model to use. Pick one: `AgentView(provider="bedrock")`, `AgentView(model="openai:gpt-4.1")` with `OPENAI_API_KEY` set, or the Azure settings below. `AWS_ANALYZER_AGENT_MODEL` sets one for every notebook.
+
 ??? question "“… AZURE_OPENAI_ENDPOINT … are not set”"
 
     The agent doesn't know which deployment to ask. Set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_DEPLOYMENT` in the notebook's environment, or pass them to `AgentView`.
+
+??? question "“ValidationException … on-demand throughput isn't supported”"
+
+    That Bedrock model is served only through an inference profile. Put `us.` (or `eu.`, `apac.`, `global.`) before its ID, or pass its short name, `AgentView(provider="bedrock", model="haiku")`, and the agent finds the profile.
+
+??? question "“AccessDeniedException” from Bedrock"
+
+    The notebook's role needs `bedrock:InvokeModel` on the model and on its inference profile, and the account needs access to the model: the Bedrock console's Model catalog shows it.
 
 ??? question "“NotFoundError … No such deployment on this endpoint”"
 

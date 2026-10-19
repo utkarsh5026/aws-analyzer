@@ -9,6 +9,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- **The agent answers with the model you pick, not only Azure OpenAI**: `AgentView(provider="bedrock")` asks Claude
+  Haiku 4.5 on Amazon Bedrock with the notebook's own AWS credentials, so nothing leaves AWS (`model="sonnet"`, a
+  model ID or an inference profile for another; short names are found in the region's model list), and its answers
+  show their cost at Bedrock's list prices without `model_prices=`. `AgentView(model="openai:gpt-4.1")` uses OpenAI
+  (`endpoint=` points it at any server that speaks OpenAI's API: LiteLLM, vLLM, OpenRouter), and any provider
+  LangChain supports works as `model="anthropic:claude-sonnet-4-5"`, `"google_genai:gemini-2.5-pro"` or
+  `"ollama:llama3.1"`. Without `provider=`, the agent works it out from the model's name and the environment
+  (`AWS_ANALYZER_AGENT_MODEL` sets one for every notebook), and Azure OpenAI set up as before keeps working
+  unchanged. A failed model call says what it means for that provider (a Bedrock model that needs an inference
+  profile, a missing key), and `tools()` shows the provider and where what the agent sends goes. The `[agent]` extra
+  now installs langchain-aws too.
+
 ## [0.20.0] - 2026-10-18
 
 ### Added

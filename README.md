@@ -91,7 +91,7 @@ report still renders.
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Read-only by construction, with a budget per question (the model is your Azure OpenAI deployment) | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/` and `s3/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/` and `s3/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -103,7 +103,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 ```python
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
-%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents and langchain-openai (Python 3.11+)
+%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws (Python 3.11+)
 ```
 
 A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
@@ -1931,28 +1931,24 @@ it. Ask "Were last night's uploads to acme-raw processed?" and it joins the buck
 arrived and the function's runs, and finds the files that never ran it (a suffix filter that misses `.CSV`, a
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
-`S3View` commands to look closer. It covers Lambda and S3; the model is your Azure OpenAI deployment, and the agent
-loop is LangChain's [deepagents](https://pypi.org/project/deepagents/).
+`S3View` commands to look closer. It covers Lambda and S3. The model is yours to pick: one on Amazon Bedrock (so
+nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
+[deepagents](https://pypi.org/project/deepagents/).
 
 📄 [`src/aws_analyzer/agent/`](src/aws_analyzer/agent/) · 📖 [Agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html)
 
 ### Quick start
 
-The agent needs two more packages, deepagents and langchain-openai, which need Python 3.11 or newer. Everything else
-in aws-analyzer still works on 3.10 with boto3 alone.
+The agent needs a few more packages (deepagents, langchain-openai and langchain-aws), which need Python 3.11 or
+newer. Everything else in aws-analyzer still works on 3.10 with boto3 alone.
 
 ```python
 %pip install "aws-analyzer[agent]"
 
-import os
-os.environ["AZURE_OPENAI_ENDPOINT"] = "https://<resource>.openai.azure.com"
-os.environ["AZURE_OPENAI_API_KEY"] = "..."              # or AgentView(azure_ad_token_provider=...) for Entra ID
-os.environ["AZURE_OPENAI_DEPLOYMENT"] = "gpt-4o"        # your deployment's name, not the model's
-
 from aws_analyzer import AgentView, set_timezone
 
 set_timezone("Asia/Kolkata")                            # so "last night" means your night (every report follows it too)
-agent = AgentView()
+agent = AgentView(provider="bedrock")                   # pick a model: see "Which model" below
 agent.ask("Which Lambda failed last night?")
 agent.ask("Why did orders-etl fail?")                   # a follow-up: it remembers the conversation
 agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
@@ -1961,11 +1957,24 @@ agent.tools()                                           # what it can call, its 
 agent.transcript()                                      # every question and answer so far, with their cost
 ```
 
+### Which model
+
+| Model | How | Needs |
+| :---- | :-- | :---- |
+| **Amazon Bedrock** | `AgentView(provider="bedrock")`: Claude Haiku 4.5; `model="sonnet"`, `"nova-pro"`, a model ID or an inference profile for another | The notebook's AWS role, with `bedrock:InvokeModel` on the model. Nothing leaves AWS, and the cost uses Bedrock's list prices |
+| **OpenAI** | `AgentView(model="openai:gpt-4.1")`; `endpoint=` for any server that speaks OpenAI's API (LiteLLM, vLLM, OpenRouter) | `OPENAI_API_KEY`, or `api_key=` |
+| **Azure OpenAI** | `AgentView()` with `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_DEPLOYMENT` set, or `AgentView(endpoint=..., deployment=..., api_key=...)`; `azure_ad_token_provider=` for Entra ID | A deployment of a model that supports tool calling |
+| **Any LangChain provider** | `AgentView(model="anthropic:claude-sonnet-4-5")`, `"google_genai:gemini-2.5-pro"`, `"ollama:llama3.1"`, ... (anything `init_chat_model` knows), or `chat_model=` with a LangChain chat model | That provider's LangChain package (Anthropic's and Google's come with the extra) and its key |
+
+Without `provider=`, the agent works it out from the model's name (`"sonnet"` is Bedrock's, `"gpt-4.1"` OpenAI's) and
+the environment: `AWS_ANALYZER_AGENT_MODEL` (`"bedrock:sonnet"`, set once for every notebook), then the Azure
+settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
+
 > [!NOTE]
 > What leaves AWS: your question and what the tools return (function and bucket names, settings, counts, file names,
-> error messages and log lines, with anything that looks like a key or password hidden) go to your Azure OpenAI
-> deployment. Environment variable values and what's inside your files are never read. Use a deployment your
-> organisation allows for that data.
+> error messages and log lines, with anything that looks like a key or password hidden) go to the model's provider.
+> With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation
+> allows for that data. Environment variable values and what's inside your files are never read.
 
 ### What it can call
 
@@ -2027,11 +2036,10 @@ alone. No S3 tool reads what's inside a file.
 from aws_analyzer import AgentAnalyzer, AgentView
 
 core = AgentAnalyzer(
-    deployment="prod-gpt-4o",             # or AZURE_OPENAI_DEPLOYMENT
-    endpoint="https://acme.openai.azure.com",   # or AZURE_OPENAI_ENDPOINT
-    api_key="...",                        # or AZURE_OPENAI_API_KEY; azure_ad_token_provider= for Entra ID
-    api_version="2024-10-21",             # or OPENAI_API_VERSION; this is the default
-    model_prices={"gpt-4o": (2.50, 10.00)},   # USD per 1M input and output tokens, from your Azure price sheet
+    provider="bedrock",                   # or "openai", "azure", any LangChain provider; worked out when left out
+    model="sonnet",                       # a model ID, profile or short name; "openai:gpt-4.1" names both
+    # Azure OpenAI's own: deployment=, endpoint=, api_key=, api_version="2024-10-21", azure_ad_token_provider=
+    model_prices={"claude-sonnet-5": (2.00, 10.00)},   # USD per 1M input and output tokens, over the list prices
     timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
@@ -2044,18 +2052,19 @@ answer = core.ask("Which Lambda failed last night?")    # AgentAnswer
 answer.text                    # the answer, in markdown
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
-answer.input_tokens, answer.output_tokens, answer.cost   # cost is None without model_prices=
+answer.provider, answer.model # who served it, and the model or profile that answered
+answer.input_tokens, answer.output_tokens, answer.cost   # cost is None without its prices (answer.rates says whose)
 answer.stopped, answer.error   # why it stopped early, or what failed
 core.tools()                   # the tools themselves: plain functions, for another agent framework
 ```
 
-`chat_model=` takes any LangChain chat model instead of Azure OpenAI (for example `ChatBedrockConverse` from
-langchain-aws, for a model on Amazon Bedrock). The pure functions work without AWS or a model: `hide_secrets`,
+`chat_model=` takes any LangChain chat model instead (a `ChatOllama` with your own settings, say). The pure functions work without AWS or a model: `hide_secrets`,
 `asked_at`, `system_prompt`, `function_row`, `summarize_functions`, `summarize_health`, `summarize_errors`,
 `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `file_row`,
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, and `answer_findings`, `answer_next`, `answer_cost` and `explain_model_error`.
+`trigger_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
 it covers, and `tools()` returning plain functions whose type hints and docstrings tell the model how to call them.
@@ -2082,12 +2091,16 @@ headers, never the file), `s3:GetObjectTagging`, the bucket settings [S3's permi
 `s3:GetBucketObjectLockConfiguration`, `s3:GetLifecycleConfiguration`, `s3:GetReplicationConfiguration`,
 `s3:GetBucketLogging`, `s3:GetBucketTagging`, `s3:GetInventoryConfiguration`), `s3:GetBucketNotification`,
 `s3:GetAccountPublicAccessBlock` and `cloudwatch:ListMetrics`. `s3_triggers` needs both sets. Nothing else, and no
-permission to change anything. On the Azure side, an API key of the resource, or an Entra ID identity with the
-Cognitive Services OpenAI User role on it.
+permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
+and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
+`bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
+`"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the
+resource, or an Entra ID identity with the Cognitive Services OpenAI User role on it.
 
-Each answer counts the model's input and output tokens. Their cost is shown when you pass `model_prices=` (Azure
-OpenAI's prices depend on the model, the region and the deployment type, so there are no built-in ones), and each
-question's budget is checked against it. The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
+Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices
+(the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
+on the plan, the region and the deployment type, so there are no built-in ones). Without a price the cost shows as
+unknown, never a guess, and each question's budget is checked against it when there is one. The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
 $0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. Reading logs
 and Lambda's settings costs nothing.
 

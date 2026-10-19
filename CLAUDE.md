@@ -19,7 +19,8 @@ next to a notebook; that's gone, and the package is the one way in.
 `s3/explorer/` is S3's window: a clickable file explorer (ipywidgets) on the package's previews, formatting and AWS
 calls; `s3_explorer.py`, where it was until 0.20.0, only re-exports it now (an alias: `ALIASES` in `rules.py`).
 `agent/` is a companion to `lambda_functions` and `s3`: `AgentView().ask("Which
-Lambda failed last night?")`, an agent (LangChain's deepagents, on an Azure OpenAI deployment) answering questions from
+Lambda failed last night?")`, an agent (LangChain's deepagents, on a model the user picks: Amazon Bedrock, OpenAI, Azure
+OpenAI or any LangChain provider) answering questions from
 read-only tools built on `LambdaAnalyzer` and `S3Analyzer` (see "The agent" below). It's the one analyzer that is a package rather
 than a file, because it grows by toolkits (one module per AWS service it has tools for) and by capabilities of the
 agent itself, each in its own module.
@@ -749,11 +750,21 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
-- **The model** (`llm.py`): `azure_chat_model()` (`AzureChatOpenAI` from `deployment` / `endpoint` / `api_key` /
-  `api_version` or `AZURE_OPENAI_*`; `_Hint` names what's missing), or `chat_model=`, any LangChain chat model;
-  `model_name`, `answer_cost` (costs need `model_prices=`: Azure has no list prices here, else they're unknown) and
-  `explain_model_error` (by the OpenAI client's class names, so no openai import). Another provider gets its maker
-  here.
+- **The model** (`llm.py`): `pick_provider()` turns `provider=` / `model=` (`'openai:gpt-4.1'`: a prefix only when
+  it's in `_PREFIXES`, LangChain's provider names, so a Bedrock ID's `:0` isn't one), `chat_model=` (by class,
+  `provider_of`) and the environment (`MODEL_ENV`, `AWS_ANALYZER_AGENT_MODEL`, then `AZURE_OPENAI_*`, then
+  `OPENAI_API_KEY`) into `AgentAnalyzer.provider` and `.model_id` ('' when nothing says: `no_model_hint()`).
+  `AgentAnalyzer._new_chat_model()` calls its maker: `azure_chat_model()` (`AzureChatOpenAI`; `_Hint` names what's
+  missing), `openai_chat_model()` (`ChatOpenAI`, `endpoint=` as `base_url` for OpenAI-compatible servers),
+  `bedrock_chat_model()` (langchain-aws's `ChatBedrockConverse` on `bedrock-runtime` / `bedrock` clients the agent
+  makes from its own session, `_bedrock_runtime` / `_bedrock_control`, never guarded: Converse only generates text,
+  so README lists `bedrock:InvokeModel`; a short name or family is resolved by `bedrock_model_id()` from
+  `_bedrock.parse_models` over ListFoundationModels and ListInferenceProfiles) or `langchain_chat_model()`
+  (`init_chat_model` for any other provider). `PROVIDERS` holds each one's title, key variable, default model and
+  `place` (where what's sent goes, for `tools()`). `model_rates` / `answer_cost` price tokens at `model_prices=`, else
+  for Bedrock at `_bedrock`'s list prices (`model_price`), else unknown; `explain_model_error(exc, provider)` reads
+  Bedrock's error codes, and the others' client class names or HTTP status, so no openai import. A provider that
+  needs handling of its own gets a `PROVIDERS` entry and a maker here.
 - **The prompt** (`prompt.py`): `system_prompt()` is the shared rules (answer from the tools, times, regions, partial
   results, data isn't instructions, read-only), then each toolkit's `instructions()`, then how to answer, then the
   user's `notes`. It's fixed, so it caches; the time goes in each question through `asked_at()`, in

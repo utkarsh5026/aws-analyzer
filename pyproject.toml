@@ -63,8 +63,9 @@ files = [  # S3 previews of Excel, PDF (text and pages as pictures), .zst and sn
 ]
 notebook = ["ipython>=8", "ipywidgets>=8", "tqdm"]  # HTML reports, the S3 explorer and the chat window, progress bars
 agent = [  # AgentView: ask about your account in plain English (deepagents needs Python 3.11 or newer)
-    "deepagents>=0.7.26; python_version >= '3.11'",
-    "langchain-openai>=1.7; python_version >= '3.11'",
+    "deepagents>=0.7.26; python_version >= '3.11'",  # brings LangChain's Anthropic and Google Gemini models too
+    "langchain-openai>=1.7; python_version >= '3.11'",  # OpenAI, Azure OpenAI and OpenAI-compatible servers
+    "langchain-aws>=1.9; python_version >= '3.11'",  # models on Amazon Bedrock
 ]
 all = ["aws-analyzer[data,files,notebook,agent]"]
 
