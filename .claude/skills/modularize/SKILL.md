@@ -523,6 +523,9 @@ the recipe above as well. This section is for what the next agent must know and 
   - **The tools assumed one file**: `snapshot.py`'s `_layout` looked for `s3.py`, and `shots.py` found the View by
     `__module__ ==` (so it couldn't find a package's). Both fixed. `rules.py --apis` now lists S3's operations per
     module; compare the union per service against the baseline, not the lines.
+  - **CI's wheel smoke test (`ci.yml`, and the same in `release.yml`) named `s3_explorer._s3_module`**, which local
+    `/check` didn't catch, since `run.py` has its own copy of the check. Grep `.github/workflows/` for the names
+    a step moves, too.
   - **`--allow-lost` takes several names after one flag** (`--allow-lost a b c`); repeating the flag keeps the last.
 
 - **lambda_functions:**
