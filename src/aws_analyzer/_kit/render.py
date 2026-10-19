@@ -973,3 +973,23 @@ def _render_text(blocks: list[Any], max_rows: int) -> str:
     """
     report = _Report(max_rows)
     return "\n".join(line for block in blocks for line in _block_lines(block, report))
+
+
+_PAGE_CSS = """\
+:root{color-scheme:light dark}
+body{margin:0;padding:24px clamp(16px,4vw,48px) 48px;background:Canvas;color:CanvasText}
+"""
+
+
+def _page_document(report_html: str, title: str) -> str:
+    """
+    A report's HTML as a page of its own, to open in a browser tab: a whole HTML document with the report in it, in
+    the browser's own light or dark colours. Still no JavaScript.
+    """
+    return "".join([
+        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n',
+        f"<title>{_esc(title)}</title>\n<style>\n{_PAGE_CSS}</style>\n</head>\n<body>\n",
+        report_html,
+        "\n</body>\n</html>\n",
+    ])

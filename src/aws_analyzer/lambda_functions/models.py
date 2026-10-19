@@ -460,3 +460,18 @@ class PackageDownload:
     sha256_matches: bool | None = None  # its SHA-256 against the CodeSha256 Lambda reports (None: Lambda gave none)
     replaced: bool = False  # a file of that name was there already, and this replaced it
     marked: bool = False  # the downloads folder was made now, with a .gitignore that keeps it out of git
+
+
+@dataclass
+class SavedPage:
+    """
+    A report how_it_works_page() saved on the notebook's disk as a page of its own, to open in a browser tab:
+    where (`path`, absolute), its size in bytes, whether it replaced a file of that name, and whether the downloads
+    folder was made now (`marked`, with a .gitignore that keeps it out of git).
+    """
+
+    function: Function
+    path: str
+    size: int
+    replaced: bool = False
+    marked: bool = False

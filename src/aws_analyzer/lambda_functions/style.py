@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from .._kit.jsontree import _json_tree_css
-from .._kit.render import _base_css, _report_html
+from .._kit.render import _base_css, _page_document, _report_html
 
 
 _ROOT = "lmb"  # the class around each report's HTML: its stylesheet's rules are scoped to it
@@ -37,6 +37,10 @@ _EXTRA_CSS = """\
 .lmb .colbars .lim span{position:absolute;right:0;top:-16px;font-size:10.5px;color:#ef4444;opacity:.85}
 .lmb .colbars .top{position:absolute;left:4px;top:-2px;font-size:10.5px;opacity:.55;pointer-events:none}
 .lmb .colx{display:flex;justify-content:space-between;font-size:10.5px;opacity:.55;margin:3px 0 10px;max-width:980px}
+.lmb .pgw{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;margin:8px 0 10px}
+.lmb a.pgo{display:inline-block;padding:5px 16px;border:1px solid rgba(59,130,246,.5);border-radius:999px;color:#3b82f6;font-weight:600;font-size:13.5px;text-decoration:none}
+.lmb a.pgo:hover{background:rgba(59,130,246,.1)}
+.lmb .pgp{font-size:12px;opacity:.65;overflow-wrap:anywhere}
 .lmb .flow{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:6px 10px 6px 4px;margin:4px 0 10px;max-width:1180px;max-height:760px;overflow:auto;font-size:12px}
 .lmb .flow .ol{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:8px;row-gap:2px;padding:1px 4px;border-radius:5px;line-height:1.55;min-width:0}
 .lmb .flow .ol:hover{background:rgba(127,127,127,.08)}
@@ -178,3 +182,20 @@ def _render_html(blocks: list[Any], max_rows: int) -> str:
     A report as HTML: this service's stylesheet, root class and badge around the blocks _kit's renderer draws.
     """
     return _report_html(blocks, max_rows, _CSS, _ROOT, _BADGE)
+
+
+_WIDE_CSS = """\
+<style>
+.lmb .flow{max-width:none;max-height:none}
+.lmb .cgb{max-width:100%}
+</style>
+"""
+
+
+def _render_page(blocks: list[Any], title: str) -> str:
+    """
+    A report as a page of its own (a whole HTML document) to open in a browser tab, with no row cap: the page has
+    the tab's whole height and width, so the outline and the graph are as wide and tall as they are (_WIDE_CSS)
+    instead of scrolling in a box.
+    """
+    return _page_document(_report_html(blocks, 0, _CSS + _WIDE_CSS, _ROOT, _BADGE), title)

@@ -22,6 +22,8 @@ from ..analysis.package import _JUNK_RE, _SECRET_FILE_RE, _SOURCE_LIMIT, _local_
 from ..analysis.codemap.model import CodeMap
 from ..analysis.codemap.mapping import map_package
 from ..analysis.codemap.findings import code_map_findings
+from ..blocks.page import _PageLink
+from ..style import _CSS, _render_html
 from .frame import _CODE_PAGE
 from .widgets import _Row
 
@@ -184,7 +186,14 @@ class _CodeTab:
         for css in ("lmx-small", "lmx-side", "lmx-i-how"):
             self.how_button.add_class(css)
         self.how_button.on_click(self._safely(lambda _button: self._toggle_how()))
-        self.code_bar = w.HBox([self.files_toggle, self.how_button, self.code_save, self.code_saved],
+        self.page_button = w.Button(description="↗ Open in a tab", layout=layout(width="auto", display="none"),
+                                    tooltip="Save How it works as a page of its own, with a link that opens it in a "
+                                            "tab with room for it")
+        self.page_button.add_class("lmx-small")
+        self.page_button.on_click(self._safely(lambda _button: self._open_page()))
+        self.page_link = w.Output(layout=layout(width="100%", display="none"))
+        self.code_bar = w.HBox([self.files_toggle, self.how_button, self.page_button, self.code_save, self.code_saved,
+                                self.page_link],
                                layout=layout(width="100%", display="none"))
         self.code_bar.add_class("lmx-codebar")
         self.code_find = w.Text(placeholder="Find a file", continuous_update=True,
@@ -332,6 +341,9 @@ class _CodeTab:
 
     def _draw_how_button(self) -> None:
         self.how_button.layout.display = "" if self._reads_python() else "none"
+        self.page_button.layout.display = "" if self._how and self.code_map is not None else "none"
+        if self.page_saved is None:
+            self.page_link.layout.display = "none"
         _class_if(self.how_button, "lmx-on", self._how)
         self.how_button.tooltip = (
             "Back to the source of the file picked in the tree" if self._how else
@@ -375,11 +387,32 @@ class _CodeTab:
         self.code_map = cmap
         if not self._how:
             return
+        self._draw_how_button()
         self._draw("how", self.source_view, self.ui._how_blocks(cmap))
         self._renew_source()
         warnings = sum(level == "warn" for level, _ in code_map_findings(cmap))
         line = self._tab_line("code") + (f" · {_plural(warnings, 'warning')}" if warnings else "")
         self._finish("map", line, tabs=("code",))
+
+    def _open_page(self) -> None:
+        """
+        ↗ Open in a tab: How it works saved as a page (where Download .zip saves), and the link that opens it, in an
+        Output under the bar, since JupyterLab only serves the notebook's files to links in a cell's output, not in a
+        widget's HTML.
+        """
+        if self.code_map is None:
+            return
+        try:
+            saved = self.ui._save_how_page(self.code_map)
+        except ValueError as exc:
+            self._status(str(exc), "warn")
+            return
+        self.page_saved = saved
+        link = _render_html([_PageLink(saved.path)], 0).replace(_CSS, "", 1)
+        self.page_link.outputs = ({"output_type": "display_data", "data": {"text/html": link}, "metadata": {}},)
+        self.page_link.layout.display = ""
+        self._status(f"Saved how {saved.function.name} works as {_local_path(saved.path)}: a click on the link under "
+                     "the bar opens it in a JupyterLab tab, a middle-click in a browser tab.", "ok")
 
     def _map_failed(self, exc: BaseException) -> None:
         self._how = False

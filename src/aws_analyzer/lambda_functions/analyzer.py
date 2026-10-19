@@ -32,14 +32,14 @@ from .prices import LAMBDA_PRICES
 from .helpers import MB, _lambda_time, _midnight, parse_function_ref, runtime_family
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodePackage, DailyUsage, ErrorReport, Function, FunctionDetail,
-    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, Trigger,
-    Version,
+    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, SavedPage,
+    Trigger, Version,
 )
 from .analysis.functions import _unqualified, parse_event_source_mapping, parse_function, parse_policy
 from .analysis.overview import Overview
 from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
-from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, read_package
+from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.codemap.model import CodeMap
 from .analysis.codemap.mapping import map_package
 
@@ -1257,25 +1257,26 @@ class LambdaAnalyzer(_BaseAnalyzer):
         """
         return os.path.abspath(os.path.expanduser(str(self.downloads).strip() or "."))
 
-    def _save_package(self, fn: Function, data: bytes, path: str | None = None) -> PackageDownload:
+    def _write_download(self, name: str, data: bytes, path: str | None) -> tuple[str, bool, bool]:
         """
-        Writes a package already downloaded (data, from _package) where download() would: no AWS call. A downloads
-        folder it makes gets a .gitignore that keeps it out of git, since a package can hold secrets.
+        Writes data where download() saves: path= (a file, or a folder to put `name` in), else `name` in the
+        downloads folder; to <target>.part, then renamed over a file of that name. A downloads folder it makes gets a
+        .gitignore that keeps it out of git, since a package can hold secrets. Returns (where, whether it replaced a
+        file, whether it made the downloads folder); an OSError becomes a ValueError that says why.
         """
-        name = package_file_name(fn)
         target = os.path.abspath(os.path.expanduser(path)) if path else os.path.join(self.downloads_folder(), name)
         if os.path.isdir(target) or (path and path.endswith(("/", os.sep))):
             target = os.path.join(target, name)
         folder = os.path.dirname(target)
-        saved = PackageDownload(fn, target, len(data), replaced=os.path.exists(target))
+        replaced, marked = os.path.exists(target), False
         part = target + ".part"
         try:
             if not os.path.isdir(folder):
                 os.makedirs(folder)
-                if not path:  # a downloads folder made now holds only downloads: keep it out of git
+                if not path:
                     with open(os.path.join(folder, ".gitignore"), "w", encoding="utf-8") as mark:
                         mark.write(_DOWNLOADS_MARK)
-                    saved.marked = True
+                    marked = True
             with open(part, "wb") as handle:
                 handle.write(data)
             os.replace(part, target)
@@ -1283,6 +1284,14 @@ class LambdaAnalyzer(_BaseAnalyzer):
             if os.path.exists(part):
                 os.remove(part)
             raise ValueError(f"Couldn't save {name} in {folder}: {exc.strerror or exc}") from None
+        return target, replaced, marked
+
+    def _save_package(self, fn: Function, data: bytes, path: str | None = None) -> PackageDownload:
+        """
+        Writes a package already downloaded (data, from _package) where download() would: no AWS call.
+        """
+        target, replaced, marked = self._write_download(package_file_name(fn), data, path)
+        saved = PackageDownload(fn, target, len(data), replaced=replaced, marked=marked)
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 saved.files = sum(1 for info in archive.infolist() if not info.is_dir())
@@ -1292,3 +1301,12 @@ class LambdaAnalyzer(_BaseAnalyzer):
         if expected:
             saved.sha256_matches = base64.b64encode(hashlib.sha256(data).digest()).decode() == expected
         return saved
+
+    def _save_page(self, fn: Function, page: str, path: str | None = None) -> SavedPage:
+        """
+        Writes a report drawn as a page (a whole HTML document) where download() saves, as
+        page_file_name(fn) unless path= names a file: no AWS call.
+        """
+        data = page.encode("utf-8")
+        target, replaced, marked = self._write_download(page_file_name(fn), data, path)
+        return SavedPage(fn, target, len(data), replaced=replaced, marked=marked)

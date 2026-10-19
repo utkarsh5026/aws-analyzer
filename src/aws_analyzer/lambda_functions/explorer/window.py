@@ -13,7 +13,7 @@ from ..._kit.text import _esc
 from ..._kit.window import _Explorer, _class_if, _for_window, _window_errors
 
 from ..helpers import parse_function_ref
-from ..models import CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance
+from ..models import CodePackage, ErrorReport, Function, FunctionDetail, PackageDownload, Performance, SavedPage
 from ..analysis.text import _window
 from ..analysis.overview import Overview
 from ..analysis.findings import function_findings
@@ -108,6 +108,7 @@ class LambdaExplorer(_FunctionsTab, _FunctionTab, _LogsTab, _ErrorsTab, _Perform
         self.package: CodePackage | None = None  # the Code tab
         self.code_map: CodeMap | None = None  # the Code tab's How it works, read from the package it downloaded
         self.saved: PackageDownload | None = None  # what the Code tab's Download .zip saved last
+        self.page_saved: SavedPage | None = None
         self._facts: dict[str, _Facts] = {}  # function ARN -> what the list says about it
         self._numbers_pending = False  # CloudWatch's numbers are being read for the list
         self._want, self._want_tab = name, tab  # opened once the functions are listed...
