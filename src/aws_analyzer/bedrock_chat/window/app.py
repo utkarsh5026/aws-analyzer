@@ -126,7 +126,8 @@ class _ChatApp(_PickersPane, _ConversationPane, _SettingsTab, _RequestTab, _Test
                                     layout=layout(width="auto", flex="0 0 auto"))
         self.send_button.on_click(self._safely(self._send))
         self.status = w.HTML(layout=layout(width="100%"))
-        self.composer = w.HBox([self.question, self.send_button], layout=layout(width="100%"))
+        prompt = w.HTML('<span class="kbc-prompt">\u203a</span>', layout=layout(flex="0 0 auto"))
+        self.composer = w.HBox([prompt, self.question, self.send_button], layout=layout(width="100%"))
         self.composer.add_class("kbc-composer")
         self.chat = w.VBox([self.log, self.composer, self.status], layout=layout(
             flex="1 1 460px", min_width="320px", margin=_CHAT_MARGIN))

@@ -1236,6 +1236,7 @@ def test_the_chat_window_shows_each_tool_call_then_the_answer(seeded):
     assert "LambdaView().logs(&#x27;etl-nightly&#x27;" in shown and "details: tool calls, AWS reads and cost" in shown
     assert "<strong>etl-nightly</strong> failed 40 times" in shown and "Thinking…" not in shown
     assert "# checked every function&#x27;s health" in shown and "# read etl-nightly&#x27;s errors" in shown
+    assert shown.count("\U0001F9D1") == 1 and shown.count("\U0001F916") == 1
     assert "2 tool calls ·" in shown and 'title="AWS Lambda"' in shown and 'title="Amazon CloudWatch Logs"' in shown
     assert "data the model read" in shown and "lambda:ListFunctions" in shown
     assert "This conversation: 1 question" in x.status.value and x.empty not in x.log.children

@@ -2348,9 +2348,10 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     app.send_button.click()
     a = window.answers[-1]
     assert a.streamed and app.question.value == "" and not app.busy
-    assert "How long do refunds take?" in texts(app)[1] and blocksmod._YOU in texts(app)[1]  # your mark beside it
+    assert "How long do refunds take?" in texts(app)[1] and 'class="msg you"' in texts(app)[1]
+    assert "\U0001F9D1" in texts(app)[1] and "\U0001F916" in texts(app)[2]
     assert "Refunds take 5-7 business days" in texts(app)[2] and "<sup>[1]</sup>" in texts(app)[2]
-    assert '<div class="sh">📎 Sources' in texts(app)[2]
+    assert '<div class="sh">Sources' in texts(app)[2]
     assert "Request and response JSON" in texts(app)[2] and "refund-policy.pdf · p.3" in texts(app)[2]
     assert app.log.children[0] is app.bubbles[-1]  # newest first: the box runs bottom-up
     assert "1 question in this conversation" in app.status.value and "session session-…" in app.status.value
@@ -2395,7 +2396,7 @@ def test_window_retrieve_only_searches_without_an_answer(window, clients):
     assert "kbc-off" in app.rows["temperature"]._dom_classes and "kbc-off" not in app.rows["n"]._dom_classes
     assert "Generation · not sent with Retrieve only" in app.headers["Generation"].value
     assert "retrievalQuery" in app.request_view.value and "temperature" not in app.request_view.value
-    assert "Retrieve, the search only" in app.request_view.value and "Retrieve (retrieve only)" in app.title.value
+    assert "Retrieve, the search only" in app.request_view.value and app.mode_pick.value == "retrieve"
     app.question._handle_custom_msg({"event": "submit"}, [])  # Enter
     a = window.answers[-1]
     assert a.retrieve_only and not a.streamed and window.session_id == "session-1"

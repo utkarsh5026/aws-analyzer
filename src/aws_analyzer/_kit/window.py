@@ -11,6 +11,8 @@ functions that need them (the window itself loads ipywidgets with `_require`), s
     _Explorer        the knowledge base and Lambda explorers' base: their status line, tabs and frame, AWS read off
                      the event loop (_later), the window shown once per cell
     _Picker          a field that opens a list to search and pick from
+    _terminal_theme  the chat windows' look: a monospace font and a code editor's colours, light and dark, and the
+                     marks beside a question (_HUMAN) and an answer (_MACHINE)
 """
 
 from __future__ import annotations
@@ -62,6 +64,45 @@ def _cell_number() -> Any:
         return None
     shell = get_ipython()
     return getattr(shell, "execution_count", None) if shell is not None else None
+
+
+_HUMAN, _MACHINE = "\U0001F9D1", "\U0001F916"
+_MONO_FONT = ('"JetBrains Mono","Cascadia Code","Fira Code",ui-monospace,SFMono-Regular,Menlo,Consolas,'
+              '"Liberation Mono",monospace')
+_TERMINAL_LIGHT = {
+    "mono": _MONO_FONT, "bg": "var(--jp-cell-editor-background,var(--vscode-editor-background,#f6f8fa))",
+    "line": "rgba(127,127,127,.22)", "dim": "rgba(127,127,127,.95)", "hover": "rgba(127,127,127,.1)",
+    "accent": "#0969da", "prompt": "#8250df", "ok": "#1a7f37", "bad": "#cf222e", "warn": "#9a6700",
+    "comment": "#6e7781", "k": "#cf222e", "f": "#8250df", "a": "#953800", "s": "#0a3069", "n": "#0550ae",
+    "l": "#0550ae",
+}
+_TERMINAL_DARK = {
+    "bg": "var(--jp-cell-editor-background,var(--vscode-editor-background,#0d1117))", "accent": "#58a6ff",
+    "prompt": "#d2a8ff", "ok": "#3fb950", "bad": "#f85149", "warn": "#d29922", "comment": "#8b949e", "k": "#ff7b72",
+    "f": "#d2a8ff", "a": "#ffa657", "s": "#a5d6ff", "n": "#79c0ff", "l": "#79c0ff",
+}
+_DARK_PAGES = ('body[data-jp-theme-light="false"]', "body.vscode-dark", "body.vscode-high-contrast")
+_UNSET_PAGE = "body:not([data-jp-theme-light]):not(.vscode-light)"
+
+
+def _theme_tokens(prefix: str, values: dict[str, str]) -> str:
+    return ";".join(f"--{prefix}-{name}:{value}" for name, value in values.items())
+
+
+def _terminal_theme(roots: tuple[str, ...], prefix: str, *, dark_roots: tuple[str, ...] = ()) -> str:
+    """
+    The chat windows' look as CSS custom properties on `roots`: --<prefix>-mono (the font), -bg (a code editor's
+    background, JupyterLab's or VS Code's when they say), -line, -dim, -hover, the -accent and -prompt colours, -ok,
+    -bad, -warn, -comment, and the code colours (-k keywords, -f calls, -a arguments, -s text, -n numbers, -l
+    literals). Dark when JupyterLab or VS Code is, or the browser is and neither says; dark_roots are more selectors
+    that are always dark.
+    """
+    dark_selectors = [f"{page} {root}" for page in _DARK_PAGES for root in roots] + list(dark_roots)
+    unset = ",".join(f"{_UNSET_PAGE} {root}" for root in roots)
+    dark = _theme_tokens(prefix, _TERMINAL_DARK)
+    return "\n".join([f"{','.join(roots)}{{{_theme_tokens(prefix, _TERMINAL_LIGHT)}}}",
+                      f"{','.join(dark_selectors)}{{{dark}}}",
+                      f"@media (prefers-color-scheme:dark){{{unset}{{{dark}}}}}"])
 
 
 _ICON_SVG = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' "
