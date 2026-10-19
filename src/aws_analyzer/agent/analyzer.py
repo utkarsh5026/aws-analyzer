@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .._bedrock import ModelInfo, parse_models
+from .._bedrock.foundation_models import parse_models
+from .._bedrock.models import ModelInfo
 from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
