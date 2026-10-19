@@ -9,10 +9,14 @@ import pytest
 from botocore.stub import Stubber
 from moto import mock_aws
 
-from aws_analyzer import sagemaker_env as smmod
+from aws_analyzer._kit.blocks import _Cards, _Findings, _Table, _Text, _Title
+from aws_analyzer._kit.deps import _require
+from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer._kit.text import _pad, _width
-from aws_analyzer._kit.view import _commands
+from aws_analyzer._kit.view import _commands, _friendly_errors
+from aws_analyzer.sagemaker_env import envs as envs_reads
+from aws_analyzer.sagemaker_env import style as stylemod
 from aws_analyzer.sagemaker_env import (
     GB,
     KB,
@@ -978,10 +982,10 @@ def test_ui_friendly_errors(stubs, tmp_path, capsys):
 
 
 def test_render_html_and_badge():
-    blocks = [smmod._Title("Notebook instance x"), smmod._Cards([("Idle shutdown", "off", "warn")]),
-              smmod._Findings([("warn", "stop it: aws sagemaker stop-notebook-instance --notebook-instance-name x")]),
-              smmod._Text("aws sagemaker update-domain --domain-id d", title="Turn on idle shutdown", code=True)]
-    rendered = smmod._render_html(blocks, 50)
+    blocks = [_Title("Notebook instance x"), _Cards([("Idle shutdown", "off", "warn")]),
+              _Findings([("warn", "stop it: aws sagemaker stop-notebook-instance --notebook-instance-name x")]),
+              _Text("aws sagemaker update-domain --domain-id d", title="Turn on idle shutdown", code=True)]
+    rendered = stylemod._render_html(blocks, 50)
     assert '<div class="smk">' in rendered and '<span class="badge">🧪 SageMaker</span>' in rendered
     assert ">aws sagemaker stop-notebook-instance --notebook-instance-name x</code>" in rendered
     assert 'class="card warn"' in rendered and '<pre class="code"' in rendered
@@ -990,7 +994,7 @@ def test_render_html_and_badge():
 def test_text_tables_line_up_around_emoji():
     assert [_width(s) for s in ("abc", "📓 a", "🏋️ a", "日本", "é")] == [3, 4, 4, 4, 1]
     assert _pad("📓 a", 6) == "📓 a  " and _pad("12", 4, right=True) == "  12"
-    table = smmod._Table(["Kind", "Name"], [["📓 notebook instance", "a"], ["🏋️ training job", "b"], ["endpoint", "c"]])
+    table = _Table(["Kind", "Name"], [["📓 notebook instance", "a"], ["🏋️ training job", "b"], ["endpoint", "c"]])
     lines = [line for line in _render_text([table], 50).splitlines()[-5:] if not line.startswith("-")]
     assert len(lines) == 4  # the header and three rows
     assert len({_width(line[: line.rindex(" ") + 1]) for line in lines}) == 1  # 'Name' and each name line up
@@ -1003,7 +1007,7 @@ def test_ui_without_ipython_or_an_optional_package(tmp_path, capsys, monkeypatch
     out = run(capsys, ui.help)
     assert "Start here:" in out and "mode='html' only works in Jupyter" in out  # text, and why
     assert "only works in Jupyter" not in run(capsys, ui.help)  # said once
-    needs = smmod._friendly_errors(lambda self: smmod._require("no_such_pkg", "Drawing this"))
+    needs = _friendly_errors(lambda self: _require("no_such_pkg", "Drawing this"))
     assert run(capsys, needs, ui).strip() == "[!] Drawing this needs `no_such_pkg` (pip install no_such_pkg)."
 
 
@@ -1258,10 +1262,10 @@ def test_env_plan(tmp_path):
         core.env_plan("3.11", "my env")
     with pytest.raises(ValueError, match="tool takes 'auto', 'mamba'"):
         core.env_plan("3.11", tool="pipenv")
-    with pytest.raises(smmod._Hint, match=r"There's no uv on this machine \(conda is: leave out tool=\)\. "
+    with pytest.raises(_Hint, match=r"There's no uv on this machine \(conda is: leave out tool=\)\. "
                                           r"%pip install uv adds it\."):
         core.env_plan("3.11", tool="uv")
-    with pytest.raises(smmod._Hint, match="There's no conda, mamba, micromamba or uv on this machine"):
+    with pytest.raises(_Hint, match="There's no conda, mamba, micromamba or uv on this machine"):
         SageMakerAnalyzer(root=str(write_root(tmp_path / "bare"))).env_plan("3.11")
 
 
@@ -1326,7 +1330,7 @@ def test_run_reports_exit_status_output_and_timeouts(tmp_path):
 
 
 def test_ui_envs_on_a_notebook_instance(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(smmod.platform, "python_version", lambda: "3.12.3")  # this kernel's, whatever runs the tests
+    monkeypatch.setattr(envs_reads.platform, "python_version", lambda: "3.12.3")  # this kernel's, whatever runs the tests
     core = fake_machine(SageMakerAnalyzer(root=str(notebook_envs(tmp_path))))
     out = run(capsys, SageMakerView(core, mode="text").envs)
     for expected in (
