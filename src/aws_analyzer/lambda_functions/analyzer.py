@@ -18,8 +18,9 @@ import threading
 import urllib.request
 import zipfile
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, NamedTuple
 
 from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
@@ -60,6 +61,12 @@ _SEARCH_HITS = 500  # log_runs(search=...) reads at most this many matching line
 
 _SEARCH_WINDOWS = 30  # ...and the whole runs around the newest this many of them (a read each)
 
+_LOG_READERS = 4
+
+_FIRST_SLICE_MS = 60_000
+
+_SLICE_GROWTH = 4
+
 
 def _to_ms(moment: datetime) -> int:
     return int(moment.timestamp() * 1000)
@@ -67,6 +74,54 @@ def _to_ms(moment: datetime) -> int:
 
 def _from_ms(value: Any) -> datetime | None:
     return None if value in (None, "") else datetime.fromtimestamp(int(value) / 1000, timezone.utc)
+
+
+def _log_slices(low: int, high: int, readers: int) -> list[tuple[int, int]]:
+    """
+    The (first, last) milliseconds a log read asks CloudWatch for, newest first: the newest minute, then slices
+    _SLICE_GROWTH times longer each, so a read that fills its limit early has asked for little. With several readers
+    no slice is longer than their even share of the range, so the slices read side by side finish about together.
+    """
+    longest = high - low + 1 if readers <= 1 else max(_FIRST_SLICE_MS, (high - low + 1) // readers)
+    slices: list[tuple[int, int]] = []
+    size = _FIRST_SLICE_MS
+    while high >= low:
+        first = max(low, high - size + 1)
+        slices.append((first, high))
+        high = first - 1
+        size = min(size * _SLICE_GROWTH, longest)
+    return slices
+
+
+class _LogSlice(NamedTuple):
+    """
+    What one slice of a log read found: where it starts, its events oldest first, and whether CloudWatch had more
+    than the limit let it read.
+    """
+
+    first: int
+    events: list[LogEvent]
+    has_more: bool
+
+
+def _join_slices(
+    parts: list[_LogSlice], low: int, limit: int | None
+) -> tuple[list[LogEvent], bool, datetime | None]:
+    """
+    The newest-first slices of a log read as one list, oldest first, cut to the newest `limit` events: with whether
+    it was cut (or older slices weren't read), and then the time of its oldest event.
+    """
+    events: list[LogEvent] = []
+    truncated = False
+    for part in parts:
+        batch = part.events
+        total = len(events) + len(batch)
+        reached_limit = limit is not None and total >= limit
+        if reached_limit and (part.has_more or part.first > low or total > limit):
+            batch = batch[total - limit:]
+            truncated = True
+        events = batch + events
+    return events, truncated, (events[0].time if truncated and events else None)
 
 
 def _log_group(entry: dict[str, Any]) -> LogGroup:
@@ -718,42 +773,107 @@ class LambdaAnalyzer(_BaseAnalyzer):
         """
         The newest `limit` events from start to end that match the filter pattern, oldest first; whether reading
         stopped at the limit, and then how far back it reached. Reads backwards in growing slices (a minute, then
-        4, 16, ...), so the newest events are the ones kept.
+        4, 16, ...), so the newest events are the ones kept. A log group's slices are read _LOG_READERS at a time,
+        newest first, so a search over days takes a fraction of the time one slice after another would; a stream's
+        window (one run at a time) is small and read in order.
         """
         client = self._service("logs", region)
-        events: list[LogEvent] = []
+        params: dict[str, Any] = {"logGroupName": group}
+        if pattern:
+            params["filterPattern"] = pattern
+        if stream:
+            params["logStreamNames"] = [stream]
         low, high = _to_ms(start), _to_ms(end)
-        size = 60_000
-        truncated = False
-        while high >= low and (limit is None or len(events) < limit):
-            first = max(low, high - size + 1)
-            params: dict[str, Any] = {"logGroupName": group, "startTime": first, "endTime": high}
-            if pattern:
-                params["filterPattern"] = pattern
-            if stream:
-                params["logStreamNames"] = [stream]
-            batch: list[LogEvent] = []
-            while True:
-                resp = client.filter_log_events(**params)  # read-only: FilterLogEvents only reads log events
-                for e in resp.get("events") or []:
-                    message = e.get("message") or ""
-                    moment = _from_ms(e.get("timestamp")) or start
-                    batch.append(LogEvent(moment, message, e.get("logStreamName") or "", request_id_of(message)))
-                token = resp.get("nextToken")
-                if not token or (limit is not None and len(events) + len(batch) >= limit):
-                    break
-                params["nextToken"] = token
-            batch.sort(key=lambda e: e.time)
-            if limit is not None and len(events) + len(batch) >= limit and (token or first > low or len(
-                    events) + len(batch) > limit):
-                batch = batch[len(events) + len(batch) - limit:]
-                truncated = True
-            events = batch + events
+
+        def read(window: tuple[int, int], budget: int | None, stop: threading.Event | None = None) -> _LogSlice:
+            return self._read_slice(client, {**params, "startTime": window[0], "endTime": window[1]}, start,
+                                    budget, stop)
+
+        readers = 1 if stream or self.max_workers <= 1 else _LOG_READERS
+        slices = _log_slices(low, high, readers)
+        if readers > 1 and len(slices) > 1:
+            parts = self._read_side_by_side(read, slices, limit, readers, progress)
+        else:
+            parts = self._read_in_order(read, slices, limit, progress)
+        return _join_slices(parts, low, limit)
+
+    @staticmethod
+    def _read_slice(
+        client: Any, params: dict[str, Any], start: datetime, budget: int | None, stop: threading.Event | None
+    ) -> _LogSlice:
+        """
+        One slice of a log read, page by page, until CloudWatch has no more, `budget` events are in, or `stop` is
+        set (a newer slice already holds the limit).
+        """
+        events: list[LogEvent] = []
+        token = None
+        while stop is None or not stop.is_set():
+            resp = client.filter_log_events(**params)  # read-only: FilterLogEvents only reads log events
+            for e in resp.get("events") or []:
+                message = e.get("message") or ""
+                moment = _from_ms(e.get("timestamp")) or start
+                events.append(LogEvent(moment, message, e.get("logStreamName") or "", request_id_of(message)))
+            token = resp.get("nextToken")
+            if not token or (budget is not None and len(events) >= budget):
+                break
+            params["nextToken"] = token
+        events.sort(key=lambda e: e.time)
+        return _LogSlice(params["startTime"], events, bool(token))
+
+    @staticmethod
+    def _read_in_order(
+        read: Callable[..., _LogSlice],
+        slices: list[tuple[int, int]],
+        limit: int | None,
+        progress: Callable[..., None] | None,
+    ) -> list[_LogSlice]:
+        """
+        The slices read one after another, newest first, each asking only for what the limit still leaves.
+        """
+        parts: list[_LogSlice] = []
+        count = 0
+        for window in slices:
+            if limit is not None and count >= limit:
+                break
+            part = read(window, None if limit is None else limit - count)
+            parts.append(part)
+            count += len(part.events)
             if progress:
-                progress(len(events))
-            high = first - 1
-            size *= 4
-        return events, truncated, (events[0].time if truncated and events else None)
+                progress(count)
+        return parts
+
+    @staticmethod
+    def _read_side_by_side(
+        read: Callable[..., _LogSlice],
+        slices: list[tuple[int, int]],
+        limit: int | None,
+        readers: int,
+        progress: Callable[..., None] | None,
+    ) -> list[_LogSlice]:
+        """
+        The slices read `readers` at a time, newest first, taken in order until they hold the limit; the older ones
+        still waiting are dropped, and the ones being read stop after their page. Progress is reported from the
+        calling thread.
+        """
+        parts: list[_LogSlice] = []
+        count = 0
+        stop = threading.Event()
+        with ThreadPoolExecutor(max_workers=readers, thread_name_prefix="lambda-logs") as pool:
+            futures = [pool.submit(read, window, limit, stop) for window in slices]
+            try:
+                for future in futures:
+                    part = future.result()
+                    parts.append(part)
+                    count += len(part.events)
+                    if progress:
+                        progress(count)
+                    if limit is not None and count >= limit:
+                        break
+            finally:
+                stop.set()
+                for future in futures:
+                    future.cancel()
+        return parts
 
     def _run_of(self, fn: Function, event: LogEvent) -> str | None:
         """
