@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
 `src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb.py`, `bedrock_kb.py` for Bedrock Knowledge Bases and `explore()`, a window to look
-through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env.py` for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
+through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they
 all share lives once in `src/aws_analyzer/_kit/`, and what the two Bedrock modules share in
-`src/aws_analyzer/_bedrock.py` (see "Hard constraints"). `sagemaker_env.py` isn't `sagemaker.py` so it's
+`src/aws_analyzer/_bedrock.py` (see "Hard constraints"). `sagemaker_env` isn't `sagemaker` so it's
 never mixed up with the SageMaker Python SDK (when each analyzer was a file next to the notebook, a `sagemaker.py`
 would have hidden it), and `lambda_functions` isn't `lambda` because `lambda` is a Python keyword
 (`from aws_analyzer import lambda` is a syntax error). Up to 0.13.0 each analyzer was also a standalone file to copy
@@ -171,7 +171,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
   deletes one), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
-  (`SageMakerAnalyzer.create_env` runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
+  (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
   kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
   findings show `rm -rf ...` instead).
@@ -634,7 +634,8 @@ How the View layer works:
   Sentences from reports go through `_for_window` / `_window_text`, which turn calls into tabs (`errors('etl')` -> "the
   Errors tab", `logs(..., request_id=...)` -> "run 8f5ce35b in the Logs tab") and capitalise them at a sentence's start.
   Without ipywidgets or Jupyter it shows the reports instead (`_reports`, `_report_for`).
-- `sagemaker_env` also reads the machine it runs on: SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
+- `sagemaker_env` also reads the machine it runs on (`machine.py`'s `_MachineReads`; the Python environments are
+  `envs.py`'s `_EnvReads`, and AWS is `analyzer.py`): SageMaker's `/opt/ml/metadata/resource-metadata.json` (which
   says whether this is a notebook instance or a Studio app, and which), `/proc` (load, memory, uptime,
   processes and which are Jupyter kernels), the disks and `nvidia-smi`. `SageMakerAnalyzer(root=...)` points all of
   that at a folder of fake files, and `_shown()` / `_real()` make paths look and work as the machine sees them
@@ -652,7 +653,7 @@ How the View layer works:
 
 Cost estimates come from module-level price tables (`S3_PRICES`, `DYNAMODB_PRICES`, `BEDROCK_PRICES`, and
 `MODEL_PRICES` for $ per 1M tokens by model family, with `GLOBAL_MODEL_PRICES` for the cheaper `global.` inference
-profiles, and `SAGEMAKER_PRICES`, storage plus the hourly price of each type in `INSTANCE_TYPES`, which also holds
+profiles, and `SAGEMAKER_PRICES` (`sagemaker_env/prices.py`), storage plus the hourly price of each type in `INSTANCE_TYPES`, which also holds
 its vCPUs, memory and GPUs, and `OPENSEARCH_PRICES`, EBS storage and Serverless OCUs plus the hourly price of each
 OpenSearch instance type in `opensearch/prices.py`'s own `INSTANCE_TYPES` (vCPUs and memory, which give each node's k-NN memory),
 with `EMBEDDING_MODELS` for the Bedrock embedding models `search()` can call, and `LAMBDA_PRICES`, requests, GB-seconds

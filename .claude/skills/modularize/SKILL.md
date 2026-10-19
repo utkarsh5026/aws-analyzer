@@ -426,7 +426,19 @@ mixins (configuration, files, search). `BedrockKBView` (~2,585) → `_<Topic>Com
 test, runs, code, request/response) and one for the pickers and composer. `BedrockChatView` (~2,230) →
 `_<Topic>Commands`.
 
-### `sagemaker_env` (5,044)
+### `sagemaker_env` (5,044), done
+
+The layout below was the plan. What it became is `plans/sagemaker_env.py` (14 modules, the largest `view.py` at
+1,140 lines). It differs in these ways:
+- `prices.py` holds `INSTANCE_TYPES` and `SAGEMAKER_PRICES`.
+- `machine.py` and `envs.py` are `SageMakerAnalyzer`'s mixins (`_MachineReads`, `_EnvReads`), with the constants only
+  they read (`METADATA_FILE`, `_HOMES`, `_PACKAGES`). `create_env` and `_run` are `envs.py`'s `_EnvMaking`, a mixin
+  of their own. `analyzer.py` keeps `__init__`, the clients, the notebooks and `running()`.
+- The pure side of each is in `analysis/`: `machine` (the `/proc`, nvidia-smi and metadata parsers, which return
+  section-2 dataclasses, so they left section 1), `common` (what several reports' findings share), `notebooks`,
+  `disk`, `running` and `envs`.
+- `shell_path` and `_tilde` moved from section 3 to `helpers.py`, since the disk, environment and View code all
+  write paths with them.
 
 The core has three parts, not one:
 - `machine.py`: `/proc`, disks, GPU, the metadata file, `_shown` / `_real`.
@@ -472,12 +484,12 @@ Update this table in each step's PR.
 |---|---|---|---|
 | Phase 0: tooling | done | #97 | branch `modularize/tooling` |
 | opensearch | done | #98 | plan in `plans/opensearch.py` |
-| lambda_functions | in review | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
-| s3 + s3_explorer | in review | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
+| lambda_functions | done | #99 | plan in `plans/lambda_functions.py` (mixins and modules) |
+| s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | not started | | before bedrock_kb / bedrock_chat |
 | bedrock_kb | not started | | |
 | bedrock_chat | not started | | |
-| sagemaker_env | not started | | |
+| sagemaker_env | in review | | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | not started | | |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
 | Phase 2: findings with actions | needs a plan | | ask the user first |
@@ -500,6 +512,16 @@ Update this table in each step's PR.
 
 What a finished step found that this plan got wrong or didn't say, newest first, with the service it came from. Fix
 the recipe above as well. This section is for what the next agent must know and can't see in the code.
+
+- **sagemaker_env:**
+  - **An analyzer under the limit can still take mixins**, when the plan splits it by where it reads from. They
+    followed the class's own `# ----` sub-banners (this machine, disk, Python environments), which moved with the
+    first member under each, so the comment count didn't change.
+  - **A test that patched a module through the service** (`smmod.platform`) patches the same module object through
+    the submodule that calls it (`envs_reads.platform`); `_kit` names a test read off the service (`smmod._Hint`,
+    `smmod._Title`) come from `_kit`.
+  - **Patching the class still works for mixins.** demo.py sets `SageMakerAnalyzer._disk_usage` and friends on the
+    composed class, which shadows the mixin's method, so it needed no change.
 
 - **s3:**
   - **The explorer couldn't stay a companion through the split.** It reached into s3 through `self.s3._Note`,
