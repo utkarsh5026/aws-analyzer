@@ -11,6 +11,18 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- Lambda: `how_it_works_page("orders-etl")` saves `how_it_works()` as a page of its own,
+  `lambda-downloads/orders-etl-how-it-works.html` (or at `path=`), and shows a link that opens it, so a big package's
+  graph and steps get a whole tab instead of a notebook cell. In JupyterLab a click opens it in a JupyterLab tab, and
+  a middle-click (or right-click, **Open link in new tab**) in a browser tab. The explorer's Code tab has the same as
+  **↗ Open in a tab**, beside **How it works**.
+  ([#120](https://github.com/utkarsh5026/aws-analyzer/pull/120))
+- Lambda: `how_it_works_page("orders-etl")` (and the explorer's **↗ Open in a tab**) draws the whole graph: every
+  function the steps follow and every operation, variable and event field in each box, where `how_it_works()` in the
+  notebook stops at 24 functions, 5 calls deep, and 5 lines a box. When the notebook's graph leaves something out, a
+  note under it says what and points to the page. `code_graph(cmap, max_functions=None, max_depth=None,
+  max_lines=None)` gives the whole graph in Python.
+  ([#121](https://github.com/utkarsh5026/aws-analyzer/pull/121))
 - **`set_theme()` picks how reports look**: `from aws_analyzer import set_theme; set_theme("soft")`. There are five
   themes, each made for a light or a dark notebook: `console` (boxed panels, WARN and INFO tags, numbers in a
   monospace font), `soft` (rounded tiles on a light fill), `editorial` (a serif title, large figures, almost no

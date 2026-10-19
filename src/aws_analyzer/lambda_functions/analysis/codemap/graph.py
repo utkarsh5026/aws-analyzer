@@ -61,15 +61,31 @@ class GraphEdge:
 class CodeGraph:
     """
     How the code fits together, as boxes and arrows: what comes in, its own functions and who calls whom, and what
-    they reach outside. code_graph() makes it from a CodeMap; mermaid() writes it for a Markdown file.
+    they reach outside. code_graph() makes it from a CodeMap; mermaid() writes it for a Markdown file. `shortened`
+    counts the boxes whose list ends in '+3 more'.
     """
 
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
     hidden: int = 0  # functions left out to keep the graph readable (too deep, or too many)
+    shortened: int = 0
 
     def node(self, node_id: str) -> GraphNode | None:
         return next((n for n in self.nodes if n.id == node_id), None)
+
+    def what_was_cut(self) -> str:
+        """
+        What code_graph() left out to keep the graph readable: 'leaves out 4 functions (too deep or too many) and
+        shortens 2 boxes' lists', or '' when it drew all of it.
+        """
+        cut = []
+        if self.hidden:
+            cut.append(f"leaves out {_plural(self.hidden, 'function')} (too deep or too many)")
+        if self.shortened == 1:
+            cut.append("shortens 1 box's list")
+        elif self.shortened:
+            cut.append(f"shortens {self.shortened} boxes' lists")
+        return " and ".join(cut)
 
     def mermaid(self) -> str:
         """
@@ -123,22 +139,36 @@ _GRAPH_DEPTH = 5  # ...and how deep below the handler
 _GRAPH_LINES = 5  # lines a box lists before "+3 more"
 
 
-def _listed_lines(items: list[str], most: int = _GRAPH_LINES) -> list[str]:
-    return items[:most] if len(items) <= most else items[:most - 1] + [f"+{len(items) - most + 1} more"]
+def _listed_lines(items: list[str], most: int | None = _GRAPH_LINES) -> list[str]:
+    if most is None or len(items) <= most:
+        return items
+    return items[:most - 1] + [f"+{len(items) - most + 1} more"]
 
 
-def code_graph(cmap: CodeMap) -> CodeGraph:
+def code_graph(cmap: CodeMap, *, max_functions: int | None = _GRAPH_FUNCTIONS, max_depth: int | None = _GRAPH_DEPTH,
+               max_lines: int | None = _GRAPH_LINES) -> CodeGraph:
     """
     How the code fits together, as boxes and arrows, from a CodeMap: on the left what comes in (the event, with the
     fields it reads, and the environment variables), then the handler, what runs at start-up, and its own functions
     by how many calls they are from those (an arrow for each call), and on the right the AWS services and the web it
     reaches, each arrow by what it does (reads, writes, sends, runs). A box or an arrow a warning is about is marked,
-    and says which on hover. At most 24 functions, 5 calls deep, the nearest first; `hidden` counts the rest, and what
-    they do is drawn from the nearest box above them that is.
+    and says which on hover. At most 24 functions, 5 calls deep, the nearest first, and 5 lines a box; `hidden` counts
+    the functions left out, and what they do is drawn from the nearest box above them that is, and `shortened` the
+    boxes whose list ends in '+3 more'. max_functions=None, max_depth=None and max_lines=None draw all of it (what
+    how_it_works_page() saves).
     """
     graph = CodeGraph()
     if cmap.note or cmap.entry is None:
         return graph
+
+    def listed(items: list[str]) -> list[str]:
+        """
+        A box's lines, counted in `shortened` when they end in '+3 more'.
+        """
+        if max_lines is not None and len(items) > max_lines:
+            graph.shortened += 1
+        return _listed_lines(items, max_lines)
+
     fn = cmap.function
     entry = cmap.entry
     found = code_map_findings(cmap)
@@ -173,9 +203,12 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
                 level[child] = level[key] + 1
                 todo.append(child)
     order = {f.name: i for i, f in enumerate(cmap.functions)}
-    rest = sorted((f for f in cmap.functions if f.name != entry and level.get(f.name, f.depth + 1) <= _GRAPH_DEPTH),
-                  key=lambda f: (level.get(f.name, f.depth + 1), order[f.name]))
-    shown = ([by_name[entry]] if entry_is_function else []) + rest[:_GRAPH_FUNCTIONS - 1]
+    deep_enough = [f for f in cmap.functions if f.name != entry
+                   and (max_depth is None or level.get(f.name, f.depth + 1) <= max_depth)]
+    rest = sorted(deep_enough, key=lambda f: (level.get(f.name, f.depth + 1), order[f.name]))
+    if max_functions is not None:
+        rest = rest[:max_functions - 1]
+    shown = ([by_name[entry]] if entry_is_function else []) + rest
     graph.hidden = len(cmap.functions) - len(shown)
     ids = {f.name: f"f{i}" for i, f in enumerate(shown)}
     if not entry_is_function:
@@ -268,7 +301,7 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
             f"{c.operation} ({c.permission or 'no permission needed'})" for c in {c.operation: c for c in calls}.values())
         if all(c.guessed for c in calls):
             tip += "\nKnown only by the methods' names: their client couldn't be followed"
-        reach.append(GraphNode(node_id, "aws", _service_name(service), " · ".join(does), _listed_lines(ops),
+        reach.append(GraphNode(node_id, "aws", _service_name(service), " · ".join(does), listed(ops),
                                "warn" if why else "", warned_tip(tip, why), flags={
                                    c.operation: "first page only" for c in calls if c.pages == "one" and not c.guessed
                                    and c.operation.startswith(("List", "Scan", "Query"))}))
@@ -304,7 +337,7 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
     if http:
         slow = [s for s in http if not s.ok]
         reach.append(GraphNode(
-            "http", "http", "The web", "HTTP requests", _listed_lines(list(dict.fromkeys(s.detail for s in http))),
+            "http", "http", "The web", "HTTP requests", listed(list(dict.fromkeys(s.detail for s in http))),
             "warn" if slow else "", warned_tip("HTTP requests it sends", [
                 f"{s.detail} has no timeout ({s.file} line {s.line})" for s in slow]),
             flags={s.detail: "no timeout" for s in slow}))
@@ -326,11 +359,11 @@ def code_graph(cmap: CodeMap) -> CodeGraph:
     kind = _event_kind(cmap.event)
     graph.nodes.append(GraphNode(
         "event", "event", kind[0].upper() + kind[1:] if kind else "The event", "Lambda calls it with",
-        _listed_lines(leaves) or ["(no fields read)"],
+        listed(leaves) or ["(no fields read)"],
         tip="The event Lambda passes the handler" + (f": the code reads {', '.join(leaves)}" if leaves else "")))
     if names:
         graph.nodes.append(GraphNode(
-            "env", "env", "Environment", "variables it reads", _listed_lines(names), "warn" if unset else "",
+            "env", "env", "Environment", "variables it reads", listed(names), "warn" if unset else "",
             warned_tip("Environment variables it reads (names only)",
                        [f"{name} isn't set on the function" for name in names if name in unset]),
             flags={name: "not set" for name in names if name in unset}))

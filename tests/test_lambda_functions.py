@@ -1086,6 +1086,17 @@ def test_code_graph():
     deep = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"))
     assert deep.hidden == 4 and max(n.column for n in deep.nodes if n.kind == "function") == 1 + codemap_graph._GRAPH_DEPTH
     assert {e.target for e in deep.edges} <= {n.id for n in deep.nodes}  # no arrow to a box that isn't drawn
+    whole = code_graph(map_code({"app.py": chain + "def handler(event, context):\n    return f0()\n"}, "app.handler"),
+                       max_functions=None, max_depth=None, max_lines=None)
+    assert whole.hidden == 0 and len([n for n in whole.nodes if n.kind == "function"]) == 9
+    assert not any(e.indirect for e in whole.edges)
+    variables = "".join(f"    os.environ['V{i}']\n" for i in range(8))
+    many = map_code({"app.py": f"import os\n\ndef handler(event, context):\n{variables}"}, "app.handler")
+    assert code_graph(many).node("env").lines[-1] == "+4 more" and code_graph(many).shortened == 1
+    every = code_graph(many, max_lines=None)
+    assert every.node("env").lines == [f"V{i}" for i in range(8)] and every.shortened == 0
+    assert code_graph(many).what_was_cut() == "shortens 1 box's list" and every.what_was_cut() == ""
+    assert deep.what_was_cut() == "leaves out 4 functions (too deep or too many)"
 
     # a handler that's an object (a web app's adapter): its routes hang off it
     app = ("from mangum import Mangum\nfrom fastapi import FastAPI\nimport boto3\napp = FastAPI()\n"
@@ -2008,6 +2019,42 @@ def test_how_it_works_report(ui, capsys):
     assert "save()</b>" in page and "store.py line 4" in page
 
 
+def test_how_it_works_page_saves_a_page_to_open_in_a_tab(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ui.core._download = lambda url, most: HOW
+    out = run(capsys, ui.how_it_works_page, "etl-nightly")
+    page_path = tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html"
+    assert "Saved how etl-nightly works as a page" in out and "lambda-downloads/etl-nightly-how-it-works.html" in out
+    assert "middle-click it, or right-click it and pick Open link in new tab, for a browser tab of its own." in out
+    assert "lambda-downloads was made for downloads, with a .gitignore" in out and "how_it_works('etl-nightly')" in out
+    page = page_path.read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>") and "<title>How etl-nightly works</title>" in page
+    assert "color-scheme:light dark" in page and ".lmb .flow{max-width:none;max-height:none}" in page
+    assert "BUCKET isn&#x27;t set on etl-nightly" in page
+    assert '<details class="od">' in page and "<script" not in page and "hunter2" not in page
+    again = run(capsys, ui.how_it_works_page, "etl-nightly", "notes/etl.html")
+    assert (tmp_path / "notes" / "etl.html").exists() and "notes/etl.html" in again
+    saved = ui._save_how_page(ui.core.code_map("etl-nightly"))
+    assert saved.replaced and not saved.marked and saved.size == len(page.encode("utf-8"))
+    link = stylemod._render_html(ui._page_blocks(saved), 50)
+    assert ('<a class="pgo" href="lambda-downloads/etl-nightly-how-it-works.html" target="_blank" rel="noopener"'
+            in link)
+    outside = ui._save_how_page(ui.core.code_map("etl-nightly"), str(tmp_path.parent / "elsewhere.html"))
+    assert '<a class="pgo"' not in stylemod._render_html(ui._page_blocks(outside), 50)
+
+
+def test_how_it_works_page_draws_the_whole_graph(ui, capsys, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    chain = "".join(f"def step{i}():\n    return step{i + 1}()\n\n" for i in range(8)) + "def step8():\n    return 1\n"
+    ui.core._download = lambda url, most: zipped({"app.py": chain + "def handler(event, context):\n    return step0()\n"})
+    out = run(capsys, ui.how_it_works, "etl-nightly")
+    assert ("The graph is cut to fit here: it leaves out 4 functions (too deep or too many). "
+            "how_it_works_page('etl-nightly') saves a page with the whole graph.") in out
+    run(capsys, ui.how_it_works_page, "etl-nightly")
+    page = (tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html").read_text(encoding="utf-8")
+    assert "step8()" in page and "not drawn" not in page and "The graph is cut" not in page
+
+
 def test_download_report(ui, capsys, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     out = run(capsys, ui.download, "etl-nightly")
@@ -2447,7 +2494,7 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
 
 
 
-def test_explorer_how_it_works(core, explorer, role, monkeypatch):
+def test_explorer_how_it_works(core, explorer, role, monkeypatch, tmp_path):
     core._download = lambda url, most: HOW
     x = explorer("etl-nightly", tab="code")
     button = x.how_button
@@ -2471,6 +2518,13 @@ def test_explorer_how_it_works(core, explorer, role, monkeypatch):
     monkeypatch.setattr(code_tab, "map_package", lambda *args: pytest.fail("the code is read once"))
     button.click()
     assert x._how and "How etl-nightly works" in plain(x.source_view.value)
+    assert x.page_button.layout.display == "" and x.page_link.layout.display == "none"
+    monkeypatch.chdir(tmp_path)
+    x.page_button.click()
+    assert x.page_saved.path == str(tmp_path / "lambda-downloads" / "etl-nightly-how-it-works.html")
+    assert x.page_link.layout.display == "" and "<!doctype" not in x.page_link.outputs[0]["data"]["text/html"]
+    assert 'href="lambda-downloads/etl-nightly-how-it-works.html"' in x.page_link.outputs[0]["data"]["text/html"]
+    assert plain(x.status.value).startswith("Saved how etl-nightly works as lambda-downloads/etl-nightly-how-it-works")
     x._code_rows[2].button.click()  # a file in the tree: its source, and the button is up again
     assert not x._how and "def save" in plain(x.source_view.value) and "lmx-on" not in button._dom_classes
     # a function on another runtime has no How it works

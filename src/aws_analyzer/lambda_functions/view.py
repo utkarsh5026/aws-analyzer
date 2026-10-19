@@ -26,6 +26,7 @@ from .._kit.fmt import (
 from .._kit.jsontree import _JsonTree
 from .._kit.render import _call
 from .._kit.text import _clip
+from .._kit.themes import _theme_name
 from .._kit.view import _BaseView, _friendly_errors
 
 from .helpers import (
@@ -34,7 +35,7 @@ from .helpers import (
 )
 from .models import (
     CodePackage, ErrorReport, Function, FunctionDetail, LogGroup, PackageDownload, Performance, RuntimeStatus,
-    Trigger,
+    SavedPage, Trigger,
 )
 from .analysis.text import _reason, _window
 from .analysis.functions import runtime_status
@@ -50,11 +51,12 @@ from .analysis.codemap.terms import _LAMBDA_ENV, _REMOVED_MODULES
 from .analysis.codemap.aws_model import _event_kind, _sample_event, _service_name
 from .analysis.codemap.model import AwsCall, CodeMap, EventField, ImportUse
 from .analysis.codemap.findings import _code_summary, _short_name, _where, code_map_findings
-from .analysis.codemap.graph import code_graph
+from .analysis.codemap.graph import CodeGraph, code_graph
 from .analyzer import LambdaAnalyzer
-from .style import _render_html
+from .style import _render_html, _render_page
 from .blocks.outline import _Outline
 from .blocks.graph import _Graph
+from .blocks.page import _PageLink
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -353,7 +355,7 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
-        "📦 Code": ("code", "how_it_works", "download"),
+        "📦 Code": ("code", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -1235,9 +1237,48 @@ class LambdaView(_BaseView):
             cmap = self.core.code_map(name, region=region, max_size=max_size)
         self._show(self._how_blocks(cmap))
 
-    def _how_blocks(self, cmap: CodeMap) -> list[Any]:
+    @_friendly_errors
+    def how_it_works_page(self, name: str, path: str | None = None, *, region: str | None = None,
+                          max_size: Any = "50MB") -> None:
         """
-        how_it_works()'s report, as blocks (the explorer's How it works shows them too).
+        how_it_works() as a page of its own, to read in a tab with room for it: saved as <name>-how-it-works.html in
+        lambda-downloads next to the notebook (or at path=), with a link that opens it. In JupyterLab a click opens
+        it in a JupyterLab tab; middle-click, or right-click and Open link in new tab, for a browser tab.
+        """
+        with self._named(name, region):
+            cmap = self.core.code_map(name, region=region, max_size=max_size)
+        saved = self._save_how_page(cmap, path)
+        self._show(self._page_blocks(saved))
+
+    def _save_how_page(self, cmap: CodeMap, path: str | None = None) -> SavedPage:
+        """
+        how_it_works()'s report drawn as a page and saved where download() saves (the explorer's ↗ Open in a tab too).
+        """
+        fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
+        whole_graph = code_graph(cmap, max_functions=None, max_depth=None, max_lines=None)
+        page = _render_page(self._how_blocks(cmap, whole_graph), f"How {fn.name} works", theme=_theme_name())
+        return self.core._save_page(fn, page, path)
+
+    def _page_blocks(self, saved: SavedPage) -> list[Any]:
+        """
+        how_it_works_page()'s report: the link, and how to open it where.
+        """
+        fn = saved.function
+        said = ["In JupyterLab, a click opens it in a JupyterLab tab you can drag beside the notebook; middle-click "
+                "it, or right-click it and pick Open link in new tab, for a browser tab of its own"
+                + (", where it replaced the page saved before." if saved.replaced else ".")]
+        if saved.marked:
+            said.append(f"{_local_path(os.path.dirname(saved.path))} was made for downloads, with a .gitignore that "
+                        "keeps it out of git.")
+        said.append("It's a snapshot of the code as it is now: run it again after a deploy.")
+        return [_Title(f"Saved how {fn.name} works as a page", f"{_local_path(saved.path)} · {human_size(saved.size)}"),
+                _PageLink(saved.path), _Note(" ".join(said)),
+                _Next([(self._call_for("how_it_works", fn), "the same report here, in the notebook")])]
+
+    def _how_blocks(self, cmap: CodeMap, graph: CodeGraph | None = None) -> list[Any]:
+        """
+        how_it_works()'s report, as blocks (the explorer's How it works shows them too). graph is the one to draw:
+        by default code_graph()'s, cut to fit a notebook; the saved page draws all of it.
         """
         fn = cmap.function or Function(cmap.handler or "code", handler=cmap.handler)
         read = (f"read from {_plural(cmap.files, 'Python file')} ({cmap.lines:,} lines) with Python's ast, nothing run"
@@ -1274,9 +1315,12 @@ class LambdaView(_BaseView):
         blocks.append(_Findings(found, empty=(
             "Nothing in the code stands out: the variables it needs are set, what it imports is there, and its HTTP "
             "and list calls look complete.")))
-        graph = code_graph(cmap)
+        graph = graph or code_graph(cmap)
         if graph.nodes:
             blocks.append(_Graph(graph, "How it fits together: what comes in, who calls whom, and what it reaches"))
+            if graph.what_was_cut():
+                blocks.append(_Note(f"The graph is cut to fit here: it {graph.what_was_cut()}. "
+                                    f"{self._call_for('how_it_works_page', fn)} saves a page with the whole graph."))
             blocks.append(_Text(graph.mermaid(), code=True, collapsed=True, title=(
                 "The same graph in Mermaid, to paste in a Markdown file, a wiki or a pull request")))
         if cmap.startup:

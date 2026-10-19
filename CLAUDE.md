@@ -178,7 +178,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   folder and the ones above them, even when marked. Local files are only written where the user asks: S3 downloads,
   `lambda_functions`' `download()` and the explorer's Download .zip (`LambdaAnalyzer._save_package`: one .zip, written
   to `<name>.zip.part` then renamed, in `lambda-downloads/` or the path given; a downloads folder it makes gets its own
-  `_DOWNLOADS_MARK`, and nothing in Lambda's module ever deletes a download), `bedrock_chat`'s `save_runs()` /
+  `_DOWNLOADS_MARK`, and nothing in Lambda's module ever deletes a download) and `how_it_works_page()` / the explorer's
+  ↗ Open in a tab (`_save_page`, through the same `_write_download`: `<name>-how-it-works.html`, the report drawn by
+  `style._render_page` as a whole document, `_kit.render._page_document`), `bedrock_chat`'s `save_runs()` /
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
@@ -641,7 +643,10 @@ How the View layer works:
   click within `_TOGGLE_GRACE`). The file's **Copy** (`_copy_html`) is a `user-select:all` span holding the text
   hidden, its label drawn by `::before`, so a click selects the file and Ctrl+C copies it, with no JavaScript.
   **Download .zip** (`_save_code`) writes the cached bytes with `_save_package`, no new download; `x.saved` is the
-  `PackageDownload`. **Hide files** (`files_toggle`, `_toggle_files`) hides the tree's pane, `code_left`, so the source
+  `PackageDownload`. **↗ Open in a tab** (`page_button`, `_open_page`, shown while How it works is) saves
+  `LambdaView._save_how_page(x.code_map)` and puts the `_PageLink` in `page_link`, an `Output`, because JupyterLab
+  serves the notebook's files only to links in a cell's output, not in a widget's HTML; `x.page_saved` is the
+  `SavedPage`. **Hide files** (`files_toggle`, `_toggle_files`) hides the tree's pane, `code_left`, so the source
   has the tab's width; `_files_shown` isn't reset by `_open_function`, so it stays hidden for the next function.
   **How it works** (`how_button`, `_toggle_how`) shows `how_it_works()`'s blocks in place of the source, for a Python
   function: `map_package` on the cached bytes runs as the `map` job (`_later`), `x.code_map` keeps it, and a click on a

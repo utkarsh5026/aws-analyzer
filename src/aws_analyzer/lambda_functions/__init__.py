@@ -35,6 +35,7 @@ Quick start
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
     ui.how_it_works("etl-nightly")                    # how its Python code works, step by step from the handler
+    ui.how_it_works_page("etl-nightly")               # the same as a page of its own, to open in a browser tab
     ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
     ui.explore()                                      # all of it in a window, by clicking: functions, logs, errors
 
@@ -59,7 +60,7 @@ from .helpers import (
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodeFile, CodePackage, DailyUsage, ErrorGroup, ErrorReport, Function,
     FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LogEvent, LogGroup, PackageDownload,
-    Performance, ProvisionedConcurrency, RuntimeStatus, Trigger, Version,
+    Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, Trigger, Version,
 )
 from .analysis.functions import masked_config, parse_event_source_mapping, parse_function, parse_policy, runtime_status
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
@@ -68,7 +69,9 @@ from .analysis.findings import RECENT_DAYS, account_findings, function_findings,
 from .analysis.errors import classify_error, error_findings, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, line_level, parse_report, split_runs
 from .analysis.performance import percentile, performance_findings, suggest_memory
-from .analysis.package import DOWNLOADS, handler_file, package_file_name, package_findings, read_package
+from .analysis.package import (
+    DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
+)
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
 from .analysis.codemap.findings import code_map_findings
@@ -132,6 +135,7 @@ __all__ = [
     "Performance",
     "ProvisionedConcurrency",
     "RuntimeStatus",
+    "SavedPage",
     "Trigger",
     "Version",
     "account_findings",
@@ -155,6 +159,7 @@ __all__ = [
     "masked_config",
     "package_file_name",
     "package_findings",
+    "page_file_name",
     "parse_event_source_mapping",
     "parse_function",
     "parse_function_ref",
