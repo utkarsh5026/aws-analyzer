@@ -10,9 +10,10 @@ from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from aws_analyzer import s3 as s3mod
-from aws_analyzer.s3 import explorer as sx
+from aws_analyzer.s3.explorer import frame, listing, navigator, report, window
 from aws_analyzer._kit.render import _render_text
 from aws_analyzer.s3 import S3Analyzer, S3View
+from aws_analyzer.s3.blocks import _Flow, _Pages
 from aws_analyzer.s3_explorer import (
     Entry,
     S3Explorer,
@@ -276,7 +277,7 @@ def test_navigator_lists_the_rest_of_a_folder(core):
 
 
 def test_navigator_forgets_old_folders_past_a_size(core, monkeypatch):
-    monkeypatch.setattr(sx, "_CACHED_ENTRIES", 20)
+    monkeypatch.setattr(navigator, "_CACHED_ENTRIES", 20)
     nav = S3Navigator(core)
     many = nav.open("s3://lake/many/")
     nav.open("s3://lake/raw/")  # 25 entries kept is over 20: the oldest folder goes
@@ -337,7 +338,7 @@ def test_navigator_takes_a_view_or_settings(core):
 
 @pytest.fixture
 def explorer(core, monkeypatch):
-    monkeypatch.setattr(sx, "_CLICK_GRACE", 0)
+    monkeypatch.setattr(listing, "_CLICK_GRACE", 0)
 
     def make(uri="", **kwargs):
         return S3Explorer(uri, core=core, mode="widgets", progress="off", **kwargs)
@@ -360,11 +361,11 @@ def text(x):
 def test_explorer_fills_the_window_unless_given_a_height(explorer):
     x = explorer()
     assert x._body.layout.height is None and "s3x-body" in x._body._dom_classes  # the style sizes it
-    assert ".s3x .s3x-body{height:clamp(560px,calc(100vh - 220px),1400px)}" in sx._CSS
-    assert "body[class*=vscode-] .s3x .s3x-body{height:560px}" in sx._CSS  # VS Code's 100vh is the whole notebook
+    assert ".s3x .s3x-body{height:clamp(560px,calc(100vh - 220px),1400px)}" in frame._CSS
+    assert "body[class*=vscode-] .s3x .s3x-body{height:560px}" in frame._CSS  # VS Code's 100vh is the whole notebook
     assert explorer(height=720)._body.layout.height == "720px"
     assert explorer(height="80vh")._body.layout.height == "80vh"
-    assert [sx._css_height(h) for h in ("720", " 600.5 ", "", None)] == ["720px", "600.5px", None, None]
+    assert [window._css_height(h) for h in ("720", " 600.5 ", "", None)] == ["720px", "600.5px", None, None]
 
 
 def test_explorer_opens_folders_and_files_by_clicking(explorer):
@@ -756,7 +757,7 @@ def test_explorer_opens_a_file_path_with_the_file_shown(explorer):
 
 def test_explorer_ignores_clicks_aimed_at_the_old_rows(explorer, monkeypatch):
     x = explorer("s3://lake/")
-    monkeypatch.setattr(sx, "_CLICK_GRACE", 60)
+    monkeypatch.setattr(listing, "_CLICK_GRACE", 60)
     row(x, "raw").button.click()  # the rows just changed: this click was meant for what was there before
     assert x.location == "s3://lake/"
 
@@ -820,14 +821,14 @@ def test_explorer_text_mode(core, capsys):
 
 
 def test_explorer_without_ipywidgets_falls_back_to_text(core, capsys, monkeypatch):
-    real = sx._require
+    real = window._require
 
     def require(module, purpose, package=None):
         if module == "ipywidgets":
             raise ImportError(f"{purpose} needs `ipywidgets` (pip install ipywidgets)")
         return real(module, purpose, package)
 
-    monkeypatch.setattr(sx, "_require", require)
+    monkeypatch.setattr(window, "_require", require)
     x = S3Explorer("s3://lake/", core=core, mode="widgets", progress="off")
     out = capsys.readouterr().out
     assert "pip install ipywidgets" in out and "-- In this folder --" in out and x._widgets is None
@@ -837,7 +838,7 @@ def test_explorer_without_s3_py(capsys, monkeypatch):
     def missing(core=None):
         raise ImportError("s3_explorer.py builds on s3.py, which isn't here.")
 
-    monkeypatch.setattr(sx, "_s3_module", missing)
+    monkeypatch.setattr(window, "_s3_module", missing)
     x = S3Explorer("s3://lake/")
     assert "builds on s3.py" in capsys.readouterr().out
     x.open("s3://lake/raw/")
@@ -845,7 +846,7 @@ def test_explorer_without_s3_py(capsys, monkeypatch):
 
 
 def test_s3_module_is_the_package_the_explorer_is_part_of():
-    assert sx._s3_module() is s3mod
+    assert navigator._s3_module() is s3mod
     assert S3Explorer("s3://lake/", mode="text").s3 is s3mod
 
 
@@ -891,13 +892,13 @@ def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
     assert "Every page as it looks" in x._act_buttons["document"].tooltip
 
     x._act_buttons["document"].click()
-    drawn = [block.pictures[0].page for block in x.shown if isinstance(block, s3mod._Pages)]
+    drawn = [block.pictures[0].page for block in x.shown if isinstance(block, _Pages)]
     assert drawn == list(range(1, 21)) and x._content.value.count('<div class="zw"') == 20
     assert "Pages 1–20 of 25; the buttons at the end show the others. Click a page to see it full size" in text(x)
     assert "Text of page 3" in text(x)  # each page's text, folded under it
     assert x._pager.layout.display is None and pager(x) == ["Pages 1–20 of 25", "Pages 21–25 ›"]
     x._pager.children[1].click()
-    assert [block.pictures[0].page for block in x.shown if isinstance(block, s3mod._Pages)] == [21, 22, 23, 24, 25]
+    assert [block.pictures[0].page for block in x.shown if isinstance(block, _Pages)] == [21, 22, 23, 24, 25]
     assert pager(x) == ["Pages 21–25 of 25", "‹ Pages 1–20"]
     x._pager.children[1].click()
     assert pager(x)[0] == "Pages 1–20 of 25"
@@ -906,7 +907,7 @@ def test_explorer_reads_a_pdf_as_its_pages(explorer, aws):
 
     row(x, "short.pdf").button.click()
     x._act_buttons["document"].click()
-    assert len([block for block in x.shown if isinstance(block, s3mod._Pages)]) == 2
+    assert len([block for block in x.shown if isinstance(block, _Pages)]) == 2
     assert x._pager.layout.display == "none" and "Pages 1–2" not in text(x) and "Click a page" in text(x)
 
     row(x, "broken.pdf").button.click()
@@ -922,9 +923,9 @@ def test_explorer_reads_a_pdfs_text(explorer, aws):
     assert "laid out to read" in x._act_buttons["text"].tooltip
 
     x._act_buttons["text"].click()
-    flows = [block for block in x.shown if isinstance(block, s3mod._Flow)]
+    flows = [block for block in x.shown if isinstance(block, _Flow)]
     assert len(flows) == 1 and [value for role, value in flows[0].items if role == "page"] == list(range(1, 51))
-    assert ("p", "Page 3 text") in flows[0].items and not any(isinstance(b, s3mod._Pages) for b in x.shown)
+    assert ("p", "Page 3 text") in flows[0].items and not any(isinstance(b, _Pages) for b in x.shown)
     assert '<div class="pg">Page 2</div>' in x._content.value and '<div class="zw"' not in x._content.value
     assert "Pages 1–50 of 60; the buttons at the end show the others, and 📖 Read all shows the pages" in text(x)
     assert x._action == "text" and pager(x) == ["Pages 1–50 of 60", "Pages 51–60 ›"]
@@ -978,7 +979,7 @@ def test_explorer_loads_previews_in_the_background(explorer, core, monkeypatch):
     """
     In a notebook (a running event loop), a click returns at once; a file clicked since wins.
     """
-    monkeypatch.setattr(sx, "_WORKERS", 1)
+    monkeypatch.setattr(report, "_WORKERS", 1)
     gate, real, asked = threading.Event(), core.preview, []
 
     def slow(uri, *args, **kwargs):

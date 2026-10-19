@@ -83,7 +83,7 @@ def package_step(python: str) -> tuple[str, bool, str, str]:
             shutil.unpack_archive(wheels[0], site, "zip")
             code = (f"MODULE = 'aws_analyzer'\n{BOTO3_ONLY}\npackage = sys.modules['aws_analyzer']\n"
                     "for name in package.__all__[1:]:\n    getattr(package, name)\n"
-                    "assert package.s3.explorer._s3_module() is package.s3\n")
+                    "assert package.s3.explorer.navigator._s3_module() is package.s3\n")
             proc = subprocess.run([python, "-c", code], cwd=site, capture_output=True, text=True)
     output = (proc.stdout + proc.stderr).strip()
     ok = proc.returncode == 0

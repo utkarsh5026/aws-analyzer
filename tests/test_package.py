@@ -86,7 +86,7 @@ def test_changelog_has_an_entry_for_this_version(package):
 
 def test_explorer_builds_on_the_s3_installed_with_it(package):
     # The explorer is part of the s3 package; aws_analyzer.s3_explorer, where it was before, still has its names.
-    assert package.s3.explorer._s3_module() is package.s3
+    assert package.s3.explorer.navigator._s3_module() is package.s3
     assert package.S3Explorer.__module__.startswith("aws_analyzer.s3.explorer")
     assert package.s3_explorer.S3Explorer is package.S3Explorer is package.s3.S3Explorer
 
