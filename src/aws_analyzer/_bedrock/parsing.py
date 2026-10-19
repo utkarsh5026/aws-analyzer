@@ -86,6 +86,7 @@ def parse_passage(ref: dict[str, Any], rank: int) -> Passage:
         chunk_id=str(system.get("chunk-id") or ""),
         data_source_id=str(system.get("data-source-id") or ""),
         metadata=user,
+        bedrock_metadata=system,
         content_type=content_type,
         row=row,
     )

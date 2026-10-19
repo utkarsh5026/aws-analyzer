@@ -44,6 +44,8 @@ class Passage:
         location_type  S3, WEB, CONFLUENCE, SALESFORCE, SHAREPOINT, CUSTOM, KENDRA, SQL, ...
         page           its page number in a PDF, when the parser recorded one
         metadata       the author's metadata only (what where= filters on)
+        bedrock_metadata  Bedrock's own keys, without their x-amz-bedrock-kb- prefix ('chunk-id', 'source-uri',
+                       'document-page-number', ...)
         content_type   TEXT, IMAGE, ROW, AUDIO or VIDEO
         row            a ROW result's columns (SQL knowledge bases): column -> value
     """
@@ -57,6 +59,7 @@ class Passage:
     chunk_id: str = ""
     data_source_id: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    bedrock_metadata: dict[str, Any] = field(default_factory=dict)
     content_type: str = "TEXT"
     row: dict[str, Any] | None = None
 

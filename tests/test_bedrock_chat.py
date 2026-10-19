@@ -534,7 +534,26 @@ def test_parse_rag_numbers_each_passage_once():
     assert [p.source for p in a.sources] == ["refund-policy.pdf p.3", "refund-policy.pdf p.4"]
     assert a.citations[0].text == "Refunds take 5-7 business days." and a.session_id == "session-1"
     assert a.sources[0].metadata == {"team": "billing"}
+    assert a.sources[0].bedrock_metadata["chunk-id"] == "chunk-policies/refund-policy.pdf-3"
     assert 0.6 < a.grounded_share < 0.8 and a.cited == [1, 2]
+
+
+def test_each_source_opens_to_its_metadata():
+    tagged = ref("Refunds go back to the card.", team="billing", tags=["refunds", "cards"], owner={"name": "Ana"})
+    a = parse_rag(rag_resp(citations=(("Refunds take 5-7 business days.", [tagged, BANK]),)))
+    shown = chatmod._sources_html(a)
+    first, second = shown.split('<details class="src">')[1:]
+    for text in ('<span class="mk">team</span><span class="mv">billing</span>',
+                 '<span class="mv">refunds, cards</span>', '{&quot;name&quot;: &quot;Ana&quot;}',
+                 '<span class="mk mb">chunk-id</span>', '<span class="mv mb">DSID123456</span>'):
+        assert text in first, text
+    assert "source-uri" not in first
+    assert "None of the file&#x27;s own" in second
+    assert '<span class="mk mb">document-page-number</span><span class="mv mb">4</span>' in second
+    from_old_log = chatmod.Passage(rank=1, text="t", chunk_id="c-1", data_source_id="DS1")
+    assert chatmod._bedrock_keys(from_old_log) == {"chunk-id": "c-1", "data-source-id": "DS1"}
+    assert chatmod._meta_text(a.sources[0]) == 'team=billing · tags=refunds, cards · owner={"name": "Ana"}'
+    assert chatmod._meta_text(a.sources[1]) == "-"
 
 
 def test_collect_stream_builds_a_response_like_retrieve_and_generates():
@@ -1675,6 +1694,7 @@ def test_ui_retrieve_shows_every_passage_and_what_the_answer_cited(ui, clients, 
                  "Cited by the answer: 2 of 3", "The answer cites 2 of the 3 passages the search found (#1 as [1], "
                  "#2 as [2]); the other one wasn't cited.", "-- Passages, best first --",
                  "#  Score  File               Page  Cited as  Passage", "3  0.400  shipping.md        -     -",
+                 "Metadata", "team=billing",
                  "Retrieve sent the search settings only (n=5)", "last()"):
         assert text in out, text
     sent = clients["bedrock-agent-runtime"].called("retrieve")[-1]

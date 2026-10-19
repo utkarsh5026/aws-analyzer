@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Changed
+
+- **`chat()`'s sources show each chunk's metadata**: open a source under an answer, or a passage of a Retrieve only
+  search, and it lists the file's own metadata (its `<file>.metadata.json`, what `where=` filters on) and Bedrock's
+  (chunk ID, data source ID, page), or says the file has none of its own. `ask()` and `retrieve()` reports add a
+  Metadata column when a passage has some, and `Passage.bedrock_metadata` keeps Bedrock's keys.
+
 ## [0.21.0] - 2026-10-19
 
 ### Added

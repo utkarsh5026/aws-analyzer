@@ -4025,6 +4025,12 @@ _EXTRA_CSS = """\
 .kbc details.src[open]>summary .sn{display:none}
 .kbc details.src .pt{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 8px 6px 31px;padding:8px 12px;border-left:3px solid var(--kc-ring);border-radius:3px 9px 9px 3px;background:var(--kc-surface);max-height:280px;overflow:auto;line-height:1.5}
 .kbc details.src .pm{margin:0 8px 6px 31px;opacity:.6;overflow-wrap:anywhere}
+.kbc details.src .pmeta{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);gap:2px 12px;margin:0 8px 8px 31px;padding:6px 10px;border-radius:9px;background:var(--kc-surface);font-size:11.5px}
+.kbc details.src .pmeta .pmh{grid-column:1/-1;font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;opacity:.55}
+.kbc details.src .pmeta .mk{font-weight:600;overflow-wrap:anywhere}
+.kbc details.src .pmeta .mv{overflow-wrap:anywhere;white-space:pre-wrap}
+.kbc details.src .pmeta .mb{opacity:.6}
+.kbc details.src .pmeta .mn{grid-column:1/-1;opacity:.6}
 .kbc .srcs.hits{margin-top:2px;padding-top:0;border-top:0}
 .kbc .hits details.src>summary{flex-wrap:wrap;row-gap:2px;white-space:normal;padding:4px 6px}
 .kbc .hits details.src .sf{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
@@ -4282,19 +4288,69 @@ def _code_block_html(block: _Code, report: _Report) -> str:
 _draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any other text
 
 
+_SHOWN_ELSEWHERE = {"source-uri", "AMAZON_BEDROCK_TEXT", "AMAZON_BEDROCK_TEXT_CHUNK"}
+_META_VALUE_CHARS = 300
+_NO_OWN_METADATA = "None of the file's own: a <file>.metadata.json next to it adds some, for where= to filter on."
+
+
+def _meta_value(value: Any) -> str:
+    """
+    A metadata value as text: a list joined by commas, a dict as JSON, 4.0 as 4, anything long clipped.
+    """
+    if isinstance(value, (list, tuple)):
+        text = ", ".join(str(item) for item in value)
+    elif isinstance(value, dict):
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    elif isinstance(value, float) and value.is_integer():
+        text = str(int(value))
+    else:
+        text = str(value)
+    return _clip(text, _META_VALUE_CHARS)
+
+
+def _bedrock_keys(p: Passage) -> dict[str, Any]:
+    """
+    Bedrock's own metadata on a passage, less the source URI and the text it already shows. A passage read back from
+    a run log written before Bedrock's keys were kept falls back to its chunk and data source IDs.
+    """
+    kept = p.bedrock_metadata or {"chunk-id": p.chunk_id, "data-source-id": p.data_source_id}
+    return {key: value for key, value in kept.items() if value not in ("", None) and key not in _SHOWN_ELSEWHERE}
+
+
+def _meta_text(p: Passage) -> str:
+    """
+    A passage's own metadata on one line, for a report's table: 'team=billing · year=2024', or '-'.
+    """
+    return " · ".join(f"{key}={_meta_value(value)}" for key, value in p.metadata.items()) or "-"
+
+
+def _passage_meta_html(p: Passage) -> str:
+    """
+    A passage's metadata as name / value lines: the file's own (its <file>.metadata.json, what where= filters on)
+    first, then Bedrock's, dimmed.
+    """
+    lines = [f'<span class="mk">{_esc(key)}</span><span class="mv">{_esc(_meta_value(value))}</span>'
+             for key, value in p.metadata.items()]
+    if not lines:
+        lines.append(f'<span class="mn">{_esc(_NO_OWN_METADATA)}</span>')
+    lines += [f'<span class="mk mb">{_esc(key)}</span><span class="mv mb">{_esc(_meta_value(value))}</span>'
+              for key, value in _bedrock_keys(p).items()]
+    return f'<div class="pmeta"><span class="pmh">Metadata</span>{"".join(lines)}</div>'
+
+
 def _sources_html(a: Answer) -> str:
     """
-    The cited passages under an answer: one line each, opening to the full passage, its location and metadata.
+    The cited passages under an answer: one line each, opening to the full passage, its location and its metadata
+    (the file's own and Bedrock's).
     """
     terms = question_terms(a.question)
     items = []
     for i, p in enumerate(a.sources, 1):
         where = " · ".join(filter(None, [source_name(p.uri) or p.uri or "(unknown source)",
                                          f"p.{p.page}" if p.page is not None else ""]))
-        meta = " · ".join(f"{k}={v}" for k, v in p.metadata.items())
         body = f'<div class="pt">{_highlight(p.text, terms)}</div>'
         body += f'<div class="pm">{_esc(p.uri)}</div>' if p.uri else ""
-        body += f'<div class="pm">{_esc(meta)}</div>' if meta else ""
+        body += _passage_meta_html(p)
         items.append(f'<details class="src"><summary><span class="sx">{i}</span><span class="sf">{_esc(where)}</span>'
                      f'<span class="sn">{_esc(best_snippet(p.text, terms, 120))}</span></summary>{body}</details>')
     count = f" · {len(items)}" if len(items) > 1 else ""
@@ -4342,10 +4398,9 @@ def _search_html(a: Answer, meta: str, findings: list[tuple[str, str]], ranks: d
         n = ranks.get(p.rank)
         cited = (f'<span class="ct" title="The answer to this question cites it as [{n}]">cited [{n}]</span>'
                  if n else "")
-        meta_line = " · ".join(f"{k}={v}" for k, v in p.metadata.items())
         body = f'<div class="pt">{_highlight(p.text, terms)}</div>'
         body += f'<div class="pm">{_esc(p.uri)}</div>' if p.uri else ""
-        body += f'<div class="pm">{_esc(meta_line)}</div>' if meta_line else ""
+        body += _passage_meta_html(p)
         snippet = _highlight(best_snippet(p.text, terms, 220), terms)
         items.append(f'<details class="src"><summary><span class="sx">{p.rank}</span><span class="sf">{_esc(where)}'
                      f'</span>{score}{cited}<span class="sn">{snippet}</span></summary>{body}</details>')
@@ -7452,16 +7507,19 @@ class BedrockChatView(_BaseView):
         ]
         terms = question_terms(a.question)
         names = self._source_names(a.kb_id, a.sources)
+        has_metadata = any(p.metadata for p in a.sources)
         rows = [
             [str(p.rank), _score(p.score) or "-", source_name(p.uri) or p.uri or "-",
              "-" if p.page is None else str(p.page)]
             + ([names.get(p.data_source_id, "-")] if names else [])
             + ([f"[{ranks[p.rank]}]" if p.rank in ranks else "-"] if other is not None else [])
             + [p.text if full else f'"{best_snippet(p.text, terms, 90)}"']
+            + ([_meta_text(p)] if has_metadata else [])
             for p in a.sources
         ]
         headers = (["#", "Score", "File", "Page"] + (["Data source"] if names else [])
-                   + (["Cited as"] if other is not None else []) + ["Passage"])
+                   + (["Cited as"] if other is not None else []) + ["Passage"]
+                   + (["Metadata"] if has_metadata else []))
         blocks.append(_Table(headers, rows, title="Passages, best first", max_rows=0))
         if full:
             marks = _setting_marks(a.settings, self.core.schema(), retrieve_only=True)
@@ -7517,13 +7575,16 @@ class BedrockChatView(_BaseView):
         ]
         terms = question_terms(a.question)
         names = self._source_names(a.kb_id, a.sources)
+        has_metadata = any(p.metadata for p in a.sources)
         rows = [
             [str(i), source_name(p.uri) or p.uri or "-", "-" if p.page is None else str(p.page)]
             + ([names.get(p.data_source_id, "-")] if names else [])
             + [p.text if full else f'"{best_snippet(p.text, terms, 90)}"']
+            + ([_meta_text(p)] if has_metadata else [])
             for i, p in enumerate(a.sources, 1)
         ]
-        headers = ["#", "File", "Page"] + (["Data source"] if names else []) + ["Passage"]
+        headers = (["#", "File", "Page"] + (["Data source"] if names else []) + ["Passage"]
+                   + (["Metadata"] if has_metadata else []))
         blocks.append(_Table(headers, rows, title="Sources", max_rows=0))
         if full:
             marks = _setting_marks(a.settings, self.core.schema())
