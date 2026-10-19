@@ -15,13 +15,14 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError
 
-from .._bedrock import _Answer
+from .._bedrock import _Answer, _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money
 from .._kit.render import _base_css, _report_html
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
+from .llm import model_place, no_model_hint, provider_info
 
 _ROOT = "agt"
 _EXTRA_CSS = """\
@@ -96,6 +97,33 @@ def _first_line(doc: str | None) -> str:
     return match.group(1) if match else flat
 
 
+def _price_key(answer: AgentAnswer) -> str:
+    """
+    The name to price a model by in model_prices=: a Bedrock model's family ('claude-haiku-4-5'), else the model or
+    deployment without the version it was served as ('prod-gpt-4o', not 'prod-gpt-4o (gpt-4o-2024-11-20)').
+    """
+    base = answer.model.split(" (")[0]
+    return short_model(base) if answer.provider == "bedrock" else base
+
+
+def _cost_basis(answer: AgentAnswer) -> str:
+    """
+    What a report's model cost is based on: the prices passed in model_prices=, or Amazon Bedrock's list prices for
+    the model; when neither knows it, how to pass them.
+    """
+    rates = answer.rates
+    tokens = f"{answer.input_tokens:,} input and {answer.output_tokens:,} output tokens"
+    if answer.cost is None or rates is None:
+        sheet = f"{provider_info(answer.provider).title}'s price sheet" if answer.provider else "your provider's prices"
+        return (f"The model's cost is unknown: pass its prices, AgentView(model_prices={{{_price_key(answer)!r}: "
+                f"(input_price, output_price)}}) (USD per 1M input and output tokens, from {sheet}).")
+    if rates.source == "list":
+        return (f"Model cost is an estimate: {tokens} at Amazon Bedrock's list prices for {_price_key(answer)} "
+                f"({_per_million(rates.price_in)} in and {_per_million(rates.price_out)} out per 1M tokens; "
+                "model_prices= sets your own).")
+    return f"Model cost is an estimate: {tokens} at the prices you passed in model_prices=."
+
+
 def _look_closer(commands: list[tuple[str, str]]) -> str:
     """
     The title over the commands to run next, naming the Views they're on: 'Look closer (aws_analyzer.LambdaView)'.
@@ -109,8 +137,8 @@ class AgentView(_BaseView):
     Notebook UI over AgentAnalyzer: ask questions about your AWS account in plain English. Each method renders a
     report and returns nothing; for the data, call the matching method on `view.core` (ask() -> AgentAnswer).
 
-    AgentView(timezone='Asia/Kolkata', deployment='gpt-4o', ...) passes its settings to a new AgentAnalyzer (see
-    there for each); AgentView(core) uses one you made.
+    AgentView(provider='bedrock', model='sonnet', timezone='Asia/Kolkata', ...) passes its settings to a new
+    AgentAnalyzer (see there for each, and for every provider it can answer with); AgentView(core) uses one you made.
     mode: 'auto' (HTML inside Jupyter, text elsewhere), 'html' or 'text'.
     max_rows: default cap for long tables (set to 0 for no cap).
     progress: 'auto' (a progress bar while it works, when tqdm is installed), 'plain' or 'off'.
@@ -205,13 +233,7 @@ class AgentView(_BaseView):
         if answer.aws_calls:
             rows = [[op, f"{n:,}"] for op, n in sorted(answer.aws_calls.items(), key=lambda kv: (-kv[1], kv[0]))]
             blocks.append(_Table(["AWS call (read-only)", "Calls"], rows, title="AWS reads it made", collapsed=True))
-        basis = []
-        if answer.cost is None:
-            basis.append("The model's cost is unknown: pass its prices, AgentView(model_prices={'gpt-4o': (2.50, "
-                         "10.00)}) (USD per 1M input and output tokens, as your Azure price sheet lists them).")
-        else:
-            basis.append(f"Model cost is an estimate: {answer.input_tokens:,} input and {answer.output_tokens:,} "
-                         "output tokens at the prices you passed in model_prices=.")
+        basis = [_cost_basis(answer)]
         billed = [f"{answer.metrics_read:,} CloudWatch metrics"] if answer.metrics_read else []
         requests = sum(n for op, n in answer.aws_calls.items() if op.startswith("s3:"))
         if requests:
@@ -272,20 +294,25 @@ class AgentView(_BaseView):
     def tools(self) -> None:
         """
         What the agent can call to answer: each tool, what it tells the model and the AWS reads it makes, then
-        the model it answers with, the regions and time zone it assumes, and its budget per question. Every AWS
-        call goes through a guard that refuses anything but a read.
+        the model it answers with and who serves it, the regions and time zone it assumes, its budget per question,
+        and where what it sends the model goes. Every AWS call goes through a guard that refuses anything but a read.
         """
         core = self.core
         budget = core.budget
-        model = core.model or "not set (AZURE_OPENAI_DEPLOYMENT)"
+        is_set_up = bool(core.provider) or core.chat_model is not None
+        model = core.model or "not set up"
+        if core.provider:
+            provider = provider_info(core.provider).title
+        else:
+            provider = type(core.chat_model).__name__ if core.chat_model is not None else "not set up"
         try:
             regions = ", ".join(core.default_regions())
         except (ValueError, BotoCoreError):
             regions = "not set (AWS_DEFAULT_REGION)"
         blocks: list[Any] = [
             _Title("What the agent can do", ", ".join(t.title for t in core.toolkits) + ", read-only"),
-            _Cards([("Model", model), ("Regions", regions), ("Time zone", _zone_label(core.zone)),
-                    ("Tools", f"{len(core.tools())}")]),
+            _Cards([("Model", model, *([] if is_set_up else ["warn"])), ("Provider", provider),
+                    ("Regions", regions), ("Time zone", _zone_label(core.zone)), ("Tools", f"{len(core.tools())}")]),
         ]
         reads = core.reads
         rows = [[fn.__name__, _first_line(fn.__doc__), ", ".join(reads.get(fn.__name__, ()))] for fn in core.tools()]
@@ -295,16 +322,21 @@ class AgentView(_BaseView):
             ["Tool calls", f"{budget.tool_calls:,}", "tools stop running; it answers with what it has"],
             ["Time", _duration(budget.seconds), "the same"],
             ["Model cost", human_money(budget.usd) if budget.usd is not None else "none",
-             "the same (only when model_prices= says what its tokens cost)"],
+             "the same (only when its tokens' prices are known: model_prices=, or Bedrock's list prices)"],
             ["Steps", f"{budget.steps:,}", "the agent stops (LangGraph's recursion limit)"],
             ["Log window", f"{budget.log_days:g} days", "a longer log read is refused; CloudWatch's counts still work"],
             ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
         ], title="Budget", sortable=False))
         never = " ".join(t.privacy for t in core.toolkits if t.privacy)
+        if not is_set_up:
+            blocks.append(_Note(no_model_hint(core.model_id), "warn"))
+        place = f" It goes to {model_place(core.provider, model, core.endpoint)}." if is_set_up else ""
+        stay = ("" if core.provider == "bedrock" else
+                " To keep it in AWS, answer with a model on Amazon Bedrock: AgentView(provider='bedrock').")
         blocks.append(_Note(
             "Sent to the model: your question and what the tools return (names, settings, counts, error messages and "
             "log lines, with anything that looks like a key or password hidden)." + (f" {never}" if never else "")
-            + f" The model is your Azure OpenAI deployment ({model}), outside AWS."))
+            + place + stay))
         blocks.append(_Next([
             ("ask('Which Lambda failed last night?')", "an answer, and what it checked"),
             ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together"),

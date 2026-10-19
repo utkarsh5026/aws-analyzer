@@ -10,6 +10,7 @@ HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools).
 
 from __future__ import annotations
 
+import functools
 import sys
 from typing import Any, Callable, Iterable
 
@@ -57,14 +58,16 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
 
 def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
                 model_prices: dict[str, tuple[float, float]] | None = None,
-                progress: Callable[..., None] | None = None) -> str:
+                progress: Callable[..., None] | None = None, provider: str = "") -> str:
     """
     Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
     text. Fills `answer` as it goes (model calls, tokens, the model that served it) and keeps `run.cost` current
-    for the tools' cost budget. Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button:
-    it keeps what it found) or the time budget is well past. A model or loop that fails, whatever it raises, sets
-    answer.error and answer.exception instead of raising.
+    for the tools' cost budget, at model_prices= or, for a `provider` with list prices (Amazon Bedrock), those.
+    Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button: it keeps what it found) or
+    the time budget is well past. A model or loop that fails, whatever it raises, sets answer.error (what it means
+    with this provider) and answer.exception instead of raising.
     """
+    cost_of = functools.partial(answer_cost, model_prices=model_prices, provider=provider)
     base = answer.model
     steps = 0
     text = ""
@@ -73,7 +76,7 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
     try:
         for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
             for msg in _model_messages(update):
-                _count_usage(msg, answer, base, run, model_prices)
+                _count_usage(msg, answer, base, run, cost_of)
                 if not getattr(msg, "tool_calls", None):
                     text = _message_text(msg) or text
             steps += 1
@@ -87,7 +90,7 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
         answer.stopped = "stopped"
     except Exception as exc:  # noqa: BLE001
         answer.stopped = "steps" if type(exc).__name__ == "GraphRecursionError" else "error"
-        answer.error = explain_model_error(exc)
+        answer.error = explain_model_error(exc, provider)
         answer.exception = exc
     return text
 
@@ -101,10 +104,11 @@ def _model_messages(update: Any) -> list[Any]:
 
 
 def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
-                 model_prices: dict[str, tuple[float, float]] | None) -> None:
+                 cost_of: Callable[[str, int, int], float | None]) -> None:
     """
     Adds one model message to the answer: a model call, its tokens, and the model that served it, which for a
-    deployment reads 'prod-gpt-4o (gpt-4o-2024-11-20)'. Keeps run.cost current for the tools' cost budget.
+    deployment reads 'prod-gpt-4o (gpt-4o-2024-11-20)'. Keeps run.cost current for the tools' cost budget, at what
+    cost_of(model, input_tokens, output_tokens) says the tokens so far cost.
     """
     answer.model_calls += 1
     usage = getattr(message, "usage_metadata", None) or {}
@@ -113,7 +117,7 @@ def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
     served = (getattr(message, "response_metadata", None) or {}).get("model_name")
     if served:
         answer.model = served if base in ("", served) else f"{base} ({served})"
-    cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, model_prices)
+    cost = cost_of(answer.model, answer.input_tokens, answer.output_tokens)
     with run.lock:
         run.cost = cost or 0.0
 

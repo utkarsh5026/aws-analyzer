@@ -14,6 +14,7 @@ from typing import Any
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
 from .budget import Budget
+from .llm import Rates
 
 
 @dataclass
@@ -64,7 +65,10 @@ class AgentAnswer:
         metrics_read  CloudWatch metrics requested (GetMetricData bills per 1,000)
         aws_cost      USD for those metrics ($0.01 per 1,000 at list price) and S3's requests; the rest are free
         model         the deployment or model that answered
+        provider      who served it: 'bedrock', 'openai', 'azure', another LangChain provider, or '' for a chat model
+                      passed in
         cost          estimated USD for the model's tokens; None when its prices aren't known
+        rates         the prices `cost` is at (Rates: per 1M input and output tokens, yours or Bedrock's list prices)
         stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
@@ -79,10 +83,12 @@ class AgentAnswer:
     metrics_read: int = 0
     aws_cost: float = 0.0
     model: str = ""
+    provider: str = ""
     model_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     cost: float | None = None
+    rates: Rates | None = None
     seconds: float = 0.0
     stopped: str | None = None
     error: str | None = None

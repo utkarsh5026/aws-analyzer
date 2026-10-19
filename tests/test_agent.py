@@ -6,19 +6,23 @@ from datetime import datetime, timedelta, timezone
 import boto3
 import pytest
 from botocore.exceptions import ClientError
+from botocore.stub import Stubber
 from moto import mock_aws
 
 from aws_analyzer import set_timezone
 from aws_analyzer._kit.errors import _error_code, _Hint
+from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
 from aws_analyzer.agent import view as viewmod
+from aws_analyzer.agent.llm import bedrock_model_id
 from aws_analyzer.agent import (
     AgentAnalyzer,
     AgentAnswer,
     AgentView,
     Budget,
     LambdaToolkit,
+    Rates,
     ReadOnlyError,
     S3Toolkit,
     Toolkit,
@@ -31,6 +35,8 @@ from aws_analyzer.agent import (
     count_arrivals,
     explain_model_error,
     hide_secrets,
+    model_rates,
+    pick_provider,
     summarize_errors,
     summarize_file,
     summarize_health,
@@ -136,6 +142,96 @@ def test_explain_model_error(name, status, says):
 def test_explain_model_error_names_the_content_filter():
     error = type("BadRequestError", (Exception,), {"status_code": 400})("code: content_filter, the prompt was filtered")
     assert "content filter blocked" in explain_model_error(error)
+
+
+def bedrock_error(code, message):
+    return ClientError({"Error": {"Code": code, "Message": message}}, "Converse")
+
+
+@pytest.mark.parametrize("provider, error, says", [
+    ("bedrock", bedrock_error("AccessDeniedException", "You don't have access to the model"), "bedrock:InvokeModel"),
+    ("bedrock", bedrock_error("ValidationException", "Invocation of model ID anthropic.claude-haiku-4-5-20251001-v1:0 "
+                              "with on-demand throughput isn't supported."), "put 'us.'"),
+    ("bedrock", bedrock_error("ValidationException", "This model doesn't support tool use."), "can't call tools"),
+    ("bedrock", bedrock_error("ThrottlingException", "Too many requests"), "quota for this model"),
+    ("openai", type("AuthenticationError", (Exception,), {"status_code": 401})("bad key"),
+     "OpenAI refused the key: check OPENAI_API_KEY (or api_key=)"),
+    ("anthropic", type("RateLimitError", (Exception,), {"status_code": 429})("slow down"), "Anthropic's rate limit"),
+    ("groq", type("NotFoundError", (Exception,), {"status_code": 404})("no model"), "Groq has no such model"),
+    ("", type("AuthenticationError", (Exception,), {"status_code": 401})("bad key"),
+     "The chat model you passed refused the key"),
+])
+def test_explain_model_error_for_each_provider(provider, error, says):
+    assert says in explain_model_error(error, provider)
+
+
+@pytest.mark.parametrize("given, environ, picked", [
+    ({}, {}, ("", "")),
+    ({"provider": "bedrock"}, {}, ("bedrock", "")),
+    ({"provider": "Bedrock_Converse", "model": "bedrock:sonnet"}, {}, ("bedrock", "sonnet")),
+    ({"model": "us.anthropic.claude-haiku-4-5-20251001-v1:0"}, {}, ("bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0")),
+    ({"model": "bedrock:anthropic.claude-3-haiku-20240307-v1:0"}, {}, ("bedrock", "anthropic.claude-3-haiku-20240307-v1:0")),
+    ({"model": "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc"}, {},
+     ("bedrock", "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc")),
+    ({"model": "sonnet"}, {}, ("bedrock", "sonnet")),
+    ({"model": "nova-pro"}, {}, ("bedrock", "nova-pro")),
+    ({"model": "claude-sonnet-4-5"}, {}, ("bedrock", "claude-sonnet-4-5")),
+    ({"model": "claude-sonnet-4-5"}, {"ANTHROPIC_API_KEY": "k"}, ("anthropic", "claude-sonnet-4-5")),
+    ({"model": "openai:gpt-4.1"}, {}, ("openai", "gpt-4.1")),
+    ({"model": "gpt-4.1"}, {}, ("openai", "gpt-4.1")),
+    ({"model": "gpt-4o"}, {"AZURE_OPENAI_ENDPOINT": "https://acme.openai.azure.com"}, ("azure", "gpt-4o")),
+    ({"model": "azure_openai:prod-gpt-4o"}, {}, ("azure", "prod-gpt-4o")),
+    ({"model": "ollama:llama3.1:8b"}, {}, ("ollama", "llama3.1:8b")),
+    ({"model": "llama3.1:8b"}, {}, ("", "llama3.1:8b")),
+    ({"model": "gemini-2.5-pro"}, {}, ("google_genai", "gemini-2.5-pro")),
+    ({"azure": True}, {"AWS_ANALYZER_AGENT_MODEL": "bedrock:sonnet"}, ("azure", "")),
+    ({}, {"AWS_ANALYZER_AGENT_MODEL": "bedrock:sonnet", "AZURE_OPENAI_ENDPOINT": "https://e"}, ("bedrock", "sonnet")),
+    ({}, {"AZURE_OPENAI_DEPLOYMENT": "prod"}, ("azure", "")),
+    ({}, {"OPENAI_API_KEY": "sk"}, ("openai", "")),
+    ({"api_key": True}, {}, ("openai", "")),
+])
+def test_pick_provider(given, environ, picked):
+    assert pick_provider(**given, environ=environ) == picked
+
+
+def test_pick_provider_names_a_chat_models_provider():
+    assert pick_provider(chat_model=type("ChatBedrockConverse", (), {})(), environ={}) == ("bedrock", "")
+    assert pick_provider("openai", chat_model=type("MyModel", (), {})(), environ={}) == ("", "")
+
+
+HAIKU = "anthropic.claude-haiku-4-5-20251001-v1:0"
+HAIKU_ARN = f"arn:aws:bedrock:{REGION}::foundation-model/{HAIKU}"
+BEDROCK_MODELS = [
+    {"modelArn": HAIKU_ARN, "modelId": HAIKU, "modelName": "Claude Haiku 4.5", "providerName": "Anthropic",
+     "outputModalities": ["TEXT"], "inferenceTypesSupported": ["INFERENCE_PROFILE"], "modelLifecycle": {"status": "ACTIVE"}},
+    {"modelArn": f"arn:aws:bedrock:{REGION}::foundation-model/amazon.nova-pro-v1:0", "modelId": "amazon.nova-pro-v1:0",
+     "modelName": "Nova Pro", "providerName": "Amazon", "outputModalities": ["TEXT"],
+     "inferenceTypesSupported": ["ON_DEMAND"], "modelLifecycle": {"status": "ACTIVE"}},
+]
+BEDROCK_PROFILES = [
+    {"inferenceProfileName": "US Claude Haiku 4.5", "inferenceProfileId": f"us.{HAIKU}",
+     "inferenceProfileArn": f"arn:aws:bedrock:{REGION}:{ACCOUNT}:inference-profile/us.{HAIKU}",
+     "models": [{"modelArn": HAIKU_ARN}], "status": "ACTIVE", "type": "SYSTEM_DEFINED"},
+]
+
+
+def test_bedrock_model_id_finds_how_to_call_a_model():
+    models = parse_models(BEDROCK_MODELS, BEDROCK_PROFILES, REGION)
+    assert bedrock_model_id("haiku", models) == f"us.{HAIKU}"
+    assert bedrock_model_id("anthropic.claude-haiku-4-5", models) == f"us.{HAIKU}"
+    assert bedrock_model_id(HAIKU, models) == f"us.{HAIKU}"
+    assert bedrock_model_id("nova-pro", models) == "amazon.nova-pro-v1:0"
+    with pytest.raises(_Hint, match="No Amazon Bedrock model matching 'nova-prro' here. Did you mean 'nova-pro'"):
+        bedrock_model_id("nova-prro", models)
+
+
+def test_bedrock_models_are_priced_at_list_prices():
+    assert model_rates(f"us.{HAIKU}", None, "bedrock") == Rates(1.10, 5.50, "list")
+    assert model_rates(f"global.{HAIKU}", None, "bedrock") == Rates(1.00, 5.00, "list")
+    assert model_rates(f"us.{HAIKU}", {"haiku-4-5": (0.5, 1.0)}, "bedrock") == Rates(0.5, 1.0, "model_prices=")
+    assert model_rates("gpt-4.1", None, "openai") is None and model_rates(f"us.{HAIKU}", None, "") is None
+    assert answer_cost("us.amazon.nova-pro-v1:0", 1_000_000, 1_000_000, None, provider="bedrock") == pytest.approx(4.0)
+    assert answer_cost("us.anthropic.claude-sonnet-9", 10, 10, None, provider="bedrock") is None
 
 
 def fn(**kwargs):
@@ -828,16 +924,27 @@ def test_a_failed_model_call_becomes_the_answers_error(seeded):
     core = make(scripted(denied))
     answer = core.ask("What failed?")
     assert answer.stopped == "error" and answer.exception is denied
-    assert answer.error.startswith("AuthenticationError: Access denied") and "AZURE_OPENAI_API_KEY" in answer.error
+    assert answer.error.startswith("AuthenticationError: Access denied")
+    assert "The chat model you passed refused the key" in answer.error
 
 
-def test_without_a_deployment_it_says_what_to_set(seeded, monkeypatch):
+def test_without_a_model_it_says_how_to_set_one_up(seeded, capsys):
     pytest.importorskip("deepagents")
-    for name in ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT"):
-        monkeypatch.delenv(name, raising=False)
+    view = AgentView(make(), mode="text")
+    with pytest.raises(_Hint, match="The agent needs a model to answer with, and none is set up"):
+        view.core.ask("What failed?")
+    out = run(capsys, view.ask, "What failed?")
+    assert "AgentView(provider='bedrock')" in out and "OPENAI_API_KEY" in out and "Traceback" not in out
+    out = run(capsys, view.tools)
+    assert "Model: not set up (!)" in out and "AWS_ANALYZER_AGENT_MODEL" in out
+
+
+def test_with_part_of_an_azure_deployment_it_says_what_to_set(seeded, monkeypatch):
+    pytest.importorskip("deepagents")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://acme.openai.azure.com")
     core = make()
-    with pytest.raises(_Hint, match="AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY "
-                                   "are not set"):
+    assert core.provider == "azure"
+    with pytest.raises(_Hint, match="AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_KEY are not set"):
         core.ask("What failed?")
 
 
@@ -895,6 +1002,93 @@ def test_asking_through_azure_openai(seeded):
     assert {"function_health", "function_errors", "function_code"} <= names and not names & {"task", "execute"}
 
 
+def converse_reply(content, stop, tokens):
+    return {"output": {"message": {"role": "assistant", "content": content}}, "stopReason": stop,
+            "usage": {"inputTokens": tokens[0], "outputTokens": tokens[1], "totalTokens": sum(tokens)},
+            "metrics": {"latencyMs": 120}}
+
+
+def bedrock_clients(core):
+    """
+    Stubbed bedrock and bedrock-runtime clients for the agent's Bedrock model, as the ones it makes from its session,
+    and the Converse requests the model sends.
+    """
+    control = boto3.client("bedrock", region_name=REGION)
+    runtime = boto3.client("bedrock-runtime", region_name=REGION)
+    sent = []
+    runtime.meta.events.register("before-parameter-build.bedrock-runtime.Converse",
+                                 lambda params, **_: sent.append(dict(params)))
+    core._clients.update({"bedrock": control, "bedrock-runtime": runtime})
+    return Stubber(control), Stubber(runtime), sent
+
+
+def test_asking_through_amazon_bedrock(seeded, capsys):
+    """
+    The whole path to Bedrock: ChatBedrockConverse on clients from the agent's own session, the model found from its
+    short name in the region's model list, and its tokens priced at Bedrock's list prices.
+    """
+    pytest.importorskip("deepagents")
+    pytest.importorskip("langchain_aws")
+    core = make(provider="bedrock", model="haiku")
+    control, runtime, sent = bedrock_clients(core)
+    control.add_response("list_foundation_models", {"modelSummaries": BEDROCK_MODELS}, {"byOutputModality": "TEXT"})
+    control.add_response("list_inference_profiles", {"inferenceProfileSummaries": BEDROCK_PROFILES}, {})
+    runtime.add_response("converse", converse_reply(
+        [{"toolUse": {"toolUseId": "t1", "name": "function_health", "input": {"since": "2h"}}}], "tool_use",
+        (1200, 40)), None)
+    runtime.add_response("converse", converse_reply([{"text": "**etl-nightly** failed 40 times."}], "end_turn",
+                                                    (1500, 10)), None)
+    with control, runtime:
+        answer = AgentView(core, mode="text", progress="off").core.ask("Which Lambda failed?")
+    assert answer.text == "**etl-nightly** failed 40 times." and answer.error is None
+    assert (answer.provider, answer.model) == ("bedrock", f"us.{HAIKU}") and sent[0]["modelId"] == f"us.{HAIKU}"
+    assert [c.name for c in answer.calls] == ["function_health"] and answer.calls[0].ok
+    names = {t["toolSpec"]["name"] for t in sent[0]["toolConfig"]["tools"] if "toolSpec" in t}
+    assert {"function_health", "s3_triggers"} <= names and not names & {"task", "execute"}
+    assert sent[0]["inferenceConfig"]["maxTokens"] == 4096
+    assert answer.rates == Rates(1.10, 5.50, "list") and answer.cost == pytest.approx((2700 * 1.10 + 50 * 5.50) / 1e6)
+    view = AgentView(core, mode="text", progress="off")
+    view._show(view._answer_blocks(answer))
+    out = capsys.readouterr().out
+    assert "at Amazon Bedrock's list prices for claude-haiku-4-5 ($1.10 in and $5.50 out per 1M tokens" in out
+    out = run(capsys, view.tools)
+    assert "Provider: Amazon Bedrock" in out and "so it stays in AWS" in out and "To keep it in AWS" not in out
+
+
+def test_a_bedrock_model_is_called_as_given_when_its_list_cant_be_read(seeded):
+    pytest.importorskip("langchain_aws")
+    core = make(provider="bedrock", model="anthropic.claude-3-haiku-20240307-v1:0")
+    control, _, _ = bedrock_clients(core)
+    control.add_client_error("list_foundation_models", "AccessDeniedException")
+    control.add_client_error("list_foundation_models", "AccessDeniedException")
+    with control:
+        assert core._bedrock_model() == "anthropic.claude-3-haiku-20240307-v1:0"
+        core.model_id = "sonnet"
+        with pytest.raises(_Hint, match="Couldn't list Amazon Bedrock's models to find the one 'sonnet' names "
+                                        r"\(AccessDeniedException\)"):
+            core._bedrock_model()
+    core.model_id = f"us.{HAIKU}"
+    assert core._bedrock_model() == f"us.{HAIKU}"
+
+
+def test_openai_and_other_providers_are_made_from_their_settings(monkeypatch):
+    pytest.importorskip("langchain_openai")
+    with pytest.raises(_Hint, match="OPENAI_API_KEY is not set"):
+        AgentAnalyzer(region=REGION, provider="openai")._chat()
+    monkeypatch.setenv("OPENAI_API_KEY", "not-a-real-key")
+    core = AgentAnalyzer(region=REGION)
+    model = core._chat()
+    assert core.provider == "openai" and type(model).__name__ == "ChatOpenAI"
+    assert (model.model_name, model.max_tokens) == ("gpt-4.1", 4096) and core.model == "gpt-4.1"
+    gateway = AgentAnalyzer(region=REGION, model="openai:qwen3-coder", endpoint="http://localhost:4000/v1")._chat()
+    assert gateway.openai_api_base == "http://localhost:4000/v1" and gateway.model_name == "qwen3-coder"
+    pytest.importorskip("langchain_anthropic")
+    claude = AgentAnalyzer(region=REGION, model="anthropic:claude-sonnet-4-5", api_key="not-a-real-key")
+    assert type(claude._chat()).__name__ == "ChatAnthropic" and claude.chat_model.max_tokens == 4096
+    with pytest.raises(_Hint, match="Name the mistralai model the agent should answer with"):
+        AgentAnalyzer(region=REGION, provider="mistralai")._chat()
+
+
 # ---- the View
 
 
@@ -944,7 +1138,8 @@ def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
                  "function_details", "function_code", "find_buckets", "bucket_details", "list_folder", "find_files",
                  "folder_summary", "file_info", "s3_triggers"):
         assert name in out
-    assert "logs:FilterLogEvents" in out and "3 days" in out and "outside AWS" in out
+    assert "logs:FilterLogEvents" in out and "3 days" in out and "Provider: Scripted" in out
+    assert "It goes to your chat model (gpt-test)." in out and "AgentView(provider='bedrock')" in out
     assert "Lambda, S3, read-only" in out and "s3:GetBucketNotification" in out and "100,000" in out
     assert "File contents are never read" in out
 
