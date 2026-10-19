@@ -11,7 +11,9 @@ hide:
 
 <div markdown>
 
-# AWS, explained in your notebook
+<p class="chip"><b>Open source</b> Read-only, and boto3 is all it needs</p>
+
+# AWS, <span class="accent">explained</span> in your notebook
 
 You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your buckets, tables, knowledge bases, notebooks, vector indexes and Lambda functions, and tells you what's there, what it costs, what's wrong, and the exact call to run next.
 { .lede }
@@ -25,10 +27,20 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 <a class="md-button" href="#services">Pick a service</a>
 </p>
 
+<p class="works"><span>Works with</span>
+<a href="s3.html" title="Amazon S3"><img src="images/aws/s3.svg" alt="Amazon S3" width="32" height="32"></a>
+<a href="dynamodb.html" title="Amazon DynamoDB"><img src="images/aws/dynamodb.svg" alt="Amazon DynamoDB" width="32" height="32"></a>
+<a href="bedrock_kb.html" title="Bedrock Knowledge Bases"><img src="images/aws/bedrock.svg" alt="Bedrock Knowledge Bases" width="32" height="32"></a>
+<a href="sagemaker_env.html" title="Amazon SageMaker"><img src="images/aws/sagemaker.svg" alt="Amazon SageMaker" width="32" height="32"></a>
+<a href="opensearch.html" title="Amazon OpenSearch"><img src="images/aws/opensearch.svg" alt="Amazon OpenSearch" width="32" height="32"></a>
+<a href="lambda_functions.html" title="AWS Lambda"><img src="images/aws/lambda.svg" alt="AWS Lambda" width="32" height="32"></a>
+</p>
+
 </div>
 
 <div class="nb" role="img" aria-label="A notebook cell running ui.instance(): the space churn-analysis on an ml.g5.2xlarge at $1.52 an hour, with idle shutdown off and the GPU idle, and a finding that an ml.m5.2xlarge without a GPU would cost up to $773.07 a month less">
-<div class="nb-in"><span class="prompt">[1]:</span><span class="call">ui.instance()</span></div>
+<div class="nb-bar"><span class="tab">churn-analysis.ipynb</span><span class="kernel">Python 3</span></div>
+<div class="nb-in"><span class="prompt">[1]:</span><span class="call" style="--aa-chars:13">ui.instance()</span></div>
 <div class="nb-out">
 <p class="r-title">JupyterLab space churn-analysis</p>
 <p class="r-sub">us-east-1 · the notebook this code runs in · running for 2d 5h</p>
@@ -44,6 +56,9 @@ You work in a SageMaker notebook, not the AWS console. aws-analyzer reads your b
 </div>
 
 </div>
+
+Plain English
+{ .kicker }
 
 ## It reads AWS so you don't have to { #translate }
 
@@ -100,6 +115,9 @@ dynamodb:PutItem on resource: arn:aws:dynamodb:us-east-1:
 <p class="where">From <code>get('orders', 'USER#0', 'ORDER#0000')</code> in the <a href="dynamodb.html#items">DynamoDB guide</a>, with what that read cost: 1 read unit.</p>
 </div>
 </div>
+
+Every guide
+{ .kicker }
 
 ## Start from the question you have { #services }
 
@@ -164,6 +182,9 @@ Each guide sets you up in SageMaker, walks through every command with real outpu
 </a></li>
 </ul>
 
+One pattern
+{ .kicker }
+
 ## Every report reads the same way { #pattern }
 
 Learn one and you can read them all. Each report puts the answer first and ends with what to do about it.
@@ -202,6 +223,9 @@ ui.help()                  # every command, grouped by task; ui.help("name") sho
 s3 = ui.core               # the analyzer behind the view: returns data instead of a report
 ```
 
+Promises
+{ .kicker }
+
 ## What it will never do { #promises }
 
 <div class="never">
@@ -223,6 +247,9 @@ s3 = ui.core               # the analyzer behind the view: returns data instead 
 </div>
 </div>
 
+Time zones
+{ .kicker }
+
 ## Times in your time zone { #timezone }
 
 Times are in UTC until you pick a zone. Then every report and window, for every service, shows its times in your zone and says which one (`Last modified (IST)`, `since 2024-05-01 14:02 IST`), and dates you type in (`since="2024-05-01 10:00"`) are read there too:
@@ -234,6 +261,23 @@ set_timezone("Asia/Kolkata")   # or its city, "kolkata"; "America/New_York", "+0
 ```
 
 `set_timezone("local")` uses the machine's own zone, which on SageMaker is UTC, so name yours there. The `AWS_ANALYZER_TZ` environment variable picks the zone for every notebook (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
+
+<div class="cta" markdown>
+
+<p class="cta-title">Your first report is one line away</p>
+
+Install it in a notebook cell, make a view, and ask. Nothing to set up, and nothing in your account changes.
+
+```bash
+%pip install aws-analyzer
+```
+
+<p class="actions">
+<a class="md-button md-button--primary" href="s3.html">Start with your S3 buckets</a>
+<a class="md-button" href="lambda_functions.html">See which Lambda failed</a>
+</p>
+
+</div>
 
 </div>
 

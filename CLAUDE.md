@@ -966,10 +966,12 @@ does both, a page at a time). How the UI works:
 - `docs/` is the guide site: Markdown built by MkDocs with the Material theme (`mkdocs.yml`, versions pinned in
   `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
   pull requests only build it, with `--strict`. `use_directory_urls: false` keeps the pages at `s3.html`, ... so
-  README links and old links still work. `index.md` is the home page, with no sidebars: a hero beside a notebook
-  cell drawn in HTML (`.hero`, `.nb`), lines from real reports beside the AWS data they read (`.tr`), one line per
-  service led by the questions it answers (`.svc`), how a report reads (`.anatomy`), what it never does (`.never`)
-  and time zones (`#timezone`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
+  README links and old links still work. `index.md` is the home page, with no sidebars: a hero on a field of dots
+  (`.hero`: a `.chip`, the title's `.accent`, the install line, the buttons and `.works`, the services' icons) beside a
+  notebook cell drawn in HTML (`.nb`, under a JupyterLab tab, `.nb-bar`), lines from real reports beside the AWS data
+  they read (`.tr`), a card per service led by the questions it answers (`.svc`), how a report reads (`.anatomy`),
+  what it never does (`.never`, a card each with its icon), time zones (`#timezone`) and a closing band (`.cta`); each
+  section's label sits above its heading (`{ .kicker }`); each service has its own guide (`s3.md`, `dynamodb.md`, `bedrock_kb.md`, `bedrock_chat.md`,
   `sagemaker_env.md`, `opensearch.md`, `lambda_functions.md`), and so do the S3 explorer (`s3_explorer.md`, which `s3.md#explorer` points to) and the agent (`agent.md`, with Lambda's icon, the service it covers). A new
   analyzer gets its own `docs/<service>.md`, a line in `index.md`'s `.svc` list, an entry in `mkdocs.yml`'s `nav`
   and a link in README. Each service shows its AWS Architecture icon (`docs/images/aws/<service>.svg`, the 64 px service icon from
@@ -983,7 +985,10 @@ does both, a page at a time). How the UI works:
   `<div class="steps" markdown>` and the command reference `<div class="ref" markdown>`; `docs/stylesheets/extra.css`
   styles them. The site's look is there too: ink navy chrome, the blue of a selected Jupyter cell (`--aa-blue`) for
   links and the bar beside every screenshot, highlighter amber (`--aa-mark`, `<mark>`) only for what a report wants
-  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. A guide opens with its
+  noticed, Bricolage Grotesque headings over IBM Plex Sans and Mono (`theme.font`); no green. Content sits on soft cards (`--aa-surface`, `--aa-shadow`, `--aa-lift`):
+  screenshots are framed reports a click enlarges, questions and folds are cards that open, tables are rounded with
+  small capitals over the columns, `p.part` is a dark band, and the navigation carries each service's AWS icon
+  (`a.md-nav__link[href=...]::before`; a new guide adds its line). Line-drawn icons are `--aa-i-*` masks. Its motion is in `docs/javascripts/motion.js` (`extra_javascript`) and the Motion section of `extra.css`: a guide's opening rises in, what's below the fold rises as it's scrolled to (`.aa-reveal` / `.aa-in`, a group's items one after another by `--aa-i`), the highlighter sweeps over each `<mark>`, the home page's notebook cell types and runs its call, a bar under the header shows how far through the page you are, and a click on a screenshot opens it full size. All of it is short and small, nothing is hidden unless the script has put `.aa-motion` on `<html>`, and `prefers-reduced-motion` turns it off. A guide opens with its
   eyebrow (icon, service name, module as code), an H1 that says what the reader gets ("Find out which Lambda failed,
   and why, without the console"), a short `.lede` and the `pills` it promises. Write for a data scientist: the
   question they have first, then what the page lets them do, in plain words. A guide reads in layers, so a reader who
