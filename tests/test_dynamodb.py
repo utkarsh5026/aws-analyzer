@@ -957,7 +957,7 @@ def test_ui_html_mode(core, monkeypatch):
     ui.get(TABLE, "USER#1", "PROFILE")
     html_out = "".join(shown)
     assert (
-        '<div class="ddb">' in html_out
+        '<div class="ddb theme-console">' in html_out
         and 'class="fill"' in html_out
         and 'class="tree"' in html_out
     )

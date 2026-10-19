@@ -24,7 +24,7 @@ Errors (exit 1):
   - print() outside the View class (the analyzer and the pure functions never print)
   - in an analyzer that is a package (a service split into one, see .claude/skills/modularize): a core module
     importing the UI (its package's style / blocks / view / explorer / window, or _kit's blocks, render, view,
-    window, progress, highlight or jsontree; render's _call and _signature are allowed), its analysis importing its
+    window, progress, highlight, jsontree or themes; render's _call and _signature are allowed), its analysis importing its
     analyzer, a function or class defined in two of its modules, and the command checks above on its *Explorer and
     on the mixins a View or window is made of (_<Topic>Commands, _<Topic>Tab, _<Topic>Pane). Its AWS calls are
     checked against the clients every module of the package makes.
@@ -66,7 +66,7 @@ SHARED = {"_bedrock": {"bedrock_kb", "bedrock_chat", "agent"}}  # the agent show
 # An analyzer can be a package (agent/): its modules are checked like an analyzer's file, as one analyzer.
 PACKAGES = {p.parent.name for p in ANALYZERS.glob("*/__init__.py") if not p.parent.name.startswith("_")}
 UI_LAYERS = {"style", "blocks", "view", "explorer", "window"}
-KIT_UI = {"blocks", "render", "view", "window", "progress", "highlight", "jsontree"}
+KIT_UI = {"blocks", "render", "view", "window", "progress", "highlight", "jsontree", "themes"}
 CORE_FROM_RENDER = {"_call", "_signature"}
 MIXIN_RE = re.compile(r"_\w+(Commands|Tab|Pane)$")
 REACHING_RECEIVER_RE = re.compile(r"_\w+_module$")
@@ -378,7 +378,7 @@ def check_layers(tree: ast.Module, rel: str, report: Report, *, owner: str, own_
     """
     A package's core (helpers, models, analysis, analyzer and the service's other core modules) never imports its
     UI (style, blocks, view, explorer, window) or _kit's (blocks, render, view, window, progress, highlight,
-    jsontree; render's _call and _signature, which write a call into a finding's text, are the exception), and its
+    jsontree, themes; render's _call and _signature, which write a call into a finding's text, are the exception), and its
     pure analysis never imports the analyzer, which talks to AWS. The UI may import anything, and the package's
     __init__.py re-exports both.
     """

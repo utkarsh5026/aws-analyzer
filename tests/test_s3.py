@@ -4052,7 +4052,7 @@ def test_ui_html_mode(core, monkeypatch):
         and "model.pth" in html_out
     )
     assert (
-        '<div class="s3a">' in html_out
+        '<div class="s3a theme-console">' in html_out
         and 'class="fill"' in html_out
         and "<table" in html_out
     )

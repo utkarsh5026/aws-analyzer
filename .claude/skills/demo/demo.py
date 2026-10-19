@@ -2059,10 +2059,15 @@ SEEDERS = {"s3": seed_s3, "dynamodb": seed_dynamodb, "bedrock_kb": seed_bedrock_
 
 
 def _page(fragments: list[str], theme: str, title: str) -> str:
+    """
+    The reports' page. A light or dark one says so the way JupyterLab does (data-jp-theme-light on the body, which
+    the reports' themes read); "auto" follows the browser.
+    """
     scheme = {"light": "light", "dark": "dark"}.get(theme, "light dark")
+    jupyter = {"light": ' data-jp-theme-light="true"', "dark": ' data-jp-theme-light="false"'}.get(theme, "")
     return (f'<!doctype html><html lang="en" style="color-scheme:{scheme}"><head><meta charset="utf-8">'
             f"<title>{title}</title><style>body{{margin:24px auto;max-width:1200px;padding:0 16px;"
-            "background:Canvas;color:CanvasText}</style></head><body>"
+            f"background:Canvas;color:CanvasText}}</style></head><body{jupyter}>"
             + "<hr style='opacity:.2;margin:28px 0'>".join(fragments) + "</body></html>")
 
 
@@ -2074,6 +2079,8 @@ def main() -> int:
     parser.add_argument("code", help="Python to run, e.g. 'ui.summary(\"s3://demo-lake/\")'")
     parser.add_argument("--html", type=Path, help="also write the HTML rendering of every report to this file")
     parser.add_argument("--theme", choices=["auto", "light", "dark"], default="auto", help="page theme for --html")
+    parser.add_argument("--look", help="the reports' theme for --html (set_theme's names; default: AWS_ANALYZER_THEME, "
+                                       "else console)")
     parser.add_argument("--max-rows", type=int, default=50, help="the View's max_rows")
     parser.add_argument("--live", action="store_true", help="use the real AWS account instead of moto")
     parser.add_argument("--region", help="with --live: region")
@@ -2115,12 +2122,13 @@ def main() -> int:
         kwargs = {"region": args.region, "profile": args.profile} if args.live else {"region": "us-east-1"}
         core = core_cls(**{k: v for k, v in kwargs.items() if v}, **extra)
         ui = view_cls(core, mode="text", max_rows=args.max_rows)
+        look = importlib.import_module("aws_analyzer._kit.themes").set_theme(args.look)
         fragments: list[str] = []
 
         def show(blocks: list) -> None:
             print(ui._render_text(blocks, ui.max_rows), flush=True)  # how the View draws a report as text
             if args.html:
-                fragments.append(ui._render_html(blocks, ui.max_rows))
+                fragments.append(ui._render_html(blocks, ui.max_rows, theme=look))
 
         ui._show = show
         exec(compile(args.code, "<demo>", "exec"), {"ui": ui, "core": core, "mod": mod, args.service: mod})

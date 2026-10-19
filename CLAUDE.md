@@ -113,14 +113,23 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `region`, `_cached_client`, `_paginate`, `_map`; see "Architecture of an analyzer file"), `highlight.py`
   (`_python_html`, `_json_source_html`: code in colour, for the chat's code to copy and the Lambda explorer's Code tab),
   `jsontree.py` (the `_JsonTree` block, JSON you can fold: S3's .json previews and Lambda's configuration; a service
-  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`)
+  that shows one adds `_json_tree_css(_ROOT)` to its `_EXTRA_CSS` in `_base_css`), `themes.py` (how a View's reports
+  look: `set_theme`, public as `aws_analyzer.set_theme`, or the `AWS_ANALYZER_THEME` environment variable, `console`
+  by default; `THEMES` are console, soft, editorial, brand and classic, the stylesheet's own look with no rules of its
+  own; `_theme_css(root, name)` scopes every rule of a theme to `.<root>.theme-<name>`, the class `_report_html` puts
+  on the report's box, because a notebook applies every output's `<style>` to the whole page and an earlier output
+  must keep its theme; the tones are custom properties, lighter on a dark page (`_DARK_PAGES`, `_UNSET_PAGE`, which
+  the windows' terminal theme reads too); `_BaseView._show` passes `theme=_theme_name()`, and the windows call
+  `_render_html` with none, so they keep their own look; a new rule in `_BASE_RULES` for a shared block may need a
+  line in each theme, and `demo.py --look` / a `Figure(theme=)` in `shots.py` show one)
   and `window.py`, what the four notebook windows share (see "The windows' kit" under "How the View layer works").
   Each analyzer imports the names it uses (`from ._kit.fmt import human_size, ...`), so `aws_analyzer.s3.human_size`
   still works, and `rules.py` fails when an analyzer defines a name `_kit` has: a copy. `_kit` never imports an
   analyzer, and it follows the same import-time rule as they do. Each service sets its look: `_ROOT` (its CSS root
   class), `_CSS = _base_css(_ROOT, _EXTRA_CSS)` (the shared rules, then its own blocks' rules; the chat also passes
-  `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, and `_render_html(blocks,
-  max_rows)`, which is `_report_html` with those three (its View's `_render_html` attribute points at it).
+  `theme=`, `restyle=` and `after=`, because its reports match its window), `_BADGE`, `_LOOK = _Look(_CSS, _ROOT,
+  _BADGE)`, and `_render_html(blocks, max_rows, theme="")`, which is `_report_html` with its `_LOOK` and the theme to
+  draw in (its View's `_render_html` attribute points at it).
   What `bedrock_kb/` and `bedrock_chat/` share is written once in `src/aws_analyzer/_bedrock/`, a package by
   topic: the Bedrock price tables, `DEFAULT_MODEL`, `model_price` and `short_model` (`prices.py`), the region's model
   list (`parse_models` in `foundation_models.py`, into `ModelInfo`), what Bedrock returns (`Passage`, `Citation`,

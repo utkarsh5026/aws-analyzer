@@ -68,11 +68,18 @@ KB, MB, GB = 1024, 1024 ** 2, 1024 ** 3
 
 @dataclass
 class Figure:
+    """
+    One figure in the guides. theme is the reports' theme (set_theme's names), "" for the one a user gets
+    (AWS_ANALYZER_THEME, else console); guide is the page it's on, when it isn't its service's guide.
+    """
+
     name: str  # docs/images/<name>-light.webp
     service: str
     code: str  # what the figure shows: every report it renders ends up in the picture
     setup: str = ""  # runs first, shows nothing (e.g. use())
     crop: int | None = None  # keep only the top this many CSS px ("The top of ui.summary(...)")
+    theme: str = ""
+    guide: str = ""
 
 
 LAKE = "s3://acme-ml-data"
@@ -131,13 +138,18 @@ FIGURES = [
     Figure("opensearch-sample", "opensearch", 'ui.sample("vectors-prod/support-docs", n=5)'),
     Figure("opensearch-search", "opensearch", 'ui.search("how do I get my money back?", k=8)',
            setup='ui.use("vectors-prod/support-docs")'),
+    Figure("theme-console", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="console", guide="index.md"),
+    Figure("theme-soft", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="soft", guide="index.md"),
+    Figure("theme-editorial", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="editorial", guide="index.md"),
+    Figure("theme-brand", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="brand", guide="index.md"),
+    Figure("theme-classic", "lambda_functions", 'ui.function_info("orders-etl")', crop=560, theme="classic", guide="index.md"),
     Figure("lambda-functions", "lambda_functions", 'ui.functions(regions="all")'),
     Figure("lambda-function-info", "lambda_functions", 'ui.function_info("orders-etl")', crop=1400),
     Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
     Figure("lambda-performance", "lambda_functions", 'ui.performance("orders-etl")'),
     Figure("lambda-code", "lambda_functions", 'ui.code("orders-etl")', crop=1150),
     Figure("lambda-how-it-works", "lambda_functions",  # its graph alone: the whole report is too long for one figure
-           'ui._show([b for b in ui._how_blocks(core.code_map("support-agent-actions")) if isinstance(b, mod._Graph)])'),
+           'ui._show([b for b in ui._how_blocks(core.code_map("support-agent-actions")) if type(b).__name__ == "_Graph"])'),
 ]
 
 
@@ -982,16 +994,23 @@ def render(service: str, figures: list[Figure]) -> dict[str, list[str]]:
             scope = {"ui": ui, "core": core, "mod": mod}
             ui._show = lambda blocks: None
             exec(figure.setup, scope)
-            ui._show = lambda blocks, ui=ui, shown=shown: shown.append(ui._render_html(blocks, ui.max_rows))
+            look = figure.theme or importlib.import_module("aws_analyzer._kit.themes")._theme_name()
+            ui._show = lambda blocks, ui=ui, shown=shown, look=look: shown.append(
+                ui._render_html(blocks, ui.max_rows, theme=look))
             exec(figure.code, scope)
             out[figure.name] = shown
         return out
 
 
 def page(fragments: list[str], theme: str) -> str:
+    """
+    The figure's page, light or dark the way JupyterLab says it: data-jp-theme-light on the body, which the reports'
+    themes read for their tones.
+    """
+    jupyter_light = "true" if theme == "light" else "false"
     return (f'<!doctype html><html lang="en" style="color-scheme:{theme}"><head><meta charset="utf-8"><style>'
-            f"body{{margin:0;padding:{MARGIN}px {MARGIN}px 0;background:Canvas;color:CanvasText}}</style></head><body>"
-            + "".join(fragments) + "</body></html>")
+            f"body{{margin:0;padding:{MARGIN}px {MARGIN}px 0;background:Canvas;color:CanvasText}}</style></head>"
+            f'<body data-jp-theme-light="{jupyter_light}">' + "".join(fragments) + "</body></html>")
 
 
 def chrome() -> str:
@@ -1024,8 +1043,8 @@ def trim(png_path: Path, crop: int | None):
     return image.crop((0, 0, image.width, min(bottom, image.height)))
 
 
-def set_height(service: str, name: str, height: int) -> None:
-    guide = ROOT / "docs" / GUIDES[service]
+def set_height(guide_name: str, name: str, height: int) -> None:
+    guide = ROOT / "docs" / guide_name
     text = guide.read_text(encoding="utf-8")
     # A figure is two Markdown images, the light one and the dark one, each with { width="984" height="..." }.
     image = rf"\]\(images/{re.escape(name)}-(?:light|dark)\.webp#only-(?:light|dark)\)"
@@ -1077,7 +1096,7 @@ def main() -> int:
                     image.save(IMAGES / f"{figure.name}-{theme}.webp", "WEBP", quality=90, method=6)
                     heights.add(round(image.height / SCALE))
                 height = max(heights)
-                set_height(service, figure.name, height)
+                set_height(figure.guide or GUIDES[service], figure.name, height)
                 print(f"  {figure.name}: {WIDTH} x {height}", file=sys.stderr)
     return 0
 

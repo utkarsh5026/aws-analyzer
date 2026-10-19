@@ -9,6 +9,22 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- **`set_theme()` picks how reports look**: `from aws_analyzer import set_theme; set_theme("soft")`. There are five
+  themes, each made for a light or a dark notebook: `console` (boxed panels, WARN and INFO tags, numbers in a
+  monospace font), `soft` (rounded tiles on a light fill), `editorial` (a serif title, large figures, almost no
+  boxes), `brand` (the guide site's navy, indigo and amber highlighter) and `classic` (the look until now). Every
+  report from then on uses it, and the ones already in the notebook keep theirs. The `AWS_ANALYZER_THEME` environment
+  variable picks it for every notebook, and `set_theme(None)` goes back to it. The windows keep their own look, and
+  text output is the same in every theme.
+
+### Changed
+
+- **Reports have a new look**: they're drawn in the `console` theme, with the title and findings in boxed panels,
+  each card's tone as a coloured top edge and numbers in a monospace font. `set_theme("classic")` (or
+  `AWS_ANALYZER_THEME=classic`) brings back the look until now.
+
 ## [0.24.0] - 2026-10-19
 
 ### Added

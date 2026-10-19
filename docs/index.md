@@ -262,6 +262,56 @@ set_timezone("Asia/Kolkata")   # or its city, "kolkata"; "America/New_York", "+0
 
 `set_timezone("local")` uses the machine's own zone, which on SageMaker is UTC, so name yours there. The `AWS_ANALYZER_TZ` environment variable picks the zone for every notebook (`AWS_ANALYZER_TZ=Asia/Kolkata`). CloudWatch's daily numbers stay in UTC days, since that's how AWS adds them up, and their columns say so (`Day (UTC)`).
 
+Themes
+{ .kicker }
+
+## Pick how reports look { #themes }
+
+Reports come in five themes, each made for a light or a dark notebook. `console` is the default. Pick another and every report from then on uses it, while the ones already in the notebook keep theirs:
+
+```python
+from aws_analyzer import set_theme
+
+set_theme("soft")   # "console", "soft", "editorial", "brand" or "classic"; None goes back to the default
+```
+
+=== "Console"
+
+    ![The top of a Lambda function's report in the console theme: its title, the cards with its numbers and its findings](images/theme-console-light.webp#only-light){ width="984" height="560" loading=lazy }
+    ![The top of a Lambda function's report in the console theme: its title, the cards with its numbers and its findings](images/theme-console-dark.webp#only-dark){ width="984" height="560" loading=lazy }
+
+    The default: boxed panels, WARN and INFO tags, and numbers in a monospace font. Dense, like the AWS console. `set_theme("console")`
+
+=== "Soft"
+
+    ![The top of a Lambda function's report in the soft theme: its title, the cards with its numbers and its findings](images/theme-soft-light.webp#only-light){ width="984" height="560" loading=lazy }
+    ![The top of a Lambda function's report in the soft theme: its title, the cards with its numbers and its findings](images/theme-soft-dark.webp#only-dark){ width="984" height="560" loading=lazy }
+
+    Rounded tiles on a light fill, small capitals over the numbers and columns, and the calls to run next as tiles. `set_theme("soft")`
+
+=== "Editorial"
+
+    ![The top of a Lambda function's report in the editorial theme: its title, the cards with its numbers and its findings](images/theme-editorial-light.webp#only-light){ width="984" height="560" loading=lazy }
+    ![The top of a Lambda function's report in the editorial theme: its title, the cards with its numbers and its findings](images/theme-editorial-dark.webp#only-dark){ width="984" height="560" loading=lazy }
+
+    Almost no boxes: a serif title, the numbers as a row of large figures, and findings as a list. `set_theme("editorial")`
+
+=== "Brand"
+
+    ![The top of a Lambda function's report in the brand theme: its title, the cards with its numbers and its findings](images/theme-brand-light.webp#only-light){ width="984" height="560" loading=lazy }
+    ![The top of a Lambda function's report in the brand theme: its title, the cards with its numbers and its findings](images/theme-brand-dark.webp#only-dark){ width="984" height="560" loading=lazy }
+
+    This site's look: navy and indigo, white cards with soft shadows, and an amber highlighter on what needs a look. `set_theme("brand")`
+
+=== "Classic"
+
+    ![The top of a Lambda function's report in the classic theme: its title, the cards with its numbers and its findings](images/theme-classic-light.webp#only-light){ width="984" height="560" loading=lazy }
+    ![The top of a Lambda function's report in the classic theme: its title, the cards with its numbers and its findings](images/theme-classic-dark.webp#only-dark){ width="984" height="560" loading=lazy }
+
+    The look before themes: thin borders and tinted boxes. `set_theme("classic")`
+
+The `AWS_ANALYZER_THEME` environment variable picks the theme for every notebook (`AWS_ANALYZER_THEME=editorial`). The explorer and chat windows keep their own look, and text output reads the same in every theme.
+
 <div class="cta" markdown>
 
 <p class="cta-title">Your first report is one line away</p>

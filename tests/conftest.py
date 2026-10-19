@@ -20,6 +20,7 @@ for name, value in {
 }.items():
     os.environ[name] = value
 os.environ.pop("AWS_ANALYZER_TZ", None)  # reports show times in UTC unless a test picks a zone
+os.environ.pop("AWS_ANALYZER_THEME", None)
 AGENT_MODEL_SETTINGS = ("AWS_ANALYZER_AGENT_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY",
                         "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
 for name in AGENT_MODEL_SETTINGS:
@@ -27,11 +28,17 @@ for name in AGENT_MODEL_SETTINGS:
 
 
 @pytest.fixture(autouse=True)
-def _times_in_utc_again():
+def _utc_and_the_default_theme_again():
+    """
+    A test that called set_timezone() or set_theme() leaves the next one in UTC and the default theme.
+    """
     yield
     fmt = sys.modules.get("aws_analyzer._kit.fmt")
     if fmt is not None:  # a test that called set_timezone() leaves the next one in UTC
         fmt.set_timezone(None)
+    themes = sys.modules.get("aws_analyzer._kit.themes")
+    if themes is not None:
+        themes.set_theme(None)
 
 
 @pytest.fixture(autouse=True, scope="session")

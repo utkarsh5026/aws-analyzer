@@ -1,6 +1,6 @@
 """
 The code every service shares (aws_analyzer._kit): what the renderer does with a block nothing draws, the
-stylesheet every report starts with, and what the base View and Analyzer do that no service shows in normal use
+stylesheet every report starts with and the themes drawn after it, and what the base View and Analyzer do that no service shows in normal use
 (an error none of them raises, a command no group lists, prices passed to one analyzer), and the windows' guards for
 what no window meets (a command that can't run, an error that should still raise). Each service's tests cover how its
 reports read, and each window's tests click through it.
@@ -8,6 +8,7 @@ reports read, and each window's tests click through it.
 
 import itertools
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -15,14 +16,15 @@ import pytest
 from botocore.exceptions import ClientError
 
 from aws_analyzer import (
-    bedrock_chat, bedrock_kb, dynamodb, lambda_functions, opensearch, s3, sagemaker_env, set_timezone,
+    bedrock_chat, bedrock_kb, dynamodb, lambda_functions, opensearch, s3, sagemaker_env, set_theme, set_timezone,
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
 from aws_analyzer._kit.blocks import _Note, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
-from aws_analyzer._kit.render import _base_css, _render_text, _report_html, _sort_key
+from aws_analyzer._kit.render import _base_css, _Look, _render_text, _report_html, _sort_key
+from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
 from aws_analyzer._kit.window import _Window, _window_errors
 from aws_analyzer.dynamodb import style as ddb_style
@@ -48,7 +50,7 @@ class _Loud(_Note):  # a block made from another one
 
 
 def test_a_block_nothing_draws_becomes_a_note():
-    html = _report_html([_Title("Report"), _Mystery()], 0, "<style></style>", "ddb", "🗄️ DynamoDB")
+    html = _report_html([_Title("Report"), _Mystery()], 0, _Look("<style></style>", "ddb", "🗄️ DynamoDB"))
     assert html.startswith('<style></style><div class="ddb"><h3><span class="badge">🗄️ DynamoDB</span>Report</h3>')
     assert ('<div class="note warn"><span class="ld">Part of this report isn&#x27;t shown:</span> there&#x27;s no way to '
             'draw a _Mystery') in html
@@ -56,7 +58,7 @@ def test_a_block_nothing_draws_becomes_a_note():
 
 
 def test_a_block_made_from_another_is_drawn_like_it():
-    assert _report_html([_Loud("Careful", "warn")], 0, "", "ddb", "") == (
+    assert _report_html([_Loud("Careful", "warn")], 0, _Look("", "ddb", "")) == (
         '<div class="ddb"><div class="note warn">Careful</div></div>')
     assert _render_text([_Loud("Careful", "warn")], 0) == "[!] Careful"
 
@@ -297,3 +299,71 @@ def test_window_guards_say_errors_in_the_window():
         w.go(KeyError("k"))
     idle = _ToyWindow(ready=False)
     assert idle.go() is None and idle.ran == []  # a window that can't run a command doesn't start it
+
+
+def test_reports_use_the_console_theme_until_another_is_picked():
+    assert _theme_name() == DEFAULT_THEME == "console"
+    assert set_theme(" Soft ") == "soft" == _theme_name()
+    assert set_theme(None) == "console"
+
+
+@pytest.mark.parametrize("name, message", [
+    ("sofft", "'sofft' isn't a theme. Did you mean 'soft'?"),
+    ("neon", "'neon' isn't a theme. The themes are 'console', 'soft', 'editorial', 'brand', 'classic'"),
+])
+def test_set_theme_says_what_it_takes(name, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        set_theme(name)
+    with pytest.raises(TypeError, match="takes a theme's name"):
+        set_theme(3)
+
+
+def test_the_environment_can_pick_the_theme(monkeypatch):
+    """
+    set_theme() wins over AWS_ANALYZER_THEME, and None goes back to the environment's.
+    """
+    monkeypatch.setenv("AWS_ANALYZER_THEME", "editorial")
+    assert _theme_name() == "editorial"
+    assert set_theme("brand") == "brand"
+    assert set_theme(None) == "editorial"
+    monkeypatch.setenv("AWS_ANALYZER_THEME", "Neon")
+    with pytest.warns(UserWarning, match="AWS_ANALYZER_THEME='Neon': .* Reports use 'console'."):
+        assert _theme_name() == "console"
+
+
+@pytest.mark.parametrize("theme", [name for name in THEMES if name != "classic"])
+def test_a_themes_rules_reach_only_reports_drawn_in_it(theme):
+    html = _report_html([_Title("Report")], 0, _Look("<style></style>", "ddb", "B"), theme=theme)
+    scoped = f".ddb.theme-{theme}"
+    assert html.startswith(f"<style></style><style>\n{scoped}{{")
+    assert f'<div class="ddb theme-{theme}"><h3>' in html
+    css = html[len("<style></style><style>"):html.index("</style>", 1)]
+    assert css.count("{") == css.count("}")
+    selectors = re.findall(r"(?:^|})\s*([^{}@]+){", css)
+    unscoped = [part for group in selectors for part in group.split(",") if scoped not in part]
+    assert not unscoped, f"rules that would restyle reports drawn in other themes: {unscoped}"
+
+
+def test_classic_and_the_windows_reports_draw_no_theme():
+    """
+    A window draws its reports without a theme (a service's _render_html with none named), as classic does.
+    """
+    plain = _report_html([_Title("Report")], 0, _Look("", "ddb", "B"))
+    assert plain == _report_html([_Title("Report")], 0, _Look("", "ddb", "B"), theme="classic")
+    assert plain.startswith('<div class="ddb"><h3>') and "theme-" not in plain
+    assert "theme-" not in ddb_style._render_html([_Title("Report")], 0)
+
+
+def test_a_view_draws_its_reports_in_the_theme_picked(monkeypatch):
+    import IPython.display
+
+    drawn = []
+    monkeypatch.setattr(IPython.display, "display", lambda shown, **_: drawn.append(shown.data))
+    view = _Toy()
+    view.use_html = True
+    view._render_html = ddb_style._render_html
+    view._show([_Title("Report")])
+    set_theme("editorial")
+    view._show([_Title("Report")])
+    assert '<div class="ddb theme-console">' in drawn[0] and ".ddb.theme-console{" in drawn[0]
+    assert '<div class="ddb theme-editorial">' in drawn[1] and "theme-console" not in drawn[1]

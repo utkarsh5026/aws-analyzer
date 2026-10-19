@@ -27,6 +27,9 @@ Quick start
     from aws_analyzer import set_timezone    # times in your own zone instead of UTC, in every report and window
     set_timezone("Asia/Kolkata")             # or "local", "+05:30"; AWS_ANALYZER_TZ=Asia/Kolkata does it for good
 
+    from aws_analyzer import set_theme       # how reports look: "console" (the default), "soft", "editorial",
+    set_theme("soft")                        # "brand" or "classic"; AWS_ANALYZER_THEME=soft does it for good
+
     from aws_analyzer import AgentView       # ask about your account in plain English (aws-analyzer[agent])
     AgentView().ask("Which Lambda failed last night?")  # "last night" in set_timezone()'s zone
 
@@ -44,6 +47,7 @@ from typing import TYPE_CHECKING, Any
 # For editors and type checkers; at run time __getattr__ imports them on first use.
 if TYPE_CHECKING:
     from ._kit.fmt import set_timezone
+    from ._kit.themes import set_theme
     from .agent import AgentAnalyzer, AgentView
     from .bedrock_chat import BedrockChatAnalyzer, BedrockChatView, chat
     from .bedrock_kb import BedrockKBAnalyzer, BedrockKBView, KBExplorer
@@ -79,6 +83,7 @@ __all__ = [
     "AgentAnalyzer",
     "AgentView",
     "set_timezone",
+    "set_theme",
 ]
 _EXPORTS = {  # name -> the module it comes from
     "S3Analyzer": "s3",
@@ -103,6 +108,7 @@ _EXPORTS = {  # name -> the module it comes from
     "AgentAnalyzer": "agent",
     "AgentView": "agent",
     "set_timezone": "_kit.fmt",
+    "set_theme": "_kit.themes",
 }
 _MODULES = ("s3", "s3_explorer", "dynamodb", "bedrock_kb", "bedrock_chat", "sagemaker_env", "opensearch",
             "lambda_functions", "agent")

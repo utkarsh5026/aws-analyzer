@@ -127,7 +127,8 @@ moto is not real AWS. Don't report these as bugs:
 ## HTML and screenshots
 
 `--html PATH` also writes the notebook rendering of every report to a standalone page. Put it in the scratchpad
-unless the user names a place, and give them the path. `--theme light|dark` sets the page theme. The
+unless the user names a place, and give them the path. `--theme light|dark` sets the page theme, and `--look NAME`
+the reports' theme (`set_theme`'s names: console, the default, soft, editorial, brand, classic). The
 docs screenshots are `docs/images/<command>-{light,dark}.webp` (Bedrock's are `bedrock-<command>-...`).
 
 `shots.py`, next to `demo.py`, makes them: for every figure in the guides it runs the figure's command against

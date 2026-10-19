@@ -3164,7 +3164,7 @@ def test_ui_html_mode(aws, core, monkeypatch):
     aws.describe()
     BedrockKBView(core, mode="html").kb_info()
     html_out = "".join(shown)
-    assert '<div class="kba">' in html_out and "OpenSearch Serverless" in html_out
+    assert '<div class="kba theme-console">' in html_out and "OpenSearch Serverless" in html_out
 
 
 def test_ui_without_ipython_or_an_optional_package(core, capsys, monkeypatch):
