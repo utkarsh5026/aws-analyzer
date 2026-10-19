@@ -11,19 +11,24 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, tzinfo
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import BotoCoreError
 
 from .._bedrock.blocks import _Answer
 from .._bedrock.prices import _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
+from .._kit.deps import _require
+from .._kit.errors import _Hint
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money
 from .._kit.render import _base_css, _report_html
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
 from .llm import model_place, no_model_hint, provider_info
+
+if TYPE_CHECKING:
+    from .window import _AgentChat
 
 _ROOT = "agt"
 _EXTRA_CSS = """\
@@ -147,12 +152,13 @@ class AgentView(_BaseView):
 
     _render_html = staticmethod(_render_html)
     _GROUPS = {
-        "💬 Ask": ("ask", "new_conversation"),
+        "💬 Ask": ("chat", "ask", "new_conversation"),
         "🔎 Look back": ("transcript",),
         "🧰 What it can do": ("tools",),
         "❓ Help": ("help",),
     }
     _START = (
+        ("chat()", "a chat window: ask, and watch each tool call as it runs"),
         ("ask('Which Lambda failed last night?')", "the answer, what it checked, and what to run next"),
         ("ask('Why did it fail?')", "a follow-up: it remembers the conversation"),
         ("ask('Did the files uploaded to acme-raw last night get processed?')", "S3 and Lambda together"),
@@ -174,7 +180,12 @@ class AgentView(_BaseView):
             raise TypeError(f"AgentView(core, ...) takes the settings on the analyzer: AgentAnalyzer("
                             f"{', '.join(f'{k}=...' for k in settings)})")
         self.core: AgentAnalyzer = core or AgentAnalyzer(**settings)
+        self.window: _AgentChat | None = None
 
+    def _display(self, widget: Any) -> None:
+        from IPython.display import display
+
+        display(widget)
 
     def _explain(self, code: str, message: str) -> str:
         """
@@ -195,25 +206,66 @@ class AgentView(_BaseView):
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
         found until then.
         """
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: wait for it, or press its Stop, then ask again.")
         with self._progress() as tick:
             answer = self.core.ask(question, new=new, progress=tick)
+        if window is not None:
+            window.added(answer)
         self._show(self._answer_blocks(answer))
 
+    @_friendly_errors
+    def chat(self, *, height: int | str | None = None) -> None:
+        """
+        A chat window to talk to the agent: type a question and watch it work, step by step, as it happens: what
+        it means to do, each tool it calls with what that found, then the answer, with what it checked folded under
+        it. Follow-ups continue the conversation, Stop ends a question with what it found so far, and New chat starts
+        over. Questions asked with ask() in other cells join it. height= sets the conversation's height (800
+        pixels, or CSS such as '70vh'); it fills the browser window otherwise.
+        """
+        if not self.use_html:
+            raise _Hint("The chat window needs Jupyter (SageMaker Studio, a notebook instance, JupyterLab or VS "
+                        "Code). Here, ask('Which Lambda failed last night?') answers as a report, in the same "
+                        "conversation.")
+        widgets = _require("ipywidgets", "The chat window")
+        from .window import _AgentChat
+
+        if self.window is None:
+            self.window = _AgentChat(self, widgets, height=height)
+        elif height is not None:
+            self.window.resize(height)
+        self._display(self.window.root)
+
     def _answer_blocks(self, answer: AgentAnswer) -> list[Any]:
-        core = self.core
-        failed = sum(1 for c in answer.calls if c.error)
-        sub = " · ".join(filter(None, [
-            answer.model or "model not named",
-            _plural(len(answer.calls), "tool call"),
-            _duration(answer.seconds),
-            "follow-up" if sum(1 for a in core.history if a.thread == answer.thread) > 1 else "",
-        ]))
-        blocks: list[Any] = [_Title(answer.question, sub)]
+        blocks: list[Any] = [_Title(answer.question, self._answer_line(answer))]
         if answer.text:
             blocks.append(_Answer(answer.text))
         elif not answer.error:
             blocks.append(_Note("The agent stopped before it wrote an answer: the table below shows what it read.",
                                 "warn"))
+        return blocks + self._checked_blocks(answer)
+
+    def _answer_line(self, answer: AgentAnswer) -> str:
+        """
+        'gpt-4.1 · 2 tool calls · 14s · follow-up': who answered and how much it took, under the question.
+        """
+        is_follow_up = sum(1 for a in self.core.history if a.thread == answer.thread) > 1
+        return " · ".join(filter(None, [
+            answer.model or "model not named",
+            _plural(len(answer.calls), "tool call"),
+            _duration(answer.seconds),
+            "follow-up" if is_follow_up else "",
+        ]))
+
+    def _checked_blocks(self, answer: AgentAnswer) -> list[Any]:
+        """
+        What an answer's report shows under the answer: the cards, the findings, each tool call, the AWS reads, what
+        it cost and the commands to look closer.
+        """
+        core = self.core
+        failed = sum(1 for c in answer.calls if c.error)
+        blocks: list[Any] = []
         tokens = f"{answer.input_tokens + answer.output_tokens:,}"
         cost = human_money(answer.cost) if answer.cost is not None else "unknown"
         stopped = answer.stopped not in (None, "stopped")
@@ -257,6 +309,8 @@ class AgentView(_BaseView):
         it fail?" need the conversation they follow).
         """
         self.core.new_conversation()
+        if self.window is not None:
+            self.window.cleared()
         self._show([_Note("New conversation: the next ask() starts fresh.", "ok")])
 
 

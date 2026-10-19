@@ -10,12 +10,12 @@ import difflib
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from .._kit.fmt import _duration, _plural, human_money
 
 if TYPE_CHECKING:
-    from .answers import ToolCall
+    from .answers import AgentStep, ToolCall
 
 
 _METRICS_PER_PRICE = 1000
@@ -71,6 +71,7 @@ class _Run:
         cost          the model's estimated cost so far (USD)
         metrics_read  CloudWatch metrics the tools requested (GetMetricData bills per 1,000)
         aws_cost      USD for those metrics; every other read the tools make is free
+        listener      told each AgentStep as it happens (ask()'s on_step), from whichever thread it happens on
     """
 
     budget: Budget
@@ -81,10 +82,18 @@ class _Run:
     metrics_read: int = 0
     aws_cost: float = 0.0
     lock: threading.Lock = field(default_factory=threading.Lock)
+    listener: Callable[[AgentStep], None] | None = None
 
     @property
     def elapsed(self) -> float:
         return time.monotonic() - self.started
+
+    def tell(self, step: AgentStep) -> None:
+        """
+        Tells the listener, if there is one, what the agent just did.
+        """
+        if self.listener is not None:
+            self.listener(step)
 
     def read_metrics(self, count: int, price: float) -> None:
         """

@@ -15,7 +15,7 @@ from botocore.exceptions import ClientError
 
 from .._kit.errors import _error_code, _why
 from .._kit.text import _clip
-from .answers import ToolCall
+from .answers import AgentStep, ToolCall
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .guard import ReadOnlyError
 from .results import _plain
@@ -42,18 +42,22 @@ def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
     def tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
         run = current()
         arguments = _asked_for(fn, args, kwargs)
-        call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn))
+        call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn),
+                        reads=tuple(toolkit.reads.get(fn.__name__, ())))
         started = time.monotonic()
         with run.lock:
             run.calls.append(call)
             used = sum(1 for c in run.calls if c.refused is None) - 1
+        run.tell(AgentStep("tool", call=call))
         try:
             check_budget(run, used)
             result = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
             result = _failed(exc, call, toolkit, arguments)
         call.seconds = time.monotonic() - started
-        return _reported(call, result)
+        reported = _reported(call, result)
+        run.tell(AgentStep("tool_done", call=call))
+        return reported
 
     return tool
 
@@ -121,7 +125,8 @@ def _reported(call: ToolCall, result: dict[str, Any]) -> dict[str, Any]:
     call.next = list(result.pop("_next", []) or [])
     call.summary = result.pop("_summary", None) or call.summary or (call.error or "")
     call.coverage = {k: result[k] for k in COVERAGE if k in result}
-    return _plain(result)
+    call.result = _plain(result)
+    return call.result
 
 
 def _defaults(fn: Callable[..., Any]) -> dict[str, Any]:

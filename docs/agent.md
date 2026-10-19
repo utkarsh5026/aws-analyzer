@@ -78,7 +78,8 @@ Ask the way you'd ask a colleague. Every answer says what it checked, so you kno
 { .gist }
 
 ```python
-agent.ask("Which Lambda failed last night?")
+agent.chat()                                                   # a chat window: ask, and watch it work
+agent.ask("Which Lambda failed last night?")                   # or ask in a cell, and get a report
 agent.ask("Why did orders-etl fail?")                          # a follow-up: it remembers the conversation
 agent.ask("Show me one of those runs")                         # ...and again
 agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 and Lambda together
@@ -89,6 +90,71 @@ agent.transcript()                                             # every question 
 ```
 
 Each answer comes with **What it checked**: a line per tool call with the window and regions it covered and what it found. Then what it couldn't read, its cost, and the `LambdaView` and `S3View` commands that show the same as a full report.
+
+## The chat window { #chat }
+
+`agent.chat()` opens a conversation with the agent in the notebook, drawn like a terminal, and shows every call it makes while it works.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock")
+agent.chat()
+```
+
+Type a question and press Enter, or click one of the questions to start from.
+
+![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, four small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart and S3's green bucket) and a green read-only; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch and s3, and under # try four questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-light.webp#only-light){ width="984" height="727" loading=lazy }
+![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, four small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart and S3's green bucket) and a green read-only; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch and s3, and under # try four questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-dark.webp#only-dark){ width="984" height="727" loading=lazy }
+/// caption
+**Start here**: the badges show which AWS services the agent reads; every question to start from shows the ones it needs.
+///
+
+### Every call, with the services it reads { #chat-calls }
+
+Each tool call shows as the code it is, with a badge for every AWS service it reads, so you can tell at a glance where the data came from:
+
+<div class="grid cards" markdown>
+
+- **λ orange: AWS Lambda.** The functions, their settings and code.
+- **≡ pink: CloudWatch Logs.** The log lines, run by run.
+- **↗ pink: CloudWatch.** The numbers: calls, errors, run times.
+- **Bucket, green: Amazon S3.** Buckets, folders and files.
+
+</div>
+
+Point at a badge to see the service's full name. A comment beside the call says what it does in plain English, and the line under it (`⎿`) says what it found.
+
+![The chat window while the agent works, in the dark theme: › Which Lambda failed in the last 24 hours, and why?; ● I'll check every function's failures over the last 24 hours first; then the Lambda, Logs and CloudWatch badges before function_health() # checked every function's health, ✓ 0.1s, and under it 2 of 5 functions had failed calls: orders-etl (66), report-api (20); ● orders-etl failed the most, let me read its logs; the same badges before function_errors('orders-etl') # read orders-etl's errors, with 13 errors, 3 causes: KeyError ×8, Timeout ×3, ClientError ×2; and ✻ Thinking… with the time so far, 2 tool calls, and stop ends it with what it found; the send button reads stop](images/agent-chat-working-light.webp#only-light){ width="984" height="727" loading=lazy }
+![The chat window while the agent works, in the dark theme: › Which Lambda failed in the last 24 hours, and why?; ● I'll check every function's failures over the last 24 hours first; then the Lambda, Logs and CloudWatch badges before function_health() # checked every function's health, ✓ 0.1s, and under it 2 of 5 functions had failed calls: orders-etl (66), report-api (20); ● orders-etl failed the most, let me read its logs; the same badges before function_errors('orders-etl') # read orders-etl's errors, with 13 errors, 3 causes: KeyError ×8, Timeout ×3, ClientError ×2; and ✻ Thinking… with the time so far, 2 tool calls, and stop ends it with what it found; the send button reads stop](images/agent-chat-working-dark.webp#only-dark){ width="984" height="727" loading=lazy }
+/// caption
+**While it works**: what the model says before it acts (`●`), each call with its services and what it found, and **stop** to end it with what it found so far.
+///
+
+Once it has answered, the steps fold into one line (how many calls, how long, and the services they read) and the answer leads. Under it: anything you should know about how it was reached, who answered, what it took and cost, and **details** with every call, the AWS reads and how the cost was worked out.
+
+![The same conversation once the agent has answered: a folded line 2 tool calls · 11s with the lambda, logs and cloudwatch badges named, then the answer behind a blue rule: orders-etl failed 66 of its 2,226 calls in the last 24 hours, with three causes, a KeyError on customer_id in etl.py line 23, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem; report-api's errors and throttles; the call to look closer; then claude-haiku-4-5 · 2 tool calls · 11s · $0.02 (est.) and a details link](images/agent-chat-light.webp#only-light){ width="984" height="727" loading=lazy }
+![The same conversation once the agent has answered: a folded line 2 tool calls · 11s with the lambda, logs and cloudwatch badges named, then the answer behind a blue rule: orders-etl failed 66 of its 2,226 calls in the last 24 hours, with three causes, a KeyError on customer_id in etl.py line 23, timeouts at the 60 s limit, and AccessDeniedException on dynamodb:PutItem; report-api's errors and throttles; the call to look closer; then claude-haiku-4-5 · 2 tool calls · 11s · $0.02 (est.) and a details link](images/agent-chat-dark.webp#only-dark){ width="984" height="727" loading=lazy }
+/// caption
+**The answer first**, with the steps folded above it into one line that names the services they read.
+///
+
+### The data behind each step { #chat-data }
+
+Click the folded line to see the steps again, and click a call to see what's behind it: the AWS operations it used, the time window and regions it covered, the `LambdaView` or `S3View` calls that show the same as a full report, and **the data the model read**, the exact result the tool handed it, as JSON you can fold.
+
+![The steps unfolded in the dark theme, with function_health() opened: reads, lambda:ListFunctions, lambda:ListEventSourceMappings, lambda:GetAccountSettings, logs:DescribeLogGroups, cloudwatch:GetMetricData; covered, the 24 hours and us-east-1; next, LambdaView().errors(...) for orders-etl and report-api; and data the model read · 1.2 KB opened as a JSON tree with the window, regions, functions_checked: 5 and the failed functions, orders-etl with 2,226 calls and 66 errors](images/agent-chat-details-light.webp#only-light){ width="984" height="727" loading=lazy }
+![The steps unfolded in the dark theme, with function_health() opened: reads, lambda:ListFunctions, lambda:ListEventSourceMappings, lambda:GetAccountSettings, logs:DescribeLogGroups, cloudwatch:GetMetricData; covered, the 24 hours and us-east-1; next, LambdaView().errors(...) for orders-etl and report-api; and data the model read · 1.2 KB opened as a JSON tree with the window, regions, functions_checked: 5 and the failed functions, orders-etl with 2,226 calls and 66 errors](images/agent-chat-details-dark.webp#only-dark){ width="984" height="727" loading=lazy }
+/// caption
+**Check its work**: each call opens to the operations it used, what it covered and the exact data the model read.
+///
+
+- **Follow-ups** continue the conversation. **new chat** starts over (`agent.transcript()` still has every question).
+- **stop** (the send button, while it works) ends the question: the agent finishes the step it's on and answers with what it found.
+- Questions asked with `agent.ask()` in other cells show up in the window too.
+
+??? more "How it works"
+
+    The question runs on a worker thread, so the window keeps answering clicks while the agent works. The agent hands each step to the window as it happens (`AgentAnalyzer.ask(on_step=...)`, below), and the window draws it. Each step comes whole: the model's reply isn't streamed word by word, which on Amazon Bedrock would need another permission (`bedrock:InvokeModelWithResponseStream`). The window lives in the kernel, so reopening the notebook loses it: `agent.transcript()` shows the conversation as a report that stays. `agent.chat(height=800)` sets the conversation's height (pixels, or CSS such as `'70vh'`); it fills the browser window otherwise.
 
 ## How it answers { #how-it-works }
 
@@ -190,12 +256,20 @@ agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
+answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
+answer.calls[0].result         # the data the tool handed the model
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
 answer.provider, answer.model # who served it, and the model or profile that answered
 answer.input_tokens, answer.output_tokens, answer.cost   # answer.rates: whose prices the cost is at
 answer.stopped                 # None, or why it stopped early: 'tool_calls', 'time', 'cost', 'steps', 'stopped', 'error'
 answer.error                   # what went wrong with the model, and what to do
 agent.core.history             # every AgentAnswer so far
+```
+
+To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), and each tool call as it starts (`'tool'`) and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
+
+```python
+agent.core.ask("Which Lambda failed last night?", on_step=lambda step: print(step.kind, step.text or step.call.call))
 ```
 
 Settings, all optional:
@@ -302,6 +376,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
 | Command | What it shows |
 |---|---|
+| `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; New chat starts over |
 | `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |

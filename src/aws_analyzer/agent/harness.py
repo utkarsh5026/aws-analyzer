@@ -15,7 +15,7 @@ import sys
 from typing import Any, Callable, Iterable
 
 from .._kit.deps import _require
-from .answers import AgentAnswer
+from .answers import AgentAnswer, AgentStep
 from .budget import _Run
 from .llm import answer_cost, explain_model_error
 
@@ -63,6 +63,8 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
     Streams one question (`content`) through the graph in the conversation `thread`, and returns the answer's
     text. Fills `answer` as it goes (model calls, tokens, the model that served it) and keeps `run.cost` current
     for the tools' cost budget, at model_prices= or, for a `provider` with list prices (Amazon Bedrock), those.
+    The run's listener is told what the model says before calling tools (the tools tell it their own steps). Each step comes whole: the model isn't streamed token by token, which on Bedrock would
+    need another permission (InvokeModelWithResponseStream).
     Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button: it keeps what it found) or
     the time budget is well past. A model or loop that fails, whatever it raises, sets answer.error (what it means
     with this provider) and answer.exception instead of raising.
@@ -77,7 +79,9 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
         for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
             for msg in _model_messages(update):
                 _count_usage(msg, answer, base, run, cost_of)
-                if not getattr(msg, "tool_calls", None):
+                if getattr(msg, "tool_calls", None):
+                    _tell_thinking(msg, run)
+                else:
                     text = _message_text(msg) or text
             steps += 1
             if progress:
@@ -120,6 +124,16 @@ def _count_usage(message: Any, answer: AgentAnswer, base: str, run: _Run,
     cost = cost_of(answer.model, answer.input_tokens, answer.output_tokens)
     with run.lock:
         run.cost = cost or 0.0
+
+
+def _tell_thinking(message: Any, run: _Run) -> None:
+    """
+    Tells the run's listener what the model said before the tools it's calling ("I'll check last night's errors
+    first"), when it said anything.
+    """
+    thought = _message_text(message)
+    if thought:
+        run.tell(AgentStep("thinking", text=thought))
 
 
 def _stop_reason(run: _Run) -> str:

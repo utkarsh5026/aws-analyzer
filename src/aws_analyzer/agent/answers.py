@@ -9,12 +9,24 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
 from .budget import Budget
 from .llm import Rates
+
+_OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
+
+
+def services_of(reads: Iterable[str]) -> tuple[str, ...]:
+    """
+    The AWS services a list of reads names, each once, in order: ('lambda:GetFunction', 'logs:FilterLogEvents',
+    'lambda:GetPolicy') -> ('lambda', 'logs'). A read that isn't an operation ('the package's download link') names
+    none.
+    """
+    prefixes = [read.split(":", 1)[0] for read in reads if _OPERATION.fullmatch(read)]
+    return tuple(dict.fromkeys(prefixes))
 
 
 @dataclass
@@ -28,6 +40,9 @@ class ToolCall:
         refused   why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window' or 'stopped'
         next      View calls that show more, and what they show
         first     the tool's first parameter when it has no default, which the call is written without the name of
+        reads     the AWS operations the tool reads with ('lambda:GetFunction', 'logs:FilterLogEvents', ...), its
+                  toolkit's `reads` for it
+        result    what the tool handed the model (JSON-ready, secrets hidden), once it has run
     """
 
     name: str
@@ -39,6 +54,15 @@ class ToolCall:
     refused: str | None = None
     next: list[tuple[str, str]] = field(default_factory=list)
     first: str | None = "function"
+    reads: tuple[str, ...] = ()
+    result: dict[str, Any] | None = field(default=None, repr=False)
+
+    @property
+    def services(self) -> tuple[str, ...]:
+        """
+        The AWS services the tool reads, in the order its reads name them: ('lambda', 'logs', 'cloudwatch').
+        """
+        return services_of(self.reads)
 
     @property
     def ok(self) -> bool:
@@ -52,6 +76,25 @@ class ToolCall:
         args = {k: v for k, v in self.args.items() if v not in ("", None)}
         first = args.pop(self.first, None) if self.first else None
         return _call(self.name, first, **args) if first is not None else _call(self.name, **args)
+
+
+@dataclass
+class AgentStep:
+    """
+    Something the agent did while answering, told as it happens (ask(on_step=...)), so a window can show its work.
+
+        kind  'thinking':  the model's words before it calls tools (text)
+              'tool':      a tool call starts (call)
+              'tool_done': that call finished: call.summary, call.error or call.refused say how
+        call  the same ToolCall object for 'tool' and 'tool_done', which the answer's calls hold too
+
+    Tools run side by side on LangGraph's threads, so on_step is called from them: a window queues the steps and
+    draws them on its own thread.
+    """
+
+    kind: str
+    text: str = ""
+    call: ToolCall | None = None
 
 
 @dataclass

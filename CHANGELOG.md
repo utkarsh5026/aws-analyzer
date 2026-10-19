@@ -9,6 +9,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- **`AgentView().chat()` opens a chat window for the agent**, drawn like a terminal: type a question (or click one to
+  start from) and watch it work. What the model says before it acts, then each tool call as the code it is, with a
+  coloured badge for every AWS service it reads (Lambda, CloudWatch Logs, CloudWatch, S3, ...), a comment saying what
+  it does and what it found under it. A click on a call shows the AWS operations it used, the window it covered, the
+  `LambdaView` / `S3View` call to look closer, and the exact data the model read, as JSON you can fold. Once it
+  answers, the steps fold into one line naming the services they read, and the answer leads, with any findings, the
+  model, time and cost, and **details** under it. Follow-ups continue the conversation, **stop** ends a question with
+  what it found so far, and **new chat** starts over. `AgentAnalyzer.ask(on_step=...)` hands the same steps to your
+  own code (`AgentStep`: the model's words, and each tool call as it starts and ends), and each `ToolCall` now keeps
+  the AWS operations it reads (`.reads`, `.services`) and what it handed the model (`.result`)
+  ([#115](https://github.com/utkarsh5026/aws-analyzer/pull/115)).
+
 ### Changed
 
 - **Searching a Lambda function's logs is several times faster**: the Lambda explorer's Logs search (Enter),

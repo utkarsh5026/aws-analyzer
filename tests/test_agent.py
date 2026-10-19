@@ -1,3 +1,4 @@
+import asyncio
 import json
 import threading
 import types
@@ -773,8 +774,9 @@ def test_without_lambda_the_s3_toolkit_leaves_out_s3_triggers(buckets):
 
 def scripted(*replies):
     """
-    A LangChain chat model that answers with these AIMessages in turn (an exception is raised instead), and
-    remembers the tools it was given and the messages it was sent.
+    A LangChain chat model that answers with these AIMessages in turn (an exception is raised instead; a
+    threading.Event is waited for before the next reply, to hold the agent back), and remembers the tools it was
+    given and the messages it was sent.
     """
     pytest.importorskip("deepagents")
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -797,6 +799,9 @@ def scripted(*replies):
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
             self.prompts.append(list(messages))
             reply = self.replies.pop(0)
+            if isinstance(reply, threading.Event):
+                reply.wait(10)
+                reply = self.replies.pop(0)
             if isinstance(reply, BaseException):
                 raise reply
             return ChatResult(generations=[ChatGeneration(message=reply)])
@@ -816,6 +821,15 @@ def calls(*steps, tokens=(100, 20)):
     usage = {"input_tokens": tokens[0], "output_tokens": tokens[1], "total_tokens": sum(tokens)}
     return ai_message(content="", usage_metadata=usage, tool_calls=[
         {"name": name, "args": args, "id": f"c{i}-{name}", "type": "tool_call"} for i, (name, args) in enumerate(steps)])
+
+
+def thinks(text, *steps):
+    """
+    The model's words before the tools it calls.
+    """
+    message = calls(*steps)
+    message.content = text
+    return message
 
 
 def says(text, tokens=(150, 30)):
@@ -1154,3 +1168,131 @@ def test_view_takes_settings_or_an_analyzer():
     assert view.core.deployment == "prod-gpt-4o" and view.core.endpoint == "https://e"
     with pytest.raises(TypeError, match="takes the settings on the analyzer"):
         AgentView(view.core, deployment="other")
+
+
+def test_ask_tells_each_step_as_it_happens(seeded):
+    model = scripted(
+        thinks("I'll check which functions failed first.", ("function_health", {"since": "2h"})),
+        says("etl-nightly failed."),
+    )
+    told = []
+    answer = make(model).ask("What failed?", on_step=lambda step: told.append(
+        (step.kind, step.text, step.call.summary if step.call else "")))
+    assert [kind for kind, *_ in told] == ["thinking", "tool", "tool_done"]
+    assert told[0][1] == "I'll check which functions failed first."
+    assert told[1][2] == "" and told[2][2] == "1 of 2 functions had failed calls: etl-nightly (40)"
+    assert answer.text == "etl-nightly failed." and [c.name for c in answer.calls] == ["function_health"]
+    call = answer.calls[0]
+    assert call.services == ("lambda", "logs", "cloudwatch") and call.result["failed"][0]["name"] == "etl-nightly"
+    assert "_summary" not in call.result and "_next" not in call.result
+
+
+
+def window(model, **settings):
+    """
+    The chat window on an agent with this model, as a notebook shows it (the display is replaced).
+    """
+    pytest.importorskip("ipywidgets")
+    view = AgentView(make(model, **settings), mode="html", progress="off")
+    view._display = lambda widget: None
+    view.chat()
+    return view.window
+
+
+def page(x):
+    """
+    Every piece of HTML the window's conversation and status line show, oldest first (the log holds them newest
+    first, which keeps it scrolled to the newest).
+    """
+    def html(widget):
+        children = getattr(widget, "children", None)
+        if children is not None:
+            return "".join(html(child) for child in children)
+        return getattr(widget, "value", "") or ""
+    return "".join(html(item) for item in reversed(x.log.children)) + x.status.value
+
+
+def enter(x, question):
+    x.question.value = question
+    x.question._handle_custom_msg({"event": "submit"}, [])
+
+
+def test_the_chat_window_shows_each_tool_call_then_the_answer(seeded):
+    model = scripted(
+        thinks("Checking which functions failed.", ("function_health", {"since": "2h"})),
+        calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+        says("**etl-nightly** failed 40 times: a KeyError on `customer_id`."),
+    )
+    x = window(model)
+    assert "aws-agent" in page(x) and "# try" in page(x) and "read-only" in x.title.value
+    assert all(f"ag-s-{code}" in x.title.value for code in ("lambda", "logs", "cloudwatch", "s3"))
+    assert "gpt-test" in x.title.value and x.log.children == (x.empty,)
+    assert "Which Lambda failed last night?" in page(x)
+    enter(x, "Which Lambda failed in the last 2 hours?")
+    shown = page(x)
+    assert shown.index("Which Lambda failed in the last 2 hours?") < shown.index("Checking which functions failed.")
+    assert shown.index("function_health(since=&#x27;2h&#x27;)") < shown.index("function_errors(&#x27;etl-nightly&#x27;")
+    assert "1 of 2 functions had failed calls: etl-nightly (40)" in shown and "1 error, 1 cause" in shown
+    assert "LambdaView().logs(&#x27;etl-nightly&#x27;" in shown and "details: tool calls, AWS reads and cost" in shown
+    assert "<strong>etl-nightly</strong> failed 40 times" in shown and "Thinking…" not in shown
+    assert "# checked every function&#x27;s health" in shown and "# read etl-nightly&#x27;s errors" in shown
+    assert "2 tool calls ·" in shown and 'title="AWS Lambda"' in shown and 'title="Amazon CloudWatch Logs"' in shown
+    assert "data the model read" in shown and "lambda:ListFunctions" in shown
+    assert "This conversation: 1 question" in x.status.value and x.empty not in x.log.children
+    assert not x.busy and x.question.value == "" and "agc-stop" not in x.send_button._dom_classes
+    x.new_button.click()
+    assert x.log.children == (x.empty,) and "This conversation" not in x.status.value
+
+
+def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
+    gate = threading.Event()
+    model = scripted(thinks("Checking health first.", ("function_health", {"since": "2h"})), gate,
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})), says("never reached"))
+    x = window(model)
+
+    async def ask_and_stop():
+        enter(x, "What failed?")
+        assert x.busy and "agc-stop" in x.send_button._dom_classes and x.new_button.disabled
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if "functions had failed calls" in page(x):
+                break
+        shown = page(x)
+        assert "Checking health first." in shown and "1 of 2 functions had failed calls" in shown
+        assert "# checked every function&#x27;s health" in shown and "ag-s-lambda" in shown
+        assert "Thinking…" in shown and "stop ends it with what it found" in shown
+        enter(x, "Another question")
+        assert "Still answering the last question" in x.status.value
+        x.send_button.click()
+        assert x.send_button.disabled and x.send_button.tooltip == "Stopping…"
+        gate.set()
+        await x.task
+
+    asyncio.run(ask_and_stop())
+    shown = page(x)
+    assert "You stopped it" in shown and "Thinking…" not in shown
+    assert '<span class="pf">function_errors</span>' not in shown and "never reached" not in shown
+    assert not x.busy and not x.send_button.disabled and x.view.core.history[-1].stopped == "stopped"
+
+
+def test_the_chat_window_without_a_model_says_how_to_set_one_up(seeded):
+    pytest.importorskip("deepagents")
+    x = window(None)
+    assert "The agent needs a model to answer with" in x.status.value
+    enter(x, "What failed?")
+    assert "AgentView(provider=&#x27;bedrock&#x27;)" in page(x) or "AgentView(provider='bedrock')" in page(x)
+    assert x.question.value == "What failed?" and not x.busy and "back in the box" in x.status.value
+
+
+def test_questions_asked_in_a_cell_join_the_chat_window(seeded, capsys):
+    model = scripted(says("first answer"), says("second answer"))
+    view = AgentView(make(model), mode="text", progress="off")
+    view.ask("Asked before the window")
+    assert "The chat window needs Jupyter" in run(capsys, view.chat)
+    view.use_html = True
+    view._display = lambda widget: None
+    view.chat()
+    assert "Asked before the window" in page(view.window) and "first answer" in page(view.window)
+    view.use_html = False
+    view.ask("Asked in a cell")
+    assert "second answer" in page(view.window) and "This conversation: 2 questions" in view.window.status.value
