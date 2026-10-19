@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS analysis utilities for SageMaker / Jupyter notebooks, installed with pip as `aws-analyzer`
 (`from aws_analyzer import S3View`; see "The PyPI package" below). Each service is **one module** in
-`src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb.py`, `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
+`src/aws_analyzer/` (`s3/` (a package, split by layer: see "Architecture of a service package"), `dynamodb/` (a package too), `bedrock_kb/` (a package too) for Bedrock Knowledge Bases and `explore()`, a window to look
 through one by clicking, `bedrock_chat.py` for a chat window on a knowledge base, `sagemaker_env/` (a package too) for the SageMaker notebook itself, its Python environments and what's running, `opensearch/` (a package too) for
 OpenSearch vector indexes in Service domains and Serverless collections, `lambda_functions/` (a package too) for Lambda functions in one
 region or all of them, and `explore()`, a window to click through them and read their logs run by run). The code they

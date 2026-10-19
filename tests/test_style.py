@@ -56,7 +56,13 @@ COMMENTS_LEFT = {
     "src/aws_analyzer/bedrock_kb/view/knowledge_bases.py": 4,
     "src/aws_analyzer/bedrock_kb/view/measure.py": 1,
     "src/aws_analyzer/bedrock_kb/view/search.py": 4,
-    "src/aws_analyzer/dynamodb.py": 82,
+    "src/aws_analyzer/dynamodb/analysis.py": 7,
+    "src/aws_analyzer/dynamodb/analyzer.py": 10,
+    "src/aws_analyzer/dynamodb/helpers.py": 5,
+    "src/aws_analyzer/dynamodb/models.py": 40,
+    "src/aws_analyzer/dynamodb/prices.py": 9,
+    "src/aws_analyzer/dynamodb/style.py": 2,
+    "src/aws_analyzer/dynamodb/view.py": 9,
     "src/aws_analyzer/lambda_functions/analysis/codemap/findings.py": 1,
     "src/aws_analyzer/lambda_functions/analysis/codemap/graph.py": 33,
     "src/aws_analyzer/lambda_functions/analysis/codemap/mapping.py": 4,
@@ -169,7 +175,6 @@ MAX_MODULE_LINES = 1500
 PACKAGE = ROOT / "src" / "aws_analyzer"
 LONG_FILES = {
     "src/aws_analyzer/bedrock_chat.py",
-    "src/aws_analyzer/dynamodb.py",
 }
 
 

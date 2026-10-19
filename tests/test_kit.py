@@ -25,6 +25,7 @@ from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
 from aws_analyzer._kit.render import _base_css, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
 from aws_analyzer._kit.window import _Window, _window_errors
+from aws_analyzer.dynamodb import style as ddb_style
 
 # Each service: its module, Analyzer and View, and its list prices.
 SERVICES = [
@@ -61,7 +62,7 @@ def test_a_block_made_from_another_is_drawn_like_it():
 
 
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == dynamodb._CSS and _base_css("x").count(".x ") == 161
+    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 161
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")
