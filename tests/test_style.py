@@ -28,7 +28,7 @@ COMMENTS_LEFT = {
     ".claude/skills/demo/shots.py": 23,
     ".claude/skills/release/release.py": 4,
     "src/aws_analyzer/__init__.py": 3,
-    "src/aws_analyzer/bedrock_chat.py": 281,
+    "src/aws_analyzer/bedrock_chat/__init__.py": 281,
     "src/aws_analyzer/bedrock_kb/analysis/chunks.py": 2,
     "src/aws_analyzer/bedrock_kb/analysis/cost.py": 1,
     "src/aws_analyzer/bedrock_kb/analysis/deciding.py": 1,
@@ -174,7 +174,7 @@ COMMENTS_LEFT = {
 MAX_MODULE_LINES = 1500
 PACKAGE = ROOT / "src" / "aws_analyzer"
 LONG_FILES = {
-    "src/aws_analyzer/bedrock_chat.py",
+    "src/aws_analyzer/bedrock_chat/__init__.py",
 }
 
 

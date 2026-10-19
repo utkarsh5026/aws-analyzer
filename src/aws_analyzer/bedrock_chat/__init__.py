@@ -115,45 +115,45 @@ from botocore.validate import ParamValidator
 
 # What bedrock_kb.py and bedrock_chat.py share. A name imported as itself isn't used here: it's imported so that
 # bedrock_chat.<name> still works.
-from ._bedrock.blocks import (
+from .._bedrock.blocks import (
     _Answer, _Download, _Json, _answer_html, _download_css, _file_list_blocks, _json_html, _plain_json,
 )
-from ._bedrock.estimates import estimate_tokens, generation_cost, query_cost
-from ._bedrock.files import (
+from .._bedrock.estimates import estimate_tokens, generation_cost, query_cost
+from .._bedrock.files import (
     _LIST_LINK_BYTES, SavedFileList, _data_href, _link_seconds, _list_target, _notebook_href, file_list_name,
     parse_list_link, presigned_url, write_file_list, FILE_LIST_LINKS as FILE_LIST_LINKS,
     file_list_lines as file_list_lines,
 )
-from ._bedrock.filters import (
+from .._bedrock.filters import (
     DATA_SOURCE_KEY, _is_bedrock_filter, build_filter, describe_sources, with_data_sources,
     data_source_filter as data_source_filter,
 )
-from ._bedrock.foundation_models import parse_models
-from ._bedrock.helpers import (
+from .._bedrock.foundation_models import parse_models
+from .._bedrock.helpers import (
     SEARCHABLE, _KB_ID_RE, _REFUSAL, _match_kb, _match_sources, _model_id, _session_expired, parse_kb_ref,
     source_name, split_metadata as split_metadata,
 )
-from ._bedrock.markdown import _answer_lines, _markdown_html, _with_markers
-from ._bedrock.models import Citation, KBDocument, ModelInfo, Passage
-from ._bedrock.parsing import _span, match_expected, parse_document, parse_passage, parse_retrieve
-from ._bedrock.prices import (
+from .._bedrock.markdown import _answer_lines, _markdown_html, _with_markers
+from .._bedrock.models import Citation, KBDocument, ModelInfo, Passage
+from .._bedrock.parsing import _span, match_expected, parse_document, parse_passage, parse_retrieve
+from .._bedrock.prices import (
     BEDROCK_PRICES, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, MODEL_PRICES, _MODEL_ALIASES, _RERANK_ALIASES,
     _family_match, _per_million, short_model, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES, model_price as model_price,
 )
-from ._bedrock.words import _highlight, best_snippet, question_terms
-from ._kit.analyzer import _BaseAnalyzer
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Title, _Tone, _draws
-from ._kit.deps import _require
-from ._kit.errors import _Hint, _error_code, _error_name, _why
-from ._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money
-from ._kit.highlight import _json_source_html, _python_html
-from ._kit.render import (
+from .._bedrock.words import _highlight, best_snippet, question_terms
+from .._kit.analyzer import _BaseAnalyzer
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Title, _Tone, _draws
+from .._kit.deps import _require
+from .._kit.errors import _Hint, _error_code, _error_name, _why
+from .._kit.fmt import _as_int, _duration, _plural, _utcnow, human_age, human_money
+from .._kit.highlight import _json_source_html, _python_html
+from .._kit.render import (
     _MARKS, _SELECT, _TONES, _base_css, _blocks_html, _call, _ordered, _prose, _report_html,
     _text_lines,
 )
-from ._kit.text import _clip, _esc, _marked, search_rank
-from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import _cell_number, _class_if, _css_height, _icon_url, _Picker, _running_loop, _Window
+from .._kit.text import _clip, _esc, _marked, search_rank
+from .._kit.view import _BaseView, _friendly_errors, _which_prices
+from .._kit.window import _cell_number, _class_if, _css_height, _icon_url, _Picker, _running_loop, _Window
 
 # =============================================================================
 # 1. Helpers: parsing and formatting
