@@ -527,7 +527,7 @@ Update this table in each step's PR.
 | s3 + s3_explorer | done | #101 | plans in `plans/s3.py` and `plans/s3_explorer.py`; branch `modularize/s3` |
 | _bedrock | done | #107 | plan in `plans/_bedrock.py`; branch `modularize/_bedrock` |
 | bedrock_kb | done | #108 | plan in `plans/bedrock_kb.py` (mixins and modules); branch `modularize/bedrock_kb` |
-| bedrock_chat | in review | | plan in `plans/bedrock_chat.py` (mixins and modules); every module now fits the limit, so `LONG_FILES` is empty |
+| bedrock_chat | in review | #114 | plan in `plans/bedrock_chat.py` (mixins and modules); every module now fits the limit, so `LONG_FILES` is empty |
 | sagemaker_env | done | #105 | plan in `plans/sagemaker_env.py` (mixins and modules); branch `modularize/sagemaker_env` |
 | dynamodb | in review | #109 | plan in `plans/dynamodb.py`; branch `modularize/dynamodb` |
 | leftovers | not started | | new-analyzer skill, CLAUDE.md, README, private-names error |
