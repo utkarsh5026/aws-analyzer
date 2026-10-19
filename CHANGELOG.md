@@ -21,7 +21,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   (`AWS_ANALYZER_AGENT_MODEL` sets one for every notebook), and Azure OpenAI set up as before keeps working
   unchanged. A failed model call says what it means for that provider (a Bedrock model that needs an inference
   profile, a missing key), and `tools()` shows the provider and where what the agent sends goes. The `[agent]` extra
-  now installs langchain-aws too.
+  now installs langchain-aws too ([#102](https://github.com/utkarsh5026/aws-analyzer/pull/102)).
 
 ## [0.20.0] - 2026-10-18
 
