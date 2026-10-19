@@ -14,7 +14,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - **Searching a Lambda function's logs is several times faster**: the Lambda explorer's Logs search (Enter),
   `logs()`, `errors()`, `performance()` and `log_runs(search=...)` now ask CloudWatch Logs for up to four slices of
   the time range at once, newest first, instead of one after another, so a search over a day or a week comes back in
-  a fraction of the time. They read the same lines, need the same permissions and cost nothing more.
+  a fraction of the time. They read the same lines, need the same permissions and cost nothing more
+  ([#113](https://github.com/utkarsh5026/aws-analyzer/pull/113)).
 
 ## [0.22.0] - 2026-10-19
 
