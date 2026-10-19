@@ -219,7 +219,7 @@ def main() -> int:
                         heights.setdefault(name, set()).add(round(image.height / SCALE))
                 browser.close()
             for name, sizes in heights.items():
-                shots.set_height("lambda_functions", name, max(sizes))
+                shots.set_height(shots.GUIDES["lambda_functions"], name, max(sizes))
                 print(f"  {name}: {WIDTH} x {max(sizes)}", file=sys.stderr)
         finally:
             server.terminate()

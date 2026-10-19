@@ -801,7 +801,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox. A new capability of the loop (a
   subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
-  `KeyboardInterrupt` or the hard time limit, and catches a model or loop error into `AgentAnswer.error` with
+  `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
+  `_WRAP_UP`, in which every tool is refused, so the model writes its answer), and catches a model or loop error into `AgentAnswer.error` with
   `.exception` kept. Everything about LangGraph's messages stays in this file.
 - **`AgentAnalyzer`** (`analyzer.py`) holds the settings and puts the parts together: `ask()` makes the `_Run` and
   the `AgentAnswer`, calls `stream_turn()`, and fills in what the guard and the run counted. `AgentView` (`view.py`)

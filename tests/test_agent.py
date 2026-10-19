@@ -912,10 +912,23 @@ def test_next_steps_name_the_region_of_a_function_elsewhere(seeded):
 
 def test_a_stop_request_ends_the_question_with_what_it_found(seeded):
     stop = threading.Event()
-    model = scripted(calls(("function_health", {"since": "2h"})), says("never reached"))
+    model = scripted(calls(("function_health", {"since": "2h"})),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("Stopped early: I didn't get to check any function."))
     core = make(model)
-    answer = core.ask("What failed?", stop=stop, progress=lambda steps: stop.set())
-    assert answer.stopped == "stopped" and answer.text == ""
+    answer = core.ask("What failed?", stop=stop, on_step=lambda step: step.kind == "tool" and stop.set())
+    assert answer.stopped == "stopped" and answer.text == "Stopped early: I didn't get to check any function."
+    assert [(c.name, c.refused) for c in answer.calls] == [("function_health", "stopped"),
+                                                            ("function_errors", "stopped")]
+    wrap_up = [m for m in model.prompts[-1] if "The user pressed stop before you finished" in str(m.content)]
+    assert len(wrap_up) == 1 and answer.model_calls == 3 and answer.error is None
+
+
+def test_a_stop_whose_wrap_up_fails_ends_without_an_answer(seeded):
+    stop = threading.Event()
+    model = scripted(calls(("function_health", {"since": "2h"})), RuntimeError("model down"))
+    answer = make(model).ask("What failed?", stop=stop, progress=lambda steps: stop.set())
+    assert answer.stopped == "stopped" and answer.text == "" and answer.error is None
 
 
 def test_ask_about_s3_and_lambda_together(buckets, capsys):
@@ -1257,7 +1270,8 @@ def test_the_chat_window_shows_each_tool_call_then_the_answer(seeded):
 def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
     gate = threading.Event()
     model = scripted(thinks("Checking health first.", ("function_health", {"since": "2h"})), gate,
-                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})), says("never reached"))
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("So far: **etl-nightly** failed 40 times."))
     x = window(model)
 
     async def ask_and_stop():
@@ -1285,7 +1299,8 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
     asyncio.run(ask_and_stop())
     shown = page(x)
     assert "You stopped it" in shown and "Thinking…" not in shown
-    assert '<span class="pf">function_errors</span>' not in shown and "never reached" not in shown
+    assert '<span class="pf">function_errors</span>' not in shown and "<strong>etl-nightly</strong> failed 40" in shown
+    assert "The agent stopped before it wrote an answer" not in shown
     assert not x.busy and not x.send_button.disabled and x.view.core.history[-1].stopped == "stopped"
 
 
@@ -1328,7 +1343,8 @@ def test_the_chat_window_queues_questions_typed_while_it_works(seeded):
 def test_a_queued_question_is_asked_after_stop(seeded):
     gate = threading.Event()
     model = scripted(thinks("Checking health first.", ("function_health", {"since": "2h"})), gate,
-                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})), says("the follow-up"))
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})), says("what it found"),
+                     says("the follow-up"))
     x = window(model)
 
     async def ask_stop_and_follow():
@@ -1346,7 +1362,7 @@ def test_a_queued_question_is_asked_after_stop(seeded):
     first, second = x.view.core.history
     assert first.stopped == "stopped" and second.question == "Only etl-nightly, please"
     assert second.text == "the follow-up" and not x.queued and not x.busy
-    assert "You stopped it" in page(x) and "the follow-up" in page(x)
+    assert first.text == "what it found" and "You stopped it" in page(x) and "the follow-up" in page(x)
 
 
 def test_the_queue_waits_after_an_answer_that_went_wrong(seeded):

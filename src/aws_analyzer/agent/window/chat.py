@@ -807,7 +807,9 @@ class _AgentChat(_Window):
         drop = self.w.Button(description="✕", tooltip="Don't ask this", layout=self.w.Layout(width="auto",
                                                                                             flex="0 0 auto"))
         drop.add_class("agc-drop")
-        row = self.w.HBox([self._html(_wrap(_queued_html(question))), drop],
+        line = self.w.HTML(_wrap(_queued_html(question)), layout=self.w.Layout(flex="1 1 auto", width="auto",
+                                                                               min_width="0"))
+        row = self.w.HBox([line, drop],
                           layout=self.w.Layout(width="100%", flex="0 0 auto", align_items="center"))
         row.add_class("agc-queued")
         waiting = _Queued(question, row)
