@@ -8,7 +8,7 @@ shots.py renders reports, which are plain HTML. The chat window is ipywidgets, w
 connected to a kernel, so this starts JupyterLab on a notebook that opens the window on demo.py's fake Bedrock
 (support-docs), then uses the window the way a person would: types a question and presses Enter, runs a list of test
 questions in the Test tab and opens the Code tab, asks them with Try variations and opens the Runs tab, opens the
-knowledge base list, adds settings, searches for a setting,
+knowledge base list, hides the side tabs, adds settings, searches for a setting,
 opens the Request tab and its Python view, edits the JSON, ticks files, and asks the last question again on
 Retrieve only. Each figure is the window, 984 CSS px wide at 1.5x like the other
 images, written to docs/images/<name>-{light,dark}.webp, and the height= of both its images is set in
@@ -39,7 +39,7 @@ sys.path[:0] = [str(HERE)]
 import shots  # noqa: E402  (the image size, where images go, and set_height)
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("chat-window", "chat-test", "chat-code", "chat-sweep", "chat-runs", "chat-pick", "chat-settings",
+FIGURES = ("chat-window", "chat-wide", "chat-test", "chat-code", "chat-sweep", "chat-runs", "chat-pick", "chat-settings",
            "chat-add", "chat-request", "chat-python", "chat-edit", "chat-files", "chat-retrieve")
 
 # The Test tab's questions: four answered (one only partly backed by its sources), two that demo.py's Bedrock can't
@@ -148,6 +148,11 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     answered(2)
     page.locator(".kbc-app details.src summary").last.click()
     shot("chat-window")
+    if "chat-wide" in wanted:
+        settings_toggle = page.locator(".kbc-app button.kbc-toggle:has-text('Settings')")
+        settings_toggle.click()
+        shot("chat-wide")
+        settings_toggle.click()
     tab = ".kbc-app .lm-TabBar-tab:has-text('{0}'), .kbc-app .p-TabBar-tab:has-text('{0}')"
     if "chat-test" in wanted or "chat-code" in wanted:
         page.locator(tab.format("Test")).first.click()

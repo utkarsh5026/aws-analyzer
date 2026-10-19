@@ -16,6 +16,9 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   (chunk ID, data source ID, page), or says the file has none of its own. `ask()` and `retrieve()` reports add a
   Metadata column when a passage has some, and `Passage.bedrock_metadata` keeps Bedrock's keys
   ([#110](https://github.com/utkarsh5026/aws-analyzer/pull/110)).
+- **`chat()`'s Answer / Retrieve only switch is at the top right**, beside **+ New chat**, instead of in the question
+  box, and two small buttons there, **Chat** and **Settings**, hide or show the conversation and the side tabs, so
+  either can have the window's whole width.
 
 ## [0.21.0] - 2026-10-19
 

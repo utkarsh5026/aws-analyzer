@@ -2349,10 +2349,26 @@ def test_window_sends_a_question_and_streams_the_answer(window, clients):
     assert "And bank transfers?" in app.response_view.value
 
 
+def test_window_hides_and_shows_its_panes(window):
+    app = window._app
+    assert "kbc-on" in app.chat_toggle._dom_classes and "kbc-on" in app.side_toggle._dom_classes
+    app.side_toggle.click()
+    assert app.tabs.layout.display == "none" and "kbc-on" not in app.side_toggle._dom_classes
+    assert app.chat.layout.margin == chatmod._CHAT_ALONE_MARGIN
+    app.chat_toggle.click()
+    assert app.chat.layout.display == "none" and app.tabs.layout.display is None
+    assert app.tabs.layout.max_width == "none" and "kbc-on" in app.side_toggle._dom_classes
+    app.chat_toggle.click()
+    assert app.chat.layout.display is None and app.tabs.layout.display is None
+    assert app.tabs.layout.max_width == chatmod._SIDE_MAX_WIDTH and app.chat.layout.margin == chatmod._CHAT_MARGIN
+
+
 def test_window_retrieve_only_searches_without_an_answer(window, clients):
     app = window._app
-    assert app.mode_pick.value == "answer" and app.mode_pick in app.composer.children
-    assert "<b>Retrieve only</b>, beside the box, only searches" in texts(app)[0]
+    top = app.root.children[1].children[0]
+    assert app.mode_pick.value == "answer" and app.mode_pick in top.children and top.children[2] is app.new_button
+    assert app.mode_pick not in app.composer.children
+    assert "<b>Retrieve only</b>, at the top right, only searches" in texts(app)[0]
     app.question.value = "How long do refunds take?"
     app._send()
     app.chips["temperature"].click()
