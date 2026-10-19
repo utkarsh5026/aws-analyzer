@@ -29,7 +29,7 @@ COMMENTS_LEFT = {
     ".claude/skills/release/release.py": 4,
     "src/aws_analyzer/__init__.py": 3,
     "src/aws_analyzer/bedrock_chat.py": 281,
-    "src/aws_analyzer/bedrock_kb.py": 235,
+    "src/aws_analyzer/bedrock_kb/__init__.py": 235,
     "src/aws_analyzer/dynamodb.py": 82,
     "src/aws_analyzer/lambda_functions/analysis/codemap/findings.py": 1,
     "src/aws_analyzer/lambda_functions/analysis/codemap/graph.py": 33,
@@ -143,7 +143,7 @@ MAX_MODULE_LINES = 1500
 PACKAGE = ROOT / "src" / "aws_analyzer"
 LONG_FILES = {
     "src/aws_analyzer/bedrock_chat.py",
-    "src/aws_analyzer/bedrock_kb.py",
+    "src/aws_analyzer/bedrock_kb/__init__.py",
     "src/aws_analyzer/dynamodb.py",
 }
 

@@ -66,42 +66,42 @@ from botocore.exceptions import BotoCoreError, ClientError, NoRegionError
 
 # What bedrock_kb.py and bedrock_chat.py share. A name imported as itself isn't used here: it's imported so that
 # bedrock_kb.<name> still works.
-from ._bedrock.blocks import _Answer, _Download, _Json, _download_css, _file_list_blocks, _plain_json
-from ._bedrock.estimates import estimate_tokens, generation_cost, query_cost
-from ._bedrock.files import (
+from .._bedrock.blocks import _Answer, _Download, _Json, _download_css, _file_list_blocks, _plain_json
+from .._bedrock.estimates import estimate_tokens, generation_cost, query_cost
+from .._bedrock.files import (
     _LIST_LINK_BYTES, SavedFileList, _browser_type, _data_href, _link_life, _link_seconds, _list_target,
     _looks_like_path, _notebook_href, file_list_name, parse_list_link, presigned_url, write_file_list,
     FILE_LIST_LINKS as FILE_LIST_LINKS, file_list_lines as file_list_lines,
 )
-from ._bedrock.filters import (
+from .._bedrock.filters import (
     _is_bedrock_filter, build_filter, describe_sources, with_data_sources, DATA_SOURCE_KEY as DATA_SOURCE_KEY,
     data_source_filter as data_source_filter,
 )
-from ._bedrock.foundation_models import parse_models
-from ._bedrock.helpers import (
+from .._bedrock.foundation_models import parse_models
+from .._bedrock.helpers import (
     SEARCHABLE, _BEDROCK_META_PREFIX, _KB_ID_RE, _REFUSAL, _match_kb, _match_sources, _model_id, _session_expired,
     parse_kb_ref, source_name, split_metadata as split_metadata,
 )
-from ._bedrock.markdown import _MARKER_RE
-from ._bedrock.models import Citation, KBDocument, ModelInfo, Passage
-from ._bedrock.parsing import _span, match_expected, parse_document, parse_passage, parse_retrieve
-from ._bedrock.prices import (
+from .._bedrock.markdown import _MARKER_RE
+from .._bedrock.models import Citation, KBDocument, ModelInfo, Passage
+from .._bedrock.parsing import _span, match_expected, parse_document, parse_passage, parse_retrieve
+from .._bedrock.prices import (
     BEDROCK_PRICES, DEFAULT_MODEL, DEFAULT_RERANK_MODEL, MODEL_PRICES, _MODEL_ALIASES, _RERANK_ALIASES,
     _family_match, _per_million, short_model, GLOBAL_MODEL_PRICES as GLOBAL_MODEL_PRICES, model_price as model_price,
 )
-from ._bedrock.words import _TERM_RE, _highlight, best_snippet, question_terms
-from ._kit.analyzer import _BaseAnalyzer
-from ._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
-from ._kit.deps import _require
-from ._kit.errors import _Hint, _error_code, _error_name, _why
-from ._kit.fmt import (
+from .._bedrock.words import _TERM_RE, _highlight, best_snippet, question_terms
+from .._kit.analyzer import _BaseAnalyzer
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _Tone, _draws
+from .._kit.deps import _require
+from .._kit.errors import _Hint, _error_code, _error_name, _why
+from .._kit.fmt import (
     HOURS_PER_MONTH, _as_count, _as_int, _count, _fmt_dt, _in_zone, _plural, _utcnow, human_age, human_money,
     human_size, parse_time,
 )
-from ._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
-from ._kit.text import _clip, _esc, _marked, _text_bar, search_rank
-from ._kit.view import _BaseView, _friendly_errors, _which_prices
-from ._kit.window import (
+from .._kit.render import _CALL_RE, _TONES, _base_css, _call, _prose, _report_html
+from .._kit.text import _clip, _esc, _marked, _text_bar, search_rank
+from .._kit.view import _BaseView, _friendly_errors, _which_prices
+from .._kit.window import (
     _class_if, _Explorer, _for_window, _icon_url, _Picker, _row_button, _skeleton, _window_errors,
 )
 
