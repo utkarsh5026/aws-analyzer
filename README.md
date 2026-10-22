@@ -2002,12 +2002,13 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 > What leaves AWS: your question and what the tools return (function and bucket names, settings, counts, file names,
 > error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that
 > looks like a key or password hidden) go to the model's provider. With a model on Amazon Bedrock it stays in your
-> AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values,
-> secrets files packed with a function (`.env`, keys) and what's inside your S3 files are never read.
+> AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and
+> secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either
+> unless you turn on `read_files=True` (below).
 
 ### What it can call
 
-Seventeen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Seventeen tools in two toolkits (eighteen with `read_files=True`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
@@ -2032,10 +2033,15 @@ way a coding tool reads code with sed, an editor's go to definition and grep; "w
 | `find_files(location, match, since, until, min_size, max_size, limit)` | The files under a location that match a name glob, a time window or a size: how many, how big, the newest                    |
 | `folder_summary(location)`                            | What a location holds by file type, storage class and folder, the largest files, the monthly cost and findings                                       |
 | `file_info(location)`                                 | One file's headers, never its content: size, type, storage class (Glacier needs a restore), encryption (KMS needs `kms:Decrypt`), metadata, tags        |
+| `preview_file(location, rows)`                        | **Only with `read_files=True`.** What's inside one file, the same reading as `S3View().preview()`: a table's columns and first rows (csv, json lines, parquet, orc, avro, excel), a JSON file's start, a text file's first lines, a PDF's or Word file's text, an archive's files. Anything that looks like a secret is hidden; images, audio, video and binary files only give their type and size |
 | `s3_triggers(bucket, function, since, until, region)` | **S3 and Lambda joined**: which bucket events invoke which functions, on which keys; whether the function exists and lets the bucket invoke it; the files that arrived in the window and how many ran it (and which were missed: by the case of their ending, or a multipart upload a PUT-only notification ignores); and the function's runs and failures in that window |
 
 `s3_triggers` is there when the agent has both toolkits, as it does by default; `AgentView(toolkits=["s3"])` gives S3
-alone. No S3 tool reads what's inside a file.
+alone. By default no S3 tool reads what's inside a file. `AgentView(read_files=True)` adds `preview_file`, so the agent
+can answer "which columns does orders.parquet have?" or "why does this CSV fail to load?". What it reads is sent to the
+model's provider, so turn it on with a model on Amazon Bedrock, or with a provider your organisation allows for that
+data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
+`budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
 
 ### Safe and bounded
 
@@ -2046,7 +2052,8 @@ alone. No S3 tool reads what's inside a file.
 - **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
-  `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them.
+  `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
+  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2081,6 +2088,7 @@ core = AgentAnalyzer(
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
+    read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
 )
 agent = AgentView(core)
 
@@ -2098,6 +2106,7 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `asked_at`, `system_prompt`, `function_row`, `summarize_functions`, `summarize_health`, `summarize_errors`,
 `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `file_row`,
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
+`summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
 `trigger_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
@@ -2121,7 +2130,8 @@ read-only: `lambda:ListFunctions`, `lambda:GetFunction`, `lambda:ListEventSource
 `lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`,
 `logs:FilterLogEvents` and, for `regions="all"`, `ec2:DescribeRegions`. The S3 tools read through `S3Analyzer`:
 `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:GetObject` (for `file_info`'s HeadObject: the
-headers, never the file), `s3:GetObjectTagging`, the bucket settings [S3's permissions](#amazon-s3) list for
+headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too),
+`s3:GetObjectTagging`, the bucket settings [S3's permissions](#amazon-s3) list for
 `bucket_info` (`s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration`, `s3:GetBucketPublicAccessBlock`,
 `s3:GetBucketPolicyStatus`, `s3:GetBucketPolicy`, `s3:GetBucketOwnershipControls`,
 `s3:GetBucketObjectLockConfiguration`, `s3:GetLifecycleConfiguration`, `s3:GetReplicationConfiguration`,

@@ -20,7 +20,7 @@ from .._bedrock.prices import _per_million, short_model
 from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
 from .._kit.deps import _require
 from .._kit.errors import _Hint
-from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money
+from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money, human_size
 from .._kit.render import _base_css, _Look, _report_html
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
@@ -406,7 +406,7 @@ class AgentView(_BaseView):
         rows = [[fn.__name__, _first_line(fn.__doc__), ", ".join(reads.get(fn.__name__, ()))] for fn in core.tools()]
         blocks.append(_Table(["Tool", "What it does", "AWS reads"], rows, title="Tools", prose_cols=(1,),
                              sortable=False))
-        blocks.append(_Table(["Limit", "Per question", "What happens past it"], [
+        limits = [
             ["Tool calls", f"{budget.tool_calls:,}", "tools stop running; it answers with what it has"],
             ["Time", _duration(budget.seconds), "the same"],
             ["Model cost", human_money(budget.usd) if budget.usd is not None else "none",
@@ -414,7 +414,14 @@ class AgentView(_BaseView):
             ["Steps", f"{budget.steps:,}", "the agent stops (LangGraph's recursion limit)"],
             ["Log window", f"{budget.log_days:g} days", "a longer log read is refused; CloudWatch's counts still work"],
             ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
-        ], title="Budget", sortable=False))
+        ]
+        if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
+            limits += [
+                ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
+                ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
+            ]
+        blocks.append(_Table(["Limit", "Per question", "What happens past it"], limits, title="Budget",
+                             sortable=False))
         never = " ".join(t.privacy for t in core.toolkits if t.privacy)
         if not is_set_up:
             blocks.append(_Note(no_model_hint(core.model_id), "warn"))

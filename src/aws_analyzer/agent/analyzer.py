@@ -98,7 +98,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
     the default is DEFAULT_TOOLKITS: Lambda and S3, with s3_triggers joining them). The Lambda toolkit reads through
     LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
-    S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It looks in `region` (the
+    S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It never reads what's inside a
+    file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
+    looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it). It looks in `region` (the
     session's) or `regions` (a list, or 'all'); buckets are read wherever they are. The user's time zone, so "last night" means their night, is set_timezone()'s (or
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
@@ -136,6 +138,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         lambda_clients: dict[str, Any] | None = None,
         prices: dict[str, float] | None = None,
         s3_core: S3Analyzer | None = None,
+        read_files: bool = False,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -152,7 +155,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._guard = _Guard()
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
             toolkits, {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
-                       "s3": {"analyzer": s3_core}})]
+                       "s3": {"analyzer": s3_core, "read_files": read_files}})]
         self._graph: Any = None
         self._run: _Run | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None

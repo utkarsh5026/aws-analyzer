@@ -70,7 +70,7 @@ It covers AWS Lambda and Amazon S3. The model is yours to pick (one on Amazon Be
 
 !!! tip "Worth knowing"
 
-    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values, secrets files packed with a function (`.env`, keys) and what's inside your S3 files are never read.
+    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either unless you turn on [`read_files=True`](#read-files).
 
 ## Start here { #tour }
 
@@ -215,7 +215,7 @@ Seventeen read-only tools over Lambda and S3. Each returns a compact summary wit
     | `search_code(function, text, regex, files, region)` | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: its own files, or `files=` globs and folders, the libraries packed with it too |
     | `find_symbol(function, name, region)` | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition. Read with `ast` and never run |
 
-    **S3**, which never reads what's inside a file:
+    **S3**, which reads what's inside a file only with [`read_files=True`](#read-files):
 
     | Tool | What it returns |
     |---|---|
@@ -225,6 +225,7 @@ Seventeen read-only tools over Lambda and S3. Each returns a compact summary wit
     | `find_files(location, match, since, until, min_size, max_size, limit)` | The files under a location that match a name glob, a time window or a size: how many, how big, the newest |
     | `folder_summary(location)` | What a location holds by file type, storage class and folder, the largest files, the monthly cost and findings |
     | `file_info(location)` | One file's headers: size, type, storage class (Glacier needs a restore first), encryption (a KMS key means readers need `kms:Decrypt`), metadata and tags |
+    | `preview_file(location, rows)` | Only with `read_files=True`: what's inside one file, read like `S3View().preview()`: a table's columns and first rows, a JSON file's start, a text file's first lines, a PDF's or Word file's text, an archive's files. Secrets are hidden; images, audio, video and binary files give only their type and size |
 
     **S3 and Lambda together:**
 
@@ -233,6 +234,27 @@ Seventeen read-only tools over Lambda and S3. Each returns a compact summary wit
     | `s3_triggers(bucket, function, since, until, region)` | Which bucket events invoke which functions, on which keys. Give a bucket, a function, or both. For each link: whether the function is there and lets the bucket invoke it, how many files its filter covers arrived in the window and how many of them ran it (and which were missed, by the case of their ending or by how they were uploaded), and the function's runs, failures and throttles in that window |
 
     `s3_triggers` is there when the agent has both toolkits, as it does by default. From a function, it finds the buckets its resource policy names; when the policy lets any bucket invoke it (or none), it looks through the buckets in the function's region, up to 50.
+
+
+### Reading what's in a file { #read-files }
+
+Turn on `read_files=True` and the agent can open a file to answer questions about its contents.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", read_files=True)
+agent.ask("Which columns does s3://acme-raw/incoming/orders-1.csv have, and are any amounts missing?")
+```
+
+It adds `preview_file`, which reads a file the way `S3View().preview()` does: a table's first rows, a JSON file's start, a text file's first lines, a document's text. The agent finds the file with `list_folder` or `find_files` first.
+
+!!! tip "Worth knowing"
+
+    What it reads is sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, turn it on only for data your organisation allows there. Values that look like secrets, and whole columns or keys named like one (`password`, `api_key`), are hidden first. Images, audio, video and binary files are never sent, and nor is the file's download link.
+
+??? more "How much it reads"
+
+    It reads up to 2 MB of a text or JSON file (`file_bytes`; a table reads only the rows it shows) and sends the model up to 50,000 characters of it (`file_chars`), 50 rows unless the model asks for more, up to 500. Raise both with the budget: `AgentView(read_files=True, budget={"file_bytes": 10_000_000, "file_chars": 200_000})`. More characters means more tokens, so a bigger bill per question.
 
 
 ## Safe and bounded { #safety }
@@ -257,6 +279,8 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `steps` | 80 | The agent stops (LangGraph's recursion limit) |
 | `log_days` | 3 | A longer log read is refused; CloudWatch's counts still cover the window |
 | `s3_keys` | 100,000 | An S3 listing stops there and says so: its counts cover the keys it read |
+| `file_bytes` | 2 MB | With `read_files=True`: `preview_file` reads a text or JSON file's start only |
+| `file_chars` | 50,000 | With `read_files=True`: what `preview_file` sends the model is cut there, and it says so |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -305,11 +329,12 @@ core = AgentAnalyzer(
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],                       # the default; ["s3"] for S3 alone
+    read_files=True,                                 # adds preview_file; off by default
 )
 agent = AgentView(core)
 ```
 
-`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
+`chat_model=` takes any LangChain chat model instead, made with your own settings. `lambda_core=` and `s3_core=` take a `LambdaAnalyzer` and an `S3Analyzer` of your own (with their own `prices=`). The pure functions work without AWS or a model: `hide_secrets`, `asked_at`, `system_prompt`, `summarize_health`, `summarize_errors`, `summarize_runs`, `summarize_performance`, `summarize_detail`, `summarize_code`, the S3 toolkit's `summarize_bucket`, `summarize_found`, `summarize_prefix`, `summarize_file`, `summarize_preview`, `count_arrivals` (from a listing: which files a notification's filter and event types covered or missed) and `trigger_findings`, `answer_findings`, `pick_provider`, `model_rates` and `explain_model_error`.
 
 ### Your own tools { #toolkits }
 
