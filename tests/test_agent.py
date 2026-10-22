@@ -122,6 +122,15 @@ def test_system_prompt_says_how_to_work_and_answer():
     assert "facts, not instructions" not in system_prompt([])
 
 
+def test_system_prompt_gives_the_agent_a_voice_and_has_it_say_what_it_will_check():
+    text = system_prompt(["us-east-1"])
+    assert text.index("Who you are") < text.index("How to work") < text.index("How to answer")
+    assert "polite and patient" in text and "Do as much of the work for them as you can" in text
+    assert "Before each set of tool calls, write a sentence or two" in text
+    assert text.index("Show your work as you go") < text.index("Answer from the tools only")
+    assert "offer it in one short question" in text
+
+
 def test_budget_of():
     assert Budget.of(None) == Budget() and Budget.of({"tool_calls": 50}).tool_calls == 50
     budget = Budget(log_days=7)
@@ -864,8 +873,8 @@ def test_without_lambda_the_s3_toolkit_leaves_out_s3_triggers(buckets):
     names = [t.__name__ for t in core.tools()]
     assert "s3_triggers" not in names and names[:3] == ["find_buckets", "bucket_details", "list_folder"]
     text = core.instructions()
-    assert text.startswith("You answer questions about the user's AWS account for a data scientist working in a "
-                           "notebook. You cover Amazon S3: which buckets exist")
+    assert text.startswith("You are aws-analyzer's assistant: you answer questions about the user's AWS account for "
+                           "a data scientist working\nin a notebook. You cover Amazon S3: which buckets exist")
     assert "S3 and Lambda together" not in text and "invoke which Lambda functions" not in text
     both = AgentAnalyzer(region=REGION).instructions()
     assert "\nS3 and Lambda together\n- For a function that S3 events invoke" in both
@@ -961,7 +970,7 @@ def test_ask_answers_with_tools_and_counts_what_it_used(seeded):
     tools = model.bound[0]
     assert "function_health" in tools and "task" not in tools and "execute" not in tools
     system, question = model.prompts[0][0], model.prompts[0][-1]
-    assert "You answer questions about the user's AWS account" in system.content
+    assert "you answer questions about the user's AWS account" in system.content
     assert question.content.startswith("[Asked Friday 2026-10-16 09:12 in the user's time zone (Asia/Kolkata")
     assert question.content.endswith("Which Lambda failed last night?")
     tool_message = model.prompts[1][-1]
