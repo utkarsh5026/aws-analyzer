@@ -26,6 +26,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
+- Agent: the agent is friendlier and shows its work. Before each set of tool calls it says what it's about to
+  check and why, and when a result changes its plan it says what it found and what it'll look at next, so
+  `chat()` reads like a coding assistant at work. It explains AWS terms in plain words, picks the likeliest
+  meaning of a vague question and says so instead of asking, and ends an answer by offering the obvious next
+  step. A greeting or "what can you do?" gets a short answer with questions to try.
 - Lambda: `code()`, `how_it_works()` and the agent keep the last two packages they downloaded. Reading another file
   of the same code no longer downloads it again. New code has a new hash, so it's always downloaded fresh.
   ([#128](https://github.com/utkarsh5026/aws-analyzer/pull/128))
