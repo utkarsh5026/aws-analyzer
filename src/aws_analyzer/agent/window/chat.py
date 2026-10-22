@@ -158,6 +158,7 @@ _TOOL_WORDS = {
     "find_files": _ToolWords("finding files in {t}", "found files in {t}", "a bucket"),
     "folder_summary": _ToolWords("summing up {t}", "summed up {t}", "a folder"),
     "file_info": _ToolWords("reading {t}", "read {t}", "a file"),
+    "preview_file": _ToolWords("reading what's in {t}", "read what's in {t}", "a file"),
     "s3_triggers": _ToolWords("checking what {t} triggers", "checked what {t} triggers", "each bucket"),
 }
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key")

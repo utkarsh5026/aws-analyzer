@@ -51,12 +51,13 @@ from aws_analyzer.agent import (
     summarize_errors,
     summarize_file,
     summarize_health,
+    summarize_preview,
     summarize_source,
     system_prompt,
     trigger_findings,
 )
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
-from aws_analyzer.s3 import EventNotification, ObjectInfo
+from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
 from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs
 
 NOW = datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc)
@@ -709,6 +710,32 @@ def test_summarize_file_says_what_stops_a_reader_and_hides_secrets():
     assert out["tags"] == "not read: needs s3:GetObjectTagging"
 
 
+def test_summarize_preview_hides_secrets_and_never_sends_a_link_or_pixels():
+    pd = pytest.importorskip("pandas")
+    table = Preview(uri="s3://raw/a.csv", kind="table", size=40, format="csv",
+                    data=pd.DataFrame({"id": [1, 2], "db_password": ["hunter2", "x"], "note": ["ok", None]}),
+                    info={"url": "https://raw.s3.amazonaws.com/a.csv?X-Amz-Signature=abc", "rows": 2})
+    out = summarize_preview(table)
+    assert out["columns"][1] == {"name": "db_password", "type": str(table.data.dtypes.iloc[1])}
+    assert out["rows"] == [[1, "[hidden]", "ok"], [2, "[hidden]", None]]
+    assert out["about_the_file"] == {"rows": 2} and "X-Amz-Signature" not in json.dumps(out)
+
+    lines = Preview(uri="s3://raw/app.log", kind="text", size=90, format="text", truncated=True,
+                    data=["start", "-----BEGIN RSA PRIVATE KEY-----", "MIIEow", "-----END RSA PRIVATE KEY-----"])
+    out = summarize_preview(lines)
+    assert out["lines"] == ["start", "-----BEGIN RSA PRIVATE KEY----- [hidden]"] and out["only_the_start"] is True
+
+    nested = {"user": {"token": "abc", "items": list(range(100))}}
+    out = summarize_preview(Preview(uri="s3://raw/c.json", kind="json", size=500, format="json", data=nested), rows=3)
+    assert out["value"] == {"user": {"token": "[hidden]", "items": [0, 1, 2]}}
+
+    picture = summarize_preview(Preview(uri="s3://raw/cat.png", kind="image", size=9, format="image", data=b"PNG"))
+    assert picture["content"].startswith("It's an image") and "PNG" not in json.dumps(picture)
+
+    long = summarize_preview(Preview(uri="s3://raw/big.txt", kind="text", size=9, data=["x" * 100] * 50), chars=500)
+    assert long["cut_at_chars"] == 500 and len(long["content_start"]) == 500 and "lines" not in long
+
+
 S3_POLICY = {"Version": "2012-10-17", "Statement": [
     {"Sid": "s3-acme-raw", "Effect": "Allow", "Principal": {"Service": "s3.amazonaws.com"},
      "Action": "lambda:InvokeFunction", "Resource": ETL_ARN,
@@ -787,6 +814,25 @@ def test_s3_tools_read_buckets_folders_and_files_but_never_their_contents(bucket
 
     everything = json.dumps([found, details, listing, files, summary, info])
     assert "SECRET-ROW" not in everything and "sk-123456" not in everything
+
+
+def test_preview_file_reads_a_file_only_when_read_files_is_on(buckets):
+    assert "preview_file" not in [t.__name__ for t in with_s3().tools()]
+    assert "AgentView(read_files=True)" in with_s3().instructions()
+
+    core = with_s3(read_files=True)
+    assert "preview_file reads what's inside one file" in core.instructions()
+    out = tool(core, "preview_file")("s3://acme-raw/incoming/orders-1.csv")
+    assert [c["name"] for c in out["columns"]] == ["id", "amount"] and out["rows"] == [[1, "SECRET-ROW"]]
+    assert out["format"] == "csv" and "_next" not in out
+    readme = tool(core, "preview_file")("acme-raw/README.md")
+    assert readme["shown_as"] == "text" and readme["lines"] == ["# raw"]
+    gone = tool(core, "preview_file")("s3://acme-raw/incoming/orders-3.csv")
+    assert gone["error"].startswith("No file at") and gone["close_keys"]
+    assert core._guard.blocked == []
+
+    small = with_s3(read_files=True, budget={"file_chars": 50})
+    assert tool(small, "preview_file")("s3://acme-raw/incoming/orders-1.csv")["cut_at_chars"] == 50
 
 
 def test_s3_triggers_joins_a_bucket_to_the_function_it_invokes(buckets):

@@ -33,6 +33,8 @@ class Budget:
         steps       LangGraph's recursion limit: model calls, tool calls and the harness's own steps together
         log_days    the longest window a log read (errors, logs, performance) may cover
         s3_keys     the most keys one S3 listing may read (find_files, folder_summary, s3_triggers)
+        file_bytes  the most of a text or JSON file preview_file reads (tables read only the rows they show)
+        file_chars  the most characters of a file's content preview_file hands the model
     """
 
     tool_calls: int = 25
@@ -41,6 +43,8 @@ class Budget:
     steps: int = 80
     log_days: float = 3.0
     s3_keys: int = 100_000
+    file_bytes: int = 2 * 1024 * 1024
+    file_chars: int = 50_000
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:

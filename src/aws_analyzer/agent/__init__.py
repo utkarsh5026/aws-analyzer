@@ -101,6 +101,7 @@ from .toolkits.s3_tools import (
     summarize_found,
     summarize_listing,
     summarize_prefix,
+    summarize_preview,
     summarize_triggers,
     trigger_findings,
 )
@@ -174,6 +175,7 @@ __all__ = [
     "summarize_found",
     "summarize_prefix",
     "summarize_file",
+    "summarize_preview",
     "count_arrivals",
     "trigger_findings",
     "summarize_triggers",

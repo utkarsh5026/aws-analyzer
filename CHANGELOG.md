@@ -9,6 +9,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Agent: `AgentView(read_files=True)` lets the agent read what's inside an S3 file. A new tool, `preview_file`, reads
+  a file the way `S3View().preview()` does (a table's columns and first rows, a JSON file's start, a text file's first
+  lines, a PDF's or Word file's text, an archive's files), so you can ask "which columns does orders.parquet have?" or
+  "why does this CSV fail to load?". It's off by default, because what it reads is sent to the model's provider.
+  Anything that looks like a secret is hidden, and images, audio, video, binary files and download links are never
+  sent. Two new budget limits cap it: `file_bytes` (2 MB read) and `file_chars` (50,000 characters sent).
+  ([#133](https://github.com/utkarsh5026/aws-analyzer/pull/133))
+
 ## [0.28.0] - 2026-10-22
 
 ### Changed
