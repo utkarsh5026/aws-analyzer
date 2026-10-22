@@ -107,6 +107,7 @@ from .toolkits.s3_tools import (
 from .toolkits.lambda_tools import (
     TOOL_READS,
     LambdaToolkit,
+    code_locations,
     function_row,
     summarize_code,
     summarize_detail,
@@ -115,6 +116,9 @@ from .toolkits.lambda_tools import (
     summarize_health,
     summarize_performance,
     summarize_runs,
+    summarize_search,
+    summarize_source,
+    summarize_symbol,
 )
 from .view import AgentView
 
@@ -159,6 +163,10 @@ __all__ = [
     "summarize_performance",
     "summarize_detail",
     "summarize_code",
+    "summarize_source",
+    "summarize_search",
+    "summarize_symbol",
+    "code_locations",
     "file_row",
     "summarize_buckets",
     "summarize_bucket",

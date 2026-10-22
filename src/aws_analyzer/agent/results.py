@@ -23,7 +23,7 @@ _SECRETS = (
     (re.compile(r"(?i)(-----BEGIN [A-Z ]*PRIVATE KEY-----).*?(-----END [A-Z ]*PRIVATE KEY-----|$)", re.S),
      r"\1 [hidden]"),
     (re.compile(r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|"
-                r"credential)[\w-]*)(\"?\s*[:=]\s*\"?)([^\s\"',;&}]+)"), r"\1\2[hidden]"),
+                r"credential)[\w-]*)([\"']?\s*[:=]\s*[\"']?)([^\s\"',;&}]+)"), r"\1\2[hidden]"),
     (re.compile(r"(?i)([a-z][a-z0-9+.-]*://[^\s:/@]+:)([^\s@/]+)(@)"), r"\1[hidden]\3"),
 )
 

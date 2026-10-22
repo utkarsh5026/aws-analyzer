@@ -562,12 +562,14 @@ lam.log_events("orders-etl", since="1h", pattern='"KeyError"').to_df()
 runs = lam.log_runs("orders-etl", since="24h").runs   # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                      # CodeFile: path, size, compressed
+lam.search_code("orders-etl", "customer_id")      # CodeSearch: every line that has it, like grep -rn
+lam.find_symbol("orders-etl", "load_orders")      # SymbolReport: where it's defined and every line that uses it
 cmap = lam.code_map("orders-etl")                 # CodeMap: .steps, .aws, .env, .event, .imports, .functions
 cmap.to_df()                                      # one row per AWS call: service, operation, permission, where
 lam.download("orders-etl").path                   # PackageDownload: where it was saved, size, files, sha256_matches
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files), `search_package` and `find_symbol_in` (`search_code()` and `find_symbol()` on a .zip's bytes), `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
 
 ```python
 from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory

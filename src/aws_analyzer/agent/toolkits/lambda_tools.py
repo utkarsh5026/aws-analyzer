@@ -1,9 +1,13 @@
 """
-The Lambda toolkit: seven tools over LambdaAnalyzer, building blocks rather than one per question. Which functions
-there are (find_functions), how every function did in a window, from CloudWatch (function_health), and one function's
+The Lambda toolkit: ten tools over LambdaAnalyzer, building blocks rather than one per question. Which functions
+there are (find_functions), how every function did in a window, from CloudWatch (function_health), one function's
 errors, runs, run times, settings and code (function_errors, function_logs, function_performance, function_details,
-function_code). The summarize_* functions turn what LambdaAnalyzer returns into the compact dicts the model reads;
-they're pure, so they run on any Function, ErrorReport, LogPage, Performance, FunctionDetail or CodeMap.
+function_code), and its source read the way coding tools read code: a file's lines like sed -n (function_source),
+every file searched like grep -rn (search_code) and a Python name's definition and uses like a language server
+(find_symbol). The summarize_* functions turn what LambdaAnalyzer returns into the compact dicts the model reads;
+they're pure, so they run on any Function, ErrorReport, LogPage, Performance, FunctionDetail, CodeMap, CodePackage,
+CodeSearch or SymbolReport. code_locations() finds where in the package a logged error
+happened (its traceback's frames), which is how the model goes from the logs to the lines of code that failed.
 
 TOOL_READS is what each tool reads, for tools() and README: what its LambdaAnalyzer method calls. The analyzer's
 types are imported for the type hints only, since the analyzer loads when the first tool runs (_lambda_module).
@@ -30,7 +34,8 @@ from .base import Toolkit
 
 if TYPE_CHECKING:
     from ...lambda_functions import (
-        CodeMap, ErrorReport, Function, FunctionDetail, FunctionMetrics, LambdaAnalyzer, LogPage, Performance,
+        CodeMap, CodePackage, CodeSearch, ErrorGroup, ErrorReport, Function, FunctionDetail, FunctionMetrics,
+        LambdaAnalyzer, LogPage, LogRun, Performance, SymbolReport,
     )
 
 TOOL_READS: dict[str, tuple[str, ...]] = {
@@ -48,6 +53,9 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
                          "lambda:ListVersionsByFunction", "lambda:ListProvisionedConcurrencyConfigs",
                          "lambda:GetRuntimeManagementConfig", "logs:DescribeLogGroups", "cloudwatch:GetMetricData"),
     "function_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
+    "function_source": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
+    "search_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
+    "find_symbol": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
 }
 
 
@@ -62,6 +70,38 @@ def _lambda_module() -> Any:
 
 
 _NEAR_TIMEOUT = 0.9
+
+_PYTHON_FRAME_RE = re.compile(r'File \\?"/var/task/(?P<file>[^"\\]+)\\?", line (?P<line>\d+)(?:, in (?P<name>[\w<>.]+))?')
+
+_STACK_FRAME_RE = re.compile(r"(?:\bat (?P<name>[\w$.<>]+) \()?(?:file://)?/var/task/(?P<file>[^\s:()\"\\]+):(?P<line>\d+)")
+
+_IN_CODE_FRAMES = 6
+
+
+def code_locations(text: str) -> list[dict[str, Any]]:
+    """
+    Where in a function's own code a logged error happened, from the traceback or stack trace in the log line (as
+    text, or inside a JSON line's stackTrace): the frames in its deployment package, which Lambda unpacks in
+    /var/task/, in the order they were called, so the handler's frame comes first and the line that raised last,
+    as {'file', 'line', 'function'} (Python prints its frames in that order; JavaScript and Ruby print the newest
+    first, so theirs are turned round). Frames in the runtime, layers or Python itself aren't the package's and
+    are left out; a trace longer than _IN_CODE_FRAMES keeps its first and last frames, where the handler called in
+    and where it broke. [] when the line has no trace.
+    """
+    frames = list(_PYTHON_FRAME_RE.finditer(text))
+    if not frames:
+        frames = list(reversed(list(_STACK_FRAME_RE.finditer(text))))
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for match in frames:
+        place = (match["file"], int(match["line"]))
+        if place not in seen:
+            seen.add(place)
+            found.append({"file": place[0], "line": place[1], "function": match["name"]})
+    if len(found) <= _IN_CODE_FRAMES:
+        return found
+    half = _IN_CODE_FRAMES // 2
+    return found[:half] + found[-half:]
 
 
 def _metrics_dict(m: FunctionMetrics | None) -> dict[str, Any] | None:
@@ -161,19 +201,31 @@ def summarize_health(functions: list[Function], metrics: dict[str, FunctionMetri
     return out
 
 
+def _cause(group: ErrorGroup) -> dict[str, Any]:
+    """
+    One cause of errors as the model reads it, with where in the code it happened when its example has a trace.
+    """
+    cause = {"kind": group.kind, "message": hide_secrets(_clip(group.message, 200)), "count": group.count,
+             "first": group.first, "last": group.last, "example": hide_secrets(_clip(group.example, 300)),
+             "request_ids": group.request_ids[:3]}
+    in_code = code_locations(group.example)
+    if in_code:
+        cause["in_code"] = in_code
+    return cause
+
+
 def summarize_errors(report: ErrorReport, *, causes: int = 8) -> dict[str, Any]:
     """
     function_errors()'s answer: a function's errors in a window, grouped by cause, most frequent first, with an
-    example line (secrets hidden) and a few request IDs each, CloudWatch's counts and the analyzer's findings.
+    example line (secrets hidden), a few request IDs and, when the example has a traceback, the file and line in
+    the code each happened at (in_code), CloudWatch's counts and the analyzer's findings.
     """
     lf = _lambda_module()
     out: dict[str, Any] = {
         "function": report.function.name, "region": report.function.region,
         "window": _window(report.since, report.until),
         "cloudwatch": _metrics_dict(report.metrics), "error_lines_found": report.errors_found,
-        "causes": [{"kind": g.kind, "message": hide_secrets(_clip(g.message, 200)), "count": g.count,
-                    "first": g.first, "last": g.last, "example": hide_secrets(_clip(g.example, 300)),
-                    "request_ids": g.request_ids[:3]} for g in report.groups[:causes]],
+        "causes": [_cause(group) for group in report.groups[:causes]],
         "cut_short": report.truncated,
         "findings": [{"level": level, "message": hide_secrets(text)} for level, text in lf.error_findings(report)],
     }
@@ -186,10 +238,34 @@ def summarize_errors(report: ErrorReport, *, causes: int = 8) -> dict[str, Any]:
     return out
 
 
+def _run_entry(run: LogRun, lines: int) -> dict[str, Any]:
+    """
+    One run as the model reads it: its status, run time, memory, its last lines (secrets hidden) and, when one of
+    its lines has a traceback, where in the code it failed.
+    """
+    report = run.report
+    entry: dict[str, Any] = {
+        "request_id": run.request_id, "start": run.start, "status": run.status,
+        "duration_ms": round(report.duration) if report else None,
+        "memory_used_mb": report.max_memory if report else None,
+        "memory_mb": report.memory if report else None, "cold_start": run.cold,
+        "error": hide_secrets(run.error[1]) if run.error else None,
+        "lines": [f"{e.time.astimezone(timezone.utc):%H:%M:%SZ} {hide_secrets(_clip(e.message.strip(), 400))}"
+                  for e in run.events[-lines:]],
+    }
+    in_code = code_locations("\n".join(event.message for event in run.events))
+    if in_code:
+        entry["in_code"] = in_code
+    if len(run.events) > lines:
+        entry["lines_left_out"] = len(run.events) - lines
+    return entry
+
+
 def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str, Any]:
     """
     function_logs()'s answer: the newest runs in a window (those matching the search, when there is one), each
-    with its status, run time, memory and its last lines (secrets hidden).
+    with its status, run time, memory, its last lines (secrets hidden) and, when it logged a traceback, the file
+    and line in the code it failed at (in_code).
     """
     found = page.runs
     out: dict[str, Any] = {
@@ -200,17 +276,7 @@ def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str
         "cut_short": page.truncated,
     }
     for run in found[:runs]:
-        report = run.report
-        entry = {"request_id": run.request_id, "start": run.start, "status": run.status,
-                 "duration_ms": round(report.duration) if report else None,
-                 "memory_used_mb": report.max_memory if report else None,
-                 "memory_mb": report.memory if report else None, "cold_start": run.cold,
-                 "error": hide_secrets(run.error[1]) if run.error else None,
-                 "lines": [f"{e.time.astimezone(timezone.utc):%H:%M:%SZ} {hide_secrets(_clip(e.message.strip(), 400))}"
-                           for e in run.events[-lines:]]}
-        if len(run.events) > lines:
-            entry["lines_left_out"] = len(run.events) - lines
-        out["runs"].append(entry)
+        out["runs"].append(_run_entry(run, lines))
     if len(found) > runs:
         out["more_runs"] = len(found) - runs
     if page.truncated and page.covered_from:
@@ -307,6 +373,164 @@ def summarize_code(cmap: CodeMap) -> dict[str, Any]:
     }
 
 
+_LISTED_FILES = 40
+
+_LINES_AROUND = 12
+
+_MOST_LINES = 300
+
+_LINE_CHARACTERS = 300
+
+_SEARCH_MATCHES = 40
+
+_SYMBOL_USES = 40
+
+_LINES_RE = re.compile(r"^\s*(\d+)\s*(?:[-,:]\s*(\d*)\s*)?$")
+
+
+def _numbered(lines: list[str], numbers: list[int], marked: set[int]) -> list[str]:
+    """
+    Lines by number (1-based) as '42: text', secrets hidden, '>> ' before the marked ones and '...' where numbers
+    skip.
+    """
+    numbered = []
+    previous = None
+    for number in numbers:
+        if previous is not None and number > previous + 1:
+            numbered.append("...")
+        text = hide_secrets(_clip(lines[number - 1].rstrip(), _LINE_CHARACTERS))
+        numbered.append(f"{'>> ' if number in marked else ''}{number}: {text}")
+        previous = number
+    return numbered
+
+
+def _asked_lines(spec: str, total: int) -> tuple[int, int, set[int]]:
+    """
+    The lines a function_source(lines=...) call asks for, as (first, last, marked): '' the file's start, '42' the
+    lines around line 42 (marked), '150-300' (or sed's '150,300') that range and '150-' from line 150 on, each at
+    most _MOST_LINES long. A ValueError says what it takes.
+    """
+    if not spec.strip():
+        return 1, min(total, _MOST_LINES), set()
+    match = _LINES_RE.match(spec)
+    if not match:
+        raise ValueError(f"lines={spec!r} isn't a line or a range: give one line ('42') or a range ('150-300')")
+    first = int(match[1])
+    if match[2] is None:
+        return max(1, first - _LINES_AROUND), min(total, first + _LINES_AROUND), {first}
+    last = int(match[2]) if match[2] else first + _MOST_LINES - 1
+    if last < first:
+        raise ValueError(f"lines={spec!r} ends before it starts: give a range like '150-300'")
+    return first, min(total, last, first + _MOST_LINES - 1), set()
+
+
+def summarize_source(pkg: CodePackage, *, lines: str = "") -> dict[str, Any]:
+    """
+    function_source()'s answer: lines of the file a CodePackage holds (code() read it; nothing is run), numbered,
+    with anything that looks like a secret hidden, like sed -n: lines='42' gives the lines around line 42, marked;
+    '150-300' that range, '150-' from 150 on; '' the file's start; at most _MOST_LINES at a time, and `next` says the
+    range after it. A container image, a binary or a secrets file gives a note instead.
+    """
+    fn = pkg.function
+    out: dict[str, Any] = {"function": fn.name, "region": fn.region, "handler": fn.handler, "file": pkg.shown_file}
+    if pkg.note or pkg.source is None:
+        out["note"] = pkg.note or "The package holds no file with the handler's code."
+        return out
+    text_lines = pkg.source.splitlines()
+    total = len(text_lines)
+    first, last, marked = _asked_lines(lines, total)
+    out["total_lines"] = total
+    if first > total or any(number > total for number in marked):
+        out["note"] = (f"The file has {total:,} lines, so there is no line {max(marked or {first})}: the code may have "
+                       "changed since that line was logged.")
+        return out
+    out["showing"] = f"lines {first}-{last}" if last else "an empty file"
+    out["lines"] = _numbered(text_lines, list(range(first, last + 1)), marked)
+    if last < total:
+        out["next"] = f"{last + 1}-{min(total, last + _MOST_LINES)}"
+    if pkg.source_truncated:
+        out["cut_short"] = "only the start of the file was read (200 KB)"
+    return out
+
+
+def _excerpts(matches: list[Any]) -> list[dict[str, Any]]:
+    """
+    A search's matches as the model reads them: one entry per file, in order, its matching lines marked and the
+    lines around them, overlapping context shown once.
+    """
+    by_file: dict[str, tuple[dict[int, str], set[int]]] = {}
+    for match in matches:
+        texts, marked = by_file.setdefault(match.file, ({}, set()))
+        texts.update(dict(match.context))
+        marked.add(match.line)
+    excerpts = []
+    for path, (texts, marked) in by_file.items():
+        numbers = sorted(texts)
+        lines = [""] * numbers[-1]
+        for number, text in texts.items():
+            lines[number - 1] = text
+        excerpts.append({"file": path, "matches": len(marked), "lines": _numbered(lines, numbers, marked)})
+    return excerpts
+
+
+def summarize_search(search: CodeSearch) -> dict[str, Any]:
+    """
+    search_code()'s answer, like grep -rn: how many lines matched in how many of the files it read, then each file's
+    matching lines (marked, secrets hidden) with the lines around them, and the files it couldn't read.
+    """
+    fn = search.function
+    out: dict[str, Any] = {"function": fn.name, "region": fn.region, "search": search.pattern, "regex": search.regex,
+                           "files": search.files or "its own source files"}
+    if search.note:
+        out["note"] = search.note
+        return out
+    out.update(files_searched=search.files_searched, matching_lines=search.total, files_matched=search.files_matched,
+               matches=_excerpts(search.matches))
+    if search.truncated:
+        out["more_matches"] = search.total - len(search.matches)
+        out["cut_short"] = True
+    if search.skipped:
+        out["not_read"] = search.skipped[:10]
+    if not search.total and not search.files:
+        out["hint"] = ("Nothing in its own files: files='*' searches the libraries packed with it too, and "
+                       "regex=True with '(?i)' ignores case.")
+    return out
+
+
+def summarize_symbol(report: SymbolReport) -> dict[str, Any]:
+    """
+    find_symbol()'s answer, like a language server: where a Python name is defined (file, lines, signature,
+    decorators and the first line of its docstring) and the lines that call, import or refer to it, each with the
+    function it's in (secrets hidden).
+    """
+    fn = report.function
+    out: dict[str, Any] = {"function": fn.name, "region": fn.region, "name": report.name}
+    if report.note:
+        out["note"] = report.note
+        return out
+    out["definitions"] = []
+    for symbol in report.definitions:
+        entry: dict[str, Any] = {"name": symbol.name, "kind": symbol.kind, "file": symbol.file, "line": symbol.line,
+                                 "end_line": symbol.end_line, "signature": hide_secrets(symbol.signature)}
+        if symbol.decorators:
+            entry["decorators"] = symbol.decorators
+        if symbol.doc:
+            entry["doc"] = hide_secrets(_clip(symbol.doc, 200))
+        out["definitions"].append(entry)
+    out["uses"] = [{"file": use.file, "line": use.line, "kind": use.kind, "within": use.within,
+                    "text": hide_secrets(_clip(use.text, _LINE_CHARACTERS))} for use in report.uses]
+    out["total_uses"] = report.total_uses
+    if report.total_uses > len(report.uses):
+        out["more_uses"] = report.total_uses - len(report.uses)
+    out["python_files_read"] = report.files_read
+    if report.skipped:
+        out["not_read"] = report.skipped[:10]
+    if not report.definitions:
+        out["hint"] = ("No definition in its own Python files: it may come from a library or Python itself, or be "
+                       "spelled differently. search_code finds every line that mentions it.")
+    return out
+
+
 _PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}
 _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:ListEventSourceMappings",
                          "account": "lambda:GetAccountSettings", "logs": "logs:DescribeLogGroups",
@@ -326,8 +550,12 @@ class LambdaToolkit(Toolkit):
     title = "Lambda"
     covers = ("AWS Lambda: which functions exist, how often they ran, failed, were throttled or ran close to their "
               "timeout, their errors and logs run by run, their run times and memory, their settings, triggers and "
-              "estimated cost, and what their code calls.")
-    privacy = "Environment variable values are never read."
+              "estimated cost, what their code calls, and their source code, read line by line, searched across "
+              "files and followed from a call to its definition, so an error in the logs can be traced to the line "
+              "that raised it.")
+    privacy = ("Environment variable values are never read. Lines of code the agent reads (function_source, "
+               "search_code, find_symbol) go to the model with anything that looks like a secret hidden; secrets "
+               "files (.env, keys) are never read.")
     reads = TOOL_READS
     service = "lambda"
     services = {"FilterLogEvents": "logs", "DescribeLogGroups": "logs", "DescribeLogStreams": "logs",
@@ -359,16 +587,24 @@ AWS Lambda
   functions that matter. Don't read logs function by function to find which ones failed.
 - Log reads (function_errors, function_logs, function_performance) cover at most {budget.log_days:g} days; CloudWatch's
   counts (function_health) cover longer windows. If a tool refuses a window, explain why and what the user can do.
+- To find out why a function fails, follow its logs into its code: function_errors and function_logs give each
+  error's in_code (the file and line its traceback names, the line that raised last), and function_source(function,
+  file=..., lines='42') shows the lines around it; lines='150-300' reads any range. find_symbol says where a Python
+  function, class or name is defined and every line that uses it, so you can follow a call into the function it
+  calls; search_code finds a text or a regular expression in every file (an error message, a table, a variable).
+  Read the code before saying what caused an error, quote the line, and say what to change. function_code says what
+  the code calls and where.
 - Name functions exactly as the tools return them."""
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
-        find_functions, function_health, function_errors, function_logs, function_performance, function_details
-        and function_code: methods whose type hints and docstrings tell the model how to call them, each
-        reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
+        find_functions, function_health, function_errors, function_logs, function_performance, function_details,
+        function_code, function_source, search_code and find_symbol: methods whose type hints and docstrings tell the model how to call them,
+        each reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
         return [self.find_functions, self.function_health, self.function_errors, self.function_logs,
-                self.function_performance, self.function_details, self.function_code]
+                self.function_performance, self.function_details, self.function_code, self.function_source,
+                self.search_code, self.find_symbol]
 
     def find_functions(self, match: str = "", regions: str = "") -> dict[str, Any]:
         """
@@ -507,6 +743,102 @@ AWS Lambda
             out["_next"] = [(self._next_for(cmap.function, "how_it_works"), "how the code works, step by step")]
         return out
 
+    def function_source(self, function: str, file: str = "", lines: str = "", region: str = "") -> dict[str, Any]:
+        """
+        One function's source code, numbered line by line, from its deployment package, like sed -n (nothing is
+        run, and anything that looks like a secret is hidden). file: a path in the package, such as an error's
+        in_code file, a definition's file from find_symbol, a match's file from search_code or one from this tool's
+        files list; empty for the file that holds the handler. lines: '42' for the lines around line 42 (the line an
+        error's in_code names), '150-300' for a range, '150-' from line 150 on, empty for the file's start; at most
+        300 lines a call, and next says the range after it. Use it after function_errors or function_logs to read
+        the code that failed. region: empty for the default region.
+        """
+        core = self.analyzer
+        try:
+            pkg = core.code(function, file=file or None, region=region or None)
+        except ValueError as exc:
+            if not file or not str(exc).startswith("No file"):
+                raise
+            return self._no_such_file(core.code(function, region=region or None), file)
+        out = summarize_source(pkg, lines=lines)
+        if not file:
+            self._add_files(out, pkg)
+        out["_summary"] = _source_summary(out)
+        out["_next"] = [(self._next_for(pkg.function, "code", pkg.shown_file), "the whole file, in colour")]
+        return out
+
+    def search_code(self, function: str, text: str, regex: bool = False, files: str = "",
+                    region: str = "") -> dict[str, Any]:
+        """
+        Every line of one function's code that contains a text, like grep -rn across its files: each match with
+        its file, line number and the lines around it (secrets hidden; nothing is run). text: what to find, such as
+        a variable, an error message, a table name or an environment variable (case-sensitive). regex: true to
+        read text as a Python regular expression ('(?i)' first ignores case). files: empty for the function's own
+        source files, or globs, folders or paths separated by commas ('*.py', 'app/', 'requests/*') to search
+        those, the libraries packed with it too. Works for every runtime. region: empty for the default region.
+        """
+        core = self.analyzer
+        search = core.search_code(function, text, regex=regex, files=files or None, limit=_SEARCH_MATCHES,
+                                  region=region or None)
+        out = summarize_search(search)
+        if search.note:
+            out["_summary"] = _clip(search.note, 80)
+        else:
+            out["_summary"] = (f"{_plural(search.total, 'line')} in {_plural(search.files_matched, 'file')} "
+                               f"of {search.files_searched:,}")
+        if search.matches:
+            out["_next"] = [(self._next_for(search.function, "code", search.matches[0].file),
+                             "the first file it was found in, in colour")]
+        return out
+
+    def find_symbol(self, function: str, name: str, region: str = "") -> dict[str, Any]:
+        """
+        Where a name is defined in one Python function's code and every line that uses it, like a language
+        server's go to definition and find references: each definition's file, lines, signature and docstring, and
+        each call, import or reference with the function it's in (read with Python's ast module; nothing is run).
+        name: a function, class, method or module-level name ('load_orders'), or a dotted one ('Orders.load',
+        'store.load_orders') to pick one. Then read a definition with function_source(file=..., lines='17-60').
+        For other runtimes, use search_code. region: empty for the default region.
+        """
+        core = self.analyzer
+        report = core.find_symbol(function, name, limit=_SYMBOL_USES, region=region or None)
+        out = summarize_symbol(report)
+        if report.note:
+            out["_summary"] = _clip(report.note, 80)
+            return out
+        places = ", ".join(f"{d.file}:{d.line}" for d in report.definitions[:2]) or "not defined in its own files"
+        out["_summary"] = f"{report.name}: {places}; {_plural(report.total_uses, 'use')}"
+        if report.definitions:
+            out["_next"] = [(self._next_for(report.function, "code", report.definitions[0].file),
+                             "the file it's defined in, in colour")]
+        return out
+
+    def _add_files(self, out: dict[str, Any], pkg: CodePackage) -> None:
+        """
+        Adds the package's own source files to a function_source() answer, the most the model can pick from.
+        """
+        files = _lambda_module().source_files(pkg)
+        out["files"] = files[:_LISTED_FILES]
+        if len(files) > _LISTED_FILES:
+            out["more_files"] = len(files) - _LISTED_FILES
+        others = len(pkg.files) - len(files)
+        if others:
+            out["other_files"] = f"{others:,} more: libraries, data and binaries packed with it"
+
+    def _no_such_file(self, pkg: CodePackage, file: str) -> dict[str, Any]:
+        """
+        function_source()'s answer when the package has no such file: the closest names, and its files.
+        """
+        files = _lambda_module().source_files(pkg)
+        close = difflib.get_close_matches(file, files, n=3)
+        out: dict[str, Any] = {
+            "function": pkg.function.name, "error": f"No file {file!r} in {pkg.function.name}'s package.",
+            "close_files": close, "hint": "Use a path from files; the code may have changed since the error.",
+        }
+        self._add_files(out, pkg)
+        out["_summary"] = f"no file {file}"
+        return out
+
     def not_found(self, exc: ClientError, arguments: dict[str, Any]) -> dict[str, Any] | None:
         """
         A tool's answer when a function isn't there: the closest names in that region.
@@ -570,6 +902,16 @@ def _cause_label(cause: dict[str, Any], kinds: Counter) -> str:
     if kinds[kind] > 1 and rest:
         return f"{kind} ({_clip(rest, 40)}) ×{cause['count']}"
     return f"{kind} ×{cause['count']}"
+
+
+def _source_summary(out: dict[str, Any]) -> str:
+    """
+    A function_source() call as the report's one line says it: the file and what of it was shown.
+    """
+    file = out.get("file") or "no file"
+    if "note" in out:
+        return f"{file}: {_clip(str(out['note']), 60)}"
+    return f"{file}, {out.get('showing', 'nothing shown')} of {out['total_lines']:,}"
 
 
 def _since(start: datetime) -> str:

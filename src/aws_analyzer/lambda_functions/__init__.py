@@ -43,6 +43,8 @@ Quick start
     explore("etl-nightly", tab="logs")                # the window, straight to one function's logs
 
     lam = ui.core                                     # same analyzer, raw data
+    lam.search_code("etl-nightly", "customer_id")     # CodeSearch: the lines of its code that contain it, like grep
+    lam.find_symbol("etl-nightly", "load_orders")     # SymbolReport: where it's defined and used, like a language server
     df = lam.overview(regions="all").to_df()          # one row per function
     detail = lam.describe("etl-nightly")              # FunctionDetail: .function, .triggers, .aliases, .metrics
     runs = lam.log_runs("etl-nightly").runs           # LogRun per call: its lines, status, run time, memory
@@ -58,9 +60,10 @@ from .helpers import (
     RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, runtime_family,
 )
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodeFile, CodePackage, DailyUsage, ErrorGroup, ErrorReport, Function,
-    FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LogEvent, LogGroup, PackageDownload,
-    Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, Trigger, Version,
+    AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
+    ErrorReport, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LogEvent, LogGroup,
+    PackageDownload, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, SymbolReport, SymbolUse, Trigger,
+    Version,
 )
 from .analysis.functions import masked_config, parse_event_source_mapping, parse_function, parse_policy, runtime_status
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
@@ -72,6 +75,7 @@ from .analysis.performance import percentile, performance_findings, suggest_memo
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
 )
+from .analysis.source import find_symbol_in, search_package, source_files
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
 from .analysis.codemap.findings import code_map_findings
@@ -103,6 +107,9 @@ __all__ = [
     "AsyncConfig",
     "AwsCall",
     "CodeFile",
+    "CodeMatch",
+    "CodeSearch",
+    "CodeSymbol",
     "CodeFunction",
     "CodeGraph",
     "CodeMap",
@@ -136,6 +143,8 @@ __all__ = [
     "ProvisionedConcurrency",
     "RuntimeStatus",
     "SavedPage",
+    "SymbolReport",
+    "SymbolUse",
     "Trigger",
     "Version",
     "account_findings",
@@ -156,6 +165,9 @@ __all__ = [
     "log_storage_monthly_cost",
     "map_code",
     "map_package",
+    "find_symbol_in",
+    "search_package",
+    "source_files",
     "masked_config",
     "package_file_name",
     "package_findings",
