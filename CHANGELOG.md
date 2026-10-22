@@ -19,6 +19,17 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   sent. Two new budget limits cap it: `file_bytes` (2 MB read) and `file_chars` (50,000 characters sent).
   ([#133](https://github.com/utkarsh5026/aws-analyzer/pull/133))
 
+## [0.28.0] - 2026-10-22
+
+### Changed
+
+- Agent: the agent is friendlier and shows its work. Before each set of tool calls it says what it's about to
+  check and why, and when a result changes its plan it says what it found and what it'll look at next, so
+  `chat()` reads like a coding assistant at work. It explains AWS terms in plain words, picks the likeliest
+  meaning of a vague question and says so instead of asking, and ends an answer by offering the obvious next
+  step. A greeting or "what can you do?" gets a short answer with questions to try.
+  ([#131](https://github.com/utkarsh5026/aws-analyzer/pull/131))
+
 ## [0.27.0] - 2026-10-22
 
 ### Added
@@ -38,11 +49,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- Agent: the agent is friendlier and shows its work. Before each set of tool calls it says what it's about to
-  check and why, and when a result changes its plan it says what it found and what it'll look at next, so
-  `chat()` reads like a coding assistant at work. It explains AWS terms in plain words, picks the likeliest
-  meaning of a vague question and says so instead of asking, and ends an answer by offering the obvious next
-  step. A greeting or "what can you do?" gets a short answer with questions to try.
 - Lambda: `code()`, `how_it_works()` and the agent keep the last two packages they downloaded. Reading another file
   of the same code no longer downloads it again. New code has a new hash, so it's always downloaded fresh.
   ([#128](https://github.com/utkarsh5026/aws-analyzer/pull/128))
@@ -808,7 +814,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.24.0...v0.25.0
