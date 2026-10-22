@@ -1,6 +1,6 @@
 """
 The dataclasses LambdaAnalyzer returns: functions and their triggers, metrics, logs and runs, errors,
-performance, the deployment package and the map of its code.
+performance, the deployment package, what a search of its code found and the map of its code.
 """
 
 from __future__ import annotations
@@ -445,6 +445,98 @@ class CodePackage:
     @property
     def unzipped(self) -> int:
         return sum(f.size for f in self.files)
+
+
+@dataclass
+class CodeMatch:
+    """
+    A line of a deployment package a search found: its file and line number, its text, and the lines around it as
+    (number, text), itself included.
+    """
+
+    file: str
+    line: int
+    text: str
+    context: list[tuple[int, str]] = field(default_factory=list)
+
+
+@dataclass
+class CodeSearch:
+    """
+    What search_code() found, like grep -rn: the matching lines (up to its limit, in file order, the handler's file
+    first), how many lines matched in all (`total`) and in how many files, how many files it read, and the files it
+    left out with why (`skipped`: too big, binary). `note` says why nothing could be searched (a container image,
+    no link to the code).
+    """
+
+    function: Function
+    pattern: str
+    regex: bool = False
+    files: str | None = None
+    matches: list[CodeMatch] = field(default_factory=list)
+    total: int = 0
+    files_matched: int = 0
+    files_searched: int = 0
+    skipped: list[str] = field(default_factory=list)
+    note: str | None = None
+
+    @property
+    def truncated(self) -> bool:
+        """
+        Whether more lines matched than `matches` holds.
+        """
+        return self.total > len(self.matches)
+
+
+@dataclass
+class CodeSymbol:
+    """
+    Where a Python name is defined: its qualified name ('Orders.load'), its kind ('function', 'method', 'class' or
+    'variable'), its file and first and last lines, its signature as written, its decorators and the first line of
+    its docstring.
+    """
+
+    name: str
+    kind: str
+    file: str
+    line: int
+    end_line: int
+    signature: str
+    decorators: list[str] = field(default_factory=list)
+    doc: str = ""
+
+
+@dataclass
+class SymbolUse:
+    """
+    A line that uses a name: its file and line number, its text, how it uses the name ('call', 'import' or
+    'reference') and the function it's in ('(module)' at the top level).
+    """
+
+    file: str
+    line: int
+    text: str
+    kind: str
+    within: str
+
+
+@dataclass
+class SymbolReport:
+    """
+    What find_symbol() found, like a language server's go to definition and find references: where a name is
+    defined, the lines that use it (up to its limit; `total_uses` counts them all), how many Python files it read,
+    the files it couldn't read with why (`skipped`: a syntax error, too big), and `note` when there was nothing to
+    read (not Python, a container image).
+    """
+
+    function: Function
+    name: str
+    definitions: list[CodeSymbol] = field(default_factory=list)
+    uses: list[SymbolUse] = field(default_factory=list)
+    total_uses: int = 0
+    files_read: int = 0
+    skipped: list[str] = field(default_factory=list)
+    note: str | None = None
 
 
 @dataclass

@@ -12,10 +12,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 ### Added
 
 - Agent: the agent follows an error from the logs into the code. `function_errors` and `function_logs` now give each
-  error's `in_code`, the file and line its traceback names (Python, Node.js and Ruby, from text or JSON logs). The new
-  `function_source` tool reads those lines from the function's deployment package, numbered, with anything that looks
-  like a secret hidden. Ask "why does orders-etl fail?" and the answer quotes the line that raised and says what to
-  change. Nothing in the package is run, and secrets files (`.env`, keys) are never read.
+  error's `in_code`, the file and line its traceback names (Python, Node.js and Ruby, from text or JSON logs). Three
+  new tools then read the function's code the way coding tools do: `function_source` reads any lines of a file, like
+  `sed -n`; `search_code` finds a text or a regular expression in every file, like `grep -rn`; and `find_symbol`
+  finds where a Python function or class is defined and every line that uses it, like an editor's go to definition.
+  Ask "why does orders-etl fail?" and the answer quotes the line that raised and says what to change. Nothing in the
+  package is run, anything that looks like a secret is hidden, and secrets files (`.env`, keys) are never read.
+- Lambda: `LambdaAnalyzer.search_code("orders-etl", "customer_id")` returns every line of a function's code that has
+  a text, and `find_symbol("orders-etl", "load_orders")` returns where a Python name is defined and used. Their
+  pure versions, `search_package` and `find_symbol_in`, take a .zip you already have.
 
 ### Changed
 

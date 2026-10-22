@@ -150,6 +150,8 @@ _TOOL_WORDS = {
     "function_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the function"),
     "function_code": _ToolWords("reading {t}'s code", "read {t}'s code", "the function"),
     "function_source": _ToolWords("reading {t}'s source", "read {t}'s source", "the function"),
+    "search_code": _ToolWords("searching {t}'s code", "searched {t}'s code", "the function"),
+    "find_symbol": _ToolWords("looking up a name in {t}'s code", "looked up a name in {t}'s code", "the function"),
     "find_buckets": _ToolWords("finding buckets", "found buckets"),
     "bucket_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the bucket"),
     "list_folder": _ToolWords("listing {t}", "listed {t}", "a folder"),

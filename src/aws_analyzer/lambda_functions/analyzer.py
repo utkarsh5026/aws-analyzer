@@ -31,15 +31,16 @@ from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 from .prices import LAMBDA_PRICES
 from .helpers import MB, _lambda_time, _midnight, parse_function_ref, runtime_family
 from .models import (
-    AccountLimits, Alias, AsyncConfig, CodePackage, DailyUsage, ErrorReport, Function, FunctionDetail,
+    AccountLimits, Alias, AsyncConfig, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, SavedPage,
-    Trigger, Version,
+    SymbolReport, Trigger, Version,
 )
 from .analysis.functions import _unqualified, parse_event_source_mapping, parse_function, parse_policy
 from .analysis.overview import Overview
 from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
+from .analysis.source import find_symbol_in, search_package
 from .analysis.codemap.model import CodeMap
 from .analysis.codemap.mapping import map_package
 
@@ -1263,6 +1264,32 @@ class LambdaAnalyzer(_BaseAnalyzer):
         """
         fn = self.function(ref, region=region)
         return read_package(fn, self._package(fn, max_size), file=file)
+
+    def search_code(
+        self, ref: str, pattern: str, *, regex: bool = False, files: str | None = None, limit: int = 50,
+        max_size: Any = "50MB", region: str | None = None,
+    ) -> CodeSearch:
+        """
+        The lines of a function's code that contain `pattern`, or match it as a regular expression with regex=True,
+        across its package's own source files (or the files files= names, libraries too), like grep -rn (see
+        search_package()): the first `limit` matches, and how many there are in all. Downloads the package like code(); nothing in it is run, and secrets files aren't read.
+        """
+        fn = self.function(ref, region=region)
+        search = search_package(fn, self._package(fn, max_size), pattern, regex=regex, files=files)
+        search.matches = search.matches[:limit]
+        return search
+
+    def find_symbol(
+        self, ref: str, name: str, *, limit: int = 40, max_size: Any = "50MB", region: str | None = None
+    ) -> SymbolReport:
+        """
+        Where a Python name ('load_orders', 'Orders.load') is defined in a function's code and the lines that use it,
+        like go to definition and find references (see find_symbol_in()). Downloads the package like code() and
+        reads its .py files with Python's ast module; nothing in it is run.
+        """
+        fn = self.function(ref, region=region)
+        data = self._package(fn, max_size) if runtime_family(fn.runtime) == "python" else None
+        return find_symbol_in(fn, data, name, limit=limit)
 
     def code_map(self, ref: str, *, max_size: Any = "50MB", region: str | None = None) -> CodeMap:
         """

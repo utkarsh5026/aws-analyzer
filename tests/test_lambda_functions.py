@@ -66,6 +66,7 @@ from aws_analyzer.lambda_functions import (
     code_graph,
     code_map_findings,
     error_findings,
+    find_symbol_in,
     function_findings,
     function_monthly_cost,
     group_errors,
@@ -88,8 +89,10 @@ from aws_analyzer.lambda_functions import (
     read_package,
     request_id_of,
     runtime_status,
+    search_package,
     search_rank,
     secret_like,
+    source_files,
     split_runs,
     suggest_memory,
 )
@@ -112,6 +115,21 @@ CODE = zipped({
     "app.py": "def handler(event, context):\n    return event['customer_id']\n",
     "utils.py": "def helper():\n    return 42\n",
     ".env": "DB_PASSWORD=hunter2\n",
+})
+
+
+SOURCE = zipped({
+    "app.py": 'import os\nfrom store import Orders, load_orders\n\nTABLE = os.environ["TABLE"]\n\n\n'
+              'def handler(event, context):\n    orders = load_orders(event)\n    return Orders(TABLE).save(orders)\n',
+    "store.py": 'class Orders:\n    """Orders in DynamoDB."""\n\n    def __init__(self, table):\n        self.table = table\n\n'
+                '    @staticmethod\n    def save(orders, *, batch=25) -> int:\n        return len(orders)\n\n\n'
+                'def load_orders(event):\n    """The orders in an S3 event."""\n    return event["customer_id"]\n',
+    "requests/api.py": "def load_orders():\n    return None\n",
+    "requests-2.32.3.dist-info/RECORD": "requests/api.py,,\n",
+    "broken.py": "def oops(:\n",
+    "logo.png": b"\x89PNG\x00\x00",
+    ".env": "DB_PASSWORD=hunter2\n",
+    "long.py": "\n".join(f"x{i} = {i}" for i in range(1, 701)) + "\n",
 })
 
 
@@ -1695,6 +1713,59 @@ def test_code_downloads_a_package_once_and_new_code_again(core):
     core.code("etl-nightly")
     core.code("etl-nightly")
     assert len(downloads) == 3
+
+
+def test_source_files_are_its_own_text_files_the_handlers_first():
+    package = read_package(fn(handler="app.handler"), SOURCE)
+    assert source_files(package) == ["app.py", "broken.py", "long.py", "store.py"]
+
+
+def test_search_package_finds_lines_like_grep():
+    found = search_package(fn(), SOURCE, "load_orders")
+    assert [(m.file, m.line) for m in found.matches] == [("app.py", 2), ("app.py", 8), ("store.py", 12)]
+    assert found.total == 3 and found.files_matched == 2 and found.files_searched == 4 and not found.truncated
+    assert found.matches[1].context == [(6, ""), (7, "def handler(event, context):"),
+                                        (8, "    orders = load_orders(event)"), (9, "    return Orders(TABLE).save(orders)")]
+    libraries = search_package(fn(), SOURCE, "load_orders", files="requests/")
+    assert [(m.file, m.line) for m in libraries.matches] == [("requests/api.py", 1)]
+    everything = search_package(fn(), SOURCE, "hunter2", files="*")
+    assert not everything.matches and "logo.png: a binary file" in everything.skipped
+    regex = search_package(fn(), SOURCE, r'(?i)EVENT\["\w+"\]', regex=True)
+    assert [m.text.strip() for m in regex.matches] == ['return event["customer_id"]']
+    assert len(search_package(fn(), SOURCE, "x", files="long.py").matches) == 500
+    with pytest.raises(ValueError, match="repeats a group that repeats itself"):
+        search_package(fn(), SOURCE, "(a+)+$", regex=True)
+    with pytest.raises(ValueError, match="isn't a regular expression"):
+        search_package(fn(), SOURCE, "(", regex=True)
+    assert "container image" in search_package(fn(package_type="Image", runtime=None), None, "x").note
+
+
+def test_find_symbol_in_finds_definitions_and_uses():
+    report = find_symbol_in(fn(), SOURCE, "load_orders")
+    assert [(d.name, d.kind, d.file, d.line, d.end_line) for d in report.definitions] == [
+        ("load_orders", "function", "store.py", 12, 14)]
+    assert report.definitions[0].signature == "def load_orders(event)"
+    assert report.definitions[0].doc == "The orders in an S3 event."
+    assert [(u.file, u.line, u.kind, u.within) for u in report.uses] == [
+        ("app.py", 2, "import", "(module)"), ("app.py", 8, "call", "handler")]
+    assert report.files_read == 3 and report.skipped == ["broken.py: Python can't read it (SyntaxError at line 1)"]
+
+    save = find_symbol_in(fn(), SOURCE, "Orders.save").definitions
+    assert [(d.kind, d.signature, d.decorators) for d in save] == [
+        ("method", "def save(orders, *, batch=25) -> int", ["@staticmethod"])]
+    assert find_symbol_in(fn(), SOURCE, "store.Orders").definitions[0].doc == "Orders in DynamoDB."
+    assert find_symbol_in(fn(), SOURCE, "TABLE").definitions[0].kind == "variable"
+    assert not find_symbol_in(fn(), SOURCE, "Other.save").definitions
+    assert "search the code" in find_symbol_in(fn(runtime="nodejs20.x"), SOURCE, "x").note
+    with pytest.raises(ValueError, match="isn't a Python name"):
+        find_symbol_in(fn(), SOURCE, "load orders")
+
+
+def test_search_code_and_find_symbol_read_the_package(core):
+    core._download = lambda url, most: SOURCE
+    search = core.search_code("etl-nightly", "load_orders", limit=2)
+    assert len(search.matches) == 2 and search.total == 3 and search.truncated
+    assert core.find_symbol("etl-nightly", "load_orders").definitions[0].file == "store.py"
 
 
 def test_download_checks_size_and_network(core, monkeypatch):

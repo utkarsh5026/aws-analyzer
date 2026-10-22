@@ -191,7 +191,7 @@ Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. 
 
 ## What it can call { #tools }
 
-Fifteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
+Seventeen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -211,7 +211,9 @@ Fifteen read-only tools over Lambda and S3. Each returns a compact summary with 
     | `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs |
     | `function_details(function, region)` | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding |
     | `function_code(function, region)` | What a Python function's code calls, read with `ast` and never run: AWS operations, environment variables by name, event fields |
-    | `function_source(function, file, line, search, region)` | The function's code, numbered line by line: the lines around the one an error's traceback names, the lines containing a text, or a file's start, with its own files listed. Nothing is run, and anything that looks like a secret is hidden |
+    | `function_source(function, file, lines, region)` | The function's code, numbered line by line, like `sed -n`: `lines="42"` for the lines around the one an error's traceback names, `"150-300"` for any range, up to 300 lines a call; with no file, the handler's file and the package's own files. Nothing is run, and anything that looks like a secret is hidden |
+    | `search_code(function, text, regex, files, region)` | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: its own files, or `files=` globs and folders, the libraries packed with it too |
+    | `find_symbol(function, name, region)` | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition. Read with `ast` and never run |
 
     **S3**, which never reads what's inside a file:
 

@@ -1886,6 +1886,8 @@ lam.log_events("orders-etl", pattern='"KeyError"').to_df()
 lam.log_runs("orders-etl", since="24h").runs           # LogRun per call: .status, .duration, .cold, .events
 lam.log_runs("orders-etl", search="ORD-1042").runs     # the runs with a line that has it, each one whole
 lam.code("orders-etl").files                           # CodeFile: path, size, compressed
+lam.search_code("orders-etl", "customer_id").matches   # CodeMatch per line, like grep -rn: file, line, text, context
+lam.find_symbol("orders-etl", "load_orders")           # SymbolReport: .definitions (file, line, signature), .uses
 lam.code_map("orders-etl").aws                         # CodeMap: .steps, .aws, .env, .event, .imports, .functions
 code_graph(lam.code_map("orders-etl")).mermaid()      # its graph as Mermaid: boxes and arrows
 lam.download("orders-etl").path                        # where its .zip was saved (PackageDownload)
@@ -1895,7 +1897,8 @@ The analysis functions are pure (no AWS calls), so they also work on configurati
 already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`,
 `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs`
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
-`package_file_name`, `page_file_name`, `secret_like`, `map_code` (Python code read with `ast`: `map_code({"app.py": source},
+`package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
+`search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
 "app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), and the findings: `function_findings`,
 `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
 
@@ -2004,10 +2007,11 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 ### What it can call
 
-Fifteen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Seventeen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
-lines of code it names with `function_source`; "were last night's files processed?" is `s3_triggers`, then
+lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
+way a coding tool reads code with sed, an editor's go to definition and grep; "were last night's files processed?" is `s3_triggers`, then
 `function_errors` for the runs that failed.
 
 | Tool                                                  | What it returns                                                                                                                                       |
@@ -2019,7 +2023,9 @@ lines of code it names with `function_source`; "were last night's files processe
 | `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs                                                 |
 | `function_details(function, region)`                  | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding with its next step               |
 | `function_code(function, region)`                     | What a Python function's code calls (AWS operations, environment variables by name, event fields, libraries), read with `ast` and never run            |
-| `function_source(function, file, line, search, region)` | The function's code, numbered line by line (any runtime with a .zip package): the lines around the one an error's traceback names, the lines containing a text, or a file's start, with its own files listed. Nothing is run, and anything that looks like a secret is hidden |
+| `function_source(function, file, lines, region)`      | The function's code, numbered line by line, like `sed -n` (any runtime with a .zip package): `lines="42"` for the lines around the one an error's traceback names, `"150-300"` for any range, up to 300 lines a call; with no file, the handler's file and the package's own files. Nothing is run, and anything that looks like a secret is hidden |
+| `search_code(function, text, regex, files, region)`   | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: the function's own files, or `files=` globs and folders, the libraries packed with it too |
+| `find_symbol(function, name, region)`                 | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition and find references. Read with `ast` and never run |
 | `find_buckets(match, sizes)`                          | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first                                     |
 | `bucket_details(bucket)`                              | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, **its event notifications**, size and monthly cost, and its findings |
 | `list_folder(location)`                               | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first                                                                   |

@@ -109,7 +109,6 @@ from .toolkits.lambda_tools import (
     LambdaToolkit,
     code_locations,
     function_row,
-    source_files,
     summarize_code,
     summarize_detail,
     summarize_errors,
@@ -117,7 +116,9 @@ from .toolkits.lambda_tools import (
     summarize_health,
     summarize_performance,
     summarize_runs,
+    summarize_search,
     summarize_source,
+    summarize_symbol,
 )
 from .view import AgentView
 
@@ -163,7 +164,8 @@ __all__ = [
     "summarize_detail",
     "summarize_code",
     "summarize_source",
-    "source_files",
+    "summarize_search",
+    "summarize_symbol",
     "code_locations",
     "file_row",
     "summarize_buckets",

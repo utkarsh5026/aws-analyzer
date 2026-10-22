@@ -57,7 +57,7 @@ from aws_analyzer.agent import (
 )
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo
-from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, create, lambda_clients, put_logs
+from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs
 
 NOW = datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc)
 
@@ -380,7 +380,7 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert "You cover:\n- AWS Lambda: which functions exist" in text and "\n- the user's notes: what" in text
     assert text.index("\nAWS Lambda\n") < text.index("\nNotes\n- Read a note") < text.index("How to answer")
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 10" in out
+    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 12" in out
     assert "secrets files (.env, keys) are never read. Notes marked private are never read." in out
     assert viewmod._look_closer([("NotesView().note('plan', region='eu-west-1')", "the note"),
                                  ("LambdaView().errors('etl')", "errors")]) == (
@@ -548,7 +548,7 @@ def test_the_agent_follows_an_error_from_the_logs_into_the_code(core):
     logs = tool(core, "function_logs")("etl-nightly", since="1h")
     assert logs["runs"][0]["in_code"] == errors["causes"][0]["in_code"]
 
-    source = tool(core, "function_source")("etl-nightly", file="app.py", line=2)
+    source = tool(core, "function_source")("etl-nightly", file="app.py", lines="2")
     assert source["lines"] == ["1: def handler(event, context):", ">> 2:     return event['customer_id']"]
     assert source["total_lines"] == 2 and source["showing"] == "lines 1-2" and "files" not in source
 
@@ -556,13 +556,36 @@ def test_the_agent_follows_an_error_from_the_logs_into_the_code(core):
     assert first["file"] == "app.py" and first["files"] == ["app.py", "utils.py"]
     assert first["other_files"].startswith("1 more")
 
-    found = tool(core, "function_source")("etl-nightly", file="utils.py", search="return")
-    assert found["matches"] == 1 and found["lines"] == ["1: def helper():", ">> 2:     return 42"]
-
     assert "hunter2" not in json.dumps(tool(core, "function_source")("etl-nightly", file=".env"))
-    missing = tool(core, "function_source")("etl-nightly", file="apps.py", line=2)
+    missing = tool(core, "function_source")("etl-nightly", file="apps.py", lines="2")
     assert missing["error"] == "No file 'apps.py' in etl-nightly's package." and missing["close_files"] == ["app.py"]
-    assert tool(core, "function_source")("etl-nightly", file="app.py", line=40)["note"].startswith("The file has 2")
+    assert tool(core, "function_source")("etl-nightly", file="app.py", lines="40")["note"].startswith("The file has 2")
+    bad = tool(core, "function_source")("etl-nightly", lines="the end")
+    assert bad["error"] == "ValueError" and "give one line ('42') or a range" in bad["message"]
+
+
+def test_the_agent_reads_code_like_sed_grep_and_a_language_server(core):
+    core.toolkit("lambda").analyzer._download = lambda url, most: SOURCE
+    page = tool(core, "function_source")("etl-nightly", file="long.py", lines="150-")
+    assert page["showing"] == "lines 150-449" and page["lines"][0] == "150: x150 = 150" and page["next"] == "450-700"
+    assert tool(core, "function_source")("etl-nightly", file="long.py", lines="650,900")["showing"] == "lines 650-700"
+
+    found = tool(core, "search_code")("etl-nightly", "load_orders")
+    assert found["matching_lines"] == 3 and found["files_matched"] == 2 and found["files"] == "its own source files"
+    app, store = found["matches"]
+    assert app["file"] == "app.py" and app["matches"] == 2 and "..." in app["lines"]
+    assert ">> 8:     orders = load_orders(event)" in app["lines"] and store["file"] == "store.py"
+    assert tool(core, "search_code")("etl-nightly", "load_orders", files="requests/")["matching_lines"] == 1
+    assert "files='*'" in tool(core, "search_code")("etl-nightly", "nowhere")["hint"]
+
+    symbol = tool(core, "find_symbol")("etl-nightly", "load_orders")
+    assert symbol["definitions"] == [{"name": "load_orders", "kind": "function", "file": "store.py", "line": 12,
+                                      "end_line": 14, "signature": "def load_orders(event)",
+                                      "doc": "The orders in an S3 event."}]
+    assert [(u["file"], u["line"], u["kind"], u["within"]) for u in symbol["uses"]] == [
+        ("app.py", 2, "import", "(module)"), ("app.py", 8, "call", "handler")]
+    assert "broken.py" in symbol["not_read"][0]
+    assert "search_code finds every line" in tool(core, "find_symbol")("etl-nightly", "boto3_client")["hint"]
 
 
 def test_reading_more_of_the_same_code_downloads_it_once(seeded):
@@ -572,18 +595,18 @@ def test_reading_more_of_the_same_code_downloads_it_once(seeded):
     analyzer._download = lambda url, most: downloads.append(url) or CODE
     tool(core, "function_source")("etl-nightly")
     tool(core, "function_source")("etl-nightly", file="utils.py")
+    tool(core, "search_code")("etl-nightly", "return")
+    tool(core, "find_symbol")("etl-nightly", "helper")
     tool(core, "function_code")("etl-nightly")
     assert len(downloads) == 1
 
 
-def test_source_lines_hide_secrets_and_mark_each_match():
+def test_source_lines_hide_secrets():
     pkg = CodePackage(Function("etl", region=REGION, handler="app.handler"), shown_file="app.py",
                       source="import os\nKEY = 'x'\nTOKEN = 'abc123'\n" + "\n".join(f"x{i} = KEY" for i in range(20)))
-    found = summarize_source(pkg, search="KEY")
-    assert found["matches"] == 21 and found["more_matches"] == 13 and "TOKEN = '[hidden]'" in " ".join(found["lines"])
-    assert found["lines"][0] == "1: import os" and "..." not in found["lines"]
     start = summarize_source(pkg)
-    assert start["showing"] == "lines 1-23" and "lines_left_out" not in start
+    assert start["showing"] == "lines 1-23" and "next" not in start and "TOKEN = '[hidden]'" in start["lines"][2]
+    assert summarize_source(pkg, lines="10")["lines"][0] == "1: import os"
     assert summarize_source(CodePackage(pkg.function, note="It's a container image"))["note"].startswith("It's a")
 
 
@@ -1243,7 +1266,7 @@ def test_transcript_and_new_conversation(view, capsys):
 def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
     out = run(capsys, view.tools)
     for name in ("find_functions", "function_health", "function_errors", "function_logs", "function_performance",
-                 "function_details", "function_code", "function_source", "find_buckets", "bucket_details", "list_folder", "find_files",
+                 "function_details", "function_code", "function_source", "search_code", "find_symbol", "find_buckets", "bucket_details", "list_folder", "find_files",
                  "folder_summary", "file_info", "s3_triggers"):
         assert name in out
     assert "logs:FilterLogEvents" in out and "3 days" in out and "Provider: Scripted" in out
