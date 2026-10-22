@@ -17,6 +17,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   "why does this CSV fail to load?". It's off by default, because what it reads is sent to the model's provider.
   Anything that looks like a secret is hidden, and images, audio, video, binary files and download links are never
   sent. Two new budget limits cap it: `file_bytes` (2 MB read) and `file_chars` (50,000 characters sent).
+  ([#133](https://github.com/utkarsh5026/aws-analyzer/pull/133))
 
 ## [0.27.0] - 2026-10-22
 
