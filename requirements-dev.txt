@@ -20,7 +20,7 @@ pytest==9.1.1
 fastavro==1.12.2
 openpyxl==3.1.5
 # Optional for users (PDF text, and PDF pages drawn as pictures); installed here so the PDF tests run.
-pypdf==6.20.1
+pypdf==6.21.1
 pypdfium2==5.14.0
 pillow==12.3.0
 # Optional for users (progress bars); installed here so the tqdm path is tested.
