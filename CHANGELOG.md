@@ -9,6 +9,19 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Agent: the agent follows an error from the logs into the code. `function_errors` and `function_logs` now give each
+  error's `in_code`, the file and line its traceback names (Python, Node.js and Ruby, from text or JSON logs). The new
+  `function_source` tool reads those lines from the function's deployment package, numbered, with anything that looks
+  like a secret hidden. Ask "why does orders-etl fail?" and the answer quotes the line that raised and says what to
+  change. Nothing in the package is run, and secrets files (`.env`, keys) are never read.
+
+### Changed
+
+- Lambda: `code()`, `how_it_works()` and the agent keep the last two packages they downloaded. Reading another file
+  of the same code no longer downloads it again. New code has a new hash, so it's always downloaded fresh.
+
 ## [0.26.0] - 2026-10-20
 
 ### Added

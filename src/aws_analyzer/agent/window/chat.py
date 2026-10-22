@@ -149,6 +149,7 @@ _TOOL_WORDS = {
     "function_performance": _ToolWords("timing {t}'s runs", "timed {t}'s runs", "the function"),
     "function_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the function"),
     "function_code": _ToolWords("reading {t}'s code", "read {t}'s code", "the function"),
+    "function_source": _ToolWords("reading {t}'s source", "read {t}'s source", "the function"),
     "find_buckets": _ToolWords("finding buckets", "found buckets"),
     "bucket_details": _ToolWords("reading {t}'s settings", "read {t}'s settings", "the bucket"),
     "list_folder": _ToolWords("listing {t}", "listed {t}", "a folder"),

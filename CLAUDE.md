@@ -730,8 +730,8 @@ maps them), so a new service's tools or a new capability of the agent goes in on
 functions); a test patches a name in the module that looks it up (`harness._MIN_PYTHON`, `view._render_html`).
 
 - **Toolkits** (`toolkits/`): what the agent can read, one `Toolkit` subclass per AWS service (`base.py` says what one
-  gives). `LambdaToolkit` (`lambda_tools.py`) has seven tools (`find_functions`, `function_health`, `function_errors`,
-  `function_logs`, `function_performance`, `function_details`, `function_code`), building blocks over `LambdaAnalyzer`
+  gives). `LambdaToolkit` (`lambda_tools.py`) has eight tools (`find_functions`, `function_health`, `function_errors`,
+  `function_logs`, `function_performance`, `function_details`, `function_code`, `function_source`), building blocks over `LambdaAnalyzer`
   methods, not one per question: methods of the toolkit that its `tools()` lists. Their type hints and
   docstrings are the schema and description the model sees (LangChain reads them), so write a docstring for the
   model: what it returns, how to pass times (ISO UTC or '24h'), when to use it, and nothing about how it works

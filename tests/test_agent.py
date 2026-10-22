@@ -42,6 +42,7 @@ from aws_analyzer.agent import (
     answer_findings,
     answer_next,
     asked_at,
+    code_locations,
     count_arrivals,
     explain_model_error,
     hide_secrets,
@@ -50,10 +51,11 @@ from aws_analyzer.agent import (
     summarize_errors,
     summarize_file,
     summarize_health,
+    summarize_source,
     system_prompt,
     trigger_findings,
 )
-from aws_analyzer.lambda_functions import ErrorGroup, ErrorReport, Function, FunctionMetrics
+from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo
 from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, create, lambda_clients, put_logs
 
@@ -72,6 +74,8 @@ def run(capsys, fn, *args, **kwargs):
     ("key AKIAABCDEFGHIJKLMNOP used", "AKIAABCDEFGHIJKLMNOP"),
     ("DB_PASSWORD=hunter2 MODE=prod", "hunter2"),
     ('{"api_key": "sk-123456", "ok": 1}', "sk-123456"),
+    ("API_KEY = 'sk-live-9f8a7b6c'", "sk-live-9f8a7b6c"),
+    ("{'password': 'hunter2'}", "hunter2"),
     ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz"),
     ("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "eyJhbGci"),
     ("postgres://etl:s3cret@warehouse:5432/orders", "s3cret"),
@@ -376,8 +380,8 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert "You cover:\n- AWS Lambda: which functions exist" in text and "\n- the user's notes: what" in text
     assert text.index("\nAWS Lambda\n") < text.index("\nNotes\n- Read a note") < text.index("How to answer")
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 9" in out
-    assert "Environment variable values are never read. Notes marked private are never read." in out
+    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 10" in out
+    assert "secrets files (.env, keys) are never read. Notes marked private are never read." in out
     assert viewmod._look_closer([("NotesView().note('plan', region='eu-west-1')", "the note"),
                                  ("LambdaView().errors('etl')", "errors")]) == (
         "Look closer (aws_analyzer.NotesView, aws_analyzer.LambdaView)")
@@ -459,7 +463,9 @@ def seeded(aws):
     put_logs("/aws/lambda/etl-nightly", [
         (started, f"START RequestId: {RID} Version: $LATEST"),
         (started + timedelta(milliseconds=5), "connecting with DB_PASSWORD=hunter2"),
-        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):"),
+        (started + timedelta(milliseconds=10), "[ERROR] KeyError: 'customer_id'\nTraceback (most recent call last):\n"
+                                               '  File "/var/task/app.py", line 2, in handler\n'
+                                               "    return event['customer_id']"),
         (started + timedelta(milliseconds=20), f"END RequestId: {RID}"),
         (started + timedelta(milliseconds=21), f"REPORT RequestId: {RID}\tDuration: 102.12 ms\tBilled Duration: 103 ms"
                                                "\tMemory Size: 1024 MB\tMax Memory Used: 88 MB\tInit Duration: 300.11 ms"),
@@ -513,6 +519,72 @@ def test_tools_answer_from_lambda_cloudwatch_and_logs(core):
     assert found["count"] == 3 and {f["name"] for f in found["functions"]} == {"etl-nightly", "api-handler", "eu-fn"}
     lam = core.toolkit("lambda")  # the next step leaves out what wasn't given, so the command's defaults apply
     assert lam._view_call("functions", None, regions=None) == "LambdaView().functions()"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('[ERROR] KeyError: \'x\'\nTraceback (most recent call last):\n  File "/var/runtime/bootstrap.py", line 60, in run\n'
+     '  File "/var/task/app.py", line 12, in handler\n  File "/var/task/lib/load.py", line 4, in load',
+     [("app.py", 12, "handler"), ("lib/load.py", 4, "load")]),
+    (json.dumps({"errorType": "KeyError", "stackTrace": ['  File "/var/task/app.py", line 2, in handler\n']}),
+     [("app.py", 2, "handler")]),
+    ("Error: boom\n    at parse (/var/task/lib/parse.js:10:2)\n    at Runtime.handler (file:///var/task/index.mjs:3:9)"
+     "\n    at Runtime.handleOnceNonStreaming (file:///var/runtime/index.mjs:1173:29)",
+     [("index.mjs", 3, "Runtime.handler"), ("lib/parse.js", 10, "parse")]),
+    ("/var/task/lambda_function.rb:3:in `lambda_handler'", [("lambda_function.rb", 3, None)]),
+    ("[ERROR] KeyError: 'x'", []),
+])
+def test_code_locations_read_a_trace_in_the_order_it_was_called(text, expected):
+    assert [(f["file"], f["line"], f["function"]) for f in code_locations(text)] == expected
+
+
+def test_a_long_trace_keeps_where_it_started_and_where_it_broke():
+    frames = "".join(f'  File "/var/task/m{i}.py", line {i}, in f{i}\n' for i in range(1, 11))
+    assert [f["file"] for f in code_locations(frames)] == ["m1.py", "m2.py", "m3.py", "m8.py", "m9.py", "m10.py"]
+
+
+def test_the_agent_follows_an_error_from_the_logs_into_the_code(core):
+    errors = tool(core, "function_errors")("etl-nightly", since="1h")
+    assert errors["causes"][0]["in_code"] == [{"file": "app.py", "line": 2, "function": "handler"}]
+    logs = tool(core, "function_logs")("etl-nightly", since="1h")
+    assert logs["runs"][0]["in_code"] == errors["causes"][0]["in_code"]
+
+    source = tool(core, "function_source")("etl-nightly", file="app.py", line=2)
+    assert source["lines"] == ["1: def handler(event, context):", ">> 2:     return event['customer_id']"]
+    assert source["total_lines"] == 2 and source["showing"] == "lines 1-2" and "files" not in source
+
+    first = tool(core, "function_source")("etl-nightly")
+    assert first["file"] == "app.py" and first["files"] == ["app.py", "utils.py"]
+    assert first["other_files"].startswith("1 more")
+
+    found = tool(core, "function_source")("etl-nightly", file="utils.py", search="return")
+    assert found["matches"] == 1 and found["lines"] == ["1: def helper():", ">> 2:     return 42"]
+
+    assert "hunter2" not in json.dumps(tool(core, "function_source")("etl-nightly", file=".env"))
+    missing = tool(core, "function_source")("etl-nightly", file="apps.py", line=2)
+    assert missing["error"] == "No file 'apps.py' in etl-nightly's package." and missing["close_files"] == ["app.py"]
+    assert tool(core, "function_source")("etl-nightly", file="app.py", line=40)["note"].startswith("The file has 2")
+
+
+def test_reading_more_of_the_same_code_downloads_it_once(seeded):
+    core = make()
+    analyzer = core.toolkit("lambda").analyzer
+    downloads = []
+    analyzer._download = lambda url, most: downloads.append(url) or CODE
+    tool(core, "function_source")("etl-nightly")
+    tool(core, "function_source")("etl-nightly", file="utils.py")
+    tool(core, "function_code")("etl-nightly")
+    assert len(downloads) == 1
+
+
+def test_source_lines_hide_secrets_and_mark_each_match():
+    pkg = CodePackage(Function("etl", region=REGION, handler="app.handler"), shown_file="app.py",
+                      source="import os\nKEY = 'x'\nTOKEN = 'abc123'\n" + "\n".join(f"x{i} = KEY" for i in range(20)))
+    found = summarize_source(pkg, search="KEY")
+    assert found["matches"] == 21 and found["more_matches"] == 13 and "TOKEN = '[hidden]'" in " ".join(found["lines"])
+    assert found["lines"][0] == "1: import os" and "..." not in found["lines"]
+    start = summarize_source(pkg)
+    assert start["showing"] == "lines 1-23" and "lines_left_out" not in start
+    assert summarize_source(CodePackage(pkg.function, note="It's a container image"))["note"].startswith("It's a")
 
 
 def test_a_missing_function_lists_close_names(core):
@@ -1171,7 +1243,7 @@ def test_transcript_and_new_conversation(view, capsys):
 def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
     out = run(capsys, view.tools)
     for name in ("find_functions", "function_health", "function_errors", "function_logs", "function_performance",
-                 "function_details", "function_code", "find_buckets", "bucket_details", "list_folder", "find_files",
+                 "function_details", "function_code", "function_source", "find_buckets", "bucket_details", "list_folder", "find_files",
                  "folder_summary", "file_info", "s3_triggers"):
         assert name in out
     assert "logs:FilterLogEvents" in out and "3 days" in out and "Provider: Scripted" in out

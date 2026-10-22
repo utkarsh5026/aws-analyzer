@@ -57,6 +57,10 @@ _ERROR_PATTERN = (
 
 _REPORT_PATTERN = '?"REPORT RequestId" ?"platform.report"'
 
+_PACKAGES_KEPT = 2
+
+_KEPT_PACKAGE_BYTES = 50 * MB
+
 _SEARCH_HITS = 500  # log_runs(search=...) reads at most this many matching lines (the newest)...
 
 _SEARCH_WINDOWS = 30  # ...and the whole runs around the newest this many of them (a read each)
@@ -198,6 +202,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
         self._lock = threading.Lock()  # boto3 sessions aren't thread-safe, so clients are made one at a time
         self.max_workers = 8  # functions and regions read in parallel
         self._seen: dict[str, set[str]] = defaultdict(set)  # function name -> regions overview() found it in
+        self._packages: dict[tuple[str, str], bytes] = {}
 
     # ------------------------------------------------------------------ clients
 
@@ -1202,14 +1207,50 @@ class LambdaAnalyzer(_BaseAnalyzer):
                                             more=f"{math.ceil(max_bytes * 2 / MB)}MB"))
         return data
 
+    def _kept_package(self, key: tuple[str, str] | None, max_bytes: int | None) -> bytes | None:
+        """
+        The package kept under `key`, when there is one no bigger than max_bytes.
+        """
+        if key is None:
+            return None
+        with self._lock:
+            data = self._packages.get(key)
+        if data is None or (max_bytes is not None and len(data) > max_bytes):
+            return None
+        return data
+
+    def _keep_package(self, key: tuple[str, str] | None, data: bytes) -> None:
+        """
+        Keeps a downloaded package for the next read of the same code, dropping the oldest past _PACKAGES_KEPT: only
+        one whose SHA-256 is the CodeSha256 in `key`, so a download that came out wrong is never kept.
+        """
+        if key is None or len(data) > _KEPT_PACKAGE_BYTES:
+            return
+        if base64.b64encode(hashlib.sha256(data).digest()).decode() != key[1]:
+            return
+        with self._lock:
+            self._packages.pop(key, None)
+            self._packages[key] = data
+            while len(self._packages) > _PACKAGES_KEPT:
+                del self._packages[next(iter(self._packages))]
+
     def _package(self, fn: Function, max_size: Any = "50MB") -> bytes | None:
         """
         A function's deployment package (fn as function() returns it, with the link GetFunction gives), downloaded up
-        to max_size; None for a container image, or when Lambda gave no link.
+        to max_size; None for a container image, or when Lambda gave no link. The last _PACKAGES_KEPT, up to
+        _KEPT_PACKAGE_BYTES each, are kept in memory by ARN and CodeSha256, newest last, so reading another file of the same code (code(), code_map(), the agent's function_source)
+        doesn't download it again, and new code, which has a new hash, always is.
         """
         if fn.package_type == "Image" or not fn.code_location:
             return None
-        return self._download(fn.code_location, parse_size(max_size))
+        sha = fn.raw.get("CodeSha256")
+        key = (fn.arn, sha) if sha else None
+        max_bytes = parse_size(max_size)
+        data = self._kept_package(key, max_bytes)
+        if data is None:
+            data = self._download(fn.code_location, max_bytes)
+            self._keep_package(key, data)
+        return data
 
     def code(
         self, ref: str, *, file: str | None = None, max_size: Any = "50MB", region: str | None = None

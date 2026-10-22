@@ -1997,26 +1997,29 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 > [!NOTE]
 > What leaves AWS: your question and what the tools return (function and bucket names, settings, counts, file names,
-> error messages and log lines, with anything that looks like a key or password hidden) go to the model's provider.
-> With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation
-> allows for that data. Environment variable values and what's inside your files are never read.
+> error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that
+> looks like a key or password hidden) go to the model's provider. With a model on Amazon Bedrock it stays in your
+> AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values,
+> secrets files packed with a function (`.env`, keys) and what's inside your S3 files are never read.
 
 ### What it can call
 
-Fourteen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Fifteen tools in two toolkits, each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
-then `function_errors` for the functions that failed; "were last night's files processed?" is `s3_triggers`, then
+then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
+lines of code it names with `function_source`; "were last night's files processed?" is `s3_triggers`, then
 `function_errors` for the runs that failed.
 
 | Tool                                                  | What it returns                                                                                                                                       |
 | :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `find_functions(match, regions)`                      | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed                                                     |
 | `function_health(since, until, match, regions)`       | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called. Fast: the agent starts here     |
-| `function_errors(function, since, until, region)`     | One function's errors from its logs, grouped by cause, with counts, an example line and request IDs, next to CloudWatch's count of failed calls        |
+| `function_errors(function, since, until, region)`     | One function's errors from its logs, grouped by cause, with counts, an example line, request IDs and the file and line its traceback names, next to CloudWatch's count of failed calls |
 | `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error                   |
 | `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs                                                 |
 | `function_details(function, region)`                  | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding with its next step               |
 | `function_code(function, region)`                     | What a Python function's code calls (AWS operations, environment variables by name, event fields, libraries), read with `ast` and never run            |
+| `function_source(function, file, line, search, region)` | The function's code, numbered line by line (any runtime with a .zip package): the lines around the one an error's traceback names, the lines containing a text, or a file's start, with its own files listed. Nothing is run, and anything that looks like a secret is hidden |
 | `find_buckets(match, sizes)`                          | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first                                     |
 | `bucket_details(bucket)`                              | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, **its event notifications**, size and monthly cost, and its findings |
 | `list_folder(location)`                               | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first                                                                   |

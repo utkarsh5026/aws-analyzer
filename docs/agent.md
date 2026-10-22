@@ -70,7 +70,7 @@ It covers AWS Lambda and Amazon S3. The model is yours to pick (one on Amazon Be
 
 !!! tip "Worth knowing"
 
-    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and what's inside your files are never read.
+    **What leaves AWS.** Your question and what the tools return (function and bucket names, settings, counts, file names, error messages and log lines, and the lines of a function's code it reads to explain an error, with anything that looks like a key or password hidden) are sent to the model's provider. With a model on Amazon Bedrock it stays in your AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values, secrets files packed with a function (`.env`, keys) and what's inside your S3 files are never read.
 
 ## Start here { #tour }
 
@@ -191,7 +191,7 @@ Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. 
 
 ## What it can call { #tools }
 
-Fourteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
+Fifteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -206,11 +206,12 @@ Fourteen read-only tools over Lambda and S3. Each returns a compact summary with
     |---|---|
     | `find_functions(match, regions)` | The functions: runtime and whether AWS still supports it, memory, timeout, when each last changed |
     | `function_health(since, until, match, regions)` | CloudWatch's counts for every function in a window, sorted into failed, throttled, near their timeout and not called |
-    | `function_errors(function, since, until, region)` | One function's errors from its logs, grouped by cause, with counts, an example line and request IDs |
+    | `function_errors(function, since, until, region)` | One function's errors from its logs, grouped by cause, with counts, an example line, request IDs and the file and line its traceback names |
     | `function_logs(function, since, until, search, region)` | Its runs, newest first: status, run time, memory, cold start and last lines; `search=` finds a request ID, an order ID or an error |
     | `function_performance(function, since, until, region)` | Median, p95, p99 and longest run against the timeout, timeouts, cold starts, and the memory it needs |
     | `function_details(function, region)` | Settings, triggers, aliases, its last 30 days, log retention, the estimated monthly cost by part, and every finding |
     | `function_code(function, region)` | What a Python function's code calls, read with `ast` and never run: AWS operations, environment variables by name, event fields |
+    | `function_source(function, file, line, search, region)` | The function's code, numbered line by line: the lines around the one an error's traceback names, the lines containing a text, or a file's start, with its own files listed. Nothing is run, and anything that looks like a secret is hidden |
 
     **S3**, which never reads what's inside a file:
 

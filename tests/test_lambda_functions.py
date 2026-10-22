@@ -1678,8 +1678,23 @@ def test_code_reads_the_package(core):
     with pytest.raises(ValueError, match="Did you mean 'utils.py'"):
         core.code("etl-nightly", file="util.py")
     core._download = lambda url, most: b"not a zip"
+    core._packages.clear()
     with pytest.raises(ValueError, match="isn't a readable .zip"):
         core.code("etl-nightly")
+
+
+def test_code_downloads_a_package_once_and_new_code_again(core):
+    downloads = []
+    core._download = lambda url, most: downloads.append(url) or CODE
+    core.code("etl-nightly")
+    core.code("etl-nightly", file="utils.py")
+    core.code_map("etl-nightly")
+    assert len(downloads) == 1
+    core._packages.clear()
+    core._download = lambda url, most: downloads.append(url) or zipped({"app.py": "not what Lambda reports"})
+    core.code("etl-nightly")
+    core.code("etl-nightly")
+    assert len(downloads) == 3
 
 
 def test_download_checks_size_and_network(core, monkeypatch):
@@ -1730,6 +1745,7 @@ def test_download_saves_the_package(core, tmp_path, monkeypatch):
     core.downloads = "elsewhere"
     assert core.download("etl-nightly").path == str(tmp_path / "elsewhere" / "etl-nightly.zip")
     core._download = lambda url, most: zipped({"app.py": "changed"})
+    core._packages.clear()
     changed = core.download("etl-nightly")
     assert changed.sha256_matches is False and changed.files == 1
     (tmp_path / "blocked").write_text("a file, not a folder")
@@ -2099,6 +2115,7 @@ def test_download_report(ui, capsys, tmp_path, monkeypatch):
     again = run(capsys, ui.download, "etl-nightly")
     assert "where it replaced the one downloaded before" in again and "was made for downloads" not in again
     ui.core._download = lambda url, most: b"not a zip"
+    ui.core._packages.clear()
     odd = run(capsys, ui.download, "etl-nightly", "odd.zip")
     assert "SHA-256: differs from Lambda's (!)" in odd and "Files: not a .zip (!)" in odd
     assert "download('etl-nightly', " in odd and "odd.zip')" in odd
@@ -2475,6 +2492,7 @@ def test_explorer_code_tab(core, explorer, tmp_path, monkeypatch):
 
     # the tree: folders first, a folder that holds only a folder on one line, opened and folded by a click
     core._download = lambda url, most: NESTED
+    core._packages.clear()
     nested = explorer("etl-nightly", tab="code")
     assert tree_of(nested) == ["lib/ 37 B", "vendor/requests/ 22 B", "PY app.py HANDLER 42 B"]
     assert len(nested.files_box.children) == 3
