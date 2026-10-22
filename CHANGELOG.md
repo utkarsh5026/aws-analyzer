@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-22
+
 ### Added
 
 - Agent: the agent follows an error from the logs into the code. `function_errors` and `function_logs` now give each
@@ -791,7 +793,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.23.0...v0.24.0
