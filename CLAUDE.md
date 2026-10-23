@@ -81,6 +81,11 @@ python .claude/skills/check/snapshot.py compare BASE NEW           # what a refa
 make <task>                                    # or python makefile.py <task>: setup, test, lint, check, build, docs, demo, ...
 make local                                     # the wheel in a fresh venv (.local-check/), imported with only boto3,
                                                # then every service's demo reports run on it; ARGS="--live" reads AWS
+make local-agent                               # the same for the agent: a Python 3.11+, the wheel with [all], the
+                                               # sandbox's Pyodide files, and the agent's demo question
+make envs                                      # the Python environments here (sagemaker_env's environments())
+make install-env                               # this checkout into ones you pick, asked in the terminal (or --env,
+                                               # --extras, --kernel, --yes): pip in each, a Jupyter kernel if asked
 ```
 
 CI (`.github/workflows/ci.yml`) also checks that each module of the package (and the `agent/` package) imports with
