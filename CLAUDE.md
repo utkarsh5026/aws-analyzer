@@ -78,6 +78,9 @@ mkdocs serve                                   # preview docs/ at http://127.0.0
 mkdocs build --strict                          # what the Docs workflow runs: broken links and anchors fail
 python .claude/skills/check/snapshot.py run OUT [--root CHECKOUT]  # every report as text and HTML (pip install time-machine)
 python .claude/skills/check/snapshot.py compare BASE NEW           # what a refactor changed in them (see /check)
+make <task>                                    # or python makefile.py <task>: setup, test, lint, check, build, docs, demo, ...
+make local                                     # the wheel in a fresh venv (.local-check/), imported with only boto3,
+                                               # then every service's demo reports run on it; ARGS="--live" reads AWS
 ```
 
 CI (`.github/workflows/ci.yml`) also checks that each module of the package (and the `agent/` package) imports with

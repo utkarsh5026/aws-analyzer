@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# makefile.py local: the wheel, its virtual environment, the reports and notebooks
+.local-check/
