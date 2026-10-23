@@ -28,7 +28,9 @@ The same commands, and a few more, are tasks in [`makefile.py`](makefile.py): `m
 package as pip would install it, without publishing it: it builds the wheel, installs it in a fresh environment in
 `.local-check/`, imports it with only boto3, and runs every service's reports on demo data against that copy
 (`make local ARGS="--live --profile dev"` also reads your own account, read-only; `make notebook` opens JupyterLab on
-it).
+it). `make local-agent` does the same for the AI agent in one step: it finds a Python 3.11 or newer, installs the wheel
+with every extra (the agent's LangChain packages and Deno for its sandbox), downloads the sandbox's Pyodide files and
+asks the agent a question on demo data.
 
 ## How the code is laid out
 

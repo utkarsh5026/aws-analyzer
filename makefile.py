@@ -12,6 +12,7 @@ machines that have make, and this file runs them on machines that don't (Windows
     python makefile.py demo s3               # a service's reports on demo data in moto (no AWS account needed)
     python makefile.py local                 # try the package as pip would install it, without publishing it
     python makefile.py local --live --profile dev   # ... and against your own AWS account (read-only)
+    python makefile.py local-agent           # the same with the AI agent and everything it needs (Python 3.11+)
     python makefile.py notebook              # JupyterLab on that locally installed package
     python makefile.py clean                 # remove what these tasks built
 
@@ -19,6 +20,11 @@ machines that have make, and this file runs them on machines that don't (Windows
 environment in .local-check/ (only boto3 comes with it, as from PyPI), imports every module there, then installs the
 optional packages and runs every service's reports on demo data against that installed copy, not src/. Each
 service's reports are saved in .local-check/reports/ as text and as the notebook's HTML, to open in a browser.
+
+`local-agent` installs the AI agent (AgentView) the same way, in one step: it picks a Python 3.11 or newer (the
+agent's packages need one) when this one is older, installs the wheel with every extra (the agent's LangChain
+packages, Deno for its Python sandbox, and the data, file and notebook packages), downloads the sandbox's Pyodide
+files, and asks the agent a question on demo data with a scripted model. `make notebook` then opens JupyterLab on it.
 """
 
 from __future__ import annotations
@@ -46,7 +52,9 @@ DOCS_REQUIREMENTS = ROOT / "requirements-docs.txt"
 
 DEFAULT_EXTRAS = "data,files,notebook"
 AGENT_EXTRAS = {"agent", "all"}
+AGENT_INSTALL_EXTRAS = "all"
 AGENT_MIN_PYTHON = (3, 11)
+AGENT_PYTHONS = ["python3.14", "python3.13", "python3.12", "python3.11"]
 FAILED_LINES_SHOWN = 40
 BUILT_FOLDERS = [LOCAL, ROOT / "dist", ROOT / "build", ROOT / "site", ROOT / ".pytest_cache", ROOT / ".ruff_cache"]
 PIP_QUIET = ["--quiet", "--disable-pip-version-check"]
@@ -68,6 +76,12 @@ for name in aws_analyzer.__all__:
     getattr(aws_analyzer, name)
 print(f"aws-analyzer {aws_analyzer.__version__} from {location}: {len(aws_analyzer._MODULES)} modules and "
       f"{len(aws_analyzer.__all__)} names import with only boto3")
+"""
+
+PREPARE_SANDBOX = """
+from aws_analyzer.agent import LocalSandbox
+
+print("      " + LocalSandbox().prepare(lambda name: print(f"      downloading {name}", flush=True)))
 """
 
 DEMO_ON_INSTALLED = """
@@ -418,12 +432,15 @@ def wants_agent(extras: str) -> bool:
     return bool(AGENT_EXTRAS & set(extras.split(",")))
 
 
-def runs_agent(python: Path) -> bool:
+def runs_agent(python: str | Path) -> bool:
     """
-    Whether the local environment's Python is new enough for the agent's packages.
+    Whether a Python is new enough for the agent's packages.
     """
     version_check = f"import sys; sys.exit(sys.version_info < {AGENT_MIN_PYTHON})"
-    return run_quietly([python, "-c", version_check]).returncode == 0
+    try:
+        return run_quietly([python, "-c", version_check]).returncode == 0
+    except OSError:
+        return False
 
 
 def tours_to_run(python: Path, extras: str) -> tuple[list[Tour], list[str]]:
@@ -487,15 +504,11 @@ def verdict(results: list[TourResult]) -> str:
     return "The installed package works."
 
 
-def task_local(args: argparse.Namespace, extra: list[str]) -> int:
+def run_tours(python: Path, tours: list[Tour], args: argparse.Namespace) -> list[TourResult]:
     """
-    Tries the package as pip would install it, without publishing it: builds the wheel, installs it in a fresh
-    environment, imports it with only boto3, and runs every service's reports on demo data against that copy.
+    Runs each tour's reports on demo data from the installed package, and with --live against the user's account.
     """
-    python = install_locally(args)
-    tours, skipped = tours_to_run(python, args.extras)
     LOCAL_REPORTS.mkdir(parents=True, exist_ok=True)
-
     step("Running each service's reports on demo data, from the installed package")
     results = [timed_tour(tour.service, demo_command(python, tour, live=False, args=args),
                           saved=LOCAL_REPORTS / f"{tour.service}.txt", live=False) for tour in tours]
@@ -504,15 +517,81 @@ def task_local(args: argparse.Namespace, extra: list[str]) -> int:
         results += [timed_tour(f"{tour.service} (live)", demo_command(python, tour, live=True, args=args),
                                saved=LOCAL_REPORTS / f"{tour.service}-live.txt", live=True)
                     for tour in tours if tour.live_code]
+    return results
 
+
+def finish_local(results: list[TourResult], *, skipped: list[str], show: bool) -> int:
+    """
+    The end of `local` and `local-agent`: a line per service, where the reports are, and the verdict.
+    """
     print()
-    print_results(results, show=args.show)
+    print_results(results, show=show)
     for reason in skipped:
         print(f"SKIP  {reason}")
     print(f"\nReports, as text and as the notebook's HTML: {LOCAL_REPORTS}")
     print("Try it in a notebook: python makefile.py notebook")
     print(f"\n{verdict(results)}")
     return 1 if any(result.status == "FAIL" for result in results) else 0
+
+
+def task_local(args: argparse.Namespace, extra: list[str]) -> int:
+    """
+    Tries the package as pip would install it, without publishing it: builds the wheel, installs it in a fresh
+    environment, imports it with only boto3, and runs every service's reports on demo data against that copy.
+    """
+    python = install_locally(args)
+    tours, skipped = tours_to_run(python, args.extras)
+    results = run_tours(python, tours, args)
+    return finish_local(results, skipped=skipped, show=args.show)
+
+
+def agent_python(requested: str | None) -> str:
+    """
+    The Python to make the agent's environment with: the one asked for, else this one when it's 3.11 or newer, else
+    the newest python3.1x on PATH that is. Stops with what to do when there's none.
+    """
+    minimum = ".".join(map(str, AGENT_MIN_PYTHON))
+    if requested:
+        if not runs_agent(requested):
+            raise SystemExit(f"The agent's packages need Python {minimum} or newer: {requested} isn't one, or wasn't found.")
+        return requested
+    if runs_agent(sys.executable):
+        return sys.executable
+    for name in AGENT_PYTHONS:
+        found = shutil.which(name)
+        if found and runs_agent(found):
+            return found
+    raise SystemExit(f"The agent's packages need Python {minimum} or newer, and none was found on PATH: install one, "
+                     f"or pass its path with --python.")
+
+
+def prepare_sandbox(python: Path) -> str:
+    """
+    Downloads the Pyodide and Vega files the agent's Python sandbox runs on, once, into its cache. A failure (no
+    internet) is a warning, since the agent works without the sandbox and prepare() downloads them on first use.
+    """
+    step("Downloading the Python sandbox's files (Pyodide on Deno, once, into ~/.cache/aws-analyzer)")
+    prepared = run_quietly([python, "-I", "-c", PREPARE_SANDBOX], cwd=LOCAL)
+    print(prepared.stdout.rstrip(), flush=True)
+    if prepared.returncode:
+        return f"the Python sandbox's files didn't download:\n{tail(prepared.stderr)}"
+    return ""
+
+
+def task_local_agent(args: argparse.Namespace, extra: list[str]) -> int:
+    """
+    Installs the AI agent from this checkout with everything it needs, in one step: a fresh environment on Python
+    3.11+, the wheel with every extra, the Python sandbox's files, and a question asked on demo data.
+    """
+    args.python = agent_python(args.python)
+    args.extras = AGENT_INSTALL_EXTRAS
+    python = install_locally(args)
+    sandbox_problem = "" if args.no_sandbox else prepare_sandbox(python)
+    results = run_tours(python, [tour for tour in TOURS if tour.needs_agent], args)
+    if sandbox_problem:
+        print(f"\nWARN  {sandbox_problem}")
+    print("\nAsk your own account: from aws_analyzer import AgentView; AgentView().ask(...)  (see docs/agent.md)")
+    return finish_local(results, skipped=[], show=args.show)
 
 
 def task_notebook(args: argparse.Namespace, extra: list[str]) -> int:
@@ -545,6 +624,7 @@ TASKS = {
     "docs-serve": task_docs_serve,
     "demo": task_demo,
     "local": task_local,
+    "local-agent": task_local_agent,
     "notebook": task_notebook,
     "clean": task_clean,
 }
@@ -573,6 +653,18 @@ def add_local_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--show", action="store_true", help="print every service's reports, not only failures")
 
 
+def add_local_agent_options(parser: argparse.ArgumentParser) -> None:
+    """
+    The options of `local-agent`: which Python to install with, and whether to skip the sandbox's download.
+    """
+    parser.add_argument("--python", default=None,
+                        help="the Python 3.11+ to make the environment with (default: this one, or the newest found)")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="don't download the Python sandbox's files now (the agent downloads them on first use)")
+    parser.add_argument("--show", action="store_true", help="print the agent's report, not only failures")
+    parser.set_defaults(live=False)
+
+
 def make_parser() -> argparse.ArgumentParser:
     """
     One subcommand per task, each described by its function's docstring.
@@ -588,6 +680,7 @@ def make_parser() -> argparse.ArgumentParser:
                                        help=f"the service: {', '.join(DEMO_SERVICES)} (default: s3)")
     tasks.choices["demo"].add_argument("code", nargs="?", help="the Python to run (default: the service's tour)")
     add_local_options(tasks.choices["local"])
+    add_local_agent_options(tasks.choices["local-agent"])
     tasks.add_parser("help", help="this list")
     return parser
 
