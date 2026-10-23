@@ -9,6 +9,30 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-23
+
+### Added
+
+- Agent: `AgentView(python="local")` gives the agent a Python sandbox for questions no single tool answers: what a
+  folder of documents says, every place a function's code calls DynamoDB, errors by hour across a day of logs, a count
+  across a hundred CSVs. Install it with `pip install "aws-analyzer[agent,sandbox]"` (the new `sandbox` extra brings
+  Deno). The code runs in Pyodide on Deno with no network, no AWS credentials, no environment variables and none of
+  the machine's files; the first run downloads about 21 MB of Pyodide once, checked against pinned hashes
+  (`LocalSandbox().prepare()` does it ahead of time, `index_url=` points at a mirror). New tools copy data into its
+  workspace and run code there: `save_s3_files`, `save_function_code`, `save_logs`, `run_python` and
+  `workspace_files`, and deepagents' file tools (`read_file`, `write_file`, `edit_file`, `grep`, ...) work on the same
+  files. What the code prints goes to the model's provider. New budget limits cap it: `python_runs` (10),
+  `python_seconds` (30) and `workspace_bytes` (50 MB). `python=` also takes a `Workspace` of your own, to run the
+  code in another sandbox. ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
+- Lambda: `core.sources("orders-etl")` returns the text of a function's own source files, and `read_sources()` does
+  the same for a .zip you already have. ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
+
+### Changed
+
+- Agent: the default `steps` budget (the agent loop's limit) goes from 80 to 200, so a question that uses most of
+  its 25 tool calls isn't stopped by the step limit first.
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
+
 ## [0.30.0] - 2026-10-23
 
 ### Added
@@ -869,7 +893,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.27.0...v0.28.0
