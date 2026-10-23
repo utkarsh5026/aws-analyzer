@@ -44,6 +44,7 @@ from ..._kit.text import _clip
 from ..budget import Budget
 from ..results import _iso, _plain, _window, _with_permissions, hide_secrets
 from .base import Toolkit
+from .s3_saving import DEFAULT_FILES, MOST_FILES, SAVE_READS, plan_saves, read_files, summarize_saved
 from .lambda_tools import _lambda_module
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ S3_TOOL_READS: dict[str, tuple[str, ...]] = {
     "preview_file": ("s3:GetObject (its first bytes; only with read_files=True)",),
     "s3_triggers": ("s3:GetBucketNotification", "s3:ListBucket", "s3:ListAllMyBuckets", "s3:GetBucketLocation",
                     "lambda:GetFunction", "lambda:GetPolicy", "cloudwatch:GetMetricData"),
+    **SAVE_READS,
 }
 S3_REQUEST_PRICES = {"list": 0.005, "get": 0.0004}
 _REQUESTS_PER_PRICE = 1000
@@ -955,6 +957,10 @@ class S3Toolkit(Toolkit):
 
     @property
     def privacy(self) -> str:
+        if self.peer("python") is not None:
+            return ("File contents are read only into the Python workspace (save_s3_files), and reach the model only as "
+                    "what its code prints" + (", or through preview_file (read_files=True)." if self.read_files
+                                              else "."))
         if self.read_files:
             return ("File contents are read only by preview_file (read_files=True): the first rows, lines or text of "
                     "one file at a time, with anything that looks like a secret hidden; images, audio, video and "
@@ -965,8 +971,12 @@ class S3Toolkit(Toolkit):
     def covers(self) -> str:
         links = (", and which S3 events invoke which Lambda functions and whether the files that arrived ran them"
                  if self.peer("lambda") else "")
-        contents = ("one file's headers and what's inside it (its first rows or lines)" if self.read_files
-                    else "one file's headers (never what's inside a file)")
+        if self.peer("python") is not None:
+            contents = "one file's headers, and files copied whole into the Python workspace to read with code"
+        elif self.read_files:
+            contents = "one file's headers and what's inside it (its first rows or lines)"
+        else:
+            contents = "one file's headers (never what's inside a file)"
         return ("Amazon S3: which buckets exist and how they're set up (public access, encryption, versioning, "
                 "lifecycle rules, event notifications), their size and estimated storage cost, what's in a folder and "
                 f"which files were written when, and {contents}{links}.")
@@ -989,7 +999,7 @@ Amazon S3
   {budget.s3_keys:,} keys: give them the narrowest prefix you can (a date's folder rather than the whole bucket).
 {_contents_rule(self.read_files)}
 - A file's time is when it was last written: an overwritten file shows only its newest write, and a deleted file
-  doesn't show at all."""
+  doesn't show at all.{self._python_rule()}"""
         if self.peer("lambda"):
             text += """
 
@@ -1002,6 +1012,17 @@ S3 and Lambda together
   buckets actually send it."""
         return text
 
+    def _python_rule(self) -> str:
+        """
+        The S3 section's line on the Python workspace, when the agent has one.
+        """
+        if self.peer("python") is None:
+            return ""
+        return """
+- To read whole files, or many at once (documents, tables, logs), save_s3_files copies them into the Python workspace
+  (a PDF's, Word or PowerPoint file's text beside it as <key>.txt) and run_python reads them there. Call find_files
+  first to see how many files there are and how big."""
+
     def request_cost(self, counts: dict[str, int]) -> float:
         """
         USD for the S3 requests in `counts` (the guard's 's3:ListObjectsV2' -> n), at S3_REQUEST_PRICES.
@@ -1013,7 +1034,8 @@ S3 and Lambda together
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_buckets, bucket_details, list_folder, find_files, folder_summary and file_info, preview_file with
-        read_files=True, and s3_triggers when the agent has the Lambda toolkit too: methods whose type hints and
+        read_files=True, s3_triggers when the agent has the Lambda toolkit too, and save_s3_files when it has a
+        Python workspace: methods whose type hints and
         docstrings tell the model how to call them, each reading through S3Analyzer and returning a compact,
         JSON-ready summary.
         """
@@ -1023,6 +1045,8 @@ S3 and Lambda together
             tools.append(self.preview_file)
         if self.peer("lambda") is not None:
             tools.append(self.s3_triggers)
+        if self.peer("python") is not None:
+            tools.append(self.save_s3_files)
         return tools
 
     def find_buckets(self, match: str = "", sizes: bool = False) -> dict[str, Any]:
@@ -1293,6 +1317,35 @@ S3 and Lambda together
             return self.analyzer.account_public_access_block()
         except (ClientError, BotoCoreError, ValueError):
             return None
+
+    def save_s3_files(self, location: str, match: str = "", since: str = "", until: str = "",  # noqa: PLR0913
+                      max_files: int = DEFAULT_FILES) -> dict[str, Any]:
+        """
+        Copies files from S3 into the Python workspace, under s3/<bucket>/<key>, so run_python can read them whole:
+        one file ('s3://bucket/report.pdf') or every file under a location that matches. A PDF's, Word file's or
+        PowerPoint file's text is saved beside it as <key>.txt. match: a glob on the file name, or on the whole key
+        when it has a '/' ('*.pdf'). since/until: only files last written in that window, as ISO UTC times or
+        relative ('7d'). max_files: at most this many (up to 500), in key order. Call find_files first to see how
+        many files there are and how big.
+        """
+        python = self.peer("python")
+        if python is None:
+            raise ValueError("The agent has no Python workspace to save files into")
+        s3 = _s3_module()
+        bucket, prefix = s3.parse_s3_uri(location)
+        start, end = _between(since, until)
+        keep = s3.make_filter(pattern=match or None, modified_after=start, modified_before=end if until else None)
+        found, scanned, more = self._matching(location, keep)
+        exact = [obj for obj in found if obj.key == prefix]
+        room = self.budget.workspace_bytes - sum(f.size for f in python.workspace.files())
+        wanted = max(1, min(int(max_files or DEFAULT_FILES), MOST_FILES))
+        plan = plan_saves(exact or found, room=room, max_files=wanted)
+        read = read_files(self.analyzer, s3, plan.chosen)
+        saved = python.save(f"s3/{bucket}", {**read.files, **read.texts}) if read.files else {
+            "folder": f"s3/{bucket}/", "files_saved": 0, "size": "0 B"}
+        out = summarize_saved(saved, plan, read, location=s3.s3_uri(bucket, prefix), found=len(found))
+        out.update(scanned=scanned, cut_short=more)
+        return out
 
     def _matching(self, location: str, keep: Callable[[ObjectInfo], bool]) -> tuple[list[ObjectInfo], int, bool]:
         """

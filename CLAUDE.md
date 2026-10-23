@@ -784,7 +784,10 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   sandbox the user passes in (`put`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python` and `workspace_files`. A sandbox must give the code no AWS
   credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
-  Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`),
+  Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`,
+  and `save_logs`, a window's `log_lines` / `run_rows` as JSON Lines with secrets hidden; S3's `save_s3_files`, whose
+  helpers are in `toolkits/s3_saving.py`: `plan_saves` (what fits, Glacier and folder markers skipped), `read_files`
+  on the analyzer's client and `document_text`, a PDF's, Word or PowerPoint file's text saved as `<key>.txt`),
   which the toolkit offers when `peer("python")` is there and which saves through `PythonToolkit.save()` (paths through
   `clean_path`, the budget's `workspace_bytes`). `run_python` checks `python_runs` and runs for at most
   `python_seconds`; what it prints is cut to `file_chars` and passed through `hide_secrets`. `ToolCall.code` /

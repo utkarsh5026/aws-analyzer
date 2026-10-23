@@ -162,6 +162,8 @@ _TOOL_WORDS = {
     "s3_triggers": _ToolWords("checking what {t} triggers", "checked what {t} triggers", "each bucket"),
     "save_function_code": _ToolWords("saving {t}'s code to the workspace", "saved {t}'s code to the workspace",
                                      "the function"),
+    "save_logs": _ToolWords("saving {t}'s logs to the workspace", "saved {t}'s logs to the workspace", "the function"),
+    "save_s3_files": _ToolWords("saving {t} to the workspace", "saved {t} to the workspace", "files"),
     "run_python": _ToolWords("running Python", "ran Python"),
     "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
 }

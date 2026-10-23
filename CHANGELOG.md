@@ -36,6 +36,12 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   ahead of time. `LocalSandbox(packages=[...], memory=...)` offers more of Pyodide's packages, and `python=` takes a
   `Workspace` of your own for another sandbox. The chat window and the report show each run's code, and the budget
   caps runs (`python_runs`, `python_seconds`) and what's saved (`workspace_bytes`).
+- Agent: with `python=`, the agent can also save S3 files and Lambda logs where its code reads them, so it can
+  answer "what do the contracts in this folder say?" or "when did the errors start, hour by hour?". `save_s3_files`
+  copies one file or a folder's matching files (50 by default, up to 500), with a PDF's, Word file's or PowerPoint
+  file's text saved beside it, and skips files in Glacier until they're restored. `save_logs` saves a window of a
+  function's logs as one line per log line and one per run (status, run time, memory, cold start, error), with
+  anything that looks like a secret hidden.
 - Lambda: `core.sources("orders-etl")` returns the text of a function's own source files by path, and
   `read_sources()` does the same for a .zip you already have.
 

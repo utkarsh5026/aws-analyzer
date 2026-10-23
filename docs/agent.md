@@ -262,17 +262,19 @@ It adds `preview_file`, which reads a file the way `S3View().preview()` does: a 
 
 ### Running Python { #run-python }
 
-Give the agent a Python sandbox and it can write code for what no tool does: parse a function's code, count across files, join two tools' data.
+Give the agent a Python sandbox and it can write code for what no tool does: read a folder of documents, parse a function's code, group a day of logs, join two tools' data.
 { .gist }
 
 ```python
 %pip install "aws-analyzer[agent,sandbox]"
 
 agent = AgentView(provider="bedrock", python="local")
+agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
 agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
 ```
 
-It adds three tools. `save_function_code` saves a function's source files into the workspace, under `lambda/<function>/`. `run_python` runs the code the model writes there and returns what it printed. `workspace_files` lists what's saved. The window shows each run's code under its call, and the report folds it under the table of calls.
+It adds five tools. Three save data into the workspace: `save_s3_files` copies files from S3 under `s3/<bucket>/<key>`, with a PDF's, Word file's or PowerPoint file's text beside it as `<key>.txt`; `save_function_code` saves a function's source files under `lambda/<function>/`; and `save_logs` saves a window of its logs as `lines.jsonl` and `runs.jsonl` (each run's status, run time, memory, cold start and error). `run_python` runs the code the model writes there and returns what it printed, and `workspace_files` lists what's saved. The window shows each run's code under its call, and the report folds it under the table of calls.
 
 The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on [Deno](https://deno.com), which lets it read Pyodide's own files and nothing else: no network, so not the metadata service that hands out the notebook role's credentials, no environment variables, none of the machine's files and no subprocesses. Data gets in only through the tools, which the read-only guard covers.
 

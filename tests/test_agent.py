@@ -21,6 +21,7 @@ from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
 from aws_analyzer.agent.sandboxes import local as localmod
+from aws_analyzer.agent.toolkits import s3_saving
 from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
@@ -73,6 +74,7 @@ from aws_analyzer.agent import (
 )
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
+from test_s3 import docx_bytes
 from test_lambda_functions import (
     ACCOUNT, CODE, NEW_CODE, OLD_CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs, versioned_clients,
 )
@@ -2057,3 +2059,98 @@ def test_the_agent_runs_python_in_the_local_sandbox(pyodide, core):
                                     "print(sorted(p.name for p in pathlib.Path('lambda/etl-nightly').iterdir()))")
     assert ran["ok"] and ran["stdout"] == "['app.py', 'utils.py']\n"
     assert agent._guard.counts == {"lambda:GetFunction": 1}
+
+
+def obj(key, size=10, storage_class="STANDARD"):
+    return ObjectInfo("acme-docs", key, size, NOW, storage_class)
+
+
+def test_plan_saves_takes_what_fits_and_says_why_it_left_the_rest():
+    found = [obj("b.pdf", 30), obj("a.txt", 20), obj("folder/"), obj("cold.csv", 5, "GLACIER"),
+             obj("../up.txt"), obj("c.csv", 60), obj("d.csv", 5), obj("e.csv", 5)]
+    plan = s3_saving.plan_saves(found, room=100, max_files=3)
+    assert [o.key for o in plan.chosen] == ["a.txt", "b.pdf", "d.csv"] and plan.size == 55
+    assert plan.skipped == ["../up.txt: its key can't be a path in the workspace",
+                            "c.csv: 60 B: past what's left of the workspace",
+                            "cold.csv: in GLACIER: restore it before anything can read it",
+                            "e.csv: past the 3 files asked for", "folder/: a folder marker"]
+    assert s3_saving.workspace_key("acme", "docs//a.pdf") == "s3/acme/docs/a.pdf"
+
+
+def test_document_text_reads_word_files_and_says_when_it_cant():
+    from aws_analyzer import s3 as s3mod
+
+    text, why = s3_saving.document_text(s3mod, "notes/study.docx", docx_bytes())
+    assert text.startswith("Churn study") and "plan | churn" in text and why is None
+    assert s3_saving.document_text(s3mod, "rows.csv", b"id\n1\n") == (None, None)
+    broken, why = s3_saving.document_text(s3mod, "broken.docx", b"not a zip")
+    assert broken is None and why.startswith("BadZipFile")
+
+
+def test_the_agent_saves_s3_files_and_their_text_for_python(buckets, tmp_path):
+    s3 = boto3.client("s3", region_name=REGION)
+    s3.put_object(Bucket="acme-raw", Key="docs/study.docx", Body=docx_bytes())
+    s3.put_object(Bucket="acme-raw", Key="docs/old.csv", Body=b"id\n9\n", StorageClass="GLACIER")
+    plain = with_s3()
+    assert "save_s3_files" not in {fn.__name__ for fn in plain.tools()}
+    assert "never read" in plain.toolkit("s3").privacy
+
+    workspace = Folder(tmp_path)
+    core = with_s3(python=workspace)
+    assert "read only into the Python workspace" in core.toolkit("s3").privacy
+    assert "save_s3_files copies them" in core.instructions()
+    saved = tool(core, "save_s3_files")("s3://acme-raw/", match="*")
+    assert saved["folder"] == "s3/acme-raw/" and saved["files_found"] == 6 and saved["files_saved"] == 6
+    assert saved["documents_as_text"] == ["docs/study.docx.txt"] and saved["skipped_count"] == 1
+    assert saved["skipped"] == ["docs/old.csv: in GLACIER: restore it before anything can read it"]
+    assert (tmp_path / "s3/acme-raw/docs/study.docx.txt").read_text().startswith("Churn study")
+    assert set(core._guard.counts) == {"s3:ListObjectsV2", "s3:GetObject"} and core._guard.counts["s3:GetObject"] == 5
+
+    ran = tool(core, "run_python")("import csv, pathlib\n"
+                                   "rows = [r for f in sorted(pathlib.Path('s3/acme-raw/incoming').iterdir())\n"
+                                   "        for r in csv.DictReader(f.open())]\n"
+                                   "print(len(rows), sorted(r['id'] for r in rows))")
+    assert ran["stdout"] == "3 ['1', '2', '3']\n"
+
+    one = tool(core, "save_s3_files")("s3://acme-raw/README.md")
+    assert one["files_saved"] == 1 and one["saved"] == ["s3/acme-raw/README.md"]
+    nothing = tool(core, "save_s3_files")("s3://acme-raw/incoming/", match="*.parquet")
+    assert nothing["files_saved"] == 0 and nothing["note"] == "No file under s3://acme-raw/incoming/ matched."
+    small = with_s3(python=Folder(tmp_path / "small"), budget={"workspace_bytes": 12})
+    tight = tool(small, "save_s3_files")("s3://acme-raw/incoming/")
+    assert tight["files_saved"] == 2 and "past what's left of the workspace" in tight["skipped"][0]
+
+
+def test_the_agent_saves_a_window_of_logs_for_python(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace)
+    assert "save_logs puts a" in agent.instructions()
+    saved = tool(agent, "save_logs")("etl-nightly", since="2h")
+    assert saved["lines"] == 5 and saved["runs"] == 1 and saved["folder"].startswith("logs/etl-nightly/")
+    assert saved["files_saved"] == 2 and not saved["cut_short"]
+    folder = tmp_path / saved["folder"]
+    lines = [json.loads(line) for line in (folder / "lines.jsonl").read_text().splitlines()]
+    runs = [json.loads(line) for line in (folder / "runs.jsonl").read_text().splitlines()]
+    assert "hunter2" not in (folder / "lines.jsonl").read_text() and lines[0]["request_id"] == RID
+    assert runs[0]["request_id"] == RID and runs[0]["status"] == "failed" and runs[0]["duration_ms"] == 102.12
+    assert runs[0]["error"].startswith("KeyError") and runs[0]["lines"] == 5
+    ran = tool(agent, "run_python")("import json, pathlib\n"
+                                    f"runs = [json.loads(l) for l in pathlib.Path('{saved['folder']}/runs.jsonl').open()]\n"
+                                    "print(sum(r['status'] == 'failed' for r in runs))")
+    assert ran["stdout"] == "1\n"
+    refused = tool(agent, "save_logs")("etl-nightly", since="7d")
+    assert refused["refused"] == "log_window"
+
+
+def test_the_agent_analyzes_s3_documents_in_the_local_sandbox(pyodide, buckets):
+    boto3.client("s3", region_name=REGION).put_object(Bucket="acme-raw", Key="docs/study.docx", Body=docx_bytes())
+    core = with_s3(python=LocalSandbox(cache=pyodide))
+    tool(core, "save_s3_files")("s3://acme-raw/")
+    ran = tool(core, "run_python")(
+        "import pathlib\nimport pandas as pd\n"
+        "frames = [pd.read_csv(f) for f in sorted(pathlib.Path('s3/acme-raw/incoming').iterdir())]\n"
+        "print(pd.concat(frames)['id'].tolist())\n"
+        "text = pathlib.Path('s3/acme-raw/docs/study.docx.txt').read_text()\n"
+        "print(text.splitlines()[0], len(text.split()))")
+    assert ran["ok"], ran.get("stderr")
+    assert ran["stdout"] == "[1, 2, 3]\nChurn study 25\n"

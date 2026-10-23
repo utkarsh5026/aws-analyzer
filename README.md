@@ -2011,7 +2011,8 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 > looks like a key or password hidden) go to the model's provider. With a model on Amazon Bedrock it stays in your
 > AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and
 > secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either
-> unless you turn on `read_files=True` (below).
+> unless you turn on `read_files=True` or give it a Python sandbox (`python=`), whose code reads the files it saves
+> and sends the model what it prints (below).
 
 ### What it can call
 
@@ -2054,13 +2055,15 @@ data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,00
 
 ### Running Python (`python=`)
 
-Some questions need work no tool does: every place a function's code calls DynamoDB, what two functions' handlers
-share, a count across a hundred files. `AgentView(python="local")` gives the agent a Python sandbox on the notebook's
-machine, and three tools:
+Some questions need work no tool does: what a folder of PDFs says, every place a function's code calls DynamoDB,
+errors by hour across a day of logs, a count across a hundred CSVs. `AgentView(python="local")` gives the agent a
+Python sandbox on the notebook's machine, and five tools:
 
 | Tool                                         | What it returns                                                                                                                         |
 | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
 | `save_function_code(function, files, region)` | Saves the function's own source files (or `files=` globs, the libraries packed with it too) into the workspace, under `lambda/<function>/`. Secrets files (`.env`, keys) are never saved |
+| `save_s3_files(location, match, since, until, max_files)` | Copies one file, or the files under a location that match, into the workspace under `s3/<bucket>/<key>` (50 by default, up to 500). A PDF's, Word file's or PowerPoint file's text is saved beside it as `<key>.txt`; files in Glacier are skipped until they're restored |
+| `save_logs(function, since, until, search, region)` | Saves a window of a function's logs as `lines.jsonl` (each line) and `runs.jsonl` (each run: status, run time, memory, cold start, error), with anything that looks like a secret hidden |
 | `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
 | `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
 
@@ -2068,7 +2071,9 @@ machine, and three tools:
 %pip install "aws-analyzer[agent,sandbox]"      # brings Deno
 
 agent = AgentView(provider="bedrock", python="local")
+agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
 agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
 ```
 
 The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on
@@ -2199,7 +2204,8 @@ read-only: `lambda:ListFunctions`, `lambda:GetFunction`, `lambda:ListEventSource
 `lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`,
 `logs:FilterLogEvents` and, for `regions="all"`, `ec2:DescribeRegions`. The S3 tools read through `S3Analyzer`:
 `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:GetObject` (for `file_info`'s HeadObject: the
-headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too),
+headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too, and with
+`python=`, `save_s3_files` the whole file),
 `s3:GetObjectTagging`, the bucket settings [S3's permissions](#amazon-s3) list for
 `bucket_info` (`s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration`, `s3:GetBucketPublicAccessBlock`,
 `s3:GetBucketPolicyStatus`, `s3:GetBucketPolicy`, `s3:GetBucketOwnershipControls`,

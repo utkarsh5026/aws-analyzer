@@ -18,6 +18,7 @@ overview()'s 'region:section' errors.
 from __future__ import annotations
 
 import difflib
+import json
 import re
 from collections import Counter
 from datetime import date, datetime, timezone
@@ -59,6 +60,7 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
     "diff_versions": ("lambda:ListVersionsByFunction", "lambda:GetFunction",
                       "the packages' download links (HTTPS, from S3)"),
     "save_function_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
+    "save_logs": ("lambda:GetFunction", "logs:DescribeLogGroups", "logs:FilterLogEvents"),
 }
 
 
@@ -264,6 +266,42 @@ def _run_entry(run: LogRun, lines: int) -> dict[str, Any]:
     if len(run.events) > lines:
         entry["lines_left_out"] = len(run.events) - lines
     return entry
+
+
+def log_lines(page: LogPage) -> list[dict[str, Any]]:
+    """
+    save_logs()'s lines.jsonl: each line a function logged, oldest first, as {time (ISO UTC), request_id, stream,
+    message}, with anything in it that looks like a secret hidden.
+    """
+    return [{"time": _iso(e.time), "request_id": e.request_id, "stream": e.stream, "message": hide_secrets(e.message)}
+            for e in page.events]
+
+
+def run_rows(page: LogPage) -> list[dict[str, Any]]:
+    """
+    save_logs()'s runs.jsonl: each run a function's logs show, oldest first, as {request_id, start, end (ISO UTC),
+    status (ok, failed, timeout, logged, running), duration_ms, billed_ms, memory_mb, memory_used_mb, cold_start,
+    error (what made it fail, or the first error it logged), lines, stream}.
+    """
+    rows = []
+    for run in reversed([run for run in page.runs if run.request_id is not None]):
+        report = run.report
+        error = run.error
+        rows.append({"request_id": run.request_id, "start": _iso(run.start), "end": _iso(run.end),
+                     "status": run.status, "duration_ms": run.duration,
+                     "billed_ms": report.billed if report is not None else None,
+                     "memory_mb": report.memory if report is not None else None,
+                     "memory_used_mb": report.max_memory if report is not None else None,
+                     "cold_start": run.cold, "error": hide_secrets(error[1]) if error else None,
+                     "lines": len(run.events), "stream": run.stream})
+    return rows
+
+
+def _jsonl(rows: list[dict[str, Any]]) -> bytes:
+    """
+    Rows as JSON Lines: one JSON object a line.
+    """
+    return "".join(json.dumps(row, default=str) + "\n" for row in rows).encode()
 
 
 def summarize_runs(page: LogPage, *, runs: int = 6, lines: int = 30) -> dict[str, Any]:
@@ -605,6 +643,7 @@ def summarize_diff(diff: VersionDiff) -> dict[str, Any]:
 
 
 _SKIPPED_SHOWN = 20
+_SAVED_LOG_LINES = 50_000
 _PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}
 _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:ListEventSourceMappings",
                          "account": "lambda:GetAccountSettings", "logs": "logs:DescribeLogGroups",
@@ -683,20 +722,22 @@ AWS Lambda
             return ""
         return """
 - For work across a function's whole code (every call to a client, every handler's shape, what two functions share),
-  save_function_code puts its files in the Python workspace and run_python reads them there."""
+  save_function_code puts its files in the Python workspace and run_python reads them there. For counts, timings or
+  patterns across many runs (errors by hour, the slowest runs' inputs, cold starts against memory), save_logs puts a
+  window's lines and runs there as JSON Lines files."""
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_functions, function_health, function_errors, function_logs, function_performance, function_details,
-        function_code, function_source, search_code, find_symbol and diff_versions, and save_function_code when the
-        agent has a Python workspace: methods whose type hints and docstrings tell the model how to call them,
+        function_code, function_source, search_code, find_symbol and diff_versions, and save_function_code and
+        save_logs when the agent has a Python workspace: methods whose type hints and docstrings tell the model how to call them,
         each reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
         tools = [self.find_functions, self.function_health, self.function_errors, self.function_logs,
                  self.function_performance, self.function_details, self.function_code, self.function_source,
                  self.search_code, self.find_symbol, self.diff_versions]
         if self.peer("python") is not None:
-            tools.append(self.save_function_code)
+            tools += [self.save_function_code, self.save_logs]
         return tools
 
     def find_functions(self, match: str = "", regions: str = "") -> dict[str, Any]:
@@ -1032,6 +1073,40 @@ AWS Lambda
                            "The package holds no source files of its own: files='*' saves what's in it.")
         out["_summary"] = f"saved {_plural(out['files_saved'], 'file')} ({out['size']}) to {out['folder']}"
         out["_next"] = [(self._next_for(fn, "code"), "its files, and the handler's code")]
+        return out
+
+    def save_logs(self, function: str, since: str = "1h", until: str = "", search: str = "",
+                  region: str = "") -> dict[str, Any]:
+        """
+        Saves one function's logs in a time window into the Python workspace as two JSON Lines files, so run_python
+        can count, group and time them: lines.jsonl (each line: time, request_id, stream, message) and runs.jsonl
+        (each run: request_id, start, end, status, duration_ms, billed_ms, memory_mb, memory_used_mb, cold_start,
+        error, lines), under logs/<function>/<window>/. Times are ISO UTC. search: only the runs with a line that
+        contains it ('KeyError', a request ID). since/until: ISO UTC times or relative ('24h'); the window can't be
+        longer than the log limit. region: empty for the default region.
+        """
+        python = self.peer("python")
+        if python is None:
+            raise ValueError("The agent has no Python workspace to save logs into")
+        core = self.analyzer
+        start, end = self._log_window(function, since, until, region or None)
+        page = core.log_runs(function, since=start, until=end, search=search or None, limit=_SAVED_LOG_LINES,
+                             region=region or None)
+        lines, runs = log_lines(page), run_rows(page)
+        folder = f"logs/{page.function.name}/{start:%Y%m%dT%H%M}-{end:%Y%m%dT%H%M}"
+        out: dict[str, Any] = {"function": page.function.name, "region": page.function.region,
+                               "window": _window(start, end), "lines": len(lines), "runs": len(runs)}
+        out.update(python.save(folder, {"lines.jsonl": _jsonl(lines), "runs.jsonl": _jsonl(runs)}))
+        out["cut_short"] = page.truncated
+        if page.truncated:
+            out["covered_from"] = _iso(page.covered_from)
+            out["note"] = (f"The window held more than {_SAVED_LOG_LINES:,} lines: these are the newest, from "
+                           f"{out['covered_from']}. A shorter window, or search=, saves the rest.")
+        if page.errors:
+            out["errors"] = _with_permissions(page.errors, _PERMISSIONS)
+        out["_summary"] = f"saved {_plural(len(lines), 'line')} and {_plural(len(runs), 'run')} to {out['folder']}"
+        out["_next"] = [(self._next_for(page.function, "logs", since=_since(start), search=search or None),
+                         "the same lines, as a report")]
         return out
 
     def _next_for(self, fn: Function, command: str, *args: Any, **kwargs: Any) -> str:
