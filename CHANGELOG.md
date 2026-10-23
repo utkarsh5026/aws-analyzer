@@ -21,8 +21,10 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   published versions only, so for a function that was never published the report says there's nothing to compare
   and how to keep a copy of each deploy. `core.diff()` and `core.versions()` return the same as data, and
   `diff_packages()` compares two .zip files you already have.
+  ([#135](https://github.com/utkarsh5026/aws-analyzer/pull/135))
 - Agent: a new tool, `diff_versions`, lets the agent answer "what changed when it started failing?", and each error
   cause from `function_errors` now says which versions it ran on.
+  ([#135](https://github.com/utkarsh5026/aws-analyzer/pull/135))
 
 ## [0.29.0] - 2026-10-23
 
