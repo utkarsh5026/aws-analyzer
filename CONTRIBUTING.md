@@ -32,6 +32,12 @@ it). `make local-agent` does the same for the AI agent in one step: it finds a P
 with every extra (the agent's LangChain packages and Deno for its sandbox), downloads the sandbox's Pyodide files and
 asks the agent a question on demo data.
 
+On a machine that already has its Python environments, like a SageMaker notebook's conda ones, `make envs` lists
+them (with their Python, Jupyter kernel, whether SageMaker keeps them when the notebook stops, and the aws-analyzer
+version each has), and `make install-env` installs this checkout into the ones you pick: it asks which, with which
+extras, and whether to add a Jupyter kernel for one that has none. `make install-env ARGS="--env pytorch_p310
+--extras all --kernel --yes"` does the same without questions.
+
 ## How the code is laid out
 
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads

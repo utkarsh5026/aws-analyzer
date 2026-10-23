@@ -14,6 +14,9 @@ machines that have make, and this file runs them on machines that don't (Windows
     python makefile.py local --live --profile dev   # ... and against your own AWS account (read-only)
     python makefile.py local-agent           # the same with the AI agent and everything it needs (Python 3.11+)
     python makefile.py notebook              # JupyterLab on that locally installed package
+    python makefile.py envs                  # the Python environments on this machine (conda, venv) and their kernels
+    python makefile.py install-env           # install this checkout into ones you pick (asks which, and what with)
+    python makefile.py install-env --env pytorch_p310 --extras all --kernel   # ... the same without questions
     python makefile.py clean                 # remove what these tasks built
 
 `local` is the check before a release: it builds the wheel from this checkout, installs it in a fresh virtual
@@ -25,11 +28,17 @@ service's reports are saved in .local-check/reports/ as text and as the notebook
 agent's packages need one) when this one is older, installs the wheel with every extra (the agent's LangChain
 packages, Deno for its Python sandbox, and the data, file and notebook packages), downloads the sandbox's Pyodide
 files, and asks the agent a question on demo data with a scripted model. `make notebook` then opens JupyterLab on it.
+
+`install-env` is for a machine that already has its Python environments, like a SageMaker notebook's conda ones: it
+finds them the way SageMakerView().envs() does (conda installations and their envs/, ~/.conda/envs, virtual
+environments, and the Jupyter kernel that starts each), lets you pick some, builds the wheel from this checkout and
+installs it into each with pip, with the extras you choose, and can add a Jupyter kernel for one that has none.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -56,6 +65,11 @@ AGENT_INSTALL_EXTRAS = "all"
 AGENT_MIN_PYTHON = (3, 11)
 AGENT_PYTHONS = ["python3.14", "python3.13", "python3.12", "python3.11"]
 FAILED_LINES_SHOWN = 40
+SRC = ROOT / "src"
+CONDA_PYTHONS = ["/opt/conda/bin/python", "~/anaconda3/bin/python", "~/anaconda3/envs/JupyterSystemEnv/bin/python",
+                 "~/miniconda3/bin/python"]
+NOTEBOOK_INSTANCE_CONDA_ENVS = Path("/home/ec2-user/anaconda3/envs")
+KERNEL_NAME_UNSAFE = re.compile(r"[^a-z0-9._-]+")
 BUILT_FOLDERS = [LOCAL, ROOT / "dist", ROOT / "build", ROOT / "site", ROOT / ".pytest_cache", ROOT / ".ruff_cache"]
 PIP_QUIET = ["--quiet", "--disable-pip-version-check"]
 COMMAND_ERROR = re.compile(r"^\[!\] (?:.+  \[\w+\]|Couldn't .+)$", re.MULTILINE)
@@ -82,6 +96,22 @@ PREPARE_SANDBOX = """
 from aws_analyzer.agent import LocalSandbox
 
 print("      " + LocalSandbox().prepare(lambda name: print(f"      downloading {name}", flush=True)))
+"""
+
+FIND_ENVIRONMENTS = """
+import dataclasses
+import json
+import sys
+
+sys.path.insert(0, sys.argv[1])
+from aws_analyzer.sagemaker_env import SageMakerAnalyzer
+
+print(json.dumps(dataclasses.asdict(SageMakerAnalyzer().environments()), default=str))
+"""
+
+INSTALLED_VERSION = """
+import aws_analyzer
+print(aws_analyzer.__version__)
 """
 
 DEMO_ON_INSTALLED = """
@@ -613,6 +643,390 @@ def task_notebook(args: argparse.Namespace, extra: list[str]) -> int:
     return run([python, "-m", "jupyter", "lab", f"--notebook-dir={LOCAL_NOTEBOOKS}", *extra], cwd=LOCAL_NOTEBOOKS)
 
 
+@dataclass(frozen=True)
+class FoundEnv:
+    """
+    One Python environment `install-env` can install into: what SageMakerAnalyzer.environments() found, or a path
+    the user named.
+    """
+
+    name: str
+    prefix: Path
+    python_version: str
+    kind: str = "conda"
+    kernels: tuple[str, ...] = ()
+    kept: bool | None = None
+    is_this_python: bool = False
+
+    @property
+    def python(self) -> Path:
+        """
+        The environment's own Python, which pip and ipykernel run on.
+        """
+        return venv_python(self.prefix)
+
+    @property
+    def runs_agent(self) -> bool:
+        """
+        Whether its Python is new enough for the agent's packages.
+        """
+        numbers = tuple(int(part) for part in self.python_version.split(".")[:2] if part.isdigit())
+        return numbers >= AGENT_MIN_PYTHON
+
+
+def finder_pythons() -> list[str]:
+    """
+    The Pythons that may have boto3, to read the environments with: this one, the checkout's .venv, `local`'s
+    environment, and the conda Pythons SageMaker ships.
+    """
+    candidates = [sys.executable, str(venv_python(ROOT / ".venv")), str(venv_python())]
+    candidates += [os.path.expanduser(path) for path in CONDA_PYTHONS]
+    return [path for path in dict.fromkeys(candidates) if os.path.isfile(path)]
+
+
+def found_env(env: dict) -> FoundEnv:
+    """
+    One environment from environments()' JSON. Which one is this Python is worked out here, since the Python that
+    read them may be another.
+    """
+    prefix = Path(env["path"])
+    is_this_python = prefix.resolve() == Path(sys.prefix).resolve()
+    return FoundEnv(env["name"], prefix, env["python"], env["kind"], tuple(env["kernels"]), env["kept"],
+                    is_this_python)
+
+
+def find_environments() -> tuple[str, list[FoundEnv]] | None:
+    """
+    What kind of machine this is ('notebook instance', 'studio', 'local', ...) and its Python environments, read by
+    sagemaker_env from this checkout's src/ with the first Python that has boto3, or None when none has it. Reads
+    files, never runs the environments.
+    """
+    for python in finder_pythons():
+        if not has_module(python, "botocore"):
+            continue
+        found = run_quietly([python, "-I", "-c", FIND_ENVIRONMENTS, SRC])
+        if found.returncode:
+            raise SystemExit(f"Couldn't read the environments:\n{tail(found.stderr)}")
+        report = json.loads(found.stdout)
+        return report["kind"], [found_env(env) for env in report["envs"]]
+    return None
+
+
+def environments_for(named: list[str]) -> tuple[str, list[FoundEnv]]:
+    """
+    The machine's kind and environments, or none when they can't be read but every environment named is a path.
+    """
+    found = find_environments()
+    if found is not None:
+        return found
+    if named and all(env_at_path(env) for env in named):
+        return "", []
+    raise SystemExit("Reading the environments needs a Python with boto3, and none was found: pip install boto3 (or "
+                     "python makefile.py setup), or name the environment by its path with --env /path/to/env.")
+
+
+def installed_version(env: FoundEnv) -> str:
+    """
+    The aws-analyzer version installed in an environment, read from its dist-info folder: '' when there's none.
+    """
+    for pattern in ("lib/python3*/site-packages/aws_analyzer-*.dist-info", "Lib/site-packages/aws_analyzer-*.dist-info"):
+        for dist_info in sorted(env.prefix.glob(pattern)):
+            return dist_info.name[len("aws_analyzer-"):-len(".dist-info")]
+    return ""
+
+
+def kept_text(kept: bool | None) -> str:
+    """
+    Whether the environment survives the notebook stopping, for the table: yes, no, or - off SageMaker.
+    """
+    if kept is None:
+        return "-"
+    return "yes" if kept else "no"
+
+
+def print_environments(kind: str, envs: list[FoundEnv]) -> None:
+    """
+    The environments as a numbered table: name, Python, kind, kernels, whether it's kept, aws-analyzer's version.
+    """
+    print(f"Python environments on this machine ({kind}):\n")
+    rows = [("#", "Name", "Python", "Kind", "Jupyter kernel", "Kept", "aws-analyzer", "Path")]
+    for number, env in enumerate(envs, 1):
+        name = f"{env.name} (this Python)" if env.is_this_python else env.name
+        rows.append((str(number), name, env.python_version or "?", env.kind, ", ".join(env.kernels) or "none",
+                     kept_text(env.kept), installed_version(env) or "-", str(env.prefix)))
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
+    for row in rows:
+        print("  " + "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip())
+    if any(env.kept is False for env in envs):
+        print("\nKept 'no': the environment is on the disk SageMaker resets when the notebook stops, so what's "
+              "installed in it goes too.")
+
+
+def python_version_of(python: Path) -> str:
+    """
+    The version of a Python, by running it: '3.11.9', or '' when it doesn't run.
+    """
+    try:
+        ran = run_quietly([python, "-c", "import platform; print(platform.python_version())"])
+    except OSError:
+        return ""
+    return ran.stdout.strip() if ran.returncode == 0 else ""
+
+
+def env_at_path(path: str) -> FoundEnv | None:
+    """
+    An environment the user named by its folder or its Python, found or not, or None when it isn't one: no
+    conda-meta or pyvenv.cfg (the system's Python isn't one), or no Python that runs. Links aren't followed, since
+    an environment's bin/python is a link to the Python it was made from.
+    """
+    given = Path(os.path.abspath(os.path.expanduser(path)))
+    prefix = given.parent.parent if given.is_file() else given
+    is_conda = (prefix / "conda-meta").is_dir()
+    if not (is_conda or (prefix / "pyvenv.cfg").is_file()):
+        return None
+    version = python_version_of(venv_python(prefix))
+    if not version:
+        return None
+    return FoundEnv(prefix.name, prefix, version, "conda" if is_conda else "venv")
+
+
+def named_environment(word: str, envs: list[FoundEnv]) -> FoundEnv | None:
+    """
+    The environment one word names: its number in the table, its name, or its path (listed or not).
+    """
+    if word.isdigit() and 1 <= int(word) <= len(envs):
+        return envs[int(word) - 1]
+    by_name = [env for env in envs if word in (env.name, str(env.prefix))]
+    if by_name:
+        return by_name[0]
+    return env_at_path(word)
+
+
+def pick_environments(answer: str, envs: list[FoundEnv]) -> list[FoundEnv]:
+    """
+    The environments an answer names: numbers from the table ('1,3'), names, paths, or 'all'. Stops with what it
+    didn't recognise.
+    """
+    if answer.strip().lower() == "all":
+        return list(envs)
+    picked: list[FoundEnv] = []
+    for word in answer.replace(",", " ").split():
+        env = named_environment(word, envs)
+        if env is None:
+            raise SystemExit(f"No environment {word!r}: give a number from the list, a name, or the path of a conda "
+                             f"or virtual environment (python makefile.py envs lists them).")
+        picked.append(env)
+    return list(dict.fromkeys(picked))
+
+
+def ask(question: str, default: str = "") -> str:
+    """
+    Asks a question in the terminal, and returns the answer, or `default` for Enter (and when there's no terminal).
+    """
+    suffix = f" [{default}]" if default else ""
+    try:
+        answer = input(f"{question}{suffix}: ").strip()
+    except EOFError:
+        return default
+    return answer or default
+
+
+def ask_yes(question: str, *, default: bool) -> bool:
+    """
+    A yes / no question: Enter takes the default.
+    """
+    answer = ask(question, "Y/n" if default else "y/N")
+    if answer in ("Y/n", "y/N"):
+        return default
+    return answer.lower().startswith("y")
+
+
+def kernel_appears_by_itself(env: FoundEnv, kind: str) -> bool:
+    """
+    Whether Jupyter lists the environment by itself once it has ipykernel: a notebook instance's Jupyter shows each
+    conda environment in ~/anaconda3/envs as conda_<name>, with no kernel.json.
+    """
+    return kind == "notebook instance" and env.prefix.parent == NOTEBOOK_INSTANCE_CONDA_ENVS
+
+
+def kernel_name(env: FoundEnv) -> str:
+    """
+    The name of the kernel `install-env` adds: the environment's name as Jupyter allows it ('My Env' -> 'my-env').
+    """
+    return KERNEL_NAME_UNSAFE.sub("-", env.name.lower()).strip("-") or "aws-analyzer"
+
+
+def kernel_display_name(env: FoundEnv) -> str:
+    """
+    What Jupyter's kernel menu shows for the kernel it adds: 'Python 3.11 (pytorch)', as new_env() names them.
+    """
+    return f"Python {'.'.join(env.python_version.split('.')[:2])} ({env.name})"
+
+
+@dataclass(frozen=True)
+class InstallPlan:
+    """
+    What `install-env` does: the environments, the extras, and which of them get a Jupyter kernel.
+    """
+
+    envs: list[FoundEnv]
+    extras: str
+    kernels_for: list[FoundEnv]
+    machine: str
+
+
+def extras_note(plan: InstallPlan) -> str:
+    """
+    A warning when the agent was asked for in an environment whose Python is too old for it, else ''.
+    """
+    too_old = [env.name for env in plan.envs if wants_agent(plan.extras) and not env.runs_agent]
+    if not too_old:
+        return ""
+    minimum = ".".join(map(str, AGENT_MIN_PYTHON))
+    return (f"The agent's packages need Python {minimum}+, so they're left out in {', '.join(too_old)} (pip skips "
+            f"them there). For the agent, pick a newer environment, or make one with SageMakerView().new_env('3.12').")
+
+
+def plan_from_options(args: argparse.Namespace, kind: str, envs: list[FoundEnv]) -> InstallPlan:
+    """
+    The plan from --env, --extras and --kernel, with no questions.
+    """
+    picked = pick_environments(" ".join(args.env), envs)
+    kernels_for = [env for env in picked if args.kernel and not env.kernels]
+    extras = args.extras or DEFAULT_EXTRAS
+    return InstallPlan(picked, "" if extras == "none" else extras, kernels_for, kind)
+
+
+def plan_by_asking(args: argparse.Namespace, kind: str, envs: list[FoundEnv]) -> InstallPlan:
+    """
+    The plan from questions in the terminal: which environments, which extras, and a kernel for each that has none.
+    """
+    answer = ask("\nInstall into which? Numbers from the list (1,3), names, a path, or all; Enter to stop")
+    if not answer:
+        raise SystemExit("Nothing installed.")
+    picked = pick_environments(answer, envs)
+    print("\nExtras: data (pandas, pyarrow), files (Excel, PDF, ... previews), notebook (HTML reports, the windows, "
+          "progress bars),\nagent (AgentView, Python 3.11+), sandbox (the agent's Python sandbox), all, or none.")
+    extras = args.extras or ask("Which extras", DEFAULT_EXTRAS)
+    kernels_for = []
+    for env in picked:
+        if env.kernels:
+            continue
+        question = f"{env.name} has no Jupyter kernel, so notebooks can't use it. Add one ({kernel_display_name(env)})?"
+        if ask_yes(question, default=True):
+            kernels_for.append(env)
+    return InstallPlan(picked, "" if extras == "none" else extras, kernels_for, kind)
+
+
+def describe_plan(plan: InstallPlan, version: str) -> str:
+    """
+    The plan in a few lines, shown before anything is installed.
+    """
+    package = f"aws-analyzer {version}" + (f" [{plan.extras}]" if plan.extras else "")
+    lines = [f"Install {package} from this checkout into:"]
+    for env in plan.envs:
+        kernel = ", with a Jupyter kernel" if env in plan.kernels_for else ""
+        lines.append(f"  {env.name}  (Python {env.python_version}, {env.prefix}){kernel}")
+    note = extras_note(plan)
+    return "\n".join([*lines, *([f"\n{note}"] if note else [])])
+
+
+def checkout_version() -> str:
+    """
+    This checkout's __version__, read from its __init__.py.
+    """
+    text = (SRC / "aws_analyzer" / "__init__.py").read_text(encoding="utf-8")
+    found = re.search(r'^__version__ = "([^"]+)"', text, re.MULTILINE)
+    return found.group(1) if found else "?"
+
+
+def make_sure_of_pip(env: FoundEnv) -> None:
+    """
+    Gives the environment pip when it has none (a conda environment made without it), with ensurepip.
+    """
+    if has_module(env.python, "pip"):
+        return
+    if run_quietly([env.python, "-m", "ensurepip", "--upgrade"]).returncode:
+        raise SystemExit(f"{env.name} has no pip, and ensurepip couldn't add it: conda install -p {env.prefix} pip")
+
+
+def add_kernel(env: FoundEnv, machine: str) -> int:
+    """
+    Installs ipykernel in the environment and, unless Jupyter lists it by itself, adds its kernel for this user
+    (ipykernel install --user, as new_env() does).
+    """
+    installed = run([env.python, "-m", "pip", "install", *PIP_QUIET, "ipykernel"])
+    if installed or kernel_appears_by_itself(env, machine):
+        return installed
+    return run([env.python, "-m", "ipykernel", "install", "--user", "--name", kernel_name(env),
+                "--display-name", kernel_display_name(env)])
+
+
+def install_into(env: FoundEnv, wheel: Path, plan: InstallPlan) -> bool:
+    """
+    Installs the wheel and its extras into one environment with its own pip, the wheel again even when the same
+    version is there (the checkout changed, its number didn't), adds its kernel when asked, and checks it imports.
+    """
+    step(f"Installing into {env.name} ({env.prefix})")
+    make_sure_of_pip(env)
+    requirement = f"{wheel}[{plan.extras}]" if plan.extras else str(wheel)
+    failed = run([env.python, "-m", "pip", "install", *PIP_QUIET, requirement])
+    failed = failed or run([env.python, "-m", "pip", "install", *PIP_QUIET, "--force-reinstall", "--no-deps", wheel])
+    if not failed and env in plan.kernels_for:
+        failed = add_kernel(env, plan.machine)
+    if failed:
+        print(f"FAIL  {env.name}: pip's error is above")
+        return False
+    imported = run_quietly([env.python, "-I", "-c", INSTALLED_VERSION], cwd=LOCAL)
+    if imported.returncode:
+        print(f"FAIL  {env.name}: installed, but doesn't import:\n{tail(imported.stderr)}")
+        return False
+    print(f"PASS  {env.name}: aws-analyzer {imported.stdout.strip()} imports")
+    return True
+
+
+def task_envs(args: argparse.Namespace, extra: list[str]) -> int:
+    """
+    Lists the Python environments on this machine (conda environments, virtual environments) with their Python,
+    their Jupyter kernel, whether SageMaker keeps them, and the aws-analyzer version each has.
+    """
+    kind, envs = environments_for([])
+    print_environments(kind, envs)
+    print("\nInstall this checkout into some: python makefile.py install-env")
+    return 0
+
+
+def task_install_env(args: argparse.Namespace, extra: list[str]) -> int:
+    """
+    Installs this checkout into Python environments already on this machine (a SageMaker notebook's conda ones):
+    lists them, asks which and with which extras (or takes --env), and can add a Jupyter kernel for each.
+    """
+    kind, envs = environments_for(args.env)
+    if not args.env and not sys.stdin.isatty():
+        print_environments(kind, envs)
+        print("\nNo terminal to ask in: name them with --env (python makefile.py install-env --env NAME).",
+              file=sys.stderr)
+        return 1
+    if not args.env:
+        print_environments(kind, envs)
+    plan = plan_from_options(args, kind, envs) if args.env else plan_by_asking(args, kind, envs)
+    print(f"\n{describe_plan(plan, checkout_version())}\n")
+    if not args.yes and sys.stdin.isatty() and not ask_yes("Go ahead?", default=True):
+        print("Nothing installed.")
+        return 0
+
+    step("Building the wheel from this checkout")
+    builder = Path(sys.executable) if has_module(sys.executable, "pip") else plan.envs[0].python
+    wheel = build_wheel(builder)
+    results = [install_into(env, wheel, plan) for env in plan.envs]
+    for env in plan.envs:
+        if env.kept is False:
+            print(f"\nNote: {env.name} is on the disk SageMaker resets when the notebook stops, so run this again "
+                  f"after a restart, or keep your work in an environment made with SageMakerView().new_env().")
+    print("\nIn a notebook, pick the environment's kernel (Kernel > Change Kernel), then: "
+          "from aws_analyzer import S3View; S3View().help()")
+    return 0 if all(results) else 1
+
 
 TASKS = {
     "setup": task_setup,
@@ -626,6 +1040,8 @@ TASKS = {
     "local": task_local,
     "local-agent": task_local_agent,
     "notebook": task_notebook,
+    "envs": task_envs,
+    "install-env": task_install_env,
     "clean": task_clean,
 }
 PASSES_ARGUMENTS_ON = {"setup", "test", "lint", "check", "build", "docs", "docs-serve", "demo", "notebook"}
@@ -665,6 +1081,21 @@ def add_local_agent_options(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(live=False)
 
 
+def add_install_env_options(parser: argparse.ArgumentParser) -> None:
+    """
+    The options of `install-env`: which environments and extras, and whether to add kernels, so it runs without
+    questions too.
+    """
+    parser.add_argument("--env", action="append", default=[],
+                        help="an environment to install into: its name or number from `envs`, or its path "
+                             "(repeat for several, or 'all'); without it, it asks")
+    parser.add_argument("--extras", help=f"the optional packages: data, files, notebook, agent, sandbox or all "
+                                         f"(default: {DEFAULT_EXTRAS}; 'none' for none)")
+    parser.add_argument("--kernel", action="store_true",
+                        help="add a Jupyter kernel for an environment that has none")
+    parser.add_argument("--yes", action="store_true", help="don't ask before installing")
+
+
 def make_parser() -> argparse.ArgumentParser:
     """
     One subcommand per task, each described by its function's docstring.
@@ -681,6 +1112,7 @@ def make_parser() -> argparse.ArgumentParser:
     tasks.choices["demo"].add_argument("code", nargs="?", help="the Python to run (default: the service's tour)")
     add_local_options(tasks.choices["local"])
     add_local_agent_options(tasks.choices["local-agent"])
+    add_install_env_options(tasks.choices["install-env"])
     tasks.add_parser("help", help="this list")
     return parser
 
