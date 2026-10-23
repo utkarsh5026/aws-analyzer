@@ -16,6 +16,7 @@ from .._kit.fmt import _duration, _plural, human_money
 
 if TYPE_CHECKING:
     from .answers import AgentStep, ToolCall
+    from .charts import Chart
 
 
 _METRICS_PER_PRICE = 1000
@@ -38,6 +39,7 @@ class Budget:
         python_runs     run_python calls per question (only with a Python workspace)
         python_seconds  the longest one run_python call may take
         workspace_bytes the most the tools may save into the workspace, in all
+        charts          the most charts show_chart may put in one answer (only with a Python workspace)
     """
 
     tool_calls: int = 25
@@ -51,6 +53,7 @@ class Budget:
     python_runs: int = 10
     python_seconds: float = 30.0
     workspace_bytes: int = 50 * 1024 * 1024
+    charts: int = 8
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
@@ -82,6 +85,7 @@ class _Run:
         metrics_read  CloudWatch metrics the tools requested (GetMetricData bills per 1,000)
         aws_cost      USD for those metrics; every other read the tools make is free
         listener      told each AgentStep as it happens (ask()'s on_step), from whichever thread it happens on
+        charts        the charts show_chart put in the answer, in the order it showed them
     """
 
     budget: Budget
@@ -93,6 +97,7 @@ class _Run:
     aws_cost: float = 0.0
     lock: threading.Lock = field(default_factory=threading.Lock)
     listener: Callable[[AgentStep], None] | None = None
+    charts: list[Chart] = field(default_factory=list)
 
     @property
     def elapsed(self) -> float:
@@ -132,6 +137,7 @@ _REFUSED = {
     "stopped": "not run: stopped",
     "python_runs": "not run: the budget of Python runs was used up",
     "workspace": "not saved: the workspace is full",
+    "charts": "not shown: the answer has as many charts as the budget allows",
 }
 
 

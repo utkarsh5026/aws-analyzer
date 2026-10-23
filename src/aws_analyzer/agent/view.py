@@ -1,5 +1,6 @@
 """
-AgentView: the agent's notebook UI. ask() shows the answer first, then what it checked to get it (each tool call
+AgentView: the agent's notebook UI. ask() shows the answer first, with the charts the agent drew for it (_Charts),
+then what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
 View commands to look closer; transcript() and tools() show the questions so far and what the agent can call.
 
@@ -9,7 +10,10 @@ _BADGE, so its reports are easy to tell from other analyzers'.
 
 from __future__ import annotations
 
+import base64
+import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, tzinfo
 from typing import TYPE_CHECKING, Any
 
@@ -17,14 +21,16 @@ from botocore.exceptions import BotoCoreError
 
 from .._bedrock.blocks import _Answer
 from .._bedrock.prices import _per_million, short_model
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Report, _Table, _Text, _Title, _draws
 from .._kit.deps import _require
 from .._kit.errors import _Hint
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money, human_size
 from .._kit.render import _base_css, _Look, _report_html
+from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
+from .charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
 
 if TYPE_CHECKING:
@@ -51,7 +57,12 @@ _EXTRA_CSS = """\
 .agt .ans th,.agt .ans td{border-bottom:1px solid rgba(127,127,127,.22);padding:6px 11px;text-align:left;vertical-align:top}
 .agt .ans th{background:rgba(127,127,127,.06);font-weight:600}
 .agt .ans tbody tr:last-child td{border-bottom:0}
-.agt .ans th.r,.agt .ans td.r{text-align:right;font-variant-numeric:tabular-nums}"""
+.agt .ans th.r,.agt .ans td.r{text-align:right;font-variant-numeric:tabular-nums}
+.agt .cht{display:flex;flex-direction:column;gap:16px;margin:4px 0 14px;max-width:900px}
+.agt .cht figure{margin:0}
+.agt .cht figcaption{font-size:13.5px;font-weight:600;margin:0 0 6px}
+.agt .cht img{display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid rgba(127,127,127,.22);background:#fcfcfb}
+.agt .cht .cht-f{font-size:11.5px;opacity:.6;margin-top:4px}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS)
 _BADGE = "🤖 Agent"
 
@@ -64,6 +75,38 @@ def _render_html(blocks: list[Any], max_rows: int, theme: str = "") -> str:
     `theme` when one is named (set_theme's), else in the stylesheet's own look (the windows' reports).
     """
     return _report_html(blocks, max_rows, _LOOK, theme=theme)
+
+
+@dataclass
+class _Charts:
+    """
+    The charts an answer shows under its text, each under its title, with its kind, size and workspace file.
+    """
+
+    charts: list[Chart]
+
+
+@_draws(_Charts, "html")
+def _charts_html(block: _Charts, report: _Report) -> str:
+    """
+    Each chart as an <img> holding the picture itself (a data: URL, so it stays in the saved notebook; an SVG's
+    scripts don't run in an <img>), under its title.
+    """
+    figures = []
+    for chart in block.charts:
+        source = f"data:{chart.mime};base64,{base64.b64encode(chart.data).decode()}"
+        figures.append(f'<figure><figcaption>{_esc(chart.title)}</figcaption>'
+                       f'<img src="{source}" alt="{_esc(chart.title)}">'
+                       f'<div class="cht-f">{chart.kind.upper()} · {_esc(chart.size)} · {_esc(chart.path)}</div>'
+                       '</figure>')
+    return f'<div class="cht">{"".join(figures)}</div>'
+
+
+@_draws(_Charts, "text")
+def _charts_lines(block: _Charts, report: _Report) -> list[str]:
+    lines = [f"📈 {chart.title} ({chart.kind.upper()}, {chart.size}): open in a notebook to see it"
+             for chart in block.charts]
+    return ["", *lines, "   save_charts() writes them to files."]
 
 
 def _coverage_text(call: ToolCall) -> str:
@@ -156,7 +199,7 @@ class AgentView(_BaseView):
     _render_html = staticmethod(_render_html)
     _GROUPS = {
         "💬 Ask": ("chat", "ask", "new_conversation"),
-        "🔎 Look back": ("transcript",),
+        "🔎 Look back": ("transcript", "save_charts"),
         "🧰 What it can do": ("tools", "use_model"),
         "❓ Help": ("help",),
     }
@@ -165,6 +208,8 @@ class AgentView(_BaseView):
         ("ask('Which Lambda failed last night?')", "the answer, what it checked, and what to run next"),
         ("ask('Why did it fail?')", "a follow-up: it remembers the conversation"),
         ("ask('Did the files uploaded to acme-raw last night get processed?')", "S3 and Lambda together"),
+        ("AgentView(python='local').ask('Chart the CSVs in s3://acme-raw/sales/ by month')",
+         "its own Python over your files, with charts"),
         ("tools()", "what the agent can call, its model and its budget"),
     )
     _PROGRESS = ("Thinking", "steps")
@@ -245,7 +290,9 @@ class AgentView(_BaseView):
         blocks: list[Any] = [_Title(answer.question, self._answer_line(answer))]
         if answer.text:
             blocks.append(_Answer(answer.text))
-        elif not answer.error:
+        if answer.charts:
+            blocks.append(_Charts(answer.charts))
+        if not answer.text and not answer.error:
             blocks.append(_Note("The agent stopped before it wrote an answer: the table below shows what it read.",
                                 "warn"))
         return blocks + self._checked_blocks(answer)
@@ -258,6 +305,7 @@ class AgentView(_BaseView):
         return " · ".join(filter(None, [
             answer.model or "model not named",
             _plural(len(answer.calls), "tool call"),
+            _plural(len(answer.charts), "chart") if answer.charts else "",
             _duration(answer.seconds),
             "follow-up" if is_follow_up else "",
         ]))
@@ -304,6 +352,9 @@ class AgentView(_BaseView):
         if answer.error:
             blocks.append(_Note(answer.error, "warn"))
         nxt = answer_next(answer)
+        if answer.charts:
+            nxt = [("save_charts()", f"the {_plural(len(answer.charts), 'chart')} as files, in {CHARTS_FOLDER}/"),
+                   *nxt][:3]
         if nxt:
             blocks.append(_Next(nxt, title=_look_closer(nxt)))
         return blocks
@@ -377,7 +428,22 @@ class AgentView(_BaseView):
             blocks.append(_Title(answer.question, sub))
             blocks.append(_Answer(answer.text) if answer.text else
                           _Note(answer.error or "No answer: it stopped before writing one.", "warn"))
+            if answer.charts:
+                blocks.append(_Charts(answer.charts))
         self._show(blocks)
+
+    @_friendly_errors
+    def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> None:
+        """
+        Saves the charts of the last answer as files (PNG or SVG, each named after its title) in a folder beside the
+        notebook, agent-charts/ unless you name another, to put in a slide or a report. answer= picks an earlier
+        answer (answer=0 is the first asked). A file that's there already is never replaced: the new one gets a
+        number.
+        """
+        paths = self.core.save_charts(folder, answer=answer)
+        rows = [[str(path), chart.title, chart.size] for path, chart in zip(paths, self.core.history[answer].charts)]
+        self._show([_Title("Charts saved", f"{_plural(len(paths), 'file')} in {paths[0].parent}"),
+                    _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
 
     @_friendly_errors
@@ -422,6 +488,7 @@ class AgentView(_BaseView):
                 ["Python runs", f"{budget.python_runs:,}", "run_python stops running; it answers with what it has"],
                 ["One run", _duration(budget.python_seconds), "the workspace stops the code"],
                 ["Workspace", human_size(budget.workspace_bytes), "a save that would go past it is refused"],
+                ["Charts", f"{budget.charts:,}", "show_chart puts no more in the answer"],
             ]
         if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
             limits += [

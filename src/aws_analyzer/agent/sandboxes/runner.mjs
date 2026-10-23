@@ -1,13 +1,17 @@
 // The local sandbox's runner (aws_analyzer.agent.sandboxes.local): one run of the model's Python in Pyodide.
 //
 // Deno runs it with read access to the Pyodide folder only: no network, no environment, no other files, no
-// subprocesses. The request comes on stdin as JSON ({nonce, code, packages, files, limit}): the workspace's files
-// (base64) go into Pyodide's in-memory file system at /workspace, the code runs there, and the result goes back on
-// stdout as one line that starts with the nonce: what it printed, its traceback, and the files it changed or deleted.
+// subprocesses. The request comes on stdin as JSON ({nonce, code, packages, files, limit, matplotlibrc}): the
+// workspace's files (base64) go into Pyodide's in-memory file system at /workspace, the code runs there, and the
+// result goes back on stdout as one line that starts with the nonce: what it printed, its traceback, and the files it
+// changed or deleted. matplotlib's warning about its own float coordinates, which every chart drawn in WebAssembly
+// sets off, is left out of the traceback text. A charts/ folder is there for the charts the code draws. matplotlib's settings and font cache live outside /workspace, so they aren't the code's files.
 
 const DRIVER = `
-import linecache, sys, traceback
+import linecache, sys, traceback, warnings
 from pyodide.code import eval_code_async
+
+warnings.filterwarnings("ignore", message=r"The [xy] parameter as float was deprecated")
 
 async def _aws_analyzer_run(code):
     linecache.cache["<code>"] = (len(code), None, code.splitlines(True), "<code>")
@@ -67,6 +71,7 @@ const lock = JSON.parse(await Deno.readTextFile(`${indexDir}/pyodide-lock.json`)
 const offered = new Set(request.packages);
 lock.packages = Object.fromEntries(Object.entries(lock.packages).filter(([name]) => offered.has(name)));
 
+const MATPLOTLIB = "/opt/aws-analyzer/matplotlib";
 const fileUrl = (path) => new URL(`file:///${path.replace(/\\/g, "/").replace(/^\/+/, "")}`).href;
 const { loadPyodide } = await import(fileUrl(`${indexDir}/pyodide.mjs`));
 const py = await loadPyodide({
@@ -76,12 +81,14 @@ const py = await loadPyodide({
   stdin: () => null,
   stdout: out.add,
   stderr: err.add,
-  env: { HOME: "/workspace" },
+  env: { HOME: "/workspace", MPLBACKEND: "Agg", MPLCONFIGDIR: MATPLOTLIB },
 });
 
 const ROOT = "/workspace";
 const given = new Map();
 py.FS.mkdirTree(ROOT);
+py.FS.mkdirTree(MATPLOTLIB);
+if (request.matplotlibrc) py.FS.writeFile(`${MATPLOTLIB}/matplotlibrc`, request.matplotlibrc);
 for (const [path, data] of Object.entries(request.files)) {
   const target = `${ROOT}/${path}`;
   py.FS.mkdirTree(target.slice(0, target.lastIndexOf("/")));
@@ -89,6 +96,7 @@ for (const [path, data] of Object.entries(request.files)) {
   py.FS.writeFile(target, bytes);
   given.set(path, bytes);
 }
+py.FS.mkdirTree(`${ROOT}/charts`);
 py.FS.chdir(ROOT);
 
 let ok = false;

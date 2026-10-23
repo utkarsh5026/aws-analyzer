@@ -6,10 +6,15 @@ notebook role's credentials), no environment variables, no files of the machine 
 memory here and are copied into Pyodide's in-memory file system for each run (runner.mjs), which starts a fresh Deno.
 
 What it needs: Deno (pip install deno, or the [sandbox] extra), and the Pyodide files, which prepare() downloads once
-from the jsDelivr CDN into `cache` (PYODIDE_URL; about 13 MB, plus the packages: pandas and what it needs, about 8 MB),
+from the jsDelivr CDN into `cache` (PYODIDE_URL; about 13 MB, plus the packages: pandas, matplotlib and what they
+need, about 18 MB),
 checking each file's SHA-256: the core files' against _CORE_FILES, pinned here, and the packages' against the lock
 file's. Without the internet (a VPC-only notebook), put those files in `cache` from elsewhere, or point index_url= at a
 mirror. Nothing here deletes a file, and nothing is written outside `cache`.
+
+Charts: matplotlib draws with its Agg backend (Pyodide's own needs a browser page) in CHART_STYLE, a matplotlibrc
+outside the workspace, so the model's charts look alike without it setting a style: one size, recessive axes and
+grid, and the categorical colours of a palette checked for colour-blind readers, in a fixed order.
 
 _RESULT_LIMIT is the most a run's output (stdout and stderr each) the runner keeps, in characters; _DOWNLOAD_SECONDS
 how long one download may stall.
@@ -40,7 +45,46 @@ from ..workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 
 PYODIDE_VERSION = "314.0.7"
 PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
-DEFAULT_PACKAGES = ("pandas",)
+DEFAULT_PACKAGES = ("pandas", "matplotlib")
+CHART_COLORS = ("2a78d6", "eb6834", "1baf7a", "eda100", "e87ba4", "008300", "6250d6", "e34948")
+CHART_STYLE = f"""\
+backend: Agg
+figure.figsize: 8, 4.5
+figure.dpi: 110
+figure.facecolor: fcfcfb
+savefig.dpi: 110
+savefig.bbox: tight
+savefig.facecolor: fcfcfb
+font.size: 10
+text.color: 0b0b0b
+axes.facecolor: fcfcfb
+axes.edgecolor: c3c2b7
+axes.labelcolor: 52514e
+axes.titlesize: 12.5
+axes.titleweight: semibold
+axes.titlelocation: left
+axes.titlepad: 12
+axes.spines.top: False
+axes.spines.right: False
+axes.grid: True
+axes.grid.axis: y
+axes.axisbelow: True
+axes.prop_cycle: cycler('color', [{", ".join(f"'{color}'" for color in CHART_COLORS)}])
+grid.color: e6e5e0
+grid.linewidth: 0.8
+xtick.color: 52514e
+ytick.color: 52514e
+xtick.major.size: 0
+ytick.major.size: 0
+lines.linewidth: 2
+lines.markersize: 6
+patch.force_edgecolor: True
+patch.edgecolor: fcfcfb
+patch.linewidth: 1
+legend.frameon: False
+image.cmap: Blues
+date.converter: concise
+"""
 
 _LOCK_FILE = "pyodide-lock.json"
 _CORE_FILES = {
@@ -150,7 +194,8 @@ class LocalSandbox(Workspace):
     no network, no environment variables, no access to the machine's files and no subprocesses, in a fresh
     interpreter each run. Its files are kept in memory.
 
-        packages   Pyodide packages the code can import besides the standard library ('pandas' brings numpy too)
+        packages   Pyodide packages the code can import besides the standard library ('pandas' brings numpy too,
+                   'matplotlib' draws the charts show_chart puts in an answer)
         cache      where the Pyodide files are kept (default_cache())
         index_url  where prepare() downloads them from: jsDelivr's copy of Pyodide's release, or your mirror
         memory     the most memory one run may use ('2GB')
@@ -225,6 +270,7 @@ class LocalSandbox(Workspace):
             files = dict(self._files)
         nonce = secrets.token_hex(16)
         request = {"nonce": nonce, "code": code, "packages": self._offered, "limit": _RESULT_LIMIT,
+                   "matplotlibrc": CHART_STYLE,
                    "files": {path: base64.b64encode(data).decode() for path, data in files.items()}}
         started = time.monotonic()
         try:

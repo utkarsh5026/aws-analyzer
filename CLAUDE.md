@@ -186,7 +186,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
   deletes one), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
   to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
-  itself writes nothing on disk: its files stay in memory), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
+  itself writes nothing on disk: its files stay in memory), the agent's `save_charts()` (`charts.write_charts`: an
+  answer's charts, each to `<name>.part` then renamed, in `agent-charts/` or the folder given, a taken name getting a
+  number, so it never replaces a file), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
   (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
   kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
@@ -782,7 +784,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   request is built.
 - **The workspace** (`workspace.py`, `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
-  `PythonToolkit` last (`_with_python`), with `run_python` and `workspace_files`. A sandbox must give the code no AWS
+  `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS
   credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
   Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`,
   and `save_logs`, a window's `log_lines` / `run_rows` as JSON Lines with secrets hidden; S3's `save_s3_files`, whose
@@ -801,7 +803,18 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   (`PYODIDE_VERSION`, from `PYODIDE_URL`) into `cache`, the core files checked against `_CORE_FILES`' pinned SHA-256s and
   the packages (`needed_packages`) against the lock file's; the runner offers only the packages asked for (a filtered
   lock file), so importing another is a plain ModuleNotFoundError. A new Pyodide version means new pinned hashes, from
-  the npm tarball and the CDN agreeing.
+  the npm tarball and the CDN agreeing. Its `DEFAULT_PACKAGES` are pandas and matplotlib; the runner sets matplotlib's
+  Agg backend and `CHART_STYLE` (a matplotlibrc: one size, quiet axes, `CHART_COLORS`, the dataviz palette's eight
+  categorical colours in order) in `MPLCONFIGDIR` outside `/workspace`, makes a `charts/` folder, and filters
+  matplotlib's float-coordinate deprecation warning that every chart in WebAssembly sets off.
+- **Charts** (`charts.py`, pure but for `write_charts`): `show_chart(file, title)` reads a workspace picture,
+  `chart_of` checks it by its first bytes (`image_kind`: PNG, JPEG, GIF, WebP, SVG; at most `MAX_CHART_BYTES`) and
+  `PythonToolkit._add_chart` puts it on the `_Run` (`run.charts`, at most the budget's `charts`; the same path again
+  replaces it), which `ask()` copies to `AgentAnswer.charts`. The prompt's Charts part (`_chart_instructions`) says
+  when to draw one and how it should read (a title that says it, through `show_chart` rather than `ax.set_title`; no
+  pies or second y-axis). `AgentView` draws them with `_Charts` (an `<img>` with a data: URL, so an SVG's scripts
+  never run and the picture stays in the saved notebook) under the answer, in `ask()`, `transcript()` and the chat
+  window's reply (`.ag-charts`); `save_charts()` (`AgentAnalyzer.save_charts`) writes them to files.
 - **The model** (`llm.py`): `pick_provider()` turns `provider=` / `model=` (`'openai:gpt-4.1'`: a prefix only when
   it's in `_PREFIXES`, LangChain's provider names, so a Bedrock ID's `:0` isn't one), `chat_model=` (by class,
   `provider_of`) and the environment (`MODEL_ENV`, `AWS_ANALYZER_AGENT_MODEL`, then `AZURE_OPENAI_*`, then

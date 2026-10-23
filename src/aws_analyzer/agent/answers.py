@@ -15,6 +15,7 @@ from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
 from .._kit.text import _clip
 from .budget import Budget
+from .charts import Chart
 from .llm import Rates
 
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
@@ -136,6 +137,7 @@ class AgentAnswer:
     One question and its answer, with every tool call it made, the AWS reads, the tokens and what it cost.
 
         text          the answer, in markdown
+        charts        the charts it drew to show with the text (show_chart), in order: .title, .data, .mime
         aws_calls     the AWS reads it made: 'logs:FilterLogEvents' -> 12
         blocked       AWS calls the read-only guard refused
         metrics_read  CloudWatch metrics requested (GetMetricData bills per 1,000)
@@ -154,6 +156,7 @@ class AgentAnswer:
     question: str
     text: str = ""
     calls: list[ToolCall] = field(default_factory=list)
+    charts: list[Chart] = field(default_factory=list)
     aws_calls: dict[str, int] = field(default_factory=dict)
     blocked: list[str] = field(default_factory=list)
     metrics_read: int = 0
