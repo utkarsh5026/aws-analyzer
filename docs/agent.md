@@ -91,7 +91,7 @@ agent.tools()                                                  # what it can cal
 agent.transcript()                                             # every question and answer so far, with their cost
 ```
 
-With a Python sandbox (`AgentView(python="local")`, [below](#run-python)), it can also read your files and answer with charts: `agent.ask("Chart the orders in s3://acme-raw/sales/ by month")`, then `agent.save_charts()` for the PNGs.
+With a Python sandbox (`AgentView(python="local")`, [below](#run-python)), it can also read your files and answer with charts: `agent.ask("Chart the orders in s3://acme-raw/sales/ by month")`, then `agent.save_charts()` for the pictures.
 
 Each answer comes with **What it checked**: a line per tool call with the window and regions it covered and what it found. Then what it couldn't read, its cost, and the `LambdaView` and `S3View` commands that show the same as a full report.
 
@@ -282,11 +282,11 @@ The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAsse
 
 !!! tip "Worth knowing"
 
-    The first run downloads Pyodide's files once, about 31 MB with pandas and matplotlib, into `~/.cache/aws-analyzer/pyodide/`, and checks each file's SHA-256. Run `LocalSandbox().prepare()` (from `aws_analyzer.agent`) to do it ahead of time. Without internet access, copy the files into that folder from elsewhere, or pass `index_url=` a mirror. What the code prints goes to the model's provider, with anything that looks like a secret hidden.
+    The first run downloads Pyodide's files once, about 24 MB with pandas, Altair and Vega-Lite, into `~/.cache/aws-analyzer/pyodide/`, and checks each file's SHA-256. Run `LocalSandbox().prepare()` (from `aws_analyzer.agent`) to do it ahead of time. Without internet access, copy the files into that folder from elsewhere, or pass `index_url=` a mirror. What the code prints goes to the model's provider, with anything that looks like a secret hidden.
 
 ??? more "Packages, memory and time"
 
-    The code can import the standard library, pandas (with numpy) and matplotlib. `LocalSandbox(packages=["pandas", "matplotlib", "scikit-learn"])` offers others from [Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run more than its default 2 GB. Each run starts a fresh interpreter: files stay between runs, variables don't. Starting Pyodide takes about 2 seconds of a run, loading pandas about 3, and matplotlib about 2 more.
+    The code can import the standard library, pandas (with numpy) and Altair. `LocalSandbox(packages=["pandas", "altair", "scikit-learn"])` offers others from [Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run more than its default 2 GB. Each run starts a fresh interpreter: files stay between runs, variables don't. Starting Pyodide takes about 2 seconds of a run, loading pandas about 3, and Altair about 2 more.
 
     A question gets 10 runs of up to 30 seconds each, and the tools save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
 
@@ -312,23 +312,23 @@ The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAsse
 
 ### Charts { #charts }
 
-Ask for a chart and the answer has one: the agent reads the files it saved with pandas, draws the chart with matplotlib, and shows it under the answer's text.
+Ask for a chart and the answer has one: the agent reads the files it saved with pandas, makes the chart with Altair, and shows it under the answer's text.
 { .gist }
 
 ```python
 agent = AgentView(provider="bedrock", python="local")
 agent.ask("Chart the orders in s3://acme-raw/sales/*.csv by month and region")
 agent.ask("Plot orders-etl's run time per hour yesterday, and mark the slow runs")
-agent.save_charts()                       # the last answer's charts as PNG files, in agent-charts/
+agent.save_charts()                       # the last answer's charts as SVG files, in agent-charts/
 ```
 
 Each chart shows under the answer with its title, in the report, the chat window and `transcript()`. The picture is part of the notebook's output, so it stays when the notebook is saved; `save_charts()` writes the charts to files for a slide or a report (`save_charts("slides", answer=0)` for the first answer's, into `slides/`), and never replaces a file that's there.
 
-The sandbox gives every chart the same look: one size, quiet axes and grid, and eight colours that stay apart for colour-blind readers, always in the same order. The agent is told how to make a chart read: one message per chart with a title that says it ("Errors doubled after Tuesday's deploy"), axes labelled with units, a line for change over time and sorted bars to compare, no pies and never a second y-axis. It prints the numbers it plots too, so the answer's text says them.
+The chart is made with [Altair](https://altair-viz.github.io), and the sandbox draws it as a crisp SVG with [Vega-Lite](https://vega.github.io/vega-lite/), in the same Deno that runs the code, so drawing it fetches nothing. Every chart gets the same look: one size, quiet axes and grid, and eight colours that stay apart for colour-blind readers, always in the same order. The agent is told how to make a chart read: one message per chart with a title that says it ("Errors doubled after Tuesday's deploy"), axes labelled with units, a line for change over time and sorted bars to compare, no pies and never a second y-axis. It prints the numbers it plots too, so the answer's text says them.
 
 ??? more "Charts as data, and their limits"
 
-    `answer.charts` holds them: each `Chart` has its `.title`, the workspace file it was drawn to (`.path`), the picture's bytes (`.data`) and its `.kind` and `.mime`. `show_chart` takes PNG, SVG, JPEG, GIF and WebP files of up to 3 MB, and shows them as pictures, so nothing in an SVG runs. A question gets at most 8 charts: `budget={"charts": 12}` raises it. Showing the same file again replaces the chart with the new drawing.
+    `answer.charts` holds them: each `Chart` has its `.title`, the workspace file it came from (`.path`), the SVG's bytes (`.data`), its `.kind` and `.mime`, and its Vega-Lite spec (`.spec`). With Altair installed in the notebook, `alt.Chart.from_dict(answer.charts[0].spec)` shows a chart again, with tooltips; `save_charts()` writes the spec beside each SVG as `.vl.json`, which the [Vega editor](https://vega.github.io/editor/) opens too. A chart that reads data from a URL is refused: its data must be in the chart, as Altair puts it. `show_chart` also takes PNG, SVG, JPEG, GIF and WebP pictures of up to 3 MB, and shows every chart as a picture, so nothing in an SVG runs. A question gets at most 8 charts: `budget={"charts": 12}` raises it. Showing the same file again replaces the chart with the new one. To draw with matplotlib instead, `LocalSandbox(packages=["pandas", "matplotlib"])`: its charts get the same colours.
 
 
 ## Safe and bounded { #safety }
@@ -377,7 +377,7 @@ agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 ```python
 answer = agent.core.ask("Which Lambda failed last night?")
 answer.text                    # the answer, in markdown
-answer.charts                  # Chart: title, path, data (the picture's bytes), kind, mime
+answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
 answer.calls[0].result         # the data the tool handed the model
@@ -504,7 +504,7 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |
-| `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as PNG or SVG files, each named after its title; it never replaces a file |
+| `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |
 | `use_model(provider=None, model=None, ...)` | Switches the model the agent answers with, and says where what it sends goes; the window's ⚙ model does it by clicking |
 | `help(command=None)` | This list, grouped by task; `help("name")` shows one command in full |

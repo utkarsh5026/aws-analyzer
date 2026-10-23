@@ -8,7 +8,8 @@ and sees only the workspace's files. That keeps the agent read-only: data reache
 toolkits' tools, whose AWS clients the guard hooks, and the code itself can't reach AWS. Each run starts a fresh
 interpreter; the files stay between runs, the variables don't. deepagents' file tools (ls, read_file, write_file,
 edit_file, glob, grep) work on the same files (workspace_files.py), so the model can write a script, run it and edit
-it.
+it. A sandbox that can draw Vega-Lite charts (draws_charts, draw_vega_lite()) turns the charts the code saves with
+Altair into the SVG pictures an answer shows (show_chart); every sandbox can show a picture the code drew itself.
 
 clean_path() is pure: the one way a path into the workspace is read, so no tool writes outside it.
 """
@@ -50,17 +51,20 @@ class PythonRun:
 class Workspace:
     """
     A sandbox the agent runs Python in. A subclass sets the class attributes below and defines put(), read(),
-    delete(), files() and run(); close() lets it go when the agent is done with it. The code it runs must have no AWS credentials and no
+    delete(), files() and run(), and draw_vega_lite() when it sets draws_charts; close() lets it go when the agent is
+    done with it. The code it runs must have no AWS credentials and no
     network, and see only the workspace's files (see this module's docstring).
 
         title     how reports name it: 'a local sandbox'
         place     what tells it apart, after its title: '(Pyodide on Deno, in WebAssembly: no network, ...)'
-        packages  what the code can import besides the standard library: ('pandas', 'numpy')
+        packages      what the code can import besides the standard library: ('pandas', 'numpy')
+        draws_charts  whether draw_vega_lite() can draw the Vega-Lite charts the code saves (Altair's)
     """
 
     title: str = "a workspace"
     place: str = ""
     packages: tuple[str, ...] = ()
+    draws_charts: bool = False
 
     def put(self, path: str, data: bytes) -> None:
         """
@@ -90,6 +94,14 @@ class Workspace:
         """
         Runs `code` in a fresh interpreter whose working directory is the workspace's root, for at most `timeout`
         seconds, and returns what it did. Raises nothing for the code's own errors: they're the run's stderr.
+        """
+        raise NotImplementedError
+
+    def draw_vega_lite(self, spec: dict, *, config: dict, timeout: float) -> bytes:
+        """
+        A Vega-Lite chart (`spec`, its data inside it) drawn as SVG in `config` (a Vega-Lite config, under the spec's
+        own), with no network, in at most `timeout` seconds. ValueError saying what's wrong with a chart that can't be
+        drawn. The default can't draw any: show_chart then asks for a picture.
         """
         raise NotImplementedError
 

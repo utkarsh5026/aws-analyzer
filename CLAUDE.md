@@ -803,18 +803,29 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   (`PYODIDE_VERSION`, from `PYODIDE_URL`) into `cache`, the core files checked against `_CORE_FILES`' pinned SHA-256s and
   the packages (`needed_packages`) against the lock file's; the runner offers only the packages asked for (a filtered
   lock file), so importing another is a plain ModuleNotFoundError. A new Pyodide version means new pinned hashes, from
-  the npm tarball and the CDN agreeing. Its `DEFAULT_PACKAGES` are pandas and matplotlib; the runner sets matplotlib's
-  Agg backend and `CHART_STYLE` (a matplotlibrc: one size, quiet axes, `CHART_COLORS`, the dataviz palette's eight
-  categorical colours in order) in `MPLCONFIGDIR` outside `/workspace`, makes a `charts/` folder, and filters
-  matplotlib's float-coordinate deprecation warning that every chart in WebAssembly sets off.
-- **Charts** (`charts.py`, pure but for `write_charts`): `show_chart(file, title)` reads a workspace picture,
-  `chart_of` checks it by its first bytes (`image_kind`: PNG, JPEG, GIF, WebP, SVG; at most `MAX_CHART_BYTES`) and
-  `PythonToolkit._add_chart` puts it on the `_Run` (`run.charts`, at most the budget's `charts`; the same path again
+  the npm tarball and the CDN agreeing. Lock-file names are compared as pip does (`package_key`: Altair depends on
+  `jsonschema_specifications`, filed as `jsonschema-specifications`). Its `DEFAULT_PACKAGES` are pandas and altair;
+  `prepare()` also downloads Vega and Vega-Lite's UMD builds (`_VEGA_FILES`, pinned SHA-256s, from `vega_url`, jsDelivr's
+  npm), and `draw_vega_lite()` (`draws_charts`) runs `charts.mjs` in a fresh Deno with the same flags as a run: it
+  evals the two builds, compiles the spec with the theme as config and draws it with `renderer: "none"` / `toSVG()`,
+  its loader refusing every fetch. Given matplotlib (`packages=[..., "matplotlib"]`), the runner sets its Agg backend
+  and `CHART_STYLE` (a matplotlibrc with the same colours) in `MPLCONFIGDIR` outside `/workspace`; it always makes a
+  `charts/` folder and filters matplotlib's float-coordinate deprecation warning that WebAssembly sets off.
+- **Charts** (`charts.py`, pure but for `write_charts`): `show_chart(file, title)` reads a workspace file. A JSON
+  one (`is_spec`) is a Vega-Lite chart (Altair's `chart.save('charts/x.json')`): `read_spec` refuses one that isn't a
+  chart, is over `MAX_SPEC_BYTES` or has a `url` key outside its rows (`_FETCHING_KEYS`, `_DATA_KEYS`), `themed_spec`
+  takes its title out (the caption shows it) and the 300 x 300 size Altair writes into every config, and the
+  workspace's `draw_vega_lite` draws it in `CHART_THEME` (a Vega-Lite config: the dataviz palette's `CHART_COLORS`,
+  gridlines on number axes only); a `Workspace` without `draws_charts` asks for a picture. Any other file is a picture
+  that `chart_of` checks by its first bytes (`image_kind`: PNG, JPEG, GIF, WebP, SVG; at most `MAX_CHART_BYTES`).
+  `PythonToolkit._add_chart` puts the `Chart` (`.spec` for a Vega-Lite one) on the `_Run` (`run.charts`, at most the budget's `charts`; the same path again
   replaces it), which `ask()` copies to `AgentAnswer.charts`. The prompt's Charts part (`_chart_instructions`) says
   when to draw one and how it should read (a title that says it, through `show_chart` rather than `ax.set_title`; no
   pies or second y-axis). `AgentView` draws them with `_Charts` (an `<img>` with a data: URL, so an SVG's scripts
   never run and the picture stays in the saved notebook) under the answer, in `ask()`, `transcript()` and the chat
-  window's reply (`.ag-charts`); `save_charts()` (`AgentAnalyzer.save_charts`) writes them to files.
+  window's reply (`.ag-charts`); `save_charts()` (`AgentAnalyzer.save_charts`) writes them to files, a Vega-Lite
+  chart's spec beside its SVG as `.vl.json`. The prompt says Altair only when the workspace offers it and draws charts
+  (`_uses_altair`), else matplotlib, else any picture.
 - **The model** (`llm.py`): `pick_provider()` turns `provider=` / `model=` (`'openai:gpt-4.1'`: a prefix only when
   it's in `_PREFIXES`, LangChain's provider names, so a Bedrock ID's `:0` isn't one), `chat_model=` (by class,
   `provider_of`) and the environment (`MODEL_ENV`, `AWS_ANALYZER_AGENT_MODEL`, then `AZURE_OPENAI_*`, then

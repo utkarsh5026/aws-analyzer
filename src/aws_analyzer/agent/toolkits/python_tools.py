@@ -23,7 +23,7 @@ import boto3
 from ..._kit.fmt import _plural, human_size
 from ..._kit.text import _clip
 from ..budget import Budget, _Refused
-from ..charts import Chart, chart_of
+from ..charts import CHART_THEME, Chart, chart_of, chart_title, is_spec, read_spec, themed_spec
 from ..results import hide_secrets
 from ..workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 from .base import Toolkit
@@ -34,6 +34,7 @@ _SUMMARY_CHARACTERS = 80
 _MIN_TIMEOUT_SECONDS = 1.0
 _HINTED_CHARTS = 3
 _PICTURE_EXTENSIONS = (".png", ".svg", ".jpg", ".jpeg", ".gif", ".webp")
+_CHARTS_FOLDER = "charts/"
 
 
 def _cut_start(text: str, chars: int) -> tuple[str, bool]:
@@ -62,6 +63,14 @@ def _last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
+def _is_chart_file(path: str) -> bool:
+    """
+    Whether a file a run wrote looks like a chart to show: a picture, or a JSON file in charts/ (Altair's).
+    """
+    lowered = path.lower()
+    return lowered.endswith(_PICTURE_EXTENSIONS) or (lowered.startswith(_CHARTS_FOLDER) and lowered.endswith(".json"))
+
+
 def summarize_run(run: PythonRun, *, chars: int = 50_000) -> dict[str, Any]:
     """
     run_python()'s answer: whether the code finished, what it printed (cut to `chars` characters, the start kept),
@@ -83,10 +92,10 @@ def summarize_run(run: PythonRun, *, chars: int = 50_000) -> dict[str, Any]:
         out["new_files"] = run.new_files[:_LISTED_FILES]
         if len(run.new_files) > _LISTED_FILES:
             out["new_files_more"] = len(run.new_files) - _LISTED_FILES
-    pictures = [path for path in run.new_files if path.lower().endswith(_PICTURE_EXTENSIONS)]
-    if pictures:
-        shown = ", ".join(f"show_chart({path!r}, title=...)" for path in pictures[:_HINTED_CHARTS])
-        out["charts"] = f"It drew {_plural(len(pictures), 'picture')}: {shown} puts one in your answer."
+    charts = [path for path in run.new_files if _is_chart_file(path)]
+    if charts:
+        shown = ", ".join(f"show_chart({path!r}, title=...)" for path in charts[:_HINTED_CHARTS])
+        out["charts"] = f"It saved {_plural(len(charts), 'chart')}: {shown} puts one in your answer."
     return out
 
 
@@ -178,31 +187,53 @@ Python
 
     def _chart_instructions(self, budget: Budget) -> str:
         """
-        The prompt's part on charts: when to draw one, how to make it read well, and how to put it in the answer.
+        The prompt's part on charts: when to draw one, with what, how to make it read well, and how to put it in the
+        answer.
         """
-        if "matplotlib" in self.workspace.packages:
-            drawing = ("draw it with matplotlib in run_python and save it as PNG (plt.savefig('charts/errors_by_day.png'"
-                       "); the sandbox's style already sets the size, fonts, colours and grid, so don't set a style, "
-                       "figsize or colours unless the chart needs them)")
-        else:
-            drawing = "save it as a PNG or SVG file in run_python (matplotlib isn't in this workspace)"
         return f"""\
 Charts
 - When a picture says it better than a table (a trend over time, a few groups compared, a distribution, a
-  breakdown), {drawing}, then call show_chart('charts/errors_by_day.png', title=...). Charts appear under your
-  answer's text, in the order you show them: refer to each by its title in the text, and never add a markdown
-  image or link for it. A question gets {_plural(budget.charts, 'chart')}.
+  breakdown), {self._chart_maker()}, then call show_chart({self._chart_file()!r}, title=...). Charts appear
+  under your answer's text, in the order you show them: refer to each by its title in the text, and never add a
+  markdown image or link for it. A question gets {_plural(budget.charts, 'chart')}.
 - One message per chart, and its title says it ("Errors doubled after Tuesday's deploy", not "Errors"). The title
-  goes in show_chart(title=...), which shows it above the chart: don't also set one with ax.set_title. Pick the
-  form by the job: a line for change over time, bars for comparing groups (sorted, horizontal when the labels are
-  long, with the grid moved to match: ax.grid(False); ax.grid(axis='x')), a histogram for a distribution, a
-  stacked bar for parts of a whole. No pies, no 3-D, and never two y-axes: two measures of different scale are two
-  charts.
-- Label both axes with their units, put dates on a time axis (pd.to_datetime, then plot), and start bars at zero.
-  Up to 8 series, each in the style's next colour; fold the rest into "Other". A magnitude across a grid is one hue
-  from light to dark (cmap='Blues'). Label a few points that matter rather than every one.
-- Read the data from the saved files in the same run that draws the chart, print the numbers it shows (they go in
-  your answer too), and close each figure (plt.close()) before drawing the next."""
+  goes in show_chart(title=...), which shows it above the chart: don't also give the chart one. Pick the form by the
+  job: a line for change over time, bars for comparing groups (sorted, horizontal when the labels are long), a
+  histogram for a distribution, a stacked bar for parts of a whole. No pies, no 3-D, and never two y-axes: two
+  measures of different scale are two charts.
+- Label both axes with their units, put dates on a time axis, and start bars at zero. Up to 8 series, each in the
+  theme's next colour; fold the rest into "Other". A magnitude across a grid is one hue from light to dark. Label a
+  few points that matter rather than every one.
+- Read the data from the saved files in the same run that makes the chart, aggregate it to a row per point the
+  chart shows, and print those numbers (they go in your answer too)."""
+
+    @property
+    def _uses_altair(self) -> bool:
+        """
+        Whether charts here are made with Altair: the workspace offers it and can draw Vega-Lite.
+        """
+        return self.workspace.draws_charts and "altair" in self.workspace.packages
+
+    def _chart_file(self) -> str:
+        """
+        The file the prompt's example saves a chart to: a Vega-Lite file with Altair, else a PNG.
+        """
+        return "charts/errors_by_day.json" if self._uses_altair else "charts/errors_by_day.png"
+
+    def _chart_maker(self) -> str:
+        """
+        How the prompt says to make a chart in this workspace: with Altair when it has it and can draw Vega-Lite,
+        else with matplotlib, else as any picture file.
+        """
+        if self._uses_altair:
+            return ("make it with Altair in run_python and save it as a Vega-Lite file, chart.save('charts/"
+                    "errors_by_day.json') (the theme sets the size, fonts, colours and grid, so don't set those unless "
+                    "the chart needs them; Altair takes at most 5,000 rows, and tooltips and selections are dropped, "
+                    "since it's drawn as a picture)")
+        if "matplotlib" in self.workspace.packages:
+            return ("draw it with matplotlib in run_python and save it as PNG (plt.savefig('charts/errors_by_day.png'"
+                    "), then plt.close())")
+        return "save it as a PNG or SVG file in run_python (there's no chart library in this workspace)"
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
@@ -252,22 +283,35 @@ Charts
 
     def show_chart(self, file: str, title: str = "") -> dict[str, Any]:
         """
-        Puts a chart your code drew in the workspace (a PNG or SVG file that run_python saved, like
-        'charts/errors_by_day.png') in your answer, under its text, in the order you show them. title: what the chart
-        says, shown above it ("Errors doubled after Tuesday's deploy"); else its file name. Showing the same file again
-        replaces it with what it holds now.
+        Puts a chart your code saved in the workspace in your answer, under its text, in the order you show them: a
+        Vega-Lite chart (Altair's chart.save('charts/errors_by_day.json')), or a PNG or SVG picture. title: what the
+        chart says, shown above it ("Errors doubled after Tuesday's deploy"); else the chart's own title or its file
+        name. Showing the same file again replaces it with what it holds now.
         """
         path = clean_path(file)
         try:
             data = self.workspace.read(path)
         except FileNotFoundError:
-            raise ValueError(f"There's no {file!r} in the workspace: draw it with run_python first (plt.savefig("
+            raise ValueError(f"There's no {file!r} in the workspace: save it with run_python first (chart.save("
                              f"{path!r})), or see workspace_files") from None
-        chart = chart_of(path, data, title)
+        chart = self._drawn_chart(path, data, title) if is_spec(data) else chart_of(path, data, title)
         count = self._add_chart(chart)
-        return {"shown": path, "title": chart.title, "kind": chart.kind, "size": chart.size, "charts_in_answer": count,
+        return {"shown": path, "title": chart.title, "kind": chart.format_name.lower(), "size": chart.size,
+                "charts_in_answer": count,
                 "note": "It's shown under your answer's text: refer to it by its title, with no markdown image.",
-                "_summary": f"{chart.title} ({chart.kind.upper()}, {chart.size})"}
+                "_summary": f"{chart.title} ({chart.format_name}, {chart.size})"}
+
+    def _drawn_chart(self, path: str, data: bytes, title: str) -> Chart:
+        """
+        The Vega-Lite chart in `data` drawn as SVG by the workspace, in CHART_THEME, with its own title moved above it
+        unless `title` is given. ValueError when it isn't a chart that can be drawn, or the workspace can't draw any.
+        """
+        if not self.workspace.draws_charts:
+            raise ValueError(f"{self.workspace.title} can't draw Vega-Lite charts: save the chart as a PNG or SVG "
+                             "picture and show that")
+        spec, own_title = themed_spec(read_spec(path, data))
+        svg = self.workspace.draw_vega_lite(spec, config=CHART_THEME, timeout=self._timeout())
+        return Chart(chart_title(title or own_title, path), path, svg, "svg", spec=spec)
 
     def _add_chart(self, chart: Chart) -> int:
         """

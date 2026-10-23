@@ -97,14 +97,14 @@ def _charts_html(block: _Charts, report: _Report) -> str:
         source = f"data:{chart.mime};base64,{base64.b64encode(chart.data).decode()}"
         figures.append(f'<figure><figcaption>{_esc(chart.title)}</figcaption>'
                        f'<img src="{source}" alt="{_esc(chart.title)}">'
-                       f'<div class="cht-f">{chart.kind.upper()} · {_esc(chart.size)} · {_esc(chart.path)}</div>'
+                       f'<div class="cht-f">{chart.format_name} · {_esc(chart.size)} · {_esc(chart.path)}</div>'
                        '</figure>')
     return f'<div class="cht">{"".join(figures)}</div>'
 
 
 @_draws(_Charts, "text")
 def _charts_lines(block: _Charts, report: _Report) -> list[str]:
-    lines = [f"📈 {chart.title} ({chart.kind.upper()}, {chart.size}): open in a notebook to see it"
+    lines = [f"📈 {chart.title} ({chart.format_name}, {chart.size}): open in a notebook to see it"
              for chart in block.charts]
     return ["", *lines, "   save_charts() writes them to files."]
 
@@ -353,7 +353,7 @@ class AgentView(_BaseView):
             blocks.append(_Note(answer.error, "warn"))
         nxt = answer_next(answer)
         if answer.charts:
-            nxt = [("save_charts()", f"the {_plural(len(answer.charts), 'chart')} as files, in {CHARTS_FOLDER}/"),
+            nxt = [("save_charts()", f"the {_plural(len(answer.charts), 'chart')} as pictures, in {CHARTS_FOLDER}/"),
                    *nxt][:3]
         if nxt:
             blocks.append(_Next(nxt, title=_look_closer(nxt)))
@@ -435,10 +435,10 @@ class AgentView(_BaseView):
     @_friendly_errors
     def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> None:
         """
-        Saves the charts of the last answer as files (PNG or SVG, each named after its title) in a folder beside the
-        notebook, agent-charts/ unless you name another, to put in a slide or a report. answer= picks an earlier
-        answer (answer=0 is the first asked). A file that's there already is never replaced: the new one gets a
-        number.
+        Saves the charts of the last answer as pictures (SVG, or the PNG the code drew, each named after its title) in a
+        folder beside the notebook, agent-charts/ unless you name another, to put in a slide or a report; a Vega-Lite
+        chart's spec goes beside it (.vl.json). answer= picks an earlier answer (answer=0 is the first asked). A file
+        that's there already is never replaced: the new one gets a number.
         """
         paths = self.core.save_charts(folder, answer=answer)
         rows = [[str(path), chart.title, chart.size] for path, chart in zip(paths, self.core.history[answer].charts)]
