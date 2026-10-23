@@ -1,6 +1,9 @@
 import asyncio
 import json
+import subprocess
+import sys
 import threading
+import time
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +18,7 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
+from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
 from aws_analyzer.agent.window.model_panel import (
@@ -32,16 +36,21 @@ from aws_analyzer.agent import (
     AgentView,
     Budget,
     LambdaToolkit,
+    PythonRun,
+    PythonToolkit,
     Rates,
     ReadOnlyError,
     S3Toolkit,
     Toolkit,
     ToolCall,
     TriggerLink,
+    Workspace,
+    WorkspaceFile,
     answer_cost,
     answer_findings,
     answer_next,
     asked_at,
+    clean_path,
     code_locations,
     count_arrivals,
     explain_model_error,
@@ -52,7 +61,9 @@ from aws_analyzer.agent import (
     summarize_file,
     summarize_health,
     summarize_preview,
+    summarize_run,
     summarize_source,
+    summarize_workspace,
     system_prompt,
     trigger_findings,
 )
@@ -1712,3 +1723,183 @@ def test_the_model_settings_list_bedrocks_models_off_the_loop(seeded):
     x = asyncio.run(open_window())
     assert not x.panel.listing and "Listing" not in x.panel.note.value
     assert list(x.panel.model_box.options) == ["claude-haiku-4-5", "nova-pro"]
+
+
+
+class Folder(Workspace):
+    """
+    A workspace for the tests: a folder, with each run in a new Python of its own there (no sandbox: the tests'
+    code is their own).
+    """
+
+    title, place, packages = "a test folder", "on this machine", ()
+
+    def __init__(self, root):
+        self.root = root
+        self.ran = []
+
+    def put(self, path, data):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    def files(self):
+        return [WorkspaceFile(str(f.relative_to(self.root)), f.stat().st_size)
+                for f in sorted(self.root.rglob("*")) if f.is_file()]
+
+    def run(self, code, *, timeout):
+        self.ran.append((code, timeout))
+        before = {f.path: f.size for f in self.files()}
+        started = time.monotonic()
+        try:
+            done = subprocess.run([sys.executable, "-I", "-c", code], cwd=self.root, capture_output=True, text=True,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return PythonRun(False, seconds=timeout, timed_out=True)
+        changed = [f.path for f in self.files() if before.get(f.path) != f.size]
+        return PythonRun(done.returncode == 0, done.stdout, done.stderr, time.monotonic() - started,
+                         new_files=changed)
+
+
+@pytest.mark.parametrize("path, cleaned", [
+    ("lambda/etl/app.py", "lambda/etl/app.py"), ("/lambda//etl/./app.py", "lambda/etl/app.py"),
+    ("lambda\\etl\\app.py", "lambda/etl/app.py"),
+])
+def test_clean_path_keeps_every_path_inside_the_workspace(path, cleaned):
+    assert clean_path(path) == cleaned
+
+
+@pytest.mark.parametrize("path, message", [("../etc/passwd", "leaves the workspace"), ("", "names no file"),
+                                           ("a/" * 200, "longer than 300")])
+def test_clean_path_refuses_a_path_out_of_it(path, message):
+    with pytest.raises(ValueError, match=message):
+        clean_path(path)
+
+
+def test_summarize_run_cuts_what_it_printed_and_keeps_a_tracebacks_end():
+    printed = summarize_run(PythonRun(True, "x" * 100 + "\nDB_PASSWORD=hunter2", seconds=0.123), chars=50)
+    assert printed["stdout"] == "x" * 50 + "\n…" and printed["cut_short"] and printed["stdout_characters"] == 120
+    assert printed["seconds"] == 0.12 and "stderr" not in printed and "print counts" in printed["note"]
+    shown = summarize_run(PythonRun(True, "DB_PASSWORD=hunter2"))
+    assert shown["stdout"] == "DB_PASSWORD=[hidden]" and "cut_short" not in shown
+    trace = "Traceback (most recent call last):\n" + "  frame\n" * 2000 + "KeyError: 'customer_id'\n"
+    failed = summarize_run(PythonRun(False, stderr=trace, new_files=[f"f{i}" for i in range(105)]))
+    assert failed["stderr"].startswith("…\n") and failed["stderr"].endswith("KeyError: 'customer_id'\n")
+    assert len(failed["new_files"]) == 100 and failed["new_files_more"] == 5
+    assert summarize_run(PythonRun(False, seconds=30, timed_out=True))["timed_out"]
+
+
+def test_summarize_workspace_lists_a_folder():
+    files = [WorkspaceFile("lambda/etl/app.py", 2048), WorkspaceFile("lambda/api/index.py", 10),
+             WorkspaceFile("out.csv", 5)]
+    one = summarize_workspace(files, "lambda/etl/")
+    assert one["folder"] == "lambda/etl/" and one["files"] == 1 and one["size"] == "2.0 KB"
+    assert one["listed"] == [{"path": "lambda/etl/app.py", "size": "2.0 KB"}]
+    assert summarize_workspace(files)["files"] == 3 and summarize_workspace(files)["folder"] == "/"
+    assert "Nothing is saved there yet" in summarize_workspace(files, "s3")["note"]
+
+
+def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
+    plain = AgentAnalyzer(region=REGION)
+    assert plain.workspace is None and "run_python" not in {fn.__name__ for fn in plain.tools()}
+    assert "save_function_code" not in {fn.__name__ for fn in plain.tools()}
+
+    workspace = Folder(tmp_path)
+    core = AgentAnalyzer(region=REGION, python=workspace)
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "python"] and core.workspace is workspace
+    assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
+    names = [fn.__name__ for fn in core.tools()]
+    assert names[-2:] == ["run_python", "workspace_files"] and "save_function_code" in names
+    assert core.reads["save_function_code"][0] == "lambda:GetFunction" and core.reads["run_python"] == ()
+    prompt = core.instructions()
+    assert "run_python runs code you write in a sandbox" in prompt and "save_function_code puts its files" in prompt
+    assert "only the standard library" in prompt and "10 runs, each up to 30 seconds" in prompt
+    assert "save_function_code" not in plain.instructions()
+
+    alone = AgentAnalyzer(region=REGION, toolkits=["python"], python=Folder(tmp_path))
+    assert [t.name for t in alone.toolkits] == ["python"] and alone.region == REGION
+    assert [t.name for t in AgentAnalyzer(region=REGION, toolkits="lambda", python=workspace).toolkits] == [
+        "lambda", "python"]
+    with pytest.raises(ValueError, match="needs a workspace"):
+        AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
+    with pytest.raises(TypeError, match="python= takes a Workspace"):
+        AgentAnalyzer(region=REGION, python="local")
+    with pytest.raises(ValueError, match="already belongs"):
+        AgentAnalyzer(region=REGION, toolkits=[alone.toolkit("python")])
+
+
+def test_the_agent_saves_a_functions_code_and_runs_python_over_it(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace)
+    saved = tool(agent, "save_function_code")("etl-nightly")
+    assert saved["folder"] == "lambda/etl-nightly/" and saved["files_saved"] == 2 and saved["version"] == "$LATEST"
+    assert saved["saved"] == ["lambda/etl-nightly/app.py", "lambda/etl-nightly/utils.py"]
+    assert [f.path for f in workspace.files()] == ["lambda/etl-nightly/app.py", "lambda/etl-nightly/utils.py"]
+    assert agent._guard.counts == {"lambda:GetFunction": 1}
+
+    code = ("import ast, pathlib\n"
+            "for path in sorted(pathlib.Path('lambda/etl-nightly').glob('*.py')):\n"
+            "    tree = ast.parse(path.read_text())\n"
+            "    print(path.name, [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])\n"
+            "print('DB_PASSWORD=hunter2')\n"
+            "pathlib.Path('found.txt').write_text('handler')\n")
+    ran = tool(agent, "run_python")(code)
+    assert ran["ok"] and ran["stdout"].splitlines() == ["app.py ['handler']", "utils.py ['helper']",
+                                                        "DB_PASSWORD=[hidden]"]
+    assert ran["new_files"] == ["found.txt"] and workspace.ran[0][1] == 30.0
+    failed = tool(agent, "run_python")("{}['customer_id']")
+    assert not failed["ok"] and failed["stderr"].rstrip().endswith("KeyError: 'customer_id'")
+    listed = tool(agent, "workspace_files")("lambda")
+    assert listed["files"] == 2 and tool(agent, "workspace_files")()["files"] == 3
+    assert tool(agent, "run_python")("  ")["error"] == "ValueError"
+
+    chosen = tool(agent, "save_function_code")("etl-nightly", files="*.txt")
+    assert chosen["files_saved"] == 0 and chosen["note"] == "No file in the package matched '*.txt'."
+    secrets = tool(agent, "save_function_code")("etl-nightly", files=".env")
+    assert secrets["files_saved"] == 0 and not (tmp_path / "lambda/etl-nightly/.env").exists()
+
+
+def test_the_budget_caps_python_runs_and_what_the_workspace_holds(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace, budget={"python_runs": 1, "workspace_bytes": 50, "python_seconds": 5})
+    run = agent._run = harness_run(agent)
+    assert tool(agent, "run_python")("print(1)")["ok"] and workspace.ran[0][1] == 5
+    refused = tool(agent, "run_python")("print(2)")
+    assert refused["refused"] == "python_runs" and "1 Python run" in refused["message"]
+    assert run.calls[-1].summary == "not run: the budget of Python runs was used up" and len(workspace.ran) == 1
+    full = tool(agent, "save_function_code")("etl-nightly")
+    assert full["refused"] == "workspace" and "past its 50 B limit" in full["message"] and not workspace.files()
+    agent._run = None
+    timed = Folder(tmp_path)
+    assert timed.run("while True: pass", timeout=0.5).timed_out
+
+
+def harness_run(agent):
+    """
+    A question being answered, as ask() sets one up, so a tool called on its own counts against its budget.
+    """
+    from aws_analyzer.agent.budget import _Run
+
+    return _Run(agent.budget)
+
+
+def test_ask_runs_python_and_the_report_shows_its_code(seeded, tmp_path, capsys):
+    code = "import pathlib\nprint(len(list(pathlib.Path('lambda').rglob('*.py'))))"
+    model = scripted(
+        calls(("save_function_code", {"function": "etl-nightly"})),
+        calls(("run_python", {"code": code})),
+        says("etl-nightly has **2** Python files."),
+    )
+    agent = make(model, python=Folder(tmp_path))
+    answer = agent.ask("How many Python files does etl-nightly have?", now=NOW)
+    assert [c.name for c in answer.calls] == ["save_function_code", "run_python"] and answer.error is None
+    ran = answer.calls[1]
+    assert ran.result["stdout"] == "2\n" and ran.summary.startswith("ran in ") and "printed 1 line" in ran.summary
+    assert ran.code == code and ran.brief == "run_python(…)" and answer.calls[0].brief == answer.calls[0].call
+    assert "saved 2 files" in answer.calls[0].summary
+
+    out = run(capsys, AgentView(agent, mode="text", progress="off").tools)
+    assert "run_python" in out and "Python runs" in out and "Workspace" in out and "a test folder" in out
+    html = _tool_html(ran, running=False)
+    assert '<span class="pf">run_python</span>(…)' in html and 'class="ag-code"' in html and "pathlib" in html
+    assert "Ask about Lambda and S3 in plain English" in page(window(core=make(python=Folder(tmp_path))))

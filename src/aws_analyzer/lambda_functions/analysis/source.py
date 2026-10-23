@@ -1,6 +1,6 @@
 """
 A deployment package's source, searched like grep and read like a language server: which of its files are its own
-(source_files), the lines that contain a text or match a pattern across them (search_package), and where a Python
+(source_files) and their text (read_sources), the lines that contain a text or match a pattern across them (search_package), and where a Python
 name is defined and used (find_symbol_in). They read the .zip as code() downloads it, make no AWS calls, and run
 nothing in it: Python is read with the ast module.
 """
@@ -18,7 +18,9 @@ from typing import Callable
 from ..._kit.text import _clip
 
 from ..helpers import MB, runtime_family
-from ..models import CodeMatch, CodePackage, CodeSearch, CodeSymbol, Function, SymbolReport, SymbolUse
+from ..models import (
+    CodeMatch, CodePackage, CodeSearch, CodeSymbol, Function, PackageSources, SymbolReport, SymbolUse,
+)
 from .package import _SECRET_FILE_RE, read_package
 
 _SOURCE_EXTENSIONS = frozenset({".py", ".js", ".mjs", ".cjs", ".ts", ".rb", ".json", ".yaml", ".yml", ".toml",
@@ -203,6 +205,22 @@ def search_package(fn: Function, data: bytes | None, pattern: str, *, regex: boo
             search.total += len(found)
             search.matches.extend(found[: max(0, _KEPT_MATCHES - len(search.matches))])
     return search
+
+
+def read_sources(fn: Function, data: bytes | None, *, files: str | None = None) -> PackageSources:
+    """
+    The text of a deployment package's own source files (source_files()), or with files= (a glob such as '*.json',
+    a folder or a path, several separated by commas) of every file that matches, the libraries packed with it too.
+    Binary files, files over 2 MB and what's past 20 MB in all are left out with why; secrets files (.env, keys) are
+    never read, and nothing is run.
+    """
+    pkg = read_package(fn, data)
+    sources = PackageSources(fn)
+    if data is None or not pkg.files:
+        sources.note = pkg.note or "The package holds no files."
+        return sources
+    sources.texts, sources.skipped = _read_texts(data, _chosen_files(pkg, files))
+    return sources
 
 
 def _module_name(path: str) -> str:

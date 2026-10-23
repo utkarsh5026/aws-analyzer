@@ -1902,7 +1902,7 @@ already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `r
 `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs`
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
 `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
-`search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
+`read_sources` (sources(): the text of a .zip's own source files), `search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
 "app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (diff on two .zip files you already
 have), `diff_settings`, `version_before`, `stream_version` (the version a log stream's name says ran), and the
 findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`,
@@ -2014,7 +2014,7 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 ### What it can call
 
-Eighteen tools in two toolkits (nineteen with `read_files=True`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Eighteen tools in two toolkits (nineteen with `read_files=True`, and three more with `python=`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
@@ -2051,17 +2051,55 @@ model's provider, so turn it on with a model on Amazon Bedrock, or with a provid
 data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
 `budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
 
+### Running Python (`python=`)
+
+Some questions need work no tool does: every place a function's code calls DynamoDB, what two functions' handlers
+share, a count across a hundred files. `AgentView(python=workspace)` gives the agent a Python workspace, a sandbox you
+pass in, and three tools:
+
+| Tool                                         | What it returns                                                                                                                         |
+| :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `save_function_code(function, files, region)` | Saves the function's own source files (or `files=` globs, the libraries packed with it too) into the workspace, under `lambda/<function>/`. Secrets files (`.env`, keys) are never saved |
+| `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
+| `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
+
+Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
+never needs AWS. The workspace is a `Workspace` (from `aws_analyzer.agent`) you write for your sandbox: it puts a file,
+lists the files and runs code in a fresh interpreter, and it must give the code **no AWS credentials and no network**.
+A subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the
+instance's metadata service.
+
+```python
+from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
+
+class MySandbox(Workspace):
+    title, place = "my sandbox", "in a container with no network"   # how reports and the model name it
+    packages = ("pandas",)                                            # what the code can import
+
+    def put(self, path, data): ...                                    # write bytes at a path in the workspace
+    def files(self): ...                                              # -> [WorkspaceFile(path, size), ...]
+    def run(self, code, *, timeout): ...                              # -> PythonRun(ok, stdout, stderr, seconds, ...)
+
+agent = AgentView(provider="bedrock", python=MySandbox())
+agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+```
+
+What the code prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each, and the tools
+save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises
+them.
+
 ### Safe and bounded
 
 - **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
   operation that isn't a Get, List, Describe, Head or Filter call before its request is built, whatever asks for it. There's
-  no shell or code execution: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools
-  only keep notes in memory.
+  no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
+  memory. Code runs only in a workspace you pass (`python=`), which has no AWS credentials.
 - **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
   `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
-  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`).
+  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
+  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), and 50 MB saved (`workspace_bytes`).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2097,6 +2135,7 @@ core = AgentAnalyzer(
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
+    python=MySandbox(),                   # adds run_python and the save_* tools: a Workspace with no AWS access
 )
 agent = AgentView(core)
 
@@ -2116,7 +2155,7 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
 `summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`trigger_findings`, the Python toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what

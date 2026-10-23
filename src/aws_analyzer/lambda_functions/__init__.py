@@ -44,6 +44,7 @@ Quick start
     explore("etl-nightly", tab="logs")                # the window, straight to one function's logs
 
     lam = ui.core                                     # same analyzer, raw data
+    lam.sources("etl-nightly")                        # PackageSources: the text of its own source files, by path
     lam.search_code("etl-nightly", "customer_id")     # CodeSearch: the lines of its code that contain it, like grep
     lam.find_symbol("etl-nightly", "load_orders")     # SymbolReport: where it's defined and used, like a language server
     df = lam.overview(regions="all").to_df()          # one row per function
@@ -63,8 +64,8 @@ from .helpers import (
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
     ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
-    LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, SettingChange,
-    SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
+    LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage,
+    SettingChange, SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     masked_config, parse_event_source_mapping, parse_function, parse_policy, parse_version, runtime_status,
@@ -78,7 +79,7 @@ from .analysis.performance import percentile, performance_findings, suggest_memo
 from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
 )
-from .analysis.source import find_symbol_in, search_package, source_files
+from .analysis.source import find_symbol_in, read_sources, search_package, source_files
 from .analysis.versions import diff_findings, diff_packages, diff_settings, version_before
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
@@ -145,6 +146,7 @@ __all__ = [
     "LogRun",
     "Overview",
     "PackageDownload",
+    "PackageSources",
     "Performance",
     "ProvisionedConcurrency",
     "RuntimeStatus",
@@ -177,6 +179,7 @@ __all__ = [
     "map_code",
     "map_package",
     "find_symbol_in",
+    "read_sources",
     "search_package",
     "source_files",
     "masked_config",

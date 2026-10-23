@@ -258,12 +258,47 @@ It adds `preview_file`, which reads a file the way `S3View().preview()` does: a 
     It reads up to 2 MB of a text or JSON file (`file_bytes`; a table reads only the rows it shows) and sends the model up to 50,000 characters of it (`file_chars`), 50 rows unless the model asks for more, up to 500. Raise both with the budget: `AgentView(read_files=True, budget={"file_bytes": 10_000_000, "file_chars": 200_000})`. More characters means more tokens, so a bigger bill per question.
 
 
+### Running Python { #run-python }
+
+Give the agent a Python workspace and it can write code for what no tool does: parse a function's code, count across files, join two tools' data.
+{ .gist }
+
+```python
+agent = AgentView(provider="bedrock", python=MySandbox())
+agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+```
+
+It adds three tools. `save_function_code` saves a function's source files into the workspace, under `lambda/<function>/`. `run_python` runs the code the model writes there and returns what it printed. `workspace_files` lists what's saved. The window shows each run's code under its call, and the report folds it under the table of calls.
+
+!!! tip "Worth knowing"
+
+    The workspace is a sandbox you pass in, and it must give the code no AWS credentials and no network. Data gets there only through the tools, which the read-only guard covers. A subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the instance's metadata service. What the code prints goes to the model's provider, with anything that looks like a secret hidden.
+
+??? more "Writing a workspace"
+
+    A workspace is a `Workspace` (from `aws_analyzer.agent`) with three methods: `put(path, data)` writes a file, `files()` lists them as `WorkspaceFile(path, size)`, and `run(code, timeout=...)` runs the code in a fresh interpreter in the workspace's folder and returns a `PythonRun(ok, stdout, stderr, seconds, timed_out, new_files)`. Files stay between runs; variables don't. `title`, `place` and `packages` say how reports and the model name it and what the code can import.
+
+    ```python
+    from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
+
+    class MySandbox(Workspace):
+        title, place = "my sandbox", "in a container with no network"
+        packages = ("pandas",)
+
+        def put(self, path, data): ...
+        def files(self): ...
+        def run(self, code, *, timeout): ...
+    ```
+
+    A question gets 10 runs of up to 30 seconds each, and the tools save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
+
+
 ## Safe and bounded { #safety }
 
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell or code execution: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in a [workspace](#run-python) you pass, which has no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -282,6 +317,9 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `s3_keys` | 100,000 | An S3 listing stops there and says so: its counts cover the keys it read |
 | `file_bytes` | 2 MB | With `read_files=True`: `preview_file` reads a text or JSON file's start only |
 | `file_chars` | 50,000 | With `read_files=True`: what `preview_file` sends the model is cut there, and it says so |
+| `python_runs` | 10 | With `python=`: `run_python` stops; it answers with what it has |
+| `python_seconds` | 30 | With `python=`: the workspace stops a run at this many seconds |
+| `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})

@@ -89,6 +89,7 @@ from aws_analyzer.lambda_functions import (
     performance_findings,
     provisioned_monthly_cost,
     read_package,
+    read_sources,
     request_id_of,
     runtime_status,
     search_package,
@@ -1858,6 +1859,16 @@ def test_code_downloads_a_package_once_and_new_code_again(core):
 def test_source_files_are_its_own_text_files_the_handlers_first():
     package = read_package(fn(handler="app.handler"), SOURCE)
     assert source_files(package) == ["app.py", "broken.py", "long.py", "store.py"]
+
+
+def test_read_sources_reads_its_own_files_and_never_a_secrets_file():
+    own = read_sources(fn(handler="app.handler"), SOURCE)
+    assert list(own.texts) == ["app.py", "broken.py", "long.py", "store.py"] and own.note is None
+    assert own.texts["store.py"].startswith("class Orders:") and not own.skipped
+    chosen = read_sources(fn(), SOURCE, files="*")
+    assert "requests/api.py" in chosen.texts and ".env" not in chosen.texts
+    assert "logo.png: a binary file" in chosen.skipped
+    assert read_sources(fn(), None).note == "Lambda gave no link to download its code."
 
 
 def test_search_package_finds_lines_like_grep():

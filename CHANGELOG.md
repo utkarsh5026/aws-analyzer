@@ -25,6 +25,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 - Agent: a new tool, `diff_versions`, lets the agent answer "what changed when it started failing?", and each error
   cause from `function_errors` now says which versions it ran on.
   ([#135](https://github.com/utkarsh5026/aws-analyzer/pull/135))
+- Agent: `AgentView(python=workspace)` lets the agent write and run Python for questions no tool answers on its own
+  (every place a function's code calls DynamoDB, a count across many files). It adds `run_python`, which runs the
+  model's code in the workspace and hands back what it printed, `workspace_files`, and Lambda's `save_function_code`,
+  which saves a function's source files there. The workspace is a sandbox you pass in, a `Workspace` from
+  `aws_analyzer.agent` that gives the code no AWS credentials and no network; data reaches it only through the tools,
+  so the agent stays read-only. The chat window and the report show each run's code, and the budget caps runs
+  (`python_runs`, `python_seconds`) and what's saved (`workspace_bytes`).
+- Lambda: `core.sources("orders-etl")` returns the text of a function's own source files by path, and
+  `read_sources()` does the same for a .zip you already have.
 
 ## [0.29.0] - 2026-10-23
 

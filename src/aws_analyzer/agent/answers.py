@@ -19,6 +19,9 @@ from .llm import Rates
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
 
 
+CODE_ARGS = {"run_python": "code"}
+
+
 def services_of(reads: Iterable[str]) -> tuple[str, ...]:
     """
     The AWS services a list of reads names, each once, in order: ('lambda:GetFunction', 'logs:FilterLogEvents',
@@ -76,6 +79,21 @@ class ToolCall:
         args = {k: v for k, v in self.args.items() if v not in ("", None)}
         first = args.pop(self.first, None) if self.first else None
         return _call(self.name, first, **args) if first is not None else _call(self.name, **args)
+
+    @property
+    def code(self) -> str:
+        """
+        The code the call was given to run (run_python's), or '' for a tool that takes none.
+        """
+        arg = CODE_ARGS.get(self.name)
+        return str(self.args.get(arg) or "") if arg else ""
+
+    @property
+    def brief(self) -> str:
+        """
+        The call as a line shows it: "run_python(…)" for one given code to run, which is drawn under it, else the call.
+        """
+        return f"{self.name}(…)" if self.code else self.call
 
 
 @dataclass

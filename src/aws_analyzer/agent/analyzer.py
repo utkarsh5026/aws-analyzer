@@ -41,7 +41,8 @@ from .llm import (
 )
 from .prompt import asked_at, system_prompt
 from .runtime import as_tool
-from .toolkits import Toolkit, make_toolkits
+from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, Toolkit, make_toolkits
+from .workspace import Workspace, workspace_of
 
 if TYPE_CHECKING:
     from ..lambda_functions import LambdaAnalyzer
@@ -59,6 +60,35 @@ def _new_thread() -> str:
     A new conversation's ID.
     """
     return uuid.uuid4().hex[:_THREAD_ID_LENGTH]
+
+
+def _with_python(toolkits: Iterable[str | Toolkit | type[Toolkit]] | None,
+                 workspace: Workspace | None) -> Iterable[str | Toolkit | type[Toolkit]] | None:
+    """
+    toolkits= with the Python toolkit added last when there's a workspace (python=) and toolkits= doesn't name it.
+    """
+    if workspace is None:
+        return toolkits
+    if toolkits is None:
+        specs: list[str | Toolkit | type[Toolkit]] = list(DEFAULT_TOOLKITS)
+    elif isinstance(toolkits, (str, Toolkit, type)):
+        specs = [toolkits]
+    else:
+        specs = list(toolkits)
+    if any(_is_python(spec) for spec in specs):
+        return specs
+    return [*specs, "python"]
+
+
+def _is_python(spec: str | Toolkit | type[Toolkit]) -> bool:
+    """
+    Whether a toolkits= entry is the Python toolkit: its name, its class or one made from it.
+    """
+    if isinstance(spec, str):
+        return spec.strip().lower() == PythonToolkit.name
+    if isinstance(spec, type):
+        return issubclass(spec, PythonToolkit)
+    return isinstance(spec, PythonToolkit)
 
 
 def _checked_zone(timezone: str | tzinfo | None) -> str | tzinfo | None:
@@ -100,7 +130,11 @@ class AgentAnalyzer(_BaseAnalyzer):
     LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
     S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It never reads what's inside a
     file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
-    looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it). It looks in `region` (the
+    looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it). python= takes a
+    Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or network) and adds the Python toolkit:
+    run_python runs code the model writes over files the other toolkits save there (Lambda's save_function_code),
+    and what it prints goes to the model, secrets hidden (budget's python_runs, python_seconds and workspace_bytes
+    cap it). It looks in `region` (the
     session's) or `regions` (a list, or 'all'); buckets are read wherever they are. The user's time zone, so "last night" means their night, is set_timezone()'s (or
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
@@ -139,6 +173,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         prices: dict[str, float] | None = None,
         s3_core: S3Analyzer | None = None,
         read_files: bool = False,
+        python: Workspace | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -153,9 +188,11 @@ class AgentAnalyzer(_BaseAnalyzer):
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
         self._guard = _Guard()
+        workspace = workspace_of(python)
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
-            toolkits, {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
-                       "s3": {"analyzer": s3_core, "read_files": read_files}})]
+            _with_python(toolkits, workspace),
+            {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
+             "s3": {"analyzer": s3_core, "read_files": read_files}, "python": {"workspace": workspace}})]
         self._graph: Any = None
         self._run: _Run | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
@@ -257,6 +294,14 @@ class AgentAnalyzer(_BaseAnalyzer):
         reports show times in (set_timezone(), AWS_ANALYZER_TZ, else UTC). None is this machine's own zone.
         """
         return _zone_from(self.timezone) if self.timezone is not None else _display_zone()
+
+    @property
+    def workspace(self) -> Workspace | None:
+        """
+        The Python workspace the agent runs its code in (python=), or None when it has none.
+        """
+        python = next((t for t in self.toolkits if isinstance(t, PythonToolkit)), None)
+        return python.workspace if python is not None else None
 
     @property
     def reads(self) -> dict[str, tuple[str, ...]]:

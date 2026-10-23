@@ -204,7 +204,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
   `exec`s any of it. Environment variable values never reach a report: `parse_function` keeps their names, and
   `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. The agent only calls the
-  analyzers' read methods, and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
+  analyzers' read methods (code it writes runs only in a `Workspace` the user passes, with no AWS credentials), and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
   `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
   hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
   Describe, Head, Filter) with `ReadOnlyError` before its request is built; the S3 tools read names, sizes, dates and
@@ -778,6 +778,16 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
+- **The workspace** (`workspace.py`, `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
+  sandbox the user passes in (`put`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
+  `PythonToolkit` last (`_with_python`), with `run_python` and `workspace_files`. A sandbox must give the code no AWS
+  credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
+  Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`),
+  which the toolkit offers when `peer("python")` is there and which saves through `PythonToolkit.save()` (paths through
+  `clean_path`, the budget's `workspace_bytes`). `run_python` checks `python_runs` and runs for at most
+  `python_seconds`; what it prints is cut to `file_chars` and passed through `hide_secrets`. `ToolCall.code` /
+  `.brief` (`CODE_ARGS`) let the window draw the code under `run_python(…)` and the report fold it under the table.
+  A new service's data goes in through a `save_*` tool in its toolkit; a built-in sandbox goes in `sandboxes/`.
 - **The model** (`llm.py`): `pick_provider()` turns `provider=` / `model=` (`'openai:gpt-4.1'`: a prefix only when
   it's in `_PREFIXES`, LangChain's provider names, so a Bedrock ID's `:0` isn't one), `chat_model=` (by class,
   `provider_of`) and the environment (`MODEL_ENV`, `AWS_ANALYZER_AGENT_MODEL`, then `AZURE_OPENAI_*`, then
@@ -801,7 +811,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   after `check_ready()` says what's missing), with the model, the tools, the prompt, an `InMemorySaver` checkpointer
   keyed by `AgentAnalyzer.thread` (follow-ups; `new_conversation()` makes a new thread) and `_hide_tools(HIDDEN_TOOLS)`,
   a middleware that keeps deepagents' general-purpose subagent and shell away from the model. Its file tools stay, on
-  the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox. A new capability of the loop (a
+  the default in-memory `StateBackend`: never a `FilesystemBackend`, and deepagents' `execute` stays hidden. Code the
+  model writes runs only through the Python toolkit's `run_python`, in the workspace (below). A new capability of the loop (a
   subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,

@@ -160,6 +160,10 @@ _TOOL_WORDS = {
     "file_info": _ToolWords("reading {t}", "read {t}", "a file"),
     "preview_file": _ToolWords("reading what's in {t}", "read what's in {t}", "a file"),
     "s3_triggers": _ToolWords("checking what {t} triggers", "checked what {t} triggers", "each bucket"),
+    "save_function_code": _ToolWords("saving {t}'s code to the workspace", "saved {t}'s code to the workspace",
+                                     "the function"),
+    "run_python": _ToolWords("running Python", "ran Python"),
+    "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
 }
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
@@ -247,6 +251,7 @@ _CONVERSATION_CSS = """\
 .agt .ag-off .ag-tm b{color:var(--ag-warn)}
 .agt .ag-spin{display:inline-block;color:var(--ag-accent);animation:ag-spin 1s linear infinite}
 .agt .ag-res{display:flex;gap:8px;padding-left:4px;color:var(--ag-dim)}
+.agt .ag-code{margin:3px 0 2px 26px;padding:4px 0 4px 12px;border-left:1px solid var(--ag-line);font-size:12px;white-space:pre;overflow-x:auto;max-height:240px;overflow-y:auto}
 .agt .ag-res>.ag-el{color:var(--ag-comment);flex:0 0 auto}
 .agt .ag-err .ag-res{color:var(--ag-bad)}
 .agt .ag-off .ag-res{color:var(--ag-warn)}
@@ -440,13 +445,17 @@ def _tool_detail_html(call: ToolCall) -> str:
 def _tool_html(call: ToolCall, *, running: bool) -> str:
     """
     One tool call: the badges of the services it reads, the call as the model made it in colour, a comment saying
-    what it does, its time, and what it found under it. A finished call opens to its details.
+    what it does, its time, the code it ran (run_python's) and what it found under it. A finished call opens to its
+    details.
     """
     state = _tool_state(call, running=running)
     timing = '<span class="ag-spin">◐</span>' if running else f"<b>{_STATE_MARKS[state]}</b> {call.seconds:.1f}s"
-    line = (f'<div class="ag-tl">{_badges(call.services)}<span class="ag-call">{_python_html(call.call)}</span>'
+    line = (f'<div class="ag-tl">{_badges(call.services)}<span class="ag-call">{_python_html(call.brief)}</span>'
             f'<span class="ag-cm"># {_esc(_tool_words(call, running=running))}</span>'
             f'<span class="ag-tm">{timing}</span></div>')
+    if call.code:
+        line += f'<div class="ag-code">{_python_html(call.code)}</div>'
+
     if running:
         return f'<div class="ag-step ag-{state}">{line}</div>'
     found = (f'<div class="ag-res"><span class="ag-el">⎿</span><span>{_prose(call.summary or call.error or "done")}'
@@ -604,7 +613,7 @@ class _AgentChat(_Window):
         question to start from that asks it.
         """
         w = self.w
-        reads = " and ".join(t.title for t in self.view.core.toolkits) or "your account"
+        reads = " and ".join(t.title for t in self.view.core.toolkits if t.service) or "your account"
         intro = w.HTML(_wrap(
             '<div class="ag-intro"><div class="ag-big"><span class="ag-pr">›</span> aws-agent</div>'
             f'<p class="ag-dim">Ask about {_esc(reads)} in plain English. Every tool call shows as it runs: the '

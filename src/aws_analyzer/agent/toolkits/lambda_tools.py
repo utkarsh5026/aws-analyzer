@@ -58,6 +58,7 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
     "find_symbol": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
     "diff_versions": ("lambda:ListVersionsByFunction", "lambda:GetFunction",
                       "the packages' download links (HTTPS, from S3)"),
+    "save_function_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
 }
 
 
@@ -603,6 +604,7 @@ def summarize_diff(diff: VersionDiff) -> dict[str, Any]:
     return out
 
 
+_SKIPPED_SHOWN = 20
 _PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}
 _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:ListEventSourceMappings",
                          "account": "lambda:GetAccountSettings", "logs": "logs:DescribeLogGroups",
@@ -671,18 +673,31 @@ AWS Lambda
   default $LATEST against the newest published version with other code). Read a version's code with
   function_source('name:3', ...). Lambda keeps only published versions' code: if diff_versions has nothing to
   compare, say so and use when the code last changed instead.
-- Name functions exactly as the tools return them."""
+- Name functions exactly as the tools return them.{self._python_rule()}"""
+
+    def _python_rule(self) -> str:
+        """
+        The Lambda section's line on the Python workspace, when the agent has one.
+        """
+        if self.peer("python") is None:
+            return ""
+        return """
+- For work across a function's whole code (every call to a client, every handler's shape, what two functions share),
+  save_function_code puts its files in the Python workspace and run_python reads them there."""
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_functions, function_health, function_errors, function_logs, function_performance, function_details,
-        function_code, function_source, search_code, find_symbol and diff_versions: methods whose type hints and
-        docstrings tell the model how to call them,
+        function_code, function_source, search_code, find_symbol and diff_versions, and save_function_code when the
+        agent has a Python workspace: methods whose type hints and docstrings tell the model how to call them,
         each reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
-        return [self.find_functions, self.function_health, self.function_errors, self.function_logs,
-                self.function_performance, self.function_details, self.function_code, self.function_source,
-                self.search_code, self.find_symbol, self.diff_versions]
+        tools = [self.find_functions, self.function_health, self.function_errors, self.function_logs,
+                 self.function_performance, self.function_details, self.function_code, self.function_source,
+                 self.search_code, self.find_symbol, self.diff_versions]
+        if self.peer("python") is not None:
+            tools.append(self.save_function_code)
+        return tools
 
     def find_functions(self, match: str = "", regions: str = "") -> dict[str, Any]:
         """
@@ -988,6 +1003,36 @@ AWS Lambda
                 window=_window(start, end), stored=human_size(stored) if stored else None,
             )
         return start, end
+
+    def save_function_code(self, function: str, files: str = "", region: str = "") -> dict[str, Any]:
+        """
+        Saves one function's source files from its deployment package into the Python workspace, under
+        lambda/<function>/ (lambda/<function>@<version>/ for a published version), so run_python can read them: parse
+        them with ast, search them, count things across files. files: globs, folders or paths separated by commas to
+        save those instead, the libraries packed with it too ('*.json', 'vendor/'); empty for its own source files.
+        Secrets files (.env, keys), binary files and files over 2 MB are never saved. region: empty for the default
+        region.
+        """
+        python = self.peer("python")
+        if python is None:
+            raise ValueError("The agent has no Python workspace to save code into")
+        sources = self.analyzer.sources(function, files=files or None, region=region or None)
+        fn = sources.function
+        out: dict[str, Any] = {"function": fn.name, "region": fn.region, "version": fn.version}
+        if sources.note:
+            out["note"] = sources.note
+            out["_summary"] = _clip(sources.note, 80)
+            return out
+        folder = f"lambda/{fn.name}" if fn.version == "$LATEST" else f"lambda/{fn.name}@{fn.version}"
+        out.update(python.save(folder, {path: text.encode() for path, text in sources.texts.items()}))
+        if sources.skipped:
+            out["skipped"] = sources.skipped[:_SKIPPED_SHOWN]
+        if not sources.texts:
+            out["note"] = (f"No file in the package matched {files!r}." if files else
+                           "The package holds no source files of its own: files='*' saves what's in it.")
+        out["_summary"] = f"saved {_plural(out['files_saved'], 'file')} ({out['size']}) to {out['folder']}"
+        out["_next"] = [(self._next_for(fn, "code"), "its files, and the handler's code")]
+        return out
 
     def _next_for(self, fn: Function, command: str, *args: Any, **kwargs: Any) -> str:
         """
