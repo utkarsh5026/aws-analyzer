@@ -2265,6 +2265,7 @@ def test_file_tool_calls_count_against_the_budget(seeded, tmp_path):
 
 
 def test_a_script_written_with_the_file_tools_runs_in_the_local_sandbox(pyodide, core):
+    pytest.importorskip("deepagents")
     sandbox = LocalSandbox(cache=pyodide, packages=())
     agent = make(python=sandbox)
     backend = workspace_files.workspace_backend(sandbox, lambda: agent.budget).default
