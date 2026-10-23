@@ -58,7 +58,9 @@ from aws_analyzer.agent import (
 )
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
-from test_lambda_functions import ACCOUNT, CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs
+from test_lambda_functions import (
+    ACCOUNT, CODE, NEW_CODE, OLD_CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs, versioned_clients,
+)
 
 NOW = datetime(2026, 10, 16, 3, 42, tzinfo=timezone.utc)
 
@@ -390,7 +392,7 @@ def test_a_new_toolkit_plugs_in_beside_lambda(capsys):
     assert "You cover:\n- AWS Lambda: which functions exist" in text and "\n- the user's notes: what" in text
     assert text.index("\nAWS Lambda\n") < text.index("\nNotes\n- Read a note") < text.index("How to answer")
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 12" in out
+    assert "Lambda, Notes, read-only" in out and "notes:GetNote" in out and "Tools: 13" in out
     assert "secrets files (.env, keys) are never read. Notes marked private are never read." in out
     assert viewmod._look_closer([("NotesView().note('plan', region='eu-west-1')", "the note"),
                                  ("LambdaView().errors('etl')", "errors")]) == (
@@ -555,6 +557,7 @@ def test_a_long_trace_keeps_where_it_started_and_where_it_broke():
 def test_the_agent_follows_an_error_from_the_logs_into_the_code(core):
     errors = tool(core, "function_errors")("etl-nightly", since="1h")
     assert errors["causes"][0]["in_code"] == [{"file": "app.py", "line": 2, "function": "handler"}]
+    assert errors["causes"][0]["ran_on"] == ["$LATEST"]
     logs = tool(core, "function_logs")("etl-nightly", since="1h")
     assert logs["runs"][0]["in_code"] == errors["causes"][0]["in_code"]
 
@@ -596,6 +599,32 @@ def test_the_agent_reads_code_like_sed_grep_and_a_language_server(core):
         ("app.py", 2, "import", "(module)"), ("app.py", 8, "call", "handler")]
     assert "broken.py" in symbol["not_read"][0]
     assert "search_code finds every line" in tool(core, "find_symbol")("etl-nightly", "boto3_client")["hint"]
+
+
+def test_the_agent_sees_what_changed_between_versions(seeded):
+    lam = boto3.client("lambda", region_name=REGION)
+    lam.update_function_code(FunctionName="etl-nightly", ZipFile=OLD_CODE)
+    lam.publish_version(FunctionName="etl-nightly")
+    lam.update_function_code(FunctionName="etl-nightly", ZipFile=NEW_CODE)
+    core = AgentAnalyzer(region=REGION, lambda_clients={"lambda": versioned_clients()})
+    packages = {"1": OLD_CODE, "$LATEST": NEW_CODE}
+    core.toolkit("lambda").analyzer._download = lambda url, most: packages[url.rsplit("#", 1)[1]]
+
+    diff = tool(core, "diff_versions")("etl-nightly")
+    assert (diff["old"], diff["new"], diff["same_code"]) == ("1", "$LATEST", False)
+    assert {"file": "app.py", "status": "changed", "lines_added": 1, "lines_removed": 1,
+            "changed_in": ["load"]} in diff["files_changed"]
+    assert diff["diff"][0]["file"] == "app.py" and '+    return event["customer_id"]' in diff["diff"][0]["lines"]
+    assert {"name": "requests", "old": "2.31.0", "new": "2.32.3"} in diff["libraries_changed"]
+    assert any("SyntaxError at line 1" in f["message"] for f in diff["findings"])
+    assert "swordfish" not in json.dumps(diff, default=str) and not diff["cut_short"]
+    raw = core.toolkit("lambda").diff_versions("etl-nightly")
+    assert raw["_summary"] == "1 → $LATEST: 7 files, +5 −3 lines, 2 library changes"
+    assert raw["_next"][0][0] == "LambdaView().diff('etl-nightly', '1', '$LATEST')"
+
+    first = tool(core, "diff_versions")("etl-nightly", new="1")
+    assert "first version" in first["note"] and first["published_versions"] == ["1"]
+    assert "no published versions" in tool(core, "diff_versions")("api-handler")["note"]
 
 
 def test_reading_more_of_the_same_code_downloads_it_once(seeded):
@@ -1321,7 +1350,8 @@ def test_transcript_and_new_conversation(view, capsys):
 def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
     out = run(capsys, view.tools)
     for name in ("find_functions", "function_health", "function_errors", "function_logs", "function_performance",
-                 "function_details", "function_code", "function_source", "search_code", "find_symbol", "find_buckets", "bucket_details", "list_folder", "find_files",
+                 "function_details", "function_code", "function_source", "search_code", "find_symbol", "diff_versions",
+                 "find_buckets", "bucket_details", "list_folder", "find_files",
                  "folder_summary", "file_info", "s3_triggers"):
         assert name in out
     assert "logs:FilterLogEvents" in out and "3 days" in out and "Provider: Scripted" in out

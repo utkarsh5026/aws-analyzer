@@ -272,6 +272,7 @@ class Version:
     last_modified: datetime | None = None
     description: str = ""
     runtime: str | None = None
+    code_sha: str = ""
 
 
 @dataclass
@@ -342,7 +343,8 @@ class LogEvent:
 @dataclass
 class ErrorGroup:
     """
-    Errors that share a cause: the same kind and message, once numbers and IDs are blanked out.
+    Errors that share a cause: the same kind and message, once numbers and IDs are blanked out. `versions` are the
+    versions of the function that logged them, newest first, read from their log streams' names ('$LATEST', '3').
     """
 
     kind: str  # 'Timeout', 'Out of memory', 'KeyError', 'Runtime.ImportModuleError', 'Logged error', ...
@@ -352,6 +354,7 @@ class ErrorGroup:
     last: datetime
     example: str  # one full message
     request_ids: list[str] = field(default_factory=list)  # a few, newest first
+    versions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -537,6 +540,92 @@ class SymbolReport:
     files_read: int = 0
     skipped: list[str] = field(default_factory=list)
     note: str | None = None
+
+
+@dataclass
+class FileChange:
+    """
+    One file that differs between two versions of a function: `status` is 'added', 'removed' or 'changed', with its
+    size on each side, the lines added and removed, the unified diff's lines (`lines`, without its --- / +++ header,
+    cut short past a limit: `truncated`), the Python functions and classes whose lines changed (`definitions`,
+    '(top level)' for code outside them) and `note` when its lines aren't compared (a binary, minified or secrets file).
+    """
+
+    path: str
+    status: str
+    old_size: int = 0
+    new_size: int = 0
+    added: int = 0
+    removed: int = 0
+    lines: list[str] = field(default_factory=list)
+    definitions: list[str] = field(default_factory=list)
+    truncated: bool = False
+    note: str | None = None
+
+
+@dataclass
+class SettingChange:
+    """
+    A setting that differs between two versions, as people write it: ('Memory', '1,024 MB', '512 MB').
+    """
+
+    setting: str
+    old: str
+    new: str
+
+
+@dataclass
+class LibraryChange:
+    """
+    A library packed with the code that was added, removed or moved to another version: `old` / `new` are its
+    versions, None on the side it isn't on.
+    """
+
+    name: str
+    old: str | None
+    new: str | None
+
+
+@dataclass
+class VersionDiff:
+    """
+    What changed between two versions of a function (diff()): `old` and `new` are their configurations, `files`
+    the files of its own that differ (the handler's first), `libraries` the libraries packed with it that changed,
+    with `library_files` counting their files that differ, `settings` and the environment variable names added and
+    removed (values are never read), with `still_read` naming where the new code still reads a removed one
+    ('app.py:4'), and `broken` the Python files that read before and no longer do (path -> the SyntaxError's line).
+    `same_code` is true when both have the same SHA-256. `versions` are the
+    function's published versions, `skipped` the ones passed over because their code was the same, and `note` says
+    why there's nothing to compare (no published versions, a container image, no link to the code).
+    """
+
+    function: Function
+    old: Function | None = None
+    same_code: bool = False
+    files: list[FileChange] = field(default_factory=list)
+    unchanged_files: int = 0
+    libraries: list[LibraryChange] = field(default_factory=list)
+    library_files: int = 0
+    settings: list[SettingChange] = field(default_factory=list)
+    env_added: list[str] = field(default_factory=list)
+    env_removed: list[str] = field(default_factory=list)
+    still_read: dict[str, str] = field(default_factory=dict)
+    broken: dict[str, str] = field(default_factory=dict)
+    versions: list[Version] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    note: str | None = None
+
+    @property
+    def added(self) -> int:
+        return sum(change.added for change in self.files)
+
+    @property
+    def removed(self) -> int:
+        return sum(change.removed for change in self.files)
+
+    @property
+    def truncated(self) -> bool:
+        return any(change.truncated for change in self.files)
 
 
 @dataclass

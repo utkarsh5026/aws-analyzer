@@ -129,6 +129,37 @@ def parse_function_ref(text: str) -> tuple[str, str | None, str | None]:
     )
 
 
+_STREAM_VERSION_RE = re.compile(r"\[([^\]]+)\]")
+
+
+def stream_version(stream: str) -> str | None:
+    """
+    The version of a function that wrote a log stream, from the name Lambda gives it:
+    '2026/10/22/[3]8f5ce35b...' -> '3', '2026/10/22/[$LATEST]8f5c...' -> '$LATEST'; None for a name that doesn't say.
+    """
+    match = _STREAM_VERSION_RE.search(stream or "")
+    return match.group(1) if match else None
+
+
+_QUALIFIER_RE = re.compile(r"^[A-Za-z0-9_$-]{1,128}$")
+
+
+def parse_qualifier(value: Any) -> str:
+    """
+    A version or alias the way you'd write it -> what Lambda takes: 3, '3' or 'v3' -> '3', 'latest' -> '$LATEST',
+    'prod' -> 'prod'. A ValueError says what it takes.
+    """
+    text = str(value).strip()
+    if text.lower() in ("latest", "$latest"):
+        return "$LATEST"
+    if text[:1] in ("v", "V") and text[1:].isdigit():
+        return text[1:]
+    if not _QUALIFIER_RE.match(text):
+        raise ValueError(f"{value!r} isn't a version or an alias: give a version number (3), an alias ('prod') or "
+                         "'$LATEST'")
+    return text
+
+
 def runtime_family(runtime: str | None) -> str | None:
     """
     'python3.12' -> 'python', 'nodejs20.x' -> 'nodejs', 'dotnetcore3.1' -> 'dotnet', 'provided.al2' ->

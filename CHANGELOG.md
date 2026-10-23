@@ -9,6 +9,20 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Lambda: `diff("orders-etl")` shows what changed between two versions of a function: each of its own files line by
+  line, with the Python functions the changes are in, the libraries packed with it that were added, removed or
+  upgraded, and its settings and environment variable names (never their values). By default it compares `$LATEST`
+  with the newest published version whose code is different; `diff("orders-etl", 3, 5)` compares two versions and
+  `diff("orders-etl:prod")` what an alias runs. Its findings flag a Python file that no longer reads, an environment
+  variable taken out that the code still reads, and a shorter timeout or less memory. Lambda keeps the code of
+  published versions only, so for a function that was never published the report says there's nothing to compare
+  and how to keep a copy of each deploy. `core.diff()` and `core.versions()` return the same as data, and
+  `diff_packages()` compares two .zip files you already have.
+- Agent: a new tool, `diff_versions`, lets the agent answer "what changed when it started failing?", and each error
+  cause from `function_errors` now says which versions it ran on.
+
 ## [0.29.0] - 2026-10-23
 
 ### Added

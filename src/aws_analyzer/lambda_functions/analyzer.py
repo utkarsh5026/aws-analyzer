@@ -29,18 +29,21 @@ from .._kit.errors import _Hint, _error_code
 from .._kit.fmt import _as_int, _utcnow, human_size, parse_size, parse_time
 
 from .prices import LAMBDA_PRICES
-from .helpers import MB, _lambda_time, _midnight, parse_function_ref, runtime_family
+from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
     FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, SavedPage,
-    SymbolReport, Trigger, Version,
+    SymbolReport, Trigger, Version, VersionDiff,
 )
-from .analysis.functions import _unqualified, parse_event_source_mapping, parse_function, parse_policy
+from .analysis.functions import (
+    _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
+)
 from .analysis.overview import Overview
 from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
 from .analysis.source import find_symbol_in, search_package
+from .analysis.versions import diff_packages, nothing_before, version_before
 from .analysis.codemap.model import CodeMap
 from .analysis.codemap.mapping import map_package
 
@@ -314,6 +317,16 @@ class LambdaAnalyzer(_BaseAnalyzer):
         fn.code_location = code.get("Location")
         fn.image_uri = code.get("ImageUri") or code.get("ResolvedImageUri")
         return fn
+
+    def versions(self, ref: str, region: str | None = None) -> list[Version]:
+        """
+        A function's published versions, oldest first (ListVersionsByFunction): each one's number, code size and
+        SHA-256, when it was published and its description. $LATEST, the code that runs when no version is named,
+        isn't one of them.
+        """
+        name, _, where = self.locate(ref, region)
+        found = _pages(self._service("lambda", where), "list_versions_by_function", "Versions", FunctionName=name)
+        return [parse_version(v) for v in found if v.get("Version") != "$LATEST"]
 
     def event_sources(self, region: str | None = None, *, function: str | None = None) -> dict[str, list[Trigger]]:
         """
@@ -717,12 +730,7 @@ class LambdaAnalyzer(_BaseAnalyzer):
                 (destinations.get("OnSuccess") or {}).get("Destination"),
                 (destinations.get("OnFailure") or {}).get("Destination"),
             )
-        versions = read("versions", lambda: _pages(client, "list_versions_by_function", "Versions", FunctionName=name))
-        detail.versions = [
-            Version(v.get("Version", ""), int(v.get("CodeSize") or 0), _lambda_time(v.get("LastModified")),
-                    v.get("Description") or "", v.get("Runtime"))
-            for v in versions or [] if v.get("Version") != "$LATEST"
-        ]
+        detail.versions = read("versions", lambda: self.versions(name, where)) or []
         aliases = read("aliases", lambda: _pages(client, "list_aliases", "Aliases", FunctionName=name))
         detail.aliases = [
             Alias(a.get("Name", ""), a.get("FunctionVersion", ""),
@@ -1300,6 +1308,33 @@ class LambdaAnalyzer(_BaseAnalyzer):
         fn = self.function(ref, region=region)
         data = self._package(fn, max_size) if runtime_family(fn.runtime) == "python" else None
         return map_package(fn, data)
+
+    def diff(
+        self, ref: str, old: Any = None, new: Any = None, *, max_size: Any = "50MB", region: str | None = None
+    ) -> VersionDiff:
+        """
+        What changed between two versions of a function (see diff_packages()): its own files line by line, the
+        libraries packed with it, its settings and environment variable names. new= is the version or alias to look
+        at (by default the one ref names, 'etl:prod', else $LATEST) and old= the one to compare it with (by default
+        the newest published version before it whose code is different). Downloads both packages, up to max_size,
+        like code(); nothing in them is run. Lambda keeps the code of published versions only, so with none before
+        it the VersionDiff has only a note saying so.
+        """
+        name, qualifier, where = self.locate(ref, region)
+        versions = self.versions(name, where)
+        new_fn = self.function(f"{name}:{parse_qualifier(new if new is not None else qualifier or '$LATEST')}",
+                               region=where)
+        passed: list[str] = []
+        if old is None:
+            before, passed = version_before(versions, new_fn)
+            if before is None:
+                return VersionDiff(new_fn, versions=versions, note=nothing_before(new_fn))
+            old = before.version
+        old_fn = self.function(f"{name}:{parse_qualifier(old)}", region=where)
+        old_data, new_data = self._map(lambda fn: self._package(fn, max_size), [old_fn, new_fn])
+        diff = diff_packages(old_fn, old_data, new_fn, new_data)
+        diff.versions, diff.skipped = versions, passed
+        return diff
 
     def download(self, ref: str, path: str | None = None, *, region: str | None = None) -> PackageDownload:
         """

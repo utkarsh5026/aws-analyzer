@@ -1777,6 +1777,7 @@ ui.errors("orders-etl")                      # its errors in the last 24 hours, 
 ui.logs("orders-etl", search="KeyError")     # the newest lines it logged; request_id= shows one run
 ui.performance("orders-etl")                 # run times, memory used, cold starts, and the memory it needs
 ui.code("orders-etl")                        # the files in its package, and the handler's source
+ui.diff("orders-etl")                        # what changed since its last published version: files, lines, settings
 ui.how_it_works("orders-etl")                # how its Python code works, step by step from the handler
 ui.how_it_works_page("orders-etl")           # the same as a page of its own, to read in a tab with room for it
 ui.download("orders-etl")                    # its package (.zip) saved in lambda-downloads/, next to the notebook
@@ -1861,6 +1862,7 @@ Grouped the way `ui.help()` lists them.
 | Command                                                 | Shows                                                                                                                                                                                                                                         |
 | :------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code(name, file=None, region=None, max_size="50MB")`   | What's in its deployment package: files and folders by size, and the source of the handler's file (or `file=`; a secrets file's text is held back). Findings: a handler no file matches, secrets files packed in it, size near Lambda's limit, boto3 bundled although the runtime has it |
+| `diff(name, old=None, new=None, region=None, max_size="50MB")` | **What changed between two versions**: its own files line by line, with the Python functions each change is in, the libraries packed with it that were added, removed or upgraded, and its settings and environment variable names (never their values). `diff("orders-etl")` compares `$LATEST` with the newest published version whose code is different, `diff("orders-etl", 3, 5)` two versions, and `diff("orders-etl:prod")` what an alias runs. Findings: a Python file that no longer reads, an environment variable taken out that the code still reads, a shorter timeout, less memory, a new runtime. Lambda keeps the code of published versions only, so code deployed over `$LATEST` without publishing is gone, and the report says so |
 | `how_it_works(name, region=None, max_size="50MB")`      | **How a Python function's code works**, read with Python's `ast` module and never run: first **a graph of how it fits together** (the event and environment variables coming in, its own functions and who calls whom, the AWS services and web it reaches, coloured by what each call does; also as Mermaid to paste in docs), and in a second tab **each step of a call to click through like a debugger**: the code on one side, each line tagged with what it does (AWS calls, environment variables, event fields, HTTP requests, logs), and the step picked on the other, with the functions it's in and what it does, and **Next** (into the functions a line calls), **Over** and **Out**. Under them, a few sentences and the findings: a variable it needs that isn't set, an import Lambda can't find, a handler that isn't there or can't take (event, context), HTTP requests without a timeout, list calls that read only their first page, errors it drops, files written outside `/tmp`, secrets written in the code, AWS calls in a loop that a batch call would do in fewer requests, and clients made on every call |
 | `how_it_works_page(name, path=None, region=None, max_size="50MB")` | `how_it_works()` as **a page of its own**, to read in a tab with room for it, with the whole graph (the notebook's stops at 24 functions, 5 calls deep): saved as `<name>-how-it-works.html` in `lambda-downloads/` next to the notebook (or at `path=`), with a link that opens it. In JupyterLab a click opens it in a JupyterLab tab; middle-click it, or right-click and pick **Open link in new tab**, for a browser tab. Plain HTML and CSS, no JavaScript, light or dark like your browser |
 | `download(name, path=None, region=None)`                | Saves its deployment package, the .zip as Lambda stores it, in `lambda-downloads/` next to the notebook (or at `path=`, a file or a folder), and says where, its size and files, and whether its SHA-256 matches the one Lambda reports. A new downloads folder gets a `.gitignore`, since a package can hold secrets. In JupyterLab, right-click it in the file browser and pick **Download** to get it on your computer |
@@ -1891,6 +1893,8 @@ lam.find_symbol("orders-etl", "load_orders")           # SymbolReport: .definiti
 lam.code_map("orders-etl").aws                         # CodeMap: .steps, .aws, .env, .event, .imports, .functions
 code_graph(lam.code_map("orders-etl")).mermaid()      # its graph as Mermaid: boxes and arrows
 lam.download("orders-etl").path                        # where its .zip was saved (PackageDownload)
+lam.versions("orders-etl")                             # Version per published version: number, code SHA-256, when
+lam.diff("orders-etl", 3).files                        # FileChange per changed file: status, lines, definitions
 ```
 
 The analysis functions are pure (no AWS calls), so they also work on configurations, policies and log lines you
@@ -1899,8 +1903,10 @@ already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `r
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
 `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
 `search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
-"app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), and the findings: `function_findings`,
-`account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
+"app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (diff on two .zip files you already
+have), `diff_settings`, `version_before`, `stream_version` (the version a log stream's name says ran), and the
+findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`,
+`code_map_findings`, `diff_findings`.
 
 </details>
 
@@ -1928,9 +1934,9 @@ Read-only. Grant what you need:
 
 | Permission                                                                                                                                                                          | For                                                                          |
 | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------- |
-| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code`, `how_it_works` and `download` download from |
+| `lambda:ListFunctions`, `lambda:GetFunction`                                                                                                                                        | The functions and their settings, and the link `code`, `how_it_works`, `diff` and `download` download from |
 | `lambda:GetPolicy`, `lambda:ListEventSourceMappings`, `lambda:GetFunctionUrlConfig`                                                                                                 | What triggers each function, and who may call it                              |
-| `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates |
+| `lambda:GetFunctionEventInvokeConfig`, `lambda:ListVersionsByFunction`, `lambda:ListAliases`, `lambda:ListProvisionedConcurrencyConfigs`, `lambda:GetRuntimeManagementConfig`         | `function_info`: failed events, versions, aliases, provisioned concurrency, runtime updates; `diff`: the versions to compare |
 | `lambda:GetAccountSettings`                                                                                                                                                         | Each region's concurrency and code storage limits                             |
 | `cloudwatch:GetMetricData`                                                                                                                                                          | Calls, errors, throttles, run time and log volume                             |
 | `logs:DescribeLogGroups`, `logs:DescribeLogStreams`, `logs:FilterLogEvents`                                                                                                         | Log retention and size, and `errors`, `logs`, `performance` and the explorer's Logs tab |
@@ -2008,11 +2014,12 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 ### What it can call
 
-Seventeen tools in two toolkits (eighteen with `read_files=True`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Eighteen tools in two toolkits (nineteen with `read_files=True`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
-way a coding tool reads code with sed, an editor's go to definition and grep; "were last night's files processed?" is `s3_triggers`, then
+way a coding tool reads code with sed, an editor's go to definition and grep; "what changed when it started failing?" is
+`function_errors` (each cause says which versions it ran on), then `diff_versions`; "were last night's files processed?" is `s3_triggers`, then
 `function_errors` for the runs that failed.
 
 | Tool                                                  | What it returns                                                                                                                                       |
@@ -2027,6 +2034,7 @@ way a coding tool reads code with sed, an editor's go to definition and grep; "w
 | `function_source(function, file, lines, region)`      | The function's code, numbered line by line, like `sed -n` (any runtime with a .zip package): `lines="42"` for the lines around the one an error's traceback names, `"150-300"` for any range, up to 300 lines a call; with no file, the handler's file and the package's own files. Nothing is run, and anything that looks like a secret is hidden |
 | `search_code(function, text, regex, files, region)`   | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: the function's own files, or `files=` globs and folders, the libraries packed with it too |
 | `find_symbol(function, name, region)`                 | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition and find references. Read with `ast` and never run |
+| `diff_versions(function, old, new, region)`           | What changed between two versions, like `git diff`: settings and environment variable names, libraries added, removed or upgraded, each changed file with the Python functions its changes are in, and the changed lines (secrets hidden). By default `$LATEST` against the newest published version with different code |
 | `find_buckets(match, sizes)`                          | The buckets and their regions; `sizes=True` adds each one's object count and size from CloudWatch, biggest first                                     |
 | `bucket_details(bucket)`                              | Public access, encryption, versioning, lifecycle rules in plain words, replication, logging, tags, **its event notifications**, size and monthly cost, and its findings |
 | `list_folder(location)`                               | One level of a folder, like `aws s3 ls`: its subfolders, and its files newest first                                                                   |

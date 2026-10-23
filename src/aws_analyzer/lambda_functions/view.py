@@ -57,6 +57,7 @@ from .style import _render_html, _render_page
 from .blocks.walk import _Walk
 from .blocks.graph import _Graph
 from .blocks.page import _PageLink
+from .blocks.diff import _diff_blocks
 
 if TYPE_CHECKING:
     from .explorer.window import LambdaExplorer
@@ -272,7 +273,7 @@ class LambdaView(_BaseView):
         "🧭 Explore by clicking": ("explore",),
         "λ Functions": ("functions", "function_info"),
         "🩺 When something goes wrong": ("errors", "logs", "performance"),
-        "📦 Code": ("code", "how_it_works", "how_it_works_page", "download"),
+        "📦 Code": ("code", "diff", "how_it_works", "how_it_works_page", "download"),
         "❓ Help": ("help",),
     }
     _START = (
@@ -1138,6 +1139,23 @@ class LambdaView(_BaseView):
         steps.append((self._call_for("function_info", fn), "its settings, triggers and last 30 days"))
         blocks.append(_Next(steps))
         return blocks
+
+    @_friendly_errors
+    def diff(self, name: str, old: Any = None, new: Any = None, *, region: str | None = None,
+             max_size: Any = "50MB") -> None:
+        """
+        What changed between two versions of a function: its own files that differ, line by line, with the Python
+        functions each change is in, the libraries packed with it that were added, removed or upgraded, and its
+        settings and environment variable names (never their values). diff('etl') compares $LATEST with the newest
+        published version whose code is different, diff('etl', 3) with version 3, diff('etl', 3, 5) two versions,
+        and diff('etl:prod') what an alias runs with the version before it. Lambda keeps the code of published
+        versions only: code deployed over $LATEST without publishing a version is gone, and the report says so.
+        Downloads both packages, up to max_size, like code(); nothing in them is run.
+        """
+        with self._named(name, region):
+            diff = self.core.diff(name, old, new, region=region, max_size=max_size)
+        elsewhere = diff.function.region if diff.function.region != self.core.region else None
+        self._show(_diff_blocks(diff, region=elsewhere))
 
     @_friendly_errors
     def how_it_works(self, name: str, *, region: str | None = None, max_size: Any = "50MB") -> None:

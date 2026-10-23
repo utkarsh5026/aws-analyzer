@@ -1697,6 +1697,12 @@ def seed_lambda_functions() -> dict:
         }),
         "churn-scoring": _lambda_package({"app.py": "def predict(event, context):\n    return {'score': 0.42}\n",
                                           "model/churn.json": '{"trees": []}' + " " * 400_000}),
+        "churn-scoring@1": _lambda_package({
+            "app.py": "import json\n\nTHRESHOLD = 0.5\n\n\ndef predict(event, context):\n"
+                      "    features = event['features']\n    return {'score': 0.2, 'churn': 0.2 > THRESHOLD}\n",
+            "model/churn.json": '{"trees": [], "version": 1}' + " " * 380_000,
+            "scikit_learn-1.4.2.dist-info/RECORD": "sklearn/__init__.py,,\n",
+            "sklearn/__init__.py": "__version__ = '1.4.2'\n"}),
         "report-api": _lambda_package({"index.mjs": "export const handler = async (event) => ({ statusCode: 200 });\n"}),
         "feature-backfill": _lambda_package({"backfill.py": "def run(event, context):\n    return 'done'\n"}),
         "support-agent-actions": _lambda_package(AGENT_SOURCES),
@@ -1890,8 +1896,9 @@ def seed_lambda_functions() -> dict:
             answer = client.get_function(FunctionName=FunctionName, **params)
             answer.pop("ResponseMetadata", None)
             name = answer["Configuration"]["FunctionName"]
+            published = f"{name}@{answer['Configuration']['Version']}"
             answer["Code"]["Location"] = (f"https://awslambda-{region}-tasks.s3.{region}.amazonaws.com/demo-packages/"
-                                          f"{name}.zip")
+                                          f"{published if published in packages else name}.zip")
             if name == "report-api":
                 answer["Concurrency"] = {"ReservedConcurrentExecutions": 10}
                 answer["Configuration"]["LoggingConfig"] = {"LogFormat": "JSON", "ApplicationLogLevel": "INFO",

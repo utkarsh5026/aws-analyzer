@@ -15,7 +15,7 @@ from ..helpers import (
     ENDING_SOON_DAYS, LATEST_RUNTIMES, RUNTIMES, _INVOKE_ACTIONS, _SERVICE_KINDS, _STREAM_KINDS, _day, _lambda_time,
     runtime_family,
 )
-from ..models import Function, Layer, RuntimeStatus, Trigger
+from ..models import Function, Layer, RuntimeStatus, Trigger, Version
 
 
 def masked_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +88,15 @@ def parse_function(config: dict[str, Any], region: str = "") -> Function:
         version=config.get("Version") or "$LATEST",
         raw=masked_config(config),
     )
+
+
+def parse_version(config: dict[str, Any]) -> Version:
+    """
+    One entry of ListVersionsByFunction -> Version: its number, code size and SHA-256, when it was published, its
+    description and runtime.
+    """
+    return Version(config.get("Version", ""), int(config.get("CodeSize") or 0), _lambda_time(config.get("LastModified")),
+                   config.get("Description") or "", config.get("Runtime"), config.get("CodeSha256") or "")
 
 
 def runtime_status(runtime: str | None, *, package_type: str = "Zip", today: date | None = None) -> RuntimeStatus:

@@ -35,7 +35,7 @@ from .base import Toolkit
 if TYPE_CHECKING:
     from ...lambda_functions import (
         CodeMap, CodePackage, CodeSearch, ErrorGroup, ErrorReport, Function, FunctionDetail, FunctionMetrics,
-        LambdaAnalyzer, LogPage, LogRun, Performance, SymbolReport,
+        LambdaAnalyzer, LogPage, LogRun, Performance, SymbolReport, VersionDiff,
     )
 
 TOOL_READS: dict[str, tuple[str, ...]] = {
@@ -56,6 +56,8 @@ TOOL_READS: dict[str, tuple[str, ...]] = {
     "function_source": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
     "search_code": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
     "find_symbol": ("lambda:GetFunction", "the package's download link (HTTPS, from S3)"),
+    "diff_versions": ("lambda:ListVersionsByFunction", "lambda:GetFunction",
+                      "the packages' download links (HTTPS, from S3)"),
 }
 
 
@@ -211,6 +213,8 @@ def _cause(group: ErrorGroup) -> dict[str, Any]:
     in_code = code_locations(group.example)
     if in_code:
         cause["in_code"] = in_code
+    if group.versions:
+        cause["ran_on"] = group.versions
     return cause
 
 
@@ -531,6 +535,70 @@ def summarize_symbol(report: SymbolReport) -> dict[str, Any]:
     return out
 
 
+_DIFF_LINES = 300
+
+_DIFF_FILES = 30
+
+
+def _diff_excerpts(diff: VersionDiff) -> tuple[list[dict[str, Any]], bool]:
+    """
+    The changed files' diff lines as the model reads them, file by file, at most _DIFF_LINES in all (secrets hidden,
+    long lines clipped), and whether any were left out.
+    """
+    room, cut, excerpts = _DIFF_LINES, False, []
+    for change in diff.files[:_DIFF_FILES]:
+        if not change.lines:
+            continue
+        kept = change.lines[:max(0, room)]
+        cut = cut or len(kept) < len(change.lines) or change.truncated
+        room -= len(kept)
+        if kept:
+            excerpts.append({"file": change.path,
+                             "lines": [hide_secrets(_clip(line, _LINE_CHARACTERS)) for line in kept]})
+    return excerpts, cut or len(diff.files) > _DIFF_FILES
+
+
+def _diff_file(change: Any) -> dict[str, Any]:
+    entry: dict[str, Any] = {"file": change.path, "status": change.status, "lines_added": change.added,
+                             "lines_removed": change.removed}
+    if change.definitions:
+        entry["changed_in"] = change.definitions[:10]
+    if change.note:
+        entry["note"] = change.note
+    return entry
+
+
+def summarize_diff(diff: VersionDiff) -> dict[str, Any]:
+    """
+    diff_versions()'s answer: the two versions compared and when each was made, whether the code is the same, the
+    settings, environment variable names (never values) and libraries that changed, each own file that changed
+    with the Python functions its changes are in, the diff lines themselves (secrets hidden) and the findings.
+    """
+    lf = _lambda_module()
+    fn, old = diff.function, diff.old
+    out: dict[str, Any] = {"function": fn.name, "region": fn.region, "new": fn.version,
+                           "new_changed": fn.last_modified}
+    if diff.versions:
+        out["published_versions"] = [v.version for v in diff.versions][-20:]
+    if old is None:
+        out["note"] = diff.note
+        return out
+    out.update(old=old.version, old_changed=old.last_modified, same_code=diff.same_code)
+    if diff.skipped:
+        out["skipped_same_code"] = diff.skipped
+    if diff.note:
+        out["note"] = diff.note
+    out["settings_changed"] = [{"setting": c.setting, "old": c.old, "new": c.new} for c in diff.settings]
+    if diff.env_added or diff.env_removed:
+        out["env_vars"] = {"added": diff.env_added, "removed": diff.env_removed, "still_read": diff.still_read}
+    out["libraries_changed"] = [{"name": c.name, "old": c.old, "new": c.new} for c in diff.libraries]
+    out["files_changed"] = [_diff_file(change) for change in diff.files[:_DIFF_FILES]]
+    out["files_unchanged"] = diff.unchanged_files
+    out["diff"], out["cut_short"] = _diff_excerpts(diff)
+    out["findings"] = [{"level": level, "message": hide_secrets(text)} for level, text in lf.diff_findings(diff)]
+    return out
+
+
 _PERMISSIONS = {"logs": "logs:FilterLogEvents", "metrics": "cloudwatch:GetMetricData"}
 _OVERVIEW_PERMISSIONS = {"list": "lambda:ListFunctions", "triggers": "lambda:ListEventSourceMappings",
                          "account": "lambda:GetAccountSettings", "logs": "logs:DescribeLogGroups",
@@ -552,7 +620,7 @@ class LambdaToolkit(Toolkit):
               "timeout, their errors and logs run by run, their run times and memory, their settings, triggers and "
               "estimated cost, what their code calls, and their source code, read line by line, searched across "
               "files and followed from a call to its definition, so an error in the logs can be traced to the line "
-              "that raised it.")
+              "that raised it, and what changed between two versions of its code and settings.")
     privacy = ("Environment variable values are never read. Lines of code the agent reads (function_source, "
                "search_code, find_symbol) go to the model with anything that looks like a secret hidden; secrets "
                "files (.env, keys) are never read.")
@@ -594,17 +662,23 @@ AWS Lambda
   calls; search_code finds a text or a regular expression in every file (an error message, a table, a variable).
   Read the code before saying what caused an error, quote the line, and say what to change. function_code says what
   the code calls and where.
+- When errors started recently, ask what changed: each cause in function_errors says which versions it ran on
+  (ran_on), and diff_versions shows what changed in the code, libraries and settings between two versions (by
+  default $LATEST against the newest published version with other code). Read a version's code with
+  function_source('name:3', ...). Lambda keeps only published versions' code: if diff_versions has nothing to
+  compare, say so and use when the code last changed instead.
 - Name functions exactly as the tools return them."""
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """
         find_functions, function_health, function_errors, function_logs, function_performance, function_details,
-        function_code, function_source, search_code and find_symbol: methods whose type hints and docstrings tell the model how to call them,
+        function_code, function_source, search_code, find_symbol and diff_versions: methods whose type hints and
+        docstrings tell the model how to call them,
         each reading through LambdaAnalyzer and returning a compact, JSON-ready summary with what it covered.
         """
         return [self.find_functions, self.function_health, self.function_errors, self.function_logs,
                 self.function_performance, self.function_details, self.function_code, self.function_source,
-                self.search_code, self.find_symbol]
+                self.search_code, self.find_symbol, self.diff_versions]
 
     def find_functions(self, match: str = "", regions: str = "") -> dict[str, Any]:
         """
@@ -811,6 +885,32 @@ AWS Lambda
         if report.definitions:
             out["_next"] = [(self._next_for(report.function, "code", report.definitions[0].file),
                              "the file it's defined in, in colour")]
+        return out
+
+    def diff_versions(self, function: str, old: str = "", new: str = "", region: str = "") -> dict[str, Any]:
+        """
+        What changed between two versions of one function, like git diff: the settings and environment variable
+        names that changed, the libraries packed with it that were added, removed or upgraded, each of its own
+        files that changed with the Python functions the changes are in, and the changed lines themselves (secrets
+        hidden; nothing is run). new: a version number, an alias or '$LATEST' (empty: $LATEST, or the version the
+        function name's ':alias' points to); old: the version to compare it with (empty: the newest published
+        version before new whose code differs). Use it when errors started after a deploy: function_errors says
+        which versions each cause ran on. Lambda keeps only published versions' code, so a function that was never
+        published has nothing to compare, and the note says so. region: empty for the default region.
+        """
+        core = self.analyzer
+        diff = core.diff(function, old or None, new or None, region=region or None)
+        out = summarize_diff(diff)
+        if diff.old is None:
+            out["_summary"] = _clip(diff.note or "nothing to compare", 80)
+            return out
+        out["_summary"] = (f"{diff.old.version} → {diff.function.version}: "
+                           + ("same code" if diff.same_code else
+                              f"{_plural(len(diff.files), 'file')}, +{diff.added:,} −{diff.removed:,} lines")
+                           + (f", {_plural(len(diff.libraries), 'library change')}" if diff.libraries else "")
+                           + (f", {_plural(len(diff.settings), 'setting')}" if diff.settings else ""))
+        out["_next"] = [(self._next_for(diff.function, "diff", diff.old.version, diff.function.version),
+                         "the same change as a report, line by line")]
         return out
 
     def _add_files(self, out: dict[str, Any], pkg: CodePackage) -> None:
