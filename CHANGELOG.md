@@ -36,24 +36,29 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   ahead of time. `LocalSandbox(packages=[...], memory=...)` offers more of Pyodide's packages, and `python=` takes a
   `Workspace` of your own for another sandbox. The chat window and the report show each run's code, and the budget
   caps runs (`python_runs`, `python_seconds`) and what's saved (`workspace_bytes`).
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
 - Agent: with `python=`, the agent can also save S3 files and Lambda logs where its code reads them, so it can
   answer "what do the contracts in this folder say?" or "when did the errors start, hour by hour?". `save_s3_files`
   copies one file or a folder's matching files (50 by default, up to 500), with a PDF's, Word file's or PowerPoint
   file's text saved beside it, and skips files in Glacier until they're restored. `save_logs` saves a window of a
   function's logs as one line per log line and one per run (status, run time, memory, cold start, error), with
   anything that looks like a secret hidden.
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
 - Agent: with `python=`, deepagents' file tools work on the workspace, so the agent writes a longer script with
   `write_file`, runs it with `run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending the
   whole script again, and reads or searches saved files with `read_file` and `grep` without spending a run (secrets
   hidden in what they show). Each of those calls counts against the question's tool calls and shows in the chat window
   and the report.
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
 - Lambda: `core.sources("orders-etl")` returns the text of a function's own source files by path, and
   `read_sources()` does the same for a .zip you already have.
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
 
 ### Changed
 
 - Agent: a question may now take 200 steps of the agent's loop (`budget={"steps": ...}`), up from 80, so a question
   that uses most of its 25 tool calls isn't stopped by the step limit first.
+  ([#137](https://github.com/utkarsh5026/aws-analyzer/pull/137))
 
 ## [0.29.0] - 2026-10-23
 
