@@ -448,7 +448,7 @@ def tours_to_run(python: Path, extras: str) -> tuple[list[Tour], list[str]]:
     The services `local` runs, and why any were left out.
     """
     if not wants_agent(extras):
-        skipped = ["agent: needs --extras with agent (or all)"]
+        skipped = ["agent: needs --extras with agent (or all), or run python makefile.py local-agent"]
         return [tour for tour in TOURS if not tour.needs_agent], skipped
     if not runs_agent(python):
         skipped = [f"agent: needs Python {'.'.join(map(str, AGENT_MIN_PYTHON))} or newer (--python)"]
