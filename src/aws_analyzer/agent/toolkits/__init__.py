@@ -7,7 +7,9 @@ Adding a service: a module here (`<service>_tools.py`) with a Toolkit subclass t
 analyzer, its name in TOOLKITS (and in DEFAULT_TOOLKITS when every agent should have it), the analyzer in
 COMPANIONS["agent"] in .claude/skills/check/rules.py, and its tools' reads in README's IAM permissions. A tool that
 joins two services (S3's s3_triggers, which reads Lambda too) goes in one of their toolkits, which offers it when the
-agent has the other (Toolkit.peer()).
+agent has the other (Toolkit.peer()). The Python toolkit (python_tools.py) isn't about a service: it runs the model's
+code in the agent's workspace (AgentAnalyzer(python=...)), and each service's toolkit offers a save_* tool that puts
+its data there when the agent has it (peer('python')).
 """
 
 from __future__ import annotations
@@ -17,16 +19,18 @@ from typing import Any, Iterable
 
 from .base import Toolkit
 from .lambda_tools import LambdaToolkit
+from .python_tools import PythonToolkit
 from .s3_tools import S3Toolkit
 
-TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit}
+TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "python": PythonToolkit}
 DEFAULT_TOOLKITS = ("lambda", "s3")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
     """
     A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
-    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=).
+    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=;
+    PythonToolkit's workspace=).
     """
     if isinstance(spec, Toolkit):
         return spec
@@ -69,5 +73,5 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "LambdaToolkit", "S3Toolkit", "Toolkit", "default_toolkits", "make_toolkit",
-           "make_toolkits"]
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "LambdaToolkit", "PythonToolkit", "S3Toolkit", "Toolkit", "default_toolkits",
+           "make_toolkit", "make_toolkits"]

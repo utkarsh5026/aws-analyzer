@@ -184,7 +184,9 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   `log=`, which only append lines, and both Bedrock modules' `save_file_list()`, the KB explorer's ⬇ List and the
   chat's Files list's ⬇ List (`_bedrock.write_file_list`: one .txt of the files' paths or links, written to
   `<name>.part` then renamed, beside the notebook or at the path given; it replaces a file of that name and never
-  deletes one), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
+  deletes one), the agent's `LocalSandbox.prepare()` (Pyodide's files, each checked against its SHA-256 and written
+  to `<name>.part` then renamed, in `~/.cache/aws-analyzer/pyodide/<version>/` or the `cache=` given; the model's code
+  itself writes nothing on disk: its files stay in memory), and `sagemaker_env`'s `new_env()`, which makes a Python environment and its Jupyter kernel
   (`SageMakerAnalyzer.create_env`, in `sagemaker_env/envs.py`'s `_EnvMaking` with nothing else, runs an `env_plan`'s commands, conda / mamba / micromamba or uv, pip and
   `ipykernel install --user`, through `_run`, a subprocess without a shell; it writes the environment's folder and its
   kernel, refuses a folder that's there and isn't an environment or has another Python, and never removes anything:
@@ -204,7 +206,7 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   which `rules.py` can't see. `how_it_works()` reads the package's Python with `ast` and never runs, imports or
   `exec`s any of it. Environment variable values never reach a report: `parse_function` keeps their names, and
   `Function.raw` (the configuration shown folded) has the values replaced by `(hidden)`. The agent only calls the
-  analyzers' read methods, and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
+  analyzers' read methods (code it writes runs only in a `Workspace` the user passes, with no AWS credentials), and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
   `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
   hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
   Describe, Head, Filter) with `ReadOnlyError` before its request is built; the S3 tools read names, sizes, dates and
@@ -778,6 +780,28 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
+- **The workspace** (`workspace.py`, `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
+  sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
+  `PythonToolkit` last (`_with_python`), with `run_python` and `workspace_files`. A sandbox must give the code no AWS
+  credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
+  Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`,
+  and `save_logs`, a window's `log_lines` / `run_rows` as JSON Lines with secrets hidden; S3's `save_s3_files`, whose
+  helpers are in `toolkits/s3_saving.py`: `plan_saves` (what fits, Glacier and folder markers skipped), `read_files`
+  on the analyzer's client and `document_text`, a PDF's, Word or PowerPoint file's text saved as `<key>.txt`),
+  which the toolkit offers when `peer("python")` is there and which saves through `PythonToolkit.save()` (paths through
+  `clean_path`, the budget's `workspace_bytes`). `run_python` checks `python_runs` and runs for at most
+  `python_seconds`; what it prints is cut to `file_chars` and passed through `hide_secrets`. `ToolCall.code` /
+  `.brief` (`CODE_ARGS`) let the window draw the code under `run_python(…)` and the report fold it under the table.
+  A new service's data goes in through a `save_*` tool in its toolkit; a built-in sandbox goes in `sandboxes/`
+  (`SANDBOXES`, which `python="<name>"` looks up). `LocalSandbox` (`sandboxes/local.py`, `python="local"`) runs each
+  run in a fresh Pyodide on Deno (`runner.mjs`, shipped in the wheel): Deno gets `--allow-read` of the Pyodide folder
+  and nothing else (`_command`), and no AWS variables in its environment (`_environment`); the files live in memory
+  here and go in and out as base64 JSON, the result on the last stdout line that starts with the run's nonce
+  (`parse_result`: the code can print its own lines through `js.console`). `prepare()` downloads Pyodide's files
+  (`PYODIDE_VERSION`, from `PYODIDE_URL`) into `cache`, the core files checked against `_CORE_FILES`' pinned SHA-256s and
+  the packages (`needed_packages`) against the lock file's; the runner offers only the packages asked for (a filtered
+  lock file), so importing another is a plain ModuleNotFoundError. A new Pyodide version means new pinned hashes, from
+  the npm tarball and the CDN agreeing.
 - **The model** (`llm.py`): `pick_provider()` turns `provider=` / `model=` (`'openai:gpt-4.1'`: a prefix only when
   it's in `_PREFIXES`, LangChain's provider names, so a Bedrock ID's `:0` isn't one), `chat_model=` (by class,
   `provider_of`) and the environment (`MODEL_ENV`, `AWS_ANALYZER_AGENT_MODEL`, then `AZURE_OPENAI_*`, then
@@ -801,7 +825,13 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   after `check_ready()` says what's missing), with the model, the tools, the prompt, an `InMemorySaver` checkpointer
   keyed by `AgentAnalyzer.thread` (follow-ups; `new_conversation()` makes a new thread) and `_hide_tools(HIDDEN_TOOLS)`,
   a middleware that keeps deepagents' general-purpose subagent and shell away from the model. Its file tools stay, on
-  the default in-memory `StateBackend`: never a `FilesystemBackend` or a sandbox. A new capability of the loop (a
+  the default in-memory `StateBackend`, or with a Python workspace on its files (`workspace_files.py`'s
+  `workspace_backend`: a `CompositeBackend` whose default is `_WorkspaceBackend` over the `Workspace`, reads and greps
+  passed through `hide_secrets`, writes held to `workspace_bytes`, and `/conversation_history/` left in a
+  `StateBackend`), and `_record_file_tools` records each file tool call (`FILE_TOOLS`) on the question like a
+  toolkit's tool: counted against the budget, told to the listener, listed in the report. Never a
+  `FilesystemBackend`, and deepagents' `execute` stays hidden: code the model writes runs only through the Python
+  toolkit's `run_python` (`file=` runs a script the file tools wrote), in the workspace (below). A new capability of the loop (a
   subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,
@@ -934,7 +964,8 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   keep it low, so installing doesn't upgrade the boto3 a SageMaker image ships with. Dependabot's
   `versioning-strategy: increase-if-necessary` bumps the `==` pins in requirements files but leaves `>=` floors alone.
 - Optional packages are extras: `data` (pandas, pyarrow), `files` (the S3 file readers), `notebook` (IPython,
-  ipywidgets, tqdm), `agent` (deepagents, langchain-openai; Python 3.11+), and `all`. A new optional package goes in one of them as well as in README's install lines.
+  ipywidgets, tqdm), `agent` (deepagents, langchain-openai; Python 3.11+), `sandbox` (deno, for the agent's
+  `LocalSandbox`), and `all`. A new optional package goes in one of them as well as in README's install lines.
 - PyPI shows README.md, through `hatch-fancy-pypi-readme`, which points its relative links and pictures at GitHub
   and turns `> [!NOTE]` callouts into bold labels (PyPI renders neither). `twine check --strict` with
   `readme-renderer[md]` checks that it renders.
@@ -1016,7 +1047,9 @@ it can run off the main thread: `_request()` makes one request and changes nothi
   uploads its files before it sets a bucket's notifications, so moto doesn't try to run the function), a toy `Notes` toolkit with no AWS behind it to show what a new service's toolkit plugs into, and
   the agent loop with `scripted(...)`, a LangChain chat model that answers with AIMessages in
   turn (`calls(...)` for tool calls, `says(...)` for text) and records the tools it was given and the messages it was
-  sent; `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as
+  sent; `Folder` is a workspace for the tests (a folder, each run a subprocess: no sandbox), and the `pyodide` fixture
+  downloads Pyodide's files once for the tests that run `LocalSandbox` for real (into `AWS_ANALYZER_TEST_PYODIDE` when
+  it's set, so a second run reuses them; skipped without Deno or the internet); `test_asking_through_azure_openai` runs `AzureChatOpenAI` itself over an `httpx.MockTransport` that answers as
   Azure does. Tests that need deepagents or langchain-openai skip without them (Python 3.10).
 - UI tests build the View with `mode="text"` and assert on `capsys` output through a small `run(capsys, fn, ...)`
   helper. Each service's help test checks that `set(_commands(<Service>View))` is what its `_GROUPS` list.

@@ -17,7 +17,7 @@ from botocore.exceptions import BotoCoreError
 
 from .._bedrock.blocks import _Answer
 from .._bedrock.prices import _per_million, short_model
-from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Title
+from .._kit.blocks import _Cards, _Findings, _Next, _Note, _Table, _Text, _Title
 from .._kit.deps import _require
 from .._kit.errors import _Hint
 from .._kit.fmt import _duration, _fmt_dt, _plural, _utcnow, _zone_name, human_money, human_size
@@ -283,10 +283,12 @@ class AgentView(_BaseView):
         ]))
         blocks.append(_Findings(answer_findings(answer, core.budget)))
         if answer.calls:
-            rows = [[str(i), call.call, _coverage_text(call), call.summary or "-", f"{call.seconds:.1f}s"]
+            rows = [[str(i), call.brief, _coverage_text(call), call.summary or "-", f"{call.seconds:.1f}s"]
                     for i, call in enumerate(answer.calls, 1)]
             blocks.append(_Table(["#", "Tool call", "Covered", "Found", "Time"], rows, title="What it checked",
                                  code_cols=(1,), prose_cols=(3,), sortable=False))
+            blocks += [_Text(call.code, title=f"Call {i}'s code", code=True, collapsed=True)
+                       for i, call in enumerate(answer.calls, 1) if call.code]
         if answer.aws_calls:
             rows = [[op, f"{n:,}"] for op, n in sorted(answer.aws_calls.items(), key=lambda kv: (-kv[1], kv[0]))]
             blocks.append(_Table(["AWS call (read-only)", "Calls"], rows, title="AWS reads it made", collapsed=True))
@@ -415,6 +417,12 @@ class AgentView(_BaseView):
             ["Log window", f"{budget.log_days:g} days", "a longer log read is refused; CloudWatch's counts still work"],
             ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
         ]
+        if core.workspace is not None:
+            limits += [
+                ["Python runs", f"{budget.python_runs:,}", "run_python stops running; it answers with what it has"],
+                ["One run", _duration(budget.python_seconds), "the workspace stops the code"],
+                ["Workspace", human_size(budget.workspace_bytes), "a save that would go past it is refused"],
+            ]
         if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
             limits += [
                 ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],

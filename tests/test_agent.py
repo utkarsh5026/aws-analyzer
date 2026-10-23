@@ -1,6 +1,11 @@
 import asyncio
+import io
 import json
+import os
+import subprocess
+import sys
 import threading
+import time
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +20,10 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
+from aws_analyzer.agent.sandboxes import local as localmod
+from aws_analyzer.agent.toolkits import s3_saving
+from aws_analyzer.agent import workspace_files
+from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
 from aws_analyzer.agent.window.model_panel import (
@@ -32,16 +41,22 @@ from aws_analyzer.agent import (
     AgentView,
     Budget,
     LambdaToolkit,
+    LocalSandbox,
+    PythonRun,
+    PythonToolkit,
     Rates,
     ReadOnlyError,
     S3Toolkit,
     Toolkit,
     ToolCall,
     TriggerLink,
+    Workspace,
+    WorkspaceFile,
     answer_cost,
     answer_findings,
     answer_next,
     asked_at,
+    clean_path,
     code_locations,
     count_arrivals,
     explain_model_error,
@@ -52,12 +67,15 @@ from aws_analyzer.agent import (
     summarize_file,
     summarize_health,
     summarize_preview,
+    summarize_run,
     summarize_source,
+    summarize_workspace,
     system_prompt,
     trigger_findings,
 )
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
+from test_s3 import docx_bytes
 from test_lambda_functions import (
     ACCOUNT, CODE, NEW_CODE, OLD_CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs, versioned_clients,
 )
@@ -1712,3 +1730,546 @@ def test_the_model_settings_list_bedrocks_models_off_the_loop(seeded):
     x = asyncio.run(open_window())
     assert not x.panel.listing and "Listing" not in x.panel.note.value
     assert list(x.panel.model_box.options) == ["claude-haiku-4-5", "nova-pro"]
+
+
+
+class Folder(Workspace):
+    """
+    A workspace for the tests: a folder, with each run in a new Python of its own there (no sandbox: the tests'
+    code is their own).
+    """
+
+    title, place, packages = "a test folder", "on this machine", ()
+
+    def __init__(self, root):
+        self.root = root
+        self.ran = []
+
+    def put(self, path, data):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    def read(self, path):
+        target = self.root / path
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        return target.read_bytes()
+
+    def delete(self, path):
+        target = self.root / path
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        target.unlink()
+
+    def files(self):
+        return [WorkspaceFile(str(f.relative_to(self.root)), f.stat().st_size)
+                for f in sorted(self.root.rglob("*")) if f.is_file()]
+
+    def run(self, code, *, timeout):
+        self.ran.append((code, timeout))
+        before = {f.path: f.size for f in self.files()}
+        started = time.monotonic()
+        try:
+            done = subprocess.run([sys.executable, "-I", "-c", code], cwd=self.root, capture_output=True, text=True,
+                                  timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return PythonRun(False, seconds=timeout, timed_out=True)
+        changed = [f.path for f in self.files() if before.get(f.path) != f.size]
+        return PythonRun(done.returncode == 0, done.stdout, done.stderr, time.monotonic() - started,
+                         new_files=changed)
+
+
+@pytest.mark.parametrize("path, cleaned", [
+    ("lambda/etl/app.py", "lambda/etl/app.py"), ("/lambda//etl/./app.py", "lambda/etl/app.py"),
+    ("lambda\\etl\\app.py", "lambda/etl/app.py"),
+])
+def test_clean_path_keeps_every_path_inside_the_workspace(path, cleaned):
+    assert clean_path(path) == cleaned
+
+
+@pytest.mark.parametrize("path, message", [("../etc/passwd", "leaves the workspace"), ("", "names no file"),
+                                           ("a/" * 200, "longer than 300")])
+def test_clean_path_refuses_a_path_out_of_it(path, message):
+    with pytest.raises(ValueError, match=message):
+        clean_path(path)
+
+
+def test_summarize_run_cuts_what_it_printed_and_keeps_a_tracebacks_end():
+    printed = summarize_run(PythonRun(True, "x" * 100 + "\nDB_PASSWORD=hunter2", seconds=0.123), chars=50)
+    assert printed["stdout"] == "x" * 50 + "\n…" and printed["cut_short"] and printed["stdout_characters"] == 120
+    assert printed["seconds"] == 0.12 and "stderr" not in printed and "print counts" in printed["note"]
+    shown = summarize_run(PythonRun(True, "DB_PASSWORD=hunter2"))
+    assert shown["stdout"] == "DB_PASSWORD=[hidden]" and "cut_short" not in shown
+    trace = "Traceback (most recent call last):\n" + "  frame\n" * 2000 + "KeyError: 'customer_id'\n"
+    failed = summarize_run(PythonRun(False, stderr=trace, new_files=[f"f{i}" for i in range(105)]))
+    assert failed["stderr"].startswith("…\n") and failed["stderr"].endswith("KeyError: 'customer_id'\n")
+    assert len(failed["new_files"]) == 100 and failed["new_files_more"] == 5
+    assert summarize_run(PythonRun(False, seconds=30, timed_out=True))["timed_out"]
+
+
+def test_summarize_workspace_lists_a_folder():
+    files = [WorkspaceFile("lambda/etl/app.py", 2048), WorkspaceFile("lambda/api/index.py", 10),
+             WorkspaceFile("out.csv", 5)]
+    one = summarize_workspace(files, "lambda/etl/")
+    assert one["folder"] == "lambda/etl/" and one["files"] == 1 and one["size"] == "2.0 KB"
+    assert one["listed"] == [{"path": "lambda/etl/app.py", "size": "2.0 KB"}]
+    assert summarize_workspace(files)["files"] == 3 and summarize_workspace(files)["folder"] == "/"
+    assert "Nothing is saved there yet" in summarize_workspace(files, "s3")["note"]
+
+
+def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
+    plain = AgentAnalyzer(region=REGION)
+    assert plain.workspace is None and "run_python" not in {fn.__name__ for fn in plain.tools()}
+    assert "save_function_code" not in {fn.__name__ for fn in plain.tools()}
+
+    workspace = Folder(tmp_path)
+    core = AgentAnalyzer(region=REGION, python=workspace)
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "python"] and core.workspace is workspace
+    assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
+    names = [fn.__name__ for fn in core.tools()]
+    assert names[-2:] == ["run_python", "workspace_files"] and "save_function_code" in names
+    assert core.reads["save_function_code"][0] == "lambda:GetFunction" and core.reads["run_python"] == ()
+    prompt = core.instructions()
+    assert "run_python runs code you write in a sandbox" in prompt and "save_function_code puts its files" in prompt
+    assert "only the standard library" in prompt and "10 runs, each up to 30 seconds" in prompt
+    assert "save_function_code" not in plain.instructions()
+
+    alone = AgentAnalyzer(region=REGION, toolkits=["python"], python=Folder(tmp_path))
+    assert [t.name for t in alone.toolkits] == ["python"] and alone.region == REGION
+    assert [t.name for t in AgentAnalyzer(region=REGION, toolkits="lambda", python=workspace).toolkits] == [
+        "lambda", "python"]
+    with pytest.raises(ValueError, match="needs a workspace"):
+        AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
+    with pytest.raises(TypeError, match="python= takes 'local'"):
+        AgentAnalyzer(region=REGION, python=42)
+    with pytest.raises(ValueError, match="already belongs"):
+        AgentAnalyzer(region=REGION, toolkits=[alone.toolkit("python")])
+
+
+def test_the_agent_saves_a_functions_code_and_runs_python_over_it(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace)
+    saved = tool(agent, "save_function_code")("etl-nightly")
+    assert saved["folder"] == "lambda/etl-nightly/" and saved["files_saved"] == 2 and saved["version"] == "$LATEST"
+    assert saved["saved"] == ["lambda/etl-nightly/app.py", "lambda/etl-nightly/utils.py"]
+    assert [f.path for f in workspace.files()] == ["lambda/etl-nightly/app.py", "lambda/etl-nightly/utils.py"]
+    assert agent._guard.counts == {"lambda:GetFunction": 1}
+
+    code = ("import ast, pathlib\n"
+            "for path in sorted(pathlib.Path('lambda/etl-nightly').glob('*.py')):\n"
+            "    tree = ast.parse(path.read_text())\n"
+            "    print(path.name, [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])\n"
+            "print('DB_PASSWORD=hunter2')\n"
+            "pathlib.Path('found.txt').write_text('handler')\n")
+    ran = tool(agent, "run_python")(code)
+    assert ran["ok"] and ran["stdout"].splitlines() == ["app.py ['handler']", "utils.py ['helper']",
+                                                        "DB_PASSWORD=[hidden]"]
+    assert ran["new_files"] == ["found.txt"] and workspace.ran[0][1] == 30.0
+    failed = tool(agent, "run_python")("{}['customer_id']")
+    assert not failed["ok"] and failed["stderr"].rstrip().endswith("KeyError: 'customer_id'")
+    listed = tool(agent, "workspace_files")("lambda")
+    assert listed["files"] == 2 and tool(agent, "workspace_files")()["files"] == 3
+    assert tool(agent, "run_python")("  ")["error"] == "ValueError"
+
+    chosen = tool(agent, "save_function_code")("etl-nightly", files="*.txt")
+    assert chosen["files_saved"] == 0 and chosen["note"] == "No file in the package matched '*.txt'."
+    secrets = tool(agent, "save_function_code")("etl-nightly", files=".env")
+    assert secrets["files_saved"] == 0 and not (tmp_path / "lambda/etl-nightly/.env").exists()
+
+
+def test_the_budget_caps_python_runs_and_what_the_workspace_holds(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace, budget={"python_runs": 1, "workspace_bytes": 50, "python_seconds": 5})
+    run = agent._run = harness_run(agent)
+    assert tool(agent, "run_python")("print(1)")["ok"] and workspace.ran[0][1] == 5
+    refused = tool(agent, "run_python")("print(2)")
+    assert refused["refused"] == "python_runs" and "1 Python run" in refused["message"]
+    assert run.calls[-1].summary == "not run: the budget of Python runs was used up" and len(workspace.ran) == 1
+    full = tool(agent, "save_function_code")("etl-nightly")
+    assert full["refused"] == "workspace" and "past its 50 B limit" in full["message"] and not workspace.files()
+    agent._run = None
+    timed = Folder(tmp_path)
+    assert timed.run("while True: pass", timeout=0.5).timed_out
+
+
+def harness_run(agent):
+    """
+    A question being answered, as ask() sets one up, so a tool called on its own counts against its budget.
+    """
+    from aws_analyzer.agent.budget import _Run
+
+    return _Run(agent.budget)
+
+
+def test_ask_runs_python_and_the_report_shows_its_code(seeded, tmp_path, capsys):
+    code = "import pathlib\nprint(len(list(pathlib.Path('lambda').rglob('*.py'))))"
+    model = scripted(
+        calls(("save_function_code", {"function": "etl-nightly"})),
+        calls(("run_python", {"code": code})),
+        says("etl-nightly has **2** Python files."),
+    )
+    agent = make(model, python=Folder(tmp_path))
+    answer = agent.ask("How many Python files does etl-nightly have?", now=NOW)
+    assert [c.name for c in answer.calls] == ["save_function_code", "run_python"] and answer.error is None
+    ran = answer.calls[1]
+    assert ran.result["stdout"] == "2\n" and ran.summary.startswith("ran in ") and "printed 1 line" in ran.summary
+    assert ran.code == code and ran.brief == "run_python(…)" and answer.calls[0].brief == answer.calls[0].call
+    assert "saved 2 files" in answer.calls[0].summary
+
+    out = run(capsys, AgentView(agent, mode="text", progress="off").tools)
+    assert "run_python" in out and "Python runs" in out and "Workspace" in out and "a test folder" in out
+    html = _tool_html(ran, running=False)
+    assert '<span class="pf">run_python</span>(…)' in html and 'class="ag-code"' in html and "pathlib" in html
+    assert "Ask about Lambda and S3 in plain English" in page(window(core=make(python=Folder(tmp_path))))
+
+
+LOCK = {"pandas": {"file_name": "pandas.whl", "sha256": "a", "depends": ["numpy", "pytz"]},
+        "numpy": {"file_name": "numpy.whl", "sha256": "b", "depends": []},
+        "pytz": {"file_name": "pytz.whl", "sha256": "c", "depends": []},
+        "pyarrow": {"file_name": "pyarrow.whl", "sha256": "d", "depends": ["numpy"]}}
+
+
+def test_the_local_sandbox_downloads_a_package_with_what_it_needs():
+    assert localmod.needed_packages(LOCK, ["Pandas", "pyarrow"]) == ["pandas", "pyarrow", "numpy", "pytz"]
+    assert localmod.needed_packages(LOCK, []) == []
+    assert [f.name for f in localmod.package_files(LOCK, ["numpy"])] == ["numpy.whl"]
+    with pytest.raises(ValueError, match="no package 'panda'. Did you mean 'pandas'"):
+        localmod.needed_packages(LOCK, ["panda"])
+
+
+def test_the_local_sandbox_reads_only_its_runners_last_line():
+    output = 'N{"ok": false, "fake": 1}\nprinted\nN{"ok": true, "stdout": "hi"}\n'
+    assert localmod.parse_result(output, "N") == {"ok": True, "stdout": "hi"}
+    assert localmod.parse_result("nothing\n", "N") is None and localmod.parse_result("N{broken", "N") is None
+    assert localmod.parse_result("N[1]", "N") is None
+
+
+def test_deno_gets_read_access_to_pyodide_and_nothing_else(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s3cr3t")
+    sandbox = LocalSandbox(cache=tmp_path, memory="1GB", deno="/opt/deno")
+    command = sandbox._command()
+    assert command[:2] == ["/opt/deno", "run"] and f"--allow-read={tmp_path}" in command
+    assert "--no-prompt" in command and "--no-remote" in command and "--v8-flags=--wasm-max-mem-pages=16384" in command
+    assert not [flag for flag in command if flag.startswith("--allow-") and not flag.startswith("--allow-read")]
+    environment = sandbox._environment()
+    assert not [name for name in environment if name.startswith("AWS_")] and "s3cr3t" not in str(environment)
+    assert environment["DENO_DIR"] == str(tmp_path / "deno")
+    with pytest.raises(ValueError, match="must be an https:// URL"):
+        LocalSandbox(index_url="http://mirror/pyodide/")
+    with pytest.raises(ValueError, match="memory= is too small"):
+        LocalSandbox(memory=10)
+    sandbox.put("a//b.txt", b"x")
+    assert sandbox.files() == [WorkspaceFile("a/b.txt", 1)]
+
+
+def test_the_local_sandbox_says_how_to_get_deno(tmp_path, monkeypatch):
+    monkeypatch.setattr(localmod.shutil, "which", lambda name: None)
+    monkeypatch.setitem(sys.modules, "deno", None)
+    with pytest.raises(ImportError, match=r"pip install deno"):
+        LocalSandbox(cache=tmp_path).prepare()
+
+
+def test_the_local_sandbox_refuses_a_file_that_isnt_pyodides(tmp_path, monkeypatch):
+    monkeypatch.setattr(localmod, "_deno_binary", lambda given: "deno")
+    monkeypatch.setattr(localmod.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b"not pyodide"))
+    with pytest.raises(ValueError, match="isn't the file Pyodide 314.0.7 released"):
+        LocalSandbox(cache=tmp_path).prepare()
+    assert not list(tmp_path.iterdir())
+
+    def offline(url, timeout):
+        raise localmod.urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(localmod.urllib.request, "urlopen", offline)
+    with pytest.raises(ConnectionError, match=f"copy pyodide-lock.json and the other files it needs .* into {tmp_path}"):
+        LocalSandbox(cache=tmp_path).prepare()
+
+
+def test_python_local_makes_the_local_sandbox():
+    core = AgentAnalyzer(region=REGION, python="local")
+    assert isinstance(core.workspace, LocalSandbox) and core.workspace.packages == ("pandas",)
+    assert "a local sandbox (Pyodide on Deno, in WebAssembly" in core.toolkit("python").privacy
+    with pytest.raises(ValueError, match="There's no 'docker' sandbox"):
+        AgentAnalyzer(region=REGION, python="docker")
+
+
+@pytest.fixture(scope="module")
+def pyodide(tmp_path_factory):
+    """
+    Pyodide's files with pandas, downloaded once for these tests (into AWS_ANALYZER_TEST_PYODIDE when it's set, so a
+    second run reuses them); skipped without Deno or the internet.
+    """
+    try:
+        localmod._deno_binary(None)
+    except ImportError:
+        pytest.skip("Deno isn't installed (pip install deno)")
+    cache = os.environ.get("AWS_ANALYZER_TEST_PYODIDE") or tmp_path_factory.mktemp("pyodide")
+    try:
+        LocalSandbox(cache=cache).prepare()
+    except ConnectionError as exc:
+        pytest.skip(f"Pyodide's files can't be downloaded here: {exc}")
+    return cache
+
+
+def test_the_local_sandbox_runs_python_with_no_network_files_or_credentials(pyodide):
+    sandbox = LocalSandbox(cache=pyodide)
+    code = """
+import os, socket, js
+from pyodide.http import pyfetch
+
+def tried(fn):
+    try:
+        fn()
+    except BaseException as exc:
+        return type(exc).__name__
+    return "ALLOWED"
+
+print("environment", sorted(name for name in os.environ if name.startswith("AWS")))
+print("passwd", tried(lambda: js.Deno.readTextFileSync("/etc/passwd")))
+print("write", tried(lambda: js.Deno.writeTextFileSync("/tmp/sandbox.txt", "x")))
+print("command", tried(lambda: js.Deno.Command.new("id").outputSync()))
+print("socket", tried(lambda: socket.create_connection(("169.254.169.254", 80), timeout=1)))
+try:
+    await pyfetch("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
+    print("metadata ALLOWED")
+except BaseException as exc:
+    print("metadata", type(exc).__name__)
+"""
+    run = sandbox.run(code, timeout=60)
+    assert run.ok, run.stderr
+    assert run.stdout.splitlines() == ["environment []", "passwd JsException", "write JsException",
+                                       "command JsException", "socket OSError", "metadata AbortError"]
+    assert not os.path.exists("/tmp/sandbox.txt")
+
+
+def test_the_local_sandbox_keeps_files_between_runs_and_variables_out(pyodide):
+    sandbox = LocalSandbox(cache=pyodide)
+    sandbox.put("lambda/etl/app.py", b"def handler(event, context):\n    return event['customer_id']\n")
+    sandbox.put("old.txt", b"bye")
+    first = sandbox.run("import ast, os, pathlib\n"
+                        "tree = ast.parse(pathlib.Path('lambda/etl/app.py').read_text())\n"
+                        "print([n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])\n"
+                        "pathlib.Path('out').mkdir()\npathlib.Path('out/n.txt').write_text('1')\n"
+                        "os.remove('old.txt')\nx = 42", timeout=60)
+    assert first.ok and first.stdout == "['handler']\n" and first.new_files == ["out/n.txt"]
+    assert [f.path for f in sandbox.files()] == ["lambda/etl/app.py", "out/n.txt"]
+    second = sandbox.run("import pandas as pd\nprint(open('out/n.txt').read(), pd.Series([1, 2]).sum())\nprint(x)",
+                         timeout=60)
+    assert not second.ok and second.stdout == "1 3\n"
+    assert second.stderr.rstrip().endswith("NameError: name 'x' is not defined") and '"<code>", line 3' in second.stderr
+    assert "_pyodide" not in second.stderr
+    missing = sandbox.run("import requests", timeout=60)
+    assert "ModuleNotFoundError: No module named 'requests'" in missing.stderr
+    stopped = sandbox.run("while True: pass", timeout=3)
+    assert stopped.timed_out and not stopped.ok
+    assert sandbox.run("import sys\nsys.exit(0)", timeout=60).ok
+
+
+def test_the_agent_runs_python_in_the_local_sandbox(pyodide, core):
+    agent = make(python=LocalSandbox(cache=pyodide, packages=()))
+    assert tool(agent, "save_function_code")("etl-nightly")["files_saved"] == 2
+    ran = tool(agent, "run_python")("import pathlib\n"
+                                    "print(sorted(p.name for p in pathlib.Path('lambda/etl-nightly').iterdir()))")
+    assert ran["ok"] and ran["stdout"] == "['app.py', 'utils.py']\n"
+    assert agent._guard.counts == {"lambda:GetFunction": 1}
+
+
+def obj(key, size=10, storage_class="STANDARD"):
+    return ObjectInfo("acme-docs", key, size, NOW, storage_class)
+
+
+def test_plan_saves_takes_what_fits_and_says_why_it_left_the_rest():
+    found = [obj("b.pdf", 30), obj("a.txt", 20), obj("folder/"), obj("cold.csv", 5, "GLACIER"),
+             obj("../up.txt"), obj("c.csv", 60), obj("d.csv", 5), obj("e.csv", 5)]
+    plan = s3_saving.plan_saves(found, room=100, max_files=3)
+    assert [o.key for o in plan.chosen] == ["a.txt", "b.pdf", "d.csv"] and plan.size == 55
+    assert plan.skipped == ["../up.txt: its key can't be a path in the workspace",
+                            "c.csv: 60 B: past what's left of the workspace",
+                            "cold.csv: in GLACIER: restore it before anything can read it",
+                            "e.csv: past the 3 files asked for", "folder/: a folder marker"]
+    assert s3_saving.workspace_key("acme", "docs//a.pdf") == "s3/acme/docs/a.pdf"
+
+
+def test_document_text_reads_word_files_and_says_when_it_cant():
+    from aws_analyzer import s3 as s3mod
+
+    text, why = s3_saving.document_text(s3mod, "notes/study.docx", docx_bytes())
+    assert text.startswith("Churn study") and "plan | churn" in text and why is None
+    assert s3_saving.document_text(s3mod, "rows.csv", b"id\n1\n") == (None, None)
+    broken, why = s3_saving.document_text(s3mod, "broken.docx", b"not a zip")
+    assert broken is None and why.startswith("BadZipFile")
+
+
+def test_the_agent_saves_s3_files_and_their_text_for_python(buckets, tmp_path):
+    s3 = boto3.client("s3", region_name=REGION)
+    s3.put_object(Bucket="acme-raw", Key="docs/study.docx", Body=docx_bytes())
+    s3.put_object(Bucket="acme-raw", Key="docs/old.csv", Body=b"id\n9\n", StorageClass="GLACIER")
+    plain = with_s3()
+    assert "save_s3_files" not in {fn.__name__ for fn in plain.tools()}
+    assert "never read" in plain.toolkit("s3").privacy
+
+    workspace = Folder(tmp_path)
+    core = with_s3(python=workspace)
+    assert "read only into the Python workspace" in core.toolkit("s3").privacy
+    assert "save_s3_files copies them" in core.instructions()
+    saved = tool(core, "save_s3_files")("s3://acme-raw/", match="*")
+    assert saved["folder"] == "s3/acme-raw/" and saved["files_found"] == 6 and saved["files_saved"] == 6
+    assert saved["documents_as_text"] == ["docs/study.docx.txt"] and saved["skipped_count"] == 1
+    assert saved["skipped"] == ["docs/old.csv: in GLACIER: restore it before anything can read it"]
+    assert (tmp_path / "s3/acme-raw/docs/study.docx.txt").read_text().startswith("Churn study")
+    assert set(core._guard.counts) == {"s3:ListObjectsV2", "s3:GetObject"} and core._guard.counts["s3:GetObject"] == 5
+
+    ran = tool(core, "run_python")("import csv, pathlib\n"
+                                   "rows = [r for f in sorted(pathlib.Path('s3/acme-raw/incoming').iterdir())\n"
+                                   "        for r in csv.DictReader(f.open())]\n"
+                                   "print(len(rows), sorted(r['id'] for r in rows))")
+    assert ran["stdout"] == "3 ['1', '2', '3']\n"
+
+    one = tool(core, "save_s3_files")("s3://acme-raw/README.md")
+    assert one["files_saved"] == 1 and one["saved"] == ["s3/acme-raw/README.md"]
+    nothing = tool(core, "save_s3_files")("s3://acme-raw/incoming/", match="*.parquet")
+    assert nothing["files_saved"] == 0 and nothing["note"] == "No file under s3://acme-raw/incoming/ matched."
+    small = with_s3(python=Folder(tmp_path / "small"), budget={"workspace_bytes": 12})
+    tight = tool(small, "save_s3_files")("s3://acme-raw/incoming/")
+    assert tight["files_saved"] == 2 and "past what's left of the workspace" in tight["skipped"][0]
+
+
+def test_the_agent_saves_a_window_of_logs_for_python(core, tmp_path):
+    workspace = Folder(tmp_path)
+    agent = make(python=workspace)
+    assert "save_logs puts a" in agent.instructions()
+    saved = tool(agent, "save_logs")("etl-nightly", since="2h")
+    assert saved["lines"] == 5 and saved["runs"] == 1 and saved["folder"].startswith("logs/etl-nightly/")
+    assert saved["files_saved"] == 2 and not saved["cut_short"]
+    folder = tmp_path / saved["folder"]
+    lines = [json.loads(line) for line in (folder / "lines.jsonl").read_text().splitlines()]
+    runs = [json.loads(line) for line in (folder / "runs.jsonl").read_text().splitlines()]
+    assert "hunter2" not in (folder / "lines.jsonl").read_text() and lines[0]["request_id"] == RID
+    assert runs[0]["request_id"] == RID and runs[0]["status"] == "failed" and runs[0]["duration_ms"] == 102.12
+    assert runs[0]["error"].startswith("KeyError") and runs[0]["lines"] == 5
+    ran = tool(agent, "run_python")("import json, pathlib\n"
+                                    f"runs = [json.loads(l) for l in pathlib.Path('{saved['folder']}/runs.jsonl').open()]\n"
+                                    "print(sum(r['status'] == 'failed' for r in runs))")
+    assert ran["stdout"] == "1\n"
+    refused = tool(agent, "save_logs")("etl-nightly", since="7d")
+    assert refused["refused"] == "log_window"
+
+
+def test_the_agent_analyzes_s3_documents_in_the_local_sandbox(pyodide, buckets):
+    boto3.client("s3", region_name=REGION).put_object(Bucket="acme-raw", Key="docs/study.docx", Body=docx_bytes())
+    core = with_s3(python=LocalSandbox(cache=pyodide))
+    tool(core, "save_s3_files")("s3://acme-raw/")
+    ran = tool(core, "run_python")(
+        "import pathlib\nimport pandas as pd\n"
+        "frames = [pd.read_csv(f) for f in sorted(pathlib.Path('s3/acme-raw/incoming').iterdir())]\n"
+        "print(pd.concat(frames)['id'].tolist())\n"
+        "text = pathlib.Path('s3/acme-raw/docs/study.docx.txt').read_text()\n"
+        "print(text.splitlines()[0], len(text.split()))")
+    assert ran["ok"], ran.get("stderr")
+    assert ran["stdout"] == "[1, 2, 3]\nChurn study 25\n"
+
+
+def test_the_file_tools_see_the_workspace_from_its_root():
+    assert workspace_files.workspace_path("/lambda/etl/app.py") == "lambda/etl/app.py"
+    assert workspace_files.tool_path("lambda/etl/app.py") == "/lambda/etl/app.py"
+    with pytest.raises(ValueError, match="leaves the workspace"):
+        workspace_files.workspace_path("/../etc/passwd")
+    pairs = [("analysis.py", 10), ("lambda/etl/app.py", 20), ("lambda/etl/lib/x.py", 5), ("lambda/api/index.py", 1)]
+    assert workspace_files.listing(pairs, "/") == [
+        {"path": "/analysis.py", "is_dir": False, "size": 10}, {"path": "/lambda/", "is_dir": True, "size": 0}]
+    assert workspace_files.listing(pairs, "/lambda/etl") == [
+        {"path": "/lambda/etl/app.py", "is_dir": False, "size": 20},
+        {"path": "/lambda/etl/lib/", "is_dir": True, "size": 0}]
+
+
+def test_the_workspace_backend_reads_hides_secrets_and_keeps_to_the_budget(tmp_path):
+    pytest.importorskip("deepagents")
+    sandbox = LocalSandbox(cache=tmp_path)
+    budget = Budget(workspace_bytes=200)
+    composite = workspace_files.workspace_backend(sandbox, lambda: budget)
+    assert list(composite.routes) == ["/conversation_history/"]
+    backend = composite.default
+    sandbox.put("lambda/etl/app.py", b"DB_PASSWORD = 'hunter2'\ndef handler(e, c):\n    return e['id']\n")
+    sandbox.put("logo.png", b"\x89PNG\x00\x00")
+
+    assert [e["path"] for e in backend.ls("/").entries] == ["/lambda/", "/logo.png"]
+    read = backend.read("/lambda/etl/app.py")
+    assert "hunter2" not in read.file_data["content"] and "def handler" in read.file_data["content"]
+    assert read.total_lines == 3 and backend.read("/nope.py").error == "File '/nope.py' not found"
+    assert "binary file" in backend.read("/logo.png").error
+    found = backend.grep("PASSWORD", "/lambda").matches
+    assert found == [{"path": "/lambda/etl/app.py", "line": 1, "text": "DB_PASSWORD = '[hidden]'"}]
+    assert [m["path"] for m in backend.glob("*.py").matches] == ["/lambda/etl/app.py"]
+    assert [m["path"] for m in backend.glob("**/*.py", "/lambda").matches] == ["/lambda/etl/app.py"]
+
+    assert backend.write("/analysis.py", "print(1)\n").path == "/analysis.py"
+    assert sandbox.read("analysis.py") == b"print(1)\n"
+    edited = backend.edit("/analysis.py", "print(1)", "print(2)")
+    assert edited.occurrences == 1 and sandbox.read("analysis.py") == b"print(2)\n"
+    assert "not found" in backend.edit("/analysis.py", "print(9)", "x").error.lower()
+    assert "past its 200 B limit" in backend.write("/big.txt", "x" * 150).error
+    assert "leaves the workspace" in backend.write("/../x.py", "x").error
+    assert backend.delete("/analysis.py").path == "/analysis.py" and "analysis.py" not in str(sandbox.files())
+    assert backend.download_files(["/logo.png"])[0].content == b"\x89PNG\x00\x00"
+
+
+
+def test_brief_leaves_out_the_code_and_clips_long_text():
+    write = ToolCall("write_file", {"file_path": "/analysis.py", "content": "print(1)\n" * 20}, first="file_path")
+    assert write.brief == "write_file('/analysis.py')" and write.code.startswith("print(1)")
+    edit = ToolCall("edit_file", {"file_path": "/a.py", "old_string": "x" * 100, "new_string": "y"}, first="file_path")
+    assert edit.brief == f"edit_file('/a.py', old_string='{'x' * 39}…', new_string='y')" and edit.code == ""
+    assert ToolCall("run_python", {"file": "analysis.py"}, first=None).brief == "run_python(file='analysis.py')"
+
+
+def test_the_agent_writes_a_script_runs_it_and_fixes_it(seeded, tmp_path, capsys):
+    script = "rows = {'a': 1}\nprint(rows['b'])\n"
+    model = scripted(
+        calls(("write_file", {"file_path": "/analysis.py", "content": script})),
+        calls(("run_python", {"file": "analysis.py"})),
+        calls(("edit_file", {"file_path": "/analysis.py", "old_string": "rows['b']", "new_string": "rows['a']"})),
+        calls(("run_python", {"file": "/analysis.py"})),
+        calls(("read_file", {"file_path": "/analysis.py"})),
+        says("It prints **1**."),
+    )
+    workspace = Folder(tmp_path)
+    agent = make(model, python=workspace)
+    seen = []
+    answer = agent.ask("Run my analysis", now=NOW, on_step=seen.append)
+    assert answer.error is None and answer.text == "It prints **1**."
+    assert [c.name for c in answer.calls] == ["write_file", "run_python", "edit_file", "run_python", "read_file"]
+    write, first_run, edit, second_run, read = answer.calls
+    assert write.brief == "write_file('/analysis.py')" and write.ok and write.code == script
+    assert not first_run.result["ok"] and first_run.summary == "KeyError: 'b'"
+    assert edit.ok and second_run.result["stdout"] == "1\n" and "print(rows['a'])" in read.result["output"]
+    assert (tmp_path / "analysis.py").read_text() == "rows = {'a': 1}\nprint(rows['a'])\n"
+    assert [step.kind for step in seen if step.kind != "thinking"].count("tool_done") == 5
+
+    view = AgentView(agent, mode="text", progress="off")
+    out = run(capsys, view._show, view._checked_blocks(answer))
+    assert "write_file('/analysis.py')" in out and "edit_file('/analysis.py'" in out
+    assert "Call 1's code" in out and "rows = {'a': 1}" in out
+
+
+def test_file_tool_calls_count_against_the_budget(seeded, tmp_path):
+    model = scripted(
+        calls(("write_file", {"file_path": "/a.py", "content": "print(1)"})),
+        calls(("ls", {"path": "/"})),
+        says("Done."),
+    )
+    agent = make(model, python=Folder(tmp_path), budget={"tool_calls": 1})
+    answer = agent.ask("Write it", now=NOW)
+    assert [c.name for c in answer.calls] == ["write_file", "ls"] and answer.calls[1].refused == "tool_calls"
+    assert (tmp_path / "a.py").exists() and Budget().steps == 200
+    assert tool(agent, "run_python")(file="missing.py")["message"].startswith("There's no 'missing.py'")
+
+
+def test_a_script_written_with_the_file_tools_runs_in_the_local_sandbox(pyodide, core):
+    sandbox = LocalSandbox(cache=pyodide, packages=())
+    agent = make(python=sandbox)
+    backend = workspace_files.workspace_backend(sandbox, lambda: agent.budget).default
+    tool(agent, "save_function_code")("etl-nightly")
+    backend.write("/count.py", "import pathlib\nprint(len(list(pathlib.Path('lambda').rglob('*.py'))))\n")
+    assert tool(agent, "run_python")(file="/count.py")["stdout"] == "2\n"
+    backend.edit("/count.py", "'*.py'", "'app.py'")
+    assert tool(agent, "run_python")(file="count.py")["stdout"] == "1\n"

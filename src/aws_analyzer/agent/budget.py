@@ -35,16 +35,22 @@ class Budget:
         s3_keys     the most keys one S3 listing may read (find_files, folder_summary, s3_triggers)
         file_bytes  the most of a text or JSON file preview_file reads (tables read only the rows they show)
         file_chars  the most characters of a file's content preview_file hands the model
+        python_runs     run_python calls per question (only with a Python workspace)
+        python_seconds  the longest one run_python call may take
+        workspace_bytes the most the tools may save into the workspace, in all
     """
 
     tool_calls: int = 25
     seconds: float = 300.0
     usd: float | None = 1.00
-    steps: int = 80
+    steps: int = 200
     log_days: float = 3.0
     s3_keys: int = 100_000
     file_bytes: int = 2 * 1024 * 1024
     file_chars: int = 50_000
+    python_runs: int = 10
+    python_seconds: float = 30.0
+    workspace_bytes: int = 50 * 1024 * 1024
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
@@ -124,6 +130,8 @@ _REFUSED = {
     "time": "not run: the time budget was used up",
     "cost": "not run: the cost budget was used up",
     "stopped": "not run: stopped",
+    "python_runs": "not run: the budget of Python runs was used up",
+    "workspace": "not saved: the workspace is full",
 }
 
 

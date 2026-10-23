@@ -32,8 +32,8 @@ from .prices import LAMBDA_PRICES
 from .helpers import MB, _midnight, parse_function_ref, parse_qualifier, runtime_family
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodePackage, CodeSearch, DailyUsage, ErrorReport, Function, FunctionDetail,
-    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, SavedPage,
-    SymbolReport, Trigger, Version, VersionDiff,
+    FunctionMetrics, FunctionUrl, LogEvent, LogGroup, PackageDownload, PackageSources, Performance, ProvisionedConcurrency,
+    SavedPage, SymbolReport, Trigger, Version, VersionDiff,
 )
 from .analysis.functions import (
     _unqualified, parse_event_source_mapping, parse_function, parse_policy, parse_version,
@@ -42,7 +42,7 @@ from .analysis.overview import Overview
 from .analysis.errors import _filter_pattern, _phrase, classify_error, group_errors, request_id_of
 from .analysis.logs import LogPage, LogRun, parse_report, split_runs
 from .analysis.package import DOWNLOADS, _DOWNLOADS_MARK, package_file_name, page_file_name, read_package
-from .analysis.source import find_symbol_in, search_package
+from .analysis.source import find_symbol_in, read_sources, search_package
 from .analysis.versions import diff_packages, nothing_before, version_before
 from .analysis.codemap.model import CodeMap
 from .analysis.codemap.mapping import map_package
@@ -1272,6 +1272,16 @@ class LambdaAnalyzer(_BaseAnalyzer):
         """
         fn = self.function(ref, region=region)
         return read_package(fn, self._package(fn, max_size), file=file)
+
+    def sources(
+        self, ref: str, *, files: str | None = None, max_size: Any = "50MB", region: str | None = None
+    ) -> PackageSources:
+        """
+        The text of a function's own source files, or with files= of every file that matches (see read_sources()),
+        by path. Downloads the package like code(); nothing in it is run, and secrets files aren't read.
+        """
+        fn = self.function(ref, region=region)
+        return read_sources(fn, self._package(fn, max_size), files=files)
 
     def search_code(
         self, ref: str, pattern: str, *, regex: bool = False, files: str | None = None, limit: int = 50,

@@ -546,6 +546,21 @@ class SymbolReport:
 
 
 @dataclass
+class PackageSources:
+    """
+    The text of a deployment package's files, as sources() reads them: each file's text by its path in the
+    package, the handler's file first, the files left out with why (`skipped`: too big, binary, past what's read in
+    all), and `note` when there was nothing to read (a container image, no link to the code). Secrets files (.env,
+    keys) are never among them.
+    """
+
+    function: Function
+    texts: dict[str, str] = field(default_factory=dict)
+    skipped: list[str] = field(default_factory=list)
+    note: str | None = None
+
+
+@dataclass
 class FileChange:
     """
     One file that differs between two versions of a function: `status` is 'added', 'removed' or 'changed', with its

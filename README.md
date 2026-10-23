@@ -104,6 +104,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
 %pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws (Python 3.11+)
+%pip install "aws-analyzer[agent,sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
 ```
 
 A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
@@ -1902,7 +1903,7 @@ already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `r
 `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs`
 (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package`,
 `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files),
-`search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
+`read_sources` (sources(): the text of a .zip's own source files), `search_package` and `find_symbol_in` (search_code and find_symbol on a .zip's bytes), `map_code` (Python code read with `ast`: `map_code({"app.py": source},
 "app.handler")`), `map_package` (the same from a deployment package's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (diff on two .zip files you already
 have), `diff_settings`, `version_before`, `stream_version` (the version a log stream's name says ran), and the
 findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`,
@@ -2010,11 +2011,12 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 > looks like a key or password hidden) go to the model's provider. With a model on Amazon Bedrock it stays in your
 > AWS account; anywhere else, use a provider your organisation allows for that data. Environment variable values and
 > secrets files packed with a function (`.env`, keys) are never read, and what's inside your S3 files isn't either
-> unless you turn on `read_files=True` (below).
+> unless you turn on `read_files=True` or give it a Python sandbox (`python=`), whose code reads the files it saves
+> and sends the model what it prints (below).
 
 ### What it can call
 
-Eighteen tools in two toolkits (nineteen with `read_files=True`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Eighteen tools in two toolkits (nineteen with `read_files=True`, and three more with `python=`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
@@ -2051,17 +2053,88 @@ model's provider, so turn it on with a model on Amazon Bedrock, or with a provid
 data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
 `budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
 
+### Running Python (`python=`)
+
+Some questions need work no tool does: what a folder of PDFs says, every place a function's code calls DynamoDB,
+errors by hour across a day of logs, a count across a hundred CSVs. `AgentView(python="local")` gives the agent a
+Python sandbox on the notebook's machine, and five tools of its own (plus deepagents' file tools, below):
+
+| Tool                                         | What it returns                                                                                                                         |
+| :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `save_function_code(function, files, region)` | Saves the function's own source files (or `files=` globs, the libraries packed with it too) into the workspace, under `lambda/<function>/`. Secrets files (`.env`, keys) are never saved |
+| `save_s3_files(location, match, since, until, max_files)` | Copies one file, or the files under a location that match, into the workspace under `s3/<bucket>/<key>` (50 by default, up to 500). A PDF's, Word file's or PowerPoint file's text is saved beside it as `<key>.txt`; files in Glacier are skipped until they're restored |
+| `save_logs(function, since, until, search, region)` | Saves a window of a function's logs as `lines.jsonl` (each line) and `runs.jsonl` (each run: status, run time, memory, cold start, error), with anything that looks like a secret hidden |
+| `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
+| `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
+
+```python
+%pip install "aws-analyzer[agent,sandbox]"      # brings Deno
+
+agent = AgentView(provider="bedrock", python="local")
+agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
+agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
+```
+
+The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on
+[Deno](https://deno.com), which grants it read access to Pyodide's own files and nothing else: no network (so not
+the instance metadata service that hands out the notebook role's credentials), no environment variables, none of the
+machine's files and no subprocesses. Each run starts a fresh interpreter; the workspace's files are kept in memory
+and stay between runs. The code can import the standard library and pandas (with numpy);
+`LocalSandbox(packages=["pandas", "scikit-learn"])` (from `aws_analyzer.agent`) offers others from
+[Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run
+more than the 2 GB it gets by default.
+
+> [!NOTE]
+> The first run downloads Pyodide 314.0.7's files once from the jsDelivr CDN, about 21 MB with pandas, into
+> `~/.cache/aws-analyzer/pyodide/` (`LocalSandbox(cache=...)` for another folder), and checks each file's SHA-256.
+> `LocalSandbox().prepare()` does it ahead of time and says what it has. A notebook without internet access can copy
+> the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")`.
+
+deepagents' file tools work on the same files: the agent writes a longer script with `write_file`, runs it with
+`run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending it all again, and reads or searches
+saved files with `read_file` and `grep` without spending a run (anything that looks like a secret is hidden in what
+they show). Each of those calls counts as a tool call, and shows in the chat window and the report.
+
+Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
+never needs AWS. What it prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each
+(starting Pyodide takes about 2 seconds of that, and loading pandas about 3), and the tools save at most 50 MB in all:
+`budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
+
+To run the code somewhere else (a container, a managed sandbox), pass your own `Workspace` (from
+`aws_analyzer.agent`): it puts, reads, deletes and lists files and runs code in a fresh interpreter, and it must give the code
+**no AWS credentials and no network**. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get
+the notebook role's credentials from the instance's metadata service.
+
+```python
+from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
+
+class MySandbox(Workspace):
+    title, place = "my sandbox", "(a container with no network)"   # how reports and the model name it
+    packages = ("pandas",)                                           # what the code can import
+
+    def put(self, path, data): ...                                   # write bytes at a path in the workspace
+    def read(self, path): ...                                        # -> bytes (FileNotFoundError when it's not there)
+    def delete(self, path): ...                                      # remove a file (FileNotFoundError likewise)
+    def files(self): ...                                             # -> [WorkspaceFile(path, size), ...]
+    def run(self, code, *, timeout): ...                             # -> PythonRun(ok, stdout, stderr, seconds, ...)
+
+agent = AgentView(provider="bedrock", python=MySandbox())
+```
+
 ### Safe and bounded
 
 - **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
   operation that isn't a Get, List, Describe, Head or Filter call before its request is built, whatever asks for it. There's
-  no shell or code execution: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools
-  only keep notes in memory.
-- **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
+  no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
+  memory. Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
+- **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
+  model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
   `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
-  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`).
+  file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
+  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), and 50 MB saved (`workspace_bytes`).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2094,9 +2167,10 @@ core = AgentAnalyzer(
     timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
-    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3, "s3_keys": 100_000},
+    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
+    python="local",                       # adds run_python and the save_* tools: Python in a local sandbox
 )
 agent = AgentView(core)
 
@@ -2116,7 +2190,7 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
 `summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`trigger_findings`, the Python toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
@@ -2138,7 +2212,8 @@ read-only: `lambda:ListFunctions`, `lambda:GetFunction`, `lambda:ListEventSource
 `lambda:GetAccountSettings`, `cloudwatch:GetMetricData`, `logs:DescribeLogGroups`, `logs:DescribeLogStreams`,
 `logs:FilterLogEvents` and, for `regions="all"`, `ec2:DescribeRegions`. The S3 tools read through `S3Analyzer`:
 `s3:ListAllMyBuckets`, `s3:GetBucketLocation`, `s3:ListBucket`, `s3:GetObject` (for `file_info`'s HeadObject: the
-headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too),
+headers, never the file; with `read_files=True`, `preview_file` reads the file's start with it too, and with
+`python=`, `save_s3_files` the whole file),
 `s3:GetObjectTagging`, the bucket settings [S3's permissions](#amazon-s3) list for
 `bucket_info` (`s3:GetBucketVersioning`, `s3:GetEncryptionConfiguration`, `s3:GetBucketPublicAccessBlock`,
 `s3:GetBucketPolicyStatus`, `s3:GetBucketPolicy`, `s3:GetBucketOwnershipControls`,

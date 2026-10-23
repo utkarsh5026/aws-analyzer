@@ -5,7 +5,9 @@ time. What changes how the agent works rather than what it can read (a subagent,
 goes in build_graph(); everything about LangGraph's messages stays in this file.
 
 _MIN_PYTHON is deepagents' floor; the package's own is 3.10, and everything but the agent itself runs there.
-HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools).
+HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools). FILE_TOOLS are deepagents' file tools (with
+the parameter a call's line names first): with a Python workspace they work on its files (workspace_files.py), and
+_record_file_tools counts each call against the question's budget and records it like the toolkits' tools.
 """
 
 from __future__ import annotations
@@ -16,12 +18,17 @@ import time
 from typing import Any, Callable, Iterable
 
 from .._kit.deps import _require
-from .answers import AgentAnswer, AgentStep
-from .budget import _Run
+from .._kit.text import _clip
+from .answers import AgentAnswer, AgentStep, ToolCall
+from .budget import _REFUSED, _Refused, _Run, check_budget
 from .llm import answer_cost, explain_model_error
 
 _MIN_PYTHON = (3, 11)
 HIDDEN_TOOLS = frozenset({"task", "execute"})
+FILE_TOOLS = {"ls": "path", "read_file": "file_path", "write_file": "file_path", "edit_file": "file_path",
+              "glob": "pattern", "grep": "pattern", "delete": "file_path"}
+_FILE_SUMMARY_CHARACTERS = 80
+_FILE_RESULT_CHARACTERS = 4000
 _OVERTIME_SECONDS = 60
 _WRAP_UP_STEPS = 8
 _WRAP_UP_SECONDS = 90
@@ -41,23 +48,30 @@ def check_ready() -> None:
     _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
 
 
-def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,
-                hidden: Iterable[str] = HIDDEN_TOOLS) -> Any:
+def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
+                hidden: Iterable[str] = HIDDEN_TOOLS, backend: Any = None,
+                current_run: Callable[[], _Run] | None = None) -> Any:
     """
     The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
     InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
-    is never shown.
+    is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
+    workspace_files.py; by default deepagents' own in-memory files), and with `current_run` (the question being
+    answered) each file tool call is recorded on it and counted against its budget.
     """
     check_ready()
     deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
     memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
+    middleware = [_hide_tools(set(hidden))]
+    if current_run is not None:
+        middleware.append(_record_file_tools(current_run))
     return deepagents.create_deep_agent(
         model=model,
         tools=tools,
         system_prompt=system_prompt,
-        middleware=[_hide_tools(set(hidden))],
+        middleware=middleware,
         checkpointer=memory.InMemorySaver(),
         name="aws-analyzer",
+        **({"backend": backend} if backend is not None else {}),
     )
 
 
@@ -240,3 +254,88 @@ def _hide_tools(names: set[str]) -> Any:
             return refused(request) or await handler(request)
 
     return HideTools()
+
+
+def _tool_text(result: Any) -> str:
+    """
+    What a deepagents tool handed the model, as text: its ToolMessage's content, or the last message a Command adds.
+    """
+    content = getattr(result, "content", None)
+    if content is None:
+        added = (getattr(result, "update", None) or {}).get("messages") or []
+        content = getattr(added[-1], "content", "") if added else ""
+    return content if isinstance(content, str) else str(content)
+
+
+def _begin_file_call(run: _Run, tool_call: dict[str, Any]) -> tuple[ToolCall, str | None]:
+    """
+    Records a file tool call on the question and tells its listener, then checks the budget: (the call, the refusal
+    to hand the model instead of running it, or None).
+    """
+    name = tool_call.get("name") or ""
+    call = ToolCall(name, dict(tool_call.get("args") or {}), first=FILE_TOOLS.get(name))
+    with run.lock:
+        run.calls.append(call)
+        used = sum(1 for c in run.calls if c.refused is None) - 1
+    run.tell(AgentStep("tool", call=call))
+    try:
+        check_budget(run, used)
+    except _Refused as exc:
+        call.refused, call.summary = exc.reason, _REFUSED.get(exc.reason, "not run")
+        run.tell(AgentStep("tool_done", call=call))
+        return call, exc.message
+    return call, None
+
+
+def _end_file_call(run: _Run, call: ToolCall, result: Any, started: float) -> None:
+    """
+    Fills in a finished file tool call from what it handed the model, and tells the question's listener.
+    """
+    text = _tool_text(result)
+    failed = getattr(result, "status", None) == "error" or text.lstrip().lower().startswith("error")
+    call.seconds = time.monotonic() - started
+    call.summary = _clip(text.strip().splitlines()[0] if text.strip() else "done", _FILE_SUMMARY_CHARACTERS)
+    call.error = call.summary if failed else None
+    call.result = {"output": _clip(text, _FILE_RESULT_CHARACTERS)}
+    run.tell(AgentStep("tool_done", call=call))
+
+
+def _record_file_tools(current: Callable[[], _Run]) -> Any:
+    """
+    A deepagents middleware that records each call of its file tools (FILE_TOOLS) on the question being answered
+    (`current()`), as the toolkits' tools are (runtime.as_tool): counted against its budget (a call past it isn't run:
+    the model is told why), told to its listener (the chat window) and listed in its report.
+    """
+    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
+    messages = _require("langchain_core.messages", "The agent", package="aws-analyzer[agent]")
+
+    def refusal(request: Any, message: str) -> Any:
+        return messages.ToolMessage(content=f"Error: {message}", tool_call_id=request.tool_call.get("id") or "",
+                                    name=request.tool_call.get("name"), status="error")
+
+    class RecordFileTools(types.AgentMiddleware):
+        def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            if request.tool_call.get("name") not in FILE_TOOLS:
+                return handler(request)
+            run = current()
+            call, refused = _begin_file_call(run, request.tool_call)
+            if refused is not None:
+                return refusal(request, refused)
+            started = time.monotonic()
+            result = handler(request)
+            _end_file_call(run, call, result, started)
+            return result
+
+        async def awrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            if request.tool_call.get("name") not in FILE_TOOLS:
+                return await handler(request)
+            run = current()
+            call, refused = _begin_file_call(run, request.tool_call)
+            if refused is not None:
+                return refusal(request, refused)
+            started = time.monotonic()
+            result = await handler(request)
+            _end_file_call(run, call, result, started)
+            return result
+
+    return RecordFileTools()
