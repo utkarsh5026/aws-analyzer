@@ -182,6 +182,18 @@ class LocalSandbox(Workspace):
         with self._lock:
             self._files[clean_path(path)] = bytes(data)
 
+    def read(self, path: str) -> bytes:
+        with self._lock:
+            data = self._files.get(clean_path(path))
+        if data is None:
+            raise FileNotFoundError(f"No file {path!r} in the workspace")
+        return data
+
+    def delete(self, path: str) -> None:
+        with self._lock:
+            if self._files.pop(clean_path(path), None) is None:
+                raise FileNotFoundError(f"No file {path!r} in the workspace")
+
     def files(self) -> list[WorkspaceFile]:
         with self._lock:
             return [WorkspaceFile(path, len(data)) for path, data in sorted(self._files.items())]

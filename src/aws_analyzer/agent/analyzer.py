@@ -43,6 +43,7 @@ from .prompt import asked_at, system_prompt
 from .runtime import as_tool
 from .toolkits import DEFAULT_TOOLKITS, PythonToolkit, Toolkit, make_toolkits
 from .workspace import Workspace, workspace_of
+from .workspace_files import workspace_backend
 
 if TYPE_CHECKING:
     from ..lambda_functions import LambdaAnalyzer
@@ -415,13 +416,19 @@ class AgentAnalyzer(_BaseAnalyzer):
 
     def _harness(self) -> Any:
         """
-        The deepagents agent: the model, the tools, the instructions and a memory of the conversation. Made once;
-        new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
+        The deepagents agent: the model, the tools, the instructions and a memory of the conversation, with its file
+        tools on the Python workspace when there is one. Made once; new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
         """
         if self._graph is None:
             harness.check_ready()
             prompt = self.instructions()
-            self._graph = harness.build_graph(self._chat(), self.tools(), prompt)
+            workspace = self.workspace
+            if workspace is None:
+                self._graph = harness.build_graph(self._chat(), self.tools(), prompt)
+            else:
+                backend = workspace_backend(workspace, lambda: self.budget)
+                self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
+                                                  current_run=self._current_run)
         return self._graph
 
     def new_conversation(self) -> str:

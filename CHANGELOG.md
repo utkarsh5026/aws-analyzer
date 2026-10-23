@@ -42,8 +42,18 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   file's text saved beside it, and skips files in Glacier until they're restored. `save_logs` saves a window of a
   function's logs as one line per log line and one per run (status, run time, memory, cold start, error), with
   anything that looks like a secret hidden.
+- Agent: with `python=`, deepagents' file tools work on the workspace, so the agent writes a longer script with
+  `write_file`, runs it with `run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending the
+  whole script again, and reads or searches saved files with `read_file` and `grep` without spending a run (secrets
+  hidden in what they show). Each of those calls counts against the question's tool calls and shows in the chat window
+  and the report.
 - Lambda: `core.sources("orders-etl")` returns the text of a function's own source files by path, and
   `read_sources()` does the same for a .zip you already have.
+
+### Changed
+
+- Agent: a question may now take 200 steps of the agent's loop (`budget={"steps": ...}`), up from 80, so a question
+  that uses most of its 25 tool calls isn't stopped by the step limit first.
 
 ## [0.29.0] - 2026-10-23
 

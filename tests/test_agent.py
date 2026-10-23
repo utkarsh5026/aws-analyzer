@@ -22,6 +22,7 @@ from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
 from aws_analyzer.agent.sandboxes import local as localmod
 from aws_analyzer.agent.toolkits import s3_saving
+from aws_analyzer.agent import workspace_files
 from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
@@ -1749,6 +1750,18 @@ class Folder(Workspace):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
 
+    def read(self, path):
+        target = self.root / path
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        return target.read_bytes()
+
+    def delete(self, path):
+        target = self.root / path
+        if not target.is_file():
+            raise FileNotFoundError(path)
+        target.unlink()
+
     def files(self):
         return [WorkspaceFile(str(f.relative_to(self.root)), f.stat().st_size)
                 for f in sorted(self.root.rglob("*")) if f.is_file()]
@@ -2154,3 +2167,109 @@ def test_the_agent_analyzes_s3_documents_in_the_local_sandbox(pyodide, buckets):
         "print(text.splitlines()[0], len(text.split()))")
     assert ran["ok"], ran.get("stderr")
     assert ran["stdout"] == "[1, 2, 3]\nChurn study 25\n"
+
+
+def test_the_file_tools_see_the_workspace_from_its_root():
+    assert workspace_files.workspace_path("/lambda/etl/app.py") == "lambda/etl/app.py"
+    assert workspace_files.tool_path("lambda/etl/app.py") == "/lambda/etl/app.py"
+    with pytest.raises(ValueError, match="leaves the workspace"):
+        workspace_files.workspace_path("/../etc/passwd")
+    pairs = [("analysis.py", 10), ("lambda/etl/app.py", 20), ("lambda/etl/lib/x.py", 5), ("lambda/api/index.py", 1)]
+    assert workspace_files.listing(pairs, "/") == [
+        {"path": "/analysis.py", "is_dir": False, "size": 10}, {"path": "/lambda/", "is_dir": True, "size": 0}]
+    assert workspace_files.listing(pairs, "/lambda/etl") == [
+        {"path": "/lambda/etl/app.py", "is_dir": False, "size": 20},
+        {"path": "/lambda/etl/lib/", "is_dir": True, "size": 0}]
+
+
+def test_the_workspace_backend_reads_hides_secrets_and_keeps_to_the_budget(tmp_path):
+    pytest.importorskip("deepagents")
+    sandbox = LocalSandbox(cache=tmp_path)
+    budget = Budget(workspace_bytes=200)
+    composite = workspace_files.workspace_backend(sandbox, lambda: budget)
+    assert list(composite.routes) == ["/conversation_history/"]
+    backend = composite.default
+    sandbox.put("lambda/etl/app.py", b"DB_PASSWORD = 'hunter2'\ndef handler(e, c):\n    return e['id']\n")
+    sandbox.put("logo.png", b"\x89PNG\x00\x00")
+
+    assert [e["path"] for e in backend.ls("/").entries] == ["/lambda/", "/logo.png"]
+    read = backend.read("/lambda/etl/app.py")
+    assert "hunter2" not in read.file_data["content"] and "def handler" in read.file_data["content"]
+    assert read.total_lines == 3 and backend.read("/nope.py").error == "File '/nope.py' not found"
+    assert "binary file" in backend.read("/logo.png").error
+    found = backend.grep("PASSWORD", "/lambda").matches
+    assert found == [{"path": "/lambda/etl/app.py", "line": 1, "text": "DB_PASSWORD = '[hidden]'"}]
+    assert [m["path"] for m in backend.glob("*.py").matches] == ["/lambda/etl/app.py"]
+    assert [m["path"] for m in backend.glob("**/*.py", "/lambda").matches] == ["/lambda/etl/app.py"]
+
+    assert backend.write("/analysis.py", "print(1)\n").path == "/analysis.py"
+    assert sandbox.read("analysis.py") == b"print(1)\n"
+    edited = backend.edit("/analysis.py", "print(1)", "print(2)")
+    assert edited.occurrences == 1 and sandbox.read("analysis.py") == b"print(2)\n"
+    assert "not found" in backend.edit("/analysis.py", "print(9)", "x").error.lower()
+    assert "past its 200 B limit" in backend.write("/big.txt", "x" * 150).error
+    assert "leaves the workspace" in backend.write("/../x.py", "x").error
+    assert backend.delete("/analysis.py").path == "/analysis.py" and "analysis.py" not in str(sandbox.files())
+    assert backend.download_files(["/logo.png"])[0].content == b"\x89PNG\x00\x00"
+
+
+
+def test_brief_leaves_out_the_code_and_clips_long_text():
+    write = ToolCall("write_file", {"file_path": "/analysis.py", "content": "print(1)\n" * 20}, first="file_path")
+    assert write.brief == "write_file('/analysis.py')" and write.code.startswith("print(1)")
+    edit = ToolCall("edit_file", {"file_path": "/a.py", "old_string": "x" * 100, "new_string": "y"}, first="file_path")
+    assert edit.brief == f"edit_file('/a.py', old_string='{'x' * 39}…', new_string='y')" and edit.code == ""
+    assert ToolCall("run_python", {"file": "analysis.py"}, first=None).brief == "run_python(file='analysis.py')"
+
+
+def test_the_agent_writes_a_script_runs_it_and_fixes_it(seeded, tmp_path, capsys):
+    script = "rows = {'a': 1}\nprint(rows['b'])\n"
+    model = scripted(
+        calls(("write_file", {"file_path": "/analysis.py", "content": script})),
+        calls(("run_python", {"file": "analysis.py"})),
+        calls(("edit_file", {"file_path": "/analysis.py", "old_string": "rows['b']", "new_string": "rows['a']"})),
+        calls(("run_python", {"file": "/analysis.py"})),
+        calls(("read_file", {"file_path": "/analysis.py"})),
+        says("It prints **1**."),
+    )
+    workspace = Folder(tmp_path)
+    agent = make(model, python=workspace)
+    seen = []
+    answer = agent.ask("Run my analysis", now=NOW, on_step=seen.append)
+    assert answer.error is None and answer.text == "It prints **1**."
+    assert [c.name for c in answer.calls] == ["write_file", "run_python", "edit_file", "run_python", "read_file"]
+    write, first_run, edit, second_run, read = answer.calls
+    assert write.brief == "write_file('/analysis.py')" and write.ok and write.code == script
+    assert not first_run.result["ok"] and first_run.summary == "KeyError: 'b'"
+    assert edit.ok and second_run.result["stdout"] == "1\n" and "print(rows['a'])" in read.result["output"]
+    assert (tmp_path / "analysis.py").read_text() == "rows = {'a': 1}\nprint(rows['a'])\n"
+    assert [step.kind for step in seen if step.kind != "thinking"].count("tool_done") == 5
+
+    view = AgentView(agent, mode="text", progress="off")
+    out = run(capsys, view._show, view._checked_blocks(answer))
+    assert "write_file('/analysis.py')" in out and "edit_file('/analysis.py'" in out
+    assert "Call 1's code" in out and "rows = {'a': 1}" in out
+
+
+def test_file_tool_calls_count_against_the_budget(seeded, tmp_path):
+    model = scripted(
+        calls(("write_file", {"file_path": "/a.py", "content": "print(1)"})),
+        calls(("ls", {"path": "/"})),
+        says("Done."),
+    )
+    agent = make(model, python=Folder(tmp_path), budget={"tool_calls": 1})
+    answer = agent.ask("Write it", now=NOW)
+    assert [c.name for c in answer.calls] == ["write_file", "ls"] and answer.calls[1].refused == "tool_calls"
+    assert (tmp_path / "a.py").exists() and Budget().steps == 200
+    assert tool(agent, "run_python")(file="missing.py")["message"].startswith("There's no 'missing.py'")
+
+
+def test_a_script_written_with_the_file_tools_runs_in_the_local_sandbox(pyodide, core):
+    sandbox = LocalSandbox(cache=pyodide, packages=())
+    agent = make(python=sandbox)
+    backend = workspace_files.workspace_backend(sandbox, lambda: agent.budget).default
+    tool(agent, "save_function_code")("etl-nightly")
+    backend.write("/count.py", "import pathlib\nprint(len(list(pathlib.Path('lambda').rglob('*.py'))))\n")
+    assert tool(agent, "run_python")(file="/count.py")["stdout"] == "2\n"
+    backend.edit("/count.py", "'*.py'", "'app.py'")
+    assert tool(agent, "run_python")(file="count.py")["stdout"] == "1\n"

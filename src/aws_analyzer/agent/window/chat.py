@@ -166,6 +166,13 @@ _TOOL_WORDS = {
     "save_s3_files": _ToolWords("saving {t} to the workspace", "saved {t} to the workspace", "files"),
     "run_python": _ToolWords("running Python", "ran Python"),
     "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
+    "ls": _ToolWords("listing {t}", "listed {t}", "the workspace"),
+    "read_file": _ToolWords("reading {t}", "read {t}", "a file"),
+    "write_file": _ToolWords("writing {t}", "wrote {t}", "a file"),
+    "edit_file": _ToolWords("editing {t}", "edited {t}", "a file"),
+    "glob": _ToolWords("finding files like {t}", "found files like {t}", "a pattern"),
+    "grep": _ToolWords("searching the workspace for {t}", "searched the workspace for {t}", "a text"),
+    "delete": _ToolWords("deleting {t}", "deleted {t}", "a file"),
 }
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}

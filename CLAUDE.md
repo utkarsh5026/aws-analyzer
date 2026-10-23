@@ -781,7 +781,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
 - **The workspace** (`workspace.py`, `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
-  sandbox the user passes in (`put`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
+  sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python` and `workspace_files`. A sandbox must give the code no AWS
   credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
   Data reaches it only through a toolkit's `save_*` tool (Lambda's `save_function_code`, over `LambdaAnalyzer.sources()`,
@@ -825,8 +825,13 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   after `check_ready()` says what's missing), with the model, the tools, the prompt, an `InMemorySaver` checkpointer
   keyed by `AgentAnalyzer.thread` (follow-ups; `new_conversation()` makes a new thread) and `_hide_tools(HIDDEN_TOOLS)`,
   a middleware that keeps deepagents' general-purpose subagent and shell away from the model. Its file tools stay, on
-  the default in-memory `StateBackend`: never a `FilesystemBackend`, and deepagents' `execute` stays hidden. Code the
-  model writes runs only through the Python toolkit's `run_python`, in the workspace (below). A new capability of the loop (a
+  the default in-memory `StateBackend`, or with a Python workspace on its files (`workspace_files.py`'s
+  `workspace_backend`: a `CompositeBackend` whose default is `_WorkspaceBackend` over the `Workspace`, reads and greps
+  passed through `hide_secrets`, writes held to `workspace_bytes`, and `/conversation_history/` left in a
+  `StateBackend`), and `_record_file_tools` records each file tool call (`FILE_TOOLS`) on the question like a
+  toolkit's tool: counted against the budget, told to the listener, listed in the report. Never a
+  `FilesystemBackend`, and deepagents' `execute` stays hidden: code the model writes runs only through the Python
+  toolkit's `run_python` (`file=` runs a script the file tools wrote), in the workspace (below). A new capability of the loop (a
   subagent, a middleware) goes in `build_graph()`. `stream_turn()` streams one question (`stream_mode="updates"`),
   adds up each AIMessage's `usage_metadata` (and the served model's name), stops on `stop` (a `threading.Event`),
   `KeyboardInterrupt` or the hard time limit (after `stop`, with no answer yet, `_wrap_up` streams one more turn,

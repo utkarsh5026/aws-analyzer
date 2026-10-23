@@ -274,7 +274,7 @@ agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?
 agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
 ```
 
-It adds five tools. Three save data into the workspace: `save_s3_files` copies files from S3 under `s3/<bucket>/<key>`, with a PDF's, Word file's or PowerPoint file's text beside it as `<key>.txt`; `save_function_code` saves a function's source files under `lambda/<function>/`; and `save_logs` saves a window of its logs as `lines.jsonl` and `runs.jsonl` (each run's status, run time, memory, cold start and error). `run_python` runs the code the model writes there and returns what it printed, and `workspace_files` lists what's saved. The window shows each run's code under its call, and the report folds it under the table of calls.
+It adds five tools. Three save data into the workspace: `save_s3_files` copies files from S3 under `s3/<bucket>/<key>`, with a PDF's, Word file's or PowerPoint file's text beside it as `<key>.txt`; `save_function_code` saves a function's source files under `lambda/<function>/`; and `save_logs` saves a window of its logs as `lines.jsonl` and `runs.jsonl` (each run's status, run time, memory, cold start and error). `run_python` runs the code the model writes there and returns what it printed, and `workspace_files` lists what's saved. deepagents' file tools work on the same files, so the agent writes a longer script with `write_file`, runs it with `run_python(file="analysis.py")`, fixes a line with `edit_file`, and reads or searches saved files with `read_file` and `grep` without spending a run; what they show has secrets hidden, and each call counts against the budget and shows in the report. The window shows each run's code under its call, and the report folds it under the table of calls.
 
 The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on [Deno](https://deno.com), which lets it read Pyodide's own files and nothing else: no network, so not the metadata service that hands out the notebook role's credentials, no environment variables, none of the machine's files and no subprocesses. Data gets in only through the tools, which the read-only guard covers.
 
@@ -290,7 +290,7 @@ The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAsse
 
 ??? more "Your own sandbox"
 
-    To run the code somewhere else, pass a `Workspace` (from `aws_analyzer.agent`) with three methods: `put(path, data)` writes a file, `files()` lists them as `WorkspaceFile(path, size)`, and `run(code, timeout=...)` runs the code in a fresh interpreter in the workspace's folder and returns a `PythonRun(ok, stdout, stderr, seconds, timed_out, new_files)`. It must give the code no AWS credentials and no network. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the instance's metadata service.
+    To run the code somewhere else, pass a `Workspace` (from `aws_analyzer.agent`) with five methods: `put(path, data)` writes a file, `read(path)` returns its bytes, `delete(path)` removes it (both raise `FileNotFoundError` for a file that isn't there), `files()` lists them as `WorkspaceFile(path, size)`, and `run(code, timeout=...)` runs the code in a fresh interpreter in the workspace's folder and returns a `PythonRun(ok, stdout, stderr, seconds, timed_out, new_files)`. It must give the code no AWS credentials and no network. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the instance's metadata service.
 
     ```python
     from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
@@ -300,6 +300,8 @@ The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAsse
         packages = ("pandas",)
 
         def put(self, path, data): ...
+        def read(self, path): ...
+        def delete(self, path): ...
         def files(self): ...
         def run(self, code, *, timeout): ...
 
@@ -326,7 +328,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `tool_calls` | 25 | Tools stop; it answers with what it has |
 | `seconds` | 300 | The same |
 | `usd` | 1.00 | The same, when `model_prices=` says what its tokens cost |
-| `steps` | 80 | The agent stops (LangGraph's recursion limit) |
+| `steps` | 200 | The agent stops (LangGraph's recursion limit) |
 | `log_days` | 3 | A longer log read is refused; CloudWatch's counts still cover the window |
 | `s3_keys` | 100,000 | An S3 listing stops there and says so: its counts cover the keys it read |
 | `file_bytes` | 2 MB | With `read_files=True`: `preview_file` reads a text or JSON file's start only |

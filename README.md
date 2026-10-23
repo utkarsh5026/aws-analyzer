@@ -2057,7 +2057,7 @@ data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,00
 
 Some questions need work no tool does: what a folder of PDFs says, every place a function's code calls DynamoDB,
 errors by hour across a day of logs, a count across a hundred CSVs. `AgentView(python="local")` gives the agent a
-Python sandbox on the notebook's machine, and five tools:
+Python sandbox on the notebook's machine, and five tools of its own (plus deepagents' file tools, below):
 
 | Tool                                         | What it returns                                                                                                                         |
 | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2091,13 +2091,18 @@ more than the 2 GB it gets by default.
 > `LocalSandbox().prepare()` does it ahead of time and says what it has. A notebook without internet access can copy
 > the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")`.
 
+deepagents' file tools work on the same files: the agent writes a longer script with `write_file`, runs it with
+`run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending it all again, and reads or searches
+saved files with `read_file` and `grep` without spending a run (anything that looks like a secret is hidden in what
+they show). Each of those calls counts as a tool call, and shows in the chat window and the report.
+
 Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
 never needs AWS. What it prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each
 (starting Pyodide takes about 2 seconds of that, and loading pandas about 3), and the tools save at most 50 MB in all:
 `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
 
 To run the code somewhere else (a container, a managed sandbox), pass your own `Workspace` (from
-`aws_analyzer.agent`): it puts a file, lists the files and runs code in a fresh interpreter, and it must give the code
+`aws_analyzer.agent`): it puts, reads, deletes and lists files and runs code in a fresh interpreter, and it must give the code
 **no AWS credentials and no network**. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get
 the notebook role's credentials from the instance's metadata service.
 
@@ -2109,6 +2114,8 @@ class MySandbox(Workspace):
     packages = ("pandas",)                                           # what the code can import
 
     def put(self, path, data): ...                                   # write bytes at a path in the workspace
+    def read(self, path): ...                                        # -> bytes (FileNotFoundError when it's not there)
+    def delete(self, path): ...                                      # remove a file (FileNotFoundError likewise)
     def files(self): ...                                             # -> [WorkspaceFile(path, size), ...]
     def run(self, code, *, timeout): ...                             # -> PythonRun(ok, stdout, stderr, seconds, ...)
 
@@ -2121,7 +2128,8 @@ agent = AgentView(provider="bedrock", python=MySandbox())
   operation that isn't a Get, List, Describe, Head or Filter call before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
   memory. Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
-- **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
+- **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
+  model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
   `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
@@ -2159,7 +2167,7 @@ core = AgentAnalyzer(
     timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
-    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3, "s3_keys": 100_000},
+    budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
     python="local",                       # adds run_python and the save_* tools: Python in a local sandbox

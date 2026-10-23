@@ -6,7 +6,9 @@ and the Python toolkit (toolkits/python_tools.py) gives the model run_python ove
 What a sandbox must promise, since nothing here can check it: the code it runs has no AWS credentials and no network,
 and sees only the workspace's files. That keeps the agent read-only: data reaches the workspace only through the
 toolkits' tools, whose AWS clients the guard hooks, and the code itself can't reach AWS. Each run starts a fresh
-interpreter; the files stay between runs, the variables don't.
+interpreter; the files stay between runs, the variables don't. deepagents' file tools (ls, read_file, write_file,
+edit_file, glob, grep) work on the same files (workspace_files.py), so the model can write a script, run it and edit
+it.
 
 clean_path() is pure: the one way a path into the workspace is read, so no tool writes outside it.
 """
@@ -47,8 +49,8 @@ class PythonRun:
 
 class Workspace:
     """
-    A sandbox the agent runs Python in. A subclass sets the class attributes below and defines put(), files() and
-    run(); close() lets it go when the agent is done with it. The code it runs must have no AWS credentials and no
+    A sandbox the agent runs Python in. A subclass sets the class attributes below and defines put(), read(),
+    delete(), files() and run(); close() lets it go when the agent is done with it. The code it runs must have no AWS credentials and no
     network, and see only the workspace's files (see this module's docstring).
 
         title     how reports name it: 'a local sandbox'
@@ -63,6 +65,18 @@ class Workspace:
     def put(self, path: str, data: bytes) -> None:
         """
         Writes a file at `path` (clean_path()'s, from the workspace's root), replacing one that's there.
+        """
+        raise NotImplementedError
+
+    def read(self, path: str) -> bytes:
+        """
+        The bytes of the file at `path`. FileNotFoundError when there's none.
+        """
+        raise NotImplementedError
+
+    def delete(self, path: str) -> None:
+        """
+        Removes the file at `path` from the workspace. FileNotFoundError when there's none.
         """
         raise NotImplementedError
 

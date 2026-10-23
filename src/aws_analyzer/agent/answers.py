@@ -13,13 +13,22 @@ from typing import Any, Iterable
 
 from .._kit.fmt import _duration, _fmt_dt, _plural, human_money
 from .._kit.render import _call
+from .._kit.text import _clip
 from .budget import Budget
 from .llm import Rates
 
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
 
 
-CODE_ARGS = {"run_python": "code"}
+CODE_ARGS = {"run_python": "code", "write_file": "content"}
+_BRIEF_CHARACTERS = 40
+
+
+def _short(value: Any) -> Any:
+    """
+    An argument as a call's line shows it: text clipped to _BRIEF_CHARACTERS (edit_file's old and new text).
+    """
+    return _clip(value, _BRIEF_CHARACTERS) if isinstance(value, str) else value
 
 
 def services_of(reads: Iterable[str]) -> tuple[str, ...]:
@@ -91,9 +100,15 @@ class ToolCall:
     @property
     def brief(self) -> str:
         """
-        The call as a line shows it: "run_python(…)" for one given code to run, which is drawn under it, else the call.
+        The call as a line shows it: the code it was given left out (it's drawn under the line) and long text clipped,
+        "write_file('/analysis.py')", or "run_python(…)" when the code is all it was given.
         """
-        return f"{self.name}(…)" if self.code else self.call
+        code_arg = CODE_ARGS.get(self.name)
+        args = {k: _short(v) for k, v in self.args.items() if k != code_arg and v not in ("", None)}
+        if not args and self.code:
+            return f"{self.name}(…)"
+        first = args.pop(self.first, None) if self.first else None
+        return _call(self.name, first, **args) if first is not None else _call(self.name, **args)
 
 
 @dataclass

@@ -43,7 +43,7 @@ class Budget:
     tool_calls: int = 25
     seconds: float = 300.0
     usd: float | None = 1.00
-    steps: int = 80
+    steps: int = 200
     log_days: float = 3.0
     s3_keys: int = 100_000
     file_bytes: int = 2 * 1024 * 1024
