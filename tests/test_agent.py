@@ -1,5 +1,7 @@
 import asyncio
+import io
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -18,6 +20,7 @@ from aws_analyzer._kit.errors import _error_code, _Hint
 from aws_analyzer._bedrock import parse_models
 from aws_analyzer._kit.view import _commands
 from aws_analyzer.agent import harness
+from aws_analyzer.agent.sandboxes import local as localmod
 from aws_analyzer.agent.window.chat import _tool_html
 from aws_analyzer.agent import view as viewmod
 from aws_analyzer.agent.llm import PROVIDERS, bedrock_model_id, provider_names
@@ -36,6 +39,7 @@ from aws_analyzer.agent import (
     AgentView,
     Budget,
     LambdaToolkit,
+    LocalSandbox,
     PythonRun,
     PythonToolkit,
     Rates,
@@ -1822,8 +1826,8 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
         "lambda", "python"]
     with pytest.raises(ValueError, match="needs a workspace"):
         AgentAnalyzer(region=REGION, toolkits=["lambda", "python"])
-    with pytest.raises(TypeError, match="python= takes a Workspace"):
-        AgentAnalyzer(region=REGION, python="local")
+    with pytest.raises(TypeError, match="python= takes 'local'"):
+        AgentAnalyzer(region=REGION, python=42)
     with pytest.raises(ValueError, match="already belongs"):
         AgentAnalyzer(region=REGION, toolkits=[alone.toolkit("python")])
 
@@ -1903,3 +1907,153 @@ def test_ask_runs_python_and_the_report_shows_its_code(seeded, tmp_path, capsys)
     html = _tool_html(ran, running=False)
     assert '<span class="pf">run_python</span>(…)' in html and 'class="ag-code"' in html and "pathlib" in html
     assert "Ask about Lambda and S3 in plain English" in page(window(core=make(python=Folder(tmp_path))))
+
+
+LOCK = {"pandas": {"file_name": "pandas.whl", "sha256": "a", "depends": ["numpy", "pytz"]},
+        "numpy": {"file_name": "numpy.whl", "sha256": "b", "depends": []},
+        "pytz": {"file_name": "pytz.whl", "sha256": "c", "depends": []},
+        "pyarrow": {"file_name": "pyarrow.whl", "sha256": "d", "depends": ["numpy"]}}
+
+
+def test_the_local_sandbox_downloads_a_package_with_what_it_needs():
+    assert localmod.needed_packages(LOCK, ["Pandas", "pyarrow"]) == ["pandas", "pyarrow", "numpy", "pytz"]
+    assert localmod.needed_packages(LOCK, []) == []
+    assert [f.name for f in localmod.package_files(LOCK, ["numpy"])] == ["numpy.whl"]
+    with pytest.raises(ValueError, match="no package 'panda'. Did you mean 'pandas'"):
+        localmod.needed_packages(LOCK, ["panda"])
+
+
+def test_the_local_sandbox_reads_only_its_runners_last_line():
+    output = 'N{"ok": false, "fake": 1}\nprinted\nN{"ok": true, "stdout": "hi"}\n'
+    assert localmod.parse_result(output, "N") == {"ok": True, "stdout": "hi"}
+    assert localmod.parse_result("nothing\n", "N") is None and localmod.parse_result("N{broken", "N") is None
+    assert localmod.parse_result("N[1]", "N") is None
+
+
+def test_deno_gets_read_access_to_pyodide_and_nothing_else(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "s3cr3t")
+    sandbox = LocalSandbox(cache=tmp_path, memory="1GB", deno="/opt/deno")
+    command = sandbox._command()
+    assert command[:2] == ["/opt/deno", "run"] and f"--allow-read={tmp_path}" in command
+    assert "--no-prompt" in command and "--no-remote" in command and "--v8-flags=--wasm-max-mem-pages=16384" in command
+    assert not [flag for flag in command if flag.startswith("--allow-") and not flag.startswith("--allow-read")]
+    environment = sandbox._environment()
+    assert not [name for name in environment if name.startswith("AWS_")] and "s3cr3t" not in str(environment)
+    assert environment["DENO_DIR"] == str(tmp_path / "deno")
+    with pytest.raises(ValueError, match="must be an https:// URL"):
+        LocalSandbox(index_url="http://mirror/pyodide/")
+    with pytest.raises(ValueError, match="memory= is too small"):
+        LocalSandbox(memory=10)
+    sandbox.put("a//b.txt", b"x")
+    assert sandbox.files() == [WorkspaceFile("a/b.txt", 1)]
+
+
+def test_the_local_sandbox_says_how_to_get_deno(tmp_path, monkeypatch):
+    monkeypatch.setattr(localmod.shutil, "which", lambda name: None)
+    monkeypatch.setitem(sys.modules, "deno", None)
+    with pytest.raises(ImportError, match=r"pip install deno"):
+        LocalSandbox(cache=tmp_path).prepare()
+
+
+def test_the_local_sandbox_refuses_a_file_that_isnt_pyodides(tmp_path, monkeypatch):
+    monkeypatch.setattr(localmod, "_deno_binary", lambda given: "deno")
+    monkeypatch.setattr(localmod.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b"not pyodide"))
+    with pytest.raises(ValueError, match="isn't the file Pyodide 314.0.7 released"):
+        LocalSandbox(cache=tmp_path).prepare()
+    assert not list(tmp_path.iterdir())
+
+    def offline(url, timeout):
+        raise localmod.urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(localmod.urllib.request, "urlopen", offline)
+    with pytest.raises(ConnectionError, match=f"copy pyodide-lock.json and the other files it needs .* into {tmp_path}"):
+        LocalSandbox(cache=tmp_path).prepare()
+
+
+def test_python_local_makes_the_local_sandbox():
+    core = AgentAnalyzer(region=REGION, python="local")
+    assert isinstance(core.workspace, LocalSandbox) and core.workspace.packages == ("pandas",)
+    assert "a local sandbox (Pyodide on Deno, in WebAssembly" in core.toolkit("python").privacy
+    with pytest.raises(ValueError, match="There's no 'docker' sandbox"):
+        AgentAnalyzer(region=REGION, python="docker")
+
+
+@pytest.fixture(scope="module")
+def pyodide(tmp_path_factory):
+    """
+    Pyodide's files with pandas, downloaded once for these tests (into AWS_ANALYZER_TEST_PYODIDE when it's set, so a
+    second run reuses them); skipped without Deno or the internet.
+    """
+    try:
+        localmod._deno_binary(None)
+    except ImportError:
+        pytest.skip("Deno isn't installed (pip install deno)")
+    cache = os.environ.get("AWS_ANALYZER_TEST_PYODIDE") or tmp_path_factory.mktemp("pyodide")
+    try:
+        LocalSandbox(cache=cache).prepare()
+    except ConnectionError as exc:
+        pytest.skip(f"Pyodide's files can't be downloaded here: {exc}")
+    return cache
+
+
+def test_the_local_sandbox_runs_python_with_no_network_files_or_credentials(pyodide):
+    sandbox = LocalSandbox(cache=pyodide)
+    code = """
+import os, socket, js
+from pyodide.http import pyfetch
+
+def tried(fn):
+    try:
+        fn()
+    except BaseException as exc:
+        return type(exc).__name__
+    return "ALLOWED"
+
+print("environment", sorted(name for name in os.environ if name.startswith("AWS")))
+print("passwd", tried(lambda: js.Deno.readTextFileSync("/etc/passwd")))
+print("write", tried(lambda: js.Deno.writeTextFileSync("/tmp/sandbox.txt", "x")))
+print("command", tried(lambda: js.Deno.Command.new("id").outputSync()))
+print("socket", tried(lambda: socket.create_connection(("169.254.169.254", 80), timeout=1)))
+try:
+    await pyfetch("http://169.254.169.254/latest/meta-data/iam/security-credentials/")
+    print("metadata ALLOWED")
+except BaseException as exc:
+    print("metadata", type(exc).__name__)
+"""
+    run = sandbox.run(code, timeout=60)
+    assert run.ok, run.stderr
+    assert run.stdout.splitlines() == ["environment []", "passwd JsException", "write JsException",
+                                       "command JsException", "socket OSError", "metadata AbortError"]
+    assert not os.path.exists("/tmp/sandbox.txt")
+
+
+def test_the_local_sandbox_keeps_files_between_runs_and_variables_out(pyodide):
+    sandbox = LocalSandbox(cache=pyodide)
+    sandbox.put("lambda/etl/app.py", b"def handler(event, context):\n    return event['customer_id']\n")
+    sandbox.put("old.txt", b"bye")
+    first = sandbox.run("import ast, os, pathlib\n"
+                        "tree = ast.parse(pathlib.Path('lambda/etl/app.py').read_text())\n"
+                        "print([n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])\n"
+                        "pathlib.Path('out').mkdir()\npathlib.Path('out/n.txt').write_text('1')\n"
+                        "os.remove('old.txt')\nx = 42", timeout=60)
+    assert first.ok and first.stdout == "['handler']\n" and first.new_files == ["out/n.txt"]
+    assert [f.path for f in sandbox.files()] == ["lambda/etl/app.py", "out/n.txt"]
+    second = sandbox.run("import pandas as pd\nprint(open('out/n.txt').read(), pd.Series([1, 2]).sum())\nprint(x)",
+                         timeout=60)
+    assert not second.ok and second.stdout == "1 3\n"
+    assert second.stderr.rstrip().endswith("NameError: name 'x' is not defined") and '"<code>", line 3' in second.stderr
+    assert "_pyodide" not in second.stderr
+    missing = sandbox.run("import requests", timeout=60)
+    assert "ModuleNotFoundError: No module named 'requests'" in missing.stderr
+    stopped = sandbox.run("while True: pass", timeout=3)
+    assert stopped.timed_out and not stopped.ok
+    assert sandbox.run("import sys\nsys.exit(0)", timeout=60).ok
+
+
+def test_the_agent_runs_python_in_the_local_sandbox(pyodide, core):
+    agent = make(python=LocalSandbox(cache=pyodide, packages=()))
+    assert tool(agent, "save_function_code")("etl-nightly")["files_saved"] == 2
+    ran = tool(agent, "run_python")("import pathlib\n"
+                                    "print(sorted(p.name for p in pathlib.Path('lambda/etl-nightly').iterdir()))")
+    assert ran["ok"] and ran["stdout"] == "['app.py', 'utils.py']\n"
+    assert agent._guard.counts == {"lambda:GetFunction": 1}

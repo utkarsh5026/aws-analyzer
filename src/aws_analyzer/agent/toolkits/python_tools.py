@@ -127,7 +127,7 @@ class PythonToolkit(Toolkit):
         Where the code runs and what of it reaches the model, for the tools() report's note.
         """
         place = f" {self.workspace.place}" if self.workspace.place else ""
-        return (f"Python the agent writes runs{place} in {self.workspace.title}, with no AWS credentials: it sees only "
+        return (f"Python the agent writes runs in {self.workspace.title}{place}, with no AWS credentials: it sees only "
                 "the files the tools save there. What it prints goes to the model, with anything that looks like a "
                 "secret hidden.")
 

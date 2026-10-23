@@ -32,6 +32,8 @@ It covers AWS Lambda and Amazon S3. The model is yours to pick (one on Amazon Be
     %pip install "aws-analyzer[agent]"
     ```
 
+    Add `sandbox`, `"aws-analyzer[agent,sandbox]"`, for its [Python sandbox](#run-python).
+
 2. **Pick the model it answers with.** On SageMaker the simplest is a model on Amazon Bedrock: it uses the notebook's IAM role, needs no key, and nothing leaves AWS.
 
     ```python
@@ -260,37 +262,47 @@ It adds `preview_file`, which reads a file the way `S3View().preview()` does: a 
 
 ### Running Python { #run-python }
 
-Give the agent a Python workspace and it can write code for what no tool does: parse a function's code, count across files, join two tools' data.
+Give the agent a Python sandbox and it can write code for what no tool does: parse a function's code, count across files, join two tools' data.
 { .gist }
 
 ```python
-agent = AgentView(provider="bedrock", python=MySandbox())
+%pip install "aws-analyzer[agent,sandbox]"
+
+agent = AgentView(provider="bedrock", python="local")
 agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
 ```
 
 It adds three tools. `save_function_code` saves a function's source files into the workspace, under `lambda/<function>/`. `run_python` runs the code the model writes there and returns what it printed. `workspace_files` lists what's saved. The window shows each run's code under its call, and the report folds it under the table of calls.
 
+The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on [Deno](https://deno.com), which lets it read Pyodide's own files and nothing else: no network, so not the metadata service that hands out the notebook role's credentials, no environment variables, none of the machine's files and no subprocesses. Data gets in only through the tools, which the read-only guard covers.
+
 !!! tip "Worth knowing"
 
-    The workspace is a sandbox you pass in, and it must give the code no AWS credentials and no network. Data gets there only through the tools, which the read-only guard covers. A subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the instance's metadata service. What the code prints goes to the model's provider, with anything that looks like a secret hidden.
+    The first run downloads Pyodide's files once, about 21 MB with pandas, into `~/.cache/aws-analyzer/pyodide/`, and checks each file's SHA-256. Run `LocalSandbox().prepare()` (from `aws_analyzer.agent`) to do it ahead of time. Without internet access, copy the files into that folder from elsewhere, or pass `index_url=` a mirror. What the code prints goes to the model's provider, with anything that looks like a secret hidden.
 
-??? more "Writing a workspace"
+??? more "Packages, memory and time"
 
-    A workspace is a `Workspace` (from `aws_analyzer.agent`) with three methods: `put(path, data)` writes a file, `files()` lists them as `WorkspaceFile(path, size)`, and `run(code, timeout=...)` runs the code in a fresh interpreter in the workspace's folder and returns a `PythonRun(ok, stdout, stderr, seconds, timed_out, new_files)`. Files stay between runs; variables don't. `title`, `place` and `packages` say how reports and the model name it and what the code can import.
+    The code can import the standard library and pandas (with numpy). `LocalSandbox(packages=["pandas", "scikit-learn"])` offers others from [Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run more than its default 2 GB. Each run starts a fresh interpreter: files stay between runs, variables don't. Starting Pyodide takes about 2 seconds of a run, and loading pandas about 3.
+
+    A question gets 10 runs of up to 30 seconds each, and the tools save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
+
+??? more "Your own sandbox"
+
+    To run the code somewhere else, pass a `Workspace` (from `aws_analyzer.agent`) with three methods: `put(path, data)` writes a file, `files()` lists them as `WorkspaceFile(path, size)`, and `run(code, timeout=...)` runs the code in a fresh interpreter in the workspace's folder and returns a `PythonRun(ok, stdout, stderr, seconds, timed_out, new_files)`. It must give the code no AWS credentials and no network. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the instance's metadata service.
 
     ```python
     from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
 
     class MySandbox(Workspace):
-        title, place = "my sandbox", "in a container with no network"
+        title, place = "my sandbox", "(a container with no network)"
         packages = ("pandas",)
 
         def put(self, path, data): ...
         def files(self): ...
         def run(self, code, *, timeout): ...
-    ```
 
-    A question gets 10 runs of up to 30 seconds each, and the tools save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
+    agent = AgentView(provider="bedrock", python=MySandbox())
+    ```
 
 
 ## Safe and bounded { #safety }
@@ -298,7 +310,7 @@ It adds three tools. `save_function_code` saves a function's source files into t
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in a [workspace](#run-python) you pass, which has no AWS credentials.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 

@@ -66,6 +66,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
     workspace.py     The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
                      where the model's code runs over files the tools save; toolkits/python_tools.py gives the model
                      run_python over it, and each service's toolkit a save_* tool.
+    sandboxes/       The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
+                     (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
                      (chat.py), and its ⚙ model panel (model_panel.py).
 """
@@ -124,6 +126,7 @@ from .toolkits.lambda_tools import (
     summarize_source,
     summarize_symbol,
 )
+from .sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
 from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
@@ -147,6 +150,8 @@ __all__ = [
     "Arrivals",
     "TriggerLink",
     "PythonToolkit",
+    "LocalSandbox",
+    "PYODIDE_VERSION",
     "Workspace",
     "WorkspaceFile",
     "PythonRun",

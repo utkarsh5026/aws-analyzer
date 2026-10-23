@@ -52,7 +52,7 @@ class Workspace:
     network, and see only the workspace's files (see this module's docstring).
 
         title     how reports name it: 'a local sandbox'
-        place     where the code runs, for tools() and the system prompt: 'in WebAssembly, on this machine'
+        place     what tells it apart, after its title: '(Pyodide on Deno, in WebAssembly: no network, ...)'
         packages  what the code can import besides the standard library: ('pandas', 'numpy')
     """
 
@@ -107,9 +107,18 @@ def clean_path(path: str) -> str:
 
 def workspace_of(value: object) -> Workspace | None:
     """
-    AgentAnalyzer(python=...) as a Workspace: one passed in, or None for no workspace.
+    AgentAnalyzer(python=...) as a Workspace: one passed in, a built-in sandbox by its name ('local': LocalSandbox,
+    Pyodide on Deno), or None for no workspace.
     """
     if value is None or isinstance(value, Workspace):
         return value
-    raise TypeError(f"python= takes a Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or "
-                    f"network), not {value!r}")
+    if isinstance(value, str):
+        from .sandboxes import SANDBOXES
+
+        name = value.strip().lower()
+        if name in SANDBOXES:
+            return SANDBOXES[name]()
+        raise ValueError(f"There's no {value!r} sandbox: python= takes {', '.join(map(repr, SANDBOXES))} or a "
+                         "Workspace")
+    raise TypeError(f"python= takes 'local' (a sandbox on this machine) or a Workspace (aws_analyzer.agent.Workspace: "
+                    f"a sandbox with no AWS credentials or network), not {value!r}")

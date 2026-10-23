@@ -104,6 +104,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
 %pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws (Python 3.11+)
+%pip install "aws-analyzer[agent,sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
 ```
 
 A notebook with no internet access (VPC-only mode) can install it from a bucket. On a computer that has internet,
@@ -2054,8 +2055,8 @@ data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,00
 ### Running Python (`python=`)
 
 Some questions need work no tool does: every place a function's code calls DynamoDB, what two functions' handlers
-share, a count across a hundred files. `AgentView(python=workspace)` gives the agent a Python workspace, a sandbox you
-pass in, and three tools:
+share, a count across a hundred files. `AgentView(python="local")` gives the agent a Python sandbox on the notebook's
+machine, and three tools:
 
 | Tool                                         | What it returns                                                                                                                         |
 | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2063,37 +2064,58 @@ pass in, and three tools:
 | `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
 | `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
 
+```python
+%pip install "aws-analyzer[agent,sandbox]"      # brings Deno
+
+agent = AgentView(provider="bedrock", python="local")
+agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
+```
+
+The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on
+[Deno](https://deno.com), which grants it read access to Pyodide's own files and nothing else: no network (so not
+the instance metadata service that hands out the notebook role's credentials), no environment variables, none of the
+machine's files and no subprocesses. Each run starts a fresh interpreter; the workspace's files are kept in memory
+and stay between runs. The code can import the standard library and pandas (with numpy);
+`LocalSandbox(packages=["pandas", "scikit-learn"])` (from `aws_analyzer.agent`) offers others from
+[Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run
+more than the 2 GB it gets by default.
+
+> [!NOTE]
+> The first run downloads Pyodide 314.0.7's files once from the jsDelivr CDN, about 21 MB with pandas, into
+> `~/.cache/aws-analyzer/pyodide/` (`LocalSandbox(cache=...)` for another folder), and checks each file's SHA-256.
+> `LocalSandbox().prepare()` does it ahead of time and says what it has. A notebook without internet access can copy
+> the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")`.
+
 Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
-never needs AWS. The workspace is a `Workspace` (from `aws_analyzer.agent`) you write for your sandbox: it puts a file,
-lists the files and runs code in a fresh interpreter, and it must give the code **no AWS credentials and no network**.
-A subprocess on a SageMaker notebook isn't a sandbox: it can still get the notebook role's credentials from the
-instance's metadata service.
+never needs AWS. What it prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each
+(starting Pyodide takes about 2 seconds of that, and loading pandas about 3), and the tools save at most 50 MB in all:
+`budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
+
+To run the code somewhere else (a container, a managed sandbox), pass your own `Workspace` (from
+`aws_analyzer.agent`): it puts a file, lists the files and runs code in a fresh interpreter, and it must give the code
+**no AWS credentials and no network**. A plain subprocess on a SageMaker notebook isn't a sandbox: it can still get
+the notebook role's credentials from the instance's metadata service.
 
 ```python
 from aws_analyzer.agent import PythonRun, Workspace, WorkspaceFile
 
 class MySandbox(Workspace):
-    title, place = "my sandbox", "in a container with no network"   # how reports and the model name it
-    packages = ("pandas",)                                            # what the code can import
+    title, place = "my sandbox", "(a container with no network)"   # how reports and the model name it
+    packages = ("pandas",)                                           # what the code can import
 
-    def put(self, path, data): ...                                    # write bytes at a path in the workspace
-    def files(self): ...                                              # -> [WorkspaceFile(path, size), ...]
-    def run(self, code, *, timeout): ...                              # -> PythonRun(ok, stdout, stderr, seconds, ...)
+    def put(self, path, data): ...                                   # write bytes at a path in the workspace
+    def files(self): ...                                             # -> [WorkspaceFile(path, size), ...]
+    def run(self, code, *, timeout): ...                             # -> PythonRun(ok, stdout, stderr, seconds, ...)
 
 agent = AgentView(provider="bedrock", python=MySandbox())
-agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
 ```
-
-What the code prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each, and the tools
-save at most 50 MB in all: `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises
-them.
 
 ### Safe and bounded
 
 - **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
   operation that isn't a Get, List, Describe, Head or Filter call before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
-  memory. Code runs only in a workspace you pass (`python=`), which has no AWS credentials.
+  memory. Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
 - **A budget per question.** At most 25 tool calls, 5 minutes and, when you pass the model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
@@ -2135,7 +2157,7 @@ core = AgentAnalyzer(
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 80, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
-    python=MySandbox(),                   # adds run_python and the save_* tools: a Workspace with no AWS access
+    python="local",                       # adds run_python and the save_* tools: Python in a local sandbox
 )
 agent = AgentView(core)
 
