@@ -17,8 +17,10 @@ from dataclasses import dataclass, field
 
 from ..._kit.fmt import _fmt_dt, human_age, human_size
 
-from ..helpers import MB
+from ..helpers import MB, runtime_family
 from ..models import FileChange, Function, LibraryChange, SettingChange, Version, VersionDiff
+from .codemap.mapping import map_package
+from .codemap.model import AwsCall
 from .package import _SECRET_FILE_RE, handler_file
 from .source import _is_library_file, _is_source_file, _library_names
 from .text import _cli
@@ -431,6 +433,23 @@ def _compare_files(diff: VersionDiff, packages: _Packages) -> None:
         _find_reads(diff, packages, own)
 
 
+def _added_calls(old: Function, old_data: bytes, new: Function, new_data: bytes) -> list[AwsCall]:
+    """
+    The AWS calls a Python function's new code makes that its old code didn't (by service and operation), read with
+    map_package (nothing is run), leaving out presigned links, which need no permission of their own.
+    """
+    if runtime_family(new.runtime) != "python":
+        return []
+    before = {(call.service, call.operation) for call in map_package(old, old_data).aws}
+    added = []
+    for call in map_package(new, new_data).aws:
+        is_new = (call.service, call.operation) not in before
+        if is_new and call.permission:
+            added.append(call)
+            before.add((call.service, call.operation))
+    return added
+
+
 def _open_zip(data: bytes, label: str) -> zipfile.ZipFile:
     try:
         return zipfile.ZipFile(io.BytesIO(data))
@@ -444,8 +463,9 @@ def diff_packages(old: Function, old_data: bytes | None, new: Function, new_data
     .zip files as code() downloads them): the files of its own that were added, removed or changed, each changed
     text file's unified diff and the Python functions and classes its changes are in, the libraries packed with it
     that were added, removed or upgraded (counted, not listed line by line), its settings, and the environment
-    variable names added and removed (values are never read). Unchanged files are told apart by the zip's index, so
-    they aren't unpacked; secrets files, binaries and minified code are compared by size. Nothing in them is run.
+    variable names added and removed (values are never read), and for Python the AWS calls the new code makes that
+    the old didn't, with the permission each needs. Unchanged files are told apart by the zip's index, so they aren't
+    unpacked; secrets files, binaries and minified code are compared by size. Nothing in them is run.
     """
     diff = VersionDiff(new, old, settings=diff_settings(old, new))
     diff.env_added = sorted(set(new.env_names) - set(old.env_names))
@@ -463,6 +483,8 @@ def diff_packages(old: Function, old_data: bytes | None, new: Function, new_data
         return diff
     with _open_zip(old_data, version_label(old)) as old_zip, _open_zip(new_data, version_label(new)) as new_zip:
         _compare_files(diff, _Packages(old_zip, new_zip))
+    if diff.files:
+        diff.new_calls = _added_calls(old, old_data, new, new_data)
     return diff
 
 
@@ -487,6 +509,21 @@ def _libraries_finding(changes: list[LibraryChange], after: str) -> str:
     return (f"{count} packed with it changed in {after}: {listed}. A library added, removed or upgraded can change "
             "how the code behaves without a line of its own changing (an import that fails, a function that works "
             "differently); a new version's changelog says what changed.")
+
+
+def _calls_finding(calls: list[AwsCall], fn: Function, after: str) -> str:
+    """
+    The AWS calls a version adds, and the permissions its role needs for them.
+    """
+    listed = ", ".join(f"{call.label} at {call.file}:{call.line}" for call in calls[:_LISTED_LIBRARIES])
+    more = len(calls) - _LISTED_LIBRARIES
+    if more > 0:
+        listed += f" and {more:,} more"
+    permissions = ", ".join(dict.fromkeys(call.permission for call in calls))
+    count = "an AWS call" if len(calls) == 1 else f"{len(calls):,} AWS calls"
+    return (f"{after} makes {count} the code didn't make before: {listed}. Its role needs {permissions}, or the runs "
+            f"that reach {'it' if len(calls) == 1 else 'them'} fail with AccessDenied; errors('{fn.name}') shows "
+            "whether they do.")
 
 
 def _setting_findings(diff: VersionDiff, before: str, after: str) -> list[tuple[str, str]]:
@@ -515,7 +552,7 @@ def _setting_findings(diff: VersionDiff, before: str, after: str) -> list[tuple[
 def diff_findings(diff: VersionDiff) -> list[tuple[str, str]]:
     """
     What a diff() means: Python files that don't read (whatever imports them fails), environment variables taken out
-    that the code still reads, a package built again with the same files, libraries that changed, settings that change
+    that the code still reads, AWS calls the new code makes (and the permissions they need), a package built again with the same files, libraries that changed, settings that change
     how runs go, and when nothing changed at all.
     """
     if diff.note or diff.old is None:
@@ -539,6 +576,8 @@ def diff_findings(diff: VersionDiff) -> list[tuple[str, str]]:
             f"The code is the same in {before} and {after} (the same SHA-256): only the settings below changed."
             if diff.settings or diff.env_added or diff.env_removed
             else f"Nothing changed between {before} and {after}: the same code and the same settings.")))
+    if diff.new_calls:
+        found.append(("info", _calls_finding(diff.new_calls, fn, after)))
     rebuilt = not diff.same_code and not diff.files and not diff.library_files
     if rebuilt:
         found.append(("info", (

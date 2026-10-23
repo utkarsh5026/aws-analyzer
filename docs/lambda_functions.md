@@ -547,7 +547,13 @@ ui.diff("orders-etl", 3, 5)        # version 3 against version 5
 ui.diff("orders-etl:prod")         # what the alias runs, against the version before it
 ```
 
-The findings flag a Python file that no longer reads (a syntax error fails every call that imports it), an environment variable taken out that the code still reads, a shorter timeout, less memory and a new runtime. Versions published without a code change are skipped, and the subtitle says which.
+![diff("orders-etl"): cards comparing version 1 with $LATEST, 2 of 7 files changed, +3 −1 lines, the same libraries and 1 setting changed; a note that $LATEST makes a DynamoDB PutItem call the code didn't make before, at etl.py:22, so its role needs dynamodb:PutItem; the new ORDERS_TABLE environment variable; the new call with its permission and code; the files that changed; and etl.py's diff, with the added table = boto3.resource("dynamodb") line and the added table.put_item line that reads row["customer_id"]](images/lambda-diff-light.webp#only-light){ width="984" height="1164" loading=lazy }
+![diff("orders-etl"): cards comparing version 1 with $LATEST, 2 of 7 files changed, +3 −1 lines, the same libraries and 1 setting changed; a note that $LATEST makes a DynamoDB PutItem call the code didn't make before, at etl.py:22, so its role needs dynamodb:PutItem; the new ORDERS_TABLE environment variable; the new call with its permission and code; the files that changed; and etl.py's diff, with the added table = boto3.resource("dynamodb") line and the added table.put_item line that reads row["customer_id"]](images/lambda-diff-dark.webp#only-dark){ width="984" height="1164" loading=lazy }
+/// caption
+`ui.diff("orders-etl")`: the deploy that added a DynamoDB copy of each order, the `put_item` line behind the `KeyError: 'customer_id'` in its logs, and the permission it needs.
+///
+
+For Python code, the findings name each AWS call the new version makes that the old one didn't, with the IAM permission its role needs, since a new call the role can't make fails every run that reaches it. They also flag a Python file that no longer reads (a syntax error fails every call that imports it), an environment variable taken out that the code still reads, a shorter timeout, less memory and a new runtime. Versions published without a code change are skipped, and the subtitle says which.
 
 !!! tip "Worth knowing"
 

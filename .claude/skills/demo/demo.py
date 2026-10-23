@@ -53,7 +53,8 @@ Demo data (moto, us-east-1, everything synthetic):
             clients for what moto lacks (account limits, provisioned concurrency, log sizes) and the deployment
             packages served from memory. us-east-1: orders-etl (python3.9, SQS and S3 triggers, errors rising for
             3 days, runs near its 60 s timeout, KeyError / AccessDenied / timeouts in the last 24 hours of logs,
-            logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package),
+            logs costing more than its compute and kept forever, a .env file and bundled boto3 in its package,
+            and a version 1 from before the DynamoDB write behind those errors, for diff()),
             churn-scoring (arm64, EventBridge, 4 copies of provisioned concurrency it never needs), report-api
             (nodejs20.x, a public function URL, throttled by reserved concurrency 10, JSON logs for its last three
             hours with WARN lines and unhandled TypeErrors), feature-backfill (python3.10, never called, no triggers)
@@ -1511,6 +1512,10 @@ def handler(event, context):
     return {"loaded": loaded}
 '''
 
+ETL_SOURCE_BEFORE_DYNAMODB = ETL_SOURCE.replace(
+    'table = boto3.resource("dynamodb").Table(os.environ["ORDERS_TABLE"])\n', "").replace(
+    '                table.put_item(Item={"pk": row["customer_id"], "sk": row["order_id"]})\n', "")
+
 
 AGENT_SOURCES = {  # support-agent-actions: a Bedrock agent's action group in three files, for how_it_works()
     "actions.py": '''"""Action group for the support Bedrock agent: looks up orders and opens tickets."""
@@ -1685,16 +1690,19 @@ def seed_lambda_functions() -> dict:
     rng = random.Random(11)
     other = "eu-west-1"
     role = boto3.client("iam").create_role(RoleName="acme-lambda-role", AssumeRolePolicyDocument="{}")["Role"]["Arn"]
+    etl_files = {
+        "etl.py": ETL_SOURCE,
+        "db.py": "def connect(host, password):\n    ...\n",
+        "requirements.txt": "boto3==1.40.0\npsycopg2-binary==2.9.10\n",
+        ".env": "DB_PASSWORD=change-me\n",
+        "boto3/__init__.py": "# boto3, bundled\n" + "#" * (2 * 1024**2),
+        "botocore/data/endpoints.json": '{"partitions": []}' + " " * (11 * 1024**2),
+        "psycopg2/_psycopg.so": "\0" * (3 * 1024**2),
+    }
     packages = {
-        "orders-etl": _lambda_package({
-            "etl.py": ETL_SOURCE,
-            "db.py": "def connect(host, password):\n    ...\n",
-            "requirements.txt": "boto3==1.40.0\npsycopg2-binary==2.9.10\n",
-            ".env": "DB_PASSWORD=change-me\n",
-            "boto3/__init__.py": "# boto3, bundled\n" + "#" * (2 * 1024**2),
-            "botocore/data/endpoints.json": '{"partitions": []}' + " " * (11 * 1024**2),
-            "psycopg2/_psycopg.so": "\0" * (3 * 1024**2),
-        }),
+        "orders-etl": _lambda_package(etl_files),
+        "orders-etl@1": _lambda_package({**etl_files, "etl.py": ETL_SOURCE_BEFORE_DYNAMODB,
+                                         "requirements.txt": "boto3==1.40.0\npsycopg2-binary==2.9.9\n"}),
         "churn-scoring": _lambda_package({"app.py": "def predict(event, context):\n    return {'score': 0.42}\n",
                                           "model/churn.json": '{"trees": []}' + " " * 400_000}),
         "churn-scoring@1": _lambda_package({
@@ -1714,11 +1722,15 @@ def seed_lambda_functions() -> dict:
                       Handler="app.handler")
         boto3.client("lambda", region_name=region).create_function(**{**params, **settings})
 
+    etl_settings = {"DB_HOST": "warehouse.acme.internal", "DB_PASSWORD": "change-me"}
     create("orders-etl", Runtime="python3.9", Handler="etl.handler", MemorySize=1024, Timeout=60,
-           Description="Loads the day's orders from S3 into the warehouse",
-           Environment={"Variables": {"DB_HOST": "warehouse.acme.internal", "DB_PASSWORD": "change-me",
-                                      "ORDERS_TABLE": "orders"}},
-           Tags={"team": "data", "cost-center": "analytics"})
+           Description="Loads the day's orders from S3 into the warehouse", Code={"ZipFile": packages["orders-etl@1"]},
+           Environment={"Variables": etl_settings}, Tags={"team": "data", "cost-center": "analytics"})
+    etl = boto3.client("lambda", region_name=REGION)
+    etl.publish_version(FunctionName="orders-etl", Description="before the DynamoDB copy")
+    etl.update_function_code(FunctionName="orders-etl", ZipFile=packages["orders-etl"])
+    etl.update_function_configuration(FunctionName="orders-etl",
+                                      Environment={"Variables": {**etl_settings, "ORDERS_TABLE": "orders"}})
     create("churn-scoring", Handler="app.predict", Architectures=["arm64"], MemorySize=2048, Timeout=30,
            Description="Scores customers for churn with the model trained in SageMaker", Tags={"team": "ml"})
     create("report-api", Runtime="nodejs20.x", Handler="index.handler", MemorySize=512, Timeout=10,

@@ -1413,6 +1413,26 @@ def test_diff_packages_when_there_are_no_lines_to_compare():
     assert cut.added == 5000 and cut.truncated and len(cut.lines) == 400
 
 
+
+
+def test_diff_packages_names_the_aws_calls_new_code_makes():
+    before = zipped({"app.py": 'import boto3\n\ns3 = boto3.client("s3")\n\n\ndef handler(event, context):\n'
+                               '    return s3.get_object(Bucket="b", Key="k")\n'})
+    after = zipped({"app.py": 'import boto3\n\ns3 = boto3.client("s3")\ntable = boto3.resource("dynamodb").Table("t")\n'
+                              '\n\ndef handler(event, context):\n    table.put_item(Item=event)\n'
+                              '    return s3.get_object(Bucket="b", Key="k")\n'})
+    diff = diff_packages(versioned("1", "a"), before, versioned("$LATEST", "b", handler="app.handler"), after)
+    assert [(c.label, c.permission, c.file, c.line) for c in diff.new_calls] == [
+        ("DynamoDB PutItem", "dynamodb:PutItem", "app.py", 8)]
+    finding = [message for _, message in diff_findings(diff) if "AWS call" in message][0]
+    assert "$LATEST makes an AWS call the code didn't make before: DynamoDB PutItem at app.py:8" in finding
+    assert "Its role needs dynamodb:PutItem" in finding and "errors('etl')" in finding
+    node = diff_packages(versioned("1", "a", runtime="nodejs20.x"), before,
+                         versioned("2", "b", runtime="nodejs20.x"), after)
+    assert not node.new_calls and node.files
+    page = stylemod._render_html(diff_block._diff_blocks(diff), 50)
+    assert "AWS calls new in $LATEST" in page and "dynamodb:PutItem" in page
+
 def test_version_before_skips_versions_with_the_same_code():
     versions = [Version("1", code_sha="a"), Version("2", code_sha="b"), Version("3", code_sha="b")]
     assert version_before(versions, versioned("$LATEST", "b")) == (versions[0], ["3", "2"])

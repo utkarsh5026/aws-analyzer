@@ -137,6 +137,10 @@ def _tables(diff: VersionDiff, before: str, after: str) -> list[Any]:
     if diff.settings or diff.env_added or diff.env_removed:
         blocks.append(_Table(["Setting", before, after], _setting_rows(diff), title="Settings that changed",
                              max_rows=0))
+    if diff.new_calls:
+        rows = [[call.label, call.permission, f"{call.file}:{call.line}", call.code] for call in diff.new_calls]
+        blocks.append(_Table(["AWS call", "Permission it needs", "Where", "Code"], rows,
+                             title=f"AWS calls new in {after}", code_cols=(3,), max_rows=0))
     if diff.libraries:
         title = "Libraries that changed" + (f" ({_plural(diff.library_files, 'file')} of theirs differ)"
                                             if diff.library_files else "")

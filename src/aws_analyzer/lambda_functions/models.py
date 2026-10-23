@@ -7,11 +7,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .._kit.deps import _require
 
 from .helpers import MEMORY_PER_VCPU, _ASYNC_KINDS, _SHORT_KINDS, _in_days
+
+if TYPE_CHECKING:
+    from .analysis.codemap.model import AwsCall
 
 
 @dataclass
@@ -593,7 +596,9 @@ class VersionDiff:
     the files of its own that differ (the handler's first), `libraries` the libraries packed with it that changed,
     with `library_files` counting their files that differ, `settings` and the environment variable names added and
     removed (values are never read), with `still_read` naming where the new code still reads a removed one
-    ('app.py:4'), and `broken` the Python files that read before and no longer do (path -> the SyntaxError's line).
+    ('app.py:4'), `broken` the Python files that read before and no longer do (path -> the SyntaxError's line), and
+    `new_calls` the AWS calls a Python function's new code makes that the old one didn't, each with the IAM
+    permission its role needs.
     `same_code` is true when both have the same SHA-256. `versions` are the
     function's published versions, `skipped` the ones passed over because their code was the same, and `note` says
     why there's nothing to compare (no published versions, a container image, no link to the code).
@@ -611,6 +616,7 @@ class VersionDiff:
     env_removed: list[str] = field(default_factory=list)
     still_read: dict[str, str] = field(default_factory=dict)
     broken: dict[str, str] = field(default_factory=dict)
+    new_calls: list[AwsCall] = field(default_factory=list)
     versions: list[Version] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     note: str | None = None

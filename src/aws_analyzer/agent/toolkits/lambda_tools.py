@@ -571,7 +571,8 @@ def _diff_file(change: Any) -> dict[str, Any]:
 def summarize_diff(diff: VersionDiff) -> dict[str, Any]:
     """
     diff_versions()'s answer: the two versions compared and when each was made, whether the code is the same, the
-    settings, environment variable names (never values) and libraries that changed, each own file that changed
+    settings, environment variable names (never values) and libraries that changed, the AWS calls the new code
+    makes that the old didn't (with the permission each needs), each own file that changed
     with the Python functions its changes are in, the diff lines themselves (secrets hidden) and the findings.
     """
     lf = _lambda_module()
@@ -592,6 +593,9 @@ def summarize_diff(diff: VersionDiff) -> dict[str, Any]:
     if diff.env_added or diff.env_removed:
         out["env_vars"] = {"added": diff.env_added, "removed": diff.env_removed, "still_read": diff.still_read}
     out["libraries_changed"] = [{"name": c.name, "old": c.old, "new": c.new} for c in diff.libraries]
+    if diff.new_calls:
+        out["aws_calls_added"] = [{"call": c.label, "permission": c.permission, "where": f"{c.file}:{c.line}"}
+                                  for c in diff.new_calls]
     out["files_changed"] = [_diff_file(change) for change in diff.files[:_DIFF_FILES]]
     out["files_unchanged"] = diff.unchanged_files
     out["diff"], out["cut_short"] = _diff_excerpts(diff)
