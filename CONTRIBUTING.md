@@ -23,6 +23,13 @@ ruff check .                           # lint: real errors and the code style ru
 
 For the guide site: `pip install -r requirements-docs.txt`, then `mkdocs serve`.
 
+The same commands, and a few more, are tasks in [`makefile.py`](makefile.py): `make <task>`, or
+`python makefile.py <task>` without make (Windows). `make help` lists them. Before a release, `make local` tries the
+package as pip would install it, without publishing it: it builds the wheel, installs it in a fresh environment in
+`.local-check/`, imports it with only boto3, and runs every service's reports on demo data against that copy
+(`make local ARGS="--live --profile dev"` also reads your own account, read-only; `make notebook` opens JupyterLab on
+it).
+
 ## How the code is laid out
 
 [CLAUDE.md](CLAUDE.md) is the full guide to the code and its conventions. It's written for Claude Code, but it reads
