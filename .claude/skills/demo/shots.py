@@ -148,6 +148,7 @@ FIGURES = [
     Figure("lambda-errors", "lambda_functions", 'ui.errors("orders-etl")'),
     Figure("lambda-performance", "lambda_functions", 'ui.performance("orders-etl")'),
     Figure("lambda-code", "lambda_functions", 'ui.code("orders-etl")', crop=1150),
+    Figure("lambda-diff", "lambda_functions", 'ui.diff("orders-etl")'),
     Figure("lambda-how-it-works", "lambda_functions",  # its graph alone: the whole report is too long for one figure
            'ui._show(next(b for b in ui._how_blocks(core.code_map("support-agent-actions")) '
            'if type(b).__name__ == "_Tabs").tabs[0][1][:1])'),

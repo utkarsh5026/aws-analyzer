@@ -191,7 +191,7 @@ Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. 
 
 ## What it can call { #tools }
 
-Seventeen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
+Eighteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -214,6 +214,7 @@ Seventeen read-only tools over Lambda and S3. Each returns a compact summary wit
     | `function_source(function, file, lines, region)` | The function's code, numbered line by line, like `sed -n`: `lines="42"` for the lines around the one an error's traceback names, `"150-300"` for any range, up to 300 lines a call; with no file, the handler's file and the package's own files. Nothing is run, and anything that looks like a secret is hidden |
     | `search_code(function, text, regex, files, region)` | Every line of the code that contains a text or matches a regular expression, like `grep -rn`, with the lines around each: its own files, or `files=` globs and folders, the libraries packed with it too |
     | `find_symbol(function, name, region)` | Where a Python function, class, method or name is defined (file, lines, signature, docstring) and every line that calls, imports or refers to it, like an editor's go to definition. Read with `ast` and never run |
+    | `diff_versions(function, old, new, region)` | What changed between two versions, like `git diff`: settings, environment variable names, libraries, each changed file with the Python functions its changes are in, and the changed lines. `function_errors` says which versions each cause ran on |
 
     **S3**, which reads what's inside a file only with [`read_files=True`](#read-files):
 

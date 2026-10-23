@@ -13,6 +13,7 @@ from typing import Iterable
 from ..._kit.fmt import _count, _plural, human_age
 from ..._kit.text import _clip
 
+from ..helpers import stream_version
 from ..models import ErrorGroup, ErrorReport, LogEvent
 from .text import _cli, _window
 from .findings import _longer, _next_memory, _times
@@ -196,10 +197,11 @@ def _error_key(text: str) -> str:
 def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
     """
     Log events that report errors, grouped by cause (kind and message, numbers and IDs aside), most frequent
-    first. Lines that aren't errors are skipped.
+    first, each with the versions that logged it. Lines that aren't errors are skipped.
     """
     groups: dict[tuple[str, str], ErrorGroup] = {}
     seen: dict[tuple[str, str], list[tuple[datetime, str]]] = defaultdict(list)
+    ran: dict[tuple[str, str], list[tuple[datetime, str]]] = defaultdict(list)
     for event in events:
         found = classify_error(event.message)
         if not found:
@@ -215,9 +217,13 @@ def group_errors(events: Iterable[LogEvent]) -> list[ErrorGroup]:
             group.last, group.message, group.example = event.time, summary, event.message.strip()
         if event.request_id:
             seen[key].append((event.time, event.request_id))
+        version = stream_version(event.stream)
+        if version:
+            ran[key].append((event.time, version))
     for key, group in groups.items():
         ids = [rid for _, rid in sorted(seen[key], reverse=True)]
         group.request_ids = list(dict.fromkeys(ids))[:5]
+        group.versions = list(dict.fromkeys(version for _, version in sorted(ran[key], reverse=True)))
     return sorted(groups.values(), key=lambda g: (-g.count, -g.last.timestamp()))
 
 

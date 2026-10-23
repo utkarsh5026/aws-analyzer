@@ -64,7 +64,7 @@ The examples use acme's functions: `orders-etl` loads each day's orders from S3 
 
 ## Start here { #tour }
 
-Six questions people bring to Lambda, and the one line that answers each. Nothing is invoked, changed or deleted.
+Seven questions people bring to Lambda, and the one line that answers each. Nothing is invoked, changed or deleted.
 { .gist }
 
 <div class="quick" markdown>
@@ -116,6 +116,14 @@ Six questions people bring to Lambda, and the one line that answers each. Nothin
     ```
 
     [How the code works](#how-it-works)
+
+-   **It worked last week. What changed?**
+
+    ```python
+    ui.diff("orders-etl")
+    ```
+
+    [What changed between versions](#diff)
 
 </div>
 
@@ -525,6 +533,36 @@ In JupyterLab, a click on the link opens the page in a JupyterLab tab you can dr
     code_graph(cmap).mermaid()                        # the graph, for a Markdown file
     ```
 
+### What changed between versions { #diff }
+
+`diff()` shows what changed between two versions of a function: its code line by line, the libraries packed with it, and its settings.
+{ .gist }
+
+Each changed file shows its lines added and removed, and the Python functions the changes are in. Libraries are compared by version ("requests 2.31.0 → 2.32.3"), and environment variables by name only.
+
+```python
+ui.diff("orders-etl")              # $LATEST against the newest published version with different code
+ui.diff("orders-etl", 3)           # $LATEST against version 3
+ui.diff("orders-etl", 3, 5)        # version 3 against version 5
+ui.diff("orders-etl:prod")         # what the alias runs, against the version before it
+```
+
+![diff("orders-etl"): cards comparing version 1 with $LATEST, 2 of 7 files changed, +3 −1 lines, the same libraries and 1 setting changed; a note that $LATEST makes a DynamoDB PutItem call the code didn't make before, at etl.py:22, so its role needs dynamodb:PutItem; the new ORDERS_TABLE environment variable; the new call with its permission and code; the files that changed; and etl.py's diff, with the added table = boto3.resource("dynamodb") line and the added table.put_item line that reads row["customer_id"]](images/lambda-diff-light.webp#only-light){ width="984" height="1164" loading=lazy }
+![diff("orders-etl"): cards comparing version 1 with $LATEST, 2 of 7 files changed, +3 −1 lines, the same libraries and 1 setting changed; a note that $LATEST makes a DynamoDB PutItem call the code didn't make before, at etl.py:22, so its role needs dynamodb:PutItem; the new ORDERS_TABLE environment variable; the new call with its permission and code; the files that changed; and etl.py's diff, with the added table = boto3.resource("dynamodb") line and the added table.put_item line that reads row["customer_id"]](images/lambda-diff-dark.webp#only-dark){ width="984" height="1164" loading=lazy }
+/// caption
+`ui.diff("orders-etl")`: the deploy that added a DynamoDB copy of each order, the `put_item` line behind the `KeyError: 'customer_id'` in its logs, and the permission it needs.
+///
+
+For Python code, the findings name each AWS call the new version makes that the old one didn't, with the IAM permission its role needs, since a new call the role can't make fails every run that reaches it. They also flag a Python file that no longer reads (a syntax error fails every call that imports it), an environment variable taken out that the code still reads, a shorter timeout, less memory and a new runtime. Versions published without a code change are skipped, and the subtitle says which.
+
+!!! tip "Worth knowing"
+
+    Lambda keeps the code of **published versions** only. Code deployed over `$LATEST` without publishing a version is gone, so there's nothing to compare it with, and the report says so. To keep a copy of each deploy, publish a version after it: `aws lambda publish-version --function-name orders-etl` (SAM's `AutoPublishAlias` and CDK's `currentVersion` do it for you).
+
+??? more "How files are compared"
+
+    Unchanged files are told apart by the .zip's index (each file's CRC-32 and size), so they aren't unpacked. Files of the libraries packed with it are counted, not shown line by line. Secrets files (`.env`, keys) are compared by size and never read, and so are binaries, minified code and files over 1 MB. A package built again with the same files has a new SHA-256: the report says the code didn't change. A container image's files aren't compared, only which image each version runs. Nothing in either package is run.
+
 ### Download the package { #download }
 
 `download()` saves the deployment package as a .zip next to the notebook, and checks it's the code the function runs.
@@ -567,9 +605,11 @@ lam.find_symbol("orders-etl", "load_orders")      # SymbolReport: where it's def
 cmap = lam.code_map("orders-etl")                 # CodeMap: .steps, .aws, .env, .event, .imports, .functions
 cmap.to_df()                                      # one row per AWS call: service, operation, permission, where
 lam.download("orders-etl").path                   # PackageDownload: where it was saved, size, files, sha256_matches
+lam.versions("orders-etl")                        # Version per published version: number, code SHA-256, when, description
+diff = lam.diff("orders-etl", 3)                  # VersionDiff: .files (FileChange: lines, definitions), .libraries, .settings
 ```
 
-The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files), `search_package` and `find_symbol_in` (`search_code()` and `find_symbol()` on a .zip's bytes), `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`.
+The analysis functions don't call AWS, so they also work on data you already have: `parse_function`, `parse_policy`, `parse_event_source_mapping`, `runtime_status`, `function_monthly_cost`, `provisioned_monthly_cost`, `classify_error`, `group_errors`, `parse_report`, `split_runs` (log lines grouped into runs), `line_level`, `percentile`, `suggest_memory`, `handler_file`, `read_package` (a .zip you already have), `package_file_name`, `page_file_name`, `secret_like`, `source_files` (a package's own source files), `search_package` and `find_symbol_in` (`search_code()` and `find_symbol()` on a .zip's bytes), `map_code` (Python code read with `ast`, [above](#how-it-works)), `map_package` (the same from a .zip's bytes), `code_graph` (a CodeMap as boxes and arrows, with `.mermaid()`), `diff_packages` (`diff()` on two .zip files you already have), `diff_settings`, `version_before` (the version `diff()` compares with), `stream_version` (the version a log stream's name says ran), and the findings: `function_findings`, `account_findings`, `error_findings`, `performance_findings`, `package_findings`, `code_map_findings`, `diff_findings`.
 
 ```python
 from aws_analyzer.lambda_functions import parse_report, runtime_status, suggest_memory
@@ -644,7 +684,7 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 }
 ```
 
-`lambda:GetFunction` also returns the link `code()`, `how_it_works()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
+`lambda:GetFunction` also returns the link `code()`, `how_it_works()`, `diff()` and `download()` download the package from, and the environment variables' values, which the reports never show. Leave it out and `function_info()`, `errors()`, `logs()`, `performance()`, `code()` and `how_it_works()` can't start; give it to roles that may read the code. `diff()` lists the versions with `lambda:ListVersionsByFunction`. `ec2:DescribeRegions` is only for `regions="all"`. The explorer window reads with the same permissions as the commands: a tab whose permission is missing says which one, and the other tabs still work.
 
 ## Troubleshooting { #troubleshooting }
 
@@ -688,6 +728,10 @@ Everything is read-only. Anything the notebook's role can't read shows up as a n
 
     JupyterLab strips the report's styles from saved output when a notebook is reopened. Run the cell again to get the formatted report back.
 
+??? question "“Nothing to compare $LATEST with”"
+
+    The function has no published versions, and Lambda doesn't keep code it replaced. Publish a version after each deploy from now on (`aws lambda publish-version --function-name orders-etl`, or SAM's `AutoPublishAlias`), and `diff()` can compare the next deploy with it. If the code came from an S3 bucket with versioning, the older .zip may still be there.
+
 ## Command reference { #reference }
 
 Every `LambdaView` command. `ui.help()` prints the same list grouped by task, and `ui.help("logs")` shows one command's full description.
@@ -703,6 +747,7 @@ Every `LambdaView` command. `ui.help()` prints the same list grouped by task, an
 | `logs(name, since=None, search=None, request_id=None, n=50, region=None)` | The newest lines it logged, or one run from start to end |
 | `performance(name, since="24h", region=None, limit=5000)` | Run times, memory used, cold starts, timeouts, the slowest runs, and the memory size that would do |
 | `code(name, file=None, region=None, max_size="50MB")` | The files in its deployment package, findings about them, and the handler's source |
+| `diff(name, old=None, new=None, region=None, max_size="50MB")` | What changed between two versions: its files line by line with the functions each change is in, the libraries packed with it, its settings and environment variable names |
 | `how_it_works(name, region=None, max_size="50MB")` | How its Python code works, as a graph and as steps to click through from the handler, then what to fix |
 | `how_it_works_page(name, path=None, region=None, max_size="50MB")` | The same report as a page of its own, saved in `lambda-downloads/` (or at `path=`), with a link that opens it in a tab |
 | `download(name, path=None, region=None)` | Its deployment package saved on the notebook's disk, in `lambda-downloads/` (or at `path=`), checked against Lambda's SHA-256 |

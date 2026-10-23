@@ -25,7 +25,7 @@ from aws_analyzer.lambda_functions.analysis import text as textmod
 from aws_analyzer.lambda_functions.analysis.codemap import aws_model, reader
 from aws_analyzer.lambda_functions.analysis.codemap import findings as codemap_findings
 from aws_analyzer.lambda_functions.analysis.codemap import graph as codemap_graph
-from aws_analyzer.lambda_functions.blocks import graph as graph_block, wiring as wiring_block
+from aws_analyzer.lambda_functions.blocks import diff as diff_block, graph as graph_block, wiring as wiring_block
 from aws_analyzer.lambda_functions.blocks.walk import _Walk, _WalkHtml
 from aws_analyzer.lambda_functions.explorer import code as code_tab, frame, logs as logs_tab
 from aws_analyzer import set_timezone
@@ -65,6 +65,8 @@ from aws_analyzer.lambda_functions import (
     classify_error,
     code_graph,
     code_map_findings,
+    diff_findings,
+    diff_packages,
     error_findings,
     find_symbol_in,
     function_findings,
@@ -95,6 +97,7 @@ from aws_analyzer.lambda_functions import (
     source_files,
     split_runs,
     suggest_memory,
+    version_before,
 )
 
 REGION, OTHER = "us-east-1", "eu-west-1"
@@ -1313,6 +1316,143 @@ def test_wiring_and_columns_render_as_html_and_text():
     assert 'class="lim"' in stylemod._render_html([timed], 50) and "the most: 900 ms" in _render_text([timed], 50)
 
 
+OLD_CODE = zipped({
+    "app.py": 'import os\nMODE = os.environ["MODE"]\n\n\ndef handler(event, context):\n    return load(event)\n\n\n'
+              '@cached\ndef load(event):\n    return event["id"]\n',
+    "store.py": "def save(rows):\n    return len(rows)\n",
+    "gone.py": "x = 1\n",
+    "requests-2.31.0.dist-info/RECORD": "requests/api.py,,\n",
+    "requests/api.py": "def get():\n    return 1\n",
+    "node_modules/left-pad/package.json": '{"name": "left-pad", "version": "1.2.0"}',
+    "logo.png": b"\x89PNG\x00\x00",
+    ".env": "DB_PASSWORD=hunter2\n",
+})
+
+NEW_CODE = zipped({
+    "app.py": 'import os\nMODE = os.environ["MODE"]\n\n\ndef handler(event, context):\n    return load(event)\n\n\n'
+              '@cached\ndef load(event):\n    return event["customer_id"]\n',
+    "store.py": "def save(rows:\n    return len(rows)\n",
+    "added.py": "class Orders:\n    def add(self):\n        pass\n",
+    "requests-2.32.3.dist-info/RECORD": "requests/api.py,,\n",
+    "requests/api.py": "def get():\n    return 2\n",
+    "node_modules/left-pad/package.json": '{"name": "left-pad", "version": "1.3.0"}',
+    "logo.png": b"\x89PNG\x00\x00\x01",
+    ".env": "DB_PASSWORD=swordfish\n",
+    "bundle.js": "x" * 3000,
+})
+
+
+def versioned(version, sha, **kwargs):
+    return fn(version=version, raw={"CodeSha256": sha}, **kwargs)
+
+
+def test_stream_version_and_qualifiers():
+    assert helpers.stream_version("2026/10/22/[3]8f5ce35b") == "3"
+    assert helpers.stream_version("2026/10/22/[$LATEST]8f5c") == "$LATEST"
+    assert helpers.stream_version("no version here") is None
+    assert [helpers.parse_qualifier(v) for v in (3, "3", "v3", "latest", "$LATEST", "prod")] == [
+        "3", "3", "3", "$LATEST", "$LATEST", "prod"]
+    with pytest.raises(ValueError, match="isn't a version or an alias"):
+        helpers.parse_qualifier("not ok!")
+    events = [LogEvent(NOW - timedelta(minutes=m), "[ERROR] KeyError: 'id'", stream=f"2026/10/06/[{v}]ab")
+              for m, v in ((30, "2"), (10, "3"), (5, "3"))]
+    assert group_errors(events)[0].versions == ["3", "2"]
+
+
+def test_diff_packages_compares_files_lines_and_libraries():
+    old = versioned("2", "old", env_names=["MODE", "TABLE"], timeout=900, memory=1024, runtime="python3.11")
+    new = versioned("$LATEST", "new", env_names=["TABLE", "BUCKET"], timeout=30, memory=1024, runtime="python3.12")
+    diff = diff_packages(old, OLD_CODE, new, NEW_CODE)
+    files = {change.path: change for change in diff.files}
+    assert [change.path for change in diff.files][0] == "app.py"
+    assert {path: change.status for path, change in files.items()} == {
+        "app.py": "changed", ".env": "changed", "added.py": "added", "bundle.js": "added", "gone.py": "removed",
+        "logo.png": "changed", "store.py": "changed"}
+    app = files["app.py"]
+    assert (app.added, app.removed, app.definitions) == (1, 1, ["load"])
+    assert app.lines == ['@@ -8,4 +8,4 @@', ' ', ' @cached', ' def load(event):', '-    return event["id"]',
+                         '+    return event["customer_id"]']
+    assert files["added.py"].definitions == ["Orders", "Orders.add"] and files["added.py"].added == 3
+    assert files["gone.py"].definitions == ["(top level)"] and files["gone.py"].removed == 1
+    assert "secrets file" in files[".env"].note and not files[".env"].lines
+    assert "swordfish" not in json.dumps([change.lines for change in diff.files])
+    assert files["logo.png"].note == "not a source file: compared by size"
+    assert files["bundle.js"].note.startswith("minified")
+    assert diff.broken == {"store.py": "SyntaxError at line 1"}
+    assert [(c.name, c.old, c.new) for c in diff.libraries] == [("left-pad", "1.2.0", "1.3.0"),
+                                                                ("requests", "2.31.0", "2.32.3")]
+    assert diff.library_files == 4 and diff.unchanged_files == 0
+    assert [(c.setting, c.old, c.new) for c in diff.settings] == [("Runtime", "python3.11", "python3.12"),
+                                                                  ("Timeout", "900 s", "30 s")]
+    assert (diff.env_added, diff.env_removed, diff.still_read) == (["BUCKET"], ["MODE"], {"MODE": "app.py:2"})
+
+    found = diff_findings(diff)
+    text = " ".join(message for _, message in found)
+    assert [level for level, _ in found] == ["warn", "warn", "info", "info", "info"]
+    assert "store.py has a SyntaxError at line 1 in $LATEST that version 2 didn't have" in text
+    assert "code('etl', 'store.py')" in text
+    assert "MODE was taken out of its environment variables in $LATEST, but app.py:2 still reads it" in text
+    assert "2 libraries packed with it changed in $LATEST: left-pad 1.2.0 → 1.3.0, requests 2.31.0 → 2.32.3" in text
+    assert "timeout went down from 900 s to 30 s" in text and "moved from python3.11 to python3.12" in text
+
+
+def test_diff_packages_when_there_are_no_lines_to_compare():
+    same = diff_packages(versioned("2", "abc"), None, versioned("3", "abc", memory=512), None)
+    assert same.same_code and not same.files and same.settings[0].setting == "Memory"
+    assert "only the settings below changed" in diff_findings(same)[0][1]
+    nothing = diff_packages(versioned("2", "abc"), None, versioned("3", "abc"), None)
+    assert "Nothing changed between version 2 and version 3" in diff_findings(nothing)[0][1]
+    image = diff_packages(versioned("2", "a", package_type="Image", image_uri="repo@sha256:1"), None,
+                          versioned("3", "b", package_type="Image", image_uri="repo@sha256:2"), None)
+    assert "container image" in image.note and image.settings[-1].setting == "Image" and not diff_findings(image)
+    assert "no link" in diff_packages(versioned("2", "a"), CODE, versioned("3", "b"), None).note
+    with pytest.raises(ValueError, match="isn't a readable .zip"):
+        diff_packages(versioned("2", "a"), b"not a zip", versioned("3", "b"), CODE)
+    big = zipped({"app.py": "".join(f"line {i}\n" for i in range(5000))})
+    cut = diff_packages(versioned("2", "a"), zipped({"app.py": ""}), versioned("3", "b"), big).files[0]
+    assert cut.added == 5000 and cut.truncated and len(cut.lines) == 400
+
+
+
+
+def test_diff_packages_names_the_aws_calls_new_code_makes():
+    before = zipped({"app.py": 'import boto3\n\ns3 = boto3.client("s3")\n\n\ndef handler(event, context):\n'
+                               '    return s3.get_object(Bucket="b", Key="k")\n'})
+    after = zipped({"app.py": 'import boto3\n\ns3 = boto3.client("s3")\ntable = boto3.resource("dynamodb").Table("t")\n'
+                              '\n\ndef handler(event, context):\n    table.put_item(Item=event)\n'
+                              '    return s3.get_object(Bucket="b", Key="k")\n'})
+    diff = diff_packages(versioned("1", "a"), before, versioned("$LATEST", "b", handler="app.handler"), after)
+    assert [(c.label, c.permission, c.file, c.line) for c in diff.new_calls] == [
+        ("DynamoDB PutItem", "dynamodb:PutItem", "app.py", 8)]
+    finding = [message for _, message in diff_findings(diff) if "AWS call" in message][0]
+    assert "$LATEST makes an AWS call the code didn't make before: DynamoDB PutItem at app.py:8" in finding
+    assert "Its role needs dynamodb:PutItem" in finding and "errors('etl')" in finding
+    node = diff_packages(versioned("1", "a", runtime="nodejs20.x"), before,
+                         versioned("2", "b", runtime="nodejs20.x"), after)
+    assert not node.new_calls and node.files
+    page = stylemod._render_html(diff_block._diff_blocks(diff), 50)
+    assert "AWS calls new in $LATEST" in page and "dynamodb:PutItem" in page
+
+def test_version_before_skips_versions_with_the_same_code():
+    versions = [Version("1", code_sha="a"), Version("2", code_sha="b"), Version("3", code_sha="b")]
+    assert version_before(versions, versioned("$LATEST", "b")) == (versions[0], ["3", "2"])
+    assert version_before(versions, versioned("$LATEST", "c")) == (versions[2], [])
+    assert version_before(versions, versioned("3", "b")) == (versions[0], ["2"])
+    assert version_before(versions, versioned("$LATEST", "a"))[0] is versions[2]
+    assert version_before(versions[:1], versioned("$LATEST", "a")) == (versions[0], [])
+    assert version_before(versions, versioned("1", "a")) == (None, [])
+    assert version_before([], versioned("$LATEST", "a")) == (None, [])
+
+
+def test_diff_renders_as_html_and_text():
+    diff = diff_packages(versioned("2", "old"), OLD_CODE, versioned("$LATEST", "new"), NEW_CODE)
+    page = stylemod._render_html([diff_block._Diff(diff.files[0], open=True)], 50)
+    assert '<details class="dif" open>' in page and '<span class="dfa">+    return event[&quot;customer_id&quot;]' in page
+    assert '<span class="dfh">@@ -8,4 +8,4 @@</span>' in page and "in load" in page
+    out = _render_text([diff_block._Diff(diff.files[0])], 50)
+    assert "-- app.py (changed, +1 −1, in load) --" in out and '+    return event["customer_id"]' in out
+
+
 # ---- AWS (moto)
 
 
@@ -1768,6 +1908,61 @@ def test_search_code_and_find_symbol_read_the_package(core):
     assert core.find_symbol("etl-nightly", "load_orders").definitions[0].file == "store.py"
 
 
+
+def versioned_clients(**settings):
+    """
+    lambda_clients whose GetFunction tags the code's link with the version, since moto gives every version the
+    same one, so a test's _download can serve each version its own package.
+    """
+    def get_function(FunctionName, **params):
+        answer = boto3.client("lambda", region_name=REGION).get_function(FunctionName=FunctionName, **params)
+        answer.pop("ResponseMetadata", None)
+        answer["Code"]["Location"] += "#" + answer["Configuration"]["Version"]
+        return answer
+    return lambda_clients(get_function=get_function, **settings)
+
+
+@pytest.fixture
+def released(role):
+    """
+    orders-etl, published as version 1 (OLD_CODE, 900 s, MODE set), version 2 (the same code, 60 s) and version 3
+    (NEW_CODE), then $LATEST with MODE taken out; the alias prod is version 2. core serves each version its package.
+    """
+    lam = boto3.client("lambda", region_name=REGION)
+    create("orders-etl", role, Code={"ZipFile": OLD_CODE}, Timeout=900,
+           Environment={"Variables": {"MODE": "prod", "TABLE": "orders"}})
+    lam.publish_version(FunctionName="orders-etl")
+    lam.update_function_configuration(FunctionName="orders-etl", Timeout=60)
+    lam.publish_version(FunctionName="orders-etl")
+    lam.update_function_code(FunctionName="orders-etl", ZipFile=NEW_CODE)
+    lam.publish_version(FunctionName="orders-etl")
+    lam.update_function_configuration(FunctionName="orders-etl", Environment={"Variables": {"TABLE": "orders"}})
+    lam.create_alias(FunctionName="orders-etl", Name="prod", FunctionVersion="2")
+    create("never-published", role)
+    core = LambdaAnalyzer(region=REGION, clients={"lambda": versioned_clients()})
+    packages = {"1": OLD_CODE, "2": OLD_CODE, "3": NEW_CODE, "$LATEST": NEW_CODE}
+    core._download = lambda url, most: packages[url.rsplit("#", 1)[1]] if "#" in url else CODE
+    return core
+
+
+def test_versions_and_diff_compare_published_versions(released):
+    core = released
+    assert [(v.version, bool(v.code_sha)) for v in core.versions("orders-etl")] == [("1", True), ("2", True),
+                                                                                    ("3", True)]
+    diff = core.diff("orders-etl")
+    assert (diff.old.version, diff.function.version, diff.skipped) == ("2", "$LATEST", ["3"])
+    assert diff.broken == {"store.py": "SyntaxError at line 1"} and diff.still_read == {"MODE": "app.py:2"}
+    assert not diff.settings and diff.env_removed == ["MODE"]
+    pair = core.diff("orders-etl", 1, "v2")
+    assert pair.same_code and [(c.setting, c.old, c.new) for c in pair.settings] == [("Timeout", "900 s", "60 s")]
+    alias = core.diff("orders-etl:prod")
+    assert (alias.old.version, alias.function.version, alias.same_code) == ("1", "2", True)
+    first = core.diff("orders-etl", new=1)
+    assert first.old is None and "first version" in first.note
+    nothing = core.diff("never-published")
+    assert nothing.old is None and "no published versions" in nothing.note and "publish-version" in nothing.note
+
+
 def test_download_checks_size_and_network(core, monkeypatch):
     class Answer:
         def __init__(self, body, length=None):
@@ -2067,6 +2262,24 @@ def test_code_report(ui, capsys):
     secret = run(capsys, ui.code, "etl-nightly", ".env")
     assert ".env looks like a secrets file, so its text isn't shown" in secret and "hunter2" not in secret
     assert "aws lambda get-function --function-name etl-nightly --region us-east-1 --query Code.Location" in secret
+
+
+def test_diff_report(released, capsys):
+    ui = LambdaView(released, mode="text", progress="off")
+    out = run(capsys, ui.diff, "orders-etl")
+    assert "What changed in orders-etl" in out and "skipped 3: the same code" in out
+    assert "Compared: version 2 → $LATEST" in out and "Files changed: 7 of 7 (!)" in out
+    assert "store.py has a SyntaxError at line 1 in $LATEST" in out and "app.py:2 still reads it" in out
+    assert "-- app.py (changed, +1 −1, in load) --" in out and '+    return event["customer_id"]' in out
+    assert "requests  2.31.0     2.32.3" in out and "Environment variable MODE  set        removed" in out
+    assert "code('orders-etl', 'app.py')" in out and "errors('orders-etl')" in out
+    assert "diff('orders-etl', 1, 2)" in out
+    same = run(capsys, ui.diff, "orders-etl", 1, 2)
+    assert "The code is the same in version 1 and version 2" in same and "Timeout      900 s       60 s" in same
+    none = run(capsys, ui.diff, "never-published")
+    assert "Nothing to compare $LATEST with" in none and "aws lambda publish-version" in none
+    assert "isn't a version or an alias" in run(capsys, ui.diff, "orders-etl", "no way")
+    assert "No function 'orders-etc'" in run(capsys, ui.diff, "orders-etc") and "Traceback" not in out
 
 
 def test_how_it_works_report(ui, capsys):

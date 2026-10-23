@@ -219,7 +219,22 @@ _EXTRA_CSS = """\
 .lmb .cgk .kw circle{fill:#f59e0b}
 .lmb .cgk .kw path{stroke:var(--jp-layout-color0,var(--vscode-editor-background,Canvas));stroke-width:1.8;stroke-linecap:round;fill:none}
 .lmb .cgk .kl circle{fill:none;stroke:currentColor;stroke-opacity:.55;stroke-width:1.2}
-.lmb .cgk .kl path{fill:none;stroke:currentColor;stroke-opacity:.8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}""".replace("%CODE_FONT%", _CODE_FONT)
+.lmb .cgk .kl path{fill:none;stroke:currentColor;stroke-opacity:.8;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.lmb details.dif{border:1px solid rgba(127,127,127,.25);border-radius:8px;margin:6px 0;max-width:1180px}
+.lmb details.dif>summary{cursor:pointer;padding:5px 10px;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.lmb details.dif>summary code{font-weight:600}
+.lmb .dif .dfs{font-size:10.5px;font-weight:600;padding:0 7px;border-radius:9px;background:rgba(127,127,127,.14)}
+.lmb .dif .dfs-added{background:rgba(22,163,74,.15);color:#178a45}
+.lmb .dif .dfs-removed{background:rgba(239,68,68,.14);color:#c53030}
+.lmb .dif .dfs-changed{background:rgba(245,158,11,.18);color:#b86e04}
+.lmb .dif .dfn{font:12px var(--lmb-mono);opacity:.75}
+.lmb .dif .dfd{font-size:12px;opacity:.65}
+.lmb .dif pre.dfp{margin:0;padding:6px 0;border:0;border-top:1px solid rgba(127,127,127,.2);border-radius:0;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre}
+.lmb .dif pre.dfp>span{display:inline-block;min-width:100%;box-sizing:border-box;padding:0 10px}
+.lmb .dif .dfa{background:rgba(22,163,74,.13)}
+.lmb .dif .dfr{background:rgba(239,68,68,.12)}
+.lmb .dif .dfh{color:#3b82f6;opacity:.8;margin-top:4px}
+.lmb .dif .dfx{padding:4px 10px 6px;font-size:12px;opacity:.7}""".replace("%CODE_FONT%", _CODE_FONT)
 
 _CSS = _base_css(_ROOT, _EXTRA_CSS + "\n" + _json_tree_css(_ROOT))
 

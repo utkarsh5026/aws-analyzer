@@ -34,6 +34,7 @@ Quick start
     ui.logs("etl-nightly", search="KeyError")         # the newest lines it logged
     ui.performance("etl-nightly")                     # run times, memory used, cold starts, and the memory it needs
     ui.code("etl-nightly")                            # the files in its package, and the handler's source
+    ui.diff("etl-nightly")                            # what changed since its last published version: files, lines, settings
     ui.how_it_works("etl-nightly")                    # how its Python code works, step by step from the handler
     ui.how_it_works_page("etl-nightly")               # the same as a page of its own, to open in a browser tab
     ui.download("etl-nightly")                        # its package (.zip) saved in lambda-downloads/, next to the notebook
@@ -57,15 +58,17 @@ from .._kit.text import search_rank
 from .prices import DAYS_PER_MONTH, LAMBDA_PRICES
 from .helpers import (
     CODE_STORAGE_LIMIT, ENDING_SOON_DAYS, GB, KB, LATEST_RUNTIMES, MAX_TIMEOUT, MB, MEMORY_PER_VCPU, MEMORY_STEPS,
-    RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, runtime_family,
+    RUNTIMES, TB, UNZIPPED_LIMIT, human_ms, parse_function_ref, parse_qualifier, runtime_family, stream_version,
 )
 from .models import (
     AccountLimits, Alias, AsyncConfig, CodeFile, CodeMatch, CodePackage, CodeSearch, CodeSymbol, DailyUsage, ErrorGroup,
-    ErrorReport, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LogEvent, LogGroup,
-    PackageDownload, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, SymbolReport, SymbolUse, Trigger,
-    Version,
+    ErrorReport, FileChange, Function, FunctionDetail, FunctionMetrics, FunctionUrl, Invocation, Layer, LibraryChange,
+    LogEvent, LogGroup, PackageDownload, Performance, ProvisionedConcurrency, RuntimeStatus, SavedPage, SettingChange,
+    SymbolReport, SymbolUse, Trigger, Version, VersionDiff,
 )
-from .analysis.functions import masked_config, parse_event_source_mapping, parse_function, parse_policy, runtime_status
+from .analysis.functions import (
+    masked_config, parse_event_source_mapping, parse_function, parse_policy, parse_version, runtime_status,
+)
 from .analysis.cost import function_monthly_cost, log_storage_monthly_cost, provisioned_monthly_cost
 from .analysis.overview import Overview
 from .analysis.findings import RECENT_DAYS, account_findings, function_findings, secret_like
@@ -76,6 +79,7 @@ from .analysis.package import (
     DOWNLOADS, handler_file, package_file_name, package_findings, page_file_name, read_package,
 )
 from .analysis.source import find_symbol_in, search_package, source_files
+from .analysis.versions import diff_findings, diff_packages, diff_settings, version_before
 from .analysis.codemap.model import AwsCall, CodeFunction, CodeMap, CodeSpot, CodeStep, EnvRead, EventField, ImportUse
 from .analysis.codemap.mapping import map_code, map_package
 from .analysis.codemap.findings import code_map_findings
@@ -121,6 +125,7 @@ __all__ = [
     "ErrorGroup",
     "ErrorReport",
     "EventField",
+    "FileChange",
     "Function",
     "FunctionDetail",
     "FunctionMetrics",
@@ -133,6 +138,7 @@ __all__ = [
     "LambdaExplorer",
     "LambdaView",
     "Layer",
+    "LibraryChange",
     "LogEvent",
     "LogGroup",
     "LogPage",
@@ -143,14 +149,19 @@ __all__ = [
     "ProvisionedConcurrency",
     "RuntimeStatus",
     "SavedPage",
+    "SettingChange",
     "SymbolReport",
     "SymbolUse",
     "Trigger",
     "Version",
+    "VersionDiff",
     "account_findings",
     "classify_error",
     "code_graph",
     "code_map_findings",
+    "diff_findings",
+    "diff_packages",
+    "diff_settings",
     "error_findings",
     "explore",
     "function_findings",
@@ -176,9 +187,11 @@ __all__ = [
     "parse_function",
     "parse_function_ref",
     "parse_policy",
+    "parse_qualifier",
     "parse_report",
     "parse_size",
     "parse_time",
+    "parse_version",
     "percentile",
     "performance_findings",
     "provisioned_monthly_cost",
@@ -189,5 +202,7 @@ __all__ = [
     "search_rank",
     "secret_like",
     "split_runs",
+    "stream_version",
     "suggest_memory",
+    "version_before",
 ]

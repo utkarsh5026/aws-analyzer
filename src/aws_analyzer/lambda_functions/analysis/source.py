@@ -58,6 +58,23 @@ def _library_names(paths: list[str]) -> set[str]:
     return names
 
 
+def _is_library_file(path: str, libraries: set[str]) -> bool:
+    """
+    Whether a file in a package belongs to a library packed with it: under a folder (or a module) named after one of
+    its .dist-info folders (`libraries`, from _library_names), or in node_modules, site-packages, __pycache__ or a
+    .dist-info folder.
+    """
+    top = path.split("/")[0].removesuffix(".py").lower()
+    return top in libraries or bool(_LIBRARY_PATH_RE.search(path))
+
+
+def _is_source_file(path: str) -> bool:
+    """
+    Whether a file is text a person writes: .py, .js, .json, .yaml, ... (_SOURCE_EXTENSIONS).
+    """
+    return posixpath.splitext(path)[1].lower() in _SOURCE_EXTENSIONS
+
+
 def source_files(pkg: CodePackage) -> list[str]:
     """
     A deployment package's own source files, the handler's first, then by folder depth and name: its text files
@@ -66,12 +83,7 @@ def source_files(pkg: CodePackage) -> list[str]:
     """
     paths = [f.path for f in pkg.files]
     libraries = _library_names(paths)
-    own = []
-    for path in paths:
-        top = path.split("/")[0].removesuffix(".py").lower()
-        is_source = posixpath.splitext(path)[1].lower() in _SOURCE_EXTENSIONS
-        if is_source and top not in libraries and not _LIBRARY_PATH_RE.search(path):
-            own.append(path)
+    own = [path for path in paths if _is_source_file(path) and not _is_library_file(path, libraries)]
     return sorted(own, key=lambda path: (path != pkg.handler_file, path.count("/"), path))
 
 
