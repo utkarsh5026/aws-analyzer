@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-23
+
 ### Added
 
 - Lambda: `diff("orders-etl")` shows what changed between two versions of a function: each of its own files line by
@@ -833,7 +835,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.26.0...v0.27.0
