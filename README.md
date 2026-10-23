@@ -2016,7 +2016,7 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 ### What it can call
 
-Eighteen tools in two toolkits (nineteen with `read_files=True`, and three more with `python=`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Eighteen tools in two toolkits (nineteen with `read_files=True`, and six more with `python=`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
@@ -2056,8 +2056,9 @@ data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,00
 ### Running Python (`python=`)
 
 Some questions need work no tool does: what a folder of PDFs says, every place a function's code calls DynamoDB,
-errors by hour across a day of logs, a count across a hundred CSVs. `AgentView(python="local")` gives the agent a
-Python sandbox on the notebook's machine, and five tools of its own (plus deepagents' file tools, below):
+errors by hour across a day of logs, a count across a hundred CSVs, a chart of sales by month. `AgentView(python="local")`
+gives the agent a Python sandbox on the notebook's machine, with pandas and Altair, and six tools of its own (plus
+deepagents' file tools, below):
 
 | Tool                                         | What it returns                                                                                                                         |
 | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2066,6 +2067,7 @@ Python sandbox on the notebook's machine, and five tools of its own (plus deepag
 | `save_logs(function, since, until, search, region)` | Saves a window of a function's logs as `lines.jsonl` (each line) and `runs.jsonl` (each run: status, run time, memory, cold start, error), with anything that looks like a secret hidden |
 | `run_python(code)`                           | Runs the code the model writes in the workspace and returns what it printed (anything that looks like a secret hidden), its traceback when it failed, and the files it wrote |
 | `workspace_files(folder)`                    | The files in the workspace, with their sizes                                                                                             |
+| `show_chart(file, title)`                    | Puts a chart the code saved in the answer, under its text, with its title: an Altair (Vega-Lite) chart, which the sandbox draws as SVG, or a PNG or SVG picture |
 
 ```python
 %pip install "aws-analyzer[agent,sandbox]"      # brings Deno
@@ -2074,22 +2076,39 @@ agent = AgentView(provider="bedrock", python="local")
 agent.ask("What do the contracts in s3://acme-legal/2026/ say about termination notice?")
 agent.ask("Which of orders-etl's functions call DynamoDB, and with which tables?")
 agent.ask("When did orders-etl's errors start yesterday, hour by hour?")
+agent.ask("Chart the orders in s3://acme-raw/sales/*.csv by month and region")   # the answer, with its charts
+agent.save_charts()                             # those charts as SVG files in agent-charts/, for a slide
 ```
+
+**Charts.** When a picture answers better than a table (a trend, a few groups compared, a distribution), the agent
+reads the files it saved with pandas, makes the chart with [Altair](https://altair-viz.github.io) and puts it in the
+answer with `show_chart`. The sandbox draws it as a crisp SVG with [Vega-Lite](https://vega.github.io/vega-lite/),
+in the same Deno that runs the code, so drawing it fetches nothing. The report shows each chart under the answer's text
+with its title, and so do the chat window and `transcript()`; the picture is inside the notebook's output, so it stays
+when the notebook is saved. Every chart gets the same look (`CHART_THEME`: one size, quiet axes and grid, and eight
+colours that stay apart for colour-blind readers, in a fixed order), and the agent is told how to make one read: a
+title that says what it shows, axes labelled with units, no pies or second y-axis. `save_charts()` writes the last
+answer's charts to SVG files with each chart's Vega-Lite spec beside it (`answer=` picks an earlier one; it never
+replaces a file), and `answer.charts` holds them as data (`.title`, `.data`, `.spec`): with Altair installed,
+`alt.Chart.from_dict(answer.charts[0].spec)` shows one again with tooltips. A question gets at most 8 charts
+(`budget={"charts": 12}` raises it). Prefer matplotlib? `LocalSandbox(packages=["pandas", "matplotlib"])`.
 
 The code runs in [Pyodide](https://pyodide.org) (Python 3.14 compiled to WebAssembly) on
 [Deno](https://deno.com), which grants it read access to Pyodide's own files and nothing else: no network (so not
 the instance metadata service that hands out the notebook role's credentials), no environment variables, none of the
 machine's files and no subprocesses. Each run starts a fresh interpreter; the workspace's files are kept in memory
-and stay between runs. The code can import the standard library and pandas (with numpy);
-`LocalSandbox(packages=["pandas", "scikit-learn"])` (from `aws_analyzer.agent`) offers others from
+and stay between runs. The code can import the standard library, pandas (with numpy) and Altair;
+`LocalSandbox(packages=["pandas", "altair", "scikit-learn"])` (from `aws_analyzer.agent`) offers others from
 [Pyodide's packages](https://pyodide.org/en/stable/usage/packages-in-pyodide.html), and `memory="4GB"` gives a run
 more than the 2 GB it gets by default.
 
 > [!NOTE]
-> The first run downloads Pyodide 314.0.7's files once from the jsDelivr CDN, about 21 MB with pandas, into
+> The first run downloads Pyodide 314.0.7's files once from the jsDelivr CDN, about 24 MB with pandas, Altair and
+> Vega-Lite, into
 > `~/.cache/aws-analyzer/pyodide/` (`LocalSandbox(cache=...)` for another folder), and checks each file's SHA-256.
 > `LocalSandbox().prepare()` does it ahead of time and says what it has. A notebook without internet access can copy
-> the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")`.
+> the files into that folder from elsewhere, or use a mirror: `LocalSandbox(index_url="https://...")` for Pyodide's,
+> `vega_url="https://..."` for Vega's (an npm mirror).
 
 deepagents' file tools work on the same files: the agent writes a longer script with `write_file`, runs it with
 `run_python(file="analysis.py")`, fixes a line with `edit_file` instead of sending it all again, and reads or searches
@@ -2098,7 +2117,8 @@ they show). Each of those calls counts as a tool call, and shows in the chat win
 
 Data reaches the workspace only through the tools, whose AWS clients the read-only guard hooks, so the code itself
 never needs AWS. What it prints goes to the model's provider. A question gets 10 runs of up to 30 seconds each
-(starting Pyodide takes about 2 seconds of that, and loading pandas about 3), and the tools save at most 50 MB in all:
+(starting Pyodide takes about 2 seconds of that, loading pandas about 3, and Altair about 2 more), and the tools
+save at most 50 MB in all:
 `budget={"python_runs": 20, "python_seconds": 60, "workspace_bytes": 200_000_000}` raises them.
 
 To run the code somewhere else (a container, a managed sandbox), pass your own `Workspace` (from
@@ -2134,7 +2154,8 @@ agent = AgentView(provider="bedrock", python=MySandbox())
   Past a limit the tools stop and the model answers with what it has, and the report says what was cut short.
   `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
   file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
-  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), and 50 MB saved (`workspace_bytes`).
+  `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`) and 8
+  charts in an answer (`charts`).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2148,6 +2169,7 @@ agent = AgentView(provider="bedrock", python=MySandbox())
 | `ask(question, new=False)`  | The answer first, then **what it checked**: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
+| `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
 | `use_model(provider=None, model=None, *, endpoint=None, api_key=None, api_version=None, chat_model=None)` | Switches the model the agent answers with (`use_model('bedrock', 'sonnet')`, `use_model('openai', 'gpt-4.1', api_key=...)`), then says where what it sends goes. A new conversation starts; a missing key or package is said, and the agent keeps the model it had |
 
@@ -2170,12 +2192,13 @@ core = AgentAnalyzer(
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
-    python="local",                       # adds run_python and the save_* tools: Python in a local sandbox
+    python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
 )
 agent = AgentView(core)
 
 answer = core.ask("Which Lambda failed last night?")    # AgentAnswer
 answer.text                    # the answer, in markdown
+answer.charts                  # Chart: title, path, data (the SVG's bytes), kind, mime, spec (its Vega-Lite)
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
 answer.provider, answer.model # who served it, and the model or profile that answered
@@ -2190,7 +2213,8 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
 `summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, the Python toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`trigger_findings`, the Python toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
+`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what

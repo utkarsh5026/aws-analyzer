@@ -44,7 +44,7 @@ from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
 from ..answers import AgentAnswer, AgentStep, ToolCall, services_of
 from ..llm import provider_info
-from ..view import _CSS, _ROOT, _coverage_text
+from ..view import _CSS, _ROOT, _Charts, _coverage_text
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
 if TYPE_CHECKING:
@@ -126,6 +126,7 @@ _SUGGESTIONS = (
     _Suggestion(frozenset({"s3"}), "Which buckets do I have, and how big are they?", ("s3", "cloudwatch")),
     _Suggestion(frozenset({"s3", "lambda"}), "Did last night's uploads trigger their Lambda?",
                 ("s3", "lambda", "cloudwatch")),
+    _Suggestion(frozenset({"s3", "python"}), "Chart how big each of my buckets is", ("s3", "cloudwatch")),
 )
 
 
@@ -166,6 +167,7 @@ _TOOL_WORDS = {
     "save_s3_files": _ToolWords("saving {t} to the workspace", "saved {t} to the workspace", "files"),
     "run_python": _ToolWords("running Python", "ran Python"),
     "workspace_files": _ToolWords("listing the workspace", "listed the workspace"),
+    "show_chart": _ToolWords("putting {t} in the answer", "put {t} in the answer", "a chart"),
     "ls": _ToolWords("listing {t}", "listed {t}", "the workspace"),
     "read_file": _ToolWords("reading {t}", "read {t}", "a file"),
     "write_file": _ToolWords("writing {t}", "wrote {t}", "a file"),
@@ -174,7 +176,7 @@ _TOOL_WORDS = {
     "grep": _ToolWords("searching the workspace for {t}", "searched the workspace for {t}", "a text"),
     "delete": _ToolWords("deleting {t}", "deleted {t}", "a file"),
 }
-_TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key")
+_TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 
 _THEME_CSS = _terminal_theme((".agc-app",), "ag") + """
@@ -290,6 +292,8 @@ _CONVERSATION_CSS = """\
 .agt .ag-ans{display:flex;gap:10px;margin:8px 0 2px}
 .agt .ag-ans .ans{font-size:13px;line-height:1.65;margin:0;padding-left:12px;border-left:2px solid var(--ag-accent);min-width:0}
 .agt .ag-ans .ans code{background:var(--ag-hover);padding:1px 4px;border-radius:4px;font-size:12.5px}
+.agt .ag-charts{margin:10px 0 2px;padding-left:36px}
+.agt .ag-charts .cht{margin:0}
 .agt .ag-fd .fd{margin:10px 0 4px}
 .agt .ag-fail{margin:8px 0;padding-left:14px;border-left:2px solid var(--ag-bad);color:var(--ag-bad)}
 .agt .ag-foot{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px;margin:8px 0 4px;font-size:12px}
@@ -994,7 +998,7 @@ class _AgentChat(_Window):
     def _reply_html(self, answer: AgentAnswer, trail: list[Any]) -> str:
         """
         The answer as the window shows it: the steps it took folded into one line (open when something went wrong),
-        the answer, the findings about how it was reached, who answered and what it cost, and the rest of the report
+        the answer and its charts, the findings about how it was reached, who answered and what it cost, and the rest of the report
         (each call, the AWS reads, the commands to look closer) under details.
         """
         view = self.view
@@ -1006,7 +1010,9 @@ class _AgentChat(_Window):
         if answer.text:
             mark = f'<span class="ag-mark">{_MACHINE}</span>'
             parts.append(f'<div class="ag-ans">{mark}{_answer_text_html(answer.text)}</div>')
-        elif not answer.error:
+        if answer.charts:
+            parts.append(f'<div class="ag-charts">{_blocks_html([_Charts(answer.charts)], root=_ROOT)}</div>')
+        if not answer.text and not answer.error:
             parts.append(_blocks_html([_Note("The agent stopped before it wrote an answer: the steps above show what "
                                              "it read.", "warn")], root=_ROOT))
         if findings:

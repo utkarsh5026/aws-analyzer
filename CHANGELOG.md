@@ -9,6 +9,23 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Agent: with a Python sandbox (`AgentView(python="local")`), the agent answers with charts. Ask "Chart the orders in
+  s3://acme-raw/sales/ by month" and it reads the files it saved with pandas, makes the chart with Altair and puts it
+  under the answer with the new `show_chart` tool, in the report, the chat window and `transcript()`. The sandbox draws
+  it as a crisp SVG with Vega-Lite, with no network; every chart gets the same look (quiet axes, colours that stay
+  apart for colour-blind readers), and the agent is told how to make one read. `save_charts()` writes an answer's
+  charts to SVG files in `agent-charts/` with their Vega-Lite specs beside them (never replacing a file),
+  `answer.charts` holds them as data, and a new budget limit, `charts` (8), caps them. The local sandbox now offers
+  Altair by default (its first download grows from about 21 MB to 24 MB), and `LocalSandbox(vega_url=)` points at a
+  mirror of Vega's files. `LocalSandbox(packages=["pandas", "matplotlib"])` draws with matplotlib instead.
+
+### Fixed
+
+- Agent: `LocalSandbox(packages=[...])` now offers packages whose dependencies Pyodide names with an underscore or a
+  dot (Altair's `jsonschema_specifications`), which it used to refuse as unknown.
+
 ## [0.31.0] - 2026-10-23
 
 ### Added

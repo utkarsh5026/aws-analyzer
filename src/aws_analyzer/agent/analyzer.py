@@ -6,9 +6,11 @@ It never prints; AgentView shows what it returns.
 
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from datetime import datetime, tzinfo
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -21,6 +23,7 @@ from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
 from .answers import AgentAnswer, AgentStep
 from .budget import Budget, _Run
+from .charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
 from .llm import (
     AZURE_API_VERSION,
@@ -476,6 +479,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         finally:
             self._run = None
         answer.calls = list(run.calls)
+        answer.charts = list(run.charts)
         answer.aws_calls = dict(self._guard.counts)
         answer.blocked = list(self._guard.blocked)
         answer.metrics_read = run.metrics_read
@@ -489,6 +493,24 @@ class AgentAnalyzer(_BaseAnalyzer):
             answer.stopped = refused[0] if refused else None
         self.history.append(answer)
         return answer
+
+    def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> list[Path]:
+        """
+        Saves the charts of an answer (the last one; answer= picks another from history) as files in `folder`
+        ('agent-charts', beside the notebook; made when it isn't there), each named after its title, and returns
+        their paths. A file that's there already is never replaced: the new one gets a number.
+        """
+        if not self.history:
+            raise _Hint("Nothing asked yet: ask a question that needs a chart first, like ask('Chart the errors per "
+                        "day of each function this week').")
+        try:
+            picked = self.history[answer]
+        except IndexError:
+            raise _Hint(f"There's no answer {answer}: {len(self.history)} so far (answer=-1 is the last)") from None
+        if not picked.charts:
+            raise _Hint(f"The answer to {picked.question!r} has no charts. Ask for one (it needs a Python workspace: "
+                        "AgentView(python='local')).")
+        return write_charts(picked.charts, folder)
 
     def tools(self) -> list[Callable[..., dict[str, Any]]]:
         """

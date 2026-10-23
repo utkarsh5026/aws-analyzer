@@ -50,10 +50,13 @@ from aws_analyzer.agent import (
     Toolkit,
     ToolCall,
     TriggerLink,
+    Chart,
     Workspace,
     WorkspaceFile,
     answer_cost,
     answer_findings,
+    chart_of,
+    image_kind,
     answer_next,
     asked_at,
     clean_path,
@@ -1828,7 +1831,7 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
     assert [t.name for t in core.toolkits] == ["lambda", "s3", "python"] and core.workspace is workspace
     assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
     names = [fn.__name__ for fn in core.tools()]
-    assert names[-2:] == ["run_python", "workspace_files"] and "save_function_code" in names
+    assert names[-3:] == ["run_python", "workspace_files", "show_chart"] and "save_function_code" in names
     assert core.reads["save_function_code"][0] == "lambda:GetFunction" and core.reads["run_python"] == ()
     prompt = core.instructions()
     assert "run_python runs code you write in a sandbox" in prompt and "save_function_code puts its files" in prompt
@@ -1924,6 +1927,166 @@ def test_ask_runs_python_and_the_report_shows_its_code(seeded, tmp_path, capsys)
     assert "Ask about Lambda and S3 in plain English" in page(window(core=make(python=Folder(tmp_path))))
 
 
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+DRAW = ("import os\nos.makedirs('charts', exist_ok=True)\n"
+        "open('charts/errors_by_day.png', 'wb').write(b'\\x89PNG\\r\\n\\x1a\\n' + bytes(24))\nprint('drawn')")
+
+
+@pytest.mark.parametrize("data, kind", [
+    (PNG, "png"), (b"\xff\xd8\xff\xe0", "jpeg"), (b"GIF89a..", "gif"), (b"RIFF\x00\x00\x00\x00WEBPVP8 ", "webp"),
+    (b'<?xml version="1.0"?>\n<!-- drawn -->\n<svg xmlns="http://www.w3.org/2000/svg">', "svg"),
+    (b"\xef\xbb\xbf  <svg width='1'>", "svg"), (b"day,errors\n1,2\n", None), (b"<html><svg>", None),
+])
+def test_image_kind_tells_a_picture_by_how_it_starts(data, kind):
+    assert image_kind(data) == kind
+
+
+def test_chart_of_takes_pictures_only_and_names_them(tmp_path):
+    chart = chart_of("charts/errors_by_day.png", PNG)
+    assert chart.title == "Errors by day" and chart.kind == "png" and chart.mime == "image/png"
+    assert chart_of("a.svg", b"<svg/>", "  Errors\n doubled ").title == "Errors doubled"
+    with pytest.raises(ValueError, match="isn't a chart: save one with Altair"):
+        chart_of("data.csv", b"a,b\n")
+    with pytest.raises(ValueError, match="more than the 3.0 MB a chart may be"):
+        chart_of("big.png", PNG + bytes(4 * 1024 * 1024))
+
+    from aws_analyzer.agent.charts import write_charts
+    (tmp_path / "errors-by-day.png").write_bytes(b"mine")
+    written = write_charts([chart, Chart("Errors by day", "b.svg", b"<svg/>", "svg"), chart], tmp_path)
+    assert [p.name for p in written] == ["errors-by-day-2.png", "errors-by-day.svg", "errors-by-day-3.png"]
+    assert (tmp_path / "errors-by-day.png").read_bytes() == b"mine" and written[0].read_bytes() == PNG
+    assert not list(tmp_path.glob("*.part"))
+
+
+SPEC = {"$schema": "https://vega.github.io/schema/vega-lite/v6.1.0.json", "title": {"text": "Orders"},
+        "config": {"view": {"continuousWidth": 300, "continuousHeight": 300, "stroke": "red"}},
+        "datasets": {"d1": [{"month": "2026-01", "url": "https://acme.example/x", "orders": 120}]},
+        "data": {"name": "d1"}, "mark": "bar", "encoding": {"x": {"field": "month"}, "y": {"field": "orders"}}}
+
+
+def test_read_spec_takes_vega_lite_charts_drawn_from_their_own_data():
+    from aws_analyzer.agent.charts import is_spec, read_spec, themed_spec
+
+    data = json.dumps(SPEC).encode()
+    assert is_spec(b"  {") and not is_spec(PNG) and read_spec("c.json", data) == SPEC
+    themed, title = themed_spec(SPEC)
+    assert title == "Orders" and "title" not in themed and themed["config"]["view"] == {"stroke": "red"}
+    assert SPEC["config"]["view"]["continuousWidth"] == 300
+    assert themed_spec({"mark": "bar", "title": ["Two", "lines"]})[1] == "Two lines"
+    for spec, message in [
+        ({**SPEC, "data": {"url": "https://evil.example/x.csv"}}, "reads from a URL \\('url'\\)"),
+        ({"layer": [{"mark": "image", "encoding": {"url": {"field": "u"}}}]}, "reads from a URL"),
+        ({"rows": [1, 2]}, "is JSON but not a Vega-Lite chart"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            read_spec("c.json", json.dumps(spec).encode())
+    with pytest.raises(ValueError, match="isn't a Vega-Lite chart"):
+        read_spec("c.json", b"{broken")
+    with pytest.raises(ValueError, match="more than the 5.0 MB a chart may be: aggregate"):
+        read_spec("c.json", b"{" + b" " * (6 * 1024 * 1024) + b"}")
+
+
+def test_a_workspace_that_cant_draw_vega_lite_asks_for_a_picture(seeded, tmp_path):
+    workspace = Folder(tmp_path)
+    workspace.put("charts/c.json", json.dumps(SPEC).encode())
+    core = AgentAnalyzer(region=REGION, toolkits=["python"], python=workspace)
+    shown = tool(core, "show_chart")("charts/c.json")
+    assert shown["message"].startswith("a test folder can't draw Vega-Lite charts: save the chart as a PNG")
+
+
+def test_saved_vega_lite_charts_keep_their_spec_beside_them(tmp_path):
+    from aws_analyzer.agent.charts import write_charts
+
+    (tmp_path / "orders.vl.json").write_text("mine")
+    chart = Chart("Orders", "charts/c.json", b"<svg/>", "svg", spec=SPEC)
+    written = write_charts([chart, chart], tmp_path)
+    assert [p.name for p in written] == ["orders-2.svg", "orders-3.svg"]
+    assert json.loads((tmp_path / "orders-2.vl.json").read_text()) == SPEC
+    assert (tmp_path / "orders.vl.json").read_text() == "mine" and not (tmp_path / "orders.svg").exists()
+
+
+def test_a_run_that_draws_a_picture_says_how_to_show_it():
+    ran = summarize_run(PythonRun(True, new_files=["charts/a.json", "out.csv", "charts/b.SVG", "data/c.json"]))
+    assert ran["charts"] == ("It saved 2 charts: show_chart('charts/a.json', title=...), "
+                             "show_chart('charts/b.SVG', title=...) puts one in your answer.")
+    assert "charts" not in summarize_run(PythonRun(True, new_files=["out.csv"]))
+
+
+def test_ask_draws_a_chart_and_every_report_shows_it(seeded, tmp_path, capsys, monkeypatch):
+    model = scripted(
+        calls(("run_python", {"code": DRAW})),
+        calls(("show_chart", {"file": "charts/errors_by_day.png", "title": "Errors doubled on Tuesday"})),
+        calls(("show_chart", {"file": "charts/errors_by_day.png"})),
+        calls(("show_chart", {"file": "nope.png"})),
+        says("Errors **doubled** on Tuesday: see the chart Errors by day."),
+    )
+    agent = make(model, python=Folder(tmp_path))
+    answer = agent.ask("Chart the errors per day", now=NOW)
+    assert answer.error is None and [c.title for c in answer.charts] == ["Errors by day"]
+    assert answer.charts[0].data == PNG and answer.charts[0].path == "charts/errors_by_day.png"
+    assert "show_chart('charts/errors_by_day.png', title=...)" in answer.calls[0].result["charts"]
+    assert "Folder can't draw" not in str(answer.calls)
+    shown = answer.calls[1]
+    assert shown.summary == "Errors doubled on Tuesday (PNG, 32 B)" and shown.result["charts_in_answer"] == 1
+    assert shown.call == "show_chart('charts/errors_by_day.png', title='Errors doubled on Tuesday')"
+    assert answer.calls[3].error.startswith("ValueError: There's no 'nope.png' in the workspace")
+    assert "show_chart" in model.bound[0] and "Charts\n- When a picture says it better" in agent.instructions()
+    assert "save it as a PNG or SVG file in run_python (there's no chart library" in agent.instructions()
+
+    view = AgentView(agent, mode="text", progress="off")
+    out = run(capsys, view._show, view._answer_blocks(answer))
+    assert "📈 Errors by day (PNG, 32 B): open in a notebook to see it" in out and "save_charts()" in out
+    assert "1 chart" in out
+    html = viewmod._render_html(view._answer_blocks(answer), 50)
+    assert '<figcaption>Errors by day</figcaption><img src="data:image/png;base64,iVBORw0KGgo' in html
+    assert "PNG · 32 B · charts/errors_by_day.png" in html
+    assert "📈 Errors by day" in run(capsys, view.transcript)
+
+    monkeypatch.chdir(tmp_path)
+    out = run(capsys, view.save_charts)
+    assert "Charts saved" in out and "agent-charts/errors-by-day.png" in out
+    assert (tmp_path / "agent-charts" / "errors-by-day.png").read_bytes() == PNG
+    run(capsys, view.save_charts, "slides")
+    assert (tmp_path / "slides" / "errors-by-day.png").is_file()
+
+
+def test_show_chart_keeps_to_the_budget_of_charts(seeded, tmp_path, capsys, monkeypatch):
+    workspace = Folder(tmp_path)
+    for name in ("a", "b", "c"):
+        workspace.put(f"charts/{name}.png", PNG)
+    model = scripted(
+        calls(("show_chart", {"file": "charts/a.png"})),
+        calls(("show_chart", {"file": "charts/b.png"})),
+        calls(("show_chart", {"file": "charts/c.png"})),
+        calls(("show_chart", {"file": "charts/a.png", "title": "A again"})),
+        says("Two charts."),
+    )
+    agent = make(model, python=workspace, budget={"charts": 2})
+    answer = agent.ask("Chart it", now=NOW)
+    assert [c.title for c in answer.charts] == ["A again", "B"]
+    refused = answer.calls[2]
+    assert refused.refused == "charts" and "as many as the budget allows" in refused.result["message"]
+
+    view = AgentView(agent, mode="text", progress="off")
+    assert "Charts" in run(capsys, view.tools)
+    agent.history.append(AgentAnswer("No chart here"))
+    monkeypatch.chdir(tmp_path)
+    assert "has no charts. Ask for one" in run(capsys, view.save_charts)
+    assert "There's no answer 5" in run(capsys, view.save_charts, answer=5)
+    assert "Nothing asked yet" in run(capsys, AgentView(make(), mode="text", progress="off").save_charts)
+
+
+def test_the_chat_window_shows_the_charts_under_the_answer(seeded, tmp_path):
+    workspace = Folder(tmp_path)
+    workspace.put("charts/errors.png", PNG)
+    model = scripted(calls(("show_chart", {"file": "charts/errors.png", "title": "Errors"})), says("See the chart."))
+    x = window(model, python=workspace)
+    enter(x, "Chart the errors")
+    shown = page(x)
+    assert 'class="ag-charts"' in shown and '<img src="data:image/png;base64,' in shown
+    assert "put charts/errors.png in the answer" in _tool_html(x.view.core.history[-1].calls[0], running=False)
+
+
 LOCK = {"pandas": {"file_name": "pandas.whl", "sha256": "a", "depends": ["numpy", "pytz"]},
         "numpy": {"file_name": "numpy.whl", "sha256": "b", "depends": []},
         "pytz": {"file_name": "pytz.whl", "sha256": "c", "depends": []},
@@ -1932,6 +2095,9 @@ LOCK = {"pandas": {"file_name": "pandas.whl", "sha256": "a", "depends": ["numpy"
 
 def test_the_local_sandbox_downloads_a_package_with_what_it_needs():
     assert localmod.needed_packages(LOCK, ["Pandas", "pyarrow"]) == ["pandas", "pyarrow", "numpy", "pytz"]
+    named = {"altair": {"depends": ["jsonschema_specifications", "Typing.Extensions"]},
+             "jsonschema-specifications": {"depends": []}, "typing-extensions": {"depends": []}}
+    assert localmod.needed_packages(named, ["altair"]) == ["altair", "jsonschema-specifications", "typing-extensions"]
     assert localmod.needed_packages(LOCK, []) == []
     assert [f.name for f in localmod.package_files(LOCK, ["numpy"])] == ["numpy.whl"]
     with pytest.raises(ValueError, match="no package 'panda'. Did you mean 'pandas'"):
@@ -1957,6 +2123,9 @@ def test_deno_gets_read_access_to_pyodide_and_nothing_else(tmp_path, monkeypatch
     assert environment["DENO_DIR"] == str(tmp_path / "deno")
     with pytest.raises(ValueError, match="must be an https:// URL"):
         LocalSandbox(index_url="http://mirror/pyodide/")
+    with pytest.raises(ValueError, match="vega_url= must be an https:// URL"):
+        LocalSandbox(vega_url="http://mirror/npm/")
+    assert sandbox._command(localmod._CHART_RUNNER)[-2:] == [str(localmod._CHART_RUNNER), str(tmp_path)]
     with pytest.raises(ValueError, match="memory= is too small"):
         LocalSandbox(memory=10)
     sandbox.put("a//b.txt", b"x")
@@ -1973,7 +2142,7 @@ def test_the_local_sandbox_says_how_to_get_deno(tmp_path, monkeypatch):
 def test_the_local_sandbox_refuses_a_file_that_isnt_pyodides(tmp_path, monkeypatch):
     monkeypatch.setattr(localmod, "_deno_binary", lambda given: "deno")
     monkeypatch.setattr(localmod.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(b"not pyodide"))
-    with pytest.raises(ValueError, match="isn't the file Pyodide 314.0.7 released"):
+    with pytest.raises(ValueError, match="isn't the file that was released"):
         LocalSandbox(cache=tmp_path).prepare()
     assert not list(tmp_path.iterdir())
 
@@ -1987,7 +2156,7 @@ def test_the_local_sandbox_refuses_a_file_that_isnt_pyodides(tmp_path, monkeypat
 
 def test_python_local_makes_the_local_sandbox():
     core = AgentAnalyzer(region=REGION, python="local")
-    assert isinstance(core.workspace, LocalSandbox) and core.workspace.packages == ("pandas",)
+    assert isinstance(core.workspace, LocalSandbox) and core.workspace.packages == ("pandas", "altair")
     assert "a local sandbox (Pyodide on Deno, in WebAssembly" in core.toolkit("python").privacy
     with pytest.raises(ValueError, match="There's no 'docker' sandbox"):
         AgentAnalyzer(region=REGION, python="docker")
@@ -2167,6 +2336,50 @@ def test_the_agent_analyzes_s3_documents_in_the_local_sandbox(pyodide, buckets):
         "print(text.splitlines()[0], len(text.split()))")
     assert ran["ok"], ran.get("stderr")
     assert ran["stdout"] == "[1, 2, 3]\nChurn study 25\n"
+
+
+def test_the_local_sandbox_draws_altair_charts_with_vega(pyodide, buckets):
+    boto3.client("s3", region_name=REGION).put_object(
+        Bucket="acme-raw", Key="sales/2026.csv", Body=b"month,orders\n2026-01,120\n2026-02,180\n2026-03,150\n")
+    core = with_s3(python=LocalSandbox(cache=pyodide))
+    tool(core, "save_s3_files")("s3://acme-raw/sales/")
+    ran = tool(core, "run_python")(
+        "import pandas as pd, altair as alt\n"
+        "df = pd.read_csv('s3/acme-raw/sales/2026.csv', parse_dates=['month'])\n"
+        "chart = alt.Chart(df, title='Orders per month').mark_line(point=True).encode(x='month:T', y='orders:Q')\n"
+        "chart.save('charts/orders.json')\nprint(df['orders'].sum())")
+    assert ran["ok"] and ran["stdout"] == "450\n" and "stderr" not in ran, ran
+    assert ran["new_files"] == ["charts/orders.json"] and "show_chart('charts/orders.json'" in ran["charts"]
+    shown = tool(core, "show_chart")("charts/orders.json")
+    assert shown["kind"] == "vega-lite" and shown["title"] == "Orders per month"
+    assert "make it with Altair in run_python" in core.instructions()
+
+    run = core._current_run()
+    core._run = run
+    tool(core, "show_chart")("charts/orders.json", title="Orders peaked in February")
+    chart = run.charts[0]
+    svg = chart.data.decode()
+    assert chart.kind == "svg" and svg.startswith("<svg") and "Orders per month" not in svg
+    assert chart.title == "Orders peaked in February" and chart.spec["mark"] == {"type": "line", "point": True}
+    assert "#2a78d6" in svg and "continuousWidth" not in str(chart.spec)
+
+    broken = json.dumps({"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "mark": "bar",
+                         "data": {"values": [{"a": 1}]}, "encoding": {"x": {"field": "a", "type": "nonsense"}}})
+    core.workspace.put("charts/broken.json", broken.encode())
+    assert "Vega-Lite couldn't draw the chart" in tool(core, "show_chart")("charts/broken.json")["message"]
+
+
+def test_the_local_sandbox_draws_with_matplotlib_when_given_it(pyodide):
+    sandbox = LocalSandbox(cache=pyodide, packages=("matplotlib",))
+    ran = sandbox.run("import matplotlib, matplotlib.pyplot as plt\nfig, ax = plt.subplots()\nax.bar(['a', 'b'], [1, 2])\n"
+                      "fig.savefig('charts/a.png')\nfig.savefig('charts/a.svg')\n"
+                      "print(matplotlib.get_backend(), matplotlib.rcParams['axes.spines.top'])", timeout=120)
+    assert ran.ok and ran.stdout == "Agg False\n" and ran.stderr == "", ran.stderr
+    assert ran.new_files == ["charts/a.png", "charts/a.svg"]
+    assert image_kind(sandbox.read("charts/a.png")) == "png" and image_kind(sandbox.read("charts/a.svg")) == "svg"
+    agent = AgentAnalyzer(region=REGION, toolkits=["python"], python=sandbox)
+    assert "draw it with matplotlib in run_python" in agent.instructions()
+    assert "show_chart('charts/errors_by_day.png', title=...)" in agent.instructions()
 
 
 def test_the_file_tools_see_the_workspace_from_its_root():

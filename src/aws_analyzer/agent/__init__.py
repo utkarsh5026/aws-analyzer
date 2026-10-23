@@ -38,6 +38,9 @@ Quick start
     agent.new_conversation()                             # forget it
     agent.tools()                                        # what it can call, its model and its budget
     agent.transcript()                                   # every question and answer so far, with their cost
+    agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
+    agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
+    agent.save_charts()                                  # those charts as files, in agent-charts/
 
     answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .calls, .aws_calls, .cost
     agent.core.ask("Which functions are slow?", on_step=print)   # each AgentStep as it happens
@@ -66,6 +69,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
     workspace.py     The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
                      where the model's code runs over files the tools save; toolkits/python_tools.py gives the model
                      run_python over it, and each service's toolkit a save_* tool.
+    charts.py        The charts an answer shows: Altair (Vega-Lite) charts the model's code saves in the workspace,
+                     which the sandbox draws as SVG, or pictures it drew itself; show_chart (the Python toolkit's) puts
+                     them in the answer and save_charts() writes them to files.
     sandboxes/       The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
                      (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
@@ -126,6 +132,7 @@ from .toolkits.lambda_tools import (
     summarize_source,
     summarize_symbol,
 )
+from .charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
 from .sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
 from .view import AgentView
@@ -158,6 +165,12 @@ __all__ = [
     "clean_path",
     "summarize_run",
     "summarize_workspace",
+    "Chart",
+    "CHARTS_FOLDER",
+    "CHART_THEME",
+    "chart_of",
+    "image_kind",
+    "read_spec",
     "AZURE_API_VERSION",
     "OPENAI_MODEL",
     "MODEL_ENV",
