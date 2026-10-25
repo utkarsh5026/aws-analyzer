@@ -240,18 +240,31 @@ def _message_text(message: Any) -> str:
     return "".join(parts).strip()
 
 
+def _tool_name(tool: Any) -> str | None:
+    """
+    The name of a tool in a model request: a dict's "name", or a tool object's name.
+    """
+    if isinstance(tool, dict):
+        return tool.get("name")
+    return getattr(tool, "name", None)
+
+
 def _hide_tools(names: set[str]) -> Any:
     """
     A deepagents middleware that keeps these tools away from the model (and refuses a call to one anyway):
     'task' (deepagents' general-purpose subagent, which the agent doesn't need) and 'execute' (shell commands, which
     the in-memory files deepagents uses can't run anyway).
+
+    deepagents' HarnessProfile (excluded_tools, GeneralPurposeSubagentProfile(enabled=False)) does the same, but only
+    through register_harness_profile, a registry for the whole Python process keyed by the model: registering one
+    would also take these tools from any other deepagents agent the user builds on that model in the same kernel.
+    This middleware applies to this agent only.
     """
     types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
     messages = _require("langchain_core.messages", "The agent", package="aws-analyzer[agent]")
 
     def visible(request: Any) -> Any:
-        tools = [t for t in request.tools
-                 if (t.get("name") if isinstance(t, dict) else getattr(t, "name", None)) not in names]
+        tools = [tool for tool in request.tools if _tool_name(tool) not in names]
         return request.override(tools=tools)
 
     def refused(request: Any) -> Any:
