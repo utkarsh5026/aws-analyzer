@@ -2,11 +2,15 @@
 What a question gives back (AgentAnswer, with a ToolCall per tool call and the plan it worked to), and what the reader should know about
 how it was reached: answer_findings() and the commands worth running next, answer_next(). All pure: no AWS, no
 model.
+
+A BigRead is what a tool asks the user before a read big enough to cost time or money (interrupt_on): what it would
+read, and what each of CHOICES does. choice_of() reads the user's answer forgivingly ('Go', 'yes', 'small').
 """
 
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable
@@ -26,6 +30,10 @@ _BRIEF_CHARACTERS = 40
 PLAN_STATUSES = ("pending", "in_progress", "completed")
 _PLAN_STEP_CHARACTERS = 200
 _PLAN_STEPS_NAMED = 3
+CHOICES = ("go", "smaller", "skip")
+_CHOICE_WORDS = {"go": "go", "yes": "go", "y": "go", "ok": "go", "all": "go", "smaller": "smaller", "small": "smaller",
+                 "less": "smaller", "skip": "skip", "no": "skip", "n": "skip"}
+_CALL_KEY_LENGTH = 10
 
 
 def _short(value: Any) -> Any:
@@ -45,6 +53,59 @@ def services_of(reads: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(prefixes))
 
 
+def choice_of(value: Any) -> str:
+    """
+    The user's answer to a BigRead as one of CHOICES: 'Go', 'yes' -> 'go'; 'small', 'Smaller' -> 'smaller'; 'no',
+    'skip' -> 'skip'. ValueError for anything else.
+    """
+    choice = _CHOICE_WORDS.get(str(value or "").strip().lower())
+    if choice is None:
+        raise ValueError(f"The choice is 'go', 'smaller' or 'skip', not {value!r}")
+    return choice
+
+
+@dataclass
+class BigRead:
+    """
+    A read big enough that the tool asks the user before it runs it (AgentAnalyzer(interrupt_on=...)): what it would
+    read, and what each choice does. The agent stays read-only whichever they pick; this is about time and cost.
+
+        tool     the tool that asks: 'find_files'
+        what     what it would read, in a sentence: "find_files has listed 20,000 keys under s3://acme-raw/ and
+                 there are more; the bucket holds about 41,200 files."
+        go       what Go reads: 'list on, up to 100,000 keys (about 80 more requests, <$0.01)'
+        smaller  what Smaller reads instead: 'stop at the 20,000 keys listed so far'
+        cost     the estimated USD of Go's AWS requests, None when they're free
+        choice   'go', 'smaller' or 'skip' once the user has answered, else None
+    """
+
+    tool: str
+    what: str
+    go: str
+    smaller: str
+    cost: float | None = None
+    choice: str | None = None
+
+    @property
+    def question(self) -> str:
+        """
+        The question as the user reads it: what it would read, then each choice.
+        """
+        return f"{self.what} Go: {self.go}. Smaller: {self.smaller}. Skip: answer without it."
+
+    def as_value(self, call_key: str) -> dict[str, Any]:
+        """
+        What the pause carries (plain data, which LangGraph keeps with the conversation), tied to its call by
+        `call_key`.
+        """
+        return {"call": call_key, "tool": self.tool, "what": self.what, "go": self.go, "smaller": self.smaller,
+                "cost": self.cost}
+
+
+def _call_key() -> str:
+    return uuid.uuid4().hex[:_CALL_KEY_LENGTH]
+
+
 @dataclass
 class ToolCall:
     """
@@ -53,12 +114,15 @@ class ToolCall:
         summary   one line: what it found
         coverage  its window, regions, whether it was cut short, ...
         error     why it failed: 'AccessDeniedException; needs logs:FilterLogEvents'
-        refused   why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window' or 'stopped'
+        refused   why it wasn't run: 'tool_calls', 'time', 'cost', 'log_window', 'skipped' or 'stopped'
         next      View calls that show more, and what they show
         first     the tool's first parameter when it has no default, which the call is written without the name of
         reads     the AWS operations the tool reads with ('lambda:GetFunction', 'logs:FilterLogEvents', ...), its
                   toolkit's `reads` for it
         result    what the tool handed the model (JSON-ready, secrets hidden), once it has run
+        asks      the big reads it asked the user about (BigRead), in order, each with the choice they made
+        paused    it's paused, waiting for the user's choice on its last ask (or was, and runs again when resumed)
+        key       what ties a pause to this call
     """
 
     name: str
@@ -72,6 +136,16 @@ class ToolCall:
     first: str | None = "function"
     reads: tuple[str, ...] = ()
     result: dict[str, Any] | None = field(default=None, repr=False)
+    asks: list[BigRead] = field(default_factory=list)
+    paused: bool = False
+    key: str = field(default_factory=_call_key, repr=False)
+
+    @property
+    def waiting(self) -> BigRead | None:
+        """
+        The big read it's waiting for the user's choice on, or None.
+        """
+        return self.asks[-1] if self.asks and self.asks[-1].choice is None else None
 
     @property
     def services(self) -> tuple[str, ...]:
@@ -163,6 +237,7 @@ class AgentStep:
 
         kind  'thinking':  the model's words before it calls tools (text)
               'tool':      a tool call starts (call)
+              'asking':    that call paused for the user's choice on a big read (call.waiting)
               'tool_done': that call finished: call.summary, call.error or call.refused say how
               'plan':      the model wrote or updated its plan (plan, the whole list as it stands now)
         call  the same ToolCall object for 'tool' and 'tool_done', which the answer's calls hold too
@@ -197,6 +272,7 @@ class AgentAnswer:
         cost          estimated USD for the model's tokens; None when its prices aren't known
         rates         the prices `cost` is at (Rates: per 1M input and output tokens, yours or Bedrock's list prices)
         stopped       None when it finished, else 'tool_calls', 'time', 'cost', 'steps', 'stopped' or 'error'
+        waiting       the calls paused for the user's choice on a big read (resume() goes on); empty once answered
         error         what went wrong with the model or the agent loop, when something did
         thread        the conversation it belongs to
         exception     the error itself, to raise when debugging
@@ -225,13 +301,38 @@ class AgentAnswer:
     asked: datetime | None = None
     exception: BaseException | None = field(default=None, repr=False)
 
+    @property
+    def waiting(self) -> list[ToolCall]:
+        """
+        The calls paused for the user's choice on a big read, in the order they asked.
+        """
+        return [call for call in self.calls if call.waiting is not None]
+
+
+def _choice_findings(call: ToolCall) -> list[tuple[str, str]]:
+    """
+    What the user's choices on a call's big reads left out: a read they skipped, or the smaller one they picked.
+    """
+    found = []
+    for ask in call.asks:
+        if ask.choice == "skip":
+            found.append(("info", f"You skipped {call.call}: {ask.what} The answer leaves it out; ask again and pick "
+                                  "Go to read it."))
+        elif ask.choice == "smaller":
+            found.append(("info", f"You picked the smaller read for {call.call}: {ask.smaller}. The answer covers "
+                                  "that only; ask again and pick Go for the rest."))
+    return found
+
 
 def _coverage_findings(call: ToolCall, budget: Budget) -> list[tuple[str, str]]:
     """
-    What a tool call didn't cover, and how to get the rest: a log window over the budget's log_days, a listing
-    stopped at s3_keys, a read stopped where its result says (stopped_at), or a log read cut at its line limit.
+    What a tool call didn't cover, and how to get the rest: a big read the user skipped or made smaller, a log window
+    over the budget's log_days, a listing stopped at s3_keys, a read stopped where its result says (stopped_at), or a log read cut at its line limit.
     """
     coverage = call.coverage
+    choices = _choice_findings(call)
+    if choices:
+        return choices
     if call.refused == "log_window":
         window = coverage.get("window") or {}
         days = max(1, round((window.get("hours") or 24 * budget.log_days) / 24))

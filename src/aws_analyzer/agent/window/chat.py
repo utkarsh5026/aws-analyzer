@@ -11,6 +11,10 @@ A service's badge (_SERVICES) is its colour and a line drawing, the same whereve
 steps, the header, the empty conversation's legend), so a step's services can be told apart at a glance however many
 toolkits or agents take part; a service it doesn't know shows the start of its name.
 
+Before a big read (a deep S3 listing, many days of logs, a large save) the agent stops to ask: the call's line says
+it's waiting, and a box under it says what it would read with Go, Smaller and Skip, which resume the question with that
+choice (Stop skips it and has the agent answer).
+
 The question runs on a worker thread, so the window keeps answering clicks (Stop) while the agent works. A question
 typed meanwhile waits under it, marked queued with a ✕ to drop it, and is asked once the one before is answered (or
 stopped), in the order they were typed. The agent
@@ -186,6 +190,8 @@ _TOOL_WORDS = {
 }
 _TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file", "knowledge_base")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
+_CHOICE_BUTTONS = (("go", "go ▸", "Read all of it"), ("smaller", "smaller", "Read the smaller part instead"),
+                   ("skip", "skip", "Answer without it"))
 
 _THEME_CSS = _terminal_theme((".agc-app",), "ag") + """
 @keyframes ag-spin{to{transform:rotate(360deg)}}
@@ -212,6 +218,11 @@ _FRAME_CSS = """\
 .agc-app.agc-app .agc-new:hover:enabled,.agc-app.agc-app .agc-send:hover:enabled{border-color:var(--ag-accent);color:var(--ag-accent)}
 .agc-app.agc-app .agc-send.agc-stop{border-color:var(--ag-bad);color:var(--ag-bad)}
 .agc-app.agc-app .agc-send:disabled{opacity:.5}
+.agc-app.agc-app .agc-ask{flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 2px 26px;padding:8px 12px;border:1px solid var(--ag-warn);border-radius:6px}
+.agc-app.agc-app .agc-ask>.widget-html,.agc-app.agc-app .agc-ask>.jupyter-widget-html{flex:1 1 100%;margin:0}
+.agc-app.agc-app .agc-choice{height:26px;line-height:24px;padding:0 12px;margin:0;border-radius:6px;font-size:12px;background:transparent;border:1px solid var(--ag-line);box-shadow:none;color:inherit}
+.agc-app.agc-app .agc-choice:hover:enabled{border-color:var(--ag-accent);color:var(--ag-accent)}
+.agc-app.agc-app .agc-choice.agc-go{border-color:var(--ag-accent);color:var(--ag-accent);font-weight:700}
 .agc-app.agc-app .agc-queued{gap:6px}
 .agc-app.agc-app .agc-queued>.widget-html,.agc-app.agc-app .agc-queued>.jupyter-widget-html{flex:1 1 auto;margin:0}
 .agc-app.agc-app .agc-drop{height:22px;line-height:20px;padding:0 7px;margin:10px 0 0;border-radius:6px;font-size:11px;background:transparent;border:1px solid var(--ag-line);box-shadow:none;color:inherit;opacity:.7}
@@ -268,6 +279,10 @@ _CONVERSATION_CSS = """\
 .agt .ag-ok .ag-tm b{color:var(--ag-ok)}
 .agt .ag-err .ag-tm b{color:var(--ag-bad)}
 .agt .ag-off .ag-tm b{color:var(--ag-warn)}
+.agt .ag-ask .ag-tm{color:var(--ag-warn);opacity:1}
+.agt .ag-asked{font-size:12.5px;line-height:1.55}
+.agt .ag-asked b{color:var(--ag-warn)}
+.agt .ag-asked .ag-k{display:block;margin-top:2px}
 .agt .ag-spin{display:inline-block;color:var(--ag-accent);animation:ag-spin 1s linear infinite}
 .agt .ag-res{display:flex;gap:8px;padding-left:4px;color:var(--ag-dim)}
 .agt .ag-code{margin:3px 0 2px 26px;padding:4px 0 4px 12px;border-left:1px solid var(--ag-line);font-size:12px;white-space:pre;overflow-x:auto;max-height:240px;overflow-y:auto}
@@ -471,22 +486,39 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
     """
     One tool call: the badges of the services it reads, the call as the model made it in colour, a comment saying
     what it does, its time, the code it ran (run_python's) and what it found under it. A finished call opens to its
-    details.
+    details; one waiting for the user's choice on a big read says so.
     """
-    state = _tool_state(call, running=running)
-    timing = '<span class="ag-spin">◐</span>' if running else f"<b>{_STATE_MARKS[state]}</b> {call.seconds:.1f}s"
+    state = "ask" if call.waiting is not None and not running else _tool_state(call, running=running)
+    if state == "ask":
+        timing = "✋ waiting for you"
+    elif running:
+        timing = '<span class="ag-spin">◐</span>'
+    else:
+        timing = f"<b>{_STATE_MARKS[state]}</b> {call.seconds:.1f}s"
     line = (f'<div class="ag-tl">{_badges(call.services)}<span class="ag-call">{_python_html(call.brief)}</span>'
-            f'<span class="ag-cm"># {_esc(_tool_words(call, running=running))}</span>'
+            f'<span class="ag-cm"># {_esc(_tool_words(call, running=running or state == "ask"))}</span>'
             f'<span class="ag-tm">{timing}</span></div>')
     if call.code:
         line += f'<div class="ag-code">{_python_html(call.code)}</div>'
 
-    if running:
+    if running or state == "ask":
         return f'<div class="ag-step ag-{state}">{line}</div>'
     found = (f'<div class="ag-res"><span class="ag-el">⎿</span><span>{_prose(call.summary or call.error or "done")}'
              "</span></div>")
     return (f'<div class="ag-step ag-{state}"><details><summary>{line}{found}</summary>'
             f'<div class="ag-detail">{_tool_detail_html(call)}</div></details></div>')
+
+
+def _asked_html(call: ToolCall) -> str:
+    """
+    What a call waiting for the user's choice would read, and what each choice does, over the buttons.
+    """
+    read = call.waiting
+    if read is None:
+        return ""
+    return (f'<div class="ag-asked"><b>✋ Big read: go, smaller or skip?</b> {_prose(read.what)}'
+            f'<span class="ag-k"># go: {_esc(read.go)}</span><span class="ag-k"># smaller: {_esc(read.smaller)}</span>'
+            '<span class="ag-k"># skip: answer without it · the agent only reads, whichever you pick</span></div>')
 
 
 def _plan_box_html(plan: list[PlanStep]) -> str:
@@ -502,7 +534,12 @@ def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
     after it, and how to stop it.
     """
     running = len(turn.running)
-    doing = f"Waiting for {_plural(running, 'tool call')}…" if running else "Thinking…"
+    if turn.ask is not None:
+        doing = "Waiting for you: go, smaller or skip?"
+    elif running:
+        doing = f"Waiting for {_plural(running, 'tool call')}…"
+    else:
+        doing = "Thinking…"
     counts = [_duration(time.monotonic() - turn.started)]
     if turn.calls:
         counts.append(_plural(len(turn.calls), "tool call"))
@@ -536,6 +573,7 @@ class _Turn:
 
         pulse    the "Thinking…" line at the bottom while it works, and the answer once there is one
         plan     the checklist under the question, once the agent writes a plan: redrawn in place as it changes
+        ask      the box with Go, Smaller and Skip while it waits for the user's choice on a big read
         steps    the steps' widgets, in order
         trail    the steps as they'll be folded once it's answered: the model's words, or a ToolCall
         lines    ToolCall id -> its step's widget
@@ -548,6 +586,7 @@ class _Turn:
     box: Any
     pulse: Any
     plan: Any = None
+    ask: Any = None
     steps: list[Any] = field(default_factory=list)
     trail: list[Any] = field(default_factory=list)
     lines: dict[int, Any] = field(default_factory=dict)
@@ -558,10 +597,12 @@ class _Turn:
     @property
     def shown(self) -> tuple[Any, ...]:
         """
-        The widgets the question shows while it works: the plan, the steps, then the "Thinking…" line.
+        The widgets the question shows while it works: the plan, the steps, the choice it waits for, then the
+        "Thinking…" line.
         """
         plan = (self.plan,) if self.plan is not None else ()
-        return (*plan, *self.steps, self.pulse)
+        ask = (self.ask,) if self.ask is not None else ()
+        return (*plan, *self.steps, *ask, self.pulse)
 
 
 @dataclass
@@ -839,6 +880,8 @@ class _AgentChat(_Window):
             self.stop.set()
         self.send_button.disabled, self.send_button.tooltip = True, "Stopping…"
         self._set_status("Stopping: the agent finishes the step it's on, then answers with what it found.")
+        if self.turn is not None and self.turn.ask is not None:
+            self._choose("skip")
 
     def _send(self, question: str | None = None) -> None:
         text = str(self.question.value if question is None else question).strip()
@@ -989,7 +1032,7 @@ class _AgentChat(_Window):
             self._add_step(turn, _thinking_html(step.text))
         elif step.kind == "tool" and step.call is not None:
             self._tool_started(turn, step.call)
-        elif step.kind == "tool_done" and step.call is not None:
+        elif step.kind in ("tool_done", "asking") and step.call is not None:
             self._tool_finished(turn, step.call)
         elif step.kind == "plan":
             self._show_plan(turn, step.plan)
@@ -1066,11 +1109,57 @@ class _AgentChat(_Window):
                      f'<div class="ag-box">{_blocks_html(rest, view.max_rows, root=_ROOT)}</div></details></div>')
         return _wrap("".join(parts))
 
-    def _answered(self, answer: AgentAnswer) -> None:
+    def _ask_choice(self, turn: _Turn, call: ToolCall) -> None:
         """
-        The question's answer, with its steps folded above it, and the window ready again.
+        The box under a question waiting for the user's choice on a big read: what it would read, and Go, Smaller and
+        Skip, which go on with that choice.
+        """
+        if id(call) in turn.lines:
+            self._set(turn.lines[id(call)], _wrap(_tool_html(call, running=False)))
+        buttons = []
+        for choice, label, tooltip in _CHOICE_BUTTONS:
+            button = self.w.Button(description=label, tooltip=tooltip, layout=self.w.Layout(width="auto"))
+            button.add_class("agc-choice")
+            button.add_class(f"agc-{choice}")
+            button.on_click(self._safely(lambda _button, picked=choice: self._choose(picked)))
+            buttons.append(button)
+        turn.ask = self.w.HBox([self._html(_wrap(_asked_html(call))), *buttons],
+                               layout=self.w.Layout(width="auto", flex="0 0 auto"))
+        turn.ask.add_class("agc-ask")
+        turn.box.children = turn.shown
+        self._tick()
+        self._set_status("The agent is waiting for you: go reads it all, smaller the smaller part, skip answers "
+                         "without it.", "warn")
+
+    def _choose(self, choice: str) -> None:
+        """
+        Goes on with the question waiting for the user's choice: the box goes, and the call runs again with it.
         """
         turn = self.turn
+        if turn is None or turn.ask is None:
+            return
+        turn.ask = None
+        turn.box.children = turn.shown
+        waiting = next((call for call in turn.calls if call.waiting is not None), None)
+        if waiting is not None and id(waiting) in turn.lines:
+            self._set(turn.lines[id(waiting)], _wrap(_tool_html(waiting, running=True)))
+        self._set_status("")
+        stop, steps = self.stop, queue.SimpleQueue()
+
+        def work() -> AgentAnswer:
+            return self.view.core.resume(choice, stop=stop, on_step=steps.put)
+
+        self._start(work, steps)
+
+    def _answered(self, answer: AgentAnswer) -> None:
+        """
+        The question's answer, with its steps folded above it, and the window ready again; or, when it stopped to
+        ask before a big read, the choice it waits for.
+        """
+        turn = self.turn
+        if turn is not None and answer.waiting:
+            self._ask_choice(turn, answer.waiting[0])
+            return
         if turn is not None:
             for call in answer.calls:
                 if id(call) not in turn.lines:

@@ -1,6 +1,7 @@
 """
 How far one question may go (Budget), and the state of the question being answered (_Run): its tool calls, what
-the model has cost so far, and the stop button. check_budget() is what every tool asks before it runs, and
+the model has cost so far, the stop button, and the clock, which stops while it waits for the user's choice on a big
+read. check_budget() is what every tool asks before it runs, and
 _REFUSED is what the table of tool calls says about a call that wasn't run.
 """
 
@@ -41,6 +42,12 @@ class Budget:
         workspace_bytes the most the tools may save into the workspace, in all
         charts          the most charts show_chart may put in one answer (only with a Python workspace)
         kb_searches     search_kb and file_chunks calls per question (only with the Bedrock knowledge base toolkit)
+        ask_keys        an S3 listing (find_files, folder_summary, save_s3_files) that goes past this many keys asks
+                        the user first: go on (up to s3_keys), stop here, or skip it (with interrupt_on)
+        ask_bytes       saving more than this into the workspace asks the user first (with interrupt_on)
+
+    With interrupt_on, a log read longer than log_days asks too (go reads it all, smaller the last log_days) instead
+    of being refused.
     """
 
     tool_calls: int = 25
@@ -56,6 +63,8 @@ class Budget:
     workspace_bytes: int = 50 * 1024 * 1024
     charts: int = 8
     kb_searches: int = 10
+    ask_keys: int = 20_000
+    ask_bytes: int = 10 * 1024 * 1024
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
@@ -89,6 +98,8 @@ class _Run:
         listener      told each AgentStep as it happens (ask()'s on_step), from whichever thread it happens on
         charts        the charts show_chart put in the answer, in the order it showed them
         plan          the plan the model last wrote (write_todos), which the answer keeps
+        paused_at     when it paused for the user's choice on a big read (time.monotonic), or None: the wait doesn't
+                      count against the time budget
     """
 
     budget: Budget
@@ -102,10 +113,37 @@ class _Run:
     listener: Callable[[AgentStep], None] | None = None
     charts: list[Chart] = field(default_factory=list)
     plan: list[PlanStep] = field(default_factory=list)
+    paused_at: float | None = None
 
     @property
     def elapsed(self) -> float:
         return time.monotonic() - self.started
+
+    def pause(self) -> None:
+        """
+        Stops the clock while the question waits for the user's choice.
+        """
+        self.paused_at = time.monotonic()
+
+    def go_on(self) -> None:
+        """
+        Starts the clock again, leaving out the time it waited.
+        """
+        if self.paused_at is not None:
+            self.started += time.monotonic() - self.paused_at
+            self.paused_at = None
+
+    def paused_call(self, name: str, args: dict[str, Any]) -> ToolCall | None:
+        """
+        The paused call a tool runs again for once the user has chosen (LangGraph runs a paused tool again from its
+        start), so it stays one call; None for a new call.
+        """
+        with self.lock:
+            for call in self.calls:
+                if call.paused and call.name == name and call.args == args:
+                    call.paused = False
+                    return call
+        return None
 
     def tell(self, step: AgentStep) -> None:
         """
@@ -143,6 +181,7 @@ _REFUSED = {
     "workspace": "not saved: the workspace is full",
     "charts": "not shown: the answer has as many charts as the budget allows",
     "kb_searches": "not run: the budget of knowledge base searches was used up",
+    "skipped": "not run: you skipped it",
 }
 
 

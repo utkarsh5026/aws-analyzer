@@ -2,7 +2,8 @@
 AgentView: the agent's notebook UI. ask() shows the answer first, with the charts the agent drew for it (_Charts),
 then the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
-View commands to look closer; transcript() and tools() show the questions so far and what the agent can call.
+View commands to look closer; transcript() and tools() show the questions so far and what the agent can call. A
+question that pauses before a big read shows what it would read instead, and go(), smaller() and skip() go on.
 
 Its reports sit in a box of the class _ROOT, which scopes its stylesheet's rules, and each title starts with
 _BADGE, so its reports are easy to tell from other analyzers'.
@@ -245,6 +246,7 @@ class AgentView(_BaseView):
     _render_html = staticmethod(_render_html)
     _GROUPS = {
         "💬 Ask": ("chat", "ask", "new_conversation"),
+        "✋ Big reads": ("go", "smaller", "skip"),
         "🔎 Look back": ("transcript", "save_charts"),
         "🧰 What it can do": ("tools", "use_model"),
         "❓ Help": ("help",),
@@ -298,7 +300,8 @@ class AgentView(_BaseView):
         get it: the plan it worked to, each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
         the tokens and what it cost, and the LambdaView and S3View commands to look closer. Follow-up questions continue the
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
-        found until then.
+        found until then. Before a big read (a deep S3 listing, many days of logs, a large save) it stops to ask:
+        go(), smaller() or skip() goes on.
         """
         window = self.window
         if window is not None and window.busy:
@@ -306,7 +309,44 @@ class AgentView(_BaseView):
                         "the window, which asks it next.")
         with self._progress() as tick:
             answer = self.core.ask(question, new=new, progress=tick)
-        if window is not None:
+        if window is not None and not answer.waiting:
+            window.added(answer)
+        self._show(self._answer_blocks(answer))
+
+    @_friendly_errors
+    def go(self) -> None:
+        """
+        Lets the agent make the big read it stopped to ask about (a deep S3 listing, many days of logs, a large save),
+        all of it, and shows the answer it goes on to write.
+        """
+        self._resume("go")
+
+    @_friendly_errors
+    def smaller(self) -> None:
+        """
+        Lets the agent make the smaller read its question named instead of the big one (the keys listed so far, the
+        last few days of logs, the files that fit), and shows the answer, which says what that left out.
+        """
+        self._resume("smaller")
+
+    @_friendly_errors
+    def skip(self) -> None:
+        """
+        Tells the agent to answer without the big read it stopped to ask about, and shows the answer, which says what
+        it didn't read.
+        """
+        self._resume("skip")
+
+    def _resume(self, choice: str) -> None:
+        window = self.window
+        if window is not None and window.busy:
+            raise _Hint("The chat window is answering a question: pick go, smaller or skip with its buttons.")
+        if not self.core.waiting:
+            raise _Hint("Nothing is waiting for your choice: go(), smaller() and skip() answer the agent when it "
+                        "stops to ask before a big read.")
+        with self._progress() as tick:
+            answer = self.core.resume(choice, progress=tick)
+        if window is not None and not answer.waiting:
             window.added(answer)
         self._show(self._answer_blocks(answer))
 
@@ -333,6 +373,8 @@ class AgentView(_BaseView):
         self._display(self.window.root)
 
     def _answer_blocks(self, answer: AgentAnswer) -> list[Any]:
+        if answer.waiting:
+            return self._waiting_blocks(answer)
         blocks: list[Any] = [_Title(answer.question, self._answer_line(answer))]
         if answer.text:
             blocks.append(_Answer(answer.text))
@@ -342,6 +384,26 @@ class AgentView(_BaseView):
             blocks.append(_Note("The agent stopped before it wrote an answer: the table below shows what it read.",
                                 "warn"))
         return blocks + self._checked_blocks(answer)
+
+    def _waiting_blocks(self, answer: AgentAnswer) -> list[Any]:
+        """
+        A question paused before a big read: what it would read, the plan so far, and the three choices to run.
+        """
+        call = answer.waiting[0]
+        read = call.waiting
+        blocks: list[Any] = [
+            _Title(answer.question, f"waiting for you · {self._answer_line(answer)}"),
+            _Findings([("warn", f"It stopped to ask before a big read: {read.what} Pick go(), smaller() or skip(); "
+                                "the agent only reads, whichever you pick.")]),
+        ]
+        if answer.plan:
+            blocks.append(_Plan(answer.plan))
+        others = len(answer.waiting) - 1
+        if others:
+            blocks.append(_Note(f"{_plural(others, 'more read')} waits after this one: it's asked next."))
+        blocks.append(_Next([("go()", read.go), ("smaller()", read.smaller), ("skip()", "answer without it")],
+                            title=f"Go on with {call.brief}"))
+        return blocks
 
     def _answer_line(self, answer: AgentAnswer) -> str:
         """
@@ -494,6 +556,46 @@ class AgentView(_BaseView):
                     _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
 
+    def _budget_rows(self) -> list[list[str]]:
+        """
+        The tools() report's Budget table: each limit per question, and what happens past it.
+        """
+        core = self.core
+        budget = core.budget
+        long_logs = "a longer log read is refused; CloudWatch's counts still work"
+        if core.interrupt_on:
+            long_logs = "a longer log read asks first: all of it, the last days only, or none"
+        limits = [
+            ["Tool calls", f"{budget.tool_calls:,}", "tools stop running; it answers with what it has"],
+            ["Time", _duration(budget.seconds), "the same"],
+            ["Model cost", human_money(budget.usd) if budget.usd is not None else "none",
+             "the same (only when its tokens' prices are known: model_prices=, or Bedrock's list prices)"],
+            ["Steps", f"{budget.steps:,}", "the agent stops (LangGraph's recursion limit)"],
+            ["Log window", f"{budget.log_days:g} days", long_logs],
+            ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
+        ]
+        if core.interrupt_on:
+            limits.append(["Ask first", f"{budget.ask_keys:,} keys", "a listing past it asks: go on, stop there, "
+                                                                     "or skip it"])
+            if core.workspace is not None:
+                limits.append(["Ask first", human_size(budget.ask_bytes), "a save past it asks: all of it, what "
+                                                                          "fits, or none"])
+        if core.workspace is not None:
+            limits += [
+                ["Python runs", f"{budget.python_runs:,}", "run_python stops running; it answers with what it has"],
+                ["One run", _duration(budget.python_seconds), "the workspace stops the code"],
+                ["Workspace", human_size(budget.workspace_bytes), "a save that would go past it is refused"],
+                ["Charts", f"{budget.charts:,}", "show_chart puts no more in the answer"],
+            ]
+        if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
+            limits += [
+                ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
+                ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
+            ]
+        if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
+            limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb and file_chunks stop running"])
+        return limits
+
     @_friendly_errors
     def tools(self) -> None:
         """
@@ -502,7 +604,6 @@ class AgentView(_BaseView):
         and where what it sends the model goes. Every AWS call goes through a guard that refuses anything but a read.
         """
         core = self.core
-        budget = core.budget
         is_set_up = bool(core.provider) or core.chat_model is not None
         model = core.model or "not set up"
         if core.provider:
@@ -522,30 +623,8 @@ class AgentView(_BaseView):
         rows = [[fn.__name__, _first_line(fn.__doc__), ", ".join(reads.get(fn.__name__, ()))] for fn in core.tools()]
         blocks.append(_Table(["Tool", "What it does", "AWS reads"], rows, title="Tools", prose_cols=(1,),
                              sortable=False))
-        limits = [
-            ["Tool calls", f"{budget.tool_calls:,}", "tools stop running; it answers with what it has"],
-            ["Time", _duration(budget.seconds), "the same"],
-            ["Model cost", human_money(budget.usd) if budget.usd is not None else "none",
-             "the same (only when its tokens' prices are known: model_prices=, or Bedrock's list prices)"],
-            ["Steps", f"{budget.steps:,}", "the agent stops (LangGraph's recursion limit)"],
-            ["Log window", f"{budget.log_days:g} days", "a longer log read is refused; CloudWatch's counts still work"],
-            ["S3 keys", f"{budget.s3_keys:,}", "a listing stops there and says so: its counts cover the keys it read"],
-        ]
-        if core.workspace is not None:
-            limits += [
-                ["Python runs", f"{budget.python_runs:,}", "run_python stops running; it answers with what it has"],
-                ["One run", _duration(budget.python_seconds), "the workspace stops the code"],
-                ["Workspace", human_size(budget.workspace_bytes), "a save that would go past it is refused"],
-                ["Charts", f"{budget.charts:,}", "show_chart puts no more in the answer"],
-            ]
-        if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
-            limits += [
-                ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
-                ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
-            ]
+        limits = self._budget_rows()
         has_kb = any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits)
-        if has_kb:
-            limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb and file_chunks stop running"])
         blocks.append(_Table(["Limit", "Per question", "What happens past it"], limits, title="Budget",
                              sortable=False))
         never = " ".join(t.privacy for t in core.toolkits if t.privacy)
