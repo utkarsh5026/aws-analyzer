@@ -26,6 +26,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   against the time budget. `budget={"ask_keys": ..., "ask_bytes": ...}` moves the thresholds, and
   `AgentView(interrupt_on=False)` turns it off (or `interrupt_on=["find_files"]` for some tools). In Python,
   `core.ask()` returns the answer with `.waiting` set and `core.resume("go")` goes on.
+  ([#148](https://github.com/utkarsh5026/aws-analyzer/pull/148))
 
 ## [0.32.0] - 2026-10-25
 
