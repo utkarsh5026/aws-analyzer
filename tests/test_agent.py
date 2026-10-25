@@ -77,7 +77,7 @@ from aws_analyzer.agent import (
     system_prompt,
     trigger_findings,
 )
-from aws_analyzer.agent import summarize_kb_files
+from aws_analyzer.agent import PlanStep, parse_plan, summarize_kb_files
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
@@ -1162,7 +1162,7 @@ def test_ask_about_a_knowledge_base(world, capsys):
     assert answer.calls[0].summary == "ACTIVE, 2 data sources, 4 documents, 1 warning"
     assert answer.calls[1].summary == "6 files, 4 not indexed or out of date"
     assert "kb_health" in model.bound[0] and "search_kb" in model.bound[0]
-    assert "Amazon Bedrock Knowledge Bases\n- Knowledge bases are regional" in model.prompts[0][0].content
+    assert "Amazon Bedrock Knowledge Bases\n- Knowledge bases are regional" in system_text(model)
     view._show(view._answer_blocks(answer))
     out = capsys.readouterr().out
     assert "BedrockKBView().files('support-docs', status='failed')" in out
@@ -1213,6 +1213,16 @@ def scripted(*replies):
     return Scripted(replies=list(replies), bound=[], prompts=[])
 
 
+def system_text(model, prompt=0):
+    """
+    The system prompt the scripted model was sent with its `prompt`-th call, as text (a string, or text blocks).
+    """
+    content = model.prompts[prompt][0].content
+    if isinstance(content, str):
+        return content
+    return "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in content)
+
+
 def ai_message(**fields):
     """
     An AIMessage, or a skip where the agent's packages aren't installed (Python 3.10).
@@ -1260,8 +1270,8 @@ def test_ask_answers_with_tools_and_counts_what_it_used(seeded):
     assert answer.stopped is None and core.history == [answer]
     tools = model.bound[0]
     assert "function_health" in tools and "task" not in tools and "execute" not in tools
-    system, question = model.prompts[0][0], model.prompts[0][-1]
-    assert "you answer questions about the user's AWS account" in system.content
+    question = model.prompts[0][-1]
+    assert "you answer questions about the user's AWS account" in system_text(model)
     assert question.content.startswith("[Asked Friday 2026-10-16 09:12 in the user's time zone (Asia/Kolkata")
     assert question.content.endswith("Which Lambda failed last night?")
     tool_message = model.prompts[1][-1]
@@ -1339,7 +1349,7 @@ def test_ask_about_s3_and_lambda_together(buckets, capsys):
     assert answer.aws_calls["s3:GetBucketNotificationConfiguration"] == 1 and answer.aws_calls["s3:ListObjectsV2"]
     assert answer.aws_cost > answer.metrics_read / 1000 * 0.01  # S3's requests are billed too
     assert "s3_triggers" in model.bound[0] and "find_buckets" in model.bound[0]
-    assert "S3 and Lambda together" in model.prompts[0][0].content
+    assert "S3 and Lambda together" in system_text(model)
     found = " ".join(m for _, m in answer_findings(answer, view.core.budget))
     assert "find_files('s3://acme-raw/incoming/', since='2h') stopped after 2 S3 keys" in found
     assert "AgentView(budget={'s3_keys': 10})" in found
@@ -1698,6 +1708,85 @@ def test_the_chat_window_draws_the_agent_at_work_and_stops_it(seeded):
     assert '<span class="pf">function_errors</span>' not in shown and "<strong>etl-nightly</strong> failed 40" in shown
     assert "The agent stopped before it wrote an answer" not in shown
     assert not x.busy and not x.send_button.disabled and x.view.core.history[-1].stopped == "stopped"
+
+
+PLAN = [("check every function's health", "in_progress"), ("read etl-nightly's errors", "pending"),
+        ("read the code where it fails", "pending")]
+
+
+def plan(*statuses):
+    """
+    write_todos' argument for PLAN, with these statuses in place of its own (as many as given).
+    """
+    return {"todos": [{"content": text, "status": statuses[i] if i < len(statuses) else status}
+                      for i, (text, status) in enumerate(PLAN)]}
+
+
+def test_parse_plan_reads_write_todos_and_findings_name_what_was_left():
+    steps = parse_plan([{"content": "  check   health ", "status": "completed"}, {"content": "read errors",
+                        "status": "doing"}, {"content": "", "status": "pending"}, "read the code"])
+    assert steps == [PlanStep("check health", "completed"), PlanStep("read errors", "pending"),
+                     PlanStep("read the code", "pending")]
+    assert parse_plan(None) == [] and parse_plan("check health") == [] and steps[0].done and not steps[1].done
+    answer = AgentAnswer("q", text="a", calls=[ToolCall("function_health")], plan=steps)
+    found = [m for _, m in answer_findings(answer)]
+    assert any(m.startswith("2 steps of its plan weren't marked done ('read errors'; 'read the code')") for m in found)
+    answer.plan = [PlanStep("check health", "completed")]
+    assert not any("plan" in m for _, m in answer_findings(answer))
+
+
+def test_the_agent_writes_a_plan_and_ticks_it_off(seeded, capsys):
+    model = scripted(
+        calls(("write_todos", plan())),
+        calls(("function_health", {"since": "2h"})),
+        calls(("write_todos", plan("completed", "completed", "completed"))),
+        says("**etl-nightly** failed."),
+    )
+    view = AgentView(make(model), mode="text", progress="off")
+    told = []
+    answer = view.core.ask("Why did etl-nightly fail?", on_step=told.append)
+    assert [s.status for s in answer.plan] == ["completed"] * 3 and answer.plan[0].text == PLAN[0][0]
+    assert [c.name for c in answer.calls] == ["function_health"]
+    plans = [[s.status for s in step.plan] for step in told if step.kind == "plan"]
+    assert plans == [["in_progress", "pending", "pending"], ["completed"] * 3]
+    assert "write_todos" in model.bound[0] and "Your plan (`write_todos`)" in system_text(model)
+    view._show(view._answer_blocks(answer))
+    out = capsys.readouterr().out
+    assert "Plan · 3 of 3 done" in out and "✓ read the code where it fails" in out
+    assert "marked done" not in out
+
+
+def test_plan_false_leaves_the_plan_out(seeded):
+    model = scripted(says("ok"))
+    answer = make(model, plan=False).ask("Anything?")
+    assert answer.plan == [] and "write_todos" not in model.bound[0]
+    assert "write_todos" not in system_text(model)
+
+
+def test_the_chat_window_shows_the_plan_as_it_ticks_off(seeded):
+    gate = threading.Event()
+    model = scripted(calls(("write_todos", plan())), calls(("function_health", {"since": "2h"})), gate,
+                     calls(("write_todos", plan("completed", "in_progress"))), says("etl-nightly failed."))
+    x = window(model)
+
+    async def ask():
+        enter(x, "Why did etl-nightly fail?")
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if "functions had failed calls" in page(x):
+                break
+        shown = page(x)
+        assert "Plan · 0 of 3 done" in shown and "ag-plan" in shown and 'class="pln-now"' in shown
+        assert shown.index("Why did etl-nightly fail?") < shown.index("Plan · 0 of 3 done") < shown.index(
+            '<span class="pf">function_health</span>')
+        gate.set()
+        await x.task
+
+    asyncio.run(ask())
+    shown = page(x)
+    assert shown.count("Plan · 1 of 3 done") == 1 and shown.count("ag-plan") == 1
+    assert shown.index("Plan · 1 of 3 done") < shown.index("etl-nightly failed.")
+    assert "2 steps of its plan weren&#x27;t marked done" in shown
 
 
 async def settle(x):

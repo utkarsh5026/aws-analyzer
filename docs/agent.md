@@ -177,6 +177,17 @@ Click the folded line to see the steps again, and click a call to see what's beh
 
     The question runs on a worker thread, so the window keeps answering clicks while the agent works. The agent hands each step to the window as it happens (`AgentAnalyzer.ask(on_step=...)`, below), and the window draws it. Each step comes whole: the model's reply isn't streamed word by word, which on Amazon Bedrock would need another permission (`bedrock:InvokeModelWithResponseStream`). The window lives in the kernel, so reopening the notebook loses it: `agent.transcript()` shows the conversation as a report that stays. `agent.chat(height=800)` sets the conversation's height (pixels, or CSS such as `'70vh'`); it fills the browser window otherwise.
 
+### Its plan, ticked off as it works { #chat-plan }
+
+For a question that takes three or more calls, the agent first writes a short plan, and it shows under your question as a checklist: `○` still to do, `▸` under way, `✓` done.
+{ .gist }
+
+A plan reads like "check every function's health → read orders-etl's errors → read the code where it fails". It ticks off in place as the agent works, and it changes when a result does: a step added or dropped. Once the question is answered, the plan stays above the folded steps as the agent left it. A step it didn't mark done shows under the answer as a finding, so you can check the answer covers it. A question one or two calls answer gets no plan. The report from `ask()` shows the same checklist above the table of what it checked.
+
+??? more "How it works, and turning it off"
+
+    The plan is LangChain's `TodoListMiddleware`, which deepagents doesn't add by itself: it gives the model a `write_todos` tool, with short instructions written for this agent. Writing a plan reads nothing from AWS, so it isn't counted against the budget's tool calls or listed among them. Its instructions are sent with every model call; `AgentView(plan=False)` leaves them out to save those tokens. `answer.plan` holds the steps (`PlanStep`: `.text`, `.status`).
+
 ## How it answers { #how-it-works }
 
 The model picks which read-only tools to call. For "Which Lambda failed last night?" it usually:
@@ -408,6 +419,7 @@ answer.charts                  # Chart: title, path, data (the SVG's bytes), kin
 answer.calls                   # ToolCall: name, args, coverage, summary, error, refused, seconds
 answer.calls[0].services       # ('lambda', 'logs', 'cloudwatch'): the AWS services it reads (.reads: its operations)
 answer.calls[0].result         # the data the tool handed the model
+answer.plan                    # PlanStep: text, status ('pending', 'in_progress', 'completed'): the plan it wrote
 answer.aws_calls               # {'logs:FilterLogEvents': 12, ...}: every AWS call it made, all reads
 answer.provider, answer.model # who served it, and the model or profile that answered
 answer.input_tokens, answer.output_tokens, answer.cost   # answer.rates: whose prices the cost is at
@@ -416,10 +428,16 @@ answer.error                   # what went wrong with the model, and what to do
 agent.core.history             # every AgentAnswer so far
 ```
 
-To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), and each tool call as it starts (`'tool'`) and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
+To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), its plan each time it writes or updates one (`'plan'`, `.plan`: the whole list), and each tool call as it starts (`'tool'`) and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
 
 ```python
-agent.core.ask("Which Lambda failed last night?", on_step=lambda step: print(step.kind, step.text or step.call.call))
+def show(step):
+    if step.kind == "plan":
+        print("plan:", " → ".join(f"{s.text} ({s.status})" for s in step.plan))
+    else:
+        print(step.kind, step.text or step.call.call)
+
+agent.core.ask("Which Lambda failed last night?", on_step=show)
 ```
 
 Settings, all optional:
@@ -436,6 +454,7 @@ core = AgentAnalyzer(
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3"],                       # the default; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
+    plan=False,                                      # no plan for questions of several steps; on by default
 )
 agent = AgentView(core)
 ```

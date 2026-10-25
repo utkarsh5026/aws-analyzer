@@ -62,8 +62,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
     harness.py       The agent loop: deepagents built once, and one question streamed through it.
-    answers.py       AgentAnswer, ToolCall and AgentStep (what the agent does, told as it happens), and the pure
-                     findings and next steps a report shows about them.
+    answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off) and AgentStep (what the agent
+                     does, told as it happens), and the pure findings and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
     workspace.py     The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
@@ -81,7 +81,7 @@ One concern per module, so a new service's tools or a new agent capability goes 
 from __future__ import annotations
 
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, AgentStep, ToolCall, answer_findings, answer_next
+from .answers import AgentAnswer, AgentStep, PlanStep, ToolCall, answer_findings, answer_next, parse_plan
 from .budget import Budget
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
@@ -154,6 +154,7 @@ __all__ = [
     "AgentView",
     "AgentAnswer",
     "AgentStep",
+    "PlanStep",
     "ToolCall",
     "Budget",
     "ReadOnlyError",
@@ -198,6 +199,7 @@ __all__ = [
     "system_prompt",
     "answer_findings",
     "answer_next",
+    "parse_plan",
     "answer_cost",
     "explain_model_error",
     "function_row",
