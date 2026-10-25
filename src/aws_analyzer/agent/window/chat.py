@@ -161,6 +161,13 @@ _TOOL_WORDS = {
     "file_info": _ToolWords("reading {t}", "read {t}", "a file"),
     "preview_file": _ToolWords("reading what's in {t}", "read what's in {t}", "a file"),
     "s3_triggers": _ToolWords("checking what {t} triggers", "checked what {t} triggers", "each bucket"),
+    "find_knowledge_bases": _ToolWords("finding knowledge bases", "found knowledge bases"),
+    "kb_health": _ToolWords("checking {t}'s health", "checked {t}'s health", "the knowledge base"),
+    "kb_syncs": _ToolWords("reading {t}'s syncs", "read {t}'s syncs", "the knowledge base"),
+    "kb_files": _ToolWords("checking {t}'s files", "checked {t}'s files", "the knowledge base"),
+    "search_kb": _ToolWords("searching the knowledge base for '{t}'", "searched the knowledge base for '{t}'",
+                            "a question"),
+    "file_chunks": _ToolWords("reading {t}'s chunks", "read {t}'s chunks", "a file"),
     "save_function_code": _ToolWords("saving {t}'s code to the workspace", "saved {t}'s code to the workspace",
                                      "the function"),
     "save_logs": _ToolWords("saving {t}'s logs to the workspace", "saved {t}'s logs to the workspace", "the function"),
@@ -176,7 +183,7 @@ _TOOL_WORDS = {
     "grep": _ToolWords("searching the workspace for {t}", "searched the workspace for {t}", "a text"),
     "delete": _ToolWords("deleting {t}", "deleted {t}", "a file"),
 }
-_TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file")
+_TARGET_ARGS = ("function", "bucket", "location", "path", "uri", "key", "file", "knowledge_base")
 _STATE_MARKS = {"ok": "✓", "err": "✗", "off": "–"}
 
 _THEME_CSS = _terminal_theme((".agc-app",), "ag") + """

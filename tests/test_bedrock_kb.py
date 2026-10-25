@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import html
 import json
 import re
@@ -4135,8 +4136,12 @@ class World:
         return {"retrievalResults": found[:config["numberOfResults"]]}
 
 
-@pytest.fixture
-def world():
+@contextlib.contextmanager
+def support_docs():
+    """
+    The World the explorer's tests (and the agent's knowledge base tools) read: support-docs' bucket in moto, with a
+    file in each state the explorer shows.
+    """
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-east-1")
         s3.create_bucket(Bucket="support-docs-bucket")
@@ -4152,6 +4157,12 @@ def world():
             if days:
                 backdate("support-docs-bucket", key, ago(days=days))
         yield World(s3)
+
+
+@pytest.fixture
+def world():
+    with support_docs() as found:
+        yield found
 
 
 def explorer(world, kb="support-docs", **kwargs):

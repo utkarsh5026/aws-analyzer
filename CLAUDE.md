@@ -219,7 +219,8 @@ cd src && for f in aws_analyzer/[!_]*.py aws_analyzer/[!_]*/__init__.py; do m="$
   analyzers' read methods (code it writes runs only in a `Workspace` the user passes, with no AWS credentials), and `_Guard` hooks every client a toolkit's analyzer makes for it (`attach` swaps its
   `session` for a `_GuardedSession`, whose `client()` hooks what it makes, and wraps Lambda's `_service`, which also
   hands out clients passed in) on `before-parameter-build`, refusing any operation outside `READ_PREFIXES` (Get, List,
-  Describe, Head, Filter) with `ReadOnlyError` before its request is built; the S3 tools read names, sizes, dates and
+  Describe, Head, Filter) and `SEARCHES` (Bedrock's `Retrieve`, by name) with `ReadOnlyError` before its request is
+  built; the S3 tools read names, sizes, dates and
   headers, never an object's body; the model is reached through LangChain, not boto3, so
   `rules.py` sees none of it. Keep it that way; README lists the read-only IAM permissions per service, so update that list
   when a new AWS API call is added. `rules.py` finds the services from `session.client("<literal name>", ...)`
@@ -770,7 +771,13 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   (`count_arrivals`, pure: by prefix and case-sensitive suffix, and by upload kind, since a multipart upload sends
   CompleteMultipartUpload, not Put), and reads the function, its resource policy (Lambda's `parse_policy`) and its
   CloudWatch numbers through `peer("lambda").analyzer`; `trigger_findings` (pure) says what broke each link. Its
-  `covers` and `instructions()` add the S3-and-Lambda part only when the peer is there. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
+  `covers` and `instructions()` add the S3-and-Lambda part only when the peer is there.
+  `BedrockKBToolkit` (`bedrock_kb_tools.py`, `"bedrock_kb"`, not in `DEFAULT_TOOLKITS`; `kb_core=`) has
+  `find_knowledge_bases`, `kb_health`, `kb_syncs`, `kb_files`, `search_kb` and `file_chunks` over `BedrockKBAnalyzer`
+  in the agent's region (`_kb` takes a name or ID, or the region's only one), with the `summarize_kb_*` functions
+  pure. `search_kb` and `file_chunks` call `Retrieve` (the guard's `SEARCHES`) and count against the budget's
+  `kb_searches`; their passages go to the model, secrets hidden, and no tool reads a file from S3. A result cut short
+  says where in `stopped_at`, which `answer_findings` repeats. `TOOLKITS` names the built-in ones and `DEFAULT_TOOLKITS` what an
   agent gets; `AgentAnalyzer(toolkits=[...])` takes names, `Toolkit` subclasses or objects (a user's own too), and
   `lambda_core=` / `lambda_clients=` / `prices=` go to the Lambda toolkit it makes, `s3_core=` to the S3 one. Two toolkits can't share a tool
   name (`tools()` refuses). **A new service** is a `<service>_tools.py` here with its toolkit, its name in `TOOLKITS`

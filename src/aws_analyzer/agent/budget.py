@@ -40,6 +40,7 @@ class Budget:
         python_seconds  the longest one run_python call may take
         workspace_bytes the most the tools may save into the workspace, in all
         charts          the most charts show_chart may put in one answer (only with a Python workspace)
+        kb_searches     search_kb and file_chunks calls per question (only with the Bedrock knowledge base toolkit)
     """
 
     tool_calls: int = 25
@@ -54,6 +55,7 @@ class Budget:
     python_seconds: float = 30.0
     workspace_bytes: int = 50 * 1024 * 1024
     charts: int = 8
+    kb_searches: int = 10
 
     @classmethod
     def of(cls, value: Budget | dict[str, Any] | None) -> Budget:
@@ -138,6 +140,7 @@ _REFUSED = {
     "python_runs": "not run: the budget of Python runs was used up",
     "workspace": "not saved: the workspace is full",
     "charts": "not shown: the answer has as many charts as the budget allows",
+    "kb_searches": "not run: the budget of knowledge base searches was used up",
 }
 
 

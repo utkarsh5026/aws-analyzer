@@ -176,6 +176,34 @@ class AgentAnswer:
     exception: BaseException | None = field(default=None, repr=False)
 
 
+def _coverage_findings(call: ToolCall, budget: Budget) -> list[tuple[str, str]]:
+    """
+    What a tool call didn't cover, and how to get the rest: a log window over the budget's log_days, a listing
+    stopped at s3_keys, a read stopped where its result says (stopped_at), or a log read cut at its line limit.
+    """
+    coverage = call.coverage
+    if call.refused == "log_window":
+        window = coverage.get("window") or {}
+        days = max(1, round((window.get("hours") or 24 * budget.log_days) / 24))
+        return [("info", f"{call.call} wasn't run: its {_plural(days, 'day')} of logs are more than the "
+                         f"{budget.log_days:g}-day limit for a log read, which keeps questions fast. "
+                         "CloudWatch's counts cover longer windows; to read the logs too, raise the limit: "
+                         f"AgentView(budget={{'log_days': {days}}}).")]
+    if not coverage.get("cut_short"):
+        return []
+    if coverage.get("scanned"):
+        keys = int(coverage["scanned"])
+        return [("info", f"{call.call} stopped after {keys:,} S3 keys (the budget's s3_keys), in key order: "
+                         "its counts cover those keys only. Ask about a narrower prefix, or raise the limit: "
+                         f"AgentView(budget={{'s3_keys': {max(keys, budget.s3_keys) * 5}}}).")]
+    if coverage.get("stopped_at"):
+        return [("info", f"{call.call} stopped at {coverage['stopped_at']}.")]
+    reach = coverage.get("covered_from")
+    covered = f": it covers {_fmt_dt(reach, zone=True)} to the end of the window" if isinstance(reach, datetime) else ""
+    return [("info", f"{call.name} for {call.args.get('function') or 'the functions'} stopped at its line limit"
+                     f"{covered}. The newest lines were kept.")]
+
+
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
     """
     What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
@@ -207,24 +235,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
         if call.error:
             found.append(("warn", f"{call.name} couldn't read everything ({call.error}): the answer leaves that "
                                   "out. README lists the read-only IAM permissions each tool needs."))
-        if call.refused == "log_window":
-            window = call.coverage.get("window") or {}
-            days = max(1, round((window.get("hours") or 24 * budget.log_days) / 24))
-            found.append(("info", f"{call.call} wasn't run: its {_plural(days, 'day')} of logs are more than the "
-                                  f"{budget.log_days:g}-day limit for a log read, which keeps questions fast. "
-                                  "CloudWatch's counts cover longer windows; to read the logs too, raise the limit: "
-                                  f"AgentView(budget={{'log_days': {days}}})."))
-        if call.coverage.get("cut_short") and call.coverage.get("scanned"):
-            keys = int(call.coverage["scanned"])
-            found.append(("info", f"{call.call} stopped after {keys:,} S3 keys (the budget's s3_keys), in key order: "
-                                  "its counts cover those keys only. Ask about a narrower prefix, or raise the limit: "
-                                  f"AgentView(budget={{'s3_keys': {max(keys, budget.s3_keys) * 5}}})."))
-        elif call.coverage.get("cut_short"):
-            reach = call.coverage.get("covered_from")
-            found.append(("info", f"{call.name} for {call.args.get('function') or 'the functions'} stopped at its "
-                                  "line limit" + (f": it covers {_fmt_dt(reach, zone=True)} to the end of the window"
-                                                  if isinstance(reach, datetime) else "")
-                                  + ". The newest lines were kept."))
+        found += _coverage_findings(call, budget)
     if not answer.calls and not answer.error and answer.stopped is None:
         found.append(("info", "It answered without calling a tool, so nothing in the answer comes from your account. "
                               "Ask about your functions or buckets, or a time window."))

@@ -8,7 +8,7 @@ Check the analyzers against the hard constraints in CLAUDE.md that ruff and pyte
 Errors (exit 1):
   - a top-level import that isn't the standard library, boto3 or botocore (optional packages load lazily)
   - an import of another analyzer (shared code goes in _kit/), except a companion importing the analyzers it
-    builds on (COMPANIONS: the agent/ package on lambda_functions/ and s3/); an import of a
+    builds on (COMPANIONS: the agent/ package on lambda_functions/, s3/ and bedrock_kb/); an import of a
     module a few analyzers share by any other analyzer (SHARED: _bedrock/, for bedrock_kb.py, bedrock_chat.py and
     agent/); a shared module importing an analyzer;
     and _kit/ importing any of them
@@ -57,7 +57,7 @@ ALLOWED_TOP_LEVEL = {"boto3", "botocore"}
 # <Service>View or <Service>Explorer, and its AWS calls are checked against those analyzers' services. The agent
 # builds on every analyzer one of its toolkits reads through (agent/toolkits/: LambdaToolkit on LambdaAnalyzer,
 # S3Toolkit on S3Analyzer).
-COMPANIONS = {"agent": ("lambda_functions", "s3")}
+COMPANIONS = {"agent": ("lambda_functions", "s3", "bedrock_kb")}
 ALIASES = {"s3_explorer": "s3"}
 # Code a few analyzers share that the others must not load: a module of the package beside them -> the analyzers
 # that import it. It's checked like _kit (no sections or View), imports _kit and never an analyzer, and the

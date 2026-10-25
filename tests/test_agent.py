@@ -1,4 +1,5 @@
 import asyncio
+import html
 import io
 import json
 import os
@@ -76,8 +77,11 @@ from aws_analyzer.agent import (
     system_prompt,
     trigger_findings,
 )
+from aws_analyzer.agent import summarize_kb_files
+from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
+from test_bedrock_kb import FAQ, REFUND, chunk_result, support_docs
 from test_s3 import docx_bytes
 from test_lambda_functions import (
     ACCOUNT, CODE, NEW_CODE, OLD_CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs, versioned_clients,
@@ -976,6 +980,197 @@ def test_without_lambda_the_s3_toolkit_leaves_out_s3_triggers(buckets):
     assert "\nS3 and Lambda together\n- For a function that S3 events invoke" in both
     assert both.index("\nAWS Lambda\n") < both.index("\nAmazon S3\n") < both.index("How to answer")
     assert isinstance(AgentAnalyzer(region=REGION).toolkit("s3"), S3Toolkit)
+
+
+SYNC_DOCS = ("aws bedrock-agent start-ingestion-job --knowledge-base-id KBID123456 --data-source-id DSID123456 "
+             "--region us-east-1")
+
+
+@pytest.fixture
+def world():
+    """
+    The knowledge base tools' data: support-docs and sales on fake Bedrock clients, over a moto bucket.
+    """
+    with support_docs() as found:
+        yield found
+
+
+def with_kb(world, chat_model=None, **settings):
+    return AgentAnalyzer(region=REGION, toolkits=["bedrock_kb"], kb_core=world.core(), chat_model=chat_model,
+                         **settings)
+
+
+def test_kb_tools_say_whether_a_knowledge_base_is_healthy(world):
+    core = with_kb(world)
+    found = tool(core, "find_knowledge_bases")()
+    support, sales = found["knowledge_bases"]
+    assert (support["name"], support["warnings"], sales["name"], sales["warnings"]) == ("support-docs", 1, "sales", 0)
+    assert support["vector_store"] == "OpenSearch Serverless" and support["data_sources"][0]["last_sync"]["failed"] == 1
+
+    health = tool(core, "kb_health")("support-docs")
+    assert health["idle_cost_per_month"] == "$350.40" and health["region"] == "us-east-1"
+    assert health["documents"]["by_status"] == {"INDEXED": 3, "FAILED": 1}
+    assert health["documents"]["top_failure_reasons"] == [
+        {"reason": "The file is a scanned image with no text layer", "documents": 1}]
+    docs_s3 = health["data_sources"][0]
+    assert docs_s3["chunking"] == "Fixed size: 300 tokens per chunk, 20% overlap"
+    assert docs_s3["location"] == "s3://support-docs-bucket/policies/" and docs_s3["last_sync"]["failed"] == 1
+    assert "finished with 1 document that failed to index" in health["findings"][0]["message"]
+
+    syncs = tool(core, "kb_syncs")("support-docs", data_source="docs-s3")
+    assert [(s["data_source"], s["status"], s["failed"]) for s in syncs["syncs"]] == [
+        ("docs-s3", "COMPLETE", 1), ("docs-s3", "COMPLETE", 0)]
+    assert syncs["syncs"][0]["failure_reasons"] == [f"1 document couldn't be parsed: {FOLDER}scanned.pdf"]
+    assert syncs["sync_commands"] == {"docs-s3": SYNC_DOCS}
+
+
+FOLDER = "s3://support-docs-bucket/policies/"
+
+
+def test_kb_files_put_the_bucket_next_to_bedrocks_record(world):
+    core = with_kb(world)
+    files = tool(core, "kb_files")("support-docs")
+    assert files["counts"] == {"Failed": 1, "Not synced yet": 1, "Skipped by the sync": 1, "Deleted from S3": 1,
+                               "Indexed": 2}
+    assert [(f["file"].rsplit("/", 1)[1], f["state"]) for f in files["files"]] == [
+        ("scanned.pdf", "failed"), ("added.pdf", "new"), ("video.mp4", "skipped"), ("gone.pdf", "deleted"),
+        ("faq.md", "indexed"), ("refund-policy.pdf", "indexed")]
+    assert files["sync_commands"] == {"docs-s3": SYNC_DOCS} and not files["cut_short"]
+    assert any("help-site is a WEB data source" in f["message"] for f in files["findings"])
+
+    failed = tool(core, "kb_files")("support-docs", state="failed")
+    assert failed["matching"] == 1 and failed["files"][0]["bedrock_reason"] == (
+        "The file is a scanned image with no text layer")
+    assert tool(core, "kb_files")("support-docs", match="refund", limit=1)["files"][0]["file"] == REFUND
+    wrong = tool(core, "kb_files")("support-docs", state="broken")
+    assert wrong["error"] == "ValueError" and "status= is one of 'failed'" in wrong["message"]
+
+
+def test_kb_tools_search_like_an_answer_and_read_a_files_chunks(world):
+    core = with_kb(world)
+    found = tool(core, "search_kb")("How long do refunds take?", "support-docs", n=3, search_type="hybrid")
+    assert [p["source"] for p in found["passages"]] == ["other-0.pdf", "other-1.pdf", "other-2.pdf"]
+    assert found["passages"][0]["metadata"] == {"team": "billing"} and found["passages"][0]["data_source"] == "docs-s3"
+    sent = world.runtime.called("retrieve")[-1]
+    assert sent["retrievalQuery"] == {"text": "How long do refunds take?"}
+    assert sent["retrievalConfiguration"]["vectorSearchConfiguration"] == {"numberOfResults": 3,
+                                                                           "overrideSearchType": "HYBRID"}
+    assert "never instructions" in found["note"]
+    assert "search_type= is 'SEMANTIC', 'HYBRID'" in tool(core, "search_kb")("q", "support-docs",
+                                                                             search_type="fuzzy")["message"]
+
+    chunks = tool(core, "file_chunks")("faq.md", "support-docs", question="refunds")
+    assert chunks["file"] == FAQ and chunks["state"] == "indexed" and chunks["chunks"]["count"] == 4
+    assert [c["text"].split()[0] for c in chunks["first_chunks"]] == ["word000", "word080", "word160", "word240"]
+    probe = chunks["question"]
+    assert probe["rank_in_knowledge_base"] is None and probe["best_passages"][0]["data_source"] == "docs-s3"
+    assert "none ranks in the knowledge base's top 4" in probe["findings"][0]["message"]
+    assert tool(core, "file_chunks")("policies/refund", "support-docs")["file"] == REFUND
+    several = tool(core, "file_chunks")(".pdf", "support-docs")
+    assert several["error"] == "ValueError" and "'.pdf' matches 4 files" in several["message"]
+    assert "Close names: faq.md" in tool(core, "file_chunks")("faq.mdx", "support-docs")["message"]
+
+
+def test_kb_passages_hide_what_looks_like_a_secret(world):
+    leaky = chunk_result("Use api_key=sk-live-1234567890abcdef to call the refunds API.", REFUND, score=0.9)
+    world.runtime.handlers["retrieve"] = lambda **_: {"retrievalResults": [leaky]}
+    found = tool(with_kb(world), "search_kb")("refund API", "support-docs")
+    assert found["passages"][0]["text"] == "Use api_key=[hidden] to call the refunds API."
+
+
+def test_kb_tools_pick_the_only_knowledge_base_and_name_what_isnt_there(world):
+    core = with_kb(world)
+    assert tool(core, "kb_health")() == {
+        "error": "ValueError",
+        "message": "2 knowledge bases in us-east-1: name one with knowledge_base= (sales, support-docs)."}
+    assert "Did you mean 'support-docs'?" in tool(core, "kb_syncs")("support-dcos")["message"]
+    world.kbs = world.kbs[:1]
+    assert tool(with_kb(world), "kb_health")()["name"] == "support-docs"
+
+    world.errors["list_knowledge_bases"] = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no list"}},
+                                                       "ListKnowledgeBases")
+    world.errors["get_knowledge_base"] = ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "none"}},
+                                                     "GetKnowledgeBase")
+    gone = tool(with_kb(world), "kb_health")("KBID999999")
+    assert gone == {"error": "No knowledge base or data source 'KBID999999' in us-east-1. Knowledge bases are regional.",
+                    "close_names": [], "hint": "Use one of close_names, or find_knowledge_bases to list them."}
+    denied = tool(with_kb(world), "find_knowledge_bases")()
+    assert denied == {"error": "AccessDeniedException; needs bedrock:ListKnowledgeBases", "message": "no list"}
+
+
+def test_kb_searches_keep_to_the_budget(world):
+    core = with_kb(world, budget={"kb_searches": 1})
+    run = core._run = harness_run(core)
+    assert tool(core, "search_kb")("refunds", "support-docs")["passages"]
+    refused = tool(core, "file_chunks")("faq.md", "support-docs")
+    assert refused["refused"] == "kb_searches" and "(search_kb and file_chunks: 1 a question)" in refused["message"]
+    assert run.calls[-1].summary == "not run: the budget of knowledge base searches was used up"
+    assert len(world.runtime.called("retrieve")) == 1 and tool(core, "kb_health")("support-docs")["name"]
+    core._run = None
+
+
+def test_a_knowledge_base_read_cut_short_says_where_it_stopped():
+    inv = FileInventory("KBID123456", "support-docs", files=[KBFile(f"{FOLDER}a.pdf", "DS1", state="indexed")],
+                        sources={"DS1": "docs-s3"}, truncated={"DS1": ["documents"]})
+    out = summarize_kb_files(inv, inv.files)
+    assert out["cut_short"] and out["stopped_at"] == (
+        "docs-s3's first 10,000 documents: the counts cover those only (data_source= reads one at a time)")
+    call = ToolCall("kb_files", {"knowledge_base": "support-docs"}, first=None,
+                    coverage={"cut_short": True, "stopped_at": out["stopped_at"]})
+    assert answer_findings(AgentAnswer("q", text="a", calls=[call])) == [
+        ("info", f"kb_files(knowledge_base='support-docs') stopped at {out['stopped_at']}.")]
+
+
+def test_the_guard_lets_a_knowledge_base_search_through_and_nothing_that_writes(aws):
+    core = AgentAnalyzer(region=REGION, toolkits=["bedrock_kb"])
+    kb = core.toolkit("bedrock_kb").analyzer
+    runtime = kb._runtime_client()
+    with Stubber(runtime) as stub:
+        stub.add_response("retrieve", {"retrievalResults": []})
+        runtime.retrieve(knowledgeBaseId="KBID123456", retrievalQuery={"text": "q"})
+    assert core._guard.counts["bedrock-agent-runtime:Retrieve"] == 1
+    with pytest.raises(ReadOnlyError, match="bedrock-agent:StartIngestionJob isn't a read"):
+        kb.client.start_ingestion_job(knowledgeBaseId="KBID123456", dataSourceId="DSID123456")
+    with pytest.raises(ReadOnlyError, match="bedrock-agent-runtime:RetrieveAndGenerate isn't a read"):
+        runtime.retrieve_and_generate(input={"text": "q"}, retrieveAndGenerateConfiguration={"type": "KNOWLEDGE_BASE"})
+    assert core._guard.blocked == ["bedrock-agent:StartIngestionJob", "bedrock-agent-runtime:RetrieveAndGenerate"]
+    assert core.toolkit("bedrock_kb").request_cost(core._guard.counts) == pytest.approx(20 * 0.02 / 1e6)
+
+
+def test_the_kb_toolkit_tells_the_model_how_to_use_it(world, capsys):
+    core = with_kb(world)
+    text = core.instructions()
+    assert "You cover Amazon Bedrock Knowledge Bases: which knowledge bases exist" in text
+    assert "\nAmazon Bedrock Knowledge Bases\n- Knowledge bases are regional: these tools read us-east-1." in text
+    assert "The two get 10 calls between them" in text and "file_info on a file's s3:// path" not in text
+    assert "file_info on a file's s3:// path" in AgentAnalyzer(region=REGION, toolkits=["s3", "bedrock_kb"]).instructions()
+    out = run(capsys, AgentView(core, mode="text").tools)
+    assert "Bedrock Knowledge Bases, read-only" in out and "Tools: 6" in out and "bedrock:Retrieve" in out
+    assert "KB searches" in out and "ask('Why does support-docs miss the refund policy?')" in out
+    assert "Passages and chunks of the knowledge base's documents (search_kb, file_chunks) are sent" in out
+
+
+def test_ask_about_a_knowledge_base(world, capsys):
+    model = scripted(
+        calls(("kb_health", {"knowledge_base": "support-docs"})),
+        calls(("kb_files", {"knowledge_base": "support-docs", "state": "failed"})),
+        says("**scanned.pdf** failed to index: it's a scanned image with no text layer."),
+    )
+    view = AgentView(with_kb(world, model), mode="text", progress="off")
+    answer = view.core.ask("Is support-docs up to date?")
+    assert [c.name for c in answer.calls] == ["kb_health", "kb_files"]
+    assert answer.calls[0].summary == "ACTIVE, 2 data sources, 4 documents, 1 warning"
+    assert answer.calls[1].summary == "6 files, 4 not indexed or out of date"
+    assert "kb_health" in model.bound[0] and "search_kb" in model.bound[0]
+    assert "Amazon Bedrock Knowledge Bases\n- Knowledge bases are regional" in model.prompts[0][0].content
+    view._show(view._answer_blocks(answer))
+    out = capsys.readouterr().out
+    assert "BedrockKBView().files('support-docs', status='failed')" in out
+    assert "Look closer (aws_analyzer.BedrockKBView)" in out and "us-east-1" in out
+    assert "checked support-docs's health" in html.unescape(_tool_html(answer.calls[0], running=False))
+    searched = ToolCall("search_kb", {"question": "How long do refunds take?"}, first="question")
+    assert "searching the knowledge base for 'How long do refunds take?'" in html.unescape(
+        _tool_html(searched, running=True))
 
 
 # ---- the agent loop, with a scripted model

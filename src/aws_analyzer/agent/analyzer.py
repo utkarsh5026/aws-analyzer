@@ -49,6 +49,7 @@ from .workspace import Workspace, workspace_of
 from .workspace_files import workspace_backend
 
 if TYPE_CHECKING:
+    from ..bedrock_kb import BedrockKBAnalyzer
     from ..lambda_functions import LambdaAnalyzer
     from ..s3 import S3Analyzer
 
@@ -134,7 +135,10 @@ class AgentAnalyzer(_BaseAnalyzer):
     LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
     S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It never reads what's inside a
     file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
-    looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it). python= takes a
+    looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it).
+    toolkits=['bedrock_kb', ...] adds the Bedrock knowledge base tools, reading through BedrockKBAnalyzer in the
+    session's region (kb_core= to pass your own): health, syncs, files, and Retrieve searches, whose passages go to
+    the model's provider (budget's kb_searches caps them). python= takes a
     Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or network) and adds the Python toolkit:
     run_python runs code the model writes over files the other toolkits save there (Lambda's save_function_code),
     and what it prints goes to the model, secrets hidden (budget's python_runs, python_seconds and workspace_bytes
@@ -177,6 +181,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         prices: dict[str, float] | None = None,
         s3_core: S3Analyzer | None = None,
         read_files: bool = False,
+        kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
@@ -196,7 +201,8 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.toolkits: list[Toolkit] = [toolkit.bind(self) for toolkit in make_toolkits(
             _with_python(toolkits, workspace),
             {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
-             "s3": {"analyzer": s3_core, "read_files": read_files}, "python": {"workspace": workspace}})]
+             "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
+             "python": {"workspace": workspace}})]
         self._graph: Any = None
         self._run: _Run | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
