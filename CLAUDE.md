@@ -792,6 +792,18 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   CloudWatch metrics a tool requested, and their cost). LangChain passes every default, so the `ToolCall` keeps only
   the arguments that differ from the tool's defaults, and `first` (its first parameter, when it has no default) is
   written without its name: `find_files('s3://acme-raw/incoming/', since='2h')`.
+- **Big reads ask first** (`interrupt_on=`, `True` by default): a tool in its toolkit's `asks` builds a `BigRead`
+  (`answers.py`: what it would read, what Go and Smaller read, the cost) and calls `Toolkit.ask_user`, which (when
+  `will_ask`) calls `runtime.ask_user` -> `harness.pause_for`, LangGraph's `interrupt`. The pause leaves the tool
+  (`as_tool` re-raises it, `harness.is_pause`, and keeps the call `paused`), the stream ends, `_finish` reads
+  `harness.pauses()` and keeps `_Paused`; `AgentAnalyzer.resume(choice)` answers the calls one by one and then
+  `resume_turn()`s with `Command(resume={pause id: choice})`. LangGraph runs the paused tool again from its start:
+  `_Run.paused_call` makes it the same `ToolCall`, and its asks get the stored choices in order, so a tool must ask
+  the same questions in the same order. Skip is `_Refused("skipped")`. Lambda's `_log_window` asks past `log_days`
+  (smaller: the last `log_days`); S3's listings go through `s3_listing.py`'s `KeyListing`, which asks past the
+  budget's `ask_keys`, and `save_s3_files` past `ask_bytes` (`_AsksFirst`). The clock stops while it waits
+  (`_Run.pause` / `go_on`). `AgentView.go()` / `smaller()` / `skip()` and the window's three buttons (`_ask_choice`,
+  `_choose`; Stop skips) call `resume`.
 - **The guard** (`guard.py`, `_Guard`): `attach` swaps the analyzer's `session` for a `_GuardedSession` (every client
   it makes from then on is hooked, whichever method makes it: S3Analyzer makes regional S3, CloudWatch, STS and S3
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)

@@ -44,6 +44,7 @@ from ..._kit.text import _clip
 from ..budget import Budget
 from ..results import _iso, _plain, _window, _with_permissions, hide_secrets
 from .base import Toolkit
+from .s3_listing import _AsksFirst, listing_read
 from .s3_saving import DEFAULT_FILES, MOST_FILES, SAVE_READS, plan_saves, read_files, summarize_saved
 from .lambda_tools import _lambda_module
 
@@ -926,7 +927,7 @@ def _triggers_summary(links: list[TriggerLink]) -> str:
             + (f"; {_plural(len(warned), 'link')} with warnings" if warned else ""))
 
 
-class S3Toolkit(Toolkit):
+class S3Toolkit(_AsksFirst, Toolkit):
     """
     The agent's tools for Amazon S3, reading through S3Analyzer: `analyzer` is one to use (else one is made on the
     agent's session). With the Lambda toolkit beside it, it also has s3_triggers, which reads Lambda through that
@@ -950,6 +951,7 @@ class S3Toolkit(Toolkit):
         "ListBucketInventoryConfigurations": "s3:GetInventoryConfiguration",
     }
     view = "S3View"
+    asks = frozenset({"find_files", "folder_summary", "save_s3_files"})
 
     def __init__(self, analyzer: Any = None, *, read_files: bool = False):
         super().__init__(analyzer)
@@ -1132,11 +1134,14 @@ S3 and Lambda together
         start, end = _between(since, until)
         keep = s3.make_filter(pattern=match or None, min_size=min_size or None, max_size=max_size or None,
                               modified_after=start, modified_before=end if until else None)
-        found, scanned, more = self._matching(location, keep)
+        found, scanned, more = self._matching("find_files", location, keep)
         bucket, prefix = s3.parse_s3_uri(location)
         out = summarize_found(s3.s3_uri(bucket, prefix), found, scanned=scanned, cut_short=more, start=start,
                               end=end, limit=max(1, min(int(limit or 30), 200)),
                               filters={"match": match, "min_size": min_size, "max_size": max_size})
+        if more and scanned < self.budget.s3_keys:
+            out["note"] = (f"Stopped after {scanned:,} keys, in key order: the user picked the smaller listing, so "
+                           "the counts cover those only.")
         out["_summary"] = (f"{_plural(len(found), 'file')} ({out['total_size']})"
                            + (f" of {scanned:,} keys" if scanned != len(found) else "")
                            + (", cut short" if out["cut_short"] else ""))
@@ -1154,7 +1159,10 @@ S3 and Lambda together
         the budget's limit: use the narrowest location you can.
         """
         core = self.analyzer
-        summary = core.summarize(location, top_n=5, folder_depth=1, limit=self.budget.s3_keys)
+        listing = self._listing("folder_summary", location)
+        summary = _s3_module().summarize_objects(listing, location, top_n=5, folder_depth=1, limit=self.budget.s3_keys,
+                                                 prices=core.prices)
+        summary.truncated = summary.truncated or listing.cut_short
         out = summarize_prefix(summary, core.prices)
         out["_summary"] = (f"{_plural(summary.object_count, 'file')}, {out['total_size']}, about "
                            f"{human_money(summary.monthly_cost)}/month" + (", cut short" if summary.truncated
@@ -1335,11 +1343,13 @@ S3 and Lambda together
         bucket, prefix = s3.parse_s3_uri(location)
         start, end = _between(since, until)
         keep = s3.make_filter(pattern=match or None, modified_after=start, modified_before=end if until else None)
-        found, scanned, more = self._matching(location, keep)
+        found, scanned, more = self._matching("save_s3_files", location, keep)
         exact = [obj for obj in found if obj.key == prefix]
         room = self.budget.workspace_bytes - sum(f.size for f in python.workspace.files())
         wanted = max(1, min(int(max_files or DEFAULT_FILES), MOST_FILES))
         plan = plan_saves(exact or found, room=room, max_files=wanted)
+        plan = self._confirm_save(plan, exact or found, s3.s3_uri(bucket, prefix), room=room, max_files=wanted,
+                                  price=S3_REQUEST_PRICES["get"])
         read = read_files(self.analyzer, s3, plan.chosen)
         saved = python.save(f"s3/{bucket}", {**read.files, **read.texts}) if read.files else {
             "folder": f"s3/{bucket}/", "files_saved": 0, "size": "0 B"}
@@ -1347,21 +1357,28 @@ S3 and Lambda together
         out.update(scanned=scanned, cut_short=more)
         return out
 
-    def _matching(self, location: str, keep: Callable[[ObjectInfo], bool]) -> tuple[list[ObjectInfo], int, bool]:
+    def _stop_listing(self, tool: str, location: str) -> bool:
         """
-        (the files under a location that `keep` accepts, how many keys were read, whether there were more): it reads
-        up to the budget's s3_keys, and one more to tell when there were more.
+        Asks the user whether a listing past ask_keys goes on, saying how many files the bucket holds when CloudWatch
+        knows; True when they picked the smaller listing.
         """
-        cap = self.budget.s3_keys
-        scanned, found, more = 0, [], False
-        for obj in self.analyzer.iter_objects(location, limit=cap + 1):
-            if scanned >= cap:
-                more = True
-                break
-            scanned += 1
-            if keep(obj):
-                found.append(obj)
-        return found, scanned, more
+        s3 = _s3_module()
+        bucket, prefix = s3.parse_s3_uri(location)
+        budget = self.budget
+        read = listing_read(tool, s3.s3_uri(bucket, prefix), budget, held=self._object_count(bucket),
+                            price=S3_REQUEST_PRICES["list"])
+        return self.ask_user(read) == "smaller"
+
+    def _object_count(self, bucket: str) -> int | None:
+        """
+        How many files a bucket holds, from CloudWatch's daily count; None when it can't be read or isn't published.
+        """
+        try:
+            metrics = self.analyzer.bucket_metrics(bucket)
+        except (ClientError, BotoCoreError):
+            return None
+        self._count_metrics(_metrics_read(metrics), _METRIC_PRICE)
+        return metrics.object_count
 
     def _sizes(self, buckets: list[BucketInfo]) -> tuple[dict[str, BucketMetrics], dict[str, str]]:
         """

@@ -21,7 +21,7 @@ import difflib
 import json
 import re
 from collections import Counter
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -29,6 +29,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from ..._kit.errors import _error_code
 from ..._kit.fmt import _plural, human_money, human_size
 from ..._kit.text import _clip
+from ..answers import BigRead
 from ..budget import Budget, _Refused
 from ..results import _iso, _window, _with_permissions, hide_secrets
 from .base import Toolkit
@@ -675,6 +676,7 @@ class LambdaToolkit(Toolkit):
                 "GetMetricData": "cloudwatch", "DescribeRegions": "ec2"}
     view = "LambdaView"
     client_factory = "_service"
+    asks = frozenset({"function_errors", "function_logs", "function_performance", "save_logs"})
 
     def __init__(self, analyzer: LambdaAnalyzer | None = None, *, clients: dict[str, Any] | None = None,
                  prices: dict[str, float] | None = None):
@@ -787,7 +789,7 @@ AWS Lambda
         limit. region: empty for the default region.
         """
         core = self.analyzer
-        start, end = self._log_window(function, since, until, region or None)
+        start, end = self._log_window("function_errors", function, since, until, region or None)
         report = core.errors(function, since=start, until=end, region=region or None)
         out = summarize_errors(report)
         causes = out["causes"]
@@ -811,7 +813,7 @@ AWS Lambda
         empty for the default region.
         """
         core = self.analyzer
-        start, end = self._log_window(function, since, until, region or None)
+        start, end = self._log_window("function_logs", function, since, until, region or None)
         page = core.log_runs(function, since=start, until=end, search=search or None, region=region or None)
         out = summarize_runs(page)
         statuses = out["statuses"]
@@ -830,7 +832,7 @@ AWS Lambda
         longer than the log limit. region: empty for the default region.
         """
         core = self.analyzer
-        start, end = self._log_window(function, since, until, region or None)
+        start, end = self._log_window("function_performance", function, since, until, region or None)
         perf = core.performance(function, since=start, until=end, region=region or None)
         out = summarize_performance(perf, core.prices)
         p95 = out["p95_ms"]
@@ -1018,32 +1020,49 @@ AWS Lambda
                 "hint": "Use one of close_names, or find_functions to list them; the function may be in another "
                         "region."}
 
-    def _log_window(self, function: str, since: str, until: str, region: str | None) -> tuple[datetime, datetime]:
+    def _log_window(self, tool: str, function: str, since: str, until: str,  # noqa: PLR0913
+                    region: str | None) -> tuple[datetime, datetime]:
         """
-        (start, end) for a log read, or _Refused when it's longer than the budget's log_days.
+        (start, end) for a log read. One longer than the budget's log_days asks the user first (interrupt_on): go reads
+        the whole window, smaller its last log_days; without asking, it's _Refused.
         """
         core = self.analyzer
         log_days = self.budget.log_days
         start, end = core.time_range(since or "24h", until or None)
         days = (end - start).total_seconds() / 86400
-        if days > log_days + 1e-9:
-            stored = None
-            try:
-                fn = core.function(function, region=region)
-                group = core.log_group(fn.log_group, fn.region)
-                stored = group.stored_bytes if group else None
-            except (ClientError, BotoCoreError, ValueError):
-                pass
-            size = f" Its log group holds {human_size(stored)}." if stored else ""
-            raise _Refused(
-                "log_window",
-                f"Not read: a log read over {days:.1f} days is longer than the {log_days:g}-day limit "
-                f"(long log searches are slow).{size} Use function_health for counts over long windows, or read the "
-                f"logs of a shorter window. The user can raise the limit with AgentView(budget={{'log_days': "
-                f"{max(7, round(days))}}}).",
-                window=_window(start, end), stored=human_size(stored) if stored else None,
-            )
-        return start, end
+        if days <= log_days + 1e-9:
+            return start, end
+        stored = self._stored_bytes(function, region)
+        size = f" (its log group holds {human_size(stored)})" if stored else ""
+        choice = self.ask_user(BigRead(
+            tool, what=f"{tool} would read {days:.1f} days of {function}'s logs{size}, more than the {log_days:g}-day "
+                       "limit: long log searches are slow.",
+            go=f"read all {days:.1f} days", smaller=f"read the last {log_days:g} days"))
+        if choice == "go":
+            return start, end
+        if choice == "smaller":
+            return end - timedelta(days=log_days), end
+        size = f" Its log group holds {human_size(stored)}." if stored else ""
+        raise _Refused(
+            "log_window",
+            f"Not read: a log read over {days:.1f} days is longer than the {log_days:g}-day limit "
+            f"(long log searches are slow).{size} Use function_health for counts over long windows, or read the "
+            f"logs of a shorter window. The user can raise the limit with AgentView(budget={{'log_days': "
+            f"{max(7, round(days))}}}).",
+            window=_window(start, end), stored=human_size(stored) if stored else None,
+        )
+
+    def _stored_bytes(self, function: str, region: str | None) -> int | None:
+        """
+        How much a function's log group holds (DescribeLogGroups), or None when it can't be read.
+        """
+        core = self.analyzer
+        try:
+            fn = core.function(function, region=region)
+            group = core.log_group(fn.log_group, fn.region)
+        except (ClientError, BotoCoreError, ValueError):
+            return None
+        return group.stored_bytes if group else None
 
     def save_function_code(self, function: str, files: str = "", region: str = "") -> dict[str, Any]:
         """
@@ -1089,7 +1108,7 @@ AWS Lambda
         if python is None:
             raise ValueError("The agent has no Python workspace to save logs into")
         core = self.analyzer
-        start, end = self._log_window(function, since, until, region or None)
+        start, end = self._log_window("save_logs", function, since, until, region or None)
         page = core.log_runs(function, since=start, until=end, search=search or None, limit=_SAVED_LOG_LINES,
                              region=region or None)
         lines, runs = log_lines(page), run_rows(page)

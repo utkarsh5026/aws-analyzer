@@ -20,6 +20,10 @@ Lambda toolkit, or None when it hasn't got one (then the toolkit leaves the tool
 A tool raises what it likes: the agent's runtime (runtime.py) turns every error into the tool's result, and checks the
 question's budget before the tool runs. A tool that reads logs over a window checks the budget's log_days itself
 (raising _Refused, as the Lambda toolkit's _log_window does).
+
+A tool in `asks` can stop before a big read and ask the user (ask_user, with a BigRead saying what it would read and
+what each choice does): 'go', 'smaller' or 'skip' (skip refuses the call), or '' when the agent doesn't ask, and the
+tool then does what it always did.
 """
 
 from __future__ import annotations
@@ -30,7 +34,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 from ..._kit.render import _call
-from ..budget import Budget
+from .. import runtime
+from ..answers import BigRead
+from ..budget import Budget, _Refused
 
 if TYPE_CHECKING:
     from ..analyzer import AgentAnalyzer
@@ -54,6 +60,7 @@ class Toolkit:
                         {'ListObjectsV2': 's3:ListBucket'}
         view            the View whose commands its tools suggest next: 'LambdaView'
         client_factory  the analyzer's method that makes clients, which the guard hooks too
+        asks            the tools that may ask the user before a big read (ask_user); interrupt_on= picks among them
     """
 
     name: str = ""
@@ -66,6 +73,7 @@ class Toolkit:
     permissions: dict[str, str] = {}
     view: str = ""
     client_factory: str | None = None
+    asks: frozenset[str] = frozenset()
 
     def __init__(self, analyzer: Any = None):
         self.agent: AgentAnalyzer | None = None
@@ -169,6 +177,28 @@ class Toolkit:
         service = self.services.get(op, self.service)
         return f"{service}:{op}" if op and service else ""
 
+
+    def will_ask(self, tool: str) -> bool:
+        """
+        Whether the tool asks the user before a big read now: the agent asks about it (interrupt_on=) and is
+        answering a question.
+        """
+        agent = self.agent
+        return agent is not None and agent._run is not None and agent.interrupts(tool)
+
+    def ask_user(self, read: BigRead) -> str:
+        """
+        Asks the user about a big read before the tool makes it, and returns their choice: 'go' or 'smaller'. Skip
+        is _Refused('skipped'), which the model reads as a refusal. '' when it doesn't ask (will_ask): the tool then
+        does what it does without asking.
+        """
+        if not self.will_ask(read.tool):
+            return ""
+        choice = runtime.ask_user(read)
+        if choice == "skip":
+            raise _Refused("skipped", f"Not read: the user chose to skip it ({read.what}) Answer with what you found, "
+                                      "or try a smaller read (a narrower prefix, a shorter window).")
+        return choice
 
     def _regions(self, regions: str) -> Any:
         """

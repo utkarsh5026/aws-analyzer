@@ -2,6 +2,11 @@
 How a tool runs for the agent, whichever toolkit it comes from: the budget is checked first, the call is recorded
 on the question, its errors become its result (a tool never raises into the agent loop), and the result is made
 JSON-ready, with the report's `_summary` and `_next` taken out before the model sees it.
+
+A tool can pause the question to ask the user about a big read (ask_user, through its toolkit's ask_user): the pause
+leaves the agent loop, the call is kept as paused, and once the user has chosen, LangGraph runs the tool again from its
+start, as the same call (_Run.paused_call), its asks answered in the order it made them. _CURRENT is the call a tool is
+running for, on the thread it runs on.
 """
 
 from __future__ import annotations
@@ -9,13 +14,16 @@ from __future__ import annotations
 import functools
 import inspect
 import time
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 from botocore.exceptions import ClientError
 
 from .._kit.errors import _error_code, _why
 from .._kit.text import _clip
-from .answers import AgentStep, ToolCall
+from . import harness
+from .answers import AgentStep, BigRead, ToolCall, choice_of
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .guard import ReadOnlyError
 from .results import _plain
@@ -29,37 +37,94 @@ _MESSAGE_CHARACTERS = 400
 _AWS_MESSAGE_CHARACTERS = 300
 
 
+@dataclass
+class _Current:
+    """
+    The call a tool is running for, and how many times it has asked the user so far in this run of it.
+    """
+
+    call: ToolCall
+    asked: int = 0
+
+
+_CURRENT: ContextVar[_Current | None] = ContextVar("aws_analyzer_agent_call", default=None)
+
+
+def ask_user(read: BigRead) -> str:
+    """
+    Pauses the question to ask the user about a big read, and returns their choice ('go', 'smaller' or 'skip') once
+    they've made it; '' when no tool call is running (a tool called outside ask()). The first time, the pause leaves
+    the tool and the agent loop; LangGraph then runs the tool again from its start, and the asks it makes again return
+    the choices made, in order.
+    """
+    current = _CURRENT.get()
+    if current is None:
+        return ""
+    call, index = current.call, current.asked
+    current.asked += 1
+    if index < len(call.asks):
+        read = call.asks[index]
+    else:
+        call.asks.append(read)
+    read.choice = choice_of(harness.pause_for(read.as_value(call.key)))
+    return read.choice
+
+
 def as_tool(fn: Callable[..., dict[str, Any]], toolkit: Toolkit,
             current: Callable[[], _Run]) -> Callable[..., dict[str, Any]]:
     """
     `fn` (one of `toolkit`'s tools) as the agent calls it: the budget of the question `current()` returns is
     checked first, the call recorded on it, its errors turned into its answer (a resource that isn't there into the
-    toolkit's close names, a refused call into the permission it needed), and its result made JSON-ready. The
-    signature and docstring stay the tool's, which is how the model learns to call it.
+    toolkit's close names, a refused call into the permission it needed), and its result made JSON-ready. A call
+    that pauses to ask the user is kept as paused, and its pause goes on out to the agent loop. The signature and
+    docstring stay the tool's, which is how the model learns to call it.
     """
 
     @functools.wraps(fn)
     def tool(*args: Any, **kwargs: Any) -> dict[str, Any]:
         run = current()
         arguments = _asked_for(fn, args, kwargs)
-        call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn),
-                        reads=tuple(toolkit.reads.get(fn.__name__, ())))
-        started = time.monotonic()
+        call = run.paused_call(fn.__name__, arguments) or _new_call(run, fn, toolkit, arguments)
         with run.lock:
-            run.calls.append(call)
-            used = sum(1 for c in run.calls if c.refused is None) - 1
-        run.tell(AgentStep("tool", call=call))
+            used = sum(1 for c in run.calls if c.refused is None and c is not call)
+        started = time.monotonic()
+        token = _CURRENT.set(_Current(call))
         try:
             check_budget(run, used)
             result = fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001
+            if harness.is_pause(exc):
+                _paused(run, call, started)
+                raise
             result = _failed(exc, call, toolkit, arguments)
-        call.seconds = time.monotonic() - started
+        finally:
+            _CURRENT.reset(token)
+        call.seconds += time.monotonic() - started
         reported = _reported(call, result)
         run.tell(AgentStep("tool_done", call=call))
         return reported
 
     return tool
+
+
+def _new_call(run: _Run, fn: Callable[..., Any], toolkit: Toolkit, arguments: dict[str, Any]) -> ToolCall:
+    """
+    A tool call recorded on the question, and told to its listener.
+    """
+    call = ToolCall(fn.__name__, arguments, first=_first_parameter(fn), reads=tuple(toolkit.reads.get(fn.__name__, ())))
+    with run.lock:
+        run.calls.append(call)
+    run.tell(AgentStep("tool", call=call))
+    return call
+
+
+def _paused(run: _Run, call: ToolCall, started: float) -> None:
+    """
+    Keeps a call that paused to ask the user, so it's the same call when it runs again, and tells the listener.
+    """
+    call.seconds += time.monotonic() - started
+    call.paused = True
+    run.tell(AgentStep("asking", call=call))
 
 
 def _asked_for(fn: Callable[..., Any], args: tuple, kwargs: dict[str, Any]) -> dict[str, Any]:

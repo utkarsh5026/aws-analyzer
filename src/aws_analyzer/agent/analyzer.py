@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable
@@ -21,7 +22,7 @@ from .._kit.analyzer import _BaseAnalyzer
 from .._kit.errors import _error_name, _Hint
 from .._kit.fmt import _display_zone, _utcnow, _zone_from
 from . import harness
-from .answers import AgentAnswer, AgentStep
+from .answers import AgentAnswer, AgentStep, ToolCall, choice_of
 from .budget import Budget, _Run
 from .charts import CHARTS_FOLDER, write_charts
 from .guard import _Guard
@@ -58,6 +59,36 @@ _THREAD_ID_LENGTH = 12
 _WORKERS = 8
 _MODEL_SETTINGS = ("provider", "model_id", "deployment", "endpoint", "api_version", "_api_key", "_token_provider",
                    "chat_model", "given_chat_model")
+
+
+@dataclass
+class _Paused:
+    """
+    A question waiting for the user's choice on a big read: its state, its answer so far, and each pause's ID ->
+    the key of the call that asked (what resume() answers, in the order they asked).
+    """
+
+    run: _Run
+    answer: AgentAnswer
+    pauses: dict[str, str] = field(default_factory=dict)
+
+
+def _interrupting(interrupt_on: bool | str | Iterable[str] | None, toolkits: list[Toolkit]) -> frozenset[str]:
+    """
+    The tools that ask before a big read, from interrupt_on=: True for every tool that can ask (each toolkit's
+    `asks`), False or None for none, or tool names ('find_files', ...). ValueError for a name no toolkit asks with.
+    """
+    can_ask = {name for toolkit in toolkits for name in toolkit.asks}
+    if interrupt_on is True:
+        return frozenset(can_ask)
+    if not interrupt_on:
+        return frozenset()
+    names = [interrupt_on] if isinstance(interrupt_on, str) else list(interrupt_on)
+    unknown = sorted(set(names) - can_ask)
+    if unknown:
+        raise ValueError(f"interrupt_on= names {unknown[0]!r}, which never asks first. The tools that can are "
+                         f"{', '.join(sorted(can_ask)) or 'none'} (interrupt_on=True for all of them)")
+    return frozenset(names)
 
 
 def _new_thread() -> str:
@@ -150,6 +181,13 @@ class AgentAnalyzer(_BaseAnalyzer):
 writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
 plan=False leaves the plan out, which saves its instructions' tokens on every model call.
 
+    Big reads: before a read that would take a long time or cost money (an S3 listing past the budget's ask_keys, a
+    log read longer than log_days, a save into the workspace past ask_bytes) the agent pauses and asks: ask() returns
+    the answer with .waiting set (each call's .waiting says what it would read), and resume('go' | 'smaller' |
+    'skip') goes on. interrupt_on= picks the tools that ask: True (the default) for every one that can, a list of
+    tool names, or False to never ask (listings stop at s3_keys and long log reads are refused, as before). It's
+    about time and cost: the agent only reads, whichever you pick.
+
     Its only list prices are Amazon Bedrock's (_bedrock's MODEL_PRICES): the other providers' depend on the plan or
     the deployment (see model_prices=). `provider` and `model_id` are the provider and model it was given or worked
     out, `thread` is the conversation follow-up questions continue, and `history` every question asked, in order.
@@ -186,6 +224,7 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
         plan: bool = True,
+        interrupt_on: bool | str | Iterable[str] | None = True,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -207,8 +246,10 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
             {"lambda": {"analyzer": lambda_core, "clients": lambda_clients, "prices": prices},
              "s3": {"analyzer": s3_core, "read_files": read_files}, "bedrock_kb": {"analyzer": kb_core},
              "python": {"workspace": workspace}})]
+        self.interrupt_on = _interrupting(interrupt_on, self.toolkits)
         self._graph: Any = None
         self._run: _Run | None = None
+        self._paused: _Paused | None = None
         self._tools: list[Callable[..., dict[str, Any]]] | None = None
         self.thread = _new_thread()
         self.history: list[AgentAnswer] = []
@@ -443,10 +484,26 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
 
     def new_conversation(self) -> str:
         """
-        Starts a new conversation: the next question won't see the earlier ones. Returns its ID.
+        Starts a new conversation: the next question won't see the earlier ones, and a question waiting for your
+        choice on a big read is dropped. Returns its ID.
         """
         self.thread = _new_thread()
+        self._paused = None
         return self.thread
+
+    def interrupts(self, tool: str) -> bool:
+        """
+        Whether a tool asks the user before a big read (interrupt_on=).
+        """
+        return tool in self.interrupt_on
+
+    @property
+    def waiting(self) -> list[ToolCall]:
+        """
+        The tool calls waiting for your choice on a big read (resume() goes on), in the order they asked; empty when
+        nothing waits.
+        """
+        return self._paused.answer.waiting if self._paused is not None else []
 
     def ask(  # noqa: PLR0913
         self,
@@ -465,13 +522,18 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         once, with what it read but no answer written. progress(count) is told each
         step, and on_step(AgentStep) what the agent does as it does it (its words, its plan, each tool call as it
         starts and ends), from the threads the tools run on. A model or loop that fails gives an answer with .error
-        set (and .exception) instead of raising.
+        set (and .exception) instead of raising. Before a big read (interrupt_on=) it pauses: the answer comes back
+        with .waiting set and no text yet, and resume() goes on with your choice.
         """
         question = str(question or "").strip()
         if not question:
             raise ValueError("ask() needs a question, like ask('Which Lambda failed last night?')")
         if new:
             self.new_conversation()
+        if self._paused is not None:
+            waiting = self.waiting[0]
+            raise _Hint(f"The agent is waiting for your choice on {waiting.call}: resume('go'), resume('smaller') "
+                        "or resume('skip') first, or ask(..., new=True) to drop that question.")
         graph = self._harness()
         moment = now or _utcnow()
         run = _Run(self.budget, stop=stop or threading.Event(), listener=on_step)
@@ -485,6 +547,59 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
                                               progress=progress, provider=self.provider)
         finally:
             self._run = None
+        self.history.append(answer)
+        return self._finish(graph, run, answer)
+
+    def resume(  # noqa: PLR0913
+        self,
+        choice: str,
+        *,
+        stop: threading.Event | None = None,
+        progress: Callable[..., None] | None = None,
+        on_step: Callable[[AgentStep], None] | None = None,
+    ) -> AgentAnswer:
+        """
+        Goes on with the question waiting for your choice on a big read, and returns its answer: 'go' reads it all,
+        'smaller' reads the smaller part its question names, 'skip' answers without it. When several reads wait (the
+        model asked for them side by side), each resume() answers the next one, and the question goes on once all are
+        answered. stop, progress and on_step are what ask() takes.
+        """
+        paused = self._paused
+        if paused is None:
+            raise _Hint("Nothing is waiting for your choice: resume() goes on after a question pauses before a big "
+                        "read.")
+        picked = choice_of(choice)
+        paused.answer.waiting[0].waiting.choice = picked
+        if paused.answer.waiting:
+            return paused.answer
+        choices = {pause: self._choice(paused.answer, key) for pause, key in paused.pauses.items()}
+        self._paused = None
+        run, answer = paused.run, paused.answer
+        run.stop = stop or threading.Event()
+        run.listener = on_step
+        run.go_on()
+        graph = self._harness()
+        self._run = run
+        try:
+            answer.text = harness.resume_turn(graph, choices, thread=answer.thread, run=run, answer=answer,
+                                              model_prices=self.prices, progress=progress, provider=self.provider)
+        finally:
+            self._run = None
+        return self._finish(graph, run, answer)
+
+    @staticmethod
+    def _choice(answer: AgentAnswer, key: str) -> str:
+        """
+        The choice made on the last ask of the call whose key is `key` ('skip' when the call isn't found).
+        """
+        call = next((c for c in answer.calls if c.key == key and c.asks), None)
+        return (call.asks[-1].choice or "skip") if call is not None else "skip"
+
+    def _finish(self, graph: Any, run: _Run, answer: AgentAnswer) -> AgentAnswer:
+        """
+        Fills in the answer from what the question's run, the guard and the model counted, and keeps it as paused
+        when a tool is waiting for the user's choice.
+        """
         answer.calls = list(run.calls)
         answer.plan = list(run.plan)
         answer.charts = list(run.charts)
@@ -496,10 +611,14 @@ plan=False leaves the plan out, which saves its instructions' tokens on every mo
         answer.cost = answer_cost(answer.model, answer.input_tokens, answer.output_tokens, self.prices,
                                   provider=self.provider)
         answer.seconds = run.elapsed
+        pauses = harness.pauses(graph, answer.thread) if answer.waiting and answer.error is None else {}
+        if pauses:
+            run.pause()
+            self._paused = _Paused(run, answer, {pause: str(value.get("call", "")) for pause, value in pauses.items()})
+            return answer
         if answer.stopped is None:
             refused = [c.refused for c in answer.calls if c.refused in ("tool_calls", "time", "cost")]
             answer.stopped = refused[0] if refused else None
-        self.history.append(answer)
         return answer
 
     def save_charts(self, folder: str | os.PathLike = CHARTS_FOLDER, *, answer: int = -1) -> list[Path]:

@@ -394,8 +394,10 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `seconds` | 300 | The same |
 | `usd` | 1.00 | The same, when `model_prices=` says what its tokens cost |
 | `steps` | 200 | The agent stops (LangGraph's recursion limit) |
-| `log_days` | 3 | A longer log read is refused; CloudWatch's counts still cover the window |
+| `log_days` | 3 | A longer log read [asks you first](#big-reads) (all of it, the last 3 days, or none); CloudWatch's counts still cover the window |
 | `s3_keys` | 100,000 | An S3 listing stops there and says so: its counts cover the keys it read |
+| `ask_keys` | 20,000 | An S3 listing past it [asks you first](#big-reads): go on (up to `s3_keys`), stop there, or skip it |
+| `ask_bytes` | 10 MB | With `python=`: a save into the workspace past it [asks you first](#big-reads): all of it, what fits, or none |
 | `file_bytes` | 2 MB | With `read_files=True`: `preview_file` reads a text or JSON file's start only |
 | `file_chars` | 50,000 | With `read_files=True`: what `preview_file` sends the model is cut there, and it says so |
 | `python_runs` | 10 | With `python=`: `run_python` stops; it answers with what it has |
@@ -411,6 +413,27 @@ agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 ??? more "Why log reads and S3 listings are limited"
 
     Log reads are limited because searching weeks of a busy function's logs is slow. For long windows the agent uses CloudWatch's counts, which cover months in seconds, and reads logs only for a short window around what it found. S3 listings are limited for the same reason: S3 lists 1,000 keys per request, in key order, so the agent is told to give `find_files` and `folder_summary` the narrowest prefix it can (a day's folder rather than the bucket).
+
+### Big reads ask first { #big-reads }
+
+Before a read that would take long or cost money, the agent stops and asks you: go, smaller, or skip.
+{ .gist }
+
+Three kinds of read ask first: an S3 listing that goes past 20,000 keys (`find_files`, `folder_summary`, `save_s3_files`), a log read longer than the 3-day limit, and a save of more than 10 MB into the [Python workspace](#run-python). The agent pauses with a question like *"find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket holds about 41,200 files."* and says what each choice reads:
+
+- **Go** reads all of it: the rest of the listing (up to `s3_keys`, with the requests it takes and what they cost), every day of the logs, every file of the save.
+- **Smaller** reads the smaller part it names: the keys listed so far, the last 3 days of logs, the files that fit in 10 MB. The answer says what that left out.
+- **Skip** answers without it, and says what it didn't read.
+
+In the [chat window](#chat), the call's line says *✋ waiting for you* and three buttons sit under it; Stop skips the read and has the agent answer. With `ask()`, the report shows the question and the three calls to run: `agent.go()`, `agent.smaller()` or `agent.skip()`. The wait doesn't count against the time budget.
+
+!!! note ""
+
+    This is about time and cost, not safety: the agent only reads, whichever you pick. Without asking (`AgentView(interrupt_on=False)`), a listing stops at `s3_keys` and a long log read is refused, as before.
+
+??? more "Choosing which tools ask, and how big is big"
+
+    `interrupt_on=` picks the tools that ask: `True` (the default) for all of them, a list like `interrupt_on=["find_files", "folder_summary"]` for some, `False` for none. `budget={"ask_keys": 50_000, "ask_bytes": 50_000_000}` moves where a read counts as big. The pause is LangGraph's `interrupt`, kept with the conversation, so the question goes on where it stopped: the tool that asked runs again with your choice, and the calls that finished beside it aren't run again. `agent.core.ask()` returns the answer with `.waiting` set (each call's `.waiting` is the `BigRead`: `.what`, `.go`, `.smaller`, `.cost`), and `agent.core.resume("go")` goes on. When the model asked for two big reads side by side, each `resume()` answers the next.
 
 <p class="part"><strong>That's the guide.</strong> Everything below is reference for when you need it: the data in Python and your own tools, cost, permissions, troubleshooting and every command.</p>
 
@@ -431,10 +454,12 @@ answer.provider, answer.model # who served it, and the model or profile that ans
 answer.input_tokens, answer.output_tokens, answer.cost   # answer.rates: whose prices the cost is at
 answer.stopped                 # None, or why it stopped early: 'tool_calls', 'time', 'cost', 'steps', 'stopped', 'error'
 answer.error                   # what went wrong with the model, and what to do
+answer.waiting                 # calls paused before a big read: .waiting.what / .go / .smaller say what it asks
+agent.core.resume("smaller")   # goes on with your choice: 'go', 'smaller' or 'skip'
 agent.core.history             # every AgentAnswer so far
 ```
 
-To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), its plan each time it writes or updates one (`'plan'`, `.plan`: the whole list), and each tool call as it starts (`'tool'`) and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
+To show the agent's work as it happens in a UI of your own, as the chat window does, pass `on_step`. It's told each `AgentStep`: the model's words before it acts (`kind='thinking'`, `.text`), its plan each time it writes or updates one (`'plan'`, `.plan`: the whole list), and each tool call as it starts (`'tool'`), pauses to ask you before a big read (`'asking'`, with `.call.waiting`), and ends (`'tool_done'`, with `.call.summary`, `.call.error` or `.call.refused` filled in). Tools run side by side, so it's called from their threads:
 
 ```python
 def show(step):
@@ -461,6 +486,7 @@ core = AgentAnalyzer(
     toolkits=["lambda", "s3"],                       # the default; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
+    interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
 )
 agent = AgentView(core)
 ```
@@ -546,6 +572,10 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 
     The question needed more tool calls, time or log days than the budget allows. Ask a narrower question (one function, a shorter window), or raise the limit it names: `AgentView(budget={"tool_calls": 50})`.
 
+??? question "`ask()` says the agent is waiting for my choice"
+
+    The last question stopped to ask before a [big read](#big-reads). Run `agent.go()`, `agent.smaller()` or `agent.skip()` to let it finish, or `agent.ask("...", new=True)` to drop it and start a new conversation.
+
 ## Command reference { #reference }
 
 <div class="ref" markdown>
@@ -555,6 +585,9 @@ On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra
 | `chat(height=None)` | A chat window: ask, and watch each step as it happens (what the model says, each tool call running and then what it found), then the answer with Details (each tool call, the AWS reads, the cost) folded under it. Stop ends a question with what it found; a question typed while it works is queued and asked next; New chat starts over; ⚙ model picks the model |
 | `ask(question, new=False)` | The answer first, then what it checked: each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer |
 | `new_conversation()` | Starts a new conversation: the next question won't see the earlier ones |
+| `go()` | The agent stopped to ask before a [big read](#big-reads): read all of it, then show the answer |
+| `smaller()` | The same, reading only the smaller part it named (the keys listed so far, the last days of logs, the files that fit) |
+| `skip()` | The same, answering without it; the answer says what it didn't read |
 | `transcript()` | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the last answer's charts (or `answer=` another's) as SVG files, each named after its title, with its Vega-Lite spec beside it; it never replaces a file |
 | `tools()` | Each tool and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model |

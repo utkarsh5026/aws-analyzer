@@ -2771,3 +2771,208 @@ def test_a_script_written_with_the_file_tools_runs_in_the_local_sandbox(pyodide,
     assert tool(agent, "run_python")(file="/count.py")["stdout"] == "2\n"
     backend.edit("/count.py", "'*.py'", "'app.py'")
     assert tool(agent, "run_python")(file="count.py")["stdout"] == "1\n"
+
+
+def test_choice_of_reads_the_users_answer_forgivingly():
+    from aws_analyzer.agent import choice_of
+
+    assert [choice_of(word) for word in ("Go", " yes ", "small", "Smaller", "no", "SKIP")] == [
+        "go", "go", "smaller", "smaller", "skip", "skip"]
+    with pytest.raises(ValueError, match="'go', 'smaller' or 'skip'"):
+        choice_of("maybe")
+
+
+def test_big_reads_say_what_each_choice_reads_and_costs():
+    from aws_analyzer.agent import listing_read, save_read
+
+    read = listing_read("find_files", "s3://acme-raw/", Budget(), held=41_200, price=0.005)
+    assert read.what == ("find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket "
+                         "holds about 41,200 files.")
+    assert read.go == "list the rest, up to 100,000 keys (about 22 more requests, <$0.01)"
+    assert read.smaller.startswith("stop at the 20,000 keys listed so far") and read.cost == pytest.approx(22 * 5e-6)
+    assert "up to 100,000 keys (about 80 more requests" in listing_read("find_files", "s3://a/", Budget(), held=None,
+                                                                        price=0.005).go
+    save = save_read("s3://acme-raw/docs/", files=40, size=180 * 2**20, smaller_files=3, smaller_size=9 * 2**20,
+                     limit=10 * 2**20, price=0.0004)
+    assert save.what.startswith("save_s3_files would copy 40 files (180.0 MB) from s3://acme-raw/docs/")
+    assert save.go.startswith("copy all 40 files (180.0 MB") and save.smaller == "copy 3 files (9.0 MB), up to 10.0 MB"
+    none = save_read("s3://a/", files=1, size=50 * 2**20, smaller_files=0, smaller_size=0, limit=10 * 2**20, price=0)
+    assert none.smaller == "copy none: each is bigger than 10.0 MB"
+
+
+def test_interrupt_on_names_the_tools_that_ask_first(seeded):
+    assert {"find_files", "folder_summary", "save_s3_files", "function_logs"} <= make().interrupt_on
+    assert make(interrupt_on=False).interrupt_on == frozenset()
+    assert make(interrupt_on=["function_logs"]).interrupts("function_logs")
+    with pytest.raises(ValueError, match="'list_folder', which never asks first"):
+        make(interrupt_on=["list_folder"])
+
+
+def long_read(*replies):
+    """
+    A model that reads a week of etl-nightly's errors, longer than the 3-day log limit, then answers with `replies`.
+    """
+    return scripted(calls(("function_errors", {"function": "etl-nightly", "since": "7d"})), *replies)
+
+
+def test_a_long_log_read_stops_to_ask_and_goes_on_with_the_choice(seeded):
+    model = long_read(says("A week of errors: one KeyError."))
+    core = make(model)
+    told = []
+    answer = core.ask("Errors this week?", on_step=told.append)
+    assert answer.text == "" and answer.stopped is None and [c.name for c in answer.waiting] == ["function_errors"]
+    asked = answer.waiting[0].waiting
+    assert asked.what.startswith("function_errors would read 7.0 days of etl-nightly's logs")
+    assert "more than the 3-day limit" in asked.what and (asked.go, asked.smaller) == ("read all 7.0 days",
+                                                                                         "read the last 3 days")
+    assert core.waiting == answer.waiting and [s.kind for s in told] == ["tool", "asking"]
+    assert core.history == [answer] and len(model.prompts) == 1
+    with pytest.raises(_Hint, match="waiting for your choice on function_errors"):
+        core.ask("Something else?")
+
+    done = core.resume("Go")
+    assert done is answer and done.text == "A week of errors: one KeyError." and not done.waiting
+    assert core.waiting == [] and core.history == [done] and done.stopped is None
+    call = done.calls[0]
+    assert len(done.calls) == 1 and call.ok and call.coverage["window"]["hours"] == 168.0
+    assert [a.choice for a in call.asks] == ["go"] and not any("You " in m for _, m in answer_findings(done))
+    with pytest.raises(_Hint, match="Nothing is waiting"):
+        core.resume("go")
+
+
+def test_smaller_reads_the_last_days_and_skip_answers_without_it(seeded):
+    smaller = make(long_read(says("The last 3 days: one KeyError.")))
+    smaller.ask("Errors this week?")
+    answer = smaller.resume("smaller")
+    assert answer.calls[0].ok and answer.calls[0].coverage["window"]["hours"] == 72.0
+    assert any(m.startswith("You picked the smaller read for function_errors('etl-nightly', since='7d'): read the "
+                            "last 3 days") for _, m in answer_findings(answer))
+
+    model = long_read(says("I didn't read the week's logs."))
+    skipped = make(model)
+    skipped.ask("Errors this week?")
+    answer = skipped.resume("skip")
+    assert answer.calls[0].refused == "skipped" and answer.text == "I didn't read the week's logs."
+    told = [m.content for m in model.prompts[1] if type(m).__name__ == "ToolMessage"]
+    assert any("the user chose to skip it" in text for text in told)
+    assert any(m.startswith("You skipped function_errors") for _, m in answer_findings(answer))
+
+
+def test_without_interrupt_on_a_long_log_read_is_refused_as_before(seeded):
+    core = make(long_read(says("The window is too long.")), interrupt_on=False)
+    answer = core.ask("Errors this week?")
+    assert not answer.waiting and answer.calls[0].refused == "log_window" and answer.text == "The window is too long."
+
+
+def test_the_wait_doesnt_count_against_the_time_budget(seeded):
+    core = make(long_read(says("ok")))
+    core.ask("Errors this week?")
+    core._paused.run.paused_at -= 3600
+    answer = core.resume("go")
+    assert answer.seconds < 60 and answer.calls[0].ok
+
+
+def test_reads_asked_for_side_by_side_are_answered_one_by_one(buckets):
+    model = scripted(calls(("function_logs", {"function": "etl-nightly", "since": "5d"}),
+                           ("find_files", {"location": "s3://acme-raw/"})),
+                     says("Both read."))
+    core = with_s3(model, budget={"ask_keys": 2})
+    answer = core.ask("What happened this week?")
+    assert sorted(c.name for c in answer.waiting) == ["find_files", "function_logs"]
+    first = answer.waiting[0].name
+    still = core.resume("go")
+    assert [c.name for c in still.waiting] != [first] and len(still.waiting) == 1 and len(model.prompts) == 1
+    done = core.resume("smaller")
+    assert done.text == "Both read." and not done.waiting and len(done.calls) == 2
+    found = next(c for c in done.calls if c.name == "find_files")
+    assert found.result["scanned"] == (2 if found.asks[0].choice == "smaller" else 4)
+
+
+def test_a_deep_listing_asks_past_ask_keys(buckets):
+    model = scripted(calls(("find_files", {"location": "s3://acme-raw/"})), says("Stopped at 2 keys."))
+    core = with_s3(model, budget={"ask_keys": 2})
+    answer = core.ask("What's in acme-raw?")
+    asked = answer.waiting[0].waiting
+    assert asked.what == ("find_files has listed 2 keys under s3://acme-raw/ and there are more; the bucket holds "
+                          "about 4 files.")
+    assert asked.go == "list the rest, up to 100,000 keys (about 1 more request, <$0.01)"
+    answer = core.resume("smaller")
+    result = answer.calls[0].result
+    assert result["scanned"] == 2 and result["cut_short"] is True and "picked the smaller listing" in result["note"]
+    assert any("You picked the smaller read for find_files" in m for _, m in answer_findings(answer))
+    assert not any("s3_keys" in m for _, m in answer_findings(answer))
+
+    whole = with_s3(scripted(calls(("folder_summary", {"location": "s3://acme-raw/"})), says("4 files.")),
+                    budget={"ask_keys": 2})
+    whole.ask("Summarise acme-raw")
+    done = whole.resume("go")
+    assert done.calls[0].result["files"] == 4 and done.calls[0].result["cut_short"] is False
+    small = with_s3(scripted(calls(("folder_summary", {"location": "s3://acme-raw/"})), says("2 files.")),
+                    budget={"ask_keys": 2})
+    small.ask("Summarise acme-raw")
+    assert small.resume("smaller").calls[0].result["cut_short"] is True
+
+
+def test_a_large_save_asks_before_it_copies(buckets, tmp_path):
+    model = scripted(calls(("save_s3_files", {"location": "s3://acme-raw/", "match": "*"})), says("Saved some."))
+    core = with_s3(model, python=Folder(tmp_path), budget={"ask_bytes": 20})
+    answer = core.ask("Copy acme-raw")
+    asked = answer.waiting[0].waiting
+    assert asked.what.startswith("save_s3_files would copy 4 files (") and "more than 20 B" in asked.what
+    assert asked.smaller == "copy 3 files (15 B), up to 20 B"
+    done = core.resume("smaller")
+    saved = done.calls[0].result
+    assert saved["files_saved"] == 3 and any("past the 20 B you picked" in why for why in saved["skipped"])
+    assert sorted(p.name for p in (tmp_path / "s3/acme-raw").rglob("*") if p.is_file()) == sorted(
+        key.rsplit("/", 1)[-1] for key in saved["saved"])
+
+
+def test_the_view_shows_the_choice_and_go_goes_on(seeded, capsys):
+    view = AgentView(make(long_read(says("A week: one KeyError."))), mode="text", progress="off")
+    assert {"go", "smaller", "skip"} <= set(view._GROUPS["✋ Big reads"])
+    out = run(capsys, view.ask, "Errors this week?")
+    assert "waiting for you" in out and "It stopped to ask before a big read" in out
+    assert "go()" in out and "read all 7.0 days" in out and "smaller()" in out and "skip()" in out
+    out = run(capsys, view.go)
+    assert "A week: one KeyError." in out and "waiting for you" not in out
+    assert "Nothing is waiting for your choice" in run(capsys, view.skip)
+
+
+def test_the_chat_window_asks_with_three_buttons(seeded):
+    x = window(long_read(says("A week of errors: one KeyError.")))
+    enter(x, "Errors this week?")
+    shown = page(x)
+    assert x.busy and x.turn.ask is not None and "✋ waiting for you" in shown
+    assert "Big read: go, smaller or skip?" in shown and "read all 7.0 days" in shown and "Waiting for you" in shown
+    labels = [b.description for b in x.turn.ask.children[1:]]
+    assert labels == ["go ▸", "smaller", "skip"]
+    x.turn.ask.children[1].click()
+    shown = page(x)
+    assert not x.busy and "A week of errors: one KeyError." in shown and "Waiting for you" not in shown
+    assert x.view.core.history[-1].calls[0].asks[0].choice == "go"
+
+
+def test_stop_while_the_window_waits_skips_the_read(seeded):
+    x = window(long_read(says("Stopped: I didn't read the logs.")))
+    enter(x, "Errors this week?")
+    x.send_button.click()
+    answer = x.view.core.history[-1]
+    assert not x.busy and answer.calls[0].refused == "stopped" and answer.stopped == "stopped"
+    assert "Stopped: I didn&#x27;t read the logs." in page(x)
+
+
+def test_the_chat_window_waits_for_a_choice_on_the_kernels_loop(seeded):
+    x = window(long_read(says("The last 3 days: one KeyError.")))
+
+    async def ask_and_choose():
+        enter(x, "Errors this week?")
+        await x.task
+        assert x.busy and x.turn.ask is not None and "Waiting for you" in page(x)
+        x.turn.ask.children[2].click()
+        assert x.turn.ask is None
+        await x.task
+
+    asyncio.run(ask_and_choose())
+    answer = x.view.core.history[-1]
+    assert not x.busy and answer.calls[0].asks[0].choice == "smaller" and answer.calls[0].ok
+    assert "The last 3 days: one KeyError." in page(x) and "You picked the smaller read" in page(x)

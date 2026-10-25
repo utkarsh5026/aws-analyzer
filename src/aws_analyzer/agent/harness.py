@@ -12,6 +12,10 @@ chat window and the report show it. _PLAN_PROMPT and _PLAN_TOOL_TEXT replace the
 are written for coding tasks and run to about a thousand tokens. FILE_TOOLS are deepagents' file tools (with
 the parameter a call's line names first): with a Python workspace they work on its files (workspace_files.py), and
 _record_file_tools counts each call against the question's budget and records it like the toolkits' tools.
+
+A question pauses when a tool asks the user about a big read (pause_for: LangGraph's interrupt, kept with the
+conversation by the checkpointer): the stream ends, pauses() lists what's waiting, and resume_turn() goes on with the
+user's choices.
 """
 
 from __future__ import annotations
@@ -108,16 +112,65 @@ def stream_turn(graph: Any, content: str, *, thread: str, run: _Run, answer: Age
     Stops when `run.stop` is set, the kernel is interrupted (the notebook's stop button: it keeps what it found) or
     the time budget is well past. Stopped by `run.stop` before it wrote an answer, it asks the model for one
     (_wrap_up). A model or loop that fails, whatever it raises, sets answer.error (what it means with this provider)
-    and answer.exception instead of raising.
+    and answer.exception instead of raising. A tool that asks the user about a big read ends the stream with no text
+    yet: pauses() says what's waiting.
+    """
+    message = {"role": "user", "content": content}
+    return _stream(graph, {"messages": [message]}, thread=thread, run=run, answer=answer, model_prices=model_prices,
+                   progress=progress, provider=provider)
+
+
+def resume_turn(graph: Any, choices: dict[str, str], *, thread: str, run: _Run,  # noqa: PLR0913
+                answer: AgentAnswer, model_prices: dict[str, tuple[float, float]] | None = None,
+                progress: Callable[..., None] | None = None, provider: str = "") -> str:
+    """
+    Goes on with a paused question once the user has chosen: `choices` is each pause's ID (from pauses()) -> 'go',
+    'smaller' or 'skip'. Streams the rest of the question like stream_turn(), and returns the answer's text.
+    """
+    command = _require("langgraph.types", "The agent", package="aws-analyzer[agent]").Command(resume=choices)
+    return _stream(graph, command, thread=thread, run=run, answer=answer, model_prices=model_prices,
+                   progress=progress, provider=provider)
+
+
+def pauses(graph: Any, thread: str) -> dict[str, dict[str, Any]]:
+    """
+    The pauses a question in the conversation `thread` waits on: each one's ID -> what its tool asked (a
+    BigRead.as_value() dict). Empty when nothing waits.
+    """
+    state = graph.get_state({"configurable": {"thread_id": thread}})
+    return {pause.id: dict(pause.value) for pause in getattr(state, "interrupts", ()) or ()
+            if isinstance(pause.value, dict)}
+
+
+def pause_for(value: dict[str, Any]) -> Any:
+    """
+    Pauses the question to ask the user (LangGraph's interrupt, with `value` kept with the conversation), from a tool
+    while it runs; returns their choice once they've made it.
+    """
+    return _require("langgraph.types", "The agent", package="aws-analyzer[agent]").interrupt(value)
+
+
+def is_pause(exc: BaseException) -> bool:
+    """
+    Whether an exception is LangGraph leaving a tool to pause the question (its GraphBubbleUp), which must reach
+    the agent loop rather than become the tool's error.
+    """
+    return any(cls.__name__ == "GraphBubbleUp" for cls in type(exc).__mro__)
+
+
+def _stream(graph: Any, start: Any, *, thread: str, run: _Run, answer: AgentAnswer,  # noqa: PLR0913
+            model_prices: dict[str, tuple[float, float]] | None, progress: Callable[..., None] | None,
+            provider: str) -> str:
+    """
+    Streams the graph from `start` (a question's message, or a Command going on after a pause): see stream_turn().
     """
     cost_of = functools.partial(answer_cost, model_prices=model_prices, provider=provider)
     count = functools.partial(_count_usage, answer=answer, base=answer.model, run=run, cost_of=cost_of)
     steps = 0
     text = ""
-    message = {"role": "user", "content": content}
     config = {"configurable": {"thread_id": thread}, "recursion_limit": run.budget.steps}
     try:
-        for update in graph.stream({"messages": [message]}, config=config, stream_mode="updates"):
+        for update in graph.stream(start, config=config, stream_mode="updates"):
             for msg in _model_messages(update):
                 count(msg)
                 if getattr(msg, "tool_calls", None):

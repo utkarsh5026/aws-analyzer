@@ -41,6 +41,9 @@ Quick start
     agent = AgentView(python="local")                    # its own Python over files it saves, with Altair charts
     agent.ask("Chart the CSVs in s3://acme-raw/sales/ by month")   # the answer, with the charts it drew
     agent.save_charts()                                  # those charts as files, in agent-charts/
+    agent.go()                                           # it stopped to ask before a big read: read it all
+    agent.smaller()                                      # ... or only the smaller part it named
+    agent.skip()                                         # ... or answer without it
 
     answer = agent.core.ask("Which functions are slow?")  # the same, as data: .text, .calls, .aws_calls, .cost
     agent.core.ask("Which functions are slow?", on_step=print)   # each AgentStep as it happens
@@ -54,7 +57,8 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      functions that turn an analyzer's results into what the model reads. lambda_tools.py is
                      Lambda's and s3_tools.py S3's, with s3_triggers, which joins the two when the agent has both;
                      bedrock_kb_tools.py is Bedrock Knowledge Bases'. TOOLKITS (toolkits/__init__.py) names them.
-    runtime.py       How any tool runs: the budget checked first, the call recorded, errors turned into its result.
+    runtime.py       How any tool runs: the budget checked first, the call recorded, errors turned into its result,
+                     and a pause to ask the user before a big read (ask_user; interrupt_on=).
     guard.py         The read-only guard every toolkit's AWS clients go through.
     budget.py        How far a question may go (Budget) and the question being answered (_Run).
     results.py       What tools hand the model: JSON-ready values, UTC windows, secrets hidden, permissions named.
@@ -62,8 +66,9 @@ One concern per module, so a new service's tools or a new agent capability goes 
     llm.py           The model: which provider and model (pick_provider), a maker for each (Azure OpenAI, OpenAI,
                      Bedrock, any other through init_chat_model), its name, cost and errors.
     harness.py       The agent loop: deepagents built once, and one question streamed through it.
-    answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off) and AgentStep (what the agent
-                     does, told as it happens), and the pure findings and next steps a report shows about them.
+    answers.py       AgentAnswer, ToolCall, PlanStep (the plan it writes and ticks off), AgentStep (what the agent
+                     does, told as it happens) and BigRead (what a tool asks before a big read), and the pure findings
+                     and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
     workspace.py     The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
@@ -81,7 +86,18 @@ One concern per module, so a new service's tools or a new agent capability goes 
 from __future__ import annotations
 
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, AgentStep, PlanStep, ToolCall, answer_findings, answer_next, parse_plan
+from .answers import (
+    CHOICES,
+    AgentAnswer,
+    AgentStep,
+    BigRead,
+    PlanStep,
+    ToolCall,
+    answer_findings,
+    answer_next,
+    choice_of,
+    parse_plan,
+)
 from .budget import Budget
 from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
@@ -146,6 +162,7 @@ from .toolkits.lambda_tools import (
 from .charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
 from .sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
+from .toolkits.s3_listing import listing_read, save_read
 from .view import AgentView
 from .workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 
@@ -156,6 +173,9 @@ __all__ = [
     "AgentStep",
     "PlanStep",
     "ToolCall",
+    "BigRead",
+    "CHOICES",
+    "choice_of",
     "Budget",
     "ReadOnlyError",
     "READ_PREFIXES",
@@ -222,6 +242,8 @@ __all__ = [
     "summarize_prefix",
     "summarize_file",
     "summarize_preview",
+    "listing_read",
+    "save_read",
     "count_arrivals",
     "trigger_findings",
     "summarize_triggers",

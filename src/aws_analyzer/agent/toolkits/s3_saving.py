@@ -87,10 +87,11 @@ def _skip_reason(obj: ObjectInfo) -> str:
     return ""
 
 
-def plan_saves(found: list[ObjectInfo], *, room: int, max_files: int) -> SavePlan:
+def plan_saves(found: list[ObjectInfo], *, room: int, max_files: int,
+               past_room: str = "past what's left of the workspace") -> SavePlan:
     """
     The files of `found` a save reads, in key order: at most `max_files`, and only as many as fit in `room` bytes,
-    each other one with why it's left out.
+    each other one with why it's left out (`past_room` for one that doesn't fit).
     """
     plan = SavePlan()
     for obj in sorted(found, key=lambda o: o.key):
@@ -98,7 +99,7 @@ def plan_saves(found: list[ObjectInfo], *, room: int, max_files: int) -> SavePla
         if not reason and len(plan.chosen) >= max_files:
             reason = f"past the {_plural(max_files, 'file')} asked for"
         if not reason and plan.size + obj.size > room:
-            reason = f"{human_size(obj.size)}: past what's left of the workspace"
+            reason = f"{human_size(obj.size)}: {past_room}"
         if reason:
             plan.skipped.append(f"{obj.key}: {reason}")
             continue

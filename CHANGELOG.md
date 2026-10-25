@@ -17,6 +17,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   step it didn't mark done shows as a finding. `answer.plan` holds the steps, and `ask(on_step=...)` is told each
   version (`kind='plan'`). Writing a plan reads nothing and doesn't count against the budget; `AgentView(plan=False)`
   turns it off to save its instructions' tokens.
+- Agent: before a big read, the agent now stops and asks you instead of hitting the budget: an S3 listing past 20,000
+  keys ("find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket holds about 41,200
+  files"), a log read longer than the 3-day limit, or a save of more than 10 MB into the Python workspace. Pick
+  **go** (all of it, with the requests it takes and what they cost), **smaller** (the keys listed so far, the last 3
+  days, the files that fit) or **skip**: `chat()` shows three buttons under the call, and after `ask()` you run
+  `go()`, `smaller()` or `skip()`. The answer says what a smaller read or a skip left out, and the wait doesn't count
+  against the time budget. `budget={"ask_keys": ..., "ask_bytes": ...}` moves the thresholds, and
+  `AgentView(interrupt_on=False)` turns it off (or `interrupt_on=["find_files"]` for some tools). In Python,
+  `core.ask()` returns the answer with `.waiting` set and `core.resume("go")` goes on.
+  ([#148](https://github.com/utkarsh5026/aws-analyzer/pull/148))
 
 ## [0.32.0] - 2026-10-25
 

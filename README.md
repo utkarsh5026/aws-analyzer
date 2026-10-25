@@ -2179,6 +2179,12 @@ agent = AgentView(provider="bedrock", python=MySandbox())
   file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
   `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`) and 8
   charts in an answer (`charts`). With the `bedrock_kb` toolkit, 10 knowledge base searches (`kb_searches`).
+- **Big reads ask first.** Before an S3 listing goes past 20,000 keys (`ask_keys`), a log read runs longer than
+  `log_days`, or a save into the workspace passes 10 MB (`ask_bytes`), the agent stops and asks: **go** (all of it,
+  with the requests it takes and what they cost), **smaller** (the keys listed so far, the last days of logs, the files
+  that fit) or **skip**. The chat window shows three buttons; after `ask()`, run `go()`, `smaller()` or `skip()`.
+  It's about time and cost: the agent only reads either way. `interrupt_on=` picks the tools that ask (`False`: none,
+  and long reads stop at the budget as before).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2191,6 +2197,7 @@ agent = AgentView(provider="bedrock", python=MySandbox())
 | `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
 | `ask(question, new=False)`  | The answer first, then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
+| `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
