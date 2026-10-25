@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-25
+
 ### Added
 
 - Agent: `AgentView(toolkits=["lambda", "s3", "bedrock_kb"])` lets the agent answer questions about your Bedrock
@@ -31,11 +33,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   `answer.charts` holds them as data, and a new budget limit, `charts` (8), caps them. The local sandbox now offers
   Altair by default (its first download grows from about 21 MB to 24 MB), and `LocalSandbox(vega_url=)` points at a
   mirror of Vega's files. `LocalSandbox(packages=["pandas", "matplotlib"])` draws with matplotlib instead.
+  ([#140](https://github.com/utkarsh5026/aws-analyzer/pull/140))
 
 ### Fixed
 
 - Agent: `LocalSandbox(packages=[...])` now offers packages whose dependencies Pyodide names with an underscore or a
   dot (Altair's `jsonschema_specifications`), which it used to refuse as unknown.
+  ([#140](https://github.com/utkarsh5026/aws-analyzer/pull/140))
 
 ## [0.31.0] - 2026-10-23
 
@@ -921,7 +925,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.28.0...v0.29.0
