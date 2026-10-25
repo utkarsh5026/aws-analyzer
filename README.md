@@ -1958,7 +1958,9 @@ it. Ask "Were last night's uploads to acme-raw processed?" and it joins the buck
 arrived and the function's runs, and finds the files that never ran it (a suffix filter that misses `.CSV`, a
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
-`S3View` commands to look closer. It covers Lambda and S3. The model is yours to pick: one on Amazon Bedrock (so
+`S3View` commands to look closer. It covers Lambda and S3, and Bedrock knowledge bases when you add their toolkit
+(`toolkits=["lambda", "s3", "bedrock_kb"]`): whether one is up to date, why a sync failed, and what a question
+finds in it. The model is yours to pick: one on Amazon Bedrock (so
 nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
 [deepagents](https://pypi.org/project/deepagents/).
 
@@ -2016,7 +2018,8 @@ settings, then `OPENAI_API_KEY`. `agent.tools()` shows which it picked.
 
 ### What it can call
 
-Eighteen tools in two toolkits (nineteen with `read_files=True`, and six more with `python=`), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
+Eighteen tools in two toolkits (nineteen with `read_files=True`, six more with `python=`, and six for Bedrock
+knowledge bases with the `bedrock_kb` toolkit), each a building block over `LambdaAnalyzer` or `S3Analyzer` that returns a compact
 summary with what it covered. The model combines them: "which failed last night?" is `function_health` for the window,
 then `function_errors` for the functions that failed; "why does it fail?" goes on from the error's traceback to the
 lines of code it names with `function_source`, and follows the calls there with `find_symbol` and `search_code`, the
@@ -2052,6 +2055,25 @@ can answer "which columns does orders.parquet have?" or "why does this CSV fail 
 model's provider, so turn it on with a model on Amazon Bedrock, or with a provider your organisation allows for that
 data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
 `budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
+
+**Bedrock knowledge bases** have a toolkit of their own, which an agent gets when you name it:
+`AgentView(toolkits=["lambda", "s3", "bedrock_kb"])`. Its six tools read through `BedrockKBAnalyzer` in the agent's
+region; "is support-docs up to date?" is `kb_health`, then `kb_files` for the files that aren't, and "why doesn't it
+answer X?" is `search_kb` with the question, then `file_chunks` on the file that should have answered it.
+
+| Tool                                                  | What it returns                                                                                                                                       |
+| :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `find_knowledge_bases(match)`                         | The knowledge bases in the region: status, vector store, embedding model, each data source's last sync, and how many warnings each has                |
+| `kb_health(knowledge_base)`                           | Its status, settings in plain words, estimated idle cost, each data source's chunking, parsing and last syncs, its documents by status with why they failed, and its findings |
+| `kb_syncs(knowledge_base, data_source, n)`            | Its syncs newest first, with what each indexed and why a failed one failed, the patterns in them, and the command that syncs each data source again   |
+| `kb_files(knowledge_base, state, match, data_source, limit)` | Each file of its S3 data sources next to Bedrock's record of it: failed (and why), changed since it was indexed, new since the last sync, skipped, deleted from S3, or indexed. Names, sizes and dates only |
+| `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them (Bedrock's `Retrieve`), with findings about the result     |
+| `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks (how many, how big, the first ones' text) and, with `question=`, where its best passage ranks against the whole knowledge base's |
+
+With one knowledge base in the region, `knowledge_base` can be left out. Nothing here syncs or changes a knowledge
+base: the findings give the `aws bedrock-agent start-ingestion-job` command to run. `search_kb` and `file_chunks`
+send the passages they find to the model's provider (cut short, secrets hidden), so a model on Amazon Bedrock keeps
+them in AWS; they get 10 calls a question between them (`budget={"kb_searches": 20}` raises it).
 
 ### Running Python (`python=`)
 
@@ -2145,7 +2167,8 @@ agent = AgentView(provider="bedrock", python=MySandbox())
 ### Safe and bounded
 
 - **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
-  operation that isn't a Get, List, Describe, Head or Filter call before its request is built, whatever asks for it. There's
+  operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a
+  knowledge base) before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
   memory. Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
 - **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
@@ -2155,7 +2178,7 @@ agent = AgentView(provider="bedrock", python=MySandbox())
   `AgentView(budget={"tool_calls": 50, "log_days": 7, "s3_keys": 500_000})` raises them. With `read_files=True`, a
   file read covers at most 2 MB (`file_bytes`) and sends the model at most 50,000 characters of it (`file_chars`). With
   `python=`, 10 runs (`python_runs`) of at most 30 seconds (`python_seconds`), 50 MB saved (`workspace_bytes`) and 8
-  charts in an answer (`charts`).
+  charts in an answer (`charts`). With the `bedrock_kb` toolkit, 10 knowledge base searches (`kb_searches`).
 - **It says what it checked.** Every tool result carries its window, regions and whether it was cut short, and the
   agent is told to say so. A missing permission becomes part of the answer, not an error.
 - **Log lines are data.** What the tools read can contain text that looks like instructions; the agent is told never
@@ -2190,7 +2213,8 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both)
+    toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both);
+                                          # add "bedrock_kb" for Bedrock knowledge bases (kb_core= to pass your own)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
     python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
 )
@@ -2213,7 +2237,9 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `summarize_buckets`, `summarize_bucket`, `summarize_listing`, `summarize_found`, `summarize_prefix`, `summarize_file`,
 `summarize_preview` (what the model reads of a `Preview`),
 `count_arrivals` (which files a notification's filter and event types covered or missed, from a listing) and
-`trigger_findings`, the Python toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
+`trigger_findings`, the Bedrock knowledge base toolkit's `summarize_knowledge_bases`, `summarize_kb_health`,
+`summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Python
+toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
 `image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
@@ -2243,8 +2269,12 @@ headers, never the file; with `read_files=True`, `preview_file` reads the file's
 `s3:GetBucketPolicyStatus`, `s3:GetBucketPolicy`, `s3:GetBucketOwnershipControls`,
 `s3:GetBucketObjectLockConfiguration`, `s3:GetLifecycleConfiguration`, `s3:GetReplicationConfiguration`,
 `s3:GetBucketLogging`, `s3:GetBucketTagging`, `s3:GetInventoryConfiguration`), `s3:GetBucketNotification`,
-`s3:GetAccountPublicAccessBlock` and `cloudwatch:ListMetrics`. `s3_triggers` needs both sets. Nothing else, and no
-permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
+`s3:GetAccountPublicAccessBlock` and `cloudwatch:ListMetrics`. `s3_triggers` needs both sets. The Bedrock knowledge
+base tools read through `BedrockKBAnalyzer`: `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`,
+`bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`,
+`bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve` (for `search_kb` and
+`file_chunks`: a search, which changes nothing) and `s3:ListBucket` on each data source's bucket (`kb_files` and
+`file_chunks` list its files' names, sizes and dates). Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
 and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
 `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
 `"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the
@@ -2254,7 +2284,9 @@ Each answer counts the model's input and output tokens. A model on Amazon Bedroc
 (the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
 on the plan, the region and the deployment type, so there are no built-in ones). Without a price the cost shows as
 unknown, never a guess, and each question's budget is checked against it when there is one. The CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests
-$0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. Reading logs
+$0.005 per 1,000 listing pages (1,000 keys each) and $0.0004 per 1,000 others; the report counts both. A knowledge
+base search embeds its question (about $0.0000004 at Titan Embeddings' price); the vector store bills by its own
+terms (OpenSearch Serverless by the hour, whether it's searched or not). Reading logs
 and Lambda's settings costs nothing.
 
 </details>

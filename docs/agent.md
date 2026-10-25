@@ -195,7 +195,7 @@ Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. 
 
 ## What it can call { #tools }
 
-Eighteen read-only tools over Lambda and S3. Each returns a compact summary with what it covered, never raw AWS data.
+Eighteen read-only tools over Lambda and S3, and six for [Bedrock knowledge bases](#knowledge-bases) when you add their toolkit. Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -239,6 +239,32 @@ Eighteen read-only tools over Lambda and S3. Each returns a compact summary with
     | `s3_triggers(bucket, function, since, until, region)` | Which bucket events invoke which functions, on which keys. Give a bucket, a function, or both. For each link: whether the function is there and lets the bucket invoke it, how many files its filter covers arrived in the window and how many of them ran it (and which were missed, by the case of their ending or by how they were uploaded), and the function's runs, failures and throttles in that window |
 
     `s3_triggers` is there when the agent has both toolkits, as it does by default. From a function, it finds the buckets its resource policy names; when the policy lets any bucket invoke it (or none), it looks through the buckets in the function's region, up to 50.
+
+    **Bedrock knowledge bases**, with [their toolkit](#knowledge-bases):
+
+    | Tool | What it returns |
+    |---|---|
+    | `find_knowledge_bases(match)` | The knowledge bases in the region: status, vector store, embedding model, each data source's last sync, and how many warnings each has |
+    | `kb_health(knowledge_base)` | Its status, settings in plain words, estimated idle cost, each data source's chunking, parsing and last syncs, its documents by status with why they failed, and its findings |
+    | `kb_syncs(knowledge_base, data_source, n)` | Its syncs newest first, with what each indexed and why a failed one failed, and the command that syncs each data source again |
+    | `kb_files(knowledge_base, state, match, data_source, limit)` | Each file of its S3 data sources next to Bedrock's record: failed (and why), changed since it was indexed, new since the last sync, skipped, deleted from S3, or indexed |
+    | `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them, with findings about the result |
+    | `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks and, with `question=`, where its best passage ranks against the whole knowledge base's |
+
+### Bedrock knowledge bases { #knowledge-bases }
+
+Add `"bedrock_kb"` to the toolkits, and the agent can tell you whether a knowledge base is up to date and why it doesn't answer something.
+{ .gist }
+
+```python
+agent = AgentView(toolkits=["lambda", "s3", "bedrock_kb"])
+agent.ask("Is support-docs up to date? Some answers still quote the old refund policy.")
+```
+
+It starts with `kb_health` (status, last syncs, documents that failed), then `kb_files` for the files that changed in S3 since the last sync or never made it in, and `search_kb` with your question to see the passages an answer would be built from. It reads the knowledge bases in the agent's region; with only one there, you don't have to name it.
+
+!!! tip "Worth knowing"
+    Nothing here syncs or changes a knowledge base: when a sync would fix it, the answer gives the `aws bedrock-agent start-ingestion-job` command for you to run. `search_kb` and `file_chunks` send the passages they find to the model's provider (cut short, with anything that looks like a secret hidden), so a model on Amazon Bedrock keeps them in AWS.
 
 
 ### Reading what's in a file { #read-files }
@@ -336,7 +362,7 @@ The chart is made with [Altair](https://altair-viz.github.io), and the sandbox d
 It can't change your account, it says what it checked, and each question has a budget.
 { .gist }
 
-- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
+- **It only reads.** The tools call the analyzers' read methods. A guard on every AWS client they use refuses any operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a knowledge base) before its request is built, so even a mistake in a tool can't change your account. The S3 tools read names, sizes, dates and settings, never what's inside a file. There's no shell: deepagents' `execute` tool and its general-purpose subagent are turned off, and its file tools only keep notes in memory, never on disk. Code runs only in the [Python sandbox](#run-python), which has no network and no AWS credentials.
 - **It says what it checked.** Every tool result carries its window, its regions and whether it was cut short, and the agent is told to say so in the answer. A permission the role lacks becomes part of the answer (`AccessDeniedException; needs logs:FilterLogEvents`), not an error, and the report lists it.
 - **Log lines are data.** What the tools read can contain text that looks like instructions ("ignore your instructions..."). The agent is told never to follow it, and the tools hide anything that looks like a key, token or password before the model sees it.
 
@@ -359,6 +385,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `python_seconds` | 30 | With `python=`: the workspace stops a run at this many seconds |
 | `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
+| `kb_searches` | 10 | With the `bedrock_kb` toolkit: `search_kb` and `file_chunks` stop running |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -448,11 +475,11 @@ Its tools get the same budget, error handling and report as the built-in ones, a
 
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices, so each answer shows its estimated cost and the budget's `usd` limit applies. OpenAI's and Azure OpenAI's prices depend on the plan, the region and the deployment type, so there are none built in: pass `model_prices=` for them (or to override Bedrock's). Without a price the cost shows as unknown, never a guess.
 
-On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005.
+On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's requests $0.005 per 1,000 listing pages (each lists up to 1,000 keys) and $0.0004 per 1,000 others; the report says how many of each it made and what they cost. Reading logs, Lambda's settings and code costs nothing. `function_health` reads 7 metrics per function, so a question about 100 functions reads about 700: under a cent. A `find_files` over 100,000 keys makes 100 listing requests: $0.0005. A knowledge base search embeds its question, a fraction of a cent; the vector store bills by its own terms (OpenSearch Serverless by the hour, searched or not).
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve` and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 

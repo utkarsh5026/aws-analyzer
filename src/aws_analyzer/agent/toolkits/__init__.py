@@ -1,7 +1,8 @@
 """
-The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py), each a Toolkit subclass (base.py)
-with the tools the agent can call about that service. TOOLKITS names the built-in ones; AgentAnalyzer(toolkits=[...]) picks which
-the agent gets, by name or as Toolkit objects (yours too), and DEFAULT_TOOLKITS is what it gets without that.
+The agent's toolkits: one module per AWS service (lambda_tools.py, s3_tools.py, bedrock_kb_tools.py), each a
+Toolkit subclass (base.py) with the tools the agent can call about that service. TOOLKITS names the built-in ones;
+AgentAnalyzer(toolkits=[...]) picks which the agent gets, by name or as Toolkit objects (yours too), and
+DEFAULT_TOOLKITS is what it gets without that.
 
 Adding a service: a module here (`<service>_tools.py`) with a Toolkit subclass that reads through the service's
 analyzer, its name in TOOLKITS (and in DEFAULT_TOOLKITS when every agent should have it), the analyzer in
@@ -18,19 +19,21 @@ import difflib
 from typing import Any, Iterable
 
 from .base import Toolkit
+from .bedrock_kb_tools import BedrockKBToolkit
 from .lambda_tools import LambdaToolkit
 from .python_tools import PythonToolkit
 from .s3_tools import S3Toolkit
 
-TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "python": PythonToolkit}
+TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "bedrock_kb": BedrockKBToolkit,
+                                      "python": PythonToolkit}
 DEFAULT_TOOLKITS = ("lambda", "s3")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:
     """
     A Toolkit from its name in TOOLKITS ('lambda', 's3'), a Toolkit subclass, or a Toolkit (returned as it is).
-    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's analyzer=;
-    PythonToolkit's workspace=).
+    settings are the new toolkit's own (LambdaToolkit's analyzer=, clients=, prices=; S3Toolkit's and
+    BedrockKBToolkit's analyzer=; PythonToolkit's workspace=).
     """
     if isinstance(spec, Toolkit):
         return spec
@@ -73,5 +76,5 @@ def make_toolkits(specs: Iterable[str | Toolkit | type[Toolkit]] | None,
     return made
 
 
-__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "LambdaToolkit", "PythonToolkit", "S3Toolkit", "Toolkit", "default_toolkits",
-           "make_toolkit", "make_toolkits"]
+__all__ = ["DEFAULT_TOOLKITS", "TOOLKITS", "BedrockKBToolkit", "LambdaToolkit", "PythonToolkit", "S3Toolkit", "Toolkit",
+           "default_toolkits", "make_toolkit", "make_toolkits"]

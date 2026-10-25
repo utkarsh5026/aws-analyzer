@@ -11,6 +11,16 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
+- Agent: `AgentView(toolkits=["lambda", "s3", "bedrock_kb"])` lets the agent answer questions about your Bedrock
+  knowledge bases: "is support-docs up to date?", "why didn't last night's sync index the new PDFs?", "why doesn't it
+  answer the refund question?". Six new read-only tools: `find_knowledge_bases`, `kb_health` (status, data sources,
+  last syncs, documents by status, idle cost and findings), `kb_syncs` (why syncs failed), `kb_files` (each file next
+  to Bedrock's record: failed, changed since the last sync, never synced, skipped, deleted), `search_kb` (the passages
+  a question finds, as an answer would) and `file_chunks` (how a file was chunked, and with `question=` where it ranks
+  against the whole knowledge base). Nothing syncs: the findings give the `start-ingestion-job` command to run. The
+  read-only guard now lets Bedrock's `Retrieve` through by name, since it only searches, and a new budget limit,
+  `kb_searches` (10), caps `search_kb` and `file_chunks` per question. The passages they return go to the model's
+  provider, with anything that looks like a secret hidden. `kb_core=` passes your own `BedrockKBAnalyzer`.
 - Agent: with a Python sandbox (`AgentView(python="local")`), the agent answers with charts. Ask "Chart the orders in
   s3://acme-raw/sales/ by month" and it reads the files it saved with pandas, makes the chart with Altair and puts it
   under the answer with the new `show_chart` tool, in the report, the chat window and `transcript()`. The sandbox draws

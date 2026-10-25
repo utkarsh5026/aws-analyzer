@@ -4,8 +4,9 @@ isn't a read is refused before its request is built, whatever asks for it (the m
 the reads it lets through, for the report's "AWS reads it made".
 
 READ_PREFIXES are the AWS operations the tools may call: reads only (FilterLogEvents reads a log group; HeadObject
-and HeadBucket read an object's or a bucket's headers). The guard refuses every other one before its request is
-built.
+and HeadBucket read an object's or a bucket's headers). SEARCHES are the operations allowed by name that don't start
+with one of them: Bedrock's Retrieve searches a knowledge base's vector store and changes nothing (it embeds the
+question and returns passages). The guard refuses every other one before its request is built.
 """
 
 from __future__ import annotations
@@ -15,11 +16,13 @@ from collections import Counter
 from typing import Any
 
 READ_PREFIXES = ("Get", "List", "Describe", "Head", "Filter")
+SEARCHES = frozenset({"bedrock-agent-runtime:Retrieve"})
 
 
 class ReadOnlyError(PermissionError):
     """
-    An AWS call the read-only guard refused: it isn't a Get, List, Describe, Head or Filter call.
+    An AWS call the read-only guard refused: it isn't a Get, List, Describe, Head or Filter call, or a search
+    (SEARCHES).
     """
 
 
@@ -77,7 +80,7 @@ class _Guard:
         if model is None:
             return
         op = f"{model.service_model.service_name}:{model.name}"
-        if not model.name.startswith(READ_PREFIXES):
+        if not model.name.startswith(READ_PREFIXES) and op not in SEARCHES:
             with self._lock:
                 self.blocked.append(op)
             raise ReadOnlyError(f"{op} isn't a read: the agent only reads, so it wasn't sent")

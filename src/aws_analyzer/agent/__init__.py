@@ -53,7 +53,7 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      tools, the AWS reads they make, its part of the system prompt, and the pure summarize_*
                      functions that turn an analyzer's results into what the model reads. lambda_tools.py is
                      Lambda's and s3_tools.py S3's, with s3_triggers, which joins the two when the agent has both;
-                     TOOLKITS (toolkits/__init__.py) names them.
+                     bedrock_kb_tools.py is Bedrock Knowledge Bases'. TOOLKITS (toolkits/__init__.py) names them.
     runtime.py       How any tool runs: the budget checked first, the call recorded, errors turned into its result.
     guard.py         The read-only guard every toolkit's AWS clients go through.
     budget.py        How far a question may go (Budget) and the question being answered (_Run).
@@ -83,7 +83,7 @@ from __future__ import annotations
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, AgentStep, ToolCall, answer_findings, answer_next
 from .budget import Budget
-from .guard import READ_PREFIXES, ReadOnlyError
+from .guard import READ_PREFIXES, SEARCHES, ReadOnlyError
 from .llm import (
     AZURE_API_VERSION,
     MODEL_ENV,
@@ -99,6 +99,17 @@ from .llm import (
 from .prompt import asked_at, system_prompt
 from .results import hide_secrets
 from .toolkits import DEFAULT_TOOLKITS, TOOLKITS, Toolkit
+from .toolkits.bedrock_kb_tools import (
+    KB_TOOL_READS,
+    BedrockKBToolkit,
+    kb_sync_row,
+    summarize_kb_chunks,
+    summarize_kb_files,
+    summarize_kb_health,
+    summarize_kb_search,
+    summarize_kb_syncs,
+    summarize_knowledge_bases,
+)
 from .toolkits.s3_tools import (
     S3_TOOL_READS,
     Arrivals,
@@ -147,6 +158,7 @@ __all__ = [
     "Budget",
     "ReadOnlyError",
     "READ_PREFIXES",
+    "SEARCHES",
     "Toolkit",
     "TOOLKITS",
     "DEFAULT_TOOLKITS",
@@ -154,6 +166,8 @@ __all__ = [
     "TOOL_READS",
     "S3Toolkit",
     "S3_TOOL_READS",
+    "BedrockKBToolkit",
+    "KB_TOOL_READS",
     "Arrivals",
     "TriggerLink",
     "PythonToolkit",
@@ -209,4 +223,11 @@ __all__ = [
     "count_arrivals",
     "trigger_findings",
     "summarize_triggers",
+    "kb_sync_row",
+    "summarize_knowledge_bases",
+    "summarize_kb_health",
+    "summarize_kb_syncs",
+    "summarize_kb_files",
+    "summarize_kb_search",
+    "summarize_kb_chunks",
 ]

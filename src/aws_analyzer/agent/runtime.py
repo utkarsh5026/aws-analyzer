@@ -23,7 +23,7 @@ from .results import _plain
 if TYPE_CHECKING:
     from .toolkits import Toolkit
 
-COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned")
+COVERAGE = ("window", "regions", "region", "cut_short", "covered_from", "scanned", "stopped_at")
 _ERROR_CHARACTERS = 200
 _MESSAGE_CHARACTERS = 400
 _AWS_MESSAGE_CHARACTERS = 300

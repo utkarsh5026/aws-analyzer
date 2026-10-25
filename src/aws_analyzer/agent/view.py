@@ -495,6 +495,9 @@ class AgentView(_BaseView):
                 ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
                 ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
             ]
+        has_kb = any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits)
+        if has_kb:
+            limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb and file_chunks stop running"])
         blocks.append(_Table(["Limit", "Per question", "What happens past it"], limits, title="Budget",
                              sortable=False))
         never = " ".join(t.privacy for t in core.toolkits if t.privacy)
@@ -507,9 +510,13 @@ class AgentView(_BaseView):
             "Sent to the model: your question and what the tools return (names, settings, counts, error messages and "
             "log lines, with anything that looks like a key or password hidden)." + (f" {never}" if never else "")
             + place + stay))
+        together = ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together")
+        if has_kb:
+            together = ("ask('Why does support-docs miss the refund policy?')",
+                        "a knowledge base's syncs, files and searches")
         blocks.append(_Next([
             ("ask('Which Lambda failed last night?')", "an answer, and what it checked"),
-            ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together"),
+            together,
             ("AgentView(budget={'tool_calls': 50, 'log_days': 7})", "a bigger budget per question"),
         ]))
         self._show(blocks)
