@@ -21,6 +21,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   read-only guard now lets Bedrock's `Retrieve` through by name, since it only searches, and a new budget limit,
   `kb_searches` (10), caps `search_kb` and `file_chunks` per question. The passages they return go to the model's
   provider, with anything that looks like a secret hidden. `kb_core=` passes your own `BedrockKBAnalyzer`.
+  ([#144](https://github.com/utkarsh5026/aws-analyzer/pull/144))
 - Agent: with a Python sandbox (`AgentView(python="local")`), the agent answers with charts. Ask "Chart the orders in
   s3://acme-raw/sales/ by month" and it reads the files it saved with pandas, makes the chart with Altair and puts it
   under the answer with the new `show_chart` tool, in the report, the chat window and `transcript()`. The sandbox draws
