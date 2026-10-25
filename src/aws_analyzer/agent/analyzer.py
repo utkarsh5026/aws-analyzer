@@ -146,7 +146,9 @@ class AgentAnalyzer(_BaseAnalyzer):
     session's) or `regions` (a list, or 'all'); buckets are read wherever they are. The user's time zone, so "last night" means their night, is set_timezone()'s (or
     AWS_ANALYZER_TZ's), the zone every report shows times in; `timezone` ('Asia/Kolkata', 'kolkata', '+05:30') sets
     one for the agent alone. `notes` are facts about the account the agent is told ("orders-etl runs at 02:00
-    IST"). `budget` caps each question (Budget, or a dict of its fields).
+    IST"). `budget` caps each question (Budget, or a dict of its fields). For a question of several steps the agent
+writes a short plan first and ticks it off as it works (answer.plan, a checklist in the chat window and the report);
+plan=False leaves the plan out, which saves its instructions' tokens on every model call.
 
     Its only list prices are Amazon Bedrock's (_bedrock's MODEL_PRICES): the other providers' depend on the plan or
     the deployment (see model_prices=). `provider` and `model_id` are the provider and model it was given or worked
@@ -183,6 +185,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         read_files: bool = False,
         kb_core: BedrockKBAnalyzer | None = None,
         python: Workspace | None = None,
+        plan: bool = True,
     ):
         super().__init__(session, region=region, profile=profile, prices=model_prices)
         self.given_chat_model: Any = None
@@ -193,6 +196,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         self.regions = regions
         self.notes = notes
         self.budget = Budget.of(budget)
+        self.plan = plan
         self._clients: dict[Any, Any] = {}
         self._lock = threading.Lock()
         self.max_workers = _WORKERS
@@ -426,18 +430,15 @@ class AgentAnalyzer(_BaseAnalyzer):
     def _harness(self) -> Any:
         """
         The deepagents agent: the model, the tools, the instructions and a memory of the conversation, with its file
-        tools on the Python workspace when there is one. Made once; new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
+        tools on the Python workspace when there is one and its plan unless plan=False. Made once; new_conversation() starts a new thread in it. Before anything else is made, check_ready() says what's missing.
         """
         if self._graph is None:
             harness.check_ready()
             prompt = self.instructions()
             workspace = self.workspace
-            if workspace is None:
-                self._graph = harness.build_graph(self._chat(), self.tools(), prompt)
-            else:
-                backend = workspace_backend(workspace, lambda: self.budget)
-                self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
-                                                  current_run=self._current_run)
+            backend = workspace_backend(workspace, lambda: self.budget) if workspace is not None else None
+            self._graph = harness.build_graph(self._chat(), self.tools(), prompt, backend=backend,
+                                              current_run=self._current_run, plan=self.plan)
         return self._graph
 
     def new_conversation(self) -> str:
@@ -485,6 +486,7 @@ class AgentAnalyzer(_BaseAnalyzer):
         finally:
             self._run = None
         answer.calls = list(run.calls)
+        answer.plan = list(run.plan)
         answer.charts = list(run.charts)
         answer.aws_calls = dict(self._guard.counts)
         answer.blocked = list(self._guard.blocked)

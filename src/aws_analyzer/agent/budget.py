@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from .._kit.fmt import _duration, _plural, human_money
 
 if TYPE_CHECKING:
-    from .answers import AgentStep, ToolCall
+    from .answers import AgentStep, PlanStep, ToolCall
     from .charts import Chart
 
 
@@ -88,6 +88,7 @@ class _Run:
         aws_cost      USD for those metrics; every other read the tools make is free
         listener      told each AgentStep as it happens (ask()'s on_step), from whichever thread it happens on
         charts        the charts show_chart put in the answer, in the order it showed them
+        plan          the plan the model last wrote (write_todos), which the answer keeps
     """
 
     budget: Budget
@@ -100,6 +101,7 @@ class _Run:
     lock: threading.Lock = field(default_factory=threading.Lock)
     listener: Callable[[AgentStep], None] | None = None
     charts: list[Chart] = field(default_factory=list)
+    plan: list[PlanStep] = field(default_factory=list)
 
     @property
     def elapsed(self) -> float:

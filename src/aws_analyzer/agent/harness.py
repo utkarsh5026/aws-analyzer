@@ -5,7 +5,11 @@ time. What changes how the agent works rather than what it can read (a subagent,
 goes in build_graph(); everything about LangGraph's messages stays in this file.
 
 _MIN_PYTHON is deepagents' floor; the package's own is 3.10, and everything but the agent itself runs there.
-HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools). FILE_TOOLS are deepagents' file tools (with
+HIDDEN_TOOLS are deepagents' tools the model never sees (see _hide_tools). PLAN_TOOL is LangChain's write_todos (its
+TodoListMiddleware, which deepagents doesn't add by itself): the model writes a short plan for a question of several
+steps and ticks it off as it goes, and _record_plan keeps each version on the question and tells its listener, so the
+chat window and the report show it. _PLAN_PROMPT and _PLAN_TOOL_TEXT replace the middleware's own instructions, which
+are written for coding tasks and run to about a thousand tokens. FILE_TOOLS are deepagents' file tools (with
 the parameter a call's line names first): with a Python workspace they work on its files (workspace_files.py), and
 _record_file_tools counts each call against the question's budget and records it like the toolkits' tools.
 """
@@ -19,12 +23,24 @@ from typing import Any, Callable, Iterable
 
 from .._kit.deps import _require
 from .._kit.text import _clip
-from .answers import AgentAnswer, AgentStep, ToolCall
+from .answers import AgentAnswer, AgentStep, ToolCall, parse_plan
 from .budget import _REFUSED, _Refused, _Run, check_budget
 from .llm import answer_cost, explain_model_error
 
 _MIN_PYTHON = (3, 11)
 HIDDEN_TOOLS = frozenset({"task", "execute"})
+PLAN_TOOL = "write_todos"
+_PLAN_PROMPT = """## Your plan (`write_todos`)
+
+For a question that needs three or more tool calls, first write a short plan with `write_todos`: two to six steps,
+each a few plain words saying what you'll check ("check every function's health", "read orders-etl's errors",
+"read the code where it fails"). The user sees it as a checklist that ticks off as you work. Mark a step in_progress
+when you start it and completed as soon as it's done, add or drop steps when what you find changes the plan, and
+never call `write_todos` twice in one turn. Skip the plan for a question one or two tool calls answer. The plan isn't
+the answer: write the answer in a message after your last `write_todos` call."""
+_PLAN_TOOL_TEXT = ("Writes your plan for the question as a checklist the user sees: the whole list each time, every "
+                   "step with its status (pending, in_progress or completed). Use it only for questions that need "
+                   "three or more tool calls.")
 FILE_TOOLS = {"ls": "path", "read_file": "file_path", "write_file": "file_path", "edit_file": "file_path",
               "glob": "pattern", "grep": "pattern", "delete": "file_path"}
 _FILE_SUMMARY_CHARACTERS = 80
@@ -50,19 +66,24 @@ def check_ready() -> None:
 
 def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str, *,  # noqa: PLR0913
                 hidden: Iterable[str] = HIDDEN_TOOLS, backend: Any = None,
-                current_run: Callable[[], _Run] | None = None) -> Any:
+                current_run: Callable[[], _Run] | None = None, plan: bool = True) -> Any:
     """
     The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
     InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
     is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
-    workspace_files.py; by default deepagents' own in-memory files), and with `current_run` (the question being
-    answered) each file tool call is recorded on it and counted against its budget.
+    workspace_files.py; by default deepagents' own in-memory files), and with both it and `current_run` (the
+    question being answered) each file tool call is recorded on it and counted against its budget. With `plan`, the
+    model has write_todos (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one.
     """
     check_ready()
     deepagents = _require("deepagents", "The agent", package="aws-analyzer[agent]")
     memory = _require("langgraph.checkpoint.memory", "The agent's conversation memory", package="langgraph")
     middleware = [_hide_tools(set(hidden))]
-    if current_run is not None:
+    if plan:
+        middleware.append(_planning())
+        if current_run is not None:
+            middleware.append(_record_plan(current_run))
+    if current_run is not None and backend is not None:
         middleware.append(_record_file_tools(current_run))
     return deepagents.create_deep_agent(
         model=model,
@@ -339,3 +360,49 @@ def _record_file_tools(current: Callable[[], _Run]) -> Any:
             return result
 
     return RecordFileTools()
+
+
+def _planning() -> Any:
+    """
+    LangChain's TodoListMiddleware, which gives the model write_todos, with instructions for this agent's questions
+    (_PLAN_PROMPT, _PLAN_TOOL_TEXT). Its name replaces the one a deepagents model profile may add (OpenAI's Codex).
+    """
+    middleware = _require("langchain.agents.middleware", "The agent's plan", package="aws-analyzer[agent]")
+    return middleware.TodoListMiddleware(system_prompt=_PLAN_PROMPT, tool_description=_PLAN_TOOL_TEXT)
+
+
+def _keep_plan(run: _Run, tool_call: dict[str, Any]) -> None:
+    """
+    Keeps the plan a write_todos call wrote on the question, and tells its listener (the chat window) the whole list.
+    """
+    plan = parse_plan((tool_call.get("args") or {}).get("todos"))
+    with run.lock:
+        run.plan = plan
+    run.tell(AgentStep("plan", plan=list(plan)))
+
+
+def _record_plan(current: Callable[[], _Run]) -> Any:
+    """
+    A deepagents middleware that keeps each plan the model writes (PLAN_TOOL) on the question being answered
+    (`current()`), once the tool has taken it. Writing a plan reads nothing from AWS, so it isn't a tool call of the
+    question's: it isn't counted against the budget or listed with the tools.
+    """
+    types = _require("langchain.agents.middleware.types", "The agent", package="aws-analyzer[agent]")
+
+    def took(result: Any) -> bool:
+        return getattr(result, "status", None) != "error"
+
+    class RecordPlan(types.AgentMiddleware):
+        def wrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            result = handler(request)
+            if request.tool_call.get("name") == PLAN_TOOL and took(result):
+                _keep_plan(current(), request.tool_call)
+            return result
+
+        async def awrap_tool_call(self, request: Any, handler: Callable[[Any], Any]) -> Any:
+            result = await handler(request)
+            if request.tool_call.get("name") == PLAN_TOOL and took(result):
+                _keep_plan(current(), request.tool_call)
+            return result
+
+    return RecordPlan()

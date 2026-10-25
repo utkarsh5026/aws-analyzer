@@ -863,7 +863,13 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
 - **The harness** (`harness.py`): `build_graph()` is `deepagents.create_deep_agent` once (`AgentAnalyzer._harness()`,
   after `check_ready()` says what's missing), with the model, the tools, the prompt, an `InMemorySaver` checkpointer
   keyed by `AgentAnalyzer.thread` (follow-ups; `new_conversation()` makes a new thread) and `_hide_tools(HIDDEN_TOOLS)`,
-  a middleware that keeps deepagents' general-purpose subagent and shell away from the model. Its file tools stay, on
+  a middleware that keeps deepagents' general-purpose subagent and shell away from the model, and the plan
+  (`plan=True`, `AgentAnalyzer(plan=False)` turns it off): LangChain's `TodoListMiddleware` (`_planning()`, with
+  `_PLAN_PROMPT` / `_PLAN_TOOL_TEXT` in place of its coding-task instructions; deepagents doesn't add it by itself)
+  gives the model `write_todos`, and `_record_plan` keeps each plan on the `_Run` (`parse_plan` into `PlanStep`s,
+  `AgentAnswer.plan`) and tells `AgentStep('plan')`, without counting it as a tool call. `AgentView` draws it as
+  `_Plan` (a checklist, above the table of tool calls), and the chat window pins it under the question
+  (`_Turn.plan`, redrawn in place; `_plan_box_html`) and keeps it above the folded steps once answered. Its file tools stay, on
   the default in-memory `StateBackend`, or with a Python workspace on its files (`workspace_files.py`'s
   `workspace_backend`: a `CompositeBackend` whose default is `_WorkspaceBackend` over the `Workspace`, reads and greps
   passed through `hide_secrets`, writes held to `workspace_bytes`, and `/conversation_history/` left in a

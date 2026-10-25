@@ -1,6 +1,6 @@
 """
 AgentView: the agent's notebook UI. ask() shows the answer first, with the charts the agent drew for it (_Charts),
-then what it checked to get it (each tool call
+then the plan it worked to (_Plan, when it wrote one), what it checked to get it (each tool call
 with its window and regions, what it couldn't read or was refused, the AWS reads, the tokens and the cost) and the
 View commands to look closer; transcript() and tools() show the questions so far and what the agent can call.
 
@@ -29,7 +29,7 @@ from .._kit.render import _base_css, _Look, _report_html
 from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
-from .answers import AgentAnswer, ToolCall, answer_findings, answer_next
+from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next
 from .charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
 
@@ -62,7 +62,16 @@ _EXTRA_CSS = """\
 .agt .cht figure{margin:0}
 .agt .cht figcaption{font-size:13.5px;font-weight:600;margin:0 0 6px}
 .agt .cht img{display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid rgba(127,127,127,.22);background:#fcfcfb}
-.agt .cht .cht-f{font-size:11.5px;opacity:.6;margin-top:4px}"""
+.agt .cht .cht-f{font-size:11.5px;opacity:.6;margin-top:4px}
+.agt .pln{margin:6px 0 12px;max-width:900px}
+.agt .pln-h{font-size:12px;font-weight:600;opacity:.7;margin:0 0 4px}
+.agt .pln ol{list-style:none;margin:0;padding:0}
+.agt .pln li{display:flex;gap:8px;margin:2px 0;line-height:1.5}
+.agt .pln-m{flex:0 0 1.1em;text-align:center;opacity:.55}
+.agt .pln .pln-done{opacity:.65}
+.agt .pln .pln-done .pln-m{color:#10b981;opacity:1}
+.agt .pln .pln-now{font-weight:600}
+.agt .pln .pln-now .pln-m{color:#3b82f6;opacity:1}"""
 _CSS = _base_css(_ROOT, _EXTRA_CSS)
 _BADGE = "🤖 Agent"
 
@@ -107,6 +116,43 @@ def _charts_lines(block: _Charts, report: _Report) -> list[str]:
     lines = [f"📈 {chart.title} ({chart.format_name}, {chart.size}): open in a notebook to see it"
              for chart in block.charts]
     return ["", *lines, "   save_charts() writes them to files."]
+
+
+_PLAN_MARKS = {"completed": "✓", "in_progress": "▸", "pending": "○"}
+_PLAN_CLASSES = {"completed": "pln-done", "in_progress": "pln-now", "pending": ""}
+
+
+@dataclass
+class _Plan:
+    """
+    The plan the agent wrote for a question, as a checklist: each step ticked, under way or still to do.
+    """
+
+    steps: list[PlanStep]
+
+    @property
+    def heading(self) -> str:
+        """
+        'Plan · 2 of 3 done'.
+        """
+        done = sum(1 for step in self.steps if step.done)
+        return f"Plan · {done} of {len(self.steps)} done"
+
+
+@_draws(_Plan, "html")
+def _plan_html(block: _Plan, report: _Report) -> str:
+    items = []
+    for step in block.steps:
+        css = _PLAN_CLASSES.get(step.status, "")
+        items.append(f'<li class="{css}"><span class="pln-m">{_PLAN_MARKS.get(step.status, "○")}</span>'
+                     f"<span>{_esc(step.text)}</span></li>")
+    return f'<div class="pln"><div class="pln-h">{_esc(block.heading)}</div><ol>{"".join(items)}</ol></div>'
+
+
+@_draws(_Plan, "text")
+def _plan_lines(block: _Plan, report: _Report) -> list[str]:
+    lines = [f"  {_PLAN_MARKS.get(step.status, '○')} {step.text}" for step in block.steps]
+    return ["", block.heading, *lines]
 
 
 def _coverage_text(call: ToolCall) -> str:
@@ -249,7 +295,7 @@ class AgentView(_BaseView):
     def ask(self, question: str, *, new: bool = False) -> None:
         """
         The agent's answer to a question about your AWS account (Lambda and S3, for now), then what it checked to
-        get it: each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
+        get it: the plan it worked to, each tool call with its time window and regions, what it couldn't read or was refused, the AWS reads,
         the tokens and what it cost, and the LambdaView and S3View commands to look closer. Follow-up questions continue the
         conversation; new=True starts a new one. The kernel's stop button stops it, and the report shows what it
         found until then.
@@ -267,8 +313,8 @@ class AgentView(_BaseView):
     @_friendly_errors
     def chat(self, *, height: int | str | None = None) -> None:
         """
-        A chat window to talk to the agent: type a question and watch it work, step by step, as it happens: what
-        it means to do, each tool it calls with what that found, then the answer, with what it checked folded under
+        A chat window to talk to the agent: type a question and watch it work, step by step, as it happens: its
+        plan for a question of several steps (a checklist that ticks off), what it means to do, each tool it calls with what that found, then the answer, with what it checked folded under
         it. Follow-ups continue the conversation, Stop ends a question with what it found so far, and New chat starts
         over. Questions asked with ask() in other cells join it. height= sets the conversation's height (800
         pixels, or CSS such as '70vh'); it fills the browser window otherwise.
@@ -312,7 +358,7 @@ class AgentView(_BaseView):
 
     def _checked_blocks(self, answer: AgentAnswer) -> list[Any]:
         """
-        What an answer's report shows under the answer: the cards, the findings, each tool call, the AWS reads, what
+        What an answer's report shows under the answer: the cards, the findings, the plan it worked to, each tool call, the AWS reads, what
         it cost and the commands to look closer.
         """
         core = self.core
@@ -330,6 +376,8 @@ class AgentView(_BaseView):
             ("Time", _duration(answer.seconds)),
         ]))
         blocks.append(_Findings(answer_findings(answer, core.budget)))
+        if answer.plan:
+            blocks.append(_Plan(answer.plan))
         if answer.calls:
             rows = [[str(i), call.brief, _coverage_text(call), call.summary or "-", f"{call.seconds:.1f}s"]
                     for i, call in enumerate(answer.calls, 1)]

@@ -9,6 +9,15 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- Agent: for a question that takes several steps, the agent now writes a short plan first ("check every function's
+  health → read orders-etl's errors → read the code where it fails") and ticks it off as it works. `chat()` shows it
+  as a checklist under your question that updates in place, and `ask()`'s report shows it above the tool calls; a
+  step it didn't mark done shows as a finding. `answer.plan` holds the steps, and `ask(on_step=...)` is told each
+  version (`kind='plan'`). Writing a plan reads nothing and doesn't count against the budget; `AgentView(plan=False)`
+  turns it off to save its instructions' tokens.
+
 ## [0.32.0] - 2026-10-25
 
 ### Added

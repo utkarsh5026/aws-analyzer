@@ -7,11 +7,13 @@ Remake the agent's chat window screenshots: AgentView.chat(), used in a real Jup
 
 The window is ipywidgets, which only draw in a browser connected to a kernel, so this starts JupyterLab on a notebook
 that opens the window on demo.py's Lambda functions (moto, us-east-1), with a scripted model standing in for Claude
-Haiku 4.5 on Amazon Bedrock: it says what it means to do, calls function_health and function_errors (which really
-run, on the demo data), and answers from what they found, pausing before each reply the way a model does. It takes
+Haiku 4.5 on Amazon Bedrock: it writes a three-step plan (write_todos) and says what it means to do, calls
+function_health and function_errors (which really run, on the demo data), ticking the plan off as it goes, and answers
+from what they found, pausing before each reply the way a model does. It takes
 the window empty (agent-chat-start: the greeting and the questions to start from), with its model settings open on
 Amazon Bedrock (agent-chat-model: the provider list, the model box filled from demo.py's fake Bedrock model list, and
-where questions go and what they cost), then asks the question the way a person would, and takes it while the agent works (agent-chat-working: two tool calls done, Thinking…, Stop, and a follow-up typed meanwhile,
+where questions go and what they cost), then asks the question the way a person would, and takes it while the agent works: its plan half done
+(agent-chat-plan: the checklist under the question, two calls done, the third step under way), then (agent-chat-working: two tool calls done, Thinking…, Stop, and a follow-up typed meanwhile,
 queued under it, which it then drops with its ✕ so the answer stays the last thing in the conversation), once
 it has answered (agent-chat: the steps folded above the answer), and with the steps and a tool call open
 (agent-chat-details: the first call's operations, window and data open). Each figure is the window, 984 CSS px wide at 1.5x like the other images, written to
@@ -43,12 +45,15 @@ import shots  # noqa: E402
 from chat_shots import api, chrome, free_port  # noqa: E402
 
 WIDTH, SCALE, IMAGES = shots.WIDTH, shots.SCALE, shots.IMAGES
-FIGURES = ("agent-chat-start", "agent-chat-model", "agent-chat-working", "agent-chat", "agent-chat-details")
+FIGURES = ("agent-chat-start", "agent-chat-model", "agent-chat-plan", "agent-chat-working", "agent-chat",
+           "agent-chat-details")
 QUESTION = "Which Lambda failed in the last 24 hours, and why?"
 FOLLOW_UP = "How do I fix the KeyError in orders-etl?"
 MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 PAUSE_SECONDS = 1.5
-ANSWER_PAUSE_SECONDS = 8.0
+SHOT_PAUSE_SECONDS = 8.0
+PLAN = ("Check every function's failures in the last 24 hours", "Read the logs of the ones that failed",
+        "Say what to fix first")
 ANSWER = """\
 **orders-etl** is the one that failed: 66 of its 2,226 calls in the last 24 hours (3.0%). Its logs show three causes:
 
@@ -81,19 +86,27 @@ agent.chat(height=600)"""
 
 def scripted_model():
     """
-    A LangChain chat model that plays a short investigation: it says what it will check, calls function_health,
-    then function_errors for orders-etl, then answers with ANSWER, waiting PAUSE_SECONDS before each reply (and
-    ANSWER_PAUSE_SECONDS before the answer, so the window can be taken while it works).
+    A LangChain chat model that plays a short investigation: it writes its plan (PLAN) and says what it will check,
+    calls function_health, then function_errors for orders-etl, each beside the plan ticked off so far, marks the
+    plan done, then answers with ANSWER. It waits PAUSE_SECONDS before each reply, and SHOT_PAUSE_SECONDS before
+    the plan's last tick, so the window can be taken while it works, with the plan two steps in.
     """
     from langchain_core.language_models.chat_models import BaseChatModel
     from langchain_core.messages import AIMessage
     from langchain_core.outputs import ChatGeneration, ChatResult
 
-    def reply(text: str, tool: str = "", args: dict | None = None, tokens: tuple[int, int] = (2400, 90)) -> AIMessage:
-        calls = [{"name": tool, "args": args or {}, "id": f"call-{tool}", "type": "tool_call"}] if tool else []
+    def plan(done: int) -> tuple[str, dict]:
+        statuses = ["completed"] * done + ["in_progress"] + ["pending"] * len(PLAN)
+        return "write_todos", {"todos": [{"content": text, "status": status} for text, status in zip(PLAN, statuses)]}
+
+    def reply(text: str, *tools: tuple[str, dict], tokens: tuple[int, int] = (2400, 90),
+              pause: float = PAUSE_SECONDS) -> tuple[AIMessage, float]:
+        calls = [{"name": name, "args": args, "id": f"call-{i}-{name}", "type": "tool_call"}
+                 for i, (name, args) in enumerate(tools)]
         usage = {"input_tokens": tokens[0], "output_tokens": tokens[1], "total_tokens": sum(tokens)}
-        return AIMessage(content=text, tool_calls=calls, usage_metadata=usage,
-                         response_metadata={"model_name": MODEL})
+        message = AIMessage(content=text, tool_calls=calls, usage_metadata=usage,
+                            response_metadata={"model_name": MODEL})
+        return message, pause
 
     class Scripted(BaseChatModel):
         replies: list
@@ -107,15 +120,17 @@ def scripted_model():
             return self
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-            message = self.replies.pop(0)
-            time.sleep(PAUSE_SECONDS if message.tool_calls else ANSWER_PAUSE_SECONDS)
+            message, pause = self.replies.pop(0)
+            time.sleep(pause)
             return ChatResult(generations=[ChatGeneration(message=message)])
 
     return Scripted(replies=[
-        reply("I'll check every function's failures over the last 24 hours first.", "function_health",
-              {"since": "24h"}),
-        reply("**orders-etl** failed the most. Let me read its logs to see why.", "function_errors",
-              {"function": "orders-etl", "since": "24h"}, tokens=(3900, 110)),
+        reply("I'll check every function's failures over the last 24 hours first.", plan(0),
+              ("function_health", {"since": "24h"})),
+        reply("**orders-etl** failed the most. Let me read its logs to see why.", plan(1),
+              ("function_errors", {"function": "orders-etl", "since": "24h"}), tokens=(3900, 110)),
+        reply("", plan(2), tokens=(5100, 60)),
+        reply("", plan(3), tokens=(5300, 40), pause=SHOT_PAUSE_SECONDS),
         reply(ANSWER, tokens=(6200, 320)),
     ])
 
@@ -164,7 +179,9 @@ def shoot_theme(page, base: str, token: str, theme: str, wanted: list[str], out:
     box.fill(QUESTION)
     box.press("Enter")
     page.wait_for_function("document.querySelectorAll('.agc-app .ag-step:not(.ag-run)').length === 2 && "
-                           "document.querySelector('.agc-app .ag-pulse')", timeout=60_000)
+                           "document.querySelector('.agc-app .ag-pulse') && "
+                           "document.querySelectorAll('.agc-app .ag-plan .pln-done').length === 2", timeout=60_000)
+    shot("agent-chat-plan")
     box.fill(FOLLOW_UP)
     box.press("Enter")
     page.wait_for_selector(".agc-app .agc-queued", timeout=10_000)

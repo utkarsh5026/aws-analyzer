@@ -1,10 +1,11 @@
 """
 The agent's chat window (AgentView.chat()): a conversation with the agent in a notebook, drawn like a terminal, where
-each question shows the agent's work as it happens. Under the `›` question come the model's words before it acts
-(`●`), and each tool call as the code it is, in colour, with a badge for every AWS service it reads, a comment saying
+each question shows the agent's work as it happens. Under the `›` question come its plan, when it writes one (a
+checklist that ticks off as it works, kept under the question), the model's words before it acts (`●`), and each
+tool call as the code it is, in colour, with a badge for every AWS service it reads, a comment saying
 what it does in plain English, and what it found under it (`⎿`); a click opens the AWS operations it used, what it
 covered, the View calls to look closer and the data it handed the model. Once it has answered, the steps fold into
-one line with the services they read, and the answer leads, with the findings that matter and the details under it.
+one line with the services they read under the plan as it left it, and the answer leads, with the findings that matter and the details under it.
 
 A service's badge (_SERVICES) is its colour and a line drawing, the same wherever it shows (tool calls, the folded
 steps, the header, the empty conversation's legend), so a step's services can be told apart at a glance however many
@@ -42,9 +43,9 @@ from ..._kit.jsontree import _json_tree_css, _JsonTree
 from ..._kit.render import _blocks_html, _prose
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
-from ..answers import AgentAnswer, AgentStep, ToolCall, services_of
+from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, services_of
 from ..llm import provider_info
-from ..view import _CSS, _ROOT, _Charts, _coverage_text
+from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
 if TYPE_CHECKING:
@@ -299,6 +300,10 @@ _CONVERSATION_CSS = """\
 .agt .ag-ans{display:flex;gap:10px;margin:8px 0 2px}
 .agt .ag-ans .ans{font-size:13px;line-height:1.65;margin:0;padding-left:12px;border-left:2px solid var(--ag-accent);min-width:0}
 .agt .ag-ans .ans code{background:var(--ag-hover);padding:1px 4px;border-radius:4px;font-size:12.5px}
+.agt .ag-plan .pln{margin:8px 0 4px;padding:6px 12px;border:1px solid var(--ag-line);border-radius:6px;width:fit-content;max-width:100%}
+.agt .ag-plan .pln-h{color:var(--ag-comment);opacity:1}
+.agt .ag-plan .pln .pln-done .pln-m{color:var(--ag-ok)}
+.agt .ag-plan .pln .pln-now .pln-m{color:var(--ag-accent)}
 .agt .ag-charts{margin:10px 0 2px;padding-left:36px}
 .agt .ag-charts .cht{margin:0}
 .agt .ag-fd .fd{margin:10px 0 4px}
@@ -484,6 +489,13 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
             f'<div class="ag-detail">{_tool_detail_html(call)}</div></details></div>')
 
 
+def _plan_box_html(plan: list[PlanStep]) -> str:
+    """
+    The agent's plan as a checklist in a box: each step ticked (✓), under way (▸) or still to do (○).
+    """
+    return f'<div class="ag-plan">{_blocks_html([_Plan(plan)], root=_ROOT)}</div>'
+
+
 def _pulse_html(turn: _Turn, *, queued: int = 0) -> str:
     """
     The line at the bottom of a question while the agent works: thinking, for how long, how many questions wait
@@ -523,6 +535,7 @@ class _Turn:
     its own line, and a line someone opened stays open.
 
         pulse    the "Thinking…" line at the bottom while it works, and the answer once there is one
+        plan     the checklist under the question, once the agent writes a plan: redrawn in place as it changes
         steps    the steps' widgets, in order
         trail    the steps as they'll be folded once it's answered: the model's words, or a ToolCall
         lines    ToolCall id -> its step's widget
@@ -534,12 +547,21 @@ class _Turn:
     question: str
     box: Any
     pulse: Any
+    plan: Any = None
     steps: list[Any] = field(default_factory=list)
     trail: list[Any] = field(default_factory=list)
     lines: dict[int, Any] = field(default_factory=dict)
     calls: list[ToolCall] = field(default_factory=list)
     running: set[int] = field(default_factory=set)
     started: float = field(default_factory=time.monotonic)
+
+    @property
+    def shown(self) -> tuple[Any, ...]:
+        """
+        The widgets the question shows while it works: the plan, the steps, then the "Thinking…" line.
+        """
+        plan = (self.plan,) if self.plan is not None else ()
+        return (*plan, *self.steps, self.pulse)
 
 
 @dataclass
@@ -956,7 +978,8 @@ class _AgentChat(_Window):
 
     def _stepped(self, step: AgentStep) -> None:
         """
-        One step of the agent's work, drawn under the question: its words, or a tool call starting or finishing.
+        One step of the agent's work, drawn under the question: its plan, its words, or a tool call starting or
+        finishing.
         """
         turn = self.turn
         if turn is None:
@@ -968,7 +991,19 @@ class _AgentChat(_Window):
             self._tool_started(turn, step.call)
         elif step.kind == "tool_done" and step.call is not None:
             self._tool_finished(turn, step.call)
+        elif step.kind == "plan":
+            self._show_plan(turn, step.plan)
         self._tick()
+
+    def _show_plan(self, turn: _Turn, plan: list[PlanStep]) -> None:
+        """
+        The plan under the question: drawn the first time the agent writes one, then redrawn in place.
+        """
+        if turn.plan is None:
+            turn.plan = self._html(_wrap(_plan_box_html(plan)))
+            turn.box.children = turn.shown
+            return
+        self._set(turn.plan, _wrap(_plan_box_html(plan)))
 
     def _add_step(self, turn: _Turn, html: str) -> Any:
         """
@@ -976,7 +1011,7 @@ class _AgentChat(_Window):
         """
         widget = self._html(_wrap(html))
         turn.steps.append(widget)
-        turn.box.children = (*turn.steps, turn.pulse)
+        turn.box.children = turn.shown
         return widget
 
     def _tool_started(self, turn: _Turn, call: ToolCall) -> None:
@@ -1004,16 +1039,18 @@ class _AgentChat(_Window):
 
     def _reply_html(self, answer: AgentAnswer, trail: list[Any]) -> str:
         """
-        The answer as the window shows it: the steps it took folded into one line (open when something went wrong),
-        the answer and its charts, the findings about how it was reached, who answered and what it cost, and the rest of the report
+        The answer as the window shows it: the plan as it left it, the steps it took folded into one line (open when
+        something went wrong), the answer and its charts, the findings about how it was reached, who answered and what it cost, and the rest of the report
         (each call, the AWS reads, the commands to look closer) under details.
         """
         view = self.view
         checked = view._checked_blocks(answer)
         findings = [b for b in checked if isinstance(b, _Findings) and b.items]
-        rest = [b for b in checked if not isinstance(b, _Findings)]
+        rest = [b for b in checked if not isinstance(b, (_Findings, _Plan))]
         went_wrong = bool(answer.error) or not answer.text
-        parts = [_trail_html(trail, answer.seconds, is_open=went_wrong)] if trail else []
+        parts = [_plan_box_html(answer.plan)] if answer.plan else []
+        if trail:
+            parts.append(_trail_html(trail, answer.seconds, is_open=went_wrong))
         if answer.text:
             mark = f'<span class="ag-mark">{_MACHINE}</span>'
             parts.append(f'<div class="ag-ans">{mark}{_answer_text_html(answer.text)}</div>')
@@ -1054,7 +1091,7 @@ class _AgentChat(_Window):
         """
         turn = self.turn
         if turn is not None:
-            turn.box.children = (*turn.steps, turn.pulse)
+            turn.box.children = turn.shown
             self._set(turn.pulse, _wrap(f'<div class="ag-fail">✗ {_prose(self._error_text(exc))}</div>'))
             self._quietly(self.question, value=turn.question)
         self._done()
