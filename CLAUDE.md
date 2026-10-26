@@ -809,7 +809,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   Control clients in several places), hooks the clients it already holds (its `client`, and the values of its dicts)
   and wraps its client factory, and refuses any operation outside `READ_PREFIXES` with `ReadOnlyError` before its
   request is built.
-- **The workspace** (`workspace.py`, `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
+- **The workspace** (`workspace/`: `__init__.py`, with `toolkits/python_tools.py`): `AgentAnalyzer(python=...)` takes a `Workspace`, a
   sandbox the user passes in (`put`, `read`, `delete`, `files`, `run`: a fresh interpreter per run, files kept between runs), and adds
   `PythonToolkit` last (`_with_python`), with `run_python`, `workspace_files` and `show_chart`. A sandbox must give the code no AWS
   credentials and no network; that's what keeps the agent read-only, since `_Guard` can't hook code the model writes.
@@ -821,8 +821,8 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `clean_path`, the budget's `workspace_bytes`). `run_python` checks `python_runs` and runs for at most
   `python_seconds`; what it prints is cut to `file_chars` and passed through `hide_secrets`. `ToolCall.code` /
   `.brief` (`CODE_ARGS`) let the window draw the code under `run_python(…)` and the report fold it under the table.
-  A new service's data goes in through a `save_*` tool in its toolkit; a built-in sandbox goes in `sandboxes/`
-  (`SANDBOXES`, which `python="<name>"` looks up). `LocalSandbox` (`sandboxes/local.py`, `python="local"`) runs each
+  A new service's data goes in through a `save_*` tool in its toolkit; a built-in sandbox goes in `workspace/sandboxes/`
+  (`SANDBOXES`, which `python="<name>"` looks up). `LocalSandbox` (`workspace/sandboxes/local.py`, `python="local"`) runs each
   run in a fresh Pyodide on Deno (`runner.mjs`, shipped in the wheel): Deno gets `--allow-read` of the Pyodide folder
   and nothing else (`_command`), and no AWS variables in its environment (`_environment`); the files live in memory
   here and go in and out as base64 JSON, the result on the last stdout line that starts with the run's nonce
@@ -838,7 +838,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   its loader refusing every fetch. Given matplotlib (`packages=[..., "matplotlib"]`), the runner sets its Agg backend
   and `CHART_STYLE` (a matplotlibrc with the same colours) in `MPLCONFIGDIR` outside `/workspace`; it always makes a
   `charts/` folder and filters matplotlib's float-coordinate deprecation warning that WebAssembly sets off.
-- **Charts** (`charts.py`, pure but for `write_charts`): `show_chart(file, title)` reads a workspace file. A JSON
+- **Charts** (`workspace/charts.py`, pure but for `write_charts`): `show_chart(file, title)` reads a workspace file. A JSON
   one (`is_spec`) is a Vega-Lite chart (Altair's `chart.save('charts/x.json')`): `read_spec` refuses one that isn't a
   chart, is over `MAX_SPEC_BYTES` or has a `url` key outside its rows (`_FETCHING_KEYS`, `_DATA_KEYS`), `themed_spec`
   takes its title out (the caption shows it) and the 300 x 300 size Altair writes into every config, and the
@@ -882,7 +882,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   `AgentAnswer.plan`) and tells `AgentStep('plan')`, without counting it as a tool call. `AgentView` draws it as
   `_Plan` (a checklist, above the table of tool calls), and the chat window pins it under the question
   (`_Turn.plan`, redrawn in place; `_plan_box_html`) and keeps it above the folded steps once answered. Its file tools stay, on
-  the default in-memory `StateBackend`, or with a Python workspace on its files (`workspace_files.py`'s
+  the default in-memory `StateBackend`, or with a Python workspace on its files (`workspace/files.py`'s
   `workspace_backend`: a `CompositeBackend` whose default is `_WorkspaceBackend` over the `Workspace`, reads and greps
   passed through `hide_secrets`, writes held to `workspace_bytes`, and `/conversation_history/` left in a
   `StateBackend`), and `_record_file_tools` records each file tool call (`FILE_TOOLS`) on the question like a

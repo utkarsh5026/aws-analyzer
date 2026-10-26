@@ -31,7 +31,7 @@ from .._kit.text import _esc
 from .._kit.view import _BaseView, _friendly_errors
 from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next
-from .charts import CHARTS_FOLDER, Chart
+from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
 
 if TYPE_CHECKING:

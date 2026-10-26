@@ -71,14 +71,15 @@ One concern per module, so a new service's tools or a new agent capability goes 
                      and next steps a report shows about them.
     analyzer.py      AgentAnalyzer: the settings, and the parts put together. Returns data; never prints.
     view.py          AgentView: the notebook UI, each answer as a report.
-    workspace.py     The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
-                     where the model's code runs over files the tools save; toolkits/python_tools.py gives the model
-                     run_python over it, and each service's toolkit a save_* tool.
-    charts.py        The charts an answer shows: Altair (Vega-Lite) charts the model's code saves in the workspace,
-                     which the sandbox draws as SVG, or pictures it drew itself; show_chart (the Python toolkit's) puts
-                     them in the answer and save_charts() writes them to files.
-    sandboxes/       The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
-                     (AgentAnalyzer(python="local")).
+    workspace/       The Python workspace (AgentAnalyzer(python=...)): the Workspace interface every sandbox gives,
+                     where the model's code runs over files the tools save (__init__.py); toolkits/python_tools.py
+                     gives the model run_python over it, and each service's toolkit a save_* tool.
+                     files.py     deepagents' file tools on the workspace's files.
+                     charts.py    The charts an answer shows: Altair (Vega-Lite) charts the model's code saves in the
+                                  workspace, which the sandbox draws as SVG, or pictures it drew itself; show_chart (the
+                                  Python toolkit's) puts them in the answer and save_charts() writes them to files.
+                     sandboxes/   The built-in workspaces: LocalSandbox, Python in Pyodide on Deno on this machine
+                                  (AgentAnalyzer(python="local")).
     window/          The chat window (AgentView.chat()): the agent's steps drawn as they happen, then the answer
                      (chat.py), and its ⚙ model panel (model_panel.py).
 """
@@ -159,8 +160,8 @@ from .toolkits.lambda_tools import (
     summarize_source,
     summarize_symbol,
 )
-from .charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
-from .sandboxes import PYODIDE_VERSION, LocalSandbox
+from .workspace.charts import CHART_THEME, CHARTS_FOLDER, Chart, chart_of, image_kind, read_spec
+from .workspace.sandboxes import PYODIDE_VERSION, LocalSandbox
 from .toolkits.python_tools import PythonToolkit, summarize_run, summarize_workspace
 from .toolkits.s3_listing import listing_read, save_read
 from .view import AgentView

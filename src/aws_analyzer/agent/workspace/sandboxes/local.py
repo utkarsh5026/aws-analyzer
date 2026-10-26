@@ -42,9 +42,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from ..._kit.deps import _require
-from ..._kit.fmt import human_size, parse_size
-from ..workspace import PythonRun, Workspace, WorkspaceFile, clean_path
+from ...._kit.deps import _require
+from ...._kit.fmt import human_size, parse_size
+from .. import PythonRun, Workspace, WorkspaceFile, clean_path
 
 PYODIDE_VERSION = "314.0.7"
 PYODIDE_URL = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"

@@ -1,4 +1,4 @@
-// The local sandbox's runner (aws_analyzer.agent.sandboxes.local): one run of the model's Python in Pyodide.
+// The local sandbox's runner (aws_analyzer.agent.workspace.sandboxes.local): one run of the model's Python in Pyodide.
 //
 // Deno runs it with read access to the Pyodide folder only: no network, no environment, no other files, no
 // subprocesses. The request comes on stdin as JSON ({nonce, code, packages, files, limit, matplotlibrc}): the

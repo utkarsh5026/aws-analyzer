@@ -10,7 +10,7 @@ TodoListMiddleware, which deepagents doesn't add by itself): the model writes a 
 steps and ticks it off as it goes, and _record_plan keeps each version on the question and tells its listener, so the
 chat window and the report show it. _PLAN_PROMPT and _PLAN_TOOL_TEXT replace the middleware's own instructions, which
 are written for coding tasks and run to about a thousand tokens. FILE_TOOLS are deepagents' file tools (with
-the parameter a call's line names first): with a Python workspace they work on its files (workspace_files.py), and
+the parameter a call's line names first): with a Python workspace they work on its files (workspace/files.py), and
 _record_file_tools counts each call against the question's budget and records it like the toolkits' tools.
 
 A question pauses when a tool asks the user about a big read (pause_for: LangGraph's interrupt, kept with the
@@ -75,7 +75,7 @@ def build_graph(model: Any, tools: list[Callable[..., Any]], system_prompt: str,
     The deepagents agent: the model, the tools, the instructions and a memory of each conversation (an
     InMemorySaver, keyed by the thread ID each question is asked in). `hidden` are deepagents' own tools the model
     is never shown. `backend` is where its file tools keep their files (the Python workspace's, from
-    workspace_files.py; by default deepagents' own in-memory files), and with both it and `current_run` (the
+    workspace/files.py; by default deepagents' own in-memory files), and with both it and `current_run` (the
     question being answered) each file tool call is recorded on it and counted against its budget. With `plan`, the
     model has write_todos (PLAN_TOOL) to write its plan, which is kept on `current_run` when there is one.
     """
