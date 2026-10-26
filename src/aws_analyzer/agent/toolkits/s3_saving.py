@@ -5,7 +5,7 @@ s3/<bucket>/<key>, so run_python can read them whole: which of a listing's files
 pypdf), saved beside it as <key>.txt so the code doesn't need those readers, and what the model reads of a save
 (summarize_saved). plan_saves(), document_text() and summarize_saved() are pure.
 
-A save takes at most max_files files (up to _MOST_FILES) that fit in what's left of the workspace, read _SAVE_WORKERS
+A save takes at most max_files files (up to the budget's save_files) that fit in what's left of the workspace, read _SAVE_WORKERS
 at a time. Files in Glacier Flexible Retrieval or Deep Archive (_ARCHIVED) can't be read until they're restored, so
 they're skipped, and so are folder markers (keys ending in '/') and keys that can't be a path in the workspace. The
 model reads at most _LISTED files of each list.
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from ...s3 import ObjectInfo
 
 SAVE_READS = {"save_s3_files": ("s3:ListBucket", "s3:GetObject (whole files, into the Python workspace)")}
-MOST_FILES = 500
 DEFAULT_FILES = 50
 _ARCHIVED = frozenset({"GLACIER", "DEEP_ARCHIVE"})
 _DOCUMENT_KINDS = frozenset({"pdf", "docx", "pptx"})

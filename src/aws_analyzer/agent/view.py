@@ -583,11 +583,15 @@ class AgentView(_BaseView):
             if core.workspace is not None:
                 limits.append(["Ask first", human_size(budget.ask_bytes), "a save past it asks: all of it, what "
                                                                           "fits, or none"])
+                limits.append(["Ask first", "more files than asked for", "a save that finds more asks: all of them "
+                                                                       "(up to Save files), the ones asked for, "
+                                                                       "or none"])
         if core.workspace is not None:
             limits += [
                 ["Python runs", f"{budget.python_runs:,}", "run_python stops running; it answers with what it has"],
                 ["One run", _duration(budget.python_seconds), "the workspace stops the code"],
                 ["Workspace", human_size(budget.workspace_bytes), "a save that would go past it is refused"],
+                ["Save files", f"{budget.save_files:,}", "save_s3_files copies no more in one call"],
                 ["Charts", f"{budget.charts:,}", "show_chart puts no more in the answer"],
             ]
         if any(getattr(toolkit, "read_files", False) for toolkit in core.toolkits):
@@ -597,6 +601,9 @@ class AgentView(_BaseView):
             ]
         if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
             limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb, file_chunks and answer_kb stop running"])
+        if core.ask_more:
+            limits.append(["Used up", "tool calls, time, cost, runs, searches, charts, workspace",
+                           "it asks first: raise the limit for the question (twice as much) or answer now"])
         return limits
 
     @_friendly_errors

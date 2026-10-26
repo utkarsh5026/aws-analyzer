@@ -1357,7 +1357,7 @@ def test_the_budget_stops_tools_and_the_answer_says_so(seeded):
         calls(("function_health", {"since": "2h"}), ("function_errors", {"function": "etl-nightly", "since": "1h"})),
         says("Partial: etl-nightly failed."),
     )
-    core = make(model, budget={"tool_calls": 1})
+    core = make(model, budget={"tool_calls": 1}, ask_more=False)
     answer = core.ask("What failed and why?")
     ran = [c for c in answer.calls if c.ok]  # the two calls run side by side: whichever starts first runs
     refused = [c for c in answer.calls if not c.ok]
@@ -1366,6 +1366,60 @@ def test_the_budget_stops_tools_and_the_answer_says_so(seeded):
     told = [m.content for m in model.prompts[1] if type(m).__name__ == "ToolMessage"]
     assert any("The budget of 1 tool call for this question is used up" in text for text in told)
     assert any("Stopped at the budget of 1 tool call" in m for _, m in answer_findings(answer, core.budget))
+
+
+def test_a_used_up_limit_asks_to_raise_it_for_the_question(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("etl-nightly failed with a KeyError."))
+    core = make(model, budget={"tool_calls": 1})
+    assert core.ask_more and not make(interrupt_on=False).ask_more
+    asked = core.ask("What failed and why?").waiting[0].waiting
+    assert asked.limit == "tool_calls" and asked.raise_to == 2
+    assert asked.what == ("This question has used its 1 tool call (tool calls per question), so function_errors "
+                          "can't run.")
+    assert asked.go == "raise it to 2 tool calls for this question and go on"
+    answer = core.resume("go")
+    assert answer.text == "etl-nightly failed with a KeyError." and answer.stopped is None
+    assert [(c.name, c.refused) for c in answer.calls] == [("function_health", None), ("function_errors", "raised"),
+                                                            ("function_errors", None)]
+    told = [m.content for m in model.prompts[2] if type(m).__name__ == "ToolMessage"]
+    assert any("raised this question's limit (tool calls per question) to 2 tool calls: call function_errors again"
+               in text for text in told)
+    raised_for_the_question_only = core.budget.tool_calls == 1
+    assert raised_for_the_question_only
+
+
+def test_a_limit_a_tool_checks_itself_asks_too(seeded, tmp_path):
+    model = scripted(calls(("run_python", {"code": "print(1)"})), calls(("run_python", {"code": "print(2)"})),
+                     calls(("run_python", {"code": "print(2)"})), says("1 and 2."))
+    core = make(model, python=Folder(tmp_path), budget={"python_runs": 1})
+    asked = core.ask("Count").waiting[0].waiting
+    assert asked.limit == "python_runs" and asked.go == "raise it to 2 Python runs for this question and go on"
+    answer = core.resume("go")
+    assert [c.refused for c in answer.calls] == [None, "raised", None] and answer.calls[2].result["stdout"] == "2\n"
+
+
+def test_answering_now_keeps_the_limit(seeded):
+    model = scripted(calls(("function_health", {"since": "2h"})),
+                     calls(("function_errors", {"function": "etl-nightly", "since": "1h"})),
+                     says("Partial: etl-nightly failed."))
+    core = make(model, budget={"tool_calls": 1})
+    core.ask("What failed and why?")
+    answer = core.resume("smaller")
+    assert answer.stopped == "tool_calls" and answer.text == "Partial: etl-nightly failed."
+
+
+def test_limit_read_raises_twice_as_much_or_what_is_needed():
+    from aws_analyzer.agent import limit_read
+
+    space = limit_read("save_s3_files", "workspace", Budget(), needed=180 * 2**20)
+    assert space.raise_to == 180 * 2**20 and space.go == "raise it to 180.0 MB for this question and go on"
+    time_up = limit_read("run_python", "time", Budget())
+    assert time_up.raise_to == 600 and "(time per question)" in time_up.what
+    assert limit_read("x", "kb_searches", Budget()).go.startswith("raise it to 20 knowledge base searches")
+    assert limit_read("x", "stopped", Budget()) is None and limit_read("x", "cost", Budget(usd=None)) is None
 
 
 def test_next_steps_name_the_region_of_a_function_elsewhere(seeded):
@@ -2416,7 +2470,7 @@ def test_show_chart_keeps_to_the_budget_of_charts(seeded, tmp_path, capsys, monk
         calls(("show_chart", {"file": "charts/a.png", "title": "A again"})),
         says("Two charts."),
     )
-    agent = make(model, python=workspace, budget={"charts": 2})
+    agent = make(model, python=workspace, budget={"charts": 2}, ask_more=False)
     answer = agent.ask("Chart it", now=NOW)
     assert [c.title for c in answer.charts] == ["A again", "B"]
     refused = answer.calls[2]
@@ -2996,6 +3050,36 @@ def test_a_large_save_asks_before_it_copies(buckets, tmp_path):
     assert saved["files_saved"] == 3 and any("past the 20 B you picked" in why for why in saved["skipped"])
     assert sorted(p.name for p in (tmp_path / "s3/acme-raw").rglob("*") if p.is_file()) == sorted(
         key.rsplit("/", 1)[-1] for key in saved["saved"])
+
+
+def test_a_save_that_finds_more_files_than_asked_for_asks_to_copy_them_all(buckets, tmp_path):
+    model = scripted(calls(("save_s3_files", {"location": "s3://acme-raw/", "match": "*", "max_files": 2})),
+                     says("Saved them."))
+    core = with_s3(model, python=Folder(tmp_path))
+    asked = core.ask("Copy acme-raw").waiting[0].waiting
+    assert asked.what == "save_s3_files found 4 files under s3://acme-raw/ to copy; it was asked for 2."
+    assert asked.go.startswith("copy all 4 files (") and asked.smaller == "copy the first 2 in key order"
+    assert core.resume("go").calls[0].result["files_saved"] == 4
+
+    again = with_s3(scripted(calls(("save_s3_files", {"location": "s3://acme-raw/", "match": "*", "max_files": 2})),
+                             says("Saved two.")), python=Folder(tmp_path / "smaller"))
+    again.ask("Copy acme-raw")
+    saved = again.resume("smaller").calls[0].result
+    assert saved["files_saved"] == 2 and any("past the 2 files asked for" in why for why in saved["skipped"])
+
+    capped = with_s3(python=Folder(tmp_path / "capped"), budget={"save_files": 3}, interrupt_on=False)
+    assert tool(capped, "save_s3_files")("s3://acme-raw/", match="*", max_files=50)["files_saved"] == 3
+
+
+def test_count_read_says_what_go_copies():
+    from aws_analyzer.agent import count_read
+
+    capped = count_read("s3://logs/2026/10/26/", asked=100, files=500, size=5 * 2**20, most=500, found=1_840,
+                        price=0.0004)
+    assert capped.what == "save_s3_files found 1,840 files under s3://logs/2026/10/26/ to copy; it was asked for 100."
+    assert capped.go.startswith("copy 500 files (5.0 MB") and "the budget's save_files" in capped.go
+    room = count_read("s3://a/", asked=1, files=3, size=30, most=500, found=9, price=0)
+    assert room.go.startswith("copy the 3 files that fit in the workspace")
 
 
 def test_the_view_shows_the_choice_and_go_goes_on(seeded, capsys):

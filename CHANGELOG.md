@@ -21,6 +21,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - One click selects all of it and the button says to press Ctrl+C (⌘C on a Mac); no JavaScript, so it works in saved notebooks.
   - The agent's chat window has one on the code each `run_python` call ran.
 
+- 🤖 **Agent: asks before going past a limit**
+  - A question that uses up a limit (tool calls, time, cost, Python runs, searches, charts, workspace size) asks to raise it for that question.
+  - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
+  - Go, smaller or skip, as for big reads; `AgentView(ask_more=False)` never asks.
+
 ### Changed
 
 - 🤖 **Agent: knowledge base tools on by default** ([#153](https://github.com/utkarsh5026/aws-analyzer/pull/153))

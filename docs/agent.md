@@ -403,13 +403,16 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `file_chars` | 50,000 | With `read_files=True`: what `preview_file` sends the model is cut there, and it says so |
 | `python_runs` | 10 | With `python=`: `run_python` stops; it answers with what it has |
 | `python_seconds` | 30 | With `python=`: the workspace stops a run at this many seconds |
-| `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
+| `workspace_bytes` | 50 MB | With `python=`: a save that would go past it [asks you](#big-reads) to make room |
+| `save_files` | 500 | With `python=`: the most files one `save_s3_files` call copies, even when you say go |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
 | `kb_searches` | 10 | `search_kb`, `file_chunks` and `answer_kb` stop running |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 ```
+
+When a question uses up a limit (tool calls, time, model cost, Python runs, knowledge base searches, charts, the workspace's size), the agent doesn't just stop: it [asks you](#big-reads) whether to raise it for that question. **Go** gives it twice as much (or as much as the save needs) and it carries on; **smaller** or **skip** has it answer with what it found. The raise lasts for that question only; `budget=` changes every question, and `AgentView(ask_more=False)` never asks.
 
 ??? more "Why log reads and S3 listings are limited"
 
@@ -420,7 +423,7 @@ agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
 Before a read that would take long or cost money, the agent stops and asks you: go, smaller, or skip.
 { .gist }
 
-Three kinds of read ask first: an S3 listing that goes past 20,000 keys (`find_files`, `folder_summary`, `save_s3_files`), a log read longer than the 3-day limit, and a save of more than 10 MB into the [Python workspace](#run-python). The agent pauses with a question like *"find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket holds about 41,200 files."* and says what each choice reads:
+Four kinds of read ask first: an S3 listing that goes past 20,000 keys (`find_files`, `folder_summary`, `save_s3_files`), a log read longer than the 3-day limit, a save of more than 10 MB into the [Python workspace](#run-python), and a save that finds more files than the agent asked for (*"save_s3_files found 1,840 files under s3://acme-logs/2026/10/26/ to copy; it was asked for 100."*). A [used-up limit](#budget) asks the same way, to raise it. The agent pauses with a question like *"find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket holds about 41,200 files."* and says what each choice reads:
 
 - **Go** reads all of it: the rest of the listing (up to `s3_keys`, with the requests it takes and what they cost), every day of the logs, every file of the save.
 - **Smaller** reads the smaller part it names: the keys listed so far, the last 3 days of logs, the files that fit in 10 MB. The answer says what that left out.
