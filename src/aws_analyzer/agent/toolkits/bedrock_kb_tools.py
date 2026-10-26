@@ -727,7 +727,8 @@ Amazon Bedrock Knowledge Bases
         out["_summary"] = (f"{_plural(len(a.cited), 'source')} cited, {a.grounded_share:.0%} grounded"
                            + (f", {human_money(cost)} (estimated)" if cost is not None else ""))
         out["_next"] = [(self._view_call("ask", a.question, kb=a.kb_name or kb_id, data_source=data_source or None,
-                                         n=passages, search_type=how, model=model_name),
+                                         n=passages if passages != _DEFAULT_PASSAGES else None, search_type=how,
+                                         model=model_name),
                          "the same answer with its citations shaded and its sources"),
                         (self._view_call("search", a.question, kb=a.kb_name or kb_id, data_source=data_source or None),
                          "every passage the question finds, cited or not")]
