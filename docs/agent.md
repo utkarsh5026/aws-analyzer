@@ -267,6 +267,7 @@ Eighteen read-only tools over Lambda and S3, and six for [Bedrock knowledge base
     | `kb_files(knowledge_base, state, match, data_source, limit)` | Each file of its S3 data sources next to Bedrock's record: failed (and why), changed since it was indexed, new since the last sync, skipped, deleted from S3, or indexed |
     | `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them, with findings about the result |
     | `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks and, with `question=`, where its best passage ranks against the whole knowledge base's |
+    | `answer_kb(question, knowledge_base, model, n, data_source, search_type)` | The answer the knowledge base gives once a model has read the passages (Bedrock's `RetrieveAndGenerate`): which parts cite which sources, how much of it a citation backs, its estimated cost, and findings |
 
 ### Bedrock knowledge bases { #knowledge-bases }
 
@@ -278,10 +279,10 @@ agent = AgentView(toolkits=["lambda", "s3", "bedrock_kb"])
 agent.ask("Is support-docs up to date? Some answers still quote the old refund policy.")
 ```
 
-It starts with `kb_health` (status, last syncs, documents that failed), then `kb_files` for the files that changed in S3 since the last sync or never made it in, and `search_kb` with your question to see the passages an answer would be built from. It reads the knowledge bases in the agent's region; with only one there, you don't have to name it.
+It starts with `kb_health` (status, last syncs, documents that failed), then `kb_files` for the files that changed in S3 since the last sync or never made it in, and `search_kb` with your question to see the passages an answer would be built from. To see what your users actually get, `answer_kb` asks the knowledge base the way your app does, so the agent can put the answer next to the passages: a good passage the answer doesn't cite points at the model or its prompt, not the search. It reads the knowledge bases in the agent's region; with only one there, you don't have to name it.
 
 !!! tip "Worth knowing"
-    Nothing here syncs or changes a knowledge base: when a sync would fix it, the answer gives the `aws bedrock-agent start-ingestion-job` command for you to run. `search_kb` and `file_chunks` send the passages they find to the model's provider (cut short, with anything that looks like a secret hidden), so a model on Amazon Bedrock keeps them in AWS.
+    Nothing here syncs or changes a knowledge base: when a sync would fix it, the answer gives the `aws bedrock-agent start-ingestion-job` command for you to run. `search_kb`, `file_chunks` and `answer_kb` send the passages and answers they get to the model's provider (cut short, with anything that looks like a secret hidden), so a model on Amazon Bedrock keeps them in AWS. Each `answer_kb` call runs a Bedrock model in your account (Claude Haiku 4.5 unless the agent names another), and its estimated cost is in the answer's AWS cost.
 
 
 ### Reading what's in a file { #read-files }
@@ -404,7 +405,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `python_seconds` | 30 | With `python=`: the workspace stops a run at this many seconds |
 | `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
-| `kb_searches` | 10 | With the `bedrock_kb` toolkit: `search_kb` and `file_chunks` stop running |
+| `kb_searches` | 10 | With the `bedrock_kb` toolkit: `search_kb`, `file_chunks` and `answer_kb` stop running |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -530,7 +531,7 @@ On the AWS side, the CloudWatch metrics it reads cost $0.01 per 1,000, and S3's 
 
 ## Permissions { #permissions }
 
-The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve` and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
+The Lambda tools read through `LambdaAnalyzer`, so the role needs the [Lambda guide's read-only policy](lambda_functions.md#permissions). The S3 tools read through `S3Analyzer`, so they need the [S3 guide's read-only policy](s3.md#permissions) (with `s3:GetBucketNotification`, which `bucket_details` and `s3_triggers` read the bucket's event notifications with). `s3_triggers` needs both. The Bedrock knowledge base tools read through `BedrockKBAnalyzer`, so they need the [knowledge base guide's read-only policy](bedrock_kb.md#permissions): `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`, `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`, `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve`, and for `answer_kb` `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the model or inference profile that answers (plus `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find it by a short name), and `s3:ListBucket` on each data source's bucket. Nothing more, and no permission to change anything. With a model on Amazon Bedrock, add `bedrock:InvokeModel` on the model and its inference profile (the Converse API, which only generates text), and `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model by a short name like `"sonnet"`. A permission that's missing shows up in the answer as what couldn't be read, and the rest of the answer still stands.
 
 On the Azure side, an API key of the Azure OpenAI resource, or a Microsoft Entra ID identity with the **Cognitive Services OpenAI User** role on it.
 

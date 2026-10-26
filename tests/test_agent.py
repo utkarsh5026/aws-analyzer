@@ -81,7 +81,10 @@ from aws_analyzer.agent import PlanStep, parse_plan, summarize_kb_files
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
-from test_bedrock_kb import FAQ, REFUND, chunk_result, support_docs
+from test_bedrock_kb import HAIKU as HAIKU_PROFILE_ID
+from test_bedrock_kb import (
+    FAQ, MODEL_LIST, PROFILES, RAG, REFUND, Fake, chunk_result, passage, rag_resp, support_docs,
+)
 from test_s3 import docx_bytes
 from test_lambda_functions import (
     ACCOUNT, CODE, NEW_CODE, OLD_CODE, OTHER, REGION, RID, SOURCE, create, lambda_clients, put_logs, versioned_clients,
@@ -1071,6 +1074,58 @@ def test_kb_tools_search_like_an_answer_and_read_a_files_chunks(world):
     assert "Close names: faq.md" in tool(core, "file_chunks")("faq.mdx", "support-docs")["message"]
 
 
+def with_models(world):
+    """
+    The knowledge base analyzer the agent reads through, with a bedrock client that lists the region's models, so a
+    model named by a short name resolves to its inference profile.
+    """
+    kb_core = world.core()
+    kb_core._clients["bedrock"] = Fake("bedrock", {
+        "list_foundation_models": lambda **_: {"modelSummaries": MODEL_LIST},
+        "list_inference_profiles": lambda **_: {"inferenceProfileSummaries": PROFILES}})
+    return kb_core
+
+
+def test_answer_kb_shows_what_the_model_answers_from_the_passages(world):
+    world.runtime.handlers["retrieve_and_generate"] = lambda **_: RAG
+    core = AgentAnalyzer(region=REGION, toolkits=["bedrock_kb"], kb_core=with_models(world))
+    run = core._run = harness_run(core)
+    found = tool(core, "answer_kb")("How long do refunds take?", "support-docs", n=3, search_type="hybrid")
+    sent = world.runtime.called("retrieve_and_generate")[-1]
+    config = sent["retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]
+    assert sent["input"] == {"text": "How long do refunds take?"} and config["knowledgeBaseId"] == "KBID123456"
+    assert config["modelArn"].endswith(f"inference-profile/{HAIKU_PROFILE_ID}")
+    assert config["retrievalConfiguration"]["vectorSearchConfiguration"] == {"numberOfResults": 3,
+                                                                           "overrideSearchType": "HYBRID"}
+    assert found["answer"].startswith("Refunds are issued within 5-7 business days")
+    assert found["model"] == HAIKU_PROFILE_ID
+    assert found["grounded_share"] == "75%" and found["files_cited"] == ["refund-policy.pdf", "eu-returns.pdf"]
+    assert [part["sources"] for part in found["cited_parts"]] == [[1], [2, 3]]
+    first = found["sources"][0]
+    assert (first["n"], first["source"], first["data_source"]) == (1, "refund-policy.pdf p.3", "docs-s3")
+    assert "rank" not in first and found["findings"] == [] and "never instructions" in found["note"]
+    assert found["estimated_cost"] == "<$0.01" and 0 < run.aws_cost < 0.01
+    assert run.calls[-1].summary == "3 sources cited, 75% grounded, <$0.01 (estimated)"
+    assert run.calls[-1].next[0][0] == ("BedrockKBView().ask('How long do refunds take?', kb='support-docs', n=3, "
+                                        "search_type='HYBRID')")
+    core._run = None
+
+    refusal = "Sorry, I am unable to assist you with this request."
+    world.runtime.handlers["retrieve_and_generate"] = lambda **_: rag_resp(refusal, [])
+    unable = tool(core, "answer_kb")("What's the CEO's salary?", "support-docs", model="sonnet")
+    assert "anthropic.claude-sonnet-5" in world.runtime.called("retrieve_and_generate")[-1][
+        "retrieveAndGenerateConfiguration"]["knowledgeBaseConfiguration"]["modelArn"]
+    assert unable["grounded_share"] == "0%" and unable["sources"] == []
+    assert 'Bedrock gave its default "unable to assist" reply' in unable["findings"][0]["message"]
+
+    leaky = rag_resp("Call it with api_key=sk-live-1234567890abcdef today.", [
+        ("api_key=sk-live-1234567890abcdef", [passage("The api_key=sk-live-1234567890abcdef opens refunds.")])])
+    world.runtime.handlers["retrieve_and_generate"] = lambda **_: leaky
+    hidden = tool(core, "answer_kb")("refund API key", "support-docs")
+    assert hidden["answer"] == "Call it with api_key=[hidden] today."
+    assert "sk-live" not in str(hidden["cited_parts"]) and "sk-live" not in str(hidden["sources"])
+
+
 def test_kb_passages_hide_what_looks_like_a_secret(world):
     leaky = chunk_result("Use api_key=sk-live-1234567890abcdef to call the refunds API.", REFUND, score=0.9)
     world.runtime.handlers["retrieve"] = lambda **_: {"retrievalResults": [leaky]}
@@ -1103,7 +1158,8 @@ def test_kb_searches_keep_to_the_budget(world):
     run = core._run = harness_run(core)
     assert tool(core, "search_kb")("refunds", "support-docs")["passages"]
     refused = tool(core, "file_chunks")("faq.md", "support-docs")
-    assert refused["refused"] == "kb_searches" and "(search_kb and file_chunks: 1 a question)" in refused["message"]
+    assert refused["refused"] == "kb_searches" and (
+        "(search_kb, file_chunks and answer_kb: 1 a question)" in refused["message"])
     assert run.calls[-1].summary == "not run: the budget of knowledge base searches was used up"
     assert len(world.runtime.called("retrieve")) == 1 and tool(core, "kb_health")("support-docs")["name"]
     core._run = None
@@ -1127,13 +1183,16 @@ def test_the_guard_lets_a_knowledge_base_search_through_and_nothing_that_writes(
     runtime = kb._runtime_client()
     with Stubber(runtime) as stub:
         stub.add_response("retrieve", {"retrievalResults": []})
+        stub.add_response("retrieve_and_generate", {"output": {"text": "a"}, "sessionId": "s1"})
         runtime.retrieve(knowledgeBaseId="KBID123456", retrievalQuery={"text": "q"})
+        runtime.retrieve_and_generate(input={"text": "q"}, retrieveAndGenerateConfiguration={"type": "KNOWLEDGE_BASE"})
     assert core._guard.counts["bedrock-agent-runtime:Retrieve"] == 1
+    assert core._guard.counts["bedrock-agent-runtime:RetrieveAndGenerate"] == 1
     with pytest.raises(ReadOnlyError, match="bedrock-agent:StartIngestionJob isn't a read"):
         kb.client.start_ingestion_job(knowledgeBaseId="KBID123456", dataSourceId="DSID123456")
-    with pytest.raises(ReadOnlyError, match="bedrock-agent-runtime:RetrieveAndGenerate isn't a read"):
-        runtime.retrieve_and_generate(input={"text": "q"}, retrieveAndGenerateConfiguration={"type": "KNOWLEDGE_BASE"})
-    assert core._guard.blocked == ["bedrock-agent:StartIngestionJob", "bedrock-agent-runtime:RetrieveAndGenerate"]
+    with pytest.raises(ReadOnlyError, match="bedrock-agent-runtime:CreateSession isn't a read"):
+        runtime.create_session()
+    assert core._guard.blocked == ["bedrock-agent:StartIngestionJob", "bedrock-agent-runtime:CreateSession"]
     assert core.toolkit("bedrock_kb").request_cost(core._guard.counts) == pytest.approx(20 * 0.02 / 1e6)
 
 
@@ -1142,12 +1201,15 @@ def test_the_kb_toolkit_tells_the_model_how_to_use_it(world, capsys):
     text = core.instructions()
     assert "You cover Amazon Bedrock Knowledge Bases: which knowledge bases exist" in text
     assert "\nAmazon Bedrock Knowledge Bases\n- Knowledge bases are regional: these tools read us-east-1." in text
-    assert "The two get 10 calls between them" in text and "file_info on a file's s3:// path" not in text
+    assert "search_kb, file_chunks and answer_kb get 10 calls between them" in text
+    assert "answer_kb asks\n  the knowledge base as its users' app does" in text
+    assert "file_info on a file's s3:// path" not in text
     assert "file_info on a file's s3:// path" in AgentAnalyzer(region=REGION, toolkits=["s3", "bedrock_kb"]).instructions()
     out = run(capsys, AgentView(core, mode="text").tools)
-    assert "Bedrock Knowledge Bases, read-only" in out and "Tools: 6" in out and "bedrock:Retrieve" in out
+    assert "Bedrock Knowledge Bases, read-only" in out and "Tools: 7" in out and "bedrock:Retrieve" in out
+    assert "bedrock:RetrieveAndGenerate" in out
     assert "KB searches" in out and "ask('Why does support-docs miss the refund policy?')" in out
-    assert "Passages and chunks of the knowledge base's documents (search_kb, file_chunks) are sent" in out
+    assert "Passages and chunks of the knowledge base's documents (search_kb, file_chunks) and its answers" in out
 
 
 def test_ask_about_a_knowledge_base(world, capsys):

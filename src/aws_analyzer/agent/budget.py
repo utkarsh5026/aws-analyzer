@@ -41,7 +41,7 @@ class Budget:
         python_seconds  the longest one run_python call may take
         workspace_bytes the most the tools may save into the workspace, in all
         charts          the most charts show_chart may put in one answer (only with a Python workspace)
-        kb_searches     search_kb and file_chunks calls per question (only with the Bedrock knowledge base toolkit)
+        kb_searches     search_kb, file_chunks and answer_kb calls per question (only with the Bedrock knowledge base toolkit)
         ask_keys        an S3 listing (find_files, folder_summary, save_s3_files) that goes past this many keys asks
                         the user first: go on (up to s3_keys), stop here, or skip it (with interrupt_on)
         ask_bytes       saving more than this into the workspace asks the user first (with interrupt_on)

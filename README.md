@@ -2057,9 +2057,10 @@ data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,00
 `budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
 
 **Bedrock knowledge bases** have a toolkit of their own, which an agent gets when you name it:
-`AgentView(toolkits=["lambda", "s3", "bedrock_kb"])`. Its six tools read through `BedrockKBAnalyzer` in the agent's
+`AgentView(toolkits=["lambda", "s3", "bedrock_kb"])`. Its seven tools read through `BedrockKBAnalyzer` in the agent's
 region; "is support-docs up to date?" is `kb_health`, then `kb_files` for the files that aren't, and "why doesn't it
-answer X?" is `search_kb` with the question, then `file_chunks` on the file that should have answered it.
+answer X?" is `search_kb` with the question, then `file_chunks` on the file that should have answered it. "What does
+it answer to X?" is `answer_kb`: the answer a model writes from those passages, next to what it cites.
 
 | Tool                                                  | What it returns                                                                                                                                       |
 | :---------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2069,11 +2070,13 @@ answer X?" is `search_kb` with the question, then `file_chunks` on the file that
 | `kb_files(knowledge_base, state, match, data_source, limit)` | Each file of its S3 data sources next to Bedrock's record of it: failed (and why), changed since it was indexed, new since the last sync, skipped, deleted from S3, or indexed. Names, sizes and dates only |
 | `search_kb(question, knowledge_base, n, data_source, search_type)` | The passages a question finds, best first, as an answer would get them (Bedrock's `Retrieve`), with findings about the result     |
 | `file_chunks(file, knowledge_base, question, data_source)` | How one file was cut into chunks (how many, how big, the first ones' text) and, with `question=`, where its best passage ranks against the whole knowledge base's |
+| `answer_kb(question, knowledge_base, model, n, data_source, search_type)` | The answer the knowledge base gives once a model has read the passages (Bedrock's `RetrieveAndGenerate`, Claude Haiku 4.5 unless `model=` names another): which parts cite which sources, how much of it a citation backs, its estimated cost, and findings |
 
 With one knowledge base in the region, `knowledge_base` can be left out. Nothing here syncs or changes a knowledge
-base: the findings give the `aws bedrock-agent start-ingestion-job` command to run. `search_kb` and `file_chunks`
-send the passages they find to the model's provider (cut short, secrets hidden), so a model on Amazon Bedrock keeps
-them in AWS; they get 10 calls a question between them (`budget={"kb_searches": 20}` raises it).
+base: the findings give the `aws bedrock-agent start-ingestion-job` command to run. `search_kb`, `file_chunks` and
+`answer_kb` send the passages and answers they get to the model's provider (cut short, secrets hidden), so a model on
+Amazon Bedrock keeps them in AWS; they get 10 calls a question between them (`budget={"kb_searches": 20}` raises it).
+Each `answer_kb` call runs a Bedrock model in your account, and its estimated cost is in the answer's AWS cost.
 
 ### Running Python (`python=`)
 
@@ -2280,7 +2283,9 @@ headers, never the file; with `read_files=True`, `preview_file` reads the file's
 base tools read through `BedrockKBAnalyzer`: `bedrock:ListKnowledgeBases`, `bedrock:GetKnowledgeBase`,
 `bedrock:ListDataSources`, `bedrock:GetDataSource`, `bedrock:ListIngestionJobs`, `bedrock:GetIngestionJob`,
 `bedrock:ListKnowledgeBaseDocuments`, `bedrock:ListTagsForResource`, `bedrock:Retrieve` (for `search_kb` and
-`file_chunks`: a search, which changes nothing) and `s3:ListBucket` on each data source's bucket (`kb_files` and
+`file_chunks`: a search, which changes nothing), `bedrock:RetrieveAndGenerate` with `bedrock:InvokeModel` on the
+answering model or inference profile and `bedrock:ListFoundationModels` / `bedrock:ListInferenceProfiles` (for
+`answer_kb`: the same search, then a model writes the answer, which changes nothing) and `s3:ListBucket` on each data source's bucket (`kb_files` and
 `file_chunks` list its files' names, sizes and dates). Nothing else, and no permission to change anything. With a model on Amazon Bedrock, the role also needs `bedrock:InvokeModel` on the model
 and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
 `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like

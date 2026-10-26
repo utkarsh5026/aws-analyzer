@@ -168,8 +168,8 @@ class AgentAnalyzer(_BaseAnalyzer):
     file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
     looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it).
     toolkits=['bedrock_kb', ...] adds the Bedrock knowledge base tools, reading through BedrockKBAnalyzer in the
-    session's region (kb_core= to pass your own): health, syncs, files, and Retrieve searches, whose passages go to
-    the model's provider (budget's kb_searches caps them). python= takes a
+    session's region (kb_core= to pass your own): health, syncs, files, Retrieve searches and RetrieveAndGenerate
+    answers, whose passages and answers go to the model's provider (budget's kb_searches caps them). python= takes a
     Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or network) and adds the Python toolkit:
     run_python runs code the model writes over files the other toolkits save there (Lambda's save_function_code),
     and what it prints goes to the model, secrets hidden (budget's python_runs, python_seconds and workspace_bytes

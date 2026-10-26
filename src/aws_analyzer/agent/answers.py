@@ -265,7 +265,8 @@ class AgentAnswer:
         aws_calls     the AWS reads it made: 'logs:FilterLogEvents' -> 12
         blocked       AWS calls the read-only guard refused
         metrics_read  CloudWatch metrics requested (GetMetricData bills per 1,000)
-        aws_cost      USD for those metrics ($0.01 per 1,000 at list price) and S3's requests; the rest are free
+        aws_cost      USD for those metrics ($0.01 per 1,000 at list price), S3's requests and knowledge base answers
+                      (estimated); the rest are free
         model         the deployment or model that answered
         provider      who served it: 'bedrock', 'openai', 'azure', another LangChain provider, or '' for a chat model
                       passed in
