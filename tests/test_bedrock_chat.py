@@ -693,6 +693,7 @@ def test_markdown_answers_are_laid_out_and_escaped():
     assert "<ol><li>Open <strong>Refunds</strong></li><li>Pick <code>order-42</code><ul><li>nested</li></ul></li></ol>" in out
     assert "<thead><tr><th>a</th><th class=\"r\">b</th></tr></thead><tbody><tr><td>x</td><td class=\"r\">1</td>" in out
     assert '<span class="lang">bash</span>' in out and "<code>aws s3 ls</code></pre>" in out
+    assert 'aria-label="Copy the bash code"' in out and '<span class="cpt">aws s3 ls</span>' in out
     assert "<blockquote><p>a <em>quote</em></p></blockquote>" in out and "<del>old</del>" in out
     assert "&lt;script&gt;x&lt;/script&gt;" in out and "<script>" not in out  # raw HTML stays text
     assert '<a href="https://a.b" target="_blank" rel="noopener noreferrer">ok</a>' in out

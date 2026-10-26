@@ -115,7 +115,7 @@ _EXTRA_CSS = """\
 .kbc .ans .pre{position:relative;margin:.45em 0 .8em}
 .kbc .ans .pre pre{margin:0;padding:11px 14px;white-space:pre;overflow:auto;max-height:420px;font-size:12.5px;line-height:1.55;user-select:all;-webkit-user-select:all;cursor:text}
 .kbc .ans .pre code{background:none;padding:0;font-size:inherit;user-select:inherit;-webkit-user-select:inherit}
-.kbc .ans .pre .lang{position:absolute;top:6px;right:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.5}
+.kbc .ans .pre .lang{position:absolute;top:6px;right:86px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.5}
 .kbc .ans .mdt{overflow-x:auto;margin:.45em 0 .8em;border:1px solid var(--kc-line);border-radius:6px}
 .kbc .ans table{border-collapse:collapse;font-size:13px;line-height:1.45;width:100%}
 .kbc .ans th,.kbc .ans td{border-bottom:1px solid var(--kc-line);padding:6px 11px;text-align:left;vertical-align:top}

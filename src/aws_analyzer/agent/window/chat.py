@@ -44,7 +44,7 @@ from ..._kit.blocks import _Findings, _Note
 from ..._kit.fmt import _duration, _plural, human_money, human_size
 from ..._kit.highlight import _python_html
 from ..._kit.jsontree import _json_tree_css, _JsonTree
-from ..._kit.render import _blocks_html, _prose
+from ..._kit.render import _blocks_html, _copyable, _prose
 from ..._kit.text import _clip, _esc
 from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _running_loop, _terminal_theme, _Window, _HUMAN, _MACHINE
 from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, services_of
@@ -500,7 +500,7 @@ def _tool_html(call: ToolCall, *, running: bool) -> str:
             f'<span class="ag-cm"># {_esc(_tool_words(call, running=running or state == "ask"))}</span>'
             f'<span class="ag-tm">{timing}</span></div>')
     if call.code:
-        line += f'<div class="ag-code">{_python_html(call.code)}</div>'
+        line += _copyable(f'<div class="ag-code">{_python_html(call.code)}</div>', call.code, "the code it ran")
 
     if running or state == "ask":
         return f'<div class="ag-step ag-{state}">{line}</div>'

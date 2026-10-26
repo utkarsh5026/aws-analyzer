@@ -163,6 +163,17 @@ _BASE_RULES = """\
 .{root} pre{max-height:420px;overflow:auto;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:6px;font-size:12px}
 .{root} pre.wrap{white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:13px;line-height:1.5;max-height:560px}
 .{root} pre.code{user-select:all;-webkit-user-select:all;cursor:text}
+.{root} .pre{position:relative}
+.{root} .pre>.copy{position:absolute;top:6px;right:8px;z-index:1}
+.{root} .copy{display:inline-flex;align-items:center;position:relative;height:22px;padding:0 10px;border-radius:999px;border:1px solid rgba(127,127,127,.35);background:rgba(127,127,127,.1);font-family:inherit;font-size:11px;font-weight:600;line-height:1;white-space:nowrap;cursor:pointer;user-select:all;-webkit-user-select:all;outline:none}
+.{root} .copy::before{content:"\\29C9\\2002 Copy"}
+.{root} .copy:hover{background:rgba(127,127,127,.2)}
+.{root} .copy:focus{border-color:#3b82f6;color:#3b82f6;background:rgba(59,130,246,.1)}
+.{root} .copy:focus-visible{outline:2px solid rgba(59,130,246,.45);outline-offset:1px}
+.{root} .copy:focus:not(:focus-visible)::before{content:"\\2713\\2002Selected: press Ctrl+C or \\2318 C"}
+.{root} .copy .cpt{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:pre}
+.{root} .copy::selection,.{root} .copy ::selection{background:transparent}
+.{root} .pre:has(>.copy:focus) .lang{visibility:hidden}
 .{root} .hint{font-weight:400;font-size:11px;opacity:.55;margin-left:8px}
 .{root} details.sec{margin:14px 0 4px}
 .{root} details.sec>summary{cursor:pointer;font-weight:600;margin-bottom:4px}
@@ -216,6 +227,27 @@ _TONES = ("warn", "bad", "ok")
 _MARKS = {"warn": "[!] ", "ok": "[ok] "}
 _INFO_MARK = "[i] "
 _SELECT = ' title="Click to select, then copy"'
+_COPY_HINT = "Click, then press Ctrl+C (⌘C on a Mac) to copy"
+
+
+def _copy_button(text: str, what: str = "the code") -> str:
+    """
+    A Copy button for code: a click selects the text it holds (hidden: the button shows only its label, which then
+    says to press Ctrl+C), so the whole of the code is copied with no JavaScript (Jupyter drops scripts). A browser
+    copies a text without its last line break, so one that ends with a line break gets a second. It carries
+    hidden="hidden" until the stylesheet shows it, so an untrusted notebook, which loses the <style>, doesn't show
+    the text twice.
+    """
+    held = text + "\n" if text.endswith("\n") else text
+    return (f'<span class="copy" hidden="hidden" tabindex="0" role="button" aria-label="Copy {_esc(what)}" '
+            f'title="{_COPY_HINT} {_esc(what)}"><span class="cpt">{_esc(held)}</span></span>')
+
+
+def _copyable(inner: str, text: str, what: str = "the code") -> str:
+    """
+    A block of code's HTML with a Copy button in its top right corner that copies `text`.
+    """
+    return f'<div class="pre">{_copy_button(text, what)}{inner}</div>'
 
 
 _LEAD_END_RE = re.compile(r"[:;](?=\s)|\.(?=\s+[A-Z0-9\"'(<$])")
@@ -864,10 +896,11 @@ def _text_html(block: _Text, report: _Report) -> str:
         if css
         else f"<pre>{_esc(block.text)}</pre>"
     )
+    if block.code:
+        pre = _copyable(pre, block.text, block.title or "the code")
     if block.collapsed:
         return f'<details class="sec"><summary>{_prose(block.title or "Details")}</summary>{pre}</details>'
-    hint = '<span class="hint">click it to select all, then copy</span>' if block.code else ""
-    return (f"<h4>{_prose(block.title)}{hint}</h4>" if block.title or hint else "") + pre
+    return (f"<h4>{_prose(block.title)}</h4>" if block.title else "") + pre
 
 
 @_draws(_Title, "text")
