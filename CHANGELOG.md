@@ -9,17 +9,27 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-26
+
 ### Added
 
-- 🤖 **Agent: plans before it works** ([#146](https://github.com/utkarsh5026/aws-analyzer/pull/146))
-  - For a question of several steps, the agent writes a short plan and ticks each step off as it goes.
-  - `chat()` shows it as a checklist under your question; `ask()`'s report shows it above the tool calls.
-  - Free: it reads nothing and doesn't count against the budget. `AgentView(plan=False)` turns it off.
-- 🤖 **Agent: asks before a big read** ([#148](https://github.com/utkarsh5026/aws-analyzer/pull/148))
-  - Before listing over 20,000 S3 keys, reading more than 3 days of logs or saving over 10 MB, it stops and asks.
-  - Pick **go** (all of it, with its cost), **smaller** (what fits) or **skip**: buttons in `chat()`, or `go()`,
-    `smaller()` and `skip()` after `ask()`.
-  - `budget={"ask_keys": ..., "ask_bytes": ...}` moves the limits; `AgentView(interrupt_on=False)` turns it off.
+- Agent: for a question that takes several steps, the agent now writes a short plan first ("check every function's
+  health → read orders-etl's errors → read the code where it fails") and ticks it off as it works. `chat()` shows it
+  as a checklist under your question that updates in place, and `ask()`'s report shows it above the tool calls; a
+  step it didn't mark done shows as a finding. `answer.plan` holds the steps, and `ask(on_step=...)` is told each
+  version (`kind='plan'`). Writing a plan reads nothing and doesn't count against the budget; `AgentView(plan=False)`
+  turns it off to save its instructions' tokens.
+  ([#146](https://github.com/utkarsh5026/aws-analyzer/pull/146))
+- Agent: before a big read, the agent now stops and asks you instead of hitting the budget: an S3 listing past 20,000
+  keys ("find_files has listed 20,000 keys under s3://acme-raw/ and there are more; the bucket holds about 41,200
+  files"), a log read longer than the 3-day limit, or a save of more than 10 MB into the Python workspace. Pick
+  **go** (all of it, with the requests it takes and what they cost), **smaller** (the keys listed so far, the last 3
+  days, the files that fit) or **skip**: `chat()` shows three buttons under the call, and after `ask()` you run
+  `go()`, `smaller()` or `skip()`. The answer says what a smaller read or a skip left out, and the wait doesn't count
+  against the time budget. `budget={"ask_keys": ..., "ask_bytes": ...}` moves the thresholds, and
+  `AgentView(interrupt_on=False)` turns it off (or `interrupt_on=["find_files"]` for some tools). In Python,
+  `core.ask()` returns the answer with `.waiting` set and `core.resume("go")` goes on.
+  ([#148](https://github.com/utkarsh5026/aws-analyzer/pull/148))
 
 ## [0.32.0] - 2026-10-25
 
@@ -937,7 +947,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.29.0...v0.30.0
