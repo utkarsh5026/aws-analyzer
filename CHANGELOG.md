@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - The agent compares it with `search_kb`'s passages to tell a search problem from a model problem.
   - Counts against `kb_searches`; its estimated cost is in the answer's AWS cost. Needs `bedrock:RetrieveAndGenerate`.
 
+- 🧰 **Copy buttons on code**
+  - Code in an answer (the agent's, the Bedrock chat's, `ask()`'s) and code to copy in any report gets a ⧉ Copy button.
+  - One click selects all of it and the button says to press Ctrl+C (⌘C on a Mac); no JavaScript, so it works in saved notebooks.
+  - The agent's chat window has one on the code each `run_python` call ran.
+
 ## [0.33.0] - 2026-10-26
 
 ### Added

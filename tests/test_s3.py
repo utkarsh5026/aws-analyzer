@@ -4171,7 +4171,7 @@ def test_render_tones_pills_scroll_folds_and_next():
     assert (
         '<td class="c"><code' in rendered
         and '<pre class="code"' in rendered
-        and "select all" in rendered
+        and 'class="copy"' in rendered
     )
     assert (
         '<span class="nl">Next</span>' in rendered

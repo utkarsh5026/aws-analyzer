@@ -19,7 +19,7 @@ from .._bedrock.words import _highlight, best_snippet, question_terms
 from .._kit.blocks import _Report, _draws
 from .._kit.fmt import _plural
 from .._kit.highlight import _json_source_html, _python_html
-from .._kit.render import _MARKS, _SELECT, _TONES, _ordered, _prose, _text_lines
+from .._kit.render import _MARKS, _SELECT, _TONES, _copyable, _ordered, _prose, _text_lines
 from .._kit.text import _clip, _esc
 from .._kit.window import _HUMAN, _MACHINE
 
@@ -108,8 +108,8 @@ def _code_html(text: str, lang: str) -> str:
 
 @_draws(_Code, "html")
 def _code_block_html(block: _Code, report: _Report) -> str:
-    hint = '<span class="hint">click it to select all, then copy</span>'
-    return f'<h4>{_prose(block.title)}{hint}</h4><pre class="code hl"{_SELECT}>{_code_html(block.text, block.lang)}</pre>'
+    pre = f'<pre class="code hl"{_SELECT}>{_code_html(block.text, block.lang)}</pre>'
+    return f'<h4>{_prose(block.title)}</h4>{_copyable(pre, block.text, block.title)}'
 
 
 _draws(_Code, "text")(_text_lines)  # as text, code to copy is shown like any other text

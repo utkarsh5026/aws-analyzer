@@ -43,7 +43,7 @@ _EXTRA_CSS = """\
 .kba .ans .pre{position:relative;margin:.45em 0 .8em}
 .kba .ans .pre pre{margin:0;padding:11px 14px;white-space:pre;overflow:auto;max-height:420px;font-size:12.5px;line-height:1.55;user-select:all;-webkit-user-select:all;cursor:text}
 .kba .ans .pre code{background:none;padding:0;font-size:inherit;user-select:inherit;-webkit-user-select:inherit}
-.kba .ans .pre .lang{position:absolute;top:6px;right:12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.5}
+.kba .ans .pre .lang{position:absolute;top:6px;right:86px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;opacity:.5}
 .kba .ans .mdt{overflow-x:auto;margin:.45em 0 .8em;border:1px solid rgba(127,127,127,.22);border-radius:10px}
 .kba .ans table{border-collapse:collapse;font-size:13px;line-height:1.45;width:100%}
 .kba .ans th,.kba .ans td{border-bottom:1px solid rgba(127,127,127,.22);padding:6px 11px;text-align:left;vertical-align:top}

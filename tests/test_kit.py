@@ -20,10 +20,10 @@ from aws_analyzer import (
 )
 from aws_analyzer._kit import view as viewmod
 from aws_analyzer._kit.analyzer import _BaseAnalyzer
-from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Title
+from aws_analyzer._kit.blocks import _Next, _Note, _Tabs, _Text, _Title
 from aws_analyzer._kit.errors import _Hint
 from aws_analyzer._kit.fmt import _fmt_dt, _tz_label, parse_time
-from aws_analyzer._kit.render import _base_css, _Look, _render_text, _report_html, _sort_key
+from aws_analyzer._kit.render import _base_css, _copy_button, _Look, _render_text, _report_html, _sort_key
 from aws_analyzer._kit.themes import DEFAULT_THEME, THEMES, _theme_name
 from aws_analyzer._kit.view import _BaseView, _commands, _friendly_errors
 from aws_analyzer._kit.window import _for_window, _Window, _window_errors
@@ -75,8 +75,17 @@ def test_a_block_made_from_another_is_drawn_like_it():
     assert _render_text([_Loud("Careful", "warn")], 0) == "[!] Careful"
 
 
+def test_code_to_copy_has_a_copy_button():
+    look = _Look(_base_css("x"), "x", "")
+    html = _report_html([_Text("print('<hi>')\n", title="Run this", code=True)], 10, look)
+    assert html.count('class="copy"') == 1 and "print(&#x27;&lt;hi&gt;&#x27;)" in html.split('class="cpt">')[1]
+    assert "Run this" in html and 'hidden="hidden"' in html
+    assert 'class="copy"' not in _report_html([_Text("not code")], 10, look)
+    assert '<span class="cpt">a\n\n</span>' in _copy_button("a\n")
+
+
 def test_base_css_restyles_only_a_rule_it_finds_once():
-    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 175
+    assert _base_css("ddb") == ddb_style._CSS and _base_css("x").count(".x ") == 187
     css = _base_css("x", ".x .own{}", theme=".x{--c:red}", restyle={".pill{": ".x .pill{color:var(--c)}"},
                      after={"pre.code{": ".x pre.hl{}"})
     lines = css.split("\n")

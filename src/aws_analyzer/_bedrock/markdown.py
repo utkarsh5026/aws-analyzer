@@ -9,7 +9,7 @@ import re
 import textwrap
 from typing import Any, Iterable
 
-from .._kit.render import _SELECT
+from .._kit.render import _SELECT, _copy_button
 from .._kit.text import _esc
 
 from .models import Citation
@@ -492,7 +492,8 @@ class _Markdown:
                 s, where = _md_source(block[2])
                 lang = f'<span class="lang">{_esc(block[1])}</span>' if block[1] else ""
                 body = self.chars(s, where, 0, len(s), code=True) + self.marks_before(where[-1] + 1 if where else 0)
-                out.append(f'<div class="pre">{lang}<pre{_SELECT}><code>{body}</code></pre></div>')
+                copy = _copy_button(s, f"the {block[1]} code" if block[1] else "the code")
+                out.append(f'<div class="pre">{lang}{copy}<pre{_SELECT}><code>{body}</code></pre></div>')
             elif kind == "quote":
                 out.append(f"<blockquote>{self.blocks(block[1])}</blockquote>")
             elif kind == "list":
