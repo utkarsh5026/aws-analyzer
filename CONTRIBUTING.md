@@ -73,8 +73,15 @@ just as well for people. The rules that matter most:
 3. Update the docs for anything a user would notice: the service's section in [README.md](README.md) and its guide
    in [`docs/`](docs/).
 4. Add a line under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md), in the group it belongs to (Added, Changed,
-   Fixed, Removed). Write it for someone upgrading: start with the command (`S3View.preview()`:) and say what they
-   can do now. Leave out changes users never see (tests, CI, refactors).
+   Fixed, Removed). Keep it short: the service's emoji and a bold headline of a few words, then at most three
+   one-line points (what you can do now, the call, how to turn it off). Leave out changes users never see (tests,
+   CI, refactors).
+
+   ```markdown
+   - 🪣 **S3: previews Avro files** ([#12](https://github.com/utkarsh5026/aws-analyzer/pull/12))
+     - `ui.preview("s3://bucket/events.avro")` shows the first rows as a table.
+   ```
+
 5. Check that each module still imports with only boto3 (in an environment where only boto3 is installed):
 
    ```bash
@@ -82,7 +89,11 @@ just as well for people. The rules that matter most:
    ```
 
    With Claude Code, `/check` runs this and everything else CI runs, plus the project's own rule checks.
-6. Open a pull request. CI runs lint and the tests on Python 3.10 to 3.14, imports each module with only boto3,
+6. Open a pull request, with screenshots. When it changes `src/aws_analyzer/`, its description's **Screenshots**
+   section shows each report or window it touches as a user sees it (Before and After for a change; light and dark
+   for a change to colours), drawn on demo data with `/demo` if you like. The Screenshots check fails without them;
+   tick "No screenshots" when nothing a user sees changed. The release notes copy them.
+7. CI runs lint and the tests on Python 3.10 to 3.14, imports each module with only boto3,
    builds the package, and builds the guide site with `--strict` when `docs/` changes.
 
 ## Releases

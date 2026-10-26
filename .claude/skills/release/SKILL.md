@@ -50,18 +50,34 @@ Pull requests should already have added their lines under `## [Unreleased]`, but
 `git diff v<last>..origin/main --stat`, and the README and `docs/` diffs, which already describe the change in
 the user's words.
 
-Write for a data scientist upgrading with `pip install -U aws-analyzer`, in README's voice:
+Write for a data scientist upgrading with `pip install -U aws-analyzer`, in README's voice. Someone should get
+each change from a glance, so keep a bullet small:
 
-- One bullet per change a user would notice, starting with the command or class (`S3Explorer`:,
-  `DynamoDBView.scan()`), saying what they can do now or what looks different. End it with the pull request:
-  `([#18](https://github.com/utkarsh5026/aws-analyzer/pull/18))`.
+```markdown
+- 🤖 **Agent: asks before a big read** ([#148](https://github.com/utkarsh5026/aws-analyzer/pull/148))
+  - Before listing over 20,000 S3 keys or reading more than 3 days of logs, it stops and asks.
+  - Pick **go**, **smaller** or **skip**: buttons in `chat()`, or `go()` / `smaller()` / `skip()` after `ask()`.
+  - `AgentView(interrupt_on=False)` turns it off.
+```
+
+- **The headline**: the service's emoji, then in bold the service and what changed in a few plain words (no code,
+  no more than about eight words), then the pull request link.
+- **The points under it**: at most three, each one short line holding one fact: what you can do now, the call that
+  does it, how to turn it off or what it costs. Lists of tool names, every argument, numbers of bytes and how it
+  works inside belong in README and the guide, not here; link the guide section when there's more to tell.
+- A fix or a small change can be the headline alone.
+- The service emojis: 🪣 S3, 🧭 S3 explorer, 📊 DynamoDB, 📚 Bedrock Knowledge Bases, 💬 Bedrock chat,
+  🧪 SageMaker, 🔎 OpenSearch, ⚡ Lambda, 🤖 Agent, 🧰 every service (themes, time zones, install).
 - Group the bullets under `### Added` (new commands, arguments, file types, services), `### Changed` (output,
   defaults or behaviour that's different), `### Fixed`, `### Removed`, in that order, and leave out empty groups.
-- A change that can break a notebook goes first under Changed, starts with `**Breaking**:` and says what to change:
-  a renamed or removed command or argument, a data method that returns something else, a raised `boto3>=` floor
-  or Python floor.
+  Write the headings plain: `notes` adds their emojis (✨ 🔄 🐛 🗑️).
+- A change that can break a notebook goes first under Changed, starts with `**Breaking**:` (`notes` adds ⚠️) and
+  its first point says what to change: a renamed or removed command or argument, a data method that returns
+  something else, a raised `boto3>=` floor or Python floor.
 - Leave out what users never see: tests, CI, Dependabot updates to the dev pins, screenshots, refactors, internal
   names (`_capture`, `_later`), and docs edits other than a new guide.
+
+Rewrite a pull request's line that doesn't read like this: a long bullet is what this step is for.
 
 ## 4. Pick the version and bump it
 
@@ -88,8 +104,12 @@ one the changelog already has, or an empty Unreleased.
 
 1. Run `/check`. It has to pass, `package` included: that builds the wheel with the new version and imports it
    with only boto3. `tests/test_package.py` checks the changelog has an entry for `__version__`.
-2. `release.py notes` prints the entry the GitHub release will show (hard-wrapped lines joined, the full-diff
-   link added). Read it once more as the user.
+2. `release.py notes` prints the entry the GitHub release will show: hard-wrapped lines joined, an emoji on each
+   group, a 📸 **What it looks like** section with the screenshots from each linked pull request's description
+   (read with `gh pr view`), and the full-diff link. Read it once more as the user, and check every change a user
+   can see has its picture. A pull request merged without one (from before the rule, or one whose screenshots
+   were ticked off) gets one now: draw the report with `/demo <service> '<call>' --html <scratchpad>/x.html`,
+   screenshot it, and add it to that pull request's Screenshots section, so `notes` picks it up.
 3. Commit only `CHANGELOG.md` and `src/aws_analyzer/__init__.py`, as `Release <version>`, push the branch and open
    the pull request with the notes as its body:
 
@@ -141,4 +161,5 @@ Finally `git switch main && git pull --ff-only`.
 
 ## Report
 
-The version and why, the release and PyPI links, the result of the clean install, and the notes as published.
+The version and why, the release and PyPI links, the result of the clean install, and the notes as published
+(with how many screenshots they carry).

@@ -1120,9 +1120,24 @@ it can run off the main thread: `_request()` makes one request and changes nothi
 - `README.md` is the user documentation: per service, a quick start, a command table, the pure functions, cost
   notes and IAM permissions. Update it together with the analyzer.
 - `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): every change a user would notice adds a
-  bullet under `## [Unreleased]`, in Added / Changed / Fixed / Removed, written for someone upgrading (starts with
-  the command, says what they can do now, ends with the pull request link; `**Breaking**:` first when a notebook
-  would have to change). Tests, CI, refactors and docs edits get none. `CONTRIBUTING.md`, `SECURITY.md` and the
+  bullet under `## [Unreleased]`, in Added / Changed / Fixed / Removed, written for someone upgrading and readable
+  at a glance: the service's emoji, a bold headline of a few plain words and the pull request link
+  (`- 🤖 **Agent: asks before a big read** ([#148](...))`), then at most three one-line points under it, each one
+  fact (what you can do now, the call, how to turn it off). Details go in README and the guide, never into the
+  bullet; `**Breaking**:` first when a notebook would have to change. The emojis and the rules are in
+  `.claude/skills/release/SKILL.md` step 3. Tests, CI, refactors and docs edits get none.
+- **Every pull request that changes `src/aws_analyzer/` shows screenshots** of what a user sees, in its description's
+  `## Screenshots` section (`.github/pull_request_template.md`): each report or window it touches, Before and After
+  for a change, light and dark for a change to colours or layout, each captioned with the call that drew it. The
+  Screenshots workflow (`.github/scripts/check_screenshots.py`) fails a pull request without a picture there,
+  unless "No screenshots: nothing a user sees changed" is ticked (tests, CI, refactors; release and Dependabot
+  branches are exempt), and `release.py notes` copies them into the GitHub release. Draw a report on demo data with
+  `/demo <service> '<call>' --html <scratchpad>/x.html` and screenshot the page with Playwright (984 px wide, like
+  the guides' figures); a window with its `*_shots.py`. A changed docs figure is linked at the branch's head commit
+  (`https://raw.githubusercontent.com/utkarsh5026/aws-analyzer/<sha>/docs/images/<name>-light.webp`). Other pictures,
+  when you can't attach files to the description, go in one commit adding `.github/pr-screenshots/<name>.png`,
+  linked at that commit's SHA the same way, and the next commit removes the folder, so `main`'s tree never holds
+  them (pull requests merge with a merge commit, which keeps the SHA reachable). `CONTRIBUTING.md`, `SECURITY.md` and the
   issue and pull request templates in `.github/` are for outside contributors; keep them in line with these rules.
 - `docs/` is the guide site: Markdown built by MkDocs with the Material theme (`mkdocs.yml`, versions pinned in
   `requirements-docs.txt`) and published to GitHub Pages by `.github/workflows/pages.yml` on pushes to `main`;
