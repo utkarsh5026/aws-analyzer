@@ -7,7 +7,7 @@ What a sandbox must promise, since nothing here can check it: the code it runs h
 and sees only the workspace's files. That keeps the agent read-only: data reaches the workspace only through the
 toolkits' tools, whose AWS clients the guard hooks, and the code itself can't reach AWS. Each run starts a fresh
 interpreter; the files stay between runs, the variables don't. deepagents' file tools (ls, read_file, write_file,
-edit_file, glob, grep) work on the same files (workspace_files.py), so the model can write a script, run it and edit
+edit_file, glob, grep) work on the same files (files.py), so the model can write a script, run it and edit
 it. A sandbox that can draw Vega-Lite charts (draws_charts, draw_vega_lite()) turns the charts the code saves with
 Altair into the SVG pictures an answer shows (show_chart); every sandbox can show a picture the code drew itself.
 

@@ -1,6 +1,6 @@
 """
 The Python toolkit: the model runs its own Python code (run_python) over files the other toolkits' tools save into
-the agent's workspace (workspace.py's Workspace, a sandbox with no AWS credentials or network), lists them
+the agent's workspace (workspace/__init__.py's Workspace, a sandbox with no AWS credentials or network), lists them
 (workspace_files), and puts the charts its code draws there in the answer (show_chart, charts.py). It reads nothing from AWS itself: data comes in only through the tools that save it, like the
 Lambda toolkit's save_function_code, which each toolkit offers when the agent has this one (peer('python')), and
 which save through save() so the budget's workspace_bytes holds across them.
@@ -23,7 +23,7 @@ import boto3
 from ..._kit.fmt import _plural, human_size
 from ..._kit.text import _clip
 from ..budget import Budget, _Refused
-from ..charts import CHART_THEME, Chart, chart_of, chart_title, is_spec, read_spec, themed_spec
+from ..workspace.charts import CHART_THEME, Chart, chart_of, chart_title, is_spec, read_spec, themed_spec
 from ..results import hide_secrets
 from ..workspace import PythonRun, Workspace, WorkspaceFile, clean_path
 from .base import Toolkit

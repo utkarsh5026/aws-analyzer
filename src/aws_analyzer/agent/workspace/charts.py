@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .._kit.fmt import human_size
+from ..._kit.fmt import human_size
 
 CHARTS_FOLDER = "agent-charts"
 MAX_CHART_BYTES = 3 * 1024 * 1024
