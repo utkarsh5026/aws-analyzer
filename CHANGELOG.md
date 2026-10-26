@@ -9,6 +9,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+### Added
+
+- 🤖 **Agent: tests what a knowledge base answers**
+  - New `answer_kb` tool: the answer Bedrock's `RetrieveAndGenerate` gives, what it cites, and how grounded it is.
+  - The agent compares it with `search_kb`'s passages to tell a search problem from a model problem.
+  - Counts against `kb_searches`; its estimated cost is in the answer's AWS cost. Needs `bedrock:RetrieveAndGenerate`.
+
 ## [0.33.0] - 2026-10-26
 
 ### Added

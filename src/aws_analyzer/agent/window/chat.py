@@ -173,6 +173,7 @@ _TOOL_WORDS = {
     "search_kb": _ToolWords("searching the knowledge base for '{t}'", "searched the knowledge base for '{t}'",
                             "a question"),
     "file_chunks": _ToolWords("reading {t}'s chunks", "read {t}'s chunks", "a file"),
+    "answer_kb": _ToolWords("asking the knowledge base '{t}'", "asked the knowledge base '{t}'", "a question"),
     "save_function_code": _ToolWords("saving {t}'s code to the workspace", "saved {t}'s code to the workspace",
                                      "the function"),
     "save_logs": _ToolWords("saving {t}'s logs to the workspace", "saved {t}'s logs to the workspace", "the function"),

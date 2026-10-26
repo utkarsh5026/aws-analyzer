@@ -455,6 +455,9 @@ class AgentView(_BaseView):
         requests = sum(n for op, n in answer.aws_calls.items() if op.startswith("s3:"))
         if requests:
             billed.append(f"{_plural(requests, 'S3 request')}")
+        kb_answers = answer.aws_calls.get("bedrock-agent-runtime:RetrieveAndGenerate", 0)
+        if kb_answers:
+            billed.append(f"{_plural(kb_answers, 'knowledge base answer')}, estimated")
         if billed:
             basis.append(f"Its AWS reads cost {human_money(answer.aws_cost)} ({' and '.join(billed)}); the rest are "
                          "free.")
@@ -593,7 +596,7 @@ class AgentView(_BaseView):
                 ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
             ]
         if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
-            limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb and file_chunks stop running"])
+            limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb, file_chunks and answer_kb stop running"])
         return limits
 
     @_friendly_errors
