@@ -26,7 +26,7 @@ from .s3_tools import S3Toolkit
 
 TOOLKITS: dict[str, type[Toolkit]] = {"lambda": LambdaToolkit, "s3": S3Toolkit, "bedrock_kb": BedrockKBToolkit,
                                       "python": PythonToolkit}
-DEFAULT_TOOLKITS = ("lambda", "s3")
+DEFAULT_TOOLKITS = ("lambda", "s3", "bedrock_kb")
 
 
 def make_toolkit(spec: str | Toolkit | type[Toolkit], **settings: Any) -> Toolkit:

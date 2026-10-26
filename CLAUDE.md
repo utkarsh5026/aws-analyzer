@@ -772,7 +772,7 @@ functions); a test patches a name in the module that looks it up (`harness._MIN_
   CompleteMultipartUpload, not Put), and reads the function, its resource policy (Lambda's `parse_policy`) and its
   CloudWatch numbers through `peer("lambda").analyzer`; `trigger_findings` (pure) says what broke each link. Its
   `covers` and `instructions()` add the S3-and-Lambda part only when the peer is there.
-  `BedrockKBToolkit` (`bedrock_kb_tools.py`, `"bedrock_kb"`, not in `DEFAULT_TOOLKITS`; `kb_core=`) has
+  `BedrockKBToolkit` (`bedrock_kb_tools.py`, `"bedrock_kb"`, in `DEFAULT_TOOLKITS`; `kb_core=`) has
   `find_knowledge_bases`, `kb_health`, `kb_syncs`, `kb_files`, `search_kb` and `file_chunks` over `BedrockKBAnalyzer`
   in the agent's region (`_kb` takes a name or ID, or the region's only one), with the `summarize_kb_*` functions
   pure. `search_kb` and `file_chunks` call `Retrieve` (the guard's `SEARCHES`) and count against the budget's

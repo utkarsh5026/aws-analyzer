@@ -15,11 +15,11 @@ Ask "Which Lambda failed last night?" in a notebook cell and get the answer: whi
   <li>Says what it checked</li>
   <li>A budget per question</li>
   <li>Follow-up questions</li>
-  <li>Lambda and S3, joined</li>
+  <li>Lambda and S3, joined, and knowledge bases</li>
   <li>Any model: Bedrock, OpenAI, Azure, ...</li>
 </ul>
 
-It covers AWS Lambda and Amazon S3. The model is yours to pick (one on Amazon Bedrock keeps everything in AWS), run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
+It covers AWS Lambda, Amazon S3 and Amazon Bedrock Knowledge Bases. The model is yours to pick (one on Amazon Bedrock keeps everything in AWS), run by LangChain's [deepagents](https://pypi.org/project/deepagents/). The examples use acme's `orders-etl` from the [Lambda guide](lambda_functions.md), which loads each day's orders from the files that arrive in the `acme-raw` bucket.
 { .muted }
 
 ## Set up in SageMaker { #setup }
@@ -107,8 +107,8 @@ agent.chat()
 
 Type a question and press Enter, or click one of the questions to start from.
 
-![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, four small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart and S3's green bucket), a green read-only, and the ⚙ model and new chat buttons; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch and s3, and under # try four questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-light.webp#only-light){ width="984" height="728" loading=lazy }
-![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, four small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart and S3's green bucket), a green read-only, and the ⚙ model and new chat buttons; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch and s3, and under # try four questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-dark.webp#only-dark){ width="984" height="728" loading=lazy }
+![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, five small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart, S3's green bucket and Bedrock's teal spark), a green read-only, and the ⚙ model and new chat buttons; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch, s3 and bedrock, and under # try five questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-light.webp#only-light){ width="984" height="728" loading=lazy }
+![The agent's chat window, empty, in a monospace font: a header with aws-agent, claude-haiku-4-5 @ bedrock, five small service badges (Lambda's orange λ, CloudWatch Logs' pink lines, CloudWatch's pink chart, S3's green bucket and Bedrock's teal spark), a green read-only, and the ⚙ model and new chat buttons; then a short line on what the agent does, a legend of those badges named lambda, logs, cloudwatch, s3 and bedrock, and under # try five questions, each with the badges of the services it reads; at the bottom a › prompt to type in, a send button, and a line saying enter sends, stop ends a question with what it found, and it's read-only](images/agent-chat-start-dark.webp#only-dark){ width="984" height="728" loading=lazy }
 /// caption
 **Start here**: the badges show which AWS services the agent reads; every question to start from shows the ones it needs.
 ///
@@ -212,7 +212,7 @@ Follow-ups continue the conversation, so "why did it fail?" knows what "it" is. 
 
 ## What it can call { #tools }
 
-Eighteen read-only tools over Lambda and S3, and six for [Bedrock knowledge bases](#knowledge-bases) when you add their toolkit. Each returns a compact summary with what it covered, never raw AWS data.
+Eighteen read-only tools over Lambda and S3, and seven for [Bedrock knowledge bases](#knowledge-bases). Each returns a compact summary with what it covered, never raw AWS data.
 { .gist }
 
 `agent.tools()` lists them with the AWS reads each makes. `agent.core.tools()` returns the functions themselves, with type hints and docstrings, so another agent framework can use them too.
@@ -271,11 +271,11 @@ Eighteen read-only tools over Lambda and S3, and six for [Bedrock knowledge base
 
 ### Bedrock knowledge bases { #knowledge-bases }
 
-Add `"bedrock_kb"` to the toolkits, and the agent can tell you whether a knowledge base is up to date and why it doesn't answer something.
+The agent can tell you whether a knowledge base is up to date and why it doesn't answer something.
 { .gist }
 
 ```python
-agent = AgentView(toolkits=["lambda", "s3", "bedrock_kb"])
+agent = AgentView()
 agent.ask("Is support-docs up to date? Some answers still quote the old refund policy.")
 ```
 
@@ -405,7 +405,7 @@ Past a limit, the tools stop and the model answers with what it has; the report 
 | `python_seconds` | 30 | With `python=`: the workspace stops a run at this many seconds |
 | `workspace_bytes` | 50 MB | With `python=`: a save that would go past it is refused |
 | `charts` | 8 | With `python=`: `show_chart` puts no more in the answer |
-| `kb_searches` | 10 | With the `bedrock_kb` toolkit: `search_kb`, `file_chunks` and `answer_kb` stop running |
+| `kb_searches` | 10 | `search_kb`, `file_chunks` and `answer_kb` stop running |
 
 ```python
 agent = AgentView(budget={"tool_calls": 50, "log_days": 7})
@@ -484,7 +484,7 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],              # where it looks unless asked otherwise; "all" for every region
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about your account
     budget={"tool_calls": 25, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3"],                       # the default; ["s3"] for S3 alone
+    toolkits=["lambda", "s3"],                       # the default adds "bedrock_kb"; ["s3"] for S3 alone
     read_files=True,                                 # adds preview_file; off by default
     plan=False,                                      # no plan for questions of several steps; on by default
     interrupt_on=["find_files", "function_logs"],    # only these ask before a big read; True (all) by default
@@ -496,7 +496,7 @@ agent = AgentView(core)
 
 ### Your own tools { #toolkits }
 
-The agent's tools come in toolkits, one per AWS service: `toolkits=["lambda", "s3"]` is the default. A toolkit of your own adds tools beside them. Give it a name, a sentence for the model on what it covers, and `tools()`: plain functions whose type hints and docstrings tell the model how to call them, each returning a dict.
+The agent's tools come in toolkits, one per AWS service: `toolkits=["lambda", "s3", "bedrock_kb"]` is the default. A toolkit of your own adds tools beside them. Give it a name, a sentence for the model on what it covers, and `tools()`: plain functions whose type hints and docstrings tell the model how to call them, each returning a dict.
 
 ```python
 from aws_analyzer.agent import AgentView, Toolkit
@@ -517,7 +517,7 @@ class Runbooks(Toolkit):
 
         return [runbook]
 
-agent = AgentView(toolkits=["lambda", "s3", Runbooks()])
+agent = AgentView(toolkits=["lambda", "s3", "bedrock_kb", Runbooks()])
 agent.ask("orders-etl failed last night: what should I do?")
 ```
 

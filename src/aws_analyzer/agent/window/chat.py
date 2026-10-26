@@ -124,6 +124,15 @@ class _Suggestion:
     services: tuple[str, ...]
 
 
+def _and_list(names: list[str]) -> str:
+    """
+    ['Lambda', 'S3', 'Bedrock Knowledge Bases'] -> 'Lambda, S3 and Bedrock Knowledge Bases'.
+    """
+    if len(names) < 2:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 _SUGGESTIONS = (
     _Suggestion(frozenset({"lambda"}), "Which Lambda failed last night?", ("lambda", "cloudwatch", "logs")),
     _Suggestion(frozenset({"lambda"}), "Which functions are slow or close to their timeout?",
@@ -132,6 +141,7 @@ _SUGGESTIONS = (
     _Suggestion(frozenset({"s3", "lambda"}), "Did last night's uploads trigger their Lambda?",
                 ("s3", "lambda", "cloudwatch")),
     _Suggestion(frozenset({"s3", "python"}), "Chart how big each of my buckets is", ("s3", "cloudwatch")),
+    _Suggestion(frozenset({"bedrock_kb"}), "Are my knowledge bases up to date?", ("bedrock", "s3")),
 )
 
 
@@ -697,7 +707,7 @@ class _AgentChat(_Window):
         question to start from that asks it.
         """
         w = self.w
-        reads = " and ".join(t.title for t in self.view.core.toolkits if t.service) or "your account"
+        reads = _and_list([t.title for t in self.view.core.toolkits if t.service]) or "your account"
         intro = w.HTML(_wrap(
             '<div class="ag-intro"><div class="ag-big"><span class="ag-pr">›</span> aws-agent</div>'
             f'<p class="ag-dim">Ask about {_esc(reads)} in plain English. Every tool call shows as it runs: the '

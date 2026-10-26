@@ -457,7 +457,7 @@ def test_toolkits_says_what_it_takes():
         AgentAnalyzer(region=REGION, toolkits=[5])
     with pytest.raises(KeyError, match="no 's3' toolkit; it has lambda"):
         AgentAnalyzer(region=REGION, toolkits=["lambda"]).toolkit("s3")
-    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3"]  # the default: both
+    assert [t.name for t in AgentAnalyzer(region=REGION).toolkits] == ["lambda", "s3", "bedrock_kb"]  # the default
     notes = Notes()
     AgentAnalyzer(region=REGION, toolkits=[notes])
     with pytest.raises(ValueError, match="already belongs to another AgentAnalyzer"):
@@ -1644,7 +1644,7 @@ def test_tools_report_lists_each_tool_and_the_budget(view, capsys):
         assert name in out
     assert "logs:FilterLogEvents" in out and "3 days" in out and "Provider: Scripted" in out
     assert "It goes to your chat model (gpt-test)." in out and "AgentView(provider='bedrock')" in out
-    assert "Lambda, S3, read-only" in out and "s3:GetBucketNotification" in out and "100,000" in out
+    assert "Lambda, S3, Bedrock Knowledge Bases, read-only" in out and "s3:GetBucketNotification" in out and "100,000" in out
     assert "File contents are never read" in out
 
 
@@ -1705,6 +1705,15 @@ def page(x):
 def enter(x, question):
     x.question.value = question
     x.question._handle_custom_msg({"event": "submit"}, [])
+
+
+def test_the_chat_window_suggests_knowledge_base_questions_by_default(seeded):
+    suggested = page(window(scripted(says("ok"))))
+    assert "Ask about Lambda, S3 and Bedrock Knowledge Bases in plain English" in suggested
+    assert "Are my knowledge bases up to date?" in suggested
+    without_kbs = page(window(scripted(says("ok")), toolkits=["lambda", "s3"]))
+    assert "Ask about Lambda and S3 in plain English" in without_kbs
+    assert "knowledge bases up to date" not in without_kbs
 
 
 def test_the_chat_window_shows_each_tool_call_then_the_answer(seeded):
@@ -2174,7 +2183,7 @@ def test_python_adds_its_toolkit_and_the_save_tools_that_feed_it(tmp_path):
 
     workspace = Folder(tmp_path)
     core = AgentAnalyzer(region=REGION, python=workspace)
-    assert [t.name for t in core.toolkits] == ["lambda", "s3", "python"] and core.workspace is workspace
+    assert [t.name for t in core.toolkits] == ["lambda", "s3", "bedrock_kb", "python"] and core.workspace is workspace
     assert isinstance(core.toolkit("python"), PythonToolkit) and core.toolkit("python").workspace is workspace
     names = [fn.__name__ for fn in core.tools()]
     assert names[-3:] == ["run_python", "workspace_files", "show_chart"] and "save_function_code" in names
@@ -2270,7 +2279,7 @@ def test_ask_runs_python_and_the_report_shows_its_code(seeded, tmp_path, capsys)
     assert "run_python" in out and "Python runs" in out and "Workspace" in out and "a test folder" in out
     html = _tool_html(ran, running=False)
     assert '<span class="pf">run_python</span>(…)' in html and 'class="ag-code"' in html and "pathlib" in html
-    assert "Ask about Lambda and S3 in plain English" in page(window(core=make(python=Folder(tmp_path))))
+    assert "Ask about Lambda, S3 and Bedrock Knowledge Bases in plain English" in page(window(core=make(python=Folder(tmp_path))))
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
