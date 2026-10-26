@@ -23,7 +23,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Changed
 
-- 🤖 **Agent: knowledge base tools on by default**
+- 🤖 **Agent: knowledge base tools on by default** ([#153](https://github.com/utkarsh5026/aws-analyzer/pull/153))
   - `AgentView()` now has the Bedrock knowledge base tools beside Lambda's and S3's; no `toolkits=` needed.
   - Passages they find go to the model's provider, as S3 and Lambda results do; `toolkits=["lambda", "s3"]` leaves them out.
   - The chat window suggests "Are my knowledge bases up to date?" to start from.
