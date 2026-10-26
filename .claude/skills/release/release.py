@@ -7,7 +7,9 @@ under a new version with __version__ set to match, and one version's entry as th
     python .claude/skills/release/release.py notes 0.2.0     # that version's CHANGELOG entry (default: __version__)
 
 status reads git, gh (CI on main) and PyPI and changes nothing. bump edits CHANGELOG.md and
-src/aws_analyzer/__init__.py only: no commit, no tag, nothing sent anywhere. notes prints.
+src/aws_analyzer/__init__.py only: no commit, no tag, nothing sent anywhere. notes prints the entry dressed for a
+GitHub release (an emoji on each group, the screenshots from each pull request's description, read with gh;
+--no-screenshots leaves them out).
 """
 
 from __future__ import annotations
@@ -30,6 +32,13 @@ VERSION_LINE = re.compile(r'^__version__ = "([^"]+)"$', re.M)
 HEADING = re.compile(r"^## \[([^\]]+)\](?: - (\d{4}-\d{2}-\d{2}))?[ \t]*$", re.M)
 LINK_REF = re.compile(r"^\[([^\]]+)\]: (\S+)[ \t]*$", re.M)
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+PULL_LINK = re.compile(r"\[#(\d+)\]\((https://github\.com/[^)]+/pull/\d+)\)")
+SCREENSHOTS_HEADING = re.compile(r"^##\s+.*screenshots?\b.*$", re.I | re.M)
+NEXT_HEADING = re.compile(r"^##\s", re.M)
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+PICTURE_LINE = re.compile(r"!\[[^\]]*\]\([^)\s]+|<img\s|<picture|https://github\.com/user-attachments/assets/\S+", re.I)
+GROUP_EMOJI = {"Added": "✨", "Changed": "🔄", "Fixed": "🐛", "Removed": "🗑️"}
+BREAKING = "**Breaking**"
 
 # What a changed path means for a release: only "package" changes reach people who pip install it, and README.md is
 # the PyPI page. The guide site publishes from main on its own.
@@ -297,17 +306,70 @@ def unwrap(body: str) -> str:
     return "\n".join(lines)
 
 
-def notes(version: str | None) -> int:
+def dressed(body: str) -> str:
+    """
+    The entry as a GitHub release shows it: an emoji on each group's heading and a warning sign on what can break.
+    """
+    for group, emoji in GROUP_EMOJI.items():
+        body = re.sub(rf"(?m)^### {group}[ \t]*$", f"### {emoji} {group}", body)
+    return body.replace(f"- {BREAKING}", f"- ⚠️ {BREAKING}")
+
+
+def screenshot_lines(description: str) -> list[str]:
+    """
+    The pictures in a pull request description's Screenshots section, with the captions written between them.
+    """
+    heading = SCREENSHOTS_HEADING.search(description)
+    if not heading:
+        return []
+    following = NEXT_HEADING.search(description, heading.end())
+    section = HTML_COMMENT.sub("", description[heading.end():following.start() if following else len(description)])
+    lines = [line for line in section.strip().splitlines() if not re.match(r"\s*[-*]\s*\[[ xX]\]", line)]
+    has_picture = any(PICTURE_LINE.search(line) for line in lines)
+    return lines if has_picture else []
+
+
+def pull_request(number: str) -> dict:
+    """
+    A pull request's title and description from gh, or {} when gh can't read it.
+    """
+    found = run("gh", "pr", "view", number, "--json", "title,body")
+    return json.loads(found) if found else {}
+
+
+def screenshots(body: str) -> str:
+    """
+    A "What it looks like" section with the screenshots of every pull request the entry links, '' when none has any.
+    """
+    parts = []
+    for number, url in dict(PULL_LINK.findall(body)).items():
+        found = pull_request(number)
+        if not found:
+            print(f"note: couldn't read #{number} with gh, so its screenshots are left out", file=sys.stderr)
+            continue
+        pictures = screenshot_lines(found.get("body") or "")
+        if pictures:
+            parts.append(f"**{found['title']}** ([#{number}]({url}))\n\n" + "\n".join(pictures).strip())
+    if not parts:
+        return ""
+    return "## 📸 What it looks like\n\n" + "\n\n".join(parts)
+
+
+def notes(version: str | None, *, with_screenshots: bool = True) -> int:
     text = CHANGELOG.read_text(encoding="utf-8")
     version = (version or current_version()).removeprefix("v")
     found = section(text, version)
     if not found or not found[0]:
         print(f"CHANGELOG.md has no entry for {version}", file=sys.stderr)
         return 1
-    print(unwrap(found[0]))
+    body = unwrap(found[0])
+    print(dressed(body))
+    pictures = screenshots(body) if with_screenshots else ""
+    if pictures:
+        print(f"\n{pictures}")
     diff = dict(LINK_REF.findall(text)).get(version, "")
     if "/compare/" in diff:
-        print(f"\n**Full diff**: {diff}")
+        print(f"\n🔗 **Full diff**: {diff}")
     return 0
 
 
@@ -320,12 +382,13 @@ def main() -> int:
     bumping.add_argument("--date", default=dt.date.today().isoformat(), help="the release date (default: today)")
     showing = commands.add_parser("notes", help="one version's CHANGELOG entry, for the GitHub release")
     showing.add_argument("version", nargs="?", help="default: __version__")
+    showing.add_argument("--no-screenshots", action="store_true", help="leave out the pull requests' screenshots")
     args = parser.parse_args()
     if args.command == "status":
         return status()
     if args.command == "bump":
         return bump(args.target, args.date)
-    return notes(args.version)
+    return notes(args.version, with_screenshots=not args.no_screenshots)
 
 
 if __name__ == "__main__":
