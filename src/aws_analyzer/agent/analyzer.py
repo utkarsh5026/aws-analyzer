@@ -162,13 +162,12 @@ class AgentAnalyzer(_BaseAnalyzer):
     use_model() switches to another model later (the chat window's ⚙ model does it by clicking).
 
     What it reads: toolkits= picks the services it has tools for (names like 'lambda' and 's3', or Toolkit objects;
-    the default is DEFAULT_TOOLKITS: Lambda and S3, with s3_triggers joining them). The Lambda toolkit reads through
-    LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
+    the default is DEFAULT_TOOLKITS: Lambda, S3 and Bedrock knowledge bases, with s3_triggers joining the first
+    two). The Lambda toolkit reads through LambdaAnalyzer: lambda_core= to pass your own, lambda_clients= its clients (for tests), prices= its prices. The
     S3 toolkit reads through S3Analyzer: s3_core= to pass your own (with its prices=). It never reads what's inside a
     file unless read_files=True, which adds preview_file: a file's first rows, lines or text, with anything that
     looks like a secret hidden, sent to the model's provider (budget's file_bytes and file_chars cap it).
-    toolkits=['bedrock_kb', ...] adds the Bedrock knowledge base tools, reading through BedrockKBAnalyzer in the
-    session's region (kb_core= to pass your own): health, syncs, files, Retrieve searches and RetrieveAndGenerate
+    The Bedrock knowledge base toolkit ('bedrock_kb') reads through BedrockKBAnalyzer in the session's region (kb_core= to pass your own): health, syncs, files, Retrieve searches and RetrieveAndGenerate
     answers, whose passages and answers go to the model's provider (budget's kb_searches caps them). python= takes a
     Workspace (aws_analyzer.agent.Workspace: a sandbox with no AWS credentials or network) and adds the Python toolkit:
     run_python runs code the model writes over files the other toolkits save there (Lambda's save_function_code),

@@ -21,6 +21,13 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - One click selects all of it and the button says to press Ctrl+C (⌘C on a Mac); no JavaScript, so it works in saved notebooks.
   - The agent's chat window has one on the code each `run_python` call ran.
 
+### Changed
+
+- 🤖 **Agent: knowledge base tools on by default**
+  - `AgentView()` now has the Bedrock knowledge base tools beside Lambda's and S3's; no `toolkits=` needed.
+  - Passages they find go to the model's provider, as S3 and Lambda results do; `toolkits=["lambda", "s3"]` leaves them out.
+  - The chat window suggests "Are my knowledge bases up to date?" to start from.
+
 ## [0.33.0] - 2026-10-26
 
 ### Added

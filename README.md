@@ -91,7 +91,7 @@ report still renders.
 | <img src="docs/images/aws/opensearch.svg" width="20" height="20" alt="" align="absmiddle"> **Amazon OpenSearch**              | • Every vector field in plain English: size, engine, similarity<br>• Whether the vector graphs fit in the memory the nodes have<br>• Documents without a vector, and zero or repeated vectors<br>• The nearest neighbours of a question, a vector or a document            | [`opensearch/`](src/aws_analyzer/opensearch/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/opensearch.html)                    |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **AWS Lambda**                     | • Every function's runtime, triggers, calls, errors and cost, in one region or all<br>• Runtimes losing support, and functions anyone can call<br>• Errors grouped by cause, from the function's own logs<br>• Memory used and cold starts, the code in its package, and how its Python code works, step by step | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html) |
 | <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Lambda explorer**                | • Every function and how it's doing, problems first: click one to open it<br>• Its logs run by run, failed runs in red: search them, pick a time range, or watch them live<br>• What calls it and where its results go, its errors by cause, its run times<br>• The code in its package and every setting, by clicking | [`lambda_functions/`](src/aws_analyzer/lambda_functions/)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/lambda_functions.html#explorer) |
-| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/` and `s3/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
+| <img src="docs/images/aws/lambda.svg" width="20" height="20" alt="" align="absmiddle"> **Ask in plain English**           | • Ask "Which Lambda failed last night?" and get the answer, with the numbers that matter<br>• Every answer says what it checked: the time window, the regions, what it couldn't read<br>• Follow-up questions; the commands to look closer, ready to run<br>• Lambda and S3, and the bucket events that invoke functions: were the files that arrived processed?<br>• Bedrock knowledge bases: is one up to date, and why doesn't it answer a question?<br>• Read-only by construction, with a budget per question; the model is yours to pick: Amazon Bedrock, OpenAI, Azure OpenAI or any LangChain provider | [`agent/`](src/aws_analyzer/agent/) (with `lambda_functions/`, `s3/` and `bedrock_kb/`)<br>[Guide →](https://utkarsh5026.github.io/aws-analyzer/agent.html) |
 
 The [guides](https://utkarsh5026.github.io/aws-analyzer/) walk through each service with screenshots: setting up in
 SageMaker, every command, and ready-made IAM policies. Their source is in [`docs/`](docs/).
@@ -1958,9 +1958,8 @@ it. Ask "Were last night's uploads to acme-raw processed?" and it joins the buck
 arrived and the function's runs, and finds the files that never ran it (a suffix filter that misses `.CSV`, a
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
-`S3View` commands to look closer. It covers Lambda and S3, and Bedrock knowledge bases when you add their toolkit
-(`toolkits=["lambda", "s3", "bedrock_kb"]`): whether one is up to date, why a sync failed, and what a question
-finds in it. The model is yours to pick: one on Amazon Bedrock (so
+`S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases: whether one is up to date, why
+a sync failed, and what a question finds in it. The model is yours to pick: one on Amazon Bedrock (so
 nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
 [deepagents](https://pypi.org/project/deepagents/).
 
@@ -2056,8 +2055,8 @@ model's provider, so turn it on with a model on Amazon Bedrock, or with a provid
 data. It reads up to 2 MB of a text or JSON file and sends the model up to 50,000 characters of it;
 `budget={"file_bytes": 10_000_000, "file_chars": 200_000}` raises both.
 
-**Bedrock knowledge bases** have a toolkit of their own, which an agent gets when you name it:
-`AgentView(toolkits=["lambda", "s3", "bedrock_kb"])`. Its seven tools read through `BedrockKBAnalyzer` in the agent's
+**Bedrock knowledge bases** have a toolkit of their own, which every agent gets (`toolkits=["lambda", "s3"]` leaves
+it out). Its seven tools read through `BedrockKBAnalyzer` in the agent's
 region; "is support-docs up to date?" is `kb_health`, then `kb_files` for the files that aren't, and "why doesn't it
 answer X?" is `search_kb` with the question, then `file_chunks` on the file that should have answered it. "What does
 it answer to X?" is `answer_kb`: the answer a model writes from those passages, next to what it cites.
@@ -2223,8 +2222,8 @@ core = AgentAnalyzer(
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
     notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
-    toolkits=["lambda", "s3"],            # the services it has tools for: both by default (s3_triggers needs both);
-                                          # add "bedrock_kb" for Bedrock knowledge bases (kb_core= to pass your own)
+    toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for: all three by default (s3_triggers
+                                          # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
     read_files=True,                      # adds preview_file: what's inside a file goes to the model (off by default)
     python="local",                       # adds run_python, show_chart and the save_* tools: Python in a local sandbox
 )
@@ -2255,7 +2254,7 @@ toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` an
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
 it covers, and `tools()` returning plain functions whose type hints and docstrings tell the model how to call them.
-Pass it next to the built-in ones, `AgentView(toolkits=["lambda", "s3", Runbooks()])`, and its tools get the same
+Pass it next to the built-in ones, `AgentView(toolkits=["lambda", "s3", "bedrock_kb", Runbooks()])`, and its tools get the same
 budget, error handling and report as the built-in ones; the read-only guard covers every AWS client the analyzer it
 reads through (`make_analyzer()`) makes from its session. The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#toolkits) has an
 example.
