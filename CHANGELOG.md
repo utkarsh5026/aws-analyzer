@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🤖 **Agent: findings and next calls in every answer**
+- 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
   - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
   - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".
   - `answer.findings` holds them as data; `AgentView(findings=False)` answers in plain text as before.
