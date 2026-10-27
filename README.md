@@ -1959,7 +1959,8 @@ arrived and the function's runs, and finds the files that never ran it (a suffix
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
 `S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases: whether one is up to date, why
-a sync failed, and what a question finds in it. The model is yours to pick: one on Amazon Bedrock (so
+a sync failed, and what a question finds in it. With `memory=True` it remembers what it learned about your account
+("orders-etl runs in eu-west-1") from one conversation to the next. The model is yours to pick: one on Amazon Bedrock (so
 nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
 [deepagents](https://pypi.org/project/deepagents/).
 
@@ -1984,6 +1985,8 @@ agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 a
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
+agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
+agent.memory()                                          # what it remembers; forget("orders-etl") clears a note
 ```
 
 <picture>
@@ -2190,7 +2193,8 @@ The notes are kept per AWS account (STS `GetCallerIdentity`), so one account's n
 Anything in a note that looks like a key or password is hidden before it's stored, the notes stay under 8 KB
 (`budget={"memory_bytes": ...}`), since they're sent with every conversation, and the agent can't delete them: only
 `forget()` and `forget_all()` do. Memory is off unless you turn it on, and conversations themselves still last only as
-long as the kernel.
+long as the kernel. The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#memory) shows the report and
+the window, and what the agent notes and never notes.
 
 ### Safe and bounded
 
