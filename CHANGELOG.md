@@ -9,6 +9,8 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-28
+
 ### Added
 
 - 🧰 **Free the disk: list and remove what aws-analyzer saved** ([#164](https://github.com/utkarsh5026/aws-analyzer/pull/164))
@@ -20,11 +22,6 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `AgentView(chats=True)` saves every conversation on this machine, titled from its first question.
   - `chats()` lists them; `open_chat(1)` carries one on, even after a restart; `rename_chat()` / `delete_chat()`.
   - The chat window's 🗂 chats does the same by clicking, and its header shows the open chat's title.
-
-### Fixed
-
-- 🧰 **`clean_up()` keeps the agent's notes** ([#165](https://github.com/utkarsh5026/aws-analyzer/pull/165))
-  - It removed all of `~/.cache/aws-analyzer`, the agent's memory with it; now `agent/` there stays.
 
 ## [0.36.0] - 2026-10-27
 
@@ -1013,7 +1010,8 @@ notebook with only boto3.
 - Every report starts with the numbers that matter, explains its findings in plain English with the command to run
   next, and shows a short note instead of a traceback. Nothing writes to AWS.
 
-[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/utkarsh5026/aws-analyzer/compare/v0.33.0...v0.34.0
