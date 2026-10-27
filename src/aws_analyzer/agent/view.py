@@ -15,7 +15,7 @@ import base64
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
+from datetime import date, datetime, tzinfo
 from typing import TYPE_CHECKING, Any
 
 from botocore.exceptions import BotoCoreError
@@ -33,6 +33,7 @@ from .analyzer import AgentAnalyzer
 from .answers import AgentAnswer, PlanStep, ToolCall, answer_findings, answer_next, reply_findings
 from .workspace.charts import CHARTS_FOLDER, Chart
 from .llm import model_place, no_model_hint, provider_info
+from .memory import MemoryState, Note, is_notes_file, match_words, memory_findings, notes_text
 
 if TYPE_CHECKING:
     from .window import _AgentChat
@@ -248,6 +249,7 @@ class AgentView(_BaseView):
         "💬 Ask": ("chat", "ask", "new_conversation"),
         "✋ Big reads": ("go", "smaller", "skip"),
         "🔎 Look back": ("transcript", "save_charts"),
+        "🧠 Memory": ("memory", "forget", "forget_all"),
         "🧰 What it can do": ("tools", "use_model"),
         "❓ Help": ("help",),
     }
@@ -566,6 +568,99 @@ class AgentView(_BaseView):
                     _Table(["File", "Chart", "Size"], rows, path_cols=(0,), sortable=False)])
 
 
+    def _learned_text(self, note: Note, today: date) -> str:
+        """
+        When a note was learned, as its table shows it: '2026-10-27 (today)', '2026-08-01 (87d ago)', or 'not dated'.
+        """
+        days = note.age_days(today)
+        if note.learned is None or days is None:
+            return "not dated"
+        when = "today" if days <= 0 else f"{days:,}d ago"
+        return f"{note.learned.isoformat()} ({when})"
+
+    def _memory_blocks(self, state: MemoryState) -> list[Any]:
+        """
+        The memory() report's blocks for memory that's on: cards, findings, the notes, the file as it's stored.
+        """
+        today = self.core._today()
+        title = _Title("What the agent remembers", f"account {state.account} · {state.path}")
+        if not state.notes:
+            return [title, _Note("Nothing noted yet: the agent keeps a note when it finds a lasting fact about your "
+                                 "account (where a function runs, what a bucket is for), so the next conversation "
+                                 "doesn't look it up again. Ask it something: ask('Which Lambda failed last night?').")]
+        ages = [days for note in state.notes if (days := note.age_days(today)) is not None]
+        findings = memory_findings(state, today)
+        old_tone = ("warn",) if any(level == "warn" for level, _ in findings) else ()
+        rows = [[note.text, self._learned_text(note, today)] for note in state.notes]
+        return [
+            title,
+            _Cards([("Notes", f"{len(state.notes):,}"),
+                    ("Size", f"{human_size(state.size)} of {human_size(state.limit)}"),
+                    ("Oldest", f"{max(ages):,}d ago" if ages else "not dated", *old_tone),
+                    ("Account", state.account)]),
+            _Findings(findings, empty="Every note is recent, and there's room for more."),
+            _Table(["Note", "Learned"], rows, title="Notes, in the order it wrote them", sortable=False),
+            _Text(state.text, title="/memories/AGENTS.md, as the agent reads it", collapsed=True),
+        ]
+
+    def _memory_next(self, state: MemoryState) -> _Next:
+        """
+        The memory() report's last block: clearing a note, every note, and a question that starts from them.
+        """
+        return _Next([(f"forget('{match_words(state.notes[0])}')", "clear the notes with these words"),
+                      ("forget_all()", "clear every note about this account"),
+                      ("ask('Which Lambda failed last night?')", "an answer that starts from these notes")])
+
+    @_friendly_errors
+    def memory(self) -> None:
+        """
+        What the agent remembers about your account between conversations (with memory=True): each note it kept,
+        like "orders-etl runs in eu-west-1", and when it learned it, which notes are old enough to check, and how full
+        its memory is. Your own notes= file is shown too.
+        """
+        core = self.core
+        blocks: list[Any] = []
+        state: MemoryState | None = None
+        if core.memory_file is None:
+            blocks += [_Title("What the agent remembers"),
+                       _Note("The agent's memory is off: each conversation starts from nothing but your notes=. "
+                             "AgentView(memory=True) lets it keep notes about your account (where a function runs, "
+                             "what a bucket is for) in ~/.cache/aws-analyzer/agent/memory.sqlite, one set per AWS "
+                             "account, so it doesn't look them up again.")]
+        else:
+            state = core.memories()
+            blocks += self._memory_blocks(state)
+        if is_notes_file(core.notes):
+            blocks.append(_Text(notes_text(core.notes), title=f"Your notes ({core.notes}), read for each new "
+                                                              "conversation", collapsed=True))
+        if state is not None and state.notes:
+            blocks.append(self._memory_next(state))
+        self._show(blocks)
+
+    @_friendly_errors
+    def forget(self, match: str) -> None:
+        """
+        Clears the agent's notes that hold these words (any case), and lists what it cleared: forget('orders-etl').
+        The next conversation starts without them; the one going on still has them, until new_conversation().
+        """
+        dropped = self.core.forget(match)
+        if not dropped:
+            self._show([_Note(f"No note holds {match!r}: memory() lists them all.", "warn")])
+            return
+        self._show([_Title("Forgotten", _plural(len(dropped), "note")),
+                    _Table(["Note"], [[note.text] for note in dropped], sortable=False),
+                    _Note("The next conversation starts without them (new_conversation() starts one now).", "ok")])
+
+    @_friendly_errors
+    def forget_all(self) -> None:
+        """
+        Clears every note the agent kept about this AWS account. Notes about other accounts, and your notes= file,
+        stay as they are.
+        """
+        count = self.core.forget_all()
+        self._show([_Note(f"Cleared {_plural(count, 'note')} about account {self.core.account()}: the next "
+                          "conversation starts from nothing but your notes=.", "ok")])
+
     def _budget_rows(self) -> list[list[str]]:
         """
         The tools() report's Budget table: each limit per question, and what happens past it.
@@ -606,6 +701,8 @@ class AgentView(_BaseView):
                 ["File read", human_size(budget.file_bytes), "preview_file reads a text or JSON file's start only"],
                 ["File content", f"{budget.file_chars:,} characters", "what preview_file sends the model is cut there"],
             ]
+        if core.memory_file is not None:
+            limits.append(["Notes", human_size(budget.memory_bytes), "a note that would go past it isn't kept"])
         if any(toolkit.name == "bedrock_kb" for toolkit in core.toolkits):
             limits.append(["KB searches", f"{budget.kb_searches:,}", "search_kb, file_chunks and answer_kb stop running"])
         if core.ask_more:
@@ -653,6 +750,8 @@ class AgentView(_BaseView):
         blocks.append(_Note(
             "Sent to the model: your question and what the tools return (names, settings, counts, error messages and "
             "log lines, with anything that looks like a key or password hidden)." + (f" {never}" if never else "")
+            + (" With memory=, its notes about the account go too, at the start of each conversation."
+               if core.memory_file is not None else "")
             + place + stay))
         together = ("ask('Which Lambda processes files uploaded to acme-raw?')", "S3 and Lambda together")
         if has_kb:

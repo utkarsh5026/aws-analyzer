@@ -16,6 +16,11 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `save_s3_files` asks to copy every matching file when it finds more than the agent asked for (up to `budget={"save_files": 500}`).
   - Go, smaller or skip, as for big reads; `AgentView(ask_more=False)` never asks.
 
+- 🤖 **Agent: remembers your account between conversations** ([#160](https://github.com/utkarsh5026/aws-analyzer/pull/160))
+  - `AgentView(memory=True)`: it keeps dated notes like "orders-etl runs in eu-west-1" and starts from them next time.
+  - `memory()` or the chat window's 🧠 memory shows them; `forget('orders-etl')`, a note's ✕ or `forget_all()` clears them.
+  - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
+
 - 🤖 **Agent: findings and next calls in every answer** ([#159](https://github.com/utkarsh5026/aws-analyzer/pull/159))
   - The answer ends with a findings panel, warnings first: what's wrong, why it matters and what to do.
   - Each finding names a `LambdaView`, `S3View` or `BedrockKBView` call, checked before it's shown; they lead "Look closer".

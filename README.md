@@ -103,7 +103,7 @@ SageMaker, every command, and ready-made IAM policies. Their source is in [`docs
 ```python
 %pip install aws-analyzer           # every service; only needs boto3, which SageMaker already has
 %pip install "aws-analyzer[all]"    # also every optional package: pandas, pyarrow, the PDF and Excel readers, progress bars
-%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws (Python 3.11+)
+%pip install "aws-analyzer[agent]"  # just the agent's packages: deepagents, langchain-openai, langchain-aws, langgraph-checkpoint-sqlite (Python 3.11+)
 %pip install "aws-analyzer[agent,sandbox]"  # and Deno, for the agent's Python sandbox (AgentView(python="local"))
 ```
 
@@ -1959,7 +1959,8 @@ arrived and the function's runs, and finds the files that never ran it (a suffix
 multipart upload a PUT-only notification ignores). Every answer says what it checked (the time window, in your time
 zone, and the regions), what it couldn't read or was stopped from reading, what it cost, and the `LambdaView` and
 `S3View` commands to look closer. It covers Lambda, S3 and Bedrock knowledge bases: whether one is up to date, why
-a sync failed, and what a question finds in it. The model is yours to pick: one on Amazon Bedrock (so
+a sync failed, and what a question finds in it. With `memory=True` it remembers what it learned about your account
+("orders-etl runs in eu-west-1") from one conversation to the next. The model is yours to pick: one on Amazon Bedrock (so
 nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. The agent loop is LangChain's
 [deepagents](https://pypi.org/project/deepagents/).
 
@@ -1967,7 +1968,7 @@ nothing leaves AWS), OpenAI, Azure OpenAI, or any provider LangChain supports. T
 
 ### Quick start
 
-The agent needs a few more packages (deepagents, langchain-openai and langchain-aws), which need Python 3.11 or
+The agent needs a few more packages (deepagents, langchain-openai, langchain-aws and langgraph-checkpoint-sqlite), which need Python 3.11 or
 newer. Everything else in aws-analyzer still works on 3.10 with boto3 alone.
 
 ```python
@@ -1984,6 +1985,8 @@ agent.ask("Were last night's uploads to acme-raw processed?", new=True)   # S3 a
 agent.ask("Which functions run close to their timeout?", new=True)   # a new conversation
 agent.tools()                                           # what it can call, its model and its budget
 agent.transcript()                                      # every question and answer so far, with their cost
+agent = AgentView(provider="bedrock", memory=True)      # it keeps notes about your account between conversations
+agent.memory()                                          # what it remembers; forget("orders-etl") clears a note
 ```
 
 <picture>
@@ -2166,13 +2169,40 @@ class MySandbox(Workspace):
 agent = AgentView(provider="bedrock", python=MySandbox())
 ```
 
+### Memory between conversations
+
+With `memory=True` the agent keeps notes about your account, so the next conversation doesn't look the same thing up
+again: "orders-etl runs in eu-west-1", "acme-raw/incoming feeds orders-etl". It writes one fact per line, dated, when
+it finds something lasting (where things run, what they're for, which bucket feeds which function, what you tell it),
+and never counts, costs, settings' values or log lines. Its notes go into the prompt when a conversation starts, as
+facts it found, not instructions: when a tool says otherwise, the tool wins and it fixes the note.
+
+```python
+agent = AgentView(provider="bedrock", memory=True)       # notes in ~/.cache/aws-analyzer/agent/memory.sqlite
+agent = AgentView(memory="~/SageMaker/agent-memory.sqlite")   # a notebook instance keeps only ~/SageMaker when it stops
+agent = AgentView(notes="AGENTS.md")                     # your own facts, from a file, read for each new conversation
+agent.memory()                                           # what it remembers: each note, when it learned it, how full
+agent.forget("orders-etl")                               # clear the notes holding these words
+agent.forget_all()                                       # clear every note about this account
+```
+
+In the chat window, **🧠 memory** shows the same notes, with their age and a ✕ on each to forget it; **forget all**
+asks for a second click.
+
+The notes are kept per AWS account (STS `GetCallerIdentity`), so one account's never reach a question about another.
+Anything in a note that looks like a key or password is hidden before it's stored, the notes stay under 8 KB
+(`budget={"memory_bytes": ...}`), since they're sent with every conversation, and the agent can't delete them: only
+`forget()` and `forget_all()` do. Memory is off unless you turn it on, and conversations themselves still last only as
+long as the kernel. The [agent guide](https://utkarsh5026.github.io/aws-analyzer/agent.html#memory) shows the report and
+the window, and what the agent notes and never notes.
+
 ### Safe and bounded
 
 - **It only reads.** The tools call the analyzers' read methods, and a guard on every AWS client they use refuses any
   operation that isn't a Get, List, Describe, Head or Filter call (or Bedrock's `Retrieve`, which only searches a
   knowledge base) before its request is built, whatever asks for it. There's
   no shell: deepagents' `execute` and its general-purpose subagent are turned off, and its file tools only keep notes in
-  memory. Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
+  memory (with `memory=True`, its notes about the account in a local SQLite file). Code runs only in the Python sandbox (`python=`), which has no network and no AWS credentials.
 - **A budget per question.** At most 25 tool calls, 200 steps of the agent's loop, 5 minutes and, when you pass the
   model's prices, $1.00 of tokens;
   a log read covers at most 3 days (CloudWatch's counts cover longer windows), and an S3 listing at most 100,000 keys.
@@ -2199,10 +2229,12 @@ agent = AgentView(provider="bedrock", python=MySandbox())
 
 | Command                     | Shows                                                                                                                                                                                                 |
 | :-------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
+| `chat(height=None)`         | A chat window: type a question (or click a suggested one) and watch the agent work as it happens: its plan for a question of several steps, a checklist that ticks off as it works, what it says before it acts, and each tool call in plain English with what it found. Then the steps fold into one line and the answer leads, with **Details** (each tool call, the AWS reads, the cost) folded under it. Follow-ups continue the conversation; **Stop** ends a question with what it found; **New chat** starts over; **🧠 memory** lists the agent's notes about the account, each with a ✕ to forget it (with `memory=True`); **⚙ model** picks the provider and model (and the key, endpoint or API version it takes) by clicking. Questions asked with `ask()` in other cells join it |
 | `ask(question, new=False)`  | The answer first, then its **findings** (what it found, why it matters and what to do, with the call that shows more), then **what it checked**: the plan it worked to, each tool call with its window, regions and what it found, what it couldn't read or was refused, the AWS reads, tokens and cost, and the `LambdaView` and `S3View` commands to look closer. Follow-ups continue the conversation; `new=True` starts another. The kernel's stop button stops it, and the report shows what it found until then |
 | `new_conversation()`        | Starts a new conversation: the next question won't see the earlier ones                                                                                                                                |
 | `go()` / `smaller()` / `skip()` | The agent stopped to ask before a big read (a deep S3 listing, many days of logs, a large save): read all of it, only the smaller part it named, or none, then show the answer, which says what a smaller read or a skip left out |
+| `memory()`                  | With `memory=True`: what the agent remembers about the account, each note and when it learned it, the notes old enough to check and how full its memory is, then your `notes=` file |
+| `forget(match)` / `forget_all()` | Clears the agent's notes holding these words (any case), or every note about this account; the next conversation starts without them |
 | `transcript()`              | Every question asked so far and its answer, with the tool calls, tokens and cost of each, and the total                                                                                               |
 | `save_charts(folder="agent-charts", answer=-1)` | With `python=`: the charts of the last answer (or `answer=` another) as SVG files (or the PNG the code drew), each named after its title, with a Vega-Lite chart's spec beside it, to put in a slide or a report. Never replaces a file |
 | `tools()`                   | Each tool, what it tells the model and the AWS reads it makes; the model, regions, time zone and budget; and what's sent to the model                                                                 |
@@ -2223,7 +2255,8 @@ core = AgentAnalyzer(
     model_prices={"claude-sonnet-5": (2.00, 10.00)},   # USD per 1M input and output tokens, over the list prices
     timezone="Asia/Kolkata",              # "last night" for the agent alone; set_timezone() sets it everywhere
     regions=["us-east-1", "eu-west-1"],   # where it looks unless asked otherwise ("all" for every region)
-    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account
+    notes="orders-etl runs at 02:00 IST and loads the day's orders",   # facts it's told about the account (or a .md file)
+    memory=True,                          # keeps its own notes between conversations (a path: where the SQLite file goes)
     budget={"tool_calls": 25, "seconds": 300, "usd": 1.0, "steps": 200, "log_days": 3, "s3_keys": 100_000},
     toolkits=["lambda", "s3", "bedrock_kb"],  # the services it has tools for: all three by default (s3_triggers
                                           # needs Lambda and S3; kb_core= passes your own BedrockKBAnalyzer)
@@ -2243,6 +2276,8 @@ answer.provider, answer.model # who served it, and the model or profile that ans
 answer.input_tokens, answer.output_tokens, answer.cost   # cost is None without its prices (answer.rates says whose)
 answer.stopped, answer.error   # why it stopped early, or what failed
 core.tools()                   # the tools themselves: plain functions, for another agent framework
+core.memories()                # MemoryState: notes (Note: text, learned), text, account, path, limit
+core.forget("orders-etl")      # the Notes it cleared; core.forget_all() returns how many
 ```
 
 `chat_model=` takes any LangChain chat model instead (a `ChatOllama` with your own settings, say). The pure functions work without AWS or a model: `hide_secrets`,
@@ -2254,7 +2289,7 @@ core.tools()                   # the tools themselves: plain functions, for anot
 `trigger_findings`, the Bedrock knowledge base toolkit's `summarize_knowledge_bases`, `summarize_kb_health`,
 `summarize_kb_syncs`, `summarize_kb_files`, `summarize_kb_search`, `summarize_kb_chunks` and `kb_sync_row`, the Python
 toolkit's `summarize_run`, `summarize_workspace` and `clean_path`, `chart_of` and
-`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
+`image_kind` (whether a file is a picture a report can show), `read_spec` (whether it's a Vega-Lite chart drawn from its own data) and `CHART_THEME`, the memory's `parse_notes`, `stamp_notes`, `drop_notes` and `memory_findings`, and `answer_findings`, `answer_next`, `pick_provider`, `model_rates`, `answer_cost` and
 `explain_model_error`.
 
 Your own tools go in a `Toolkit` (from `aws_analyzer.agent`): a subclass with a name, a sentence for the model on what
@@ -2294,7 +2329,8 @@ answering model or inference profile and `bedrock:ListFoundationModels` / `bedro
 and its inference profile (the agent calls Bedrock's Converse API, which only generates text), and
 `bedrock:ListFoundationModels` and `bedrock:ListInferenceProfiles` to find a model named by a short name like
 `"sonnet"` (`bedrock:GetInferenceProfile` for an application inference profile). On the Azure side, an API key of the
-resource, or an Entra ID identity with the Cognitive Services OpenAI User role on it.
+resource, or an Entra ID identity with the Cognitive Services OpenAI User role on it. With `memory=True`, the agent
+reads its account ID with `sts:GetCallerIdentity`, which needs no permission.
 
 Each answer counts the model's input and output tokens. A model on Amazon Bedrock is priced at Bedrock's list prices
 (the same table `bedrock_chat` uses); for any other provider, pass `model_prices=` (OpenAI's and Azure's prices depend
