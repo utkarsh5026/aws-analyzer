@@ -22,6 +22,8 @@ tells its steps (AgentStep) from whichever thread they happen on, into a queue t
 event loop, where the widgets are drawn. Without a running loop (a script, the tests) the question runs right away
 and the steps are drawn when it's done.
 
+The head's ⚙ model and 🧠 memory open their panels under it, one at a time (model_panel.py, memory_panel.py).
+
 Each step is a widget of its own while the agent works, so a line that changes redraws only itself and a line someone
 opened stays open. Plain widgets and CSS, no JavaScript, on the windows' kit (_Window). Widgets live in the kernel: a
 reopened notebook loses the window, and transcript() shows the conversation as a report that stays.
@@ -50,6 +52,7 @@ from ..._kit.window import _class_if, _css_height, _icon_url, _row_button, _runn
 from ..answers import AgentAnswer, AgentStep, PlanStep, ToolCall, services_of
 from ..llm import provider_info
 from ..view import _CSS, _ROOT, _Charts, _coverage_text, _Plan
+from .memory_panel import _MEMORY_CSS, _MemoryPanel
 from .model_panel import _PANEL_CSS, _ModelPanel, shown_model
 
 if TYPE_CHECKING:
@@ -355,7 +358,8 @@ def _service_rules() -> str:
 
 
 def _window_css() -> str:
-    return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _PANEL_CSS, _json_tree_css(_ROOT)])
+    return "\n".join([_THEME_CSS, _service_rules(), _FRAME_CSS, _CONVERSATION_CSS, _PANEL_CSS, _MEMORY_CSS,
+                      _json_tree_css(_ROOT)])
 
 
 def _wrap(inner: str) -> str:
@@ -672,12 +676,17 @@ class _AgentChat(_Window):
         style = w.HTML(f"{_CSS}<style>{_window_css()}</style>", layout=layout(display="none"))
         self.title = w.HTML(self._title_html(), layout=layout(flex="1 1 auto", min_width="0"))
         self.model_button = self._button("⚙ model", "Pick the provider and model the agent answers with",
-                                         lambda: self.panel.toggle(), "agc-new")
+                                         lambda: self._toggle(self.panel), "agc-new")
+        self.memory_button = self._button("🧠 memory", "What the agent remembers about your account between "
+                                                       "conversations", lambda: self._toggle(self.memory_panel),
+                                          "agc-new")
         self.new_button = self._button("new chat", "Start over: the next question starts a new conversation",
                                        self._new_chat, "agc-new")
-        head = w.HBox([self.title, self.model_button, self.new_button], layout=layout(width="100%"))
+        head = w.HBox([self.title, self.memory_button, self.model_button, self.new_button],
+                      layout=layout(width="100%"))
         head.add_class("agc-head")
         self.panel = _ModelPanel(self, w, os.environ)
+        self.memory_panel = _MemoryPanel(self, w)
         self.log = w.VBox(layout=layout(flex_flow="column-reverse", overflow="hidden auto",
                                         height=_css_height(height), width="100%"))
         self.log.add_class("agc-log")
@@ -690,7 +699,8 @@ class _AgentChat(_Window):
         composer = w.HBox([prompt, self.question, self.send_button], layout=layout(width="100%"))
         composer.add_class("agc-composer")
         self.status = w.HTML(layout=layout(width="100%"))
-        root = w.VBox([style, head, self.panel.root, self.log, composer, self.status], layout=layout(width="100%"))
+        root = w.VBox([style, head, self.panel.root, self.memory_panel.root, self.log, composer, self.status],
+                      layout=layout(width="100%"))
         root.add_class("agc-app")
         self._fill_log()
         self._say_ready()
@@ -704,6 +714,18 @@ class _AgentChat(_Window):
         button.add_class(css)
         button.on_click(self._safely(lambda _button: on_click()))
         return button
+
+    def _toggle(self, panel: _ModelPanel | _MemoryPanel) -> None:
+        """
+        Opens a panel under the head (⚙ model, 🧠 memory), closing the other, or closes it when it's open.
+        """
+        if panel.is_open:
+            panel.close()
+            return
+        for other in (self.panel, self.memory_panel):
+            if other is not panel and other.is_open:
+                other.close()
+        panel.open()
 
     def _services(self) -> list[str]:
         """
@@ -1195,6 +1217,8 @@ class _AgentChat(_Window):
             turn.box.children = (turn.pulse,)
             self._set(turn.pulse, self._reply_html(answer, turn.trail))
         self._done()
+        if self.memory_panel.is_open:
+            self.memory_panel.refresh()
         self._say_ready()
         if answer.error and self.queued:
             self._set_status(_QUEUE_HELD, "warn")

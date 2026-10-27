@@ -21,6 +21,7 @@ from .._kit.text import _clip
 from .budget import Budget, raised_limit
 from .workspace.charts import Chart
 from .llm import Rates
+from .memory import MEMORY_FOLDER, parse_notes
 
 _OPERATION = re.compile(r"[a-z0-9-]+:[A-Za-z0-9]+")
 
@@ -405,6 +406,35 @@ def _plan_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
                      "Check it does, or ask about them in a follow-up.")]
 
 
+_NOTE_TOOLS = {"write_file": "content", "edit_file": "new_string"}
+_NOTE_CHARACTERS = 90
+
+
+def _noted(call: ToolCall) -> list[str]:
+    """
+    The notes a tool call wrote into the agent's memory (a write_file or edit_file under MEMORY_FOLDER that went
+    through), as their text; empty for any other call.
+    """
+    written = _NOTE_TOOLS.get(call.name)
+    path = str(call.args.get("file_path") or "")
+    if written is None or not call.ok or not path.startswith(MEMORY_FOLDER):
+        return []
+    return [note.text for note in parse_notes(str(call.args.get(written) or ""))]
+
+
+def _memory_findings(answer: AgentAnswer) -> list[tuple[str, str]]:
+    """
+    What the agent noted for next time while answering, with the calls that show and clear its notes.
+    """
+    noted = [text for call in answer.calls for text in _noted(call)]
+    if not noted:
+        return []
+    shown = "; ".join(_clip(text, _NOTE_CHARACTERS) for text in noted[:2])
+    more = f" and {_plural(len(noted) - 2, 'more')}" if len(noted) > 2 else ""
+    return [("info", f"It kept {_plural(len(noted), 'note')} for next time ({shown}{more}): the next conversation "
+                     "starts from them. See them all with memory(), or clear one with forget('...').")]
+
+
 def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[tuple[str, str]]:
     """
     What the reader should know about how an answer was reached: where it stopped short, what it couldn't read or
@@ -438,6 +468,7 @@ def answer_findings(answer: AgentAnswer, budget: Budget | None = None) -> list[t
                                   "out. README lists the read-only IAM permissions each tool needs."))
         found += _coverage_findings(call, budget)
     found += _plan_findings(answer)
+    found += _memory_findings(answer)
     if not answer.calls and not answer.error and answer.stopped is None:
         found.append(("info", "It answered without calling a tool, so nothing in the answer comes from your account. "
                               "Ask about your functions or buckets, or a time window."))

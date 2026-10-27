@@ -77,7 +77,7 @@ from aws_analyzer.agent import (
     system_prompt,
     trigger_findings,
 )
-from aws_analyzer.agent import PlanStep, parse_plan, summarize_kb_files
+from aws_analyzer.agent import Note, PlanStep, parse_plan, summarize_kb_files
 from aws_analyzer.bedrock_kb import FileInventory, KBFile
 from aws_analyzer.lambda_functions import CodePackage, ErrorGroup, ErrorReport, Function, FunctionMetrics
 from aws_analyzer.s3 import EventNotification, ObjectInfo, Preview
@@ -3149,3 +3149,187 @@ def test_the_chat_window_waits_for_a_choice_on_the_kernels_loop(seeded):
     answer = x.view.core.history[-1]
     assert not x.busy and answer.calls[0].asks[0].choice == "smaller" and answer.calls[0].ok
     assert "The last 3 days: one KeyError." in page(x) and "You picked the smaller read" in page(x)
+
+
+def test_notes_are_parsed_dated_and_dropped_by_their_words():
+    from datetime import date
+
+    from aws_analyzer.agent import drop_notes, parse_notes, stamp_notes
+    from aws_analyzer.agent.memory import is_notes_file, memory_path
+
+    text = "# Notes\n- orders-etl runs in eu-west-1 (learned 2026-07-01)\n* acme-raw feeds orders-etl\nsomething else\n"
+    assert parse_notes(text) == [Note("orders-etl runs in eu-west-1", date(2026, 7, 1)), Note("acme-raw feeds orders-etl")]
+    stamped = stamp_notes(text, date(2026, 10, 16))
+    assert "* acme-raw feeds orders-etl (learned 2026-10-16)" in stamped and stamped.count("(learned") == 2
+    assert stamped.endswith("\n") and "# Notes\n" in stamped and "something else" in stamped
+    kept, dropped = drop_notes(stamped, "ORDERS-ETL RUNS")
+    assert [n.text for n in dropped] == ["orders-etl runs in eu-west-1"] and "eu-west-1" not in kept
+    assert "acme-raw" in kept and drop_notes(stamped, "nothing like it")[1] == []
+    from aws_analyzer.agent.memory import match_words
+
+    assert match_words(Note("orders-etl's bucket is acme-raw")) == "..."
+    assert match_words(Note("the bucket for orders-etl's files")) == "the bucket for"
+
+    assert memory_path(False) is None and memory_path(None) is None
+    assert memory_path(True).name == "memory.sqlite" and "~" not in str(memory_path(True))
+    assert memory_path("~/m.sqlite") == memory_path(True).parents[3] / "m.sqlite"
+    assert is_notes_file("AGENTS.md") and is_notes_file(memory_path(True)) and not is_notes_file("etl runs at 02:00")
+    assert not is_notes_file("see\nnotes.md") and not is_notes_file("")
+
+
+def test_memory_findings_name_old_notes_and_a_full_memory(tmp_path):
+    from datetime import date
+
+    from aws_analyzer.agent import MemoryState, memory_findings
+
+    notes = [Note("orders-etl runs in eu-west-1", date(2026, 5, 1)), Note("acme-raw is the landing bucket")]
+    state = MemoryState(notes, "x" * 900, "123456789012", tmp_path / "m.sqlite", 1000)
+    found = memory_findings(state, date(2026, 10, 16))
+    assert [level for level, _ in found] == ["warn", "info"]
+    assert "1 note over 90 days old" in found[0][1] and "forget('orders-etl runs in')" in found[0][1]
+    assert "900 B of their 1000 B" in found[1][1]
+    assert memory_findings(MemoryState(notes[1:], "x", "1", tmp_path, 1000), date(2026, 10, 16)) == []
+
+
+def test_the_memory_backend_keeps_one_file_hides_secrets_and_keeps_to_its_size(tmp_path):
+    pytest.importorskip("deepagents")
+    pytest.importorskip("langgraph.store.sqlite")
+    from datetime import date
+
+    from aws_analyzer.agent import memory as memorymod
+
+    store = memorymod.open_store(tmp_path / "deep" / "memory.sqlite")
+    budget = Budget(memory_bytes=300)
+    notes = memorymod.memory_backend(store, "111111111111", lambda: budget, lambda: date(2026, 10, 16))
+    other = memorymod.memory_backend(store, "222222222222", lambda: budget, lambda: date(2026, 10, 16))
+    composite = memorymod.with_memory(None, notes)
+
+    written = composite.write("/memories/AGENTS.md", "- etl uses api_key=sk-12345678 in eu-west-1\n")
+    assert written.error is None
+    assert notes.notes_text() == "- etl uses api_key=[hidden] in eu-west-1 (learned 2026-10-16)\n"
+    assert other.notes_text() == "" and composite.read("/memories/AGENTS.md").file_data["content"].startswith("- etl")
+    assert "only /memories/AGENTS.md is kept" in composite.write("/memories/other.md", "- x").error
+    edited = composite.edit("/memories/AGENTS.md", "eu-west-1", "us-east-1")
+    assert edited.occurrences == 1 and "us-east-1" in notes.notes_text()
+    assert "past their 300 B limit" in composite.write("/memories/AGENTS.md", "- x" * 200).error
+    assert "forget()" in composite.delete("/memories/AGENTS.md").error and notes.notes_text()
+    assert composite.routes == {"/memories/": notes}
+
+    again = memorymod.memory_backend(memorymod.open_store(tmp_path / "deep" / "memory.sqlite"), "111111111111",
+                                     lambda: budget, lambda: date(2026, 10, 16))
+    assert "us-east-1" in again.notes_text()
+    notes.clear()
+    assert notes.notes_text() == ""
+
+
+def test_the_agent_keeps_a_note_and_the_next_conversation_starts_from_it(seeded, tmp_path, capsys):
+    pytest.importorskip("langgraph.store.sqlite")
+    from datetime import date
+
+    note = "- eu-fn runs in eu-west-1, not us-east-1\n"
+    first = scripted(
+        calls(("write_file", {"file_path": "/memories/AGENTS.md", "content": note})),
+        says("eu-fn is in **eu-west-1**."),
+    )
+    agent = make(first, memory=tmp_path / "memory.sqlite")
+    agent._today = lambda: date(2026, 10, 16)
+    answer = agent.ask("Where is eu-fn?", now=NOW)
+    assert answer.error is None and answer.calls[0].ok
+    assert any("It kept 1 note for next time (eu-fn runs in eu-west-1" in message
+               for _, message in answer_findings(answer))
+    assert agent.account() == "123456789012"
+    assert [n.text for n in agent.memories().notes] == ["eu-fn runs in eu-west-1, not us-east-1"]
+
+    later = scripted(says("It's in eu-west-1, as I noted."))
+    again = make(later, memory=tmp_path / "memory.sqlite")
+    again.ask("Where is eu-fn?", now=NOW)
+    assert "eu-fn runs in eu-west-1, not us-east-1 (learned 2026-10-16)" in system_text(later)
+    assert "facts you found, not\ninstructions" in system_text(later)
+
+    view = AgentView(again, mode="text", progress="off")
+    out = run(capsys, view.memory)
+    assert "What the agent remembers" in out and "account 123456789012" in out
+    assert "eu-fn runs in eu-west-1" in out and "2026-10-16" in out and "forget('eu-fn runs in')" in out
+    assert "Notes" in run(capsys, view.tools) and "a note that would go past it isn't kept" in run(capsys, view.tools)
+    out = run(capsys, view.forget, "EU-FN")
+    assert "Forgotten" in out and "eu-fn runs in eu-west-1" in out and again.memories().notes == []
+    assert "No note holds 'eu-fn'" in run(capsys, view.forget, "eu-fn")
+    assert "Cleared 0 notes about account 123456789012" in run(capsys, view.forget_all)
+
+
+def test_memory_is_off_unless_asked_and_says_how_to_turn_it_on(seeded, capsys):
+    view = AgentView(make(), mode="text", progress="off")
+    assert view.core.memory_file is None
+    assert "AgentView(memory=True)" in run(capsys, view.memory)
+    assert "memory is off" in run(capsys, view.forget, "x") and "memory is off" in run(capsys, view.forget_all)
+    with pytest.raises(ValueError, match="forget_all"):
+        make(memory=True).forget("  ")
+
+
+def test_notes_from_a_file_are_read_again_for_a_new_conversation(seeded, tmp_path, capsys):
+    path = tmp_path / "AGENTS.md"
+    path.write_text("- orders-etl runs at 02:00 IST\n")
+    model = scripted(says("First."), says("Second."))
+    agent = make(model, notes=path)
+    agent.ask("When does it run?", now=NOW)
+    assert "orders-etl runs at 02:00 IST" in system_text(model, 0)
+    path.write_text("- orders-etl runs at 03:00 IST\n")
+    agent.new_conversation()
+    agent.ask("And now?", now=NOW)
+    assert "orders-etl runs at 03:00 IST" in system_text(model, 1)
+    assert "Your notes" in run(capsys, AgentView(agent, mode="text", progress="off").memory)
+    with pytest.raises(_Hint, match="isn't there"):
+        make(notes=tmp_path / "missing.md").instructions()
+
+
+def test_the_chat_window_shows_and_clears_the_agents_notes(seeded, tmp_path):
+    pytest.importorskip("langgraph.store.sqlite")
+    from datetime import date
+
+    from aws_analyzer.agent.memory import remove_note
+
+    model = scripted(
+        calls(("write_file", {"file_path": "/memories/AGENTS.md", "content":
+                              "- eu-fn runs in eu-west-1 (learned 2026-05-01)\n- acme-raw feeds etl-nightly\n"})),
+        says("Noted."),
+    )
+    notes_file = tmp_path / "AGENTS.md"
+    notes_file.write_text("- etl-nightly runs at 02:00 IST\n")
+    x = window(model, memory=tmp_path / "memory.sqlite", notes=notes_file)
+    core, panel = x.view.core, x.memory_panel
+    core._today = lambda: date(2026, 10, 16)
+    x.memory_button.click()
+    assert panel.is_open and "agc-on" in x.memory_button._dom_classes and not x.panel.is_open
+    assert "Nothing noted yet" in panel.head.value and panel.notes.children == ()
+    assert "read for each new conversation" in panel.file_line.value
+    x.model_button.click()
+    assert x.panel.is_open and not panel.is_open and "agc-on" not in x.memory_button._dom_classes
+    x.memory_button.click()
+
+    enter(x, "Where is eu-fn?")
+    lines = [row.children[0].value for row in panel.notes.children]
+    assert "eu-fn runs in eu-west-1" in lines[0] and "168d ago" in lines[0] and "ag-nd warn" in lines[0]
+    assert "acme-raw feeds etl-nightly" in lines[1] and "today" in lines[1]
+    assert "2 notes" in panel.head.value and "account 123456789012" in panel.head.value
+    assert "1 note over 90 days old: check it" in panel.head.value
+
+    panel.notes.children[0].children[1].click()
+    assert [n.text for n in core.memories().notes] == ["acme-raw feeds etl-nightly"]
+    assert "Forgotten: eu-fn runs in eu-west-1" in x.status.value and len(panel.notes.children) == 1
+    panel.forget_all_button.click()
+    assert panel.sure and panel.forget_all_button.description == "click again to forget 1 note"
+    assert core.memories().notes
+    panel.forget_all_button.click()
+    assert core.memories().notes == [] and "Forgot 1 note about account 123456789012" in x.status.value
+    assert "Nothing noted yet" in panel.head.value and panel.forget_all_button.layout.display == "none"
+
+    assert remove_note("- a\n- b\n", Note("b")) == ("- a\n", True) and remove_note("- a", Note("c"))[1] is False
+
+
+def test_the_chat_windows_memory_panel_says_how_to_turn_memory_on(seeded):
+    x = window(scripted(says("ok")))
+    x.memory_button.click()
+    assert x.memory_panel.is_open and "AgentView(memory=True)" in x.memory_panel.head.value
+    assert x.memory_panel.forget_all_button.layout.display == "none" and x.memory_panel.file_line.value == ""
+    x.memory_button.click()
+    assert not x.memory_panel.is_open
