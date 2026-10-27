@@ -68,8 +68,18 @@ jobs:
           done
       - name: Install dev requirements
         run: python -m pip install -r requirements-dev.txt
+      # The local sandbox's tests need Pyodide's files (tens of MB). local.py pins their versions and
+      # SHA-256s, so its hash is the key, and a cached file that doesn't match is downloaded again.
+      - name: Restore Pyodide's files
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pyodide
+          key: pyodide-${{ hashFiles('src/aws_analyzer/agent/workspace/sandboxes/local.py') }}
+      # One worker per CPU; --dist loadgroup keeps the Pyodide tests on one of them (tests/conftest.py).
       - name: Pytest
-        run: python -m pytest
+        run: python -m pytest -n auto --dist loadgroup
+        env:
+          AWS_ANALYZER_TEST_PYODIDE: ${{ runner.temp }}/pyodide
 
   # The PyPI package (pyproject.toml): build it the way the release workflow does, and check
   # that `pip install aws-analyzer` gives a notebook every module with only boto3 installed.
