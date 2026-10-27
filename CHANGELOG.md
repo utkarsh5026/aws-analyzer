@@ -21,7 +21,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
   - `memory()` or the chat window's 🧠 memory shows them; `forget('orders-etl')`, a note's ✕ or `forget_all()` clears them.
   - `notes=` also takes a file (`notes="AGENTS.md"`), read again for each new conversation.
 
-- 🤖 **Agent: runbooks it reads when needed**
+- 🤖 **Agent: runbooks it reads when needed** ([#162](https://github.com/utkarsh5026/aws-analyzer/pull/162))
   - Step-by-step guides for common problems; it reads one only when the question matches it, and says which.
   - Three built in (`lambda-failing`, `s3-trigger-not-firing`, `kb-answer-wrong`); `AgentView(runbooks="~/team-runbooks")` adds yours.
   - `runbooks()` lists them and any that didn't load; `runbooks=False` turns them off.
