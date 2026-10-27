@@ -11,7 +11,7 @@ changes what one shows, and a patch (0.1.1) only fixes things. A change that cou
 
 ### Added
 
-- 🧹 **Free the disk: `local_files()` and `clean_up()`**
+- 🧰 **Free the disk: list and remove what aws-analyzer saved**
   - `local_files()` lists what aws-analyzer saved on this machine: S3 and Lambda downloads, the agent's charts, the sandbox's cache.
   - `clean_up()` removes what comes back by itself; `clean_up("all")` the charts too; `dry_run=True` only shows what would go.
   - Only folders aws-analyzer made: one without its `.gitignore`, or that holds the notebook, stays.

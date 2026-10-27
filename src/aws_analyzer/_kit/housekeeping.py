@@ -53,7 +53,11 @@ def _short_path(path: str) -> str:
 
 
 def _folder_row(folder: LocalFolder) -> list[str]:
-    return [folder.what, _short_path(folder.path), f"{folder.files:,}", human_size(folder.size), human_age(folder.newest)]
+    """
+    A folder's line: what it holds, its path (with a / so the table draws a folder's icon), files, size, age.
+    """
+    path = f"{_short_path(folder.path)}/"
+    return [folder.what, path, f"{folder.files:,}", human_size(folder.size), human_age(folder.newest)]
 
 
 def _kept_findings(kept: list[LocalFolder]) -> list[tuple[str, str]]:
